@@ -37,6 +37,44 @@ mod prompts {
     pub const DEEP_DIVE: &str = include_str!("../prompts/deep_dive.md");
 }
 
+/// Standard Phase 1 prompts that should be present for complete research.
+/// Each entry is (name, filename, prompt_template).
+const STANDARD_PROMPTS: [(&str, &str, &str); 5] = [
+    ("overview", "overview.md", prompts::OVERVIEW),
+    ("similar_libraries", "similar_libraries.md", prompts::SIMILAR_LIBRARIES),
+    ("integration_partners", "integration_partners.md", prompts::INTEGRATION_PARTNERS),
+    ("use_cases", "use_cases.md", prompts::USE_CASES),
+    ("changelog", "changelog.md", prompts::CHANGELOG),
+];
+
+/// A standard prompt that is missing from the research output.
+#[derive(Debug, Clone)]
+pub struct MissingPrompt {
+    pub name: &'static str,
+    pub filename: &'static str,
+    pub template: &'static str,
+}
+
+/// Check which standard prompts are missing from the output directory.
+///
+/// Returns a list of prompts that don't have corresponding output files.
+pub async fn check_missing_standard_prompts(output_dir: &std::path::Path) -> Vec<MissingPrompt> {
+    let mut missing = Vec::new();
+
+    for (name, filename, template) in STANDARD_PROMPTS {
+        let path = output_dir.join(filename);
+        if !path.exists() {
+            missing.push(MissingPrompt {
+                name,
+                filename,
+                template,
+            });
+        }
+    }
+
+    missing
+}
+
 /// Information about a library found in a package manager
 #[derive(Debug, Clone)]
 pub struct LibraryInfo {
@@ -558,6 +596,63 @@ fn normalize_markdown(input: &str) -> String {
     output
 }
 
+/// Library context for building prompts
+struct LibraryContext<'a> {
+    package_manager: &'a str,
+    language: &'a str,
+    url: &'a str,
+}
+
+impl<'a> From<&'a LibraryInfo> for LibraryContext<'a> {
+    fn from(info: &'a LibraryInfo) -> Self {
+        Self {
+            package_manager: &info.package_manager,
+            language: &info.language,
+            url: &info.url,
+        }
+    }
+}
+
+impl<'a> From<&'a LibraryInfoMetadata> for LibraryContext<'a> {
+    fn from(info: &'a LibraryInfoMetadata) -> Self {
+        Self {
+            package_manager: &info.package_manager,
+            language: &info.language,
+            url: &info.url,
+        }
+    }
+}
+
+/// Build a prompt by replacing topic and library context placeholders.
+///
+/// Replaces:
+/// - `{{topic}}` - The library/topic name
+/// - `{{package_manager}}` - The package manager name (e.g., "crates.io", "npm")
+/// - `{{language}}` - The programming language (e.g., "Rust", "JavaScript")
+/// - `{{url}}` - The URL to the package on the package manager
+fn build_prompt(template: &str, topic: &str, library_info: Option<&LibraryInfo>) -> String {
+    let ctx = library_info.map(LibraryContext::from);
+    build_prompt_with_context(template, topic, ctx.as_ref())
+}
+
+/// Internal helper to build prompts with optional library context
+fn build_prompt_with_context(
+    template: &str,
+    topic: &str,
+    ctx: Option<&LibraryContext>,
+) -> String {
+    let (package_manager, language, url) = match ctx {
+        Some(c) => (c.package_manager, c.language, c.url),
+        None => ("unknown", "unknown", "N/A"),
+    };
+
+    template
+        .replace("{{topic}}", topic)
+        .replace("{{package_manager}}", package_manager)
+        .replace("{{language}}", language)
+        .replace("{{url}}", url)
+}
+
 /// Result of a single prompt task
 struct PromptTaskResult {
     metrics: Option<PromptMetrics>,
@@ -672,6 +767,9 @@ async fn run_question_task<M>(
     question_num: usize,
     topic: &str,
     question: &str,
+    package_manager: &str,
+    language: &str,
+    url: &str,
     output_dir: PathBuf,
     model: M,
     counter: Arc<AtomicUsize>,
@@ -690,8 +788,12 @@ where
     let name = format!("question_{}", question_num);
     println!("  [{}] Starting...", name);
 
-    let prompt = prompts::ADDITIONAL_QUESTION
-        .replace("{{topic}}", topic)
+    let ctx = LibraryContext {
+        package_manager,
+        language,
+        url,
+    };
+    let prompt = build_prompt_with_context(prompts::ADDITIONAL_QUESTION, topic, Some(&ctx))
         .replace("{{question}}", question);
 
     let result = model.completion_request(&prompt).send().await;
@@ -758,23 +860,56 @@ where
     PromptTaskResult { metrics }
 }
 
-/// Run incremental research by adding new questions to existing research.
+/// Run incremental research by regenerating missing prompts and/or adding new questions.
 ///
-/// This is called when metadata.json exists and new questions are provided.
-/// It runs only the new question tasks, then re-synthesizes Phase 2.
+/// This is called when metadata.json exists and either:
+/// - Some standard prompts are missing (need to be regenerated)
+/// - New questions are provided
+///
+/// It runs the missing prompt tasks and question tasks in parallel, then re-synthesizes Phase 2.
 async fn run_incremental_research(
     topic: &str,
     output_dir: PathBuf,
     mut existing_metadata: ResearchMetadata,
     questions: Vec<(usize, String)>,
+    missing_prompts: Vec<MissingPrompt>,
 ) -> Result<ResearchResult, ResearchError> {
     // Load environment variables from .env file
     dotenvy::dotenv().ok();
 
-    println!(
-        "\nIncremental research: Adding {} new question(s)...\n",
-        questions.len()
-    );
+    let has_missing = !missing_prompts.is_empty();
+    let has_questions = !questions.is_empty();
+
+    // Print what we're doing
+    match (has_missing, has_questions) {
+        (true, true) => println!(
+            "\nIncremental research: Regenerating {} missing prompt(s) and adding {} new question(s)...\n",
+            missing_prompts.len(),
+            questions.len()
+        ),
+        (true, false) => println!(
+            "\nIncremental research: Regenerating {} missing prompt(s)...\n",
+            missing_prompts.len()
+        ),
+        (false, true) => println!(
+            "\nIncremental research: Adding {} new question(s)...\n",
+            questions.len()
+        ),
+        (false, false) => {
+            // Nothing to do - should not reach here, but handle gracefully
+            return Ok(ResearchResult {
+                topic: topic.to_string(),
+                output_dir,
+                succeeded: 0,
+                failed: 0,
+                cancelled: false,
+                total_time_secs: 0.0,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_tokens: 0,
+            });
+        }
+    }
 
     // Set up cancellation flag for SIGINT handling
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -790,45 +925,128 @@ async fn run_incremental_research(
     // Initialize providers
     let gemini = gemini::Client::from_env();
     let openai = openai::Client::from_env();
+    let zai = providers::zai::Client::from_env();
+
+    // Extract library context from metadata
+    let (package_manager, language, url) = match &existing_metadata.library_info {
+        Some(info) => (
+            info.package_manager.as_str(),
+            info.language.as_str(),
+            info.url.as_str(),
+        ),
+        None => ("unknown", "unknown", "N/A"),
+    };
+
+    // Build library info for prompt building
+    let library_info = existing_metadata.library_info.as_ref().map(|info| LibraryInfo {
+        package_manager: info.package_manager.clone(),
+        language: info.language.clone(),
+        url: info.url.clone(),
+        description: None,
+    });
+    let lib_info_ref = library_info.as_ref();
 
     let start_time = Instant::now();
     let counter = Arc::new(AtomicUsize::new(0));
-    let total = questions.len();
+    let total = missing_prompts.len() + questions.len();
+
+    // Create tasks for missing standard prompts
+    // We need to select the appropriate model for each prompt type
+    let mut missing_prompt_futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = PromptTaskResult> + Send>>> = Vec::new();
+
+    for mp in &missing_prompts {
+        let prompt = build_prompt(mp.template, topic, lib_info_ref);
+        let task_name = mp.name;
+        let filename = mp.filename;
+
+        // Select appropriate model based on prompt type
+        // Using the same model assignments as the original research function
+        match mp.name {
+            "overview" => {
+                let model = zai.completion_model(providers::zai::GLM_4_7);
+                missing_prompt_futures.push(Box::pin(run_prompt_task(
+                    task_name,
+                    filename,
+                    output_dir.clone(),
+                    model,
+                    prompt,
+                    counter.clone(),
+                    total,
+                    start_time,
+                    cancelled.clone(),
+                )));
+            }
+            "changelog" => {
+                let model = openai.completion_model("gpt-5.2");
+                missing_prompt_futures.push(Box::pin(run_prompt_task(
+                    task_name,
+                    filename,
+                    output_dir.clone(),
+                    model,
+                    prompt,
+                    counter.clone(),
+                    total,
+                    start_time,
+                    cancelled.clone(),
+                )));
+            }
+            _ => {
+                // similar_libraries, integration_partners, use_cases use Gemini
+                let model = gemini.completion_model("gemini-3-flash-preview");
+                missing_prompt_futures.push(Box::pin(run_prompt_task(
+                    task_name,
+                    filename,
+                    output_dir.clone(),
+                    model,
+                    prompt,
+                    counter.clone(),
+                    total,
+                    start_time,
+                    cancelled.clone(),
+                )));
+            }
+        }
+    }
 
     // Create question tasks
-    let question_tasks: Vec<_> = questions
+    let question_futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = PromptTaskResult> + Send>>> = questions
         .iter()
         .map(|(num, question)| {
             let question_model = gemini.completion_model("gemini-3-flash-preview");
-            run_question_task(
+            let fut = run_question_task(
                 *num,
                 topic,
                 question,
+                package_manager,
+                language,
+                url,
                 output_dir.clone(),
                 question_model,
                 counter.clone(),
                 total,
                 start_time,
                 cancelled.clone(),
-            )
+            );
+            Box::pin(fut) as std::pin::Pin<Box<dyn std::future::Future<Output = PromptTaskResult> + Send>>
         })
         .collect();
 
-    // Run all question tasks in parallel
-    let question_results = join_all(question_tasks).await;
+    // Run all tasks in parallel (missing prompts + questions)
+    let all_futures: Vec<_> = missing_prompt_futures.into_iter().chain(question_futures).collect();
+    let all_results = join_all(all_futures).await;
 
-    let succeeded: Vec<_> = question_results
+    let succeeded: Vec<_> = all_results
         .iter()
         .filter_map(|r| r.metrics.as_ref())
         .collect();
-    let failed = question_results.len() - succeeded.len();
+    let failed = all_results.len() - succeeded.len();
 
     let was_cancelled = cancelled.load(Ordering::SeqCst);
 
     println!(
-        "\nNew questions complete: {}/{} succeeded{}\n",
+        "\nPhase 1 complete: {}/{} succeeded{}\n",
         succeeded.len(),
-        question_results.len(),
+        all_results.len(),
         if was_cancelled { " (cancelled)" } else { "" }
     );
 
@@ -1062,19 +1280,16 @@ pub async fn research(
     if let Some(existing_metadata) = ResearchMetadata::load(&output_dir).await {
         println!("Found existing research for '{}'", topic);
 
-        if questions.is_empty() {
-            println!("  No new questions provided. Use additional prompts to expand research.");
-            return Ok(ResearchResult {
-                topic: topic.to_string(),
-                output_dir,
-                succeeded: 0,
-                failed: 0,
-                cancelled: false,
-                total_time_secs: 0.0,
-                total_input_tokens: 0,
-                total_output_tokens: 0,
-                total_tokens: 0,
-            });
+        // Check for missing standard prompts
+        let missing_prompts = check_missing_standard_prompts(&output_dir).await;
+        if !missing_prompts.is_empty() {
+            println!(
+                "  ⚠ Missing {} standard prompt(s):",
+                missing_prompts.len()
+            );
+            for mp in &missing_prompts {
+                println!("    - {}", mp.filename);
+            }
         }
 
         // Check for overlaps and filter questions
@@ -1083,7 +1298,10 @@ pub async fn research(
 
         for question in questions {
             if let Some(conflict_file) = existing_metadata.check_overlap(question) {
-                println!("  ⚠ Question overlaps with existing {}: \"{}\"", conflict_file, question);
+                println!(
+                    "  ⚠ Question overlaps with existing {}: \"{}\"",
+                    conflict_file, question
+                );
 
                 // Ask user if they want to include anyway
                 let confirm = inquire::Confirm::new(&format!(
@@ -1111,8 +1329,9 @@ pub async fn research(
             }
         }
 
-        if questions_to_run.is_empty() {
-            println!("  No new questions to run after overlap check.");
+        // If nothing to do (no missing prompts and no new questions), return early
+        if missing_prompts.is_empty() && questions_to_run.is_empty() {
+            println!("  Research is complete. Use additional prompts to expand research.");
             return Ok(ResearchResult {
                 topic: topic.to_string(),
                 output_dir,
@@ -1126,12 +1345,13 @@ pub async fn research(
             });
         }
 
-        // Run incremental research with just the new questions
+        // Run incremental research with missing prompts and/or new questions
         return run_incremental_research(
             topic,
             output_dir,
             existing_metadata,
             questions_to_run,
+            missing_prompts,
         )
         .await;
     }
@@ -1170,12 +1390,23 @@ pub async fn research(
     let gemini3 = gemini.completion_model("gemini-3-flash-preview");
     let changelog_model = openai.completion_model("gpt-5.2"); // Use stronger model for changelog
 
-    // Build prompts from templates
-    let overview_prompt = prompts::OVERVIEW.replace("{{topic}}", topic);
-    let similar_libraries_prompt = prompts::SIMILAR_LIBRARIES.replace("{{topic}}", topic);
-    let integration_partners_prompt = prompts::INTEGRATION_PARTNERS.replace("{{topic}}", topic);
-    let use_cases_prompt = prompts::USE_CASES.replace("{{topic}}", topic);
-    let changelog_prompt = prompts::CHANGELOG.replace("{{topic}}", topic);
+    // Build prompts from templates with library context
+    let lib_info_ref = library_info.as_ref();
+    let overview_prompt = build_prompt(prompts::OVERVIEW, topic, lib_info_ref);
+    let similar_libraries_prompt = build_prompt(prompts::SIMILAR_LIBRARIES, topic, lib_info_ref);
+    let integration_partners_prompt = build_prompt(prompts::INTEGRATION_PARTNERS, topic, lib_info_ref);
+    let use_cases_prompt = build_prompt(prompts::USE_CASES, topic, lib_info_ref);
+    let changelog_prompt = build_prompt(prompts::CHANGELOG, topic, lib_info_ref);
+
+    // Extract library context strings for question tasks
+    let (pkg_mgr, lang, pkg_url) = match &library_info {
+        Some(info) => (
+            info.package_manager.as_str(),
+            info.language.as_str(),
+            info.url.as_str(),
+        ),
+        None => ("unknown", "unknown", "N/A"),
+    };
 
     let num_questions = questions.len();
     let total = 5 + num_questions; // 5 default prompts + user questions
@@ -1199,6 +1430,9 @@ pub async fn research(
                 i + 1,
                 topic,
                 question,
+                pkg_mgr,
+                lang,
+                pkg_url,
                 output_dir.clone(),
                 question_model,
                 counter.clone(),
@@ -1488,4 +1722,483 @@ pub async fn research(
         total_output_tokens: total_output,
         total_tokens,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    // ===========================================
+    // Tests for ResearchMetadata
+    // ===========================================
+
+    #[test]
+    fn test_metadata_new_library() {
+        let lib_info = LibraryInfo {
+            package_manager: "crates.io".to_string(),
+            language: "Rust".to_string(),
+            url: "https://crates.io/crates/tokio".to_string(),
+            description: Some("Async runtime".to_string()),
+        };
+
+        let metadata = ResearchMetadata::new_library(Some(&lib_info));
+
+        assert_eq!(metadata.kind, ResearchKind::Library);
+        assert!(metadata.library_info.is_some());
+        let info = metadata.library_info.unwrap();
+        assert_eq!(info.package_manager, "crates.io");
+        assert_eq!(info.language, "Rust");
+        assert!(metadata.additional_files.is_empty());
+    }
+
+    #[test]
+    fn test_metadata_new_library_without_info() {
+        let metadata = ResearchMetadata::new_library(None);
+
+        assert_eq!(metadata.kind, ResearchKind::Library);
+        assert!(metadata.library_info.is_none());
+        assert!(metadata.additional_files.is_empty());
+    }
+
+    #[test]
+    fn test_metadata_add_additional_file() {
+        let mut metadata = ResearchMetadata::new_library(None);
+        let original_updated = metadata.updated_at;
+
+        // Small delay to ensure timestamp difference
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        metadata.add_additional_file(
+            "question_1.md".to_string(),
+            "What are the best practices?".to_string(),
+        );
+
+        assert_eq!(metadata.additional_files.len(), 1);
+        assert!(metadata.additional_files.contains_key("question_1.md"));
+        assert!(metadata.updated_at >= original_updated);
+    }
+
+    #[test]
+    fn test_metadata_next_question_number_empty() {
+        let metadata = ResearchMetadata::new_library(None);
+        assert_eq!(metadata.next_question_number(), 1);
+    }
+
+    #[test]
+    fn test_metadata_next_question_number_sequential() {
+        let mut metadata = ResearchMetadata::new_library(None);
+        metadata.add_additional_file("question_1.md".to_string(), "Q1".to_string());
+        metadata.add_additional_file("question_2.md".to_string(), "Q2".to_string());
+
+        assert_eq!(metadata.next_question_number(), 3);
+    }
+
+    #[test]
+    fn test_metadata_next_question_number_gaps() {
+        let mut metadata = ResearchMetadata::new_library(None);
+        metadata.add_additional_file("question_1.md".to_string(), "Q1".to_string());
+        metadata.add_additional_file("question_5.md".to_string(), "Q5".to_string());
+
+        // Should return max + 1, even with gaps
+        assert_eq!(metadata.next_question_number(), 6);
+    }
+
+    #[test]
+    fn test_metadata_next_question_number_ignores_non_questions() {
+        let mut metadata = ResearchMetadata::new_library(None);
+        metadata.add_additional_file("question_1.md".to_string(), "Q1".to_string());
+        metadata.add_additional_file("overview.md".to_string(), "Overview".to_string());
+        metadata.add_additional_file("random_file.md".to_string(), "Random".to_string());
+
+        assert_eq!(metadata.next_question_number(), 2);
+    }
+
+    #[test]
+    fn test_metadata_check_overlap_no_overlap() {
+        let mut metadata = ResearchMetadata::new_library(None);
+        metadata.add_additional_file(
+            "question_1.md".to_string(),
+            "What are the performance characteristics of async runtimes?".to_string(),
+        );
+
+        let result = metadata.check_overlap("How do I handle errors in database connections?");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_metadata_check_overlap_with_overlap() {
+        let mut metadata = ResearchMetadata::new_library(None);
+        // Use words without punctuation for accurate matching
+        metadata.add_additional_file(
+            "question_1.md".to_string(),
+            "performance characteristics async runtimes handling".to_string(),
+        );
+
+        // This has significant word overlap (performance, async, runtimes)
+        // 3 out of 5 words match = 60% > 50% threshold
+        let result =
+            metadata.check_overlap("async runtimes performance features testing");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), "question_1.md");
+    }
+
+    #[test]
+    fn test_metadata_check_overlap_short_words_ignored() {
+        let mut metadata = ResearchMetadata::new_library(None);
+        metadata.add_additional_file(
+            "question_1.md".to_string(),
+            "the and but for are".to_string(), // All words <= 3 chars
+        );
+
+        // Short words (<= 3 chars) should be ignored, resulting in empty sets
+        let result = metadata.check_overlap("the and but for are");
+        assert!(result.is_none()); // No overlap because short words are filtered out
+    }
+
+    // ===========================================
+    // Tests for normalize_markdown
+    // ===========================================
+
+    #[test]
+    fn test_normalize_markdown_basic() {
+        let input = "# Hello\n\nWorld";
+        let output = normalize_markdown(input);
+        assert!(output.contains("# Hello"));
+        assert!(output.contains("World"));
+    }
+
+    #[test]
+    fn test_normalize_markdown_handles_html() {
+        // HTML blocks are preserved by pulldown-cmark as raw blocks
+        // The normalize function processes them but may preserve HTML depending on structure
+        let input = "<a name=\"section\"></a>\n\n# Title\n\nContent";
+        let output = normalize_markdown(input);
+
+        // Verify the markdown structure is preserved
+        assert!(output.contains("# Title"));
+        assert!(output.contains("Content"));
+    }
+
+    #[test]
+    fn test_normalize_markdown_preserves_links() {
+        let input = "Check out [this link](https://example.com)";
+        let output = normalize_markdown(input);
+        assert!(output.contains("[this link](https://example.com)"));
+    }
+
+    #[test]
+    fn test_normalize_markdown_handles_tables() {
+        let input = "| Col1 | Col2 |\n|------|------|\n| A | B |";
+        let output = normalize_markdown(input);
+        assert!(output.contains("Col1"));
+        assert!(output.contains("Col2"));
+    }
+
+    #[test]
+    fn test_normalize_markdown_handles_code_blocks() {
+        let input = "```rust\nfn main() {}\n```";
+        let output = normalize_markdown(input);
+        assert!(output.contains("fn main()"));
+    }
+
+    // ===========================================
+    // Tests for build_prompt
+    // ===========================================
+
+    #[test]
+    fn test_build_prompt_replaces_topic() {
+        let template = "Research the {{topic}} library.";
+        let result = build_prompt(template, "tokio", None);
+        assert_eq!(result, "Research the tokio library.");
+    }
+
+    #[test]
+    fn test_build_prompt_with_library_info() {
+        let template = "{{topic}} is available on {{package_manager}} for {{language}}. URL: {{url}}";
+        let lib_info = LibraryInfo {
+            package_manager: "crates.io".to_string(),
+            language: "Rust".to_string(),
+            url: "https://crates.io/crates/tokio".to_string(),
+            description: None,
+        };
+
+        let result = build_prompt(template, "tokio", Some(&lib_info));
+        assert_eq!(
+            result,
+            "tokio is available on crates.io for Rust. URL: https://crates.io/crates/tokio"
+        );
+    }
+
+    #[test]
+    fn test_build_prompt_without_library_info() {
+        let template = "{{topic}} from {{package_manager}} ({{language}})";
+        let result = build_prompt(template, "something", None);
+        assert_eq!(result, "something from unknown (unknown)");
+    }
+
+    // ===========================================
+    // Tests for check_missing_standard_prompts
+    // ===========================================
+
+    #[tokio::test]
+    async fn test_check_missing_prompts_all_missing() {
+        let temp = tempdir().unwrap();
+        let missing = check_missing_standard_prompts(temp.path()).await;
+
+        // All 5 standard prompts should be missing
+        assert_eq!(missing.len(), 5);
+
+        let names: Vec<_> = missing.iter().map(|m| m.name).collect();
+        assert!(names.contains(&"overview"));
+        assert!(names.contains(&"similar_libraries"));
+        assert!(names.contains(&"integration_partners"));
+        assert!(names.contains(&"use_cases"));
+        assert!(names.contains(&"changelog"));
+    }
+
+    #[tokio::test]
+    async fn test_check_missing_prompts_some_present() {
+        let temp = tempdir().unwrap();
+
+        // Create some of the files
+        std::fs::write(temp.path().join("overview.md"), "# Overview").unwrap();
+        std::fs::write(temp.path().join("changelog.md"), "# Changelog").unwrap();
+
+        let missing = check_missing_standard_prompts(temp.path()).await;
+
+        // Only 3 should be missing
+        assert_eq!(missing.len(), 3);
+
+        let names: Vec<_> = missing.iter().map(|m| m.name).collect();
+        assert!(!names.contains(&"overview"));
+        assert!(!names.contains(&"changelog"));
+        assert!(names.contains(&"similar_libraries"));
+        assert!(names.contains(&"integration_partners"));
+        assert!(names.contains(&"use_cases"));
+    }
+
+    #[tokio::test]
+    async fn test_check_missing_prompts_all_present() {
+        let temp = tempdir().unwrap();
+
+        // Create all standard files
+        std::fs::write(temp.path().join("overview.md"), "# Overview").unwrap();
+        std::fs::write(temp.path().join("similar_libraries.md"), "# Similar").unwrap();
+        std::fs::write(temp.path().join("integration_partners.md"), "# Partners").unwrap();
+        std::fs::write(temp.path().join("use_cases.md"), "# Use Cases").unwrap();
+        std::fs::write(temp.path().join("changelog.md"), "# Changelog").unwrap();
+
+        let missing = check_missing_standard_prompts(temp.path()).await;
+
+        // None should be missing
+        assert!(missing.is_empty());
+    }
+
+    // ===========================================
+    // Tests for STANDARD_PROMPTS constant
+    // ===========================================
+
+    #[test]
+    fn test_standard_prompts_count() {
+        assert_eq!(STANDARD_PROMPTS.len(), 5);
+    }
+
+    #[test]
+    fn test_standard_prompts_all_have_content() {
+        for (name, filename, template) in STANDARD_PROMPTS {
+            assert!(!name.is_empty(), "Name should not be empty");
+            assert!(filename.ends_with(".md"), "Filename should end with .md");
+            assert!(!template.is_empty(), "Template should not be empty");
+            assert!(
+                template.contains("{{topic}}"),
+                "Template for {} should contain {{{{topic}}}}",
+                name
+            );
+        }
+    }
+
+    // ===========================================
+    // Tests for MissingPrompt struct
+    // ===========================================
+
+    #[test]
+    fn test_missing_prompt_clone() {
+        let mp = MissingPrompt {
+            name: "overview",
+            filename: "overview.md",
+            template: "Template content",
+        };
+
+        let cloned = mp.clone();
+        assert_eq!(cloned.name, mp.name);
+        assert_eq!(cloned.filename, mp.filename);
+        assert_eq!(cloned.template, mp.template);
+    }
+
+    // ===========================================
+    // Tests for LibraryInfo Display
+    // ===========================================
+
+    #[test]
+    fn test_library_info_display_without_description() {
+        let info = LibraryInfo {
+            package_manager: "crates.io".to_string(),
+            language: "Rust".to_string(),
+            url: "https://crates.io/crates/test".to_string(),
+            description: None,
+        };
+
+        let display = format!("{}", info);
+        assert_eq!(display, "crates.io (Rust)");
+    }
+
+    #[test]
+    fn test_library_info_display_with_short_description() {
+        let info = LibraryInfo {
+            package_manager: "npm".to_string(),
+            language: "JavaScript".to_string(),
+            url: "https://npmjs.com/package/test".to_string(),
+            description: Some("A test package".to_string()),
+        };
+
+        let display = format!("{}", info);
+        assert_eq!(display, "npm (JavaScript) - A test package");
+    }
+
+    #[test]
+    fn test_library_info_display_with_long_description() {
+        let long_desc = "A".repeat(100);
+        let info = LibraryInfo {
+            package_manager: "PyPI".to_string(),
+            language: "Python".to_string(),
+            url: "https://pypi.org/project/test".to_string(),
+            description: Some(long_desc),
+        };
+
+        let display = format!("{}", info);
+        // Should be truncated to 60 chars with "..."
+        assert!(display.contains("..."));
+        assert!(display.len() < 100);
+    }
+
+    // ===========================================
+    // Tests for default_output_dir
+    // ===========================================
+
+    #[test]
+    fn test_default_output_dir_structure() {
+        let dir = default_output_dir("tokio");
+        let path_str = dir.to_string_lossy();
+
+        assert!(path_str.contains(".research"));
+        assert!(path_str.contains("library"));
+        assert!(path_str.contains("tokio"));
+    }
+
+    // ===========================================
+    // Tests for ResearchMetadata serialization
+    // ===========================================
+
+    #[tokio::test]
+    async fn test_metadata_save_and_load() {
+        let temp = tempdir().unwrap();
+
+        let lib_info = LibraryInfo {
+            package_manager: "crates.io".to_string(),
+            language: "Rust".to_string(),
+            url: "https://crates.io/crates/tokio".to_string(),
+            description: None,
+        };
+
+        let mut metadata = ResearchMetadata::new_library(Some(&lib_info));
+        metadata.add_additional_file("question_1.md".to_string(), "Test question".to_string());
+
+        // Save
+        metadata.save(temp.path()).await.unwrap();
+
+        // Load
+        let loaded = ResearchMetadata::load(temp.path()).await;
+        assert!(loaded.is_some());
+
+        let loaded = loaded.unwrap();
+        assert_eq!(loaded.kind, ResearchKind::Library);
+        assert!(loaded.library_info.is_some());
+        assert_eq!(loaded.additional_files.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_metadata_load_nonexistent() {
+        let temp = tempdir().unwrap();
+        let loaded = ResearchMetadata::load(temp.path()).await;
+        assert!(loaded.is_none());
+    }
+
+    // ===========================================
+    // Tests for PromptMetrics
+    // ===========================================
+
+    #[test]
+    fn test_prompt_metrics_default() {
+        let metrics = PromptMetrics::default();
+        assert_eq!(metrics.input_tokens, 0);
+        assert_eq!(metrics.output_tokens, 0);
+        assert_eq!(metrics.total_tokens, 0);
+        assert_eq!(metrics.elapsed_secs, 0.0);
+    }
+
+    // ===========================================
+    // Tests for ResearchResult
+    // ===========================================
+
+    #[test]
+    fn test_research_result_debug() {
+        let result = ResearchResult {
+            topic: "test".to_string(),
+            output_dir: PathBuf::from("/tmp/test"),
+            succeeded: 5,
+            failed: 0,
+            cancelled: false,
+            total_time_secs: 10.5,
+            total_input_tokens: 1000,
+            total_output_tokens: 2000,
+            total_tokens: 3000,
+        };
+
+        let debug = format!("{:?}", result);
+        assert!(debug.contains("test"));
+        assert!(debug.contains("5"));
+    }
+
+    // ===========================================
+    // Tests for LibraryInfoMetadata conversion
+    // ===========================================
+
+    #[test]
+    fn test_library_info_metadata_from() {
+        let lib_info = LibraryInfo {
+            package_manager: "npm".to_string(),
+            language: "TypeScript".to_string(),
+            url: "https://npmjs.com/package/test".to_string(),
+            description: Some("Test description".to_string()),
+        };
+
+        let metadata: LibraryInfoMetadata = (&lib_info).into();
+
+        assert_eq!(metadata.package_manager, "npm");
+        assert_eq!(metadata.language, "TypeScript");
+        assert_eq!(metadata.url, "https://npmjs.com/package/test");
+        // Note: description is not included in metadata
+    }
+
+    // ===========================================
+    // Tests for OverlapVerdict
+    // ===========================================
+
+    #[test]
+    fn test_overlap_verdict_equality() {
+        assert_eq!(OverlapVerdict::New, OverlapVerdict::New);
+        assert_eq!(OverlapVerdict::Conflict, OverlapVerdict::Conflict);
+        assert_ne!(OverlapVerdict::New, OverlapVerdict::Conflict);
+    }
 }

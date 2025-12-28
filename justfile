@@ -77,3 +77,12 @@ install:
             echo "- no justfile for the area **$area**" >&2
         fi
     done
+
+research *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ""
+    echo -e "{{BOLD}}Research CLI{{RESET}} (latest debug build)"
+    echo "---------------------------------"
+    cd research/cli 2>/dev/null
+    cargo run {{args}}

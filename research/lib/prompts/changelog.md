@@ -1,70 +1,64 @@
-# Major-Version Change History for {{topic}}
+# Version History for {{topic}}
 
-You are a senior software release historian and technical writer. Your job is to reconstruct and document this library's change history at major-version granularity (SemVer: MAJOR.MINOR.PATCH, focusing primarily on MAJOR transitions, e.g., 1.x → 2.0, 2.x → 3.0).
+You are researching the **{{topic}}** library.
 
-You must base conclusions on evidence from the repository and/or hosting provider, and you must explicitly cite what you used for each major version summary (file path, tag name, release note, PR number, commit range, etc.). If you cannot find evidence, state that clearly and provide the best-supported inference you can, labeled as inference.
+**Library Context:**
+- Package Manager: {{package_manager}}
+- Language: {{language}}
+- URL: {{url}}
 
-## Output requirements
+Your task is to document this library's version history, focusing on major versions and significant releases. Use your training knowledge about this library - you do not have live access to repositories or APIs, so work from what you know.
 
-Produce a Major Version Change History document with these sections:
+## Output Requirements
 
-### 1. Repository Overview
-- What the project is (1–3 sentences)
-- Versioning scheme observed (SemVer? date-based? mixed?)
-- Evidence sources consulted (bullet list)
+Produce a Version History document with these sections:
 
-### 2. Major Version Timeline
-A table: Major Version | Release Date (if known) | Evidence (tags/releases/commits) | Summary
+### 1. Library Overview
+- What the library does (1-3 sentences)
+- Current major version (if known)
+- Versioning scheme used (SemVer, CalVer, etc.)
 
-### 3. Per-Major-Version Notes (repeat for each major version)
-- What changed (executive summary) (3–8 bullets)
-- Breaking changes (explicit, separate bullets)
-- New capabilities (user-facing features)
-- Notable deprecations/removals
-- Migration notes (what a downstream user must do)
-- Primary evidence (links/refs: changelog headings, release notes, PRs, commits, docs)
+### 2. Version Timeline
 
-### 4. Confidence & Gaps
-- Identify versions where evidence is weak or conflicting
-- State what additional data would improve accuracy
+Create a table of significant versions:
 
-## Major-version identification rules
+| Version | Approximate Date | Significance |
+|---------|------------------|--------------|
+| ... | ... | ... |
 
-Use the following precedence order:
+Focus on:
+- Major version releases (1.0, 2.0, 3.0, etc.)
+- Significant minor releases that introduced important features
+- Initial stable release (1.0 or 0.1)
 
-1. **Authoritative sources:** CHANGELOG.md, Releases page, Git tags (v2.0.0), Package manifests
-2. **Fallback sources:** PR titles/labels, Milestones, Commit messages (Conventional Commits), Docs changes, API surface diffs
+### 3. Major Version Details
 
-## Evidence collection techniques
+For each major version you know about, provide:
 
-Apply as many as feasible:
+#### Version X.0
+- **Key Changes**: 3-8 bullet points of what changed
+- **Breaking Changes**: Explicit list of breaking changes (if any)
+- **New Features**: Major user-facing additions
+- **Migration Notes**: What users needed to do to upgrade
 
-**A) Repository files:** CHANGELOG.md, RELEASE_NOTES.md, HISTORY.md, /docs/, /migrations/, version declarations in manifests
+### 4. Notable Evolution
 
-**B) Provider API:** Releases, Tags, PRs between boundaries, Milestones
+Describe the library's evolution over time:
+- How has the API changed?
+- What problems did different versions solve?
+- Any significant rewrites or architectural changes?
 
-**C) Git history:** Identify boundary commits, compute change-sets, distill noise (de-emphasize deps, collapse repetitive commits)
+### 5. Knowledge Gaps
 
-**D) Heuristics for material changes:**
-- Public API changes (exports, CLI flags, config formats)
-- Runtime/platform support changes
-- Data format changes
-- Behavior changes that break assumptions
-- Security/auth model changes
-- Build/distribution changes
+Be explicit about what you don't know:
+- Which versions you have limited information about
+- Whether your knowledge might be outdated
+- Suggest checking the official changelog/releases for current information
 
-## Distillation method
+## Style Guidelines
 
-1. **Extract:** Gather raw notes from files, releases, PR titles, commits
-2. **Cluster:** Group into themes (API, CLI, config, performance, security, docs, tooling)
-3. **Rank:** Select 5–12 most material changes (user impact)
-4. **Validate:** Cross-check against at least two evidence sources
-5. **Write:** Produce concise bullets with consistent verbs
-
-## Style rules
-
-- Write for experienced developers
-- Prefer concrete statements: "Renamed CLI flag --foo → --bar (breaking)"
-- Every section must include at least one evidence reference
-- Prefix inferred statements with "Inference: …"
-- Be neutral; do not oversell
+- Be honest about uncertainty - prefix uncertain information with "Based on available information..." or "As of my training data..."
+- Focus on what you actually know rather than speculating
+- If you have very limited knowledge of this library's history, say so clearly and provide what you can
+- Include the package manager URL for users to check current releases
+- Write for experienced developers who want to understand the library's evolution

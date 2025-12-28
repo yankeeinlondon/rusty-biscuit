@@ -1,1 +1,21 @@
-Find 2-3 libraries which are commonly used with/integrated with the '{{topic}}' crate. For each library, describe how and why these two libraries are used together and give a code example of how they may be used together. If the crate is part of an ecosystem of crates, mention this and list out other crates in the ecosystem (along with a link to repo, documentation site (if exists), and a summary description of the crate.
+You are researching the **{{topic}}** library.
+
+**Library Context:**
+- Package Manager: {{package_manager}}
+- Language: {{language}}
+- URL: {{url}}
+
+Find 2-3 libraries which are commonly used with or integrated with **{{topic}}**.
+
+For each integration partner:
+
+1. **Library Name and Links**: Repository, documentation, package manager page
+2. **Why They're Used Together**: The complementary functionality they provide
+3. **Integration Pattern**: How they work together
+4. **Code Example**: A practical example showing the integration
+
+Additionally, if **{{topic}}** is part of an ecosystem of related libraries (e.g., a framework with plugins, or a family of crates), describe:
+
+- The ecosystem name and purpose
+- Other libraries in the ecosystem with brief descriptions
+- Links to each ecosystem library

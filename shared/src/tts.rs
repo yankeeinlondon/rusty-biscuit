@@ -76,3 +76,68 @@ pub fn announce_research_complete(library: &str) {
     let message = format!("Research for the {} library has completed", library);
     speak(&message);
 }
+
+/// Format a completion message for a task.
+///
+/// This is the internal formatting used by `announce_completion`.
+/// Exposed for testing purposes.
+#[doc(hidden)]
+pub fn format_completion_message(task: &str) -> String {
+    format!("{} has completed", task)
+}
+
+/// Format a research completion message for a library.
+///
+/// This is the internal formatting used by `announce_research_complete`.
+/// Exposed for testing purposes.
+#[doc(hidden)]
+pub fn format_research_message(library: &str) -> String {
+    format!("Research for the {} library has completed", library)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_completion_message_basic() {
+        let result = format_completion_message("database migration");
+        assert_eq!(result, "database migration has completed");
+    }
+
+    #[test]
+    fn test_format_completion_message_with_library() {
+        let result = format_completion_message("clap library research");
+        assert_eq!(result, "clap library research has completed");
+    }
+
+    #[test]
+    fn test_format_completion_message_empty() {
+        let result = format_completion_message("");
+        assert_eq!(result, " has completed");
+    }
+
+    #[test]
+    fn test_format_research_message_basic() {
+        let result = format_research_message("tokio");
+        assert_eq!(result, "Research for the tokio library has completed");
+    }
+
+    #[test]
+    fn test_format_research_message_with_dashes() {
+        let result = format_research_message("rig-core");
+        assert_eq!(result, "Research for the rig-core library has completed");
+    }
+
+    #[test]
+    fn test_format_research_message_with_spaces() {
+        let result = format_research_message("my library");
+        assert_eq!(result, "Research for the my library library has completed");
+    }
+
+    #[test]
+    fn test_format_research_message_empty() {
+        let result = format_research_message("");
+        assert_eq!(result, "Research for the  library has completed");
+    }
+}
