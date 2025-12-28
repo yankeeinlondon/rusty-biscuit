@@ -11,4 +11,7 @@
 
 ## Use Cases
 {{use_cases}}
+
+## Changelog
+{{changelog}}
 {{additional_content}}

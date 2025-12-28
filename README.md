@@ -8,12 +8,14 @@ This monorepo is organized into **areas**, each containing related modules:
 
 ### Research Area (`/research`)
 
-The Research area provides automated research capabilities for software libraries.
+The Research area provides automated research capabilities for software libraries using a two-phase LLM pipeline.
 
 - **Research Library** (`/research/lib`) - Core library providing AI integration via the `rig` crate
 - **Research CLI** (`/research/cli`) - Command-line interface exposing research capabilities
   - Binary name: `research`
   - Usage: `research library <topic> [additional questions...]`
+
+For detailed documentation, see [`/research/README.md`](./research/README.md).
 
 ### Shared Library (`/shared`)
 
@@ -22,6 +24,21 @@ Common utilities shared across multiple areas of the monorepo.
 ### TUI Area (`/tui`)
 
 A `ratatui`-based TUI application for interactive chat. (Future development)
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `RESEARCH_DIR` | Base directory for research output | `$HOME` |
+| `OPENAI_API_KEY` | OpenAI API key | (required) |
+| `GEMINI_API_KEY` | Google Gemini API key | (required) |
+| `ZAI_API_KEY` | ZAI API key | (required) |
+
+### Research Output Location
+
+Research is stored at: `${RESEARCH_DIR:-$HOME}/.research/library/<pkg>/`
 
 ## Usage
 
@@ -65,17 +82,36 @@ research library clap "How does it compare to structopt?" "What are the derive m
 just -f research/justfile cli library clap
 ```
 
-## Library Research Flow
+## Library Research Pipeline
 
-```mermaid
-flowchart TD
-    U[User Prompt] --> I(Isolate Package and Language)
-    I --> A(Summary Information)
-    I --> DDF(Library Features)
-    I --> R(Related Libraries)
-    R --> RP(Pros/Cons)
-    R --> RA(When to use; when not to)
-    R --> RC(How does it compare?)
-    I --> G(Gotchas and Workarounds)
-    I --> UC(Use Cases)
+The research system uses a two-phase LLM pipeline:
+
 ```
+Phase 1: Underlying Research (parallel)
+├── overview.md          [GLM-4-7]      - Library features and API
+├── similar_libraries.md [Gemini Flash] - Alternatives and comparisons
+├── integration_partners.md [Gemini Flash] - Ecosystem libraries
+├── use_cases.md         [Gemini Flash] - Patterns and examples
+├── changelog.md         [GPT-5.2]      - Version history
+└── question_N.md        [Gemini Flash] - Additional prompts
+
+Phase 2: Synthesis (parallel)
+├── skill/SKILL.md       [GPT-5.2]      - Claude Code skill
+└── deep_dive.md         [GPT-5.2]      - Comprehensive reference
+```
+
+### Incremental Research (DRY)
+
+The system detects existing research via `metadata.json` and:
+
+- Runs overlap detection on new prompts
+- Interactive selection for conflicts
+- Re-synthesizes Phase 2 with expanded corpus
+
+### Metadata
+
+Each research output includes `metadata.json` tracking:
+
+- Library info (package manager, language, URL)
+- Additional research prompts
+- Creation and update timestamps

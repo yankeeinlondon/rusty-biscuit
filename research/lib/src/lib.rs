@@ -14,7 +14,8 @@ use reqwest::Client as HttpClient;
 use rig::client::{CompletionClient, ProviderClient};
 use rig::completion::{AssistantContent, CompletionModel};
 use rig::providers::{gemini, openai};
-use serde::Deserialize;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -29,6 +30,7 @@ mod prompts {
     pub const SIMILAR_LIBRARIES: &str = include_str!("../prompts/similar_libraries.md");
     pub const INTEGRATION_PARTNERS: &str = include_str!("../prompts/integration_partners.md");
     pub const USE_CASES: &str = include_str!("../prompts/use_cases.md");
+    pub const CHANGELOG: &str = include_str!("../prompts/changelog.md");
     pub const ADDITIONAL_QUESTION: &str = include_str!("../prompts/additional_question.md");
     pub const CONTEXT: &str = include_str!("../prompts/context.md");
     pub const SKILL: &str = include_str!("../prompts/skill.md");
@@ -58,6 +60,143 @@ impl fmt::Display for LibraryInfo {
         }
         Ok(())
     }
+}
+
+/// The kind of research being performed
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ResearchKind {
+    Library,
+    // Future: Software, Standard, Company, etc.
+}
+
+/// Metadata for a research output
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResearchMetadata {
+    /// The kind of research
+    pub kind: ResearchKind,
+    /// Information about the library (if kind is Library)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub library_info: Option<LibraryInfoMetadata>,
+    /// Additional files created from user prompts (filename -> prompt)
+    #[serde(default)]
+    pub additional_files: std::collections::HashMap<String, String>,
+    /// When the research was first created
+    pub created_at: DateTime<Utc>,
+    /// When the research was last updated
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Library info stored in metadata (serializable version)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LibraryInfoMetadata {
+    pub package_manager: String,
+    pub language: String,
+    pub url: String,
+}
+
+impl From<&LibraryInfo> for LibraryInfoMetadata {
+    fn from(info: &LibraryInfo) -> Self {
+        Self {
+            package_manager: info.package_manager.clone(),
+            language: info.language.clone(),
+            url: info.url.clone(),
+        }
+    }
+}
+
+impl ResearchMetadata {
+    /// Create new metadata for library research
+    pub fn new_library(library_info: Option<&LibraryInfo>) -> Self {
+        let now = Utc::now();
+        Self {
+            kind: ResearchKind::Library,
+            library_info: library_info.map(LibraryInfoMetadata::from),
+            additional_files: std::collections::HashMap::new(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Load metadata from a directory
+    pub async fn load(output_dir: &std::path::Path) -> Option<Self> {
+        let path = output_dir.join("metadata.json");
+        let content = fs::read_to_string(&path).await.ok()?;
+        serde_json::from_str(&content).ok()
+    }
+
+    /// Save metadata to a directory
+    pub async fn save(&self, output_dir: &std::path::Path) -> Result<(), std::io::Error> {
+        let path = output_dir.join("metadata.json");
+        let content = serde_json::to_string_pretty(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        fs::write(&path, content).await
+    }
+
+    /// Add an additional file to the metadata
+    pub fn add_additional_file(&mut self, filename: String, prompt: String) {
+        self.additional_files.insert(filename, prompt);
+        self.updated_at = Utc::now();
+    }
+
+    /// Check if a prompt is similar to an existing one (simple text-based comparison)
+    pub fn check_overlap(&self, prompt: &str) -> Option<String> {
+        let prompt_lower = prompt.to_lowercase();
+        for (filename, existing_prompt) in &self.additional_files {
+            let existing_lower = existing_prompt.to_lowercase();
+            // Simple overlap detection: check if significant words overlap
+            let prompt_words: std::collections::HashSet<_> = prompt_lower
+                .split_whitespace()
+                .filter(|w| w.len() > 3)
+                .collect();
+            let existing_words: std::collections::HashSet<_> = existing_lower
+                .split_whitespace()
+                .filter(|w| w.len() > 3)
+                .collect();
+            let overlap: usize = prompt_words.intersection(&existing_words).count();
+            let min_words = prompt_words.len().min(existing_words.len());
+            if min_words > 0 && overlap as f32 / min_words as f32 > 0.5 {
+                return Some(filename.clone());
+            }
+        }
+        None
+    }
+
+    /// Get the next question number for additional files
+    pub fn next_question_number(&self) -> usize {
+        self.additional_files
+            .keys()
+            .filter_map(|k| {
+                k.strip_prefix("question_")
+                    .and_then(|s| s.strip_suffix(".md"))
+                    .and_then(|n| n.parse::<usize>().ok())
+            })
+            .max()
+            .unwrap_or(0)
+            + 1
+    }
+}
+
+/// Result of overlap detection for a prompt
+#[derive(Debug, Clone)]
+pub struct PromptOverlap {
+    /// The original prompt text
+    pub prompt: String,
+    /// The filename that would be generated
+    pub filename: String,
+    /// Whether this prompt overlaps with existing research
+    pub verdict: OverlapVerdict,
+    /// The conflicting file if there's overlap
+    pub conflict: Option<String>,
+}
+
+/// Verdict on whether a prompt overlaps with existing research
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverlapVerdict {
+    /// No overlap detected, safe to proceed
+    New,
+    /// Potential overlap with existing document
+    Conflict,
 }
 
 /// Response from crates.io API
@@ -515,9 +654,15 @@ where
     PromptTaskResult { metrics }
 }
 
-/// Returns the default output directory for a given topic: `research/{topic}`
+/// Returns the default output directory for a given topic.
+///
+/// Uses the `RESEARCH_DIR` environment variable if set, otherwise falls back to `$HOME`.
+/// The full path is: `${RESEARCH_DIR:-$HOME}/.research/library/{topic}`
 pub fn default_output_dir(topic: &str) -> PathBuf {
-    PathBuf::from("research").join(topic)
+    let base = std::env::var("RESEARCH_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")));
+    base.join(".research").join("library").join(topic)
 }
 
 
@@ -613,6 +758,271 @@ where
     PromptTaskResult { metrics }
 }
 
+/// Run incremental research by adding new questions to existing research.
+///
+/// This is called when metadata.json exists and new questions are provided.
+/// It runs only the new question tasks, then re-synthesizes Phase 2.
+async fn run_incremental_research(
+    topic: &str,
+    output_dir: PathBuf,
+    mut existing_metadata: ResearchMetadata,
+    questions: Vec<(usize, String)>,
+) -> Result<ResearchResult, ResearchError> {
+    // Load environment variables from .env file
+    dotenvy::dotenv().ok();
+
+    println!(
+        "\nIncremental research: Adding {} new question(s)...\n",
+        questions.len()
+    );
+
+    // Set up cancellation flag for SIGINT handling
+    let cancelled = Arc::new(AtomicBool::new(false));
+
+    // Spawn SIGINT handler
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            eprintln!("\n⚠ Received SIGINT, exiting now");
+            std::process::exit(130);
+        }
+    });
+
+    // Initialize providers
+    let gemini = gemini::Client::from_env();
+    let openai = openai::Client::from_env();
+
+    let start_time = Instant::now();
+    let counter = Arc::new(AtomicUsize::new(0));
+    let total = questions.len();
+
+    // Create question tasks
+    let question_tasks: Vec<_> = questions
+        .iter()
+        .map(|(num, question)| {
+            let question_model = gemini.completion_model("gemini-3-flash-preview");
+            run_question_task(
+                *num,
+                topic,
+                question,
+                output_dir.clone(),
+                question_model,
+                counter.clone(),
+                total,
+                start_time,
+                cancelled.clone(),
+            )
+        })
+        .collect();
+
+    // Run all question tasks in parallel
+    let question_results = join_all(question_tasks).await;
+
+    let succeeded: Vec<_> = question_results
+        .iter()
+        .filter_map(|r| r.metrics.as_ref())
+        .collect();
+    let failed = question_results.len() - succeeded.len();
+
+    let was_cancelled = cancelled.load(Ordering::SeqCst);
+
+    println!(
+        "\nNew questions complete: {}/{} succeeded{}\n",
+        succeeded.len(),
+        question_results.len(),
+        if was_cancelled { " (cancelled)" } else { "" }
+    );
+
+    if was_cancelled || succeeded.is_empty() {
+        let total_time = start_time.elapsed().as_secs_f32();
+        let total_input: u64 = succeeded.iter().map(|m| m.input_tokens).sum();
+        let total_output: u64 = succeeded.iter().map(|m| m.output_tokens).sum();
+        let total_tokens: u64 = succeeded.iter().map(|m| m.total_tokens).sum();
+
+        return Ok(ResearchResult {
+            topic: topic.to_string(),
+            output_dir,
+            succeeded: succeeded.len(),
+            failed,
+            cancelled: was_cancelled,
+            total_time_secs: total_time,
+            total_input_tokens: total_input,
+            total_output_tokens: total_output,
+            total_tokens,
+        });
+    }
+
+    // Update metadata with new questions
+    for (num, question) in &questions {
+        let filename = format!("question_{}.md", num);
+        existing_metadata.add_additional_file(filename, question.clone());
+    }
+
+    // === Phase 2: Re-synthesize with expanded corpus ===
+    println!("Phase 2: Re-generating consolidated outputs with new content...\n");
+
+    // Read back all documents
+    let overview_content = fs::read_to_string(output_dir.join("overview.md"))
+        .await
+        .unwrap_or_default();
+    let similar_libraries_content = fs::read_to_string(output_dir.join("similar_libraries.md"))
+        .await
+        .unwrap_or_default();
+    let integration_partners_content =
+        fs::read_to_string(output_dir.join("integration_partners.md"))
+            .await
+            .unwrap_or_default();
+    let use_cases_content = fs::read_to_string(output_dir.join("use_cases.md"))
+        .await
+        .unwrap_or_default();
+    let changelog_content = fs::read_to_string(output_dir.join("changelog.md"))
+        .await
+        .unwrap_or_default();
+
+    // Read all additional question files
+    let mut additional_content = String::new();
+    for filename in existing_metadata.additional_files.keys() {
+        if let Ok(content) = fs::read_to_string(output_dir.join(filename)).await {
+            if !content.is_empty() {
+                let num = filename
+                    .strip_prefix("question_")
+                    .and_then(|s| s.strip_suffix(".md"))
+                    .unwrap_or("?");
+                additional_content.push_str(&format!(
+                    "\n## Additional Research: Question {}\n\n{}\n",
+                    num, content
+                ));
+            }
+        }
+    }
+
+    // Build context from all phase 1 results
+    let combined_context = prompts::CONTEXT
+        .replace("{{topic}}", topic)
+        .replace("{{overview}}", &overview_content)
+        .replace("{{similar_libraries}}", &similar_libraries_content)
+        .replace("{{integration_partners}}", &integration_partners_content)
+        .replace("{{use_cases}}", &use_cases_content)
+        .replace("{{changelog}}", &changelog_content)
+        .replace("{{additional_content}}", &additional_content);
+
+    // Build prompts for phase 2
+    let skill_prompt = prompts::SKILL
+        .replace("{{topic}}", topic)
+        .replace("{{context}}", &combined_context);
+
+    let deep_dive_prompt = prompts::DEEP_DIVE
+        .replace("{{topic}}", topic)
+        .replace("{{context}}", &combined_context);
+
+    // Create skill subdirectory
+    let skill_dir = output_dir.join("skill");
+    fs::create_dir_all(&skill_dir).await?;
+
+    // Get models for phase 2
+    let skill_gen = openai.completion_model("gpt-5.2");
+    let deep_dive_gen = openai.completion_model("gpt-5.2");
+
+    let phase2_counter = Arc::new(AtomicUsize::new(0));
+    let phase2_start = Instant::now();
+
+    // Run phase 2 prompts in parallel
+    let (skill_result, deep_dive_result) = tokio::join!(
+        run_prompt_task(
+            "skill",
+            "SKILL.md",
+            skill_dir.clone(),
+            skill_gen,
+            skill_prompt,
+            phase2_counter.clone(),
+            2,
+            phase2_start,
+            cancelled.clone(),
+        ),
+        run_prompt_task(
+            "deep_dive",
+            "deep_dive.md",
+            output_dir.clone(),
+            deep_dive_gen,
+            deep_dive_prompt,
+            phase2_counter.clone(),
+            2,
+            phase2_start,
+            cancelled.clone(),
+        ),
+    );
+
+    // Parse skill output and split into multiple files if needed
+    if skill_result.metrics.is_some() {
+        if let Ok(skill_content) = fs::read_to_string(skill_dir.join("SKILL.md")).await {
+            if skill_content.contains("--- FILE:") {
+                let mut current_file: Option<String> = None;
+                let mut current_content = String::new();
+
+                for line in skill_content.lines() {
+                    if line.starts_with("--- FILE:") && line.ends_with("---") {
+                        if let Some(ref filename) = current_file {
+                            let file_path = skill_dir.join(filename);
+                            let normalized = normalize_markdown(&current_content);
+                            let _ = fs::write(&file_path, normalized).await;
+                        }
+                        let filename = line
+                            .trim_start_matches("--- FILE:")
+                            .trim_end_matches("---")
+                            .trim();
+                        current_file = Some(filename.to_string());
+                        current_content = String::new();
+                    } else if current_file.is_some() {
+                        current_content.push_str(line);
+                        current_content.push('\n');
+                    }
+                }
+                if let Some(ref filename) = current_file {
+                    let file_path = skill_dir.join(filename);
+                    let normalized = normalize_markdown(&current_content);
+                    let _ = fs::write(&file_path, normalized).await;
+                }
+            }
+        }
+    }
+
+    let phase2_results = [skill_result, deep_dive_result];
+    let phase2_succeeded: Vec<_> = phase2_results
+        .iter()
+        .filter_map(|r| r.metrics.as_ref())
+        .collect();
+    let phase2_failed = phase2_results.len() - phase2_succeeded.len();
+
+    println!(
+        "\nPhase 2 complete: {}/{} succeeded",
+        phase2_succeeded.len(),
+        phase2_results.len()
+    );
+
+    // Save updated metadata
+    if let Err(e) = existing_metadata.save(&output_dir).await {
+        eprintln!("Warning: Failed to update metadata.json: {}", e);
+    }
+
+    // Aggregate all metrics
+    let total_time = start_time.elapsed().as_secs_f32();
+    let all_metrics: Vec<_> = succeeded.iter().chain(phase2_succeeded.iter()).collect();
+    let total_input: u64 = all_metrics.iter().map(|m| m.input_tokens).sum();
+    let total_output: u64 = all_metrics.iter().map(|m| m.output_tokens).sum();
+    let total_tokens: u64 = all_metrics.iter().map(|m| m.total_tokens).sum();
+
+    Ok(ResearchResult {
+        topic: topic.to_string(),
+        output_dir,
+        succeeded: succeeded.len() + phase2_succeeded.len(),
+        failed: failed + phase2_failed,
+        cancelled: was_cancelled,
+        total_time_secs: total_time,
+        total_input_tokens: total_input,
+        total_output_tokens: total_output,
+        total_tokens,
+    })
+}
+
 /// Research a topic by running multiple LLM prompts in parallel.
 ///
 /// Generates the following files in the output directory:
@@ -648,10 +1058,94 @@ pub async fn research(
     // Create output directory
     fs::create_dir_all(&output_dir).await?;
 
+    // Check for existing metadata (incremental mode)
+    if let Some(existing_metadata) = ResearchMetadata::load(&output_dir).await {
+        println!("Found existing research for '{}'", topic);
+
+        if questions.is_empty() {
+            println!("  No new questions provided. Use additional prompts to expand research.");
+            return Ok(ResearchResult {
+                topic: topic.to_string(),
+                output_dir,
+                succeeded: 0,
+                failed: 0,
+                cancelled: false,
+                total_time_secs: 0.0,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_tokens: 0,
+            });
+        }
+
+        // Check for overlaps and filter questions
+        let mut questions_to_run: Vec<(usize, String)> = Vec::new();
+        let mut next_num = existing_metadata.next_question_number();
+
+        for question in questions {
+            if let Some(conflict_file) = existing_metadata.check_overlap(question) {
+                println!("  ⚠ Question overlaps with existing {}: \"{}\"", conflict_file, question);
+
+                // Ask user if they want to include anyway
+                let confirm = inquire::Confirm::new(&format!(
+                    "Include anyway as question_{}?",
+                    next_num
+                ))
+                .with_default(false)
+                .prompt();
+
+                match confirm {
+                    Ok(true) => {
+                        questions_to_run.push((next_num, question.clone()));
+                        next_num += 1;
+                    }
+                    Ok(false) => {
+                        println!("    Skipping overlapping question");
+                    }
+                    Err(_) => {
+                        println!("    Skipping (cancelled)");
+                    }
+                }
+            } else {
+                questions_to_run.push((next_num, question.clone()));
+                next_num += 1;
+            }
+        }
+
+        if questions_to_run.is_empty() {
+            println!("  No new questions to run after overlap check.");
+            return Ok(ResearchResult {
+                topic: topic.to_string(),
+                output_dir,
+                succeeded: 0,
+                failed: 0,
+                cancelled: false,
+                total_time_secs: 0.0,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                total_tokens: 0,
+            });
+        }
+
+        // Run incremental research with just the new questions
+        return run_incremental_research(
+            topic,
+            output_dir,
+            existing_metadata,
+            questions_to_run,
+        )
+        .await;
+    }
+
     // Find the library across package managers and let user select if multiple
     println!("Checking package managers for '{}'...", topic);
     let library_matches = find_library(topic).await;
-    let _selected = select_library(library_matches, topic);
+    let selected = select_library(library_matches, topic);
+
+    // Extract library info for metadata
+    let library_info = match &selected {
+        LibrarySelection::Selected(info) | LibrarySelection::Single(info) => Some(info.clone()),
+        _ => None,
+    };
 
     // Set up cancellation flag for SIGINT handling
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -674,15 +1168,17 @@ pub async fn research(
     let gemini1 = gemini.completion_model("gemini-3-flash-preview");
     let gemini2 = gemini.completion_model("gemini-3-flash-preview");
     let gemini3 = gemini.completion_model("gemini-3-flash-preview");
+    let changelog_model = openai.completion_model("gpt-5.2"); // Use stronger model for changelog
 
     // Build prompts from templates
     let overview_prompt = prompts::OVERVIEW.replace("{{topic}}", topic);
     let similar_libraries_prompt = prompts::SIMILAR_LIBRARIES.replace("{{topic}}", topic);
     let integration_partners_prompt = prompts::INTEGRATION_PARTNERS.replace("{{topic}}", topic);
     let use_cases_prompt = prompts::USE_CASES.replace("{{topic}}", topic);
+    let changelog_prompt = prompts::CHANGELOG.replace("{{topic}}", topic);
 
     let num_questions = questions.len();
-    let total = 4 + num_questions;
+    let total = 5 + num_questions; // 5 default prompts + user questions
 
     println!(
         "Phase 1: Running {} research prompts in parallel to {:?}...\n",
@@ -713,8 +1209,8 @@ pub async fn research(
         })
         .collect();
 
-    // Run main 4 tasks and all question tasks in parallel
-    let (r1, r2, r3, r4, question_results) = tokio::join!(
+    // Run main 5 tasks and all question tasks in parallel
+    let (r1, r2, r3, r4, r5, question_results) = tokio::join!(
         run_prompt_task(
             "overview",
             "overview.md",
@@ -759,10 +1255,21 @@ pub async fn research(
             start_time,
             cancelled.clone(),
         ),
+        run_prompt_task(
+            "changelog",
+            "changelog.md",
+            output_dir.clone(),
+            changelog_model,
+            changelog_prompt,
+            counter.clone(),
+            total,
+            start_time,
+            cancelled.clone(),
+        ),
         join_all(question_tasks),
     );
 
-    let mut phase1_results = vec![r1, r2, r3, r4];
+    let mut phase1_results = vec![r1, r2, r3, r4, r5];
     phase1_results.extend(question_results);
     let phase1_succeeded: Vec<_> = phase1_results
         .iter()
@@ -821,6 +1328,9 @@ pub async fn research(
     let use_cases_content = fs::read_to_string(output_dir.join("use_cases.md"))
         .await
         .unwrap_or_default();
+    let changelog_content = fs::read_to_string(output_dir.join("changelog.md"))
+        .await
+        .unwrap_or_default();
 
     // Read additional question files and build additional content
     let mut additional_content = String::new();
@@ -843,6 +1353,7 @@ pub async fn research(
         .replace("{{similar_libraries}}", &similar_libraries_content)
         .replace("{{integration_partners}}", &integration_partners_content)
         .replace("{{use_cases}}", &use_cases_content)
+        .replace("{{changelog}}", &changelog_content)
         .replace("{{additional_content}}", &additional_content);
 
     // Build prompts for phase 2 from templates
@@ -955,6 +1466,16 @@ pub async fn research(
     let total_input: u64 = all_metrics.iter().map(|m| m.input_tokens).sum();
     let total_output: u64 = all_metrics.iter().map(|m| m.output_tokens).sum();
     let total_tokens: u64 = all_metrics.iter().map(|m| m.total_tokens).sum();
+
+    // Write metadata.json
+    let mut metadata = ResearchMetadata::new_library(library_info.as_ref());
+    for (i, question) in questions.iter().enumerate() {
+        let filename = format!("question_{}.md", i + 1);
+        metadata.add_additional_file(filename, question.clone());
+    }
+    if let Err(e) = metadata.save(&output_dir).await {
+        eprintln!("Warning: Failed to write metadata.json: {}", e);
+    }
 
     Ok(ResearchResult {
         topic: topic.to_string(),

@@ -2,26 +2,42 @@
 
 ## Modules for Research
 
-This area of the `deckhand` monorepo is focused on **research** and is broken up into two discrete modules:
+This area of the `dockhand` monorepo is focused on **research** and is broken up into two discrete modules:
 
 - **Research Library** (`/research/lib`)
 
-    Exposes functions which allow the research into various topics and items.
+    Exposes functions which allow research into various topics and items.
 
     > **Note:** _will leverage the `shared` module in this monorepo for highly generalizable operations_
 
 - **CLI** (`/research/cli`)
 
-    Exposes the `research` CLI command and leverages the research library to achieve it's goals.
+    Exposes the `research` CLI command and leverages the research library to achieve its goals.
 
 ## Types of Research
 
-1. `Libraries`
+1. **Libraries** - Research code libraries found on various package managers like `crates.io`, `npm`, `PyPI`, etc.
 
-    - research code libraries found on various package managers like `create.io`, `npm`, etc.
+2. **Software** - (Future) Research software applications and tools.
 
-2. `Software`
+## Configuration
 
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `RESEARCH_DIR` | Base directory for research output | `$HOME` |
+| `OPENAI_API_KEY` | OpenAI API key for GPT-5.2 | (required) |
+| `GEMINI_API_KEY` | Google Gemini API key | (required) |
+| `ZAI_API_KEY` | ZAI API key for GLM-4-7 | (required) |
+
+### Output Location
+
+Research output is stored at:
+
+```
+${RESEARCH_DIR:-$HOME}/.research/library/<package-name>/
+```
 
 ## Using the CLI
 
@@ -32,33 +48,114 @@ This area of the `deckhand` monorepo is focused on **research** and is broken up
 
 ### Commands
 
-1. **Library Research** (`research library <pkg> [prompt] [prompt]`)
+#### Library Research (`research library <pkg> [prompt] [prompt]`)
 
-    - Perform research on a software a particular software library
-    - **Underlying Research**
-        - all library research will start with a set of _underlying_ research:
-            - strong overview of how the package is used and what it's functional footprint is (`overview.md`)
-            - a
-            - b
-            - c
-            - d
-        - in additional to all of the default research you can add additional prompts which will be evaluated to create additional documents in the _underlying research_.
-    - **Summary Deliverables**
-        - once all _underlying research_ is complete two deliverables will be produced.
-        - both deliverables are intended to be comprehensive in terms of information about the given library but the way the information is structured varies:
+Perform research on a software library.
 
-          1. **Deep Dive Document**
+```bash
+# Basic research
+research library clap
 
-            - a single document which covers everything
-            - it starts with a table of contents to aid navigation
-            - the document contains a combination of rich prose and code examples
-            - the intended audience for this document is both humans and LLM's which haven't been trained on a skill-based knowledge tree like that introduced by Anthropic for Claude Code.
+# With additional questions
+research library clap "How does it compare to structopt?" "What are the derive macros?"
+```
 
-          2. **Skill**
+## Library Research Output
 
-            - a tree shaped linked structure of documents which contain concise but complete coverage of the given software library
-            - the information created is modelled after the Claude Code **skill** structure and:
-                - has an entry point of `SKILL.md`
-                - while the `SKILL.md` should be fairly short it will provide links to other sub-areas which go into greater detail
-                - the idea of this format is to allow an LLM to selectively use the parts of the skill that it needs to complete it's task; thereby using the context window wisely rather than just putting all information into the context window right away.
+### Underlying Research
 
+All library research starts with a set of _underlying_ research documents:
+
+| File | Description | Model |
+|------|-------------|-------|
+| `overview.md` | Comprehensive library overview covering features, API surface, and usage patterns | ZAI GLM-4-7 |
+| `similar_libraries.md` | Alternative libraries with comparisons, pros/cons, and when to use each | Gemini Flash |
+| `integration_partners.md` | Libraries commonly used alongside this one (ecosystem partners) | Gemini Flash |
+| `use_cases.md` | Common use cases, patterns, and real-world examples | Gemini Flash |
+| `changelog.md` | Major-version change history with breaking changes and migration notes | OpenAI GPT-5.2 |
+| `question_N.md` | Answers to user-provided additional prompts | Gemini Flash |
+
+### Summary Deliverables
+
+Once all _underlying research_ is complete, two deliverables are produced:
+
+#### 1. Deep Dive Document (`deep_dive.md`)
+
+- A single comprehensive document covering everything
+- Starts with a table of contents for navigation
+- Combines rich prose with code examples
+- Intended for both humans and LLMs without skill-based knowledge
+
+#### 2. Skill (`skill/SKILL.md`)
+
+- A tree-shaped linked structure of documents
+- Modeled after Claude Code's **skill** structure:
+  - Entry point: `SKILL.md` (concise, <200 lines)
+  - Links to sub-areas with greater detail
+- Enables LLMs to selectively use relevant parts
+- Optimizes context window usage
+
+## Metadata
+
+Research metadata is stored in `metadata.json`:
+
+```json
+{
+  "kind": "library",
+  "library_info": {
+    "package_manager": "crates.io",
+    "language": "Rust",
+    "url": "https://crates.io/crates/clap"
+  },
+  "additional_files": {
+    "question_1.md": "How does it compare to structopt?"
+  },
+  "created_at": "2025-12-28T10:00:00Z",
+  "updated_at": "2025-12-28T10:00:00Z"
+}
+```
+
+## Incremental Research (DRY)
+
+The research system avoids repeating work:
+
+1. **Existence check**: If `metadata.json` exists, runs in incremental mode
+2. **Overlap detection**: Compares new prompts against existing documents
+3. **Interactive selection**: For conflicting prompts, user chooses which to include
+4. **Re-synthesis**: Regenerates Phase 2 deliverables with expanded corpus
+
+### Overlap Handling
+
+- **New prompts**: Added by default
+- **Conflicting prompts**: Unselected by default, user confirmation required
+
+## Architecture
+
+For detailed technical documentation, see [`/research/docs/architecture.md`](./docs/architecture.md).
+
+### Two-Phase Pipeline
+
+```
+Phase 1: Underlying Research (parallel)
+├── overview.md          [GLM-4-7]
+├── similar_libraries.md [Gemini Flash]
+├── integration_partners.md [Gemini Flash]
+├── use_cases.md         [Gemini Flash]
+├── changelog.md         [GPT-5.2]
+└── question_N.md        [Gemini Flash]
+
+Phase 2: Synthesis (parallel, after Phase 1)
+├── skill/SKILL.md       [GPT-5.2]
+└── deep_dive.md         [GPT-5.2]
+```
+
+### Package Manager Support
+
+| Manager | Language | Detection |
+|---------|----------|-----------|
+| crates.io | Rust | API query |
+| npm | JavaScript/TypeScript | Registry API |
+| PyPI | Python | JSON API |
+| Packagist | PHP | Search API |
+| LuaRocks | Lua | HEAD request |
+| pkg.go.dev | Go | HEAD request |
