@@ -3,6 +3,7 @@
         "arboard",
         "ratatui",
         "resvg",
+        "schemars",
         "syntect",
         "wezterm"
     ]

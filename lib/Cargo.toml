@@ -1,0 +1,12 @@
+[package]
+name = "lib"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dotenvy = "0.15.7"
+pulldown-cmark = "0.13.0"
+pulldown-cmark-to-cmark = "22.0.0"
+rig-core = "0.27.0"
+tokio = { version = "1.48.0", features = ["full", "tokio-macros"] }
+tts = "0.26.3"
