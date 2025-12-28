@@ -1578,9 +1578,9 @@ dependencies = [
  "rig-core",
  "serde",
  "serde_json",
+ "shared",
  "thiserror 2.0.17",
  "tokio",
- "tts",
 ]
 
 [[package]]
@@ -1848,6 +1848,9 @@ dependencies = [
 [[package]]
 name = "shared"
 version = "0.1.0"
+dependencies = [
+ "tts",
+]
 
 [[package]]
 name = "shlex"

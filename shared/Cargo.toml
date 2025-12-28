@@ -8,3 +8,4 @@ name = "shared"
 path = "src/lib.rs"
 
 [dependencies]
+tts = "0.26.3"

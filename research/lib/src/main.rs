@@ -1,7 +1,6 @@
 //! Development binary for testing the research library
 
 use research_lib::research;
-use tts::Tts;
 
 #[tokio::main]
 async fn main() {
@@ -21,33 +20,11 @@ async fn main() {
             println!("{}", "=".repeat(60));
 
             // Announce completion via TTS
-            announce_completion(&result.topic);
+            shared::tts::announce_research_complete(&result.topic);
         }
         Err(e) => {
             eprintln!("Research failed: {}", e);
             std::process::exit(1);
-        }
-    }
-}
-
-fn announce_completion(topic: &str) {
-    if let Ok(mut tts) = Tts::default() {
-        if let Ok(voices) = tts.voices() {
-            if let Some(voice) = voices.iter().find(|v| {
-                !v.id().contains("compact")
-                    && !v.id().contains("eloquence")
-                    && v.language().starts_with("en")
-            }) {
-                let _ = tts.set_voice(voice);
-            }
-        }
-
-        let message = format!("Research for the {} library has completed", topic);
-        if tts.speak(&message, false).is_ok() {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            while tts.is_speaking().unwrap_or(false) {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
         }
     }
 }
