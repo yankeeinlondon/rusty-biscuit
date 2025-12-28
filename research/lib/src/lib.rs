@@ -2,6 +2,14 @@
 //!
 //! This library provides tools for automated research on software libraries,
 //! running multiple LLM prompts in parallel and saving results.
+//!
+//! ## Tool Integration
+//!
+//! Phase 1 prompts (research prompts) have access to web search and scraping tools:
+//! - [`BraveSearchTool`](shared::tools::BraveSearchTool) - Web search via Brave Search API
+//! - [`ScreenScrapeTool`](shared::tools::ScreenScrapeTool) - Web page content extraction
+//!
+//! Phase 2 prompts (synthesis) run without tools as they consolidate existing content.
 
 pub mod providers;
 
@@ -11,11 +19,13 @@ use providers::zai;
 use pulldown_cmark::{Options, Parser};
 use pulldown_cmark_to_cmark::cmark;
 use reqwest::Client as HttpClient;
+use rig::agent::Agent;
 use rig::client::{CompletionClient, ProviderClient};
-use rig::completion::{AssistantContent, CompletionModel};
+use rig::completion::{AssistantContent, CompletionModel, Prompt};
 use rig::providers::{gemini, openai};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use shared::tools::{BraveSearchTool, ScreenScrapeTool};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -534,6 +544,9 @@ pub enum ResearchError {
     #[error("All prompts failed")]
     AllPromptsFailed,
 
+    #[error("Too many prompts failed ({succeeded}/{total} succeeded)")]
+    TooManyPromptsFailed { succeeded: usize, total: usize },
+
     #[error("Operation cancelled by user")]
     Cancelled,
 }
@@ -749,6 +762,95 @@ where
     PromptTaskResult { metrics }
 }
 
+/// Check if web research tools are available (BRAVE_API_KEY is set).
+///
+/// Returns `true` if the environment is configured for tool usage.
+pub fn tools_available() -> bool {
+    std::env::var("BRAVE_API_KEY").is_ok()
+}
+
+/// Run a prompt task using an agent with tools, printing progress as it completes.
+///
+/// This function is used for Phase 1 prompts that benefit from web search
+/// and scraping capabilities. If tools are not available (no BRAVE_API_KEY),
+/// it falls back to a standard completion request without tools.
+async fn run_agent_prompt_task<M>(
+    name: &'static str,
+    filename: &'static str,
+    output_dir: PathBuf,
+    agent: Agent<M>,
+    prompt: String,
+    counter: Arc<AtomicUsize>,
+    total: usize,
+    start_time: Instant,
+    cancelled: Arc<AtomicBool>,
+) -> PromptTaskResult
+where
+    M: CompletionModel,
+{
+    // Check if already cancelled before starting
+    if cancelled.load(Ordering::SeqCst) {
+        return PromptTaskResult { metrics: None };
+    }
+
+    println!("  [{}] Starting (with tools)...", name);
+
+    // Use multi_turn(15) to allow up to 15 rounds of tool calls before final response
+    // Higher limit needed as research tasks may require multiple search + scrape operations
+    // If this still hits the limit, the preamble should guide the agent to synthesize earlier
+    let result = agent.prompt(&prompt).multi_turn(15).await;
+
+    // Check if cancelled after the request completed
+    if cancelled.load(Ordering::SeqCst) {
+        println!("  [{}] Cancelled (response discarded)", name);
+        return PromptTaskResult { metrics: None };
+    }
+
+    let elapsed = start_time.elapsed().as_secs_f32();
+    let completed = counter.fetch_add(1, Ordering::SeqCst) + 1;
+
+    let metrics = match result {
+        Ok(content) => {
+            // Agent returns the content directly as a string
+            let metrics = PromptMetrics {
+                input_tokens: 0,  // Agent API doesn't expose token counts
+                output_tokens: 0,
+                total_tokens: 0,
+                elapsed_secs: elapsed,
+            };
+
+            let normalized = normalize_markdown(&content);
+
+            let path = output_dir.join(filename);
+            match fs::write(&path, &normalized).await {
+                Ok(_) => {
+                    println!(
+                        "  [{}/{}] ✓ {} ({:.1}s)",
+                        completed, total, name, elapsed,
+                    );
+                    Some(metrics)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "  [{}/{}] ✗ {} write failed: {} ({:.1}s)",
+                        completed, total, name, e, elapsed
+                    );
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "  [{}/{}] ✗ {} failed: {} ({:.1}s)",
+                completed, total, name, e, elapsed
+            );
+            None
+        }
+    };
+
+    PromptTaskResult { metrics }
+}
+
 /// Returns the default output directory for a given topic.
 ///
 /// Uses the `RESEARCH_DIR` environment variable if set, otherwise falls back to `$HOME`.
@@ -765,11 +867,11 @@ pub fn default_output_dir(topic: &str) -> PathBuf {
 /// Run a dynamic question task and save result
 async fn run_question_task<M>(
     question_num: usize,
-    topic: &str,
-    question: &str,
-    package_manager: &str,
-    language: &str,
-    url: &str,
+    topic: String,
+    question: String,
+    package_manager: String,
+    language: String,
+    url: String,
     output_dir: PathBuf,
     model: M,
     counter: Arc<AtomicUsize>,
@@ -789,12 +891,12 @@ where
     println!("  [{}] Starting...", name);
 
     let ctx = LibraryContext {
-        package_manager,
-        language,
-        url,
+        package_manager: &package_manager,
+        language: &language,
+        url: &url,
     };
-    let prompt = build_prompt_with_context(prompts::ADDITIONAL_QUESTION, topic, Some(&ctx))
-        .replace("{{question}}", question);
+    let prompt = build_prompt_with_context(prompts::ADDITIONAL_QUESTION, &topic, Some(&ctx))
+        .replace("{{question}}", &question);
 
     let result = model.completion_request(&prompt).send().await;
 
@@ -927,14 +1029,22 @@ async fn run_incremental_research(
     let openai = openai::Client::from_env();
     let zai = providers::zai::Client::from_env();
 
-    // Extract library context from metadata
+    // Check if research tools are available
+    let use_tools = tools_available();
+    if use_tools {
+        println!("  ✓ Web research tools enabled (BRAVE_API_KEY found)\n");
+    } else {
+        println!("  ⚠ Web research tools disabled (set BRAVE_API_KEY to enable)\n");
+    }
+
+    // Extract library context from metadata (clone to owned strings for futures)
     let (package_manager, language, url) = match &existing_metadata.library_info {
         Some(info) => (
-            info.package_manager.as_str(),
-            info.language.as_str(),
-            info.url.as_str(),
+            info.package_manager.clone(),
+            info.language.clone(),
+            info.url.clone(),
         ),
-        None => ("unknown", "unknown", "N/A"),
+        None => ("unknown".to_string(), "unknown".to_string(), "N/A".to_string()),
     };
 
     // Build library info for prompt building
@@ -946,94 +1056,194 @@ async fn run_incremental_research(
     });
     let lib_info_ref = library_info.as_ref();
 
+    // Clone topic for use in futures
+    let topic_owned = topic.to_string();
+
     let start_time = Instant::now();
     let counter = Arc::new(AtomicUsize::new(0));
     let total = missing_prompts.len() + questions.len();
 
-    // Create tasks for missing standard prompts
-    // We need to select the appropriate model for each prompt type
-    let mut missing_prompt_futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = PromptTaskResult> + Send>>> = Vec::new();
+    // Create tasks for missing standard prompts - with or without tools
+    type BoxedFuture = std::pin::Pin<Box<dyn std::future::Future<Output = PromptTaskResult> + Send>>;
+    let mut phase1_futures: Vec<BoxedFuture> = Vec::new();
 
-    for mp in &missing_prompts {
-        let prompt = build_prompt(mp.template, topic, lib_info_ref);
-        let task_name = mp.name;
-        let filename = mp.filename;
+    if use_tools {
+        // Create agents with web research tools
+        let search_tool = BraveSearchTool::from_env();
+        let scrape_tool = ScreenScrapeTool::new();
 
-        // Select appropriate model based on prompt type
-        // Using the same model assignments as the original research function
-        match mp.name {
-            "overview" => {
-                let model = zai.completion_model(providers::zai::GLM_4_7);
-                missing_prompt_futures.push(Box::pin(run_prompt_task(
-                    task_name,
-                    filename,
-                    output_dir.clone(),
-                    model,
-                    prompt,
-                    counter.clone(),
-                    total,
-                    start_time,
-                    cancelled.clone(),
-                )));
-            }
-            "changelog" => {
-                let model = openai.completion_model("gpt-5.2");
-                missing_prompt_futures.push(Box::pin(run_prompt_task(
-                    task_name,
-                    filename,
-                    output_dir.clone(),
-                    model,
-                    prompt,
-                    counter.clone(),
-                    total,
-                    start_time,
-                    cancelled.clone(),
-                )));
-            }
-            _ => {
-                // similar_libraries, integration_partners, use_cases use Gemini
-                let model = gemini.completion_model("gemini-3-flash-preview");
-                missing_prompt_futures.push(Box::pin(run_prompt_task(
-                    task_name,
-                    filename,
-                    output_dir.clone(),
-                    model,
-                    prompt,
-                    counter.clone(),
-                    total,
-                    start_time,
-                    cancelled.clone(),
-                )));
+        for mp in &missing_prompts {
+            let prompt = build_prompt(mp.template, topic, lib_info_ref);
+            let task_name = mp.name;
+            let filename = mp.filename;
+
+            match mp.name {
+                "overview" => {
+                    let agent = zai
+                        .agent(providers::zai::GLM_4_7)
+                        .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                        .tool(search_tool.clone())
+                        .tool(scrape_tool.clone())
+                        .build();
+                    phase1_futures.push(Box::pin(run_agent_prompt_task(
+                        task_name,
+                        filename,
+                        output_dir.clone(),
+                        agent,
+                        prompt,
+                        counter.clone(),
+                        total,
+                        start_time,
+                        cancelled.clone(),
+                    )));
+                }
+                "changelog" => {
+                    let agent = openai
+                        .agent("gpt-5.2")
+                        .preamble("You are a research assistant with web search and scraping tools. Search for recent releases, changelogs, and version history. Use 1-3 targeted searches, then synthesize your findings. Do not make excessive tool calls - write your final answer after gathering sufficient information.")
+                        .tool(search_tool.clone())
+                        .tool(scrape_tool.clone())
+                        .build();
+                    phase1_futures.push(Box::pin(run_agent_prompt_task(
+                        task_name,
+                        filename,
+                        output_dir.clone(),
+                        agent,
+                        prompt,
+                        counter.clone(),
+                        total,
+                        start_time,
+                        cancelled.clone(),
+                    )));
+                }
+                _ => {
+                    let agent = gemini
+                        .agent("gemini-3-flash-preview")
+                        .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                        .tool(search_tool.clone())
+                        .tool(scrape_tool.clone())
+                        .build();
+                    phase1_futures.push(Box::pin(run_agent_prompt_task(
+                        task_name,
+                        filename,
+                        output_dir.clone(),
+                        agent,
+                        prompt,
+                        counter.clone(),
+                        total,
+                        start_time,
+                        cancelled.clone(),
+                    )));
+                }
             }
         }
-    }
 
-    // Create question tasks
-    let question_futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = PromptTaskResult> + Send>>> = questions
-        .iter()
-        .map(|(num, question)| {
+        // Create question tasks with tools
+        for (num, question) in questions.iter() {
+            let question_agent = gemini
+                .agent("gemini-3-flash-preview")
+                .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to find relevant information, then provide a comprehensive answer. Do not make excessive tool calls - synthesize your findings efficiently.")
+                .tool(search_tool.clone())
+                .tool(scrape_tool.clone())
+                .build();
+
+            let prompt = prompts::ADDITIONAL_QUESTION
+                .replace("{{topic}}", &topic_owned)
+                .replace("{{package_manager}}", &package_manager)
+                .replace("{{language}}", &language)
+                .replace("{{url}}", &url)
+                .replace("{{question}}", question);
+
+            let filename: &'static str = Box::leak(format!("question_{}.md", num).into_boxed_str());
+            let name: &'static str = Box::leak(format!("question_{}", num).into_boxed_str());
+
+            phase1_futures.push(Box::pin(run_agent_prompt_task(
+                name,
+                filename,
+                output_dir.clone(),
+                question_agent,
+                prompt,
+                counter.clone(),
+                total,
+                start_time,
+                cancelled.clone(),
+            )));
+        }
+    } else {
+        // Fallback: Use raw completion models without tools
+        for mp in &missing_prompts {
+            let prompt = build_prompt(mp.template, topic, lib_info_ref);
+            let task_name = mp.name;
+            let filename = mp.filename;
+
+            match mp.name {
+                "overview" => {
+                    let model = zai.completion_model(providers::zai::GLM_4_7);
+                    phase1_futures.push(Box::pin(run_prompt_task(
+                        task_name,
+                        filename,
+                        output_dir.clone(),
+                        model,
+                        prompt,
+                        counter.clone(),
+                        total,
+                        start_time,
+                        cancelled.clone(),
+                    )));
+                }
+                "changelog" => {
+                    let model = openai.completion_model("gpt-5.2");
+                    phase1_futures.push(Box::pin(run_prompt_task(
+                        task_name,
+                        filename,
+                        output_dir.clone(),
+                        model,
+                        prompt,
+                        counter.clone(),
+                        total,
+                        start_time,
+                        cancelled.clone(),
+                    )));
+                }
+                _ => {
+                    let model = gemini.completion_model("gemini-3-flash-preview");
+                    phase1_futures.push(Box::pin(run_prompt_task(
+                        task_name,
+                        filename,
+                        output_dir.clone(),
+                        model,
+                        prompt,
+                        counter.clone(),
+                        total,
+                        start_time,
+                        cancelled.clone(),
+                    )));
+                }
+            }
+        }
+
+        // Create question tasks without tools
+        for (num, question) in questions.iter() {
             let question_model = gemini.completion_model("gemini-3-flash-preview");
-            let fut = run_question_task(
+            phase1_futures.push(Box::pin(run_question_task(
                 *num,
-                topic,
-                question,
-                package_manager,
-                language,
-                url,
+                topic_owned.clone(),
+                question.clone(),
+                package_manager.clone(),
+                language.clone(),
+                url.clone(),
                 output_dir.clone(),
                 question_model,
                 counter.clone(),
                 total,
                 start_time,
                 cancelled.clone(),
-            );
-            Box::pin(fut) as std::pin::Pin<Box<dyn std::future::Future<Output = PromptTaskResult> + Send>>
-        })
-        .collect();
+            )));
+        }
+    }
 
-    // Run all tasks in parallel (missing prompts + questions)
-    let all_futures: Vec<_> = missing_prompt_futures.into_iter().chain(question_futures).collect();
-    let all_results = join_all(all_futures).await;
+    // Run all Phase 1 tasks in parallel
+    let all_results = join_all(phase1_futures).await;
 
     let succeeded: Vec<_> = all_results
         .iter()
@@ -1050,7 +1260,8 @@ async fn run_incremental_research(
         if was_cancelled { " (cancelled)" } else { "" }
     );
 
-    if was_cancelled || succeeded.is_empty() {
+    // If cancelled, return early with partial results
+    if was_cancelled {
         let total_time = start_time.elapsed().as_secs_f32();
         let total_input: u64 = succeeded.iter().map(|m| m.input_tokens).sum();
         let total_output: u64 = succeeded.iter().map(|m| m.output_tokens).sum();
@@ -1061,11 +1272,29 @@ async fn run_incremental_research(
             output_dir,
             succeeded: succeeded.len(),
             failed,
-            cancelled: was_cancelled,
+            cancelled: true,
             total_time_secs: total_time,
             total_input_tokens: total_input,
             total_output_tokens: total_output,
             total_tokens,
+        });
+    }
+
+    // If all prompts failed, return error
+    if succeeded.is_empty() && !all_results.is_empty() {
+        return Err(ResearchError::AllPromptsFailed);
+    }
+
+    // Check if too many prompts failed (require at least 50% success for incremental)
+    let min_required = (all_results.len() / 2).max(1);
+    if succeeded.len() < min_required && all_results.len() > 1 {
+        println!(
+            "⚠ Too many prompts failed ({}/{}). Stopping before Phase 2.",
+            failed, all_results.len()
+        );
+        return Err(ResearchError::TooManyPromptsFailed {
+            succeeded: succeeded.len(),
+            total: all_results.len(),
         });
     }
 
@@ -1383,12 +1612,13 @@ pub async fn research(
     let gemini = gemini::Client::from_env();
     let zai = zai::Client::from_env();
 
-    // Initialize models
-    let glm = zai.completion_model(zai::GLM_4_7);
-    let gemini1 = gemini.completion_model("gemini-3-flash-preview");
-    let gemini2 = gemini.completion_model("gemini-3-flash-preview");
-    let gemini3 = gemini.completion_model("gemini-3-flash-preview");
-    let changelog_model = openai.completion_model("gpt-5.2"); // Use stronger model for changelog
+    // Check if research tools are available
+    let use_tools = tools_available();
+    if use_tools {
+        println!("  ✓ Web research tools enabled (BRAVE_API_KEY found)\n");
+    } else {
+        println!("  ⚠ Web research tools disabled (set BRAVE_API_KEY to enable)\n");
+    }
 
     // Build prompts from templates with library context
     let lib_info_ref = library_info.as_ref();
@@ -1398,15 +1628,16 @@ pub async fn research(
     let use_cases_prompt = build_prompt(prompts::USE_CASES, topic, lib_info_ref);
     let changelog_prompt = build_prompt(prompts::CHANGELOG, topic, lib_info_ref);
 
-    // Extract library context strings for question tasks
+    // Extract library context strings for question tasks (owned for boxed futures)
     let (pkg_mgr, lang, pkg_url) = match &library_info {
         Some(info) => (
-            info.package_manager.as_str(),
-            info.language.as_str(),
-            info.url.as_str(),
+            info.package_manager.clone(),
+            info.language.clone(),
+            info.url.clone(),
         ),
-        None => ("unknown", "unknown", "N/A"),
+        None => ("unknown".to_string(), "unknown".to_string(), "N/A".to_string()),
     };
+    let topic_owned = topic.to_string();
 
     let num_questions = questions.len();
     let total = 5 + num_questions; // 5 default prompts + user questions
@@ -1420,32 +1651,152 @@ pub async fn research(
     let start_time = Instant::now();
     let counter = Arc::new(AtomicUsize::new(0));
 
-    // Create question tasks dynamically
-    let question_tasks: Vec<_> = questions
-        .iter()
-        .enumerate()
-        .map(|(i, question)| {
-            let question_model = gemini.completion_model("gemini-3-flash-preview");
-            run_question_task(
-                i + 1,
-                topic,
-                question,
-                pkg_mgr,
-                lang,
-                pkg_url,
+    // Create Phase 1 tasks - with or without tools
+    type BoxedFuture = std::pin::Pin<Box<dyn std::future::Future<Output = PromptTaskResult> + Send>>;
+    let mut phase1_futures: Vec<BoxedFuture> = Vec::new();
+
+    if use_tools {
+        // Create agents with web research tools
+        let search_tool = BraveSearchTool::from_env();
+        let scrape_tool = ScreenScrapeTool::new();
+
+        // Overview agent (using zai GLM)
+        let overview_agent = zai
+            .agent(zai::GLM_4_7)
+            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+            .tool(search_tool.clone())
+            .tool(scrape_tool.clone())
+            .build();
+        phase1_futures.push(Box::pin(run_agent_prompt_task(
+            "overview",
+            "overview.md",
+            output_dir.clone(),
+            overview_agent,
+            overview_prompt,
+            counter.clone(),
+            total,
+            start_time,
+            cancelled.clone(),
+        )));
+
+        // Similar libraries agent (using Gemini)
+        let similar_agent = gemini
+            .agent("gemini-3-flash-preview")
+            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+            .tool(search_tool.clone())
+            .tool(scrape_tool.clone())
+            .build();
+        phase1_futures.push(Box::pin(run_agent_prompt_task(
+            "similar_libraries",
+            "similar_libraries.md",
+            output_dir.clone(),
+            similar_agent,
+            similar_libraries_prompt,
+            counter.clone(),
+            total,
+            start_time,
+            cancelled.clone(),
+        )));
+
+        // Integration partners agent (using Gemini)
+        let integration_agent = gemini
+            .agent("gemini-3-flash-preview")
+            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+            .tool(search_tool.clone())
+            .tool(scrape_tool.clone())
+            .build();
+        phase1_futures.push(Box::pin(run_agent_prompt_task(
+            "integration_partners",
+            "integration_partners.md",
+            output_dir.clone(),
+            integration_agent,
+            integration_partners_prompt,
+            counter.clone(),
+            total,
+            start_time,
+            cancelled.clone(),
+        )));
+
+        // Use cases agent (using Gemini)
+        let use_cases_agent = gemini
+            .agent("gemini-3-flash-preview")
+            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+            .tool(search_tool.clone())
+            .tool(scrape_tool.clone())
+            .build();
+        phase1_futures.push(Box::pin(run_agent_prompt_task(
+            "use_cases",
+            "use_cases.md",
+            output_dir.clone(),
+            use_cases_agent,
+            use_cases_prompt,
+            counter.clone(),
+            total,
+            start_time,
+            cancelled.clone(),
+        )));
+
+        // Changelog agent (using OpenAI GPT)
+        let changelog_agent = openai
+            .agent("gpt-5.2")
+            .preamble("You are a research assistant with web search and scraping tools. Search for recent releases, changelogs, and version history. Use 1-3 targeted searches, then synthesize your findings. Do not make excessive tool calls - write your final answer after gathering sufficient information.")
+            .tool(search_tool.clone())
+            .tool(scrape_tool.clone())
+            .build();
+        phase1_futures.push(Box::pin(run_agent_prompt_task(
+            "changelog",
+            "changelog.md",
+            output_dir.clone(),
+            changelog_agent,
+            changelog_prompt,
+            counter.clone(),
+            total,
+            start_time,
+            cancelled.clone(),
+        )));
+
+        // Question agents (using Gemini)
+        for (i, question) in questions.iter().enumerate() {
+            let question_agent = gemini
+                .agent("gemini-3-flash-preview")
+                .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to find relevant information, then provide a comprehensive answer. Do not make excessive tool calls - synthesize your findings efficiently.")
+                .tool(search_tool.clone())
+                .tool(scrape_tool.clone())
+                .build();
+
+            let ctx = LibraryContext {
+                package_manager: &pkg_mgr,
+                language: &lang,
+                url: &pkg_url,
+            };
+            let prompt = build_prompt_with_context(prompts::ADDITIONAL_QUESTION, topic, Some(&ctx))
+                .replace("{{question}}", question);
+
+            let question_num = i + 1;
+            let filename: &'static str = Box::leak(format!("question_{}.md", question_num).into_boxed_str());
+            let name: &'static str = Box::leak(format!("question_{}", question_num).into_boxed_str());
+
+            phase1_futures.push(Box::pin(run_agent_prompt_task(
+                name,
+                filename,
                 output_dir.clone(),
-                question_model,
+                question_agent,
+                prompt,
                 counter.clone(),
                 total,
                 start_time,
                 cancelled.clone(),
-            )
-        })
-        .collect();
+            )));
+        }
+    } else {
+        // Fallback: Use raw completion models without tools
+        let glm = zai.completion_model(zai::GLM_4_7);
+        let gemini1 = gemini.completion_model("gemini-3-flash-preview");
+        let gemini2 = gemini.completion_model("gemini-3-flash-preview");
+        let gemini3 = gemini.completion_model("gemini-3-flash-preview");
+        let changelog_model = openai.completion_model("gpt-5.2");
 
-    // Run main 5 tasks and all question tasks in parallel
-    let (r1, r2, r3, r4, r5, question_results) = tokio::join!(
-        run_prompt_task(
+        phase1_futures.push(Box::pin(run_prompt_task(
             "overview",
             "overview.md",
             output_dir.clone(),
@@ -1455,8 +1806,8 @@ pub async fn research(
             total,
             start_time,
             cancelled.clone(),
-        ),
-        run_prompt_task(
+        )));
+        phase1_futures.push(Box::pin(run_prompt_task(
             "similar_libraries",
             "similar_libraries.md",
             output_dir.clone(),
@@ -1466,8 +1817,8 @@ pub async fn research(
             total,
             start_time,
             cancelled.clone(),
-        ),
-        run_prompt_task(
+        )));
+        phase1_futures.push(Box::pin(run_prompt_task(
             "integration_partners",
             "integration_partners.md",
             output_dir.clone(),
@@ -1477,8 +1828,8 @@ pub async fn research(
             total,
             start_time,
             cancelled.clone(),
-        ),
-        run_prompt_task(
+        )));
+        phase1_futures.push(Box::pin(run_prompt_task(
             "use_cases",
             "use_cases.md",
             output_dir.clone(),
@@ -1488,8 +1839,8 @@ pub async fn research(
             total,
             start_time,
             cancelled.clone(),
-        ),
-        run_prompt_task(
+        )));
+        phase1_futures.push(Box::pin(run_prompt_task(
             "changelog",
             "changelog.md",
             output_dir.clone(),
@@ -1499,12 +1850,31 @@ pub async fn research(
             total,
             start_time,
             cancelled.clone(),
-        ),
-        join_all(question_tasks),
-    );
+        )));
 
-    let mut phase1_results = vec![r1, r2, r3, r4, r5];
-    phase1_results.extend(question_results);
+        // Question tasks without tools
+        for (i, question) in questions.iter().enumerate() {
+            let question_model = gemini.completion_model("gemini-3-flash-preview");
+            phase1_futures.push(Box::pin(run_question_task(
+                i + 1,
+                topic_owned.clone(),
+                question.clone(),
+                pkg_mgr.clone(),
+                lang.clone(),
+                pkg_url.clone(),
+                output_dir.clone(),
+                question_model,
+                counter.clone(),
+                total,
+                start_time,
+                cancelled.clone(),
+            )));
+        }
+    }
+
+    // Run all Phase 1 tasks in parallel
+    let phase1_results = join_all(phase1_futures).await;
+
     let phase1_succeeded: Vec<_> = phase1_results
         .iter()
         .filter_map(|r| r.metrics.as_ref())
@@ -1523,6 +1893,20 @@ pub async fn research(
 
     if phase1_succeeded.is_empty() {
         return Err(ResearchError::AllPromptsFailed);
+    }
+
+    // Check if too many Phase 1 prompts failed (require at least 50% success or all 5 core prompts)
+    let core_prompts = 5; // overview, similar_libraries, integration_partners, use_cases, changelog
+    let min_required = core_prompts.min(phase1_results.len() / 2 + 1);
+    if phase1_succeeded.len() < min_required {
+        println!(
+            "⚠ Too many Phase 1 prompts failed ({}/{}). Stopping before Phase 2.",
+            phase1_failed, phase1_results.len()
+        );
+        return Err(ResearchError::TooManyPromptsFailed {
+            succeeded: phase1_succeeded.len(),
+            total: phase1_results.len(),
+        });
     }
 
     // If cancelled, skip phase 2 and return partial results
@@ -2200,5 +2584,72 @@ mod tests {
         assert_eq!(OverlapVerdict::New, OverlapVerdict::New);
         assert_eq!(OverlapVerdict::Conflict, OverlapVerdict::Conflict);
         assert_ne!(OverlapVerdict::New, OverlapVerdict::Conflict);
+    }
+
+    // ===========================================
+    // Tests for Tool Integration
+    // ===========================================
+
+    #[test]
+    fn test_tools_available_returns_true_when_api_key_set() {
+        // Save original value if set
+        let original = std::env::var("BRAVE_API_KEY").ok();
+
+        // SAFETY: This is a single-threaded test, no concurrent access to env vars
+        unsafe {
+            std::env::set_var("BRAVE_API_KEY", "test-key");
+        }
+        assert!(tools_available(), "tools_available should return true when BRAVE_API_KEY is set");
+
+        // Restore original value
+        // SAFETY: This is a single-threaded test, no concurrent access to env vars
+        unsafe {
+            match original {
+                Some(val) => std::env::set_var("BRAVE_API_KEY", val),
+                None => std::env::remove_var("BRAVE_API_KEY"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_tools_available_returns_false_when_api_key_not_set() {
+        // Save original value if set
+        let original = std::env::var("BRAVE_API_KEY").ok();
+
+        // SAFETY: This is a single-threaded test, no concurrent access to env vars
+        unsafe {
+            std::env::remove_var("BRAVE_API_KEY");
+        }
+        assert!(!tools_available(), "tools_available should return false when BRAVE_API_KEY is not set");
+
+        // Restore original value
+        // SAFETY: This is a single-threaded test, no concurrent access to env vars
+        if let Some(val) = original {
+            unsafe {
+                std::env::set_var("BRAVE_API_KEY", val);
+            }
+        }
+    }
+
+    #[test]
+    fn test_tools_available_handles_empty_api_key() {
+        // Save original value if set
+        let original = std::env::var("BRAVE_API_KEY").ok();
+
+        // SAFETY: This is a single-threaded test, no concurrent access to env vars
+        unsafe {
+            // Set to empty string - this should still count as "set" in Rust's env::var
+            std::env::set_var("BRAVE_API_KEY", "");
+        }
+        assert!(tools_available(), "tools_available should return true for empty BRAVE_API_KEY (env var exists)");
+
+        // Restore original value
+        // SAFETY: This is a single-threaded test, no concurrent access to env vars
+        unsafe {
+            match original {
+                Some(val) => std::env::set_var("BRAVE_API_KEY", val),
+                None => std::env::remove_var("BRAVE_API_KEY"),
+            }
+        }
     }
 }

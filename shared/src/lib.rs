@@ -6,5 +6,7 @@
 //! ## Modules
 //!
 //! - [`tts`] - Text-to-speech utilities for announcing task completion
+//! - [`tools`] - Agent tools for rig-core (Brave Search, Screen Scrape)
 
+pub mod tools;
 pub mod tts;

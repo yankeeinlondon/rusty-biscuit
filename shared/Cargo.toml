@@ -8,4 +8,24 @@ name = "shared"
 path = "src/lib.rs"
 
 [dependencies]
+# Text-to-speech
 tts = "0.26.3"
+
+# Tracing
+tracing = "0.1"
+
+# Agent tools dependencies
+rig-core = "0.27"
+reqwest = { version = "0.12", features = ["json", "gzip"] }
+scraper = "0.20"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+url = "2.5"
+tokio = { version = "1.48", features = ["time"] }
+
+[dev-dependencies]
+tokio = { version = "1.48", features = ["full", "test-util"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-test = "0.2"
+wiremock = "0.6"
