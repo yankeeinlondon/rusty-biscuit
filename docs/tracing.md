@@ -99,9 +99,11 @@ async fn run_phase_1(...) {
 |-------|----------|----------|
 | ERROR | (default) | Failures that stop execution |
 | WARN | (default) | Recoverable issues, degraded operation |
-| INFO | `-v` | High-level progress, phase transitions |
-| DEBUG | `-vv` | Tool calls, API requests, intermediate results |
+| INFO | (default for tools) | Tool calls, phase transitions, research progress |
+| DEBUG | `-vv` | Tool arguments, API requests, intermediate results |
 | TRACE | `-vvv` | Verbose internals, request/response bodies |
+
+**Note:** Tool calls (brave_search, screen_scrape) and research progress are logged at INFO level by default to provide visibility into agent behavior.
 
 ### Level Guidelines
 
@@ -409,10 +411,12 @@ struct Cli {
 
 fn init_tracing(verbose: u8, json: bool) {
     // Determine base filter from RUST_LOG or verbosity flags
+    // Default shows INFO for tool calls and research progress
     let base_filter = match std::env::var("RUST_LOG") {
         Ok(filter) => filter,
         Err(_) => match verbose {
-            0 => "warn,research_lib=warn,shared=warn".to_string(),
+            // Default: Show INFO for tool calls and research progress
+            0 => "warn,research_lib=info,shared::tools=info".to_string(),
             1 => "info,research_lib=info,shared=info".to_string(),
             2 => "info,research_lib=debug,shared=debug".to_string(),
             _ => "debug,research_lib=trace,shared=trace".to_string(),
@@ -467,13 +471,13 @@ async fn main() {
 ### Example CLI Usage
 
 ```bash
-# Default (WARN only) - minimal output
+# Default - shows tool calls and research progress (INFO for research_lib and shared::tools)
 research library tokio
 
-# INFO level - see phase transitions and tool summaries
+# INFO level everywhere - see all phase transitions and tool summaries
 research library tokio -v
 
-# DEBUG level - see tool calls and arguments
+# DEBUG level - see tool arguments, API requests, intermediate results
 research library tokio -vv
 
 # TRACE level - see everything including response bodies
@@ -483,7 +487,7 @@ research library tokio -vvv
 RUST_LOG="research_lib=debug,shared::tools=trace" research library tokio
 
 # JSON output for log aggregation
-research library tokio -v --json
+research library tokio --json
 ```
 
 ## Dependencies
@@ -619,24 +623,27 @@ fn init_otel_tracing() {
 ## Expected Output Examples
 
 ### Default (no flags)
+Tool calls and research progress are visible by default:
 ```
-Research failed: Too many prompts failed (1/5 succeeded)
-```
-
-### With `-v` (INFO)
-```
-INFO research: Starting research session topic="rig-core" tools_enabled=true
+INFO research: Starting research session topic="rig-core"
 INFO research::phase_1: Beginning parallel prompt execution prompt_count=5
-INFO shared::tools::brave_search: Search completed tool.name="brave_search" tool.duration_ms=1234 tool.results_count=10
-INFO research::phase_1: Phase 1 complete succeeded=4 failed=1
+INFO research_lib: Starting prompt task with tools task="overview"
+INFO research_lib: Invoking tool tool.name="brave_search" tool.args="{\"query\":\"rig-core rust\"}"
+INFO shared::tools::brave_search: Search completed tool.results_count=10 tool.duration_ms=1234
+INFO research_lib: Tool returned result tool.name="brave_search" tool.result_len=5432
+INFO research_lib: Task completed successfully task="overview" elapsed_secs=12.3
+INFO research::phase_1: Phase 1 complete succeeded=5 failed=0
 INFO research::phase_2: Generating consolidated outputs
 INFO research: Research complete total_time_secs=45.2 total_tokens=12345
 ```
 
+### With `-v` (INFO everywhere)
+Same as default but includes INFO from all targets (not just research_lib and shared::tools).
+
 ### With `-vv` (DEBUG)
 ```
 DEBUG research_lib: Checking for BRAVE_API_KEY
-INFO research: Starting research session topic="rig-core" tools_enabled=true
+INFO research: Starting research session topic="rig-core"
 DEBUG research::phase_1: Creating agent with tools model="gemini-3-flash-preview"
 INFO research::phase_1: Beginning parallel prompt execution prompt_count=5
 DEBUG shared::tools::brave_search: Executing search query="rig-core rust library" count=10

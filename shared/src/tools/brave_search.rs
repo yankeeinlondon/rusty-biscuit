@@ -32,6 +32,7 @@ use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
 use std::env;
 use thiserror::Error;
+use tracing::{debug, info, instrument, warn, Span};
 
 /// Configuration for the Brave Search API client.
 #[derive(Debug, Clone)]
@@ -219,11 +220,24 @@ impl BraveSearchTool {
     }
 
     /// Perform a web search with the given arguments.
+    #[instrument(
+        name = "brave_search",
+        skip(self, args),
+        fields(
+            tool.name = "brave_search",
+            tool.query = %args.query,
+            tool.count = args.count.unwrap_or(10),
+            otel.kind = "client"
+        )
+    )]
     async fn perform_search(
         &self,
         args: &SearchArgs,
     ) -> Result<Vec<SearchResultOutput>, BraveSearchError> {
+        let start = std::time::Instant::now();
+
         if args.query.trim().is_empty() {
+            warn!("Search query is empty");
             return Err(BraveSearchError::ConfigError(
                 "Query cannot be empty".to_string(),
             ));
@@ -231,6 +245,13 @@ impl BraveSearchTool {
 
         let count = args.count.unwrap_or(10).min(20).max(1);
         let offset = args.offset.unwrap_or(0);
+
+        debug!(
+            country = ?args.country,
+            freshness = ?args.freshness,
+            safesearch = ?args.safesearch,
+            "Executing search"
+        );
 
         let mut request = self
             .client
@@ -258,7 +279,20 @@ impl BraveSearchTool {
             request = request.query(&[("freshness", freshness.as_str())]);
         }
 
-        let response = request.send().await?;
+        let response = request.send().await;
+
+        match &response {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                Span::current().record("http.status_code", status);
+                debug!(http.status_code = status, "Received API response");
+            }
+            Err(e) => {
+                warn!(error = %e, "Search request failed");
+            }
+        }
+
+        let response = response?;
 
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -266,6 +300,7 @@ impl BraveSearchTool {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unable to read error response".to_string());
+            warn!(status, %message, "API returned error");
             return Err(BraveSearchError::ApiError { status, message });
         }
 
@@ -289,8 +324,16 @@ impl BraveSearchTool {
             .unwrap_or_default();
 
         if results.is_empty() {
+            warn!("Search returned no results");
             return Err(BraveSearchError::NoResults);
         }
+
+        let elapsed = start.elapsed();
+        info!(
+            tool.results_count = results.len(),
+            tool.duration_ms = elapsed.as_millis() as u64,
+            "Search completed"
+        );
 
         Ok(results)
     }
@@ -711,5 +754,81 @@ mod tests {
 
         let result = tool.call(args).await;
         assert!(result.is_ok());
+    }
+
+    // ===========================================
+    // Tracing tests
+    // ===========================================
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn test_search_emits_tracing_events() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        let mock_response = serde_json::json!({
+            "web": {
+                "results": [
+                    {
+                        "title": "Test Result",
+                        "url": "https://example.com",
+                        "description": "A test result"
+                    }
+                ]
+            }
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&mock_response))
+            .mount(&mock_server)
+            .await;
+
+        let config = BraveSearchConfig::new("test-key")
+            .with_endpoint(format!("{}/search", mock_server.uri()));
+        let tool = BraveSearchTool::new(config);
+
+        let args = SearchArgs {
+            query: "test query".to_string(),
+            ..Default::default()
+        };
+
+        let _ = tool.call(args).await;
+
+        // Assert tracing events were emitted
+        assert!(logs_contain("brave_search"));
+        assert!(logs_contain("Search completed"));
+        assert!(logs_contain("tool.results_count"));
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn test_search_emits_warning_on_error() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("Invalid API key"))
+            .mount(&mock_server)
+            .await;
+
+        let config = BraveSearchConfig::new("test-key")
+            .with_endpoint(format!("{}/search", mock_server.uri()));
+        let tool = BraveSearchTool::new(config);
+
+        let args = SearchArgs {
+            query: "test".to_string(),
+            ..Default::default()
+        };
+
+        let _ = tool.call(args).await;
+
+        // Assert warning was emitted
+        assert!(logs_contain("API returned error"));
     }
 }

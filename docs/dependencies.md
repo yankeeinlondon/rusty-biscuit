@@ -1,8 +1,40 @@
-# Research Library Dependencies
+# Project Dependencies
 
 ## Structure
 
+This is a Rust workspace with the following modules:
+
+- `Cargo.toml` - Root workspace configuration
+- `research/cli/Cargo.toml` - Research CLI application
 - `research/lib/Cargo.toml` - Research library with development binary
+- `shared/Cargo.toml` - Shared utilities library
+- `tui/Cargo.toml` - TUI module (no dependencies yet)
+
+## Workspace Packages
+
+- [research-cli](./research/cli) _v0.1.0_
+
+    _CLI application for research workflows._
+
+    _Tags: workspace, cli_
+
+- [research-lib](./research/lib) _v0.1.0_
+
+    _Core library for research operations._
+
+    _Tags: workspace, library_
+
+- [shared](./shared) _v0.1.0_
+
+    _Shared utilities and tools._
+
+    _Tags: workspace, library_
+
+- [tui](./tui) _v0.1.0_
+
+    _Terminal user interface module._
+
+    _Tags: workspace, tui_
 
 ## Production Dependencies
 
@@ -28,7 +60,13 @@
 
     _Tags: async, runtime, concurrency, io_
 
-### CLI & Interactive Prompts
+### CLI & Terminal
+
+- [clap](https://github.com/clap-rs/clap) _v4.5.53_ [📄](https://docs.rs/clap)
+
+    _Command-line argument parser with derive API for declarative CLI definitions._
+
+    _Tags: cli, argument-parsing_
 
 - [inquire](https://github.com/mikaelmello/inquire) _v0.9_
 
@@ -36,7 +74,13 @@
 
     _Tags: cli, interactive, prompts_
 
-### Configuration
+- [tts](https://crates.io/crates/tts) _v0.26.3_
+
+    _Cross-platform text-to-speech library supporting Windows, Linux, macOS, iOS, Android, and WebAssembly._
+
+    _Tags: tts, audio, accessibility_
+
+### Configuration & Environment
 
 - [dotenvy](https://github.com/allan2/dotenvy) _v0.15.7_
 
@@ -76,6 +120,18 @@
 
     _Tags: http, client, async_
 
+- [scraper](https://github.com/rust-scraper/scraper) _v0.20_
+
+    _HTML parsing and querying with CSS selectors built on html5ever._
+
+    _Tags: html, parsing, web-scraping_
+
+- [url](https://github.com/servo/rust-url) _v2.5.0_
+
+    _Implementation of the URL Standard for parsing and manipulating URLs._
+
+    _Tags: url, parsing, web_
+
 ### Logging & Tracing
 
 - [tracing](https://github.com/tokio-rs/tracing) _v0.1_
@@ -83,6 +139,12 @@
     _Structured, async-aware logging framework with spans and events._
 
     _Tags: logging, tracing, observability_
+
+- [tracing-subscriber](https://github.com/tokio-rs/tracing) _v0.3_
+
+    _Utilities for implementing and composing tracing subscribers._
+
+    _Tags: logging, tracing, formatting_
 
 ### Markdown
 
@@ -112,14 +174,6 @@
 
     _Tags: json, serialization_
 
-## Workspace Dependencies
-
-- [shared](../../shared) _v0.1.0_
-
-    _Shared utilities and tools._
-
-    _Tags: workspace, library_
-
 ## Development Dependencies
 
 ### Testing
@@ -129,12 +183,6 @@
     _Secure cross-platform temporary file/directory creation with automatic cleanup._
 
     _Tags: testing, filesystem, cleanup_
-
-- [tracing-subscriber](https://github.com/tokio-rs/tracing) _v0.3_
-
-    _Utilities for implementing and composing tracing subscribers._
-
-    _Tags: logging, tracing, formatting_
 
 - [tracing-test](https://crates.io/crates/tracing-test) _v0.2_
 

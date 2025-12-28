@@ -19,9 +19,9 @@ use providers::zai;
 use pulldown_cmark::{Options, Parser};
 use pulldown_cmark_to_cmark::cmark;
 use reqwest::Client as HttpClient;
-use rig::agent::Agent;
+use rig::agent::{Agent, CancelSignal, PromptHook};
 use rig::client::{CompletionClient, ProviderClient};
-use rig::completion::{AssistantContent, CompletionModel, Prompt};
+use rig::completion::{AssistantContent, CompletionModel, Message, Prompt};
 use rig::providers::{gemini, openai};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,102 @@ use std::sync::Arc;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::fs;
+use tracing::{debug, info, info_span, instrument, warn, Span};
+
+/// A PromptHook that emits tracing events for agent interactions.
+///
+/// This hook is used to trace all tool calls made by agents during research tasks,
+/// providing visibility into the agent's decision-making process.
+#[derive(Clone)]
+pub struct TracingPromptHook {
+    span: Span,
+}
+
+impl TracingPromptHook {
+    /// Create a new TracingPromptHook for the given task name.
+    pub fn new(task_name: &str) -> Self {
+        Self {
+            span: info_span!("agent_task", task = %task_name),
+        }
+    }
+}
+
+impl<M> PromptHook<M> for TracingPromptHook
+where
+    M: CompletionModel,
+{
+    async fn on_completion_call(
+        &self,
+        _prompt: &Message,
+        history: &[Message],
+        _cancel_sig: CancelSignal,
+    ) {
+        debug!(
+            parent: &self.span,
+            history_len = history.len(),
+            "Sending prompt to model"
+        );
+    }
+
+    async fn on_completion_response(
+        &self,
+        _prompt: &Message,
+        response: &rig::completion::CompletionResponse<M::Response>,
+        _cancel_sig: CancelSignal,
+    ) {
+        let tool_call_count = response
+            .choice
+            .iter()
+            .filter(|c| matches!(c, AssistantContent::ToolCall(_)))
+            .count();
+
+        debug!(
+            parent: &self.span,
+            has_tool_calls = tool_call_count > 0,
+            tool_call_count,
+            "Received model response"
+        );
+    }
+
+    async fn on_tool_call(
+        &self,
+        tool_name: &str,
+        tool_call_id: Option<String>,
+        args: &str,
+        _cancel_sig: CancelSignal,
+    ) {
+        info!(
+            parent: &self.span,
+            tool.name = %tool_name,
+            tool.call_id = ?tool_call_id,
+            tool.args = %args,
+            "Invoking tool"
+        );
+    }
+
+    async fn on_tool_result(
+        &self,
+        tool_name: &str,
+        tool_call_id: Option<String>,
+        _args: &str,
+        result: &str,
+        _cancel_sig: CancelSignal,
+    ) {
+        // Truncate result for logging (tool results can be large)
+        let result_preview: String = result.chars().take(200).collect();
+        let truncated = result.len() > 200;
+
+        info!(
+            parent: &self.span,
+            tool.name = %tool_name,
+            tool.call_id = ?tool_call_id,
+            tool.result_preview = %result_preview,
+            tool.result_truncated = truncated,
+            tool.result_len = result.len(),
+            "Tool returned result"
+        );
+    }
+}
 
 /// Embedded prompt templates
 mod prompts {
@@ -774,6 +870,15 @@ pub fn tools_available() -> bool {
 /// This function is used for Phase 1 prompts that benefit from web search
 /// and scraping capabilities. If tools are not available (no BRAVE_API_KEY),
 /// it falls back to a standard completion request without tools.
+#[instrument(
+    name = "prompt_task",
+    skip(output_dir, agent, prompt, counter, cancelled),
+    fields(
+        task = name,
+        filename = filename,
+        prompt_len = prompt.len()
+    )
+)]
 async fn run_agent_prompt_task<M>(
     name: &'static str,
     filename: &'static str,
@@ -790,15 +895,24 @@ where
 {
     // Check if already cancelled before starting
     if cancelled.load(Ordering::SeqCst) {
+        debug!(task = name, "Task cancelled before starting");
         return PromptTaskResult { metrics: None };
     }
 
+    info!(task = name, "Starting prompt task with tools");
     println!("  [{}] Starting (with tools)...", name);
+
+    // Create a tracing hook for this task to emit tool call events
+    let hook = TracingPromptHook::new(name);
 
     // Use multi_turn(15) to allow up to 15 rounds of tool calls before final response
     // Higher limit needed as research tasks may require multiple search + scrape operations
     // If this still hits the limit, the preamble should guide the agent to synthesize earlier
-    let result = agent.prompt(&prompt).multi_turn(15).await;
+    let result = agent
+        .prompt(&prompt)
+        .multi_turn(15)
+        .with_hook(hook)
+        .await;
 
     // Check if cancelled after the request completed
     if cancelled.load(Ordering::SeqCst) {
@@ -811,6 +925,12 @@ where
 
     let metrics = match result {
         Ok(content) => {
+            debug!(
+                task = name,
+                content_len = content.len(),
+                "Agent returned content"
+            );
+
             // Agent returns the content directly as a string
             let metrics = PromptMetrics {
                 input_tokens: 0,  // Agent API doesn't expose token counts
@@ -824,6 +944,12 @@ where
             let path = output_dir.join(filename);
             match fs::write(&path, &normalized).await {
                 Ok(_) => {
+                    info!(
+                        task = name,
+                        elapsed_secs = elapsed,
+                        content_len = normalized.len(),
+                        "Task completed successfully"
+                    );
                     println!(
                         "  [{}/{}] ✓ {} ({:.1}s)",
                         completed, total, name, elapsed,
@@ -831,6 +957,11 @@ where
                     Some(metrics)
                 }
                 Err(e) => {
+                    warn!(
+                        task = name,
+                        error = %e,
+                        "Failed to write output file"
+                    );
                     eprintln!(
                         "  [{}/{}] ✗ {} write failed: {} ({:.1}s)",
                         completed, total, name, e, elapsed
@@ -840,6 +971,12 @@ where
             }
         }
         Err(e) => {
+            warn!(
+                task = name,
+                error = %e,
+                elapsed_secs = elapsed,
+                "Task failed"
+            );
             eprintln!(
                 "  [{}/{}] ✗ {} failed: {} ({:.1}s)",
                 completed, total, name, e, elapsed
@@ -1491,11 +1628,22 @@ async fn run_incremental_research(
 /// ## Errors
 /// Returns `ResearchError` if the output directory cannot be created
 /// or if all prompts fail.
+#[instrument(
+    name = "research",
+    skip(output_dir, questions),
+    fields(
+        topic = %topic,
+        question_count = questions.len(),
+        tools_enabled = tracing::field::Empty
+    )
+)]
 pub async fn research(
     topic: &str,
     output_dir: Option<PathBuf>,
     questions: &[String],
 ) -> Result<ResearchResult, ResearchError> {
+    info!("Starting research session");
+
     // Load environment variables from .env file
     dotenvy::dotenv().ok();
 
@@ -1614,9 +1762,12 @@ pub async fn research(
 
     // Check if research tools are available
     let use_tools = tools_available();
+    Span::current().record("tools_enabled", use_tools);
     if use_tools {
+        info!("Web research tools enabled");
         println!("  ✓ Web research tools enabled (BRAVE_API_KEY found)\n");
     } else {
+        warn!("Web research tools disabled - set BRAVE_API_KEY to enable");
         println!("  ⚠ Web research tools disabled (set BRAVE_API_KEY to enable)\n");
     }
 
@@ -1642,6 +1793,15 @@ pub async fn research(
     let num_questions = questions.len();
     let total = 5 + num_questions; // 5 default prompts + user questions
 
+    // Phase 1 span
+    let _phase1_guard = info_span!(
+        "phase_1",
+        prompt_count = total,
+        tools_enabled = use_tools
+    )
+    .entered();
+
+    info!(prompt_count = total, "Beginning parallel prompt execution");
     println!(
         "Phase 1: Running {} research prompts in parallel to {:?}...\n",
         total, output_dir
@@ -1884,6 +2044,16 @@ pub async fn research(
     // Check if cancelled
     let was_cancelled = cancelled.load(Ordering::SeqCst);
 
+    info!(
+        succeeded = phase1_succeeded.len(),
+        failed = phase1_failed,
+        cancelled = was_cancelled,
+        "Phase 1 complete"
+    );
+
+    // Exit the phase 1 span
+    drop(_phase1_guard);
+
     println!(
         "\nPhase 1 complete: {}/{} succeeded{}\n",
         phase1_succeeded.len(),
@@ -1930,6 +2100,8 @@ pub async fn research(
     }
 
     // === Phase 2: Read initial documents and generate consolidated outputs ===
+    let _phase2_guard = info_span!("phase_2").entered();
+    info!("Generating consolidated outputs");
     println!("Phase 2: Generating consolidated outputs...\n");
 
     // Read back the initial documents
@@ -2094,6 +2266,17 @@ pub async fn research(
     if let Err(e) = metadata.save(&output_dir).await {
         eprintln!("Warning: Failed to write metadata.json: {}", e);
     }
+
+    // Exit the phase 2 span
+    drop(_phase2_guard);
+
+    info!(
+        total_time_secs = total_time,
+        total_tokens,
+        succeeded = phase1_succeeded.len() + phase2_succeeded.len(),
+        failed = phase1_failed + phase2_failed,
+        "Research complete"
+    );
 
     Ok(ResearchResult {
         topic: topic.to_string(),

@@ -37,6 +37,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
+use tracing::{debug, info, instrument, warn, Span};
 
 /// Output format for scraped content.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -523,14 +524,34 @@ impl ScreenScrapeTool {
     }
 
     /// Perform the scrape operation.
+    #[instrument(
+        name = "screen_scrape",
+        skip(self, args),
+        fields(
+            tool.name = "screen_scrape",
+            tool.url = %args.url,
+            tool.formats = ?args.formats,
+            otel.kind = "client"
+        )
+    )]
     async fn scrape(&self, args: ScrapeArgs) -> Result<ScrapeOutput, ScrapeError> {
         let start_time = std::time::Instant::now();
 
+        debug!(
+            only_main_content = args.only_main_content,
+            mobile = args.mobile,
+            timeout = args.timeout,
+            "Starting page scrape"
+        );
+
         // Validate URL
-        let parsed_url = url::Url::parse(&args.url)
-            .map_err(|e| ScrapeError::InvalidUrl(e.to_string()))?;
+        let parsed_url = url::Url::parse(&args.url).map_err(|e| {
+            warn!(error = %e, url = %args.url, "Invalid URL");
+            ScrapeError::InvalidUrl(e.to_string())
+        })?;
 
         if !["http", "https"].contains(&parsed_url.scheme()) {
+            warn!(scheme = %parsed_url.scheme(), "Unsupported URL scheme");
             return Err(ScrapeError::InvalidUrl(
                 "Only HTTP and HTTPS URLs are supported".to_string(),
             ));
@@ -554,11 +575,25 @@ impl ScreenScrapeTool {
 
         // Wait before request if specified
         if let Some(wait_ms) = args.wait_for {
+            debug!(wait_ms, "Waiting before request");
             tokio::time::sleep(Duration::from_millis(wait_ms)).await;
         }
 
         // Perform the request
-        let response = request.send().await?;
+        let response = request.send().await;
+
+        match &response {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                Span::current().record("http.status_code", status);
+                debug!(http.status_code = status, "Received HTTP response");
+            }
+            Err(e) => {
+                warn!(error = %e, "Scrape request failed");
+            }
+        }
+
+        let response = response?;
         let status_code = response.status().as_u16();
         let content_type = response
             .headers()
@@ -568,6 +603,8 @@ impl ScreenScrapeTool {
 
         let html_content = response.text().await?;
         let content_length = html_content.len();
+
+        debug!(content_length, "Retrieved page content");
 
         // Process content
         let processed_html = if args.remove_base64_images {
@@ -623,6 +660,13 @@ impl ScreenScrapeTool {
         }
 
         let duration = start_time.elapsed();
+
+        info!(
+            tool.status_code = status_code,
+            tool.content_length = content_length,
+            tool.duration_ms = duration.as_millis() as u64,
+            "Scrape completed"
+        );
 
         Ok(ScrapeOutput {
             url: args.url,
@@ -1226,7 +1270,7 @@ mod tests {
 
         // Verify basic metadata
         assert!(result.metadata.content_length.is_some());
-        assert!(result.metadata.duration_ms > 0);
+        // Note: duration_ms may be 0 for very fast local mock responses
 
         // Content-type may or may not be present depending on mock server behavior
         if let Some(ref ct) = result.metadata.content_type {
@@ -1275,5 +1319,57 @@ mod tests {
             }
             _ => panic!("Expected Scroll action"),
         }
+    }
+
+    // ===========================================
+    // Tracing tests
+    // ===========================================
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn test_scrape_emits_tracing_events() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/test-page"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("<html><head><title>Test</title></head><body><p>Test content</p></body></html>")
+                    .insert_header("content-type", "text/html"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let tool = ScreenScrapeTool::new();
+        let args = ScrapeArgs {
+            url: format!("{}/test-page", mock_server.uri()),
+            formats: vec![OutputFormat::Markdown],
+            ..Default::default()
+        };
+
+        let _ = tool.call(args).await;
+
+        // Assert tracing events were emitted
+        assert!(logs_contain("screen_scrape"));
+        assert!(logs_contain("Scrape completed"));
+        assert!(logs_contain("tool.status_code"));
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn test_scrape_emits_warning_on_invalid_url() {
+        let tool = ScreenScrapeTool::new();
+        let args = ScrapeArgs {
+            url: "ftp://invalid-scheme.com".to_string(),
+            ..Default::default()
+        };
+
+        let _ = tool.call(args).await;
+
+        // Assert warning was emitted for invalid URL scheme
+        assert!(logs_contain("Unsupported URL scheme"));
     }
 }

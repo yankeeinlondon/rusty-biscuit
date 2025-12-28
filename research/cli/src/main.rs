@@ -4,12 +4,21 @@ use clap::{Parser, Subcommand};
 use research_lib::research;
 use std::io::{self, BufRead};
 use std::path::PathBuf;
+use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use tts::Tts;
 
 #[derive(Parser)]
 #[command(name = "research")]
 #[command(about = "Automated research tool for software libraries", long_about = None)]
 struct Cli {
+    /// Increase verbosity (-v, -vv, -vvv)
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    verbose: u8,
+
+    /// Output logs as JSON
+    #[arg(long, global = true)]
+    json: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -39,12 +48,58 @@ fn read_topic_from_stdin() -> io::Result<String> {
     Ok(line.trim().to_string())
 }
 
+/// Initialize tracing subscriber based on verbosity and output format
+fn init_tracing(verbose: u8, json: bool) {
+    // Determine base filter from RUST_LOG or verbosity flags
+    // Default (verbose=0) shows INFO for tool calls (brave_search, screen_scrape)
+    // and research_lib to give visibility into agent tool usage
+    let base_filter = match std::env::var("RUST_LOG") {
+        Ok(filter) => filter,
+        Err(_) => match verbose {
+            // Default: Show INFO for tool calls and research progress, WARN for everything else
+            0 => "warn,research_lib=info,shared::tools=info".to_string(),
+            1 => "info,research_lib=info,shared=info".to_string(),
+            2 => "info,research_lib=debug,shared=debug".to_string(),
+            _ => "debug,research_lib=trace,shared=trace".to_string(),
+        },
+    };
+
+    let filter =
+        EnvFilter::try_new(&base_filter).unwrap_or_else(|_| EnvFilter::new("warn"));
+
+    if json {
+        // JSON output for structured log processing
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt::layer().json().with_writer(std::io::stderr))
+            .init();
+    } else {
+        // Human-readable console output to stderr
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(
+                fmt::layer()
+                    .with_target(true)
+                    .with_level(true)
+                    .with_thread_ids(false)
+                    .with_file(verbose >= 3)
+                    .with_line_number(verbose >= 3)
+                    .with_writer(std::io::stderr)
+                    .compact(),
+            )
+            .init();
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // Load environment variables from .env file
     dotenvy::dotenv().ok();
 
     let cli = Cli::parse();
+    init_tracing(cli.verbose, cli.json);
+
+    tracing::info!("Research CLI starting");
 
     match cli.command {
         Commands::Library {
