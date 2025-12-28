@@ -1,0 +1,1 @@
+List out at least 4-5 common use cases which might benefit from the '{{topic}}' crate. For each use case: describe the use case, the benefit which '{{topic}}' would provide and a code example of what that might look like.

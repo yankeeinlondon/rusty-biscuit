@@ -1,0 +1,1 @@
+Find a list of comparable libraries to the '{{topic}}' crate. For each library create a summary description, a few pros and cons bullets, and URLs to the repo, docs.rs reference, and documentation site (if exists).

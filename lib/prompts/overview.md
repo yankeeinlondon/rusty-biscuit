@@ -1,0 +1,1 @@
+Do a deep dive on the Rust crate {{topic}}. Provide a structured view of its functional footprint, using code examples where possible. Add a section for 'gotchas' that people run into when they use this crate along with solutions to avoid these issues. Mention any/all licenses this software is available under. Finally discuss where this crate is a good fit and where it is not.

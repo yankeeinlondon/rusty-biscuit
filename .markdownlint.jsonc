@@ -1,0 +1,19 @@
+// [markdown lint file](https://github.com/DavidAnson/markdownlint)
+{
+    "MD007": {
+        "indent": 4
+    },
+    // [allow trailing spaces](https://github.com/DavidAnson/markdownlint/blob/main/doc/md009.md)
+    "MD009": false,
+    // [allow multiple consecutive blank lines](https://github.com/DavidAnson/markdownlint/blob/main/doc/md012.md)
+    "MD012": false,
+    // [allow any line length](https://github.com/DavidAnson/markdownlint/blob/main/doc/md013.md)
+    "MD013": false,
+    // [don't require first line to be H1](https://github.com/DavidAnson/markdownlint/blob/main/doc/md041.md)
+    "MD041": false,
+    "MD026": false,
+    "MD024": false,
+    "MD033": false,
+    "MD040": false,
+    "MD022": false
+}

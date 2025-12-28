@@ -304,6 +304,7 @@ dependencies = [
  "dockhand-lib",
  "dotenvy",
  "tokio",
+ "tts",
 ]
 
 [[package]]
@@ -1998,6 +1999,10 @@ dependencies = [
  "web-sys",
  "windows",
 ]
+
+[[package]]
+name = "tui"
+version = "0.1.0"
 
 [[package]]
 name = "unicase"

@@ -1,10 +1,13 @@
 {
     "cSpell.words": [
         "arboard",
+        "cmark",
+        "dotenvy",
         "ratatui",
         "resvg",
         "schemars",
         "syntect",
+        "TASKLISTS",
         "wezterm"
     ]
 }
