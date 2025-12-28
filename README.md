@@ -1,31 +1,74 @@
-# Deckhand
+# Dockhand
 
-> A practical helper that does common jobs in AI for you
+> A monorepo for AI-powered research and automation tools
 
-## Modules
+## Architecture
 
-1. `lib`
+This monorepo is organized into **areas**, each containing related modules:
 
-    - provides the AI integration (via `rig` crate)
+### Research Area (`/research`)
 
-2. `cli`
+The Research area provides automated research capabilities for software libraries.
 
-    - a simple CLI to expose the `lib` module's AI integrations
-    - uses the `clap` crate for basic structure and operations
+- **Research Library** (`/research/lib`) - Core library providing AI integration via the `rig` crate
+- **Research CLI** (`/research/cli`) - Command-line interface exposing research capabilities
+  - Binary name: `research`
+  - Usage: `research library <topic> [additional questions...]`
 
-3. `tui`
+### Shared Library (`/shared`)
 
-    - a `ratatui` based TUI app that exposes a chat interface
-    - leverages the `lib` modules for AI integration
+Common utilities shared across multiple areas of the monorepo.
 
-## Agent Tasks
+### TUI Area (`/tui`)
 
-1. Research Library
+A `ratatui`-based TUI application for interactive chat. (Future development)
 
-    Helps you get detailed information on a software library you're using (or considering using).
+## Usage
 
-    ```mermaid
-    flowchart TD
+### Building
+
+```bash
+# Build all areas
+just build
+
+# Build specific area
+just -f research/justfile build
+```
+
+### Testing
+
+```bash
+# Test all areas
+just test
+
+# Test specific area
+just -f research/justfile test
+```
+
+### Installing
+
+```bash
+# Install binaries from all areas
+just install
+```
+
+### Research CLI
+
+```bash
+# Research a library
+research library clap
+
+# Research with additional questions
+research library clap "How does it compare to structopt?" "What are the derive macros?"
+
+# Run in development mode
+just -f research/justfile cli library clap
+```
+
+## Library Research Flow
+
+```mermaid
+flowchart TD
     U[User Prompt] --> I(Isolate Package and Language)
     I --> A(Summary Information)
     I --> DDF(Library Features)
@@ -35,17 +78,4 @@
     R --> RC(How does it compare?)
     I --> G(Gotchas and Workarounds)
     I --> UC(Use Cases)
-    ```
-
-2. Research Software
-
-    Helps you investigate
-
-3. Test Validator
-
-    Evaluates the test delta between two git states and looks for:
-        - suspicious/lazy behavior
-
-4. Cross Link
-
-    Cross links various independent documents.
+```

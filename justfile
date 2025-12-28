@@ -1,51 +1,79 @@
 set dotenv-load
 set positional-arguments
 
-repo := `pwd`
+# List of areas in this monorepo
+areas := "research shared"
 
 BOLD := '\033[1m'
-ITALIC := '\033[3m'
 RESET := '\033[0m'
-YELLOW2 := '\033[38;5;3m'
-BLACK := '\033[30m'
-RED := '\033[31m'
-GREEN := '\033[32m'
-YELLOW := '\033[33m'
-BLUE := '\033[34m'
-MAGENTA := '\033[35m'
-CYAN := '\033[36m'
-WHITE := '\033[37m'
 
 default:
     @echo
-    @echo "deckhand"
-    @echo "------------------------------------"
+    @echo "Dockhand Monorepo"
+    @echo "================="
     @echo ""
     @just --list | grep -v 'default'
-    @echo 
+    @echo
 
-# build all modules
+# build all areas that have a build target
 build *args="":
-    @echo ""
-    @echo "Build Rust Modules (CLI, LIB, TUI)"
-    @echo "----------------------------------"
-    
-    @echo ""
-    @cargo build {{args}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ""
+    echo "Building all areas..."
+    echo "---------------------"
+    echo ""
+    for area in {{areas}}; do
+        if [ -f "$area/justfile" ]; then
+            if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "build"; then
+                echo "Building $area..."
+                just -f "$area/justfile" build {{args}}
+            else
+                echo "- no **build** command for the area **$area**" >&2
+            fi
+        else
+            echo "- no justfile for the area **$area**" >&2
+        fi
+    done
 
-# run tests across modules
+# test all areas that have a test target
 test *args="":
-    @echo ""
-    @echo "Testing Rust Modules"
-    @echo "--------------------"
-    @echo ""
-    @cargo test {{args}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ""
+    echo "Testing all areas..."
+    echo "--------------------"
+    echo ""
+    for area in {{areas}}; do
+        if [ -f "$area/justfile" ]; then
+            if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "test"; then
+                echo "Testing $area..."
+                just -f "$area/justfile" test {{args}}
+            else
+                echo "- no **test** command for the area **$area**" >&2
+            fi
+        else
+            echo "- no justfile for the area **$area**" >&2
+        fi
+    done
 
-# install the `ta` binary into the executable path
+# install binaries from all areas that have an install target
 install:
-    @cargo build --release
-    @cargo install --path ./cli --locked
-
-# run the debug release of the CLI
-cli *args="":
-    @cargo run -p deckhand-cli -- {{args}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ""
+    echo "Installing from all areas..."
+    echo "----------------------------"
+    echo ""
+    for area in {{areas}}; do
+        if [ -f "$area/justfile" ]; then
+            if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "install"; then
+                echo "Installing from $area..."
+                just -f "$area/justfile" install
+            else
+                echo "- no **install** command for the area **$area**" >&2
+            fi
+        else
+            echo "- no justfile for the area **$area**" >&2
+        fi
+    done

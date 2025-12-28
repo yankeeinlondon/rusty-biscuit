@@ -1,0 +1,25 @@
+[package]
+name = "research-lib"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "research_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "research-dev"
+path = "src/main.rs"
+
+[dependencies]
+dotenvy = "0.15.7"
+futures = "0.3"
+inquire = "0.9"
+pulldown-cmark = "0.13.0"
+pulldown-cmark-to-cmark = "22.0.0"
+reqwest = { version = "0.12", features = ["json"] }
+rig-core = "0.27.0"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+tokio = { version = "1.48.0", features = ["full", "tokio-macros"] }
+tts = "0.26.3"
