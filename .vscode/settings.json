@@ -2,12 +2,24 @@
     "cSpell.words": [
         "arboard",
         "cmark",
+        "crossterm",
+        "distroless",
+        "Dockerfiles",
         "dotenvy",
+        "insta",
+        "isterminal",
+        "mdcat",
+        "mockall",
+        "nextest",
+        "opencode",
+        "proptest",
         "ratatui",
         "resvg",
         "schemars",
         "syntect",
         "TASKLISTS",
-        "wezterm"
+        "usvg",
+        "wezterm",
+        "zigbuild"
     ]
 }

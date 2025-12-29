@@ -77,7 +77,7 @@ All library research starts with a set of _underlying_ research documents:
 
 ### Summary Deliverables
 
-Once all _underlying research_ is complete, two deliverables are produced:
+Once all _underlying research_ is complete, three deliverables are produced:
 
 #### 1. Deep Dive Document (`deep_dive.md`)
 
@@ -95,6 +95,15 @@ Once all _underlying research_ is complete, two deliverables are produced:
 - Enables LLMs to selectively use relevant parts
 - Optimizes context window usage
 
+#### 3. Brief (`brief.md`)
+
+- A compact summary for quick reference
+- Frontmatter includes:
+  - `summary`: Single-sentence description
+  - `repo`: Link to source repository (when available)
+- Body contains a paragraph-length overview
+- Generated using Gemini Flash from the deep dive
+
 ## Metadata
 
 Research metadata is stored in `metadata.json`:
@@ -105,8 +114,11 @@ Research metadata is stored in `metadata.json`:
   "library_info": {
     "package_manager": "crates.io",
     "language": "Rust",
-    "url": "https://crates.io/crates/clap"
+    "url": "https://crates.io/crates/clap",
+    "repository": "https://github.com/clap-rs/clap"
   },
+  "brief": "A full-featured command-line argument parser for Rust applications.",
+  "summary": "clap is a fast, ergonomic command-line argument parser for Rust that supports derive macros for declarative argument definitions, rich help generation, shell completions, and comprehensive validation. It's the most popular CLI library in the Rust ecosystem, used by cargo and thousands of other tools.",
   "additional_files": {
     "question_1.md": "How does it compare to structopt?"
   },
@@ -146,7 +158,8 @@ Phase 1: Underlying Research (parallel)
 
 Phase 2: Synthesis (parallel, after Phase 1)
 ├── skill/SKILL.md       [GPT-5.2]
-└── deep_dive.md         [GPT-5.2]
+├── deep_dive.md         [GPT-5.2]
+└── brief.md             [Gemini Flash] (after deep_dive)
 ```
 
 ### Package Manager Support

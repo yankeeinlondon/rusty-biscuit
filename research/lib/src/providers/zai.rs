@@ -40,10 +40,15 @@ impl Client {
     }
 
     /// Create a new Z.ai client from the ZAI_API_KEY environment variable
-    pub fn from_env() -> Self {
+    pub fn from_env() -> Result<Self, String> {
         let api_key = env::var(ZAI_API_KEY_ENV)
-            .unwrap_or_else(|_| panic!("{} environment variable not set", ZAI_API_KEY_ENV));
-        Self::new(&api_key)
+            .map_err(|_| format!("{} environment variable not set", ZAI_API_KEY_ENV))?;
+        Ok(Self::new(&api_key))
+    }
+
+    /// Create a new Z.ai client from the ZAI_API_KEY environment variable, panicking on error
+    pub fn from_env_or_panic() -> Self {
+        Self::from_env().expect("Failed to create Z.ai client from environment")
     }
 
     /// Create a builder for more advanced configuration

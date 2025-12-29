@@ -1,0 +1,4 @@
+{
+  "kind": "library",
+  "brief": "Rust analyzer library for testing pattern matching"
+}

@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{debug, info, instrument, warn, Span};
+use tracing::{Span, debug, info, instrument, warn};
 
 /// Output format for scraped content.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -343,17 +343,15 @@ impl ScreenScrapeTool {
             reqwest::redirect::Policy::none()
         };
 
-        let mut builder = Client::builder()
-            .timeout(timeout)
-            .redirect(redirect_policy);
+        let mut builder = Client::builder().timeout(timeout).redirect(redirect_policy);
 
         if args.skip_tls_verification {
             builder = builder.danger_accept_invalid_certs(true);
         }
 
-        builder.build().map_err(|e| {
-            ScrapeError::ConfigError(format!("Failed to build HTTP client: {}", e))
-        })
+        builder
+            .build()
+            .map_err(|e| ScrapeError::ConfigError(format!("Failed to build HTTP client: {}", e)))
     }
 
     /// Extract main content from HTML using common selectors.
@@ -404,11 +402,7 @@ impl ScreenScrapeTool {
                 for element in document.select(&selector) {
                     let text: String = element.text().collect::<Vec<_>>().join(" ");
                     if !text.trim().is_empty() {
-                        markdown.push_str(&format!(
-                            "{} {}\n\n",
-                            "#".repeat(level),
-                            text.trim()
-                        ));
+                        markdown.push_str(&format!("{} {}\n\n", "#".repeat(level), text.trim()));
                     }
                 }
             }
@@ -510,9 +504,9 @@ impl ScreenScrapeTool {
         // Remove src attributes that contain base64 data
         while let Some(start) = result.find("src=\"data:image") {
             if let Some(end) = result[start..].find("\"").and_then(|first_quote| {
-                result[start + first_quote + 1..].find("\"").map(|second_quote| {
-                    start + first_quote + 1 + second_quote + 1
-                })
+                result[start + first_quote + 1..]
+                    .find("\"")
+                    .map(|second_quote| start + first_quote + 1 + second_quote + 1)
             }) {
                 result.replace_range(start..end, "src=\"\"");
             } else {
@@ -564,7 +558,10 @@ impl ScreenScrapeTool {
         let mut request = client
             .get(args.url.clone())
             .header("User-Agent", user_agent)
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            .header(
+                "Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            );
 
         // Add custom headers
         if let Some(ref headers) = args.headers {

@@ -42,7 +42,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::Mutex;
-use tracing::{debug, info, instrument, warn, Span};
+use tracing::{Span, debug, info, instrument, warn};
 
 /// Brave Search API plan tier, determines rate limiting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -872,8 +872,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let config =
-            BraveSearchConfig::new("test-key").with_endpoint(format!("{}/search", mock_server.uri()));
+        let config = BraveSearchConfig::new("test-key")
+            .with_endpoint(format!("{}/search", mock_server.uri()));
         let tool = BraveSearchTool::new(config);
 
         let args = SearchArgs {
@@ -906,8 +906,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let config =
-            BraveSearchConfig::new("test-key").with_endpoint(format!("{}/search", mock_server.uri()));
+        let config = BraveSearchConfig::new("test-key")
+            .with_endpoint(format!("{}/search", mock_server.uri()));
         let tool = BraveSearchTool::new(config);
 
         let args = SearchArgs {

@@ -39,6 +39,36 @@ enum Commands {
         #[arg(short, long, value_name = "DIR")]
         output: Option<PathBuf>,
     },
+
+    /// List all research topics
+    List {
+        /// Glob patterns to filter topics (e.g., "foo", "foo*", "bar")
+        #[arg(value_name = "FILTER")]
+        filters: Vec<String>,
+
+        /// Filter by research type (repeatable: -t library -t software)
+        #[arg(short = 't', long = "type", value_name = "TYPE")]
+        types: Vec<String>,
+
+        /// Output as JSON instead of terminal format
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Create symbolic links from research skills to Claude Code and OpenCode
+    Link {
+        /// Glob patterns to filter topics (e.g., "foo", "foo*", "bar")
+        #[arg(value_name = "FILTER")]
+        filters: Vec<String>,
+
+        /// Filter by research type (repeatable: -t library -t software)
+        #[arg(short = 't', long = "type", value_name = "TYPE")]
+        types: Vec<String>,
+
+        /// Output as JSON instead of terminal format
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn read_topic_from_stdin() -> io::Result<String> {
@@ -67,8 +97,7 @@ fn init_tracing(verbose: u8, json: bool) {
         },
     };
 
-    let filter =
-        EnvFilter::try_new(&base_filter).unwrap_or_else(|_| EnvFilter::new("warn"));
+    let filter = EnvFilter::try_new(&base_filter).unwrap_or_else(|_| EnvFilter::new("warn"));
 
     if json {
         // JSON output for structured log processing
@@ -155,6 +184,38 @@ async fn main() {
                 }
                 Err(e) => {
                     eprintln!("Research failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::List {
+            filters,
+            types,
+            json,
+        } => {
+            match research_lib::list(filters, types, json).await {
+                Ok(()) => {
+                    // Success - output already written to stdout
+                }
+                Err(e) => {
+                    eprintln!("List failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Link {
+            filters,
+            types,
+            json,
+        } => {
+            match research_lib::link(filters, types, json).await {
+                Ok(()) => {
+                    // Success - output already written to stdout
+                }
+                Err(e) => {
+                    eprintln!("Link failed: {}", e);
                     std::process::exit(1);
                 }
             }

@@ -5,6 +5,7 @@
 The Research Library provides automated research capabilities for software libraries using a two-phase LLM pipeline. It gathers comprehensive information about libraries from multiple sources and produces structured documentation suitable for both human readers and AI assistants.
 
 The design philosophy emphasizes:
+
 - **Parallel execution** for speed (multiple LLM calls run concurrently)
 - **Incremental research** (DRY - don't repeat existing research)
 - **Structured output** (skill trees for context-efficient AI consumption)
@@ -26,6 +27,7 @@ Phase 1 runs multiple LLM calls in parallel to gather raw research about the tar
 | Additional Questions | `question_N.md` | Gemini Flash | User-defined research prompts |
 
 **Key characteristics:**
+
 - All tasks run concurrently via `tokio::join!`
 - Each task is independent and can fail without affecting others
 - Progress is reported as tasks complete
@@ -41,6 +43,7 @@ Phase 2 aggregates all Phase 1 outputs and generates consolidated deliverables:
 | Deep Dive | `deep_dive.md` | OpenAI GPT-5.2 | Dense comprehensive reference |
 
 **Key characteristics:**
+
 - Runs after all Phase 1 tasks complete (or are cancelled)
 - Uses combined context from all Phase 1 documents
 - Skill output supports multi-file format via `--- FILE: name.md ---` markers
@@ -69,6 +72,7 @@ The library uses three LLM providers:
 ### Environment Variables
 
 All providers read API keys from environment variables (via `dotenvy`):
+
 - `OPENAI_API_KEY`
 - `GEMINI_API_KEY` / `GOOGLE_API_KEY`
 - `ZAI_API_KEY`
@@ -161,6 +165,7 @@ fn default_output_dir(topic: &str) -> PathBuf {
 ```
 
 **Environment variable:** `RESEARCH_DIR`
+
 - If set: `$RESEARCH_DIR/.research/library/<pkg>`
 - If not set: `$HOME/.research/library/<pkg>`
 

@@ -11,8 +11,11 @@
 //!
 //! Phase 2 prompts (synthesis) run without tools as they consolidate existing content.
 
+pub mod link;
+pub mod list;
 pub mod providers;
 
+use chrono::{DateTime, Utc};
 use futures::future::join_all;
 use inquire::{InquireError, Select};
 use providers::zai;
@@ -23,17 +26,16 @@ use rig::agent::{Agent, CancelSignal, PromptHook};
 use rig::client::{CompletionClient, ProviderClient};
 use rig::completion::{AssistantContent, CompletionModel, Message, Prompt};
 use rig::providers::{gemini, openai};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use shared::tools::{BravePlan, BraveSearchTool, ScreenScrapeTool};
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 use thiserror::Error;
 use tokio::fs;
-use tracing::{debug, info, info_span, instrument, warn, Span};
+use tracing::{Span, debug, info, info_span, instrument, warn};
 
 /// A PromptHook that emits tracing events for agent interactions.
 ///
@@ -141,14 +143,23 @@ mod prompts {
     pub const CONTEXT: &str = include_str!("../prompts/context.md");
     pub const SKILL: &str = include_str!("../prompts/skill.md");
     pub const DEEP_DIVE: &str = include_str!("../prompts/deep_dive.md");
+    pub const BRIEF: &str = include_str!("../prompts/brief.md");
 }
 
 /// Standard Phase 1 prompts that should be present for complete research.
 /// Each entry is (name, filename, prompt_template).
 const STANDARD_PROMPTS: [(&str, &str, &str); 5] = [
     ("overview", "overview.md", prompts::OVERVIEW),
-    ("similar_libraries", "similar_libraries.md", prompts::SIMILAR_LIBRARIES),
-    ("integration_partners", "integration_partners.md", prompts::INTEGRATION_PARTNERS),
+    (
+        "similar_libraries",
+        "similar_libraries.md",
+        prompts::SIMILAR_LIBRARIES,
+    ),
+    (
+        "integration_partners",
+        "integration_partners.md",
+        prompts::INTEGRATION_PARTNERS,
+    ),
     ("use_cases", "use_cases.md", prompts::USE_CASES),
     ("changelog", "changelog.md", prompts::CHANGELOG),
 ];
@@ -187,6 +198,7 @@ pub struct LibraryInfo {
     pub package_manager: String,
     pub language: String,
     pub url: String,
+    pub repository: Option<String>,
     pub description: Option<String>,
 }
 
@@ -229,6 +241,12 @@ pub struct ResearchMetadata {
     pub created_at: DateTime<Utc>,
     /// When the research was last updated
     pub updated_at: DateTime<Utc>,
+    /// Single-sentence summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub brief: Option<String>,
+    /// Paragraph summary
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
 }
 
 /// Library info stored in metadata (serializable version)
@@ -237,6 +255,8 @@ pub struct LibraryInfoMetadata {
     pub package_manager: String,
     pub language: String,
     pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
 }
 
 impl From<&LibraryInfo> for LibraryInfoMetadata {
@@ -245,6 +265,7 @@ impl From<&LibraryInfo> for LibraryInfoMetadata {
             package_manager: info.package_manager.clone(),
             language: info.language.clone(),
             url: info.url.clone(),
+            repository: info.repository.clone(),
         }
     }
 }
@@ -259,6 +280,8 @@ impl ResearchMetadata {
             additional_files: std::collections::HashMap::new(),
             created_at: now,
             updated_at: now,
+            brief: None,
+            summary: None,
         }
     }
 
@@ -353,12 +376,19 @@ struct CratesIoResponse {
 #[derive(Debug, Deserialize)]
 struct CratesIoCrate {
     description: Option<String>,
+    repository: Option<String>,
 }
 
 /// Response from npm registry API
 #[derive(Debug, Deserialize)]
 struct NpmResponse {
     description: Option<String>,
+    repository: Option<NpmRepository>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NpmRepository {
+    url: Option<String>,
 }
 
 /// Response from PyPI API
@@ -370,6 +400,7 @@ struct PyPIResponse {
 #[derive(Debug, Deserialize)]
 struct PyPIInfo {
     summary: Option<String>,
+    project_urls: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Response from Packagist API
@@ -431,11 +462,13 @@ async fn check_crates_io(client: &HttpClient, name: &str) -> Option<LibraryInfo>
 
     let data: CratesIoResponse = response.json().await.ok()?;
     let description = data.krate.as_ref().and_then(|c| c.description.clone());
+    let repository = data.krate.as_ref().and_then(|c| c.repository.clone());
 
     Some(LibraryInfo {
         package_manager: "crates.io".to_string(),
         language: "Rust".to_string(),
         url: format!("https://crates.io/crates/{}", name),
+        repository,
         description,
     })
 }
@@ -450,10 +483,21 @@ async fn check_npm(client: &HttpClient, name: &str) -> Option<LibraryInfo> {
 
     let data: NpmResponse = response.json().await.ok()?;
 
+    // Extract repository URL and clean git+ prefix
+    let repository = data
+        .repository
+        .as_ref()
+        .and_then(|r| r.url.as_ref())
+        .map(|url| {
+            // Clean git+https:// prefix to just https://
+            url.strip_prefix("git+").unwrap_or(url).to_string()
+        });
+
     Some(LibraryInfo {
         package_manager: "npm".to_string(),
         language: "JavaScript/TypeScript".to_string(),
         url: format!("https://www.npmjs.com/package/{}", name),
+        repository,
         description: data.description,
     })
 }
@@ -467,12 +511,24 @@ async fn check_pypi(client: &HttpClient, name: &str) -> Option<LibraryInfo> {
     }
 
     let data: PyPIResponse = response.json().await.ok()?;
-    let description = data.info.and_then(|i| i.summary);
+    let description = data.info.as_ref().and_then(|i| i.summary.clone());
+
+    // Extract repository URL from project_urls (try "Repository" first, then "Source")
+    let repository = data
+        .info
+        .as_ref()
+        .and_then(|i| i.project_urls.as_ref())
+        .and_then(|urls| {
+            urls.get("Repository")
+                .or_else(|| urls.get("Source"))
+                .cloned()
+        });
 
     Some(LibraryInfo {
         package_manager: "PyPI".to_string(),
         language: "Python".to_string(),
         url: format!("https://pypi.org/project/{}", name),
+        repository,
         description,
     })
 }
@@ -501,6 +557,7 @@ async fn check_packagist(client: &HttpClient, name: &str) -> Option<LibraryInfo>
         url: matching
             .url
             .unwrap_or_else(|| format!("https://packagist.org/packages/{}", matching.name)),
+        repository: None,
         description: matching.description,
     })
 }
@@ -515,6 +572,7 @@ async fn check_luarocks(client: &HttpClient, name: &str) -> Option<LibraryInfo> 
             package_manager: "LuaRocks".to_string(),
             language: "Lua".to_string(),
             url,
+            repository: None,
             description: None,
         });
     }
@@ -531,6 +589,7 @@ async fn check_luarocks(client: &HttpClient, name: &str) -> Option<LibraryInfo> 
                 package_manager: "LuaRocks".to_string(),
                 language: "Lua".to_string(),
                 url: format!("https://luarocks.org/modules/{}", name),
+                repository: None,
                 description: None,
             });
         }
@@ -560,6 +619,7 @@ async fn check_go(client: &HttpClient, name: &str) -> Option<LibraryInfo> {
                     package_manager: "pkg.go.dev".to_string(),
                     language: "Go".to_string(),
                     url,
+                    repository: None,
                     description: None,
                 });
             }
@@ -591,7 +651,10 @@ pub enum LibrarySelection {
 pub fn select_library(libraries: Vec<LibraryInfo>, topic: &str) -> LibrarySelection {
     match libraries.len() {
         0 => {
-            println!("  ⚠ '{}' not found on any package manager (may be a general topic)\n", topic);
+            println!(
+                "  ⚠ '{}' not found on any package manager (may be a general topic)\n",
+                topic
+            );
             LibrarySelection::NotFound
         }
         1 => {
@@ -615,7 +678,10 @@ pub fn select_library(libraries: Vec<LibraryInfo>, topic: &str) -> LibrarySelect
 
             match selection {
                 Ok(lib) => {
-                    println!("\n  → Selected: {} ({})\n", lib.package_manager, lib.language);
+                    println!(
+                        "\n  → Selected: {} ({})\n",
+                        lib.package_manager, lib.language
+                    );
                     LibrarySelection::Selected(lib)
                 }
                 Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
@@ -705,6 +771,27 @@ fn normalize_markdown(input: &str) -> String {
     output
 }
 
+/// Parse the brief response into (brief, summary) tuple
+fn parse_brief_response(response: &str) -> (Option<String>, Option<String>) {
+    let mut brief = None;
+    let mut summary = None;
+
+    for line in response.lines() {
+        let line = line.trim();
+        if line.starts_with("BRIEF:") {
+            brief = Some(line.trim_start_matches("BRIEF:").trim().to_string());
+        } else if line.starts_with("SUMMARY:") {
+            // Summary might span multiple lines until end
+            if let Some(start) = response.find("SUMMARY:") {
+                summary = Some(response[start + 8..].trim().to_string());
+            }
+            break;
+        }
+    }
+
+    (brief, summary)
+}
+
 /// Library context for building prompts
 struct LibraryContext<'a> {
     package_manager: &'a str,
@@ -745,11 +832,7 @@ fn build_prompt(template: &str, topic: &str, library_info: Option<&LibraryInfo>)
 }
 
 /// Internal helper to build prompts with optional library context
-fn build_prompt_with_context(
-    template: &str,
-    topic: &str,
-    ctx: Option<&LibraryContext>,
-) -> String {
+fn build_prompt_with_context(template: &str, topic: &str, ctx: Option<&LibraryContext>) -> String {
     let (package_manager, language, url) = match ctx {
         Some(c) => (c.package_manager, c.language, c.url),
         None => ("unknown", "unknown", "N/A"),
@@ -908,11 +991,7 @@ where
     // Use multi_turn(15) to allow up to 15 rounds of tool calls before final response
     // Higher limit needed as research tasks may require multiple search + scrape operations
     // If this still hits the limit, the preamble should guide the agent to synthesize earlier
-    let result = agent
-        .prompt(&prompt)
-        .multi_turn(15)
-        .with_hook(hook)
-        .await;
+    let result = agent.prompt(&prompt).multi_turn(15).with_hook(hook).await;
 
     // Check if cancelled after the request completed
     if cancelled.load(Ordering::SeqCst) {
@@ -933,7 +1012,7 @@ where
 
             // Agent returns the content directly as a string
             let metrics = PromptMetrics {
-                input_tokens: 0,  // Agent API doesn't expose token counts
+                input_tokens: 0, // Agent API doesn't expose token counts
                 output_tokens: 0,
                 total_tokens: 0,
                 elapsed_secs: elapsed,
@@ -950,10 +1029,7 @@ where
                         content_len = normalized.len(),
                         "Task completed successfully"
                     );
-                    println!(
-                        "  [{}/{}] ✓ {} ({:.1}s)",
-                        completed, total, name, elapsed,
-                    );
+                    println!("  [{}/{}] ✓ {} ({:.1}s)", completed, total, name, elapsed,);
                     Some(metrics)
                 }
                 Err(e) => {
@@ -998,8 +1074,6 @@ pub fn default_output_dir(topic: &str) -> PathBuf {
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")));
     base.join(".research").join("library").join(topic)
 }
-
-
 
 /// Run a dynamic question task and save result
 async fn run_question_task<M>(
@@ -1074,7 +1148,13 @@ where
                 Ok(_) => {
                     println!(
                         "  [{}/{}] ✓ {} ({:.1}s) | tokens: {} in, {} out, {} total",
-                        completed, total, name, elapsed, metrics.input_tokens, metrics.output_tokens, metrics.total_tokens,
+                        completed,
+                        total,
+                        name,
+                        elapsed,
+                        metrics.input_tokens,
+                        metrics.output_tokens,
+                        metrics.total_tokens,
                     );
                     Some(metrics)
                 }
@@ -1164,7 +1244,7 @@ async fn run_incremental_research(
     // Initialize providers
     let gemini = gemini::Client::from_env();
     let openai = openai::Client::from_env();
-    let zai = providers::zai::Client::from_env();
+    let zai = providers::zai::Client::from_env().ok();
 
     // Check if research tools are available
     let use_tools = tools_available();
@@ -1187,16 +1267,24 @@ async fn run_incremental_research(
             info.language.clone(),
             info.url.clone(),
         ),
-        None => ("unknown".to_string(), "unknown".to_string(), "N/A".to_string()),
+        None => (
+            "unknown".to_string(),
+            "unknown".to_string(),
+            "N/A".to_string(),
+        ),
     };
 
     // Build library info for prompt building
-    let library_info = existing_metadata.library_info.as_ref().map(|info| LibraryInfo {
-        package_manager: info.package_manager.clone(),
-        language: info.language.clone(),
-        url: info.url.clone(),
-        description: None,
-    });
+    let library_info = existing_metadata
+        .library_info
+        .as_ref()
+        .map(|info| LibraryInfo {
+            package_manager: info.package_manager.clone(),
+            language: info.language.clone(),
+            url: info.url.clone(),
+            repository: info.repository.clone(),
+            description: None,
+        });
     let lib_info_ref = library_info.as_ref();
 
     // Clone topic for use in futures
@@ -1207,7 +1295,8 @@ async fn run_incremental_research(
     let total = missing_prompts.len() + questions.len();
 
     // Create tasks for missing standard prompts - with or without tools
-    type BoxedFuture = std::pin::Pin<Box<dyn std::future::Future<Output = PromptTaskResult> + Send>>;
+    type BoxedFuture =
+        std::pin::Pin<Box<dyn std::future::Future<Output = PromptTaskResult> + Send>>;
     let mut phase1_futures: Vec<BoxedFuture> = Vec::new();
 
     if use_tools {
@@ -1222,23 +1311,44 @@ async fn run_incremental_research(
 
             match mp.name {
                 "overview" => {
-                    let agent = zai
-                        .agent(providers::zai::GLM_4_7)
-                        .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
-                        .tool(search_tool.clone())
-                        .tool(scrape_tool.clone())
-                        .build();
-                    phase1_futures.push(Box::pin(run_agent_prompt_task(
-                        task_name,
-                        filename,
-                        output_dir.clone(),
-                        agent,
-                        prompt,
-                        counter.clone(),
-                        total,
-                        start_time,
-                        cancelled.clone(),
-                    )));
+                    // Use GLM-4.7 if available, otherwise fall back to Gemini
+                    if let Some(ref z) = zai {
+                        let agent = z
+                            .agent(providers::zai::GLM_4_7)
+                            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                            .tool(search_tool.clone())
+                            .tool(scrape_tool.clone())
+                            .build();
+                        phase1_futures.push(Box::pin(run_agent_prompt_task(
+                            task_name,
+                            filename,
+                            output_dir.clone(),
+                            agent,
+                            prompt,
+                            counter.clone(),
+                            total,
+                            start_time,
+                            cancelled.clone(),
+                        )));
+                    } else {
+                        let agent = gemini
+                            .agent("gemini-3-flash-preview")
+                            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                            .tool(search_tool.clone())
+                            .tool(scrape_tool.clone())
+                            .build();
+                        phase1_futures.push(Box::pin(run_agent_prompt_task(
+                            task_name,
+                            filename,
+                            output_dir.clone(),
+                            agent,
+                            prompt,
+                            counter.clone(),
+                            total,
+                            start_time,
+                            cancelled.clone(),
+                        )));
+                    }
                 }
                 "changelog" => {
                     let agent = openai
@@ -1321,18 +1431,34 @@ async fn run_incremental_research(
 
             match mp.name {
                 "overview" => {
-                    let model = zai.completion_model(providers::zai::GLM_4_7);
-                    phase1_futures.push(Box::pin(run_prompt_task(
-                        task_name,
-                        filename,
-                        output_dir.clone(),
-                        model,
-                        prompt,
-                        counter.clone(),
-                        total,
-                        start_time,
-                        cancelled.clone(),
-                    )));
+                    // Use GLM-4.7 if available, otherwise fall back to Gemini
+                    if let Some(ref z) = zai {
+                        let model = z.completion_model(providers::zai::GLM_4_7);
+                        phase1_futures.push(Box::pin(run_prompt_task(
+                            task_name,
+                            filename,
+                            output_dir.clone(),
+                            model,
+                            prompt,
+                            counter.clone(),
+                            total,
+                            start_time,
+                            cancelled.clone(),
+                        )));
+                    } else {
+                        let model = gemini.completion_model("gemini-3-flash-preview");
+                        phase1_futures.push(Box::pin(run_prompt_task(
+                            task_name,
+                            filename,
+                            output_dir.clone(),
+                            model,
+                            prompt,
+                            counter.clone(),
+                            total,
+                            start_time,
+                            cancelled.clone(),
+                        )));
+                    }
                 }
                 "changelog" => {
                     let model = openai.completion_model("gpt-5.2");
@@ -1433,7 +1559,8 @@ async fn run_incremental_research(
     if succeeded.len() < min_required && all_results.len() > 1 {
         println!(
             "⚠ Too many prompts failed ({}/{}). Stopping before Phase 2.",
-            failed, all_results.len()
+            failed,
+            all_results.len()
         );
         return Err(ResearchError::TooManyPromptsFailed {
             succeeded: succeeded.len(),
@@ -1575,6 +1702,59 @@ async fn run_incremental_research(
         }
     }
 
+    // === Phase 2b: Generate brief from deep_dive (if successful) ===
+    let (brief_text, summary_text) = if deep_dive_result.metrics.is_some() {
+        println!("Generating brief summary...\n");
+
+        // Read the deep_dive content
+        let deep_dive_content = fs::read_to_string(output_dir.join("deep_dive.md"))
+            .await
+            .unwrap_or_default();
+
+        let brief_prompt = prompts::BRIEF
+            .replace("{{topic}}", topic)
+            .replace("{{deep_dive}}", &deep_dive_content);
+
+        let brief_model = gemini.completion_model("gemini-3-flash-preview");
+
+        match brief_model.completion_request(&brief_prompt).send().await {
+            Ok(response) => {
+                let content: String = response
+                    .choice
+                    .into_iter()
+                    .filter_map(|c| match c {
+                        AssistantContent::Text(text) => Some(text.text),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                let (brief, summary) = parse_brief_response(&content);
+
+                // Write brief.md file
+                if let (Some(b), Some(s)) = (&brief, &summary) {
+                    let repo_url = library_info
+                        .as_ref()
+                        .and_then(|li| li.repository.as_ref())
+                        .map(|r| format!("repo: {}\n", r))
+                        .unwrap_or_default();
+
+                    let brief_content = format!("---\nsummary: {}\n{}---\n\n{}", b, repo_url, s);
+                    let _ = fs::write(output_dir.join("brief.md"), brief_content).await;
+                    println!("[3/3] brief ✓");
+                }
+
+                (brief, summary)
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to generate brief: {}", e);
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+
     let phase2_results = [skill_result, deep_dive_result];
     let phase2_succeeded: Vec<_> = phase2_results
         .iter()
@@ -1587,6 +1767,10 @@ async fn run_incremental_research(
         phase2_succeeded.len(),
         phase2_results.len()
     );
+
+    // Update metadata with brief/summary
+    existing_metadata.brief = brief_text;
+    existing_metadata.summary = summary_text;
 
     // Save updated metadata
     if let Err(e) = existing_metadata.save(&output_dir).await {
@@ -1628,6 +1812,133 @@ async fn run_incremental_research(
 ///   defaults to `research/{topic}` relative to the current directory.
 /// * `questions` - Additional questions to research in parallel with Phase 1
 ///
+/// List all research topics from the filesystem.
+///
+/// This function discovers all topics in the research library directory,
+/// applies filters, and outputs results in either terminal or JSON format.
+///
+/// ## Arguments
+/// * `filters` - Glob patterns to filter topics (e.g., ["foo*", "bar"])
+/// * `types` - Research types to filter (e.g., ["library", "software"])
+/// * `json` - If true, output as JSON; otherwise use terminal format
+///
+/// ## Environment Variables
+/// * `RESEARCH_DIR` - Base directory for research library (default: `$HOME`)
+///
+/// ## Returns
+/// Returns `Ok(())` on success, or an error if discovery/formatting fails.
+///
+/// ## Errors
+/// Returns an error if:
+/// - Neither `RESEARCH_DIR` nor `HOME` environment variable is set
+/// - The library directory cannot be read
+/// - JSON serialization fails (when `json` is true)
+#[instrument(
+    name = "list",
+    skip(filters, types),
+    fields(
+        filter_count = filters.len(),
+        type_count = types.len(),
+        json = json
+    )
+)]
+pub async fn list(filters: Vec<String>, types: Vec<String>, json: bool) -> Result<(), String> {
+    use list::{apply_filters, discover_topics, format_json, format_terminal};
+
+    // Get RESEARCH_DIR from env (default to HOME)
+    let research_dir = std::env::var("RESEARCH_DIR").unwrap_or_else(|_| {
+        std::env::var("HOME").expect("Neither RESEARCH_DIR nor HOME environment variable is set")
+    });
+
+    // Construct library path: $RESEARCH_DIR/.research/library/
+    let library_path = PathBuf::from(research_dir)
+        .join(".research")
+        .join("library");
+
+    debug!("Searching for topics in: {:?}", library_path);
+
+    // Discover topics
+    let topics =
+        discover_topics(library_path).map_err(|e| format!("Failed to discover topics: {}", e))?;
+
+    debug!("Found {} topics before filtering", topics.len());
+
+    // Apply filters
+    let filtered_topics = apply_filters(topics, &filters, &types)
+        .map_err(|e| format!("Failed to apply filters: {}", e))?;
+
+    debug!("Found {} topics after filtering", filtered_topics.len());
+
+    // Determine if we're filtering to a single type (for format_terminal)
+    let filter_single_type = types.len() == 1;
+
+    // Format and output to stdout
+    if json {
+        let output =
+            format_json(&filtered_topics).map_err(|e| format!("Failed to format JSON: {}", e))?;
+        println!("{}", output);
+    } else {
+        let output = format_terminal(&filtered_topics, filter_single_type);
+        println!("{}", output);
+    }
+
+    Ok(())
+}
+
+/// Create symbolic links from research topic skill directories to Claude Code
+/// and OpenCode user-scoped skill locations.
+///
+/// This is a wrapper function that delegates to the link module implementation.
+/// It outputs results to stdout in either terminal or JSON format.
+///
+/// # Arguments
+///
+/// * `filters` - Glob patterns to filter topics (e.g., "foo", "foo*", "bar")
+/// * `types` - Topic types to filter by (e.g., "library", "software")
+/// * `json` - If true, output JSON format; otherwise use terminal format
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error string on failure.
+///
+/// # Example
+///
+/// ```no_run
+/// # use research_lib::link;
+/// # async fn example() {
+/// // Link all library topics
+/// link(vec![], vec!["library".to_string()], false).await.unwrap();
+///
+/// // Link topics matching "clap*" in JSON format
+/// link(vec!["clap*".to_string()], vec![], true).await.unwrap();
+/// # }
+/// ```
+#[instrument(
+    skip(filters, types, json),
+    fields(
+        filter_count = filters.len(),
+        type_count = types.len(),
+        json = json
+    )
+)]
+pub async fn link(filters: Vec<String>, types: Vec<String>, json: bool) -> Result<(), String> {
+    // Delegate to the link module implementation
+    let result = link::link(filters, types, json)
+        .await
+        .map_err(|e| format!("Link operation failed: {}", e))?;
+
+    // TODO: Phase 5 - Format and output results
+    // For now, just acknowledge success
+    debug!(
+        "Link completed: {} processed, {} created, {} failed",
+        result.total_processed(),
+        result.total_created(),
+        result.total_failed()
+    );
+
+    Ok(())
+}
+
 /// ## Returns
 /// A `ResearchResult` containing metrics about the operation
 ///
@@ -1666,10 +1977,7 @@ pub async fn research(
         // Check for missing standard prompts
         let missing_prompts = check_missing_standard_prompts(&output_dir).await;
         if !missing_prompts.is_empty() {
-            println!(
-                "  ⚠ Missing {} standard prompt(s):",
-                missing_prompts.len()
-            );
+            println!("  ⚠ Missing {} standard prompt(s):", missing_prompts.len());
             for mp in &missing_prompts {
                 println!("    - {}", mp.filename);
             }
@@ -1687,12 +1995,10 @@ pub async fn research(
                 );
 
                 // Ask user if they want to include anyway
-                let confirm = inquire::Confirm::new(&format!(
-                    "Include anyway as question_{}?",
-                    next_num
-                ))
-                .with_default(false)
-                .prompt();
+                let confirm =
+                    inquire::Confirm::new(&format!("Include anyway as question_{}?", next_num))
+                        .with_default(false)
+                        .prompt();
 
                 match confirm {
                     Ok(true) => {
@@ -1764,7 +2070,7 @@ pub async fn research(
     // Initialize providers
     let openai = openai::Client::from_env();
     let gemini = gemini::Client::from_env();
-    let zai = zai::Client::from_env();
+    let zai = zai::Client::from_env().ok();
 
     // Check if research tools are available
     let use_tools = tools_available();
@@ -1787,7 +2093,8 @@ pub async fn research(
     let lib_info_ref = library_info.as_ref();
     let overview_prompt = build_prompt(prompts::OVERVIEW, topic, lib_info_ref);
     let similar_libraries_prompt = build_prompt(prompts::SIMILAR_LIBRARIES, topic, lib_info_ref);
-    let integration_partners_prompt = build_prompt(prompts::INTEGRATION_PARTNERS, topic, lib_info_ref);
+    let integration_partners_prompt =
+        build_prompt(prompts::INTEGRATION_PARTNERS, topic, lib_info_ref);
     let use_cases_prompt = build_prompt(prompts::USE_CASES, topic, lib_info_ref);
     let changelog_prompt = build_prompt(prompts::CHANGELOG, topic, lib_info_ref);
 
@@ -1798,7 +2105,11 @@ pub async fn research(
             info.language.clone(),
             info.url.clone(),
         ),
-        None => ("unknown".to_string(), "unknown".to_string(), "N/A".to_string()),
+        None => (
+            "unknown".to_string(),
+            "unknown".to_string(),
+            "N/A".to_string(),
+        ),
     };
     let topic_owned = topic.to_string();
 
@@ -1806,12 +2117,8 @@ pub async fn research(
     let total = 5 + num_questions; // 5 default prompts + user questions
 
     // Phase 1 span
-    let _phase1_guard = info_span!(
-        "phase_1",
-        prompt_count = total,
-        tools_enabled = use_tools
-    )
-    .entered();
+    let _phase1_guard =
+        info_span!("phase_1", prompt_count = total, tools_enabled = use_tools).entered();
 
     info!(prompt_count = total, "Beginning parallel prompt execution");
     println!(
@@ -1824,7 +2131,8 @@ pub async fn research(
     let counter = Arc::new(AtomicUsize::new(0));
 
     // Create Phase 1 tasks - with or without tools
-    type BoxedFuture = std::pin::Pin<Box<dyn std::future::Future<Output = PromptTaskResult> + Send>>;
+    type BoxedFuture =
+        std::pin::Pin<Box<dyn std::future::Future<Output = PromptTaskResult> + Send>>;
     let mut phase1_futures: Vec<BoxedFuture> = Vec::new();
 
     if use_tools {
@@ -1832,24 +2140,44 @@ pub async fn research(
         let search_tool = BraveSearchTool::from_env();
         let scrape_tool = ScreenScrapeTool::new();
 
-        // Overview agent (using zai GLM)
-        let overview_agent = zai
-            .agent(zai::GLM_4_7)
-            .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
-            .tool(search_tool.clone())
-            .tool(scrape_tool.clone())
-            .build();
-        phase1_futures.push(Box::pin(run_agent_prompt_task(
-            "overview",
-            "overview.md",
-            output_dir.clone(),
-            overview_agent,
-            overview_prompt,
-            counter.clone(),
-            total,
-            start_time,
-            cancelled.clone(),
-        )));
+        // Overview agent (using zai GLM if available, otherwise Gemini)
+        if let Some(ref z) = zai {
+            let overview_agent = z
+                .agent(zai::GLM_4_7)
+                .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                .tool(search_tool.clone())
+                .tool(scrape_tool.clone())
+                .build();
+            phase1_futures.push(Box::pin(run_agent_prompt_task(
+                "overview",
+                "overview.md",
+                output_dir.clone(),
+                overview_agent,
+                overview_prompt,
+                counter.clone(),
+                total,
+                start_time,
+                cancelled.clone(),
+            )));
+        } else {
+            let overview_agent = gemini
+                .agent("gemini-3-flash-preview")
+                .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
+                .tool(search_tool.clone())
+                .tool(scrape_tool.clone())
+                .build();
+            phase1_futures.push(Box::pin(run_agent_prompt_task(
+                "overview",
+                "overview.md",
+                output_dir.clone(),
+                overview_agent,
+                overview_prompt,
+                counter.clone(),
+                total,
+                start_time,
+                cancelled.clone(),
+            )));
+        }
 
         // Similar libraries agent (using Gemini)
         let similar_agent = gemini
@@ -1945,8 +2273,10 @@ pub async fn research(
                 .replace("{{question}}", question);
 
             let question_num = i + 1;
-            let filename: &'static str = Box::leak(format!("question_{}.md", question_num).into_boxed_str());
-            let name: &'static str = Box::leak(format!("question_{}", question_num).into_boxed_str());
+            let filename: &'static str =
+                Box::leak(format!("question_{}.md", question_num).into_boxed_str());
+            let name: &'static str =
+                Box::leak(format!("question_{}", question_num).into_boxed_str());
 
             phase1_futures.push(Box::pin(run_agent_prompt_task(
                 name,
@@ -1962,23 +2292,39 @@ pub async fn research(
         }
     } else {
         // Fallback: Use raw completion models without tools
-        let glm = zai.completion_model(zai::GLM_4_7);
         let gemini1 = gemini.completion_model("gemini-3-flash-preview");
         let gemini2 = gemini.completion_model("gemini-3-flash-preview");
         let gemini3 = gemini.completion_model("gemini-3-flash-preview");
         let changelog_model = openai.completion_model("gpt-5.2");
 
-        phase1_futures.push(Box::pin(run_prompt_task(
-            "overview",
-            "overview.md",
-            output_dir.clone(),
-            glm,
-            overview_prompt,
-            counter.clone(),
-            total,
-            start_time,
-            cancelled.clone(),
-        )));
+        // Use GLM-4.7 if available, otherwise fall back to Gemini
+        if let Some(ref z) = zai {
+            let overview_model = z.completion_model(zai::GLM_4_7);
+            phase1_futures.push(Box::pin(run_prompt_task(
+                "overview",
+                "overview.md",
+                output_dir.clone(),
+                overview_model,
+                overview_prompt,
+                counter.clone(),
+                total,
+                start_time,
+                cancelled.clone(),
+            )));
+        } else {
+            let overview_model = gemini.completion_model("gemini-3-flash-preview");
+            phase1_futures.push(Box::pin(run_prompt_task(
+                "overview",
+                "overview.md",
+                output_dir.clone(),
+                overview_model,
+                overview_prompt,
+                counter.clone(),
+                total,
+                start_time,
+                cancelled.clone(),
+            )));
+        }
         phase1_futures.push(Box::pin(run_prompt_task(
             "similar_libraries",
             "similar_libraries.md",
@@ -2083,7 +2429,8 @@ pub async fn research(
     if phase1_succeeded.len() < min_required {
         println!(
             "⚠ Too many Phase 1 prompts failed ({}/{}). Stopping before Phase 2.",
-            phase1_failed, phase1_results.len()
+            phase1_failed,
+            phase1_results.len()
         );
         return Err(ResearchError::TooManyPromptsFailed {
             succeeded: phase1_succeeded.len(),
@@ -2242,6 +2589,59 @@ pub async fn research(
         }
     }
 
+    // === Phase 2b: Generate brief from deep_dive (if successful) ===
+    let (brief_text, summary_text) = if deep_dive_result.metrics.is_some() {
+        println!("Generating brief summary...\n");
+
+        // Read the deep_dive content
+        let deep_dive_content = fs::read_to_string(output_dir.join("deep_dive.md"))
+            .await
+            .unwrap_or_default();
+
+        let brief_prompt = prompts::BRIEF
+            .replace("{{topic}}", topic)
+            .replace("{{deep_dive}}", &deep_dive_content);
+
+        let brief_model = gemini.completion_model("gemini-3-flash-preview");
+
+        match brief_model.completion_request(&brief_prompt).send().await {
+            Ok(response) => {
+                let content: String = response
+                    .choice
+                    .into_iter()
+                    .filter_map(|c| match c {
+                        AssistantContent::Text(text) => Some(text.text),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                let (brief, summary) = parse_brief_response(&content);
+
+                // Write brief.md file
+                if let (Some(b), Some(s)) = (&brief, &summary) {
+                    let repo_url = library_info
+                        .as_ref()
+                        .and_then(|li| li.repository.as_ref())
+                        .map(|r| format!("repo: {}\n", r))
+                        .unwrap_or_default();
+
+                    let brief_content = format!("---\nsummary: {}\n{}---\n\n{}", b, repo_url, s);
+                    let _ = fs::write(output_dir.join("brief.md"), brief_content).await;
+                    println!("[3/3] brief ✓");
+                }
+
+                (brief, summary)
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to generate brief: {}", e);
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+
     let phase2_results = [skill_result, deep_dive_result];
     let phase2_succeeded: Vec<_> = phase2_results
         .iter()
@@ -2271,6 +2671,8 @@ pub async fn research(
 
     // Write metadata.json
     let mut metadata = ResearchMetadata::new_library(library_info.as_ref());
+    metadata.brief = brief_text;
+    metadata.summary = summary_text;
     for (i, question) in questions.iter().enumerate() {
         let filename = format!("question_{}.md", i + 1);
         metadata.add_additional_file(filename, question.clone());
@@ -2318,6 +2720,7 @@ mod tests {
             package_manager: "crates.io".to_string(),
             language: "Rust".to_string(),
             url: "https://crates.io/crates/tokio".to_string(),
+            repository: Some("https://github.com/tokio-rs/tokio".to_string()),
             description: Some("Async runtime".to_string()),
         };
 
@@ -2416,8 +2819,7 @@ mod tests {
 
         // This has significant word overlap (performance, async, runtimes)
         // 3 out of 5 words match = 60% > 50% threshold
-        let result =
-            metadata.check_overlap("async runtimes performance features testing");
+        let result = metadata.check_overlap("async runtimes performance features testing");
         assert!(result.is_some());
         assert_eq!(result.unwrap(), "question_1.md");
     }
@@ -2494,11 +2896,13 @@ mod tests {
 
     #[test]
     fn test_build_prompt_with_library_info() {
-        let template = "{{topic}} is available on {{package_manager}} for {{language}}. URL: {{url}}";
+        let template =
+            "{{topic}} is available on {{package_manager}} for {{language}}. URL: {{url}}";
         let lib_info = LibraryInfo {
             package_manager: "crates.io".to_string(),
             language: "Rust".to_string(),
             url: "https://crates.io/crates/tokio".to_string(),
+            repository: None,
             description: None,
         };
 
@@ -2625,6 +3029,7 @@ mod tests {
             package_manager: "crates.io".to_string(),
             language: "Rust".to_string(),
             url: "https://crates.io/crates/test".to_string(),
+            repository: None,
             description: None,
         };
 
@@ -2638,6 +3043,7 @@ mod tests {
             package_manager: "npm".to_string(),
             language: "JavaScript".to_string(),
             url: "https://npmjs.com/package/test".to_string(),
+            repository: None,
             description: Some("A test package".to_string()),
         };
 
@@ -2652,6 +3058,7 @@ mod tests {
             package_manager: "PyPI".to_string(),
             language: "Python".to_string(),
             url: "https://pypi.org/project/test".to_string(),
+            repository: None,
             description: Some(long_desc),
         };
 
@@ -2687,6 +3094,7 @@ mod tests {
             package_manager: "crates.io".to_string(),
             language: "Rust".to_string(),
             url: "https://crates.io/crates/tokio".to_string(),
+            repository: None,
             description: None,
         };
 
@@ -2759,6 +3167,7 @@ mod tests {
             package_manager: "npm".to_string(),
             language: "TypeScript".to_string(),
             url: "https://npmjs.com/package/test".to_string(),
+            repository: Some("https://github.com/test/test".to_string()),
             description: Some("Test description".to_string()),
         };
 
@@ -2767,6 +3176,10 @@ mod tests {
         assert_eq!(metadata.package_manager, "npm");
         assert_eq!(metadata.language, "TypeScript");
         assert_eq!(metadata.url, "https://npmjs.com/package/test");
+        assert_eq!(
+            metadata.repository,
+            Some("https://github.com/test/test".to_string())
+        );
         // Note: description is not included in metadata
     }
 
@@ -2794,7 +3207,10 @@ mod tests {
         unsafe {
             std::env::set_var("BRAVE_API_KEY", "test-key");
         }
-        assert!(tools_available(), "tools_available should return true when BRAVE_API_KEY is set");
+        assert!(
+            tools_available(),
+            "tools_available should return true when BRAVE_API_KEY is set"
+        );
 
         // Restore original value
         // SAFETY: This is a single-threaded test, no concurrent access to env vars
@@ -2815,7 +3231,10 @@ mod tests {
         unsafe {
             std::env::remove_var("BRAVE_API_KEY");
         }
-        assert!(!tools_available(), "tools_available should return false when BRAVE_API_KEY is not set");
+        assert!(
+            !tools_available(),
+            "tools_available should return false when BRAVE_API_KEY is not set"
+        );
 
         // Restore original value
         // SAFETY: This is a single-threaded test, no concurrent access to env vars
@@ -2836,7 +3255,10 @@ mod tests {
             // Set to empty string - this should still count as "set" in Rust's env::var
             std::env::set_var("BRAVE_API_KEY", "");
         }
-        assert!(tools_available(), "tools_available should return true for empty BRAVE_API_KEY (env var exists)");
+        assert!(
+            tools_available(),
+            "tools_available should return true for empty BRAVE_API_KEY (env var exists)"
+        );
 
         // Restore original value
         // SAFETY: This is a single-threaded test, no concurrent access to env vars
