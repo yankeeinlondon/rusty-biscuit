@@ -51,15 +51,18 @@ fn read_topic_from_stdin() -> io::Result<String> {
 /// Initialize tracing subscriber based on verbosity and output format
 fn init_tracing(verbose: u8, json: bool) {
     // Determine base filter from RUST_LOG or verbosity flags
-    // Default (verbose=0) shows INFO for tool calls (brave_search, screen_scrape)
-    // and research_lib to give visibility into agent tool usage
+    // Default (verbose=0) shows only WARN level to reduce noise
+    // Use -v flags to increase verbosity for debugging
     let base_filter = match std::env::var("RUST_LOG") {
         Ok(filter) => filter,
         Err(_) => match verbose {
-            // Default: Show INFO for tool calls and research progress, WARN for everything else
-            0 => "warn,research_lib=info,shared::tools=info".to_string(),
-            1 => "info,research_lib=info,shared=info".to_string(),
+            // Default: WARN only to reduce stderr noise
+            0 => "warn".to_string(),
+            // -v: Show INFO for research progress and tool calls
+            1 => "warn,research_lib=info,shared::tools=info".to_string(),
+            // -vv: Show DEBUG for research_lib and shared
             2 => "info,research_lib=debug,shared=debug".to_string(),
+            // -vvv+: Show TRACE for detailed debugging
             _ => "debug,research_lib=trace,shared=trace".to_string(),
         },
     };

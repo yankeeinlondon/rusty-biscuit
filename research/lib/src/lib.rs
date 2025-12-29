@@ -25,7 +25,7 @@ use rig::completion::{AssistantContent, CompletionModel, Message, Prompt};
 use rig::providers::{gemini, openai};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use shared::tools::{BraveSearchTool, ScreenScrapeTool};
+use shared::tools::{BravePlan, BraveSearchTool, ScreenScrapeTool};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -1169,7 +1169,13 @@ async fn run_incremental_research(
     // Check if research tools are available
     let use_tools = tools_available();
     if use_tools {
-        println!("  ✓ Web research tools enabled (BRAVE_API_KEY found)\n");
+        let plan = std::env::var("BRAVE_PLAN")
+            .map(|s| BravePlan::from_str(&s))
+            .unwrap_or_default();
+        println!(
+            "  ✓ Web research tools enabled (BRAVE_API_KEY found, {:?} plan)\n",
+            plan
+        );
     } else {
         println!("  ⚠ Web research tools disabled (set BRAVE_API_KEY to enable)\n");
     }
@@ -1764,8 +1770,14 @@ pub async fn research(
     let use_tools = tools_available();
     Span::current().record("tools_enabled", use_tools);
     if use_tools {
-        info!("Web research tools enabled");
-        println!("  ✓ Web research tools enabled (BRAVE_API_KEY found)\n");
+        let plan = std::env::var("BRAVE_PLAN")
+            .map(|s| BravePlan::from_str(&s))
+            .unwrap_or_default();
+        info!(?plan, "Web research tools enabled");
+        println!(
+            "  ✓ Web research tools enabled (BRAVE_API_KEY found, {:?} plan)\n",
+            plan
+        );
     } else {
         warn!("Web research tools disabled - set BRAVE_API_KEY to enable");
         println!("  ⚠ Web research tools disabled (set BRAVE_API_KEY to enable)\n");

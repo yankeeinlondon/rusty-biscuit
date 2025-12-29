@@ -7,6 +7,13 @@
 //! - A Brave Search API key (get one at <https://api.search.brave.com/app/keys>)
 //! - Set the `BRAVE_API_KEY` environment variable
 //!
+//! ## Rate Limiting
+//!
+//! The tool automatically rate limits requests based on the `BRAVE_PLAN` environment variable:
+//! - `free` (default): 1 request per second
+//! - `base`: 20 requests per second
+//! - `pro`: 50 requests per second
+//!
 //! ## Example
 //!
 //! ```rust,ignore
@@ -31,8 +38,85 @@ use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::sync::Mutex;
 use tracing::{debug, info, instrument, warn, Span};
+
+/// Brave Search API plan tier, determines rate limiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BravePlan {
+    /// Free tier: 1 request per second
+    #[default]
+    Free,
+    /// Base tier: 20 requests per second
+    Base,
+    /// Pro tier: 50 requests per second
+    Pro,
+}
+
+impl BravePlan {
+    /// Parse plan from string (case-insensitive).
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "base" => Self::Base,
+            "pro" => Self::Pro,
+            _ => Self::Free,
+        }
+    }
+
+    /// Get the minimum interval between requests for this plan.
+    pub fn min_interval(&self) -> Duration {
+        match self {
+            Self::Free => Duration::from_millis(1000), // 1 req/sec
+            Self::Base => Duration::from_millis(50),   // 20 req/sec
+            Self::Pro => Duration::from_millis(20),    // 50 req/sec
+        }
+    }
+
+    /// Get the requests per second for this plan.
+    pub fn requests_per_second(&self) -> u32 {
+        match self {
+            Self::Free => 1,
+            Self::Base => 20,
+            Self::Pro => 50,
+        }
+    }
+}
+
+/// Shared rate limiter for Brave Search requests.
+#[derive(Clone)]
+struct RateLimiter {
+    last_request: Arc<Mutex<Option<Instant>>>,
+    min_interval: Duration,
+}
+
+impl RateLimiter {
+    fn new(plan: BravePlan) -> Self {
+        Self {
+            last_request: Arc::new(Mutex::new(None)),
+            min_interval: plan.min_interval(),
+        }
+    }
+
+    /// Wait if necessary to respect the rate limit, then mark this request.
+    async fn acquire(&self) {
+        let mut last = self.last_request.lock().await;
+        if let Some(last_time) = *last {
+            let elapsed = last_time.elapsed();
+            if elapsed < self.min_interval {
+                let wait_time = self.min_interval - elapsed;
+                debug!(
+                    wait_ms = wait_time.as_millis() as u64,
+                    "Rate limiting: waiting before next request"
+                );
+                tokio::time::sleep(wait_time).await;
+            }
+        }
+        *last = Some(Instant::now());
+    }
+}
 
 /// Configuration for the Brave Search API client.
 #[derive(Debug, Clone)]
@@ -41,18 +125,35 @@ pub struct BraveSearchConfig {
     pub api_key: String,
     /// API endpoint URL
     pub endpoint: String,
+    /// API plan tier for rate limiting
+    pub plan: BravePlan,
 }
 
 impl BraveSearchConfig {
     /// Create configuration from environment variables.
     ///
+    /// Reads:
+    /// - `BRAVE_API_KEY` (required): API key for authentication
+    /// - `BRAVE_PLAN` (optional): Plan tier for rate limiting ("free", "base", "pro")
+    ///
     /// # Panics
     /// Panics if `BRAVE_API_KEY` is not set.
     pub fn from_env() -> Self {
+        let plan = env::var("BRAVE_PLAN")
+            .map(|s| BravePlan::from_str(&s))
+            .unwrap_or_default();
+
+        info!(
+            plan = ?plan,
+            rate_limit = plan.requests_per_second(),
+            "Brave Search configured"
+        );
+
         Self {
             api_key: env::var("BRAVE_API_KEY")
                 .expect("BRAVE_API_KEY environment variable must be set"),
             endpoint: "https://api.search.brave.com/res/v1/web/search".to_string(),
+            plan,
         }
     }
 
@@ -61,6 +162,7 @@ impl BraveSearchConfig {
         Self {
             api_key: api_key.into(),
             endpoint: "https://api.search.brave.com/res/v1/web/search".to_string(),
+            plan: BravePlan::default(),
         }
     }
 
@@ -68,6 +170,13 @@ impl BraveSearchConfig {
     #[must_use]
     pub fn with_endpoint(mut self, endpoint: impl Into<String>) -> Self {
         self.endpoint = endpoint.into();
+        self
+    }
+
+    /// Set the API plan tier for rate limiting.
+    #[must_use]
+    pub fn with_plan(mut self, plan: BravePlan) -> Self {
+        self.plan = plan;
         self
     }
 }
@@ -190,18 +299,25 @@ pub enum BraveSearchError {
 ///
 /// This tool enables AI agents to search the web using the Brave Search API.
 /// It returns structured search results with titles, URLs, and snippets.
+///
+/// The tool implements rate limiting based on the configured plan tier.
+/// When cloned, all instances share the same rate limiter to ensure
+/// the rate limit is respected across concurrent usage.
 #[derive(Clone)]
 pub struct BraveSearchTool {
     config: BraveSearchConfig,
     client: Client,
+    rate_limiter: RateLimiter,
 }
 
 impl BraveSearchTool {
     /// Create a new Brave Search tool with the given configuration.
     pub fn new(config: BraveSearchConfig) -> Self {
+        let rate_limiter = RateLimiter::new(config.plan);
         Self {
             config,
             client: Client::new(),
+            rate_limiter,
         }
     }
 
@@ -216,7 +332,12 @@ impl BraveSearchTool {
     /// Create a tool with a custom HTTP client (useful for testing).
     #[cfg(test)]
     pub fn with_client(config: BraveSearchConfig, client: Client) -> Self {
-        Self { config, client }
+        let rate_limiter = RateLimiter::new(config.plan);
+        Self {
+            config,
+            client,
+            rate_limiter,
+        }
     }
 
     /// Perform a web search with the given arguments.
@@ -242,6 +363,9 @@ impl BraveSearchTool {
                 "Query cannot be empty".to_string(),
             ));
         }
+
+        // Acquire rate limit before making request
+        self.rate_limiter.acquire().await;
 
         let count = args.count.unwrap_or(10).min(20).max(1);
         let offset = args.offset.unwrap_or(0);
@@ -425,12 +549,55 @@ mod tests {
         let config = BraveSearchConfig::new("test-api-key");
         assert_eq!(config.api_key, "test-api-key");
         assert!(config.endpoint.contains("api.search.brave.com"));
+        assert_eq!(config.plan, BravePlan::Free);
     }
 
     #[test]
     fn test_config_with_endpoint() {
         let config = BraveSearchConfig::new("test-key").with_endpoint("http://localhost:8080");
         assert_eq!(config.endpoint, "http://localhost:8080");
+    }
+
+    #[test]
+    fn test_config_with_plan() {
+        let config = BraveSearchConfig::new("test-key").with_plan(BravePlan::Pro);
+        assert_eq!(config.plan, BravePlan::Pro);
+    }
+
+    // ===========================================
+    // Tests for BravePlan
+    // ===========================================
+
+    #[test]
+    fn test_brave_plan_default() {
+        assert_eq!(BravePlan::default(), BravePlan::Free);
+    }
+
+    #[test]
+    fn test_brave_plan_from_str() {
+        assert_eq!(BravePlan::from_str("free"), BravePlan::Free);
+        assert_eq!(BravePlan::from_str("FREE"), BravePlan::Free);
+        assert_eq!(BravePlan::from_str("base"), BravePlan::Base);
+        assert_eq!(BravePlan::from_str("BASE"), BravePlan::Base);
+        assert_eq!(BravePlan::from_str("pro"), BravePlan::Pro);
+        assert_eq!(BravePlan::from_str("PRO"), BravePlan::Pro);
+        // Unknown values default to Free
+        assert_eq!(BravePlan::from_str("unknown"), BravePlan::Free);
+        assert_eq!(BravePlan::from_str(""), BravePlan::Free);
+    }
+
+    #[test]
+    fn test_brave_plan_min_interval() {
+        assert_eq!(BravePlan::Free.min_interval(), Duration::from_millis(1000));
+        assert_eq!(BravePlan::Base.min_interval(), Duration::from_millis(50));
+        assert_eq!(BravePlan::Pro.min_interval(), Duration::from_millis(20));
+    }
+
+    #[test]
+    fn test_brave_plan_requests_per_second() {
+        assert_eq!(BravePlan::Free.requests_per_second(), 1);
+        assert_eq!(BravePlan::Base.requests_per_second(), 20);
+        assert_eq!(BravePlan::Pro.requests_per_second(), 50);
     }
 
     // ===========================================
