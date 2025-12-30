@@ -232,9 +232,7 @@ pub fn research_health(
     let topic_path = base_path.join(research_type.as_str()).join(topic);
 
     if !topic_path.exists() {
-        return Err(ValidationError::TopicNotFound {
-            path: topic_path,
-        });
+        return Err(ValidationError::TopicNotFound { path: topic_path });
     }
 
     // Check Phase 1 prompts
@@ -358,17 +356,35 @@ This is the skill content.
 
     #[test]
     fn test_research_type_from_str_valid() {
-        assert_eq!(ResearchType::from_str("library").unwrap(), ResearchType::Library);
+        assert_eq!(
+            ResearchType::from_str("library").unwrap(),
+            ResearchType::Library
+        );
         assert_eq!(ResearchType::from_str("tool").unwrap(), ResearchType::Tool);
-        assert_eq!(ResearchType::from_str("software").unwrap(), ResearchType::Software);
-        assert_eq!(ResearchType::from_str("framework").unwrap(), ResearchType::Framework);
+        assert_eq!(
+            ResearchType::from_str("software").unwrap(),
+            ResearchType::Software
+        );
+        assert_eq!(
+            ResearchType::from_str("framework").unwrap(),
+            ResearchType::Framework
+        );
     }
 
     #[test]
     fn test_research_type_from_str_case_insensitive() {
-        assert_eq!(ResearchType::from_str("LIBRARY").unwrap(), ResearchType::Library);
-        assert_eq!(ResearchType::from_str("Library").unwrap(), ResearchType::Library);
-        assert_eq!(ResearchType::from_str("LiBrArY").unwrap(), ResearchType::Library);
+        assert_eq!(
+            ResearchType::from_str("LIBRARY").unwrap(),
+            ResearchType::Library
+        );
+        assert_eq!(
+            ResearchType::from_str("Library").unwrap(),
+            ResearchType::Library
+        );
+        assert_eq!(
+            ResearchType::from_str("LiBrArY").unwrap(),
+            ResearchType::Library
+        );
     }
 
     #[test]
@@ -376,7 +392,10 @@ This is the skill content.
         let result = ResearchType::from_str("invalid");
         assert!(result.is_err());
         match result {
-            Err(ValidationError::InvalidResearchType { provided, valid_types }) => {
+            Err(ValidationError::InvalidResearchType {
+                provided,
+                valid_types,
+            }) => {
                 assert_eq!(provided, "invalid");
                 assert_eq!(valid_types.len(), 4);
             }
@@ -422,7 +441,9 @@ This is the skill content.
         create_all_outputs(&topic_path);
 
         // Set RESEARCH_DIR to temp directory
-        unsafe { std::env::set_var("RESEARCH_DIR", temp.path()); }
+        unsafe {
+            std::env::set_var("RESEARCH_DIR", temp.path());
+        }
 
         let health = research_health(ResearchType::Library, "test-lib").unwrap();
 
@@ -435,7 +456,9 @@ This is the skill content.
         assert_eq!(health.version, 1);
 
         // Cleanup
-        unsafe { std::env::remove_var("RESEARCH_DIR"); }
+        unsafe {
+            std::env::remove_var("RESEARCH_DIR");
+        }
     }
 
     #[test]
@@ -449,20 +472,36 @@ This is the skill content.
 
         create_all_outputs(&topic_path);
 
-        unsafe { std::env::set_var("RESEARCH_DIR", temp.path()); }
+        unsafe {
+            std::env::set_var("RESEARCH_DIR", temp.path());
+        }
 
         let health = research_health(ResearchType::Library, "incomplete-lib").unwrap();
 
         assert!(!health.ok, "Health should not be OK");
         assert_eq!(health.missing_underlying.len(), 4); // 6 total - 2 created = 4 missing
-        assert!(health.missing_underlying.contains(&"Similar Libraries".to_string()));
-        assert!(health.missing_underlying.contains(&"Integration Partners".to_string()));
+        assert!(
+            health
+                .missing_underlying
+                .contains(&"Similar Libraries".to_string())
+        );
+        assert!(
+            health
+                .missing_underlying
+                .contains(&"Integration Partners".to_string())
+        );
         assert!(health.missing_underlying.contains(&"Changelog".to_string()));
-        assert!(health.missing_underlying.contains(&"Additional Context".to_string()));
+        assert!(
+            health
+                .missing_underlying
+                .contains(&"Additional Context".to_string())
+        );
         assert!(health.missing_deliverables.is_empty());
         assert!(health.skill_structure_valid);
 
-        unsafe { std::env::remove_var("RESEARCH_DIR"); }
+        unsafe {
+            std::env::remove_var("RESEARCH_DIR");
+        }
     }
 
     #[test]
@@ -475,18 +514,26 @@ This is the skill content.
         // Create only skill, missing deep_dive and brief
         create_valid_skill(&topic_path);
 
-        unsafe { std::env::set_var("RESEARCH_DIR", temp.path()); }
+        unsafe {
+            std::env::set_var("RESEARCH_DIR", temp.path());
+        }
 
         let health = research_health(ResearchType::Tool, "incomplete-tool").unwrap();
 
         assert!(!health.ok, "Health should not be OK");
         assert!(health.missing_underlying.is_empty());
         assert_eq!(health.missing_deliverables.len(), 2);
-        assert!(health.missing_deliverables.contains(&ResearchOutput::DeepDive));
+        assert!(
+            health
+                .missing_deliverables
+                .contains(&ResearchOutput::DeepDive)
+        );
         assert!(health.missing_deliverables.contains(&ResearchOutput::Brief));
         assert!(health.skill_structure_valid);
 
-        unsafe { std::env::remove_var("RESEARCH_DIR"); }
+        unsafe {
+            std::env::remove_var("RESEARCH_DIR");
+        }
     }
 
     #[test]
@@ -511,16 +558,23 @@ Content
         fs::write(topic_path.join("deep_dive.md"), "content").unwrap();
         fs::write(topic_path.join("brief.md"), "content").unwrap();
 
-        unsafe { std::env::set_var("RESEARCH_DIR", temp.path()); }
+        unsafe {
+            std::env::set_var("RESEARCH_DIR", temp.path());
+        }
 
         let health = research_health(ResearchType::Software, "bad-skill").unwrap();
 
         assert!(!health.ok, "Health should not be OK");
         assert!(health.missing_underlying.is_empty());
         assert!(health.missing_deliverables.is_empty());
-        assert!(!health.skill_structure_valid, "Skill structure should be invalid");
+        assert!(
+            !health.skill_structure_valid,
+            "Skill structure should be invalid"
+        );
 
-        unsafe { std::env::remove_var("RESEARCH_DIR"); }
+        unsafe {
+            std::env::remove_var("RESEARCH_DIR");
+        }
     }
 
     #[test]
@@ -532,7 +586,9 @@ Content
         fs::write(topic_path.join("deep_dive.md"), "content").unwrap();
         fs::write(topic_path.join("brief.md"), "content").unwrap();
 
-        unsafe { std::env::set_var("RESEARCH_DIR", temp.path()); }
+        unsafe {
+            std::env::set_var("RESEARCH_DIR", temp.path());
+        }
 
         let health = research_health(ResearchType::Framework, "no-skill").unwrap();
 
@@ -540,15 +596,22 @@ Content
         assert!(health.missing_underlying.is_empty());
         assert_eq!(health.missing_deliverables.len(), 1);
         assert!(health.missing_deliverables.contains(&ResearchOutput::Skill));
-        assert!(!health.skill_structure_valid, "Skill structure should be invalid when file missing");
+        assert!(
+            !health.skill_structure_valid,
+            "Skill structure should be invalid when file missing"
+        );
 
-        unsafe { std::env::remove_var("RESEARCH_DIR"); }
+        unsafe {
+            std::env::remove_var("RESEARCH_DIR");
+        }
     }
 
     #[test]
     fn test_topic_not_found() {
         let temp = TempDir::new().unwrap();
-        unsafe { std::env::set_var("RESEARCH_DIR", temp.path()); }
+        unsafe {
+            std::env::set_var("RESEARCH_DIR", temp.path());
+        }
 
         let result = research_health(ResearchType::Library, "nonexistent");
 
@@ -560,7 +623,9 @@ Content
             _ => panic!("Expected TopicNotFound error"),
         }
 
-        unsafe { std::env::remove_var("RESEARCH_DIR"); }
+        unsafe {
+            std::env::remove_var("RESEARCH_DIR");
+        }
     }
 
     #[test]
@@ -586,13 +651,8 @@ Content
 
     #[test]
     fn test_research_health_empty_vecs_omitted() {
-        let health = ResearchHealth::new(
-            ResearchType::Tool,
-            "test".to_string(),
-            vec![],
-            vec![],
-            true,
-        );
+        let health =
+            ResearchHealth::new(ResearchType::Tool, "test".to_string(), vec![], vec![], true);
 
         let json = serde_json::to_string(&health).unwrap();
 

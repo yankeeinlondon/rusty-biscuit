@@ -78,8 +78,8 @@ pub async fn link(
     types: Vec<String>,
     json: bool,
 ) -> Result<LinkResult, LinkError> {
-    use tracing::{info, error, debug};
     use std::path::PathBuf;
+    use tracing::{debug, error, info};
 
     info!(
         "Starting link command with {} filters and {} type filters",
@@ -100,8 +100,8 @@ pub async fn link(
     debug!("Searching for topics in: {:?}", library_path);
 
     // 1. Discover topics
-    let all_topics = crate::list::discovery::discover_topics(library_path)
-        .map_err(LinkError::Discovery)?;
+    let all_topics =
+        crate::list::discovery::discover_topics(library_path).map_err(LinkError::Discovery)?;
 
     info!("Discovered {} topics", all_topics.len());
 
@@ -112,10 +112,10 @@ pub async fn link(
     info!("Filtered to {} topics", filtered_topics.len());
 
     // 3. Get home directory for target locations
-    let claude_skills_dir = detection::get_claude_skills_dir()
-        .map_err(|_| LinkError::HomeDirectory)?;
-    let opencode_skills_dir = detection::get_opencode_skills_dir()
-        .map_err(|_| LinkError::HomeDirectory)?;
+    let claude_skills_dir =
+        detection::get_claude_skills_dir().map_err(|_| LinkError::HomeDirectory)?;
+    let opencode_skills_dir =
+        detection::get_opencode_skills_dir().map_err(|_| LinkError::HomeDirectory)?;
 
     info!("Claude Code skills dir: {}", claude_skills_dir.display());
     info!("OpenCode skills dir: {}", opencode_skills_dir.display());
@@ -129,7 +129,11 @@ pub async fn link(
 
         // Validate source (early filtering)
         if !detection::validate_skill_source(&source_path) {
-            tracing::debug!("Invalid skill source for {}: {}", topic.name, source_path.display());
+            tracing::debug!(
+                "Invalid skill source for {}: {}",
+                topic.name,
+                source_path.display()
+            );
             links.push(SkillLink {
                 name: topic.name.clone(),
                 claude_action: SkillAction::NoneSkillDirectoryInvalid,
@@ -157,8 +161,12 @@ pub async fn link(
                         SkillAction::NoneSkillDirectoryInvalid
                     }
                     Err(creation::CreationError::SymlinkCreation(e))
-                        if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                        error!("Permission denied creating symlink for {}: {}", topic.name, e);
+                        if e.kind() == std::io::ErrorKind::PermissionDenied =>
+                    {
+                        error!(
+                            "Permission denied creating symlink for {}: {}",
+                            topic.name, e
+                        );
                         errors.push((topic.name.clone(), format!("Claude Code: {}", e)));
                         SkillAction::FailedPermissionDenied(e.to_string())
                     }
@@ -183,8 +191,12 @@ pub async fn link(
                         SkillAction::NoneSkillDirectoryInvalid
                     }
                     Err(creation::CreationError::SymlinkCreation(e))
-                        if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                        error!("Permission denied creating symlink for {}: {}", topic.name, e);
+                        if e.kind() == std::io::ErrorKind::PermissionDenied =>
+                    {
+                        error!(
+                            "Permission denied creating symlink for {}: {}",
+                            topic.name, e
+                        );
                         errors.push((topic.name.clone(), format!("OpenCode: {}", e)));
                         SkillAction::FailedPermissionDenied(e.to_string())
                     }
@@ -216,8 +228,8 @@ pub async fn link(
 
     // Format output
     if json {
-        let output = format::format_json(&result)
-            .map_err(|e| LinkError::Io(std::io::Error::other(e)))?;
+        let output =
+            format::format_json(&result).map_err(|e| LinkError::Io(std::io::Error::other(e)))?;
         println!("{}", output);
     } else {
         let output = format::format_terminal(&result);

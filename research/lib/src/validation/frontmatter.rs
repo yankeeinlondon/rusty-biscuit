@@ -100,8 +100,8 @@ pub fn extract_frontmatter(content: &str) -> Option<(String, String)> {
             let absolute_pos = search_pos + pos;
 
             // Check if this --- is at the start of a line
-            let is_line_start = absolute_pos == 0 ||
-                after_opening.as_bytes()[absolute_pos - 1] == b'\n';
+            let is_line_start =
+                absolute_pos == 0 || after_opening.as_bytes()[absolute_pos - 1] == b'\n';
 
             if is_line_start {
                 // Found closing delimiter
@@ -158,14 +158,13 @@ pub fn parse_and_validate_frontmatter(
     content: &str,
 ) -> Result<(SkillFrontmatter, String), FrontmatterError> {
     // Extract frontmatter and body
-    let (yaml_content, body) = extract_frontmatter(content)
-        .ok_or(FrontmatterError::MissingFrontmatter)?;
+    let (yaml_content, body) =
+        extract_frontmatter(content).ok_or(FrontmatterError::MissingFrontmatter)?;
 
     // Check if we actually found a closing delimiter
     // extract_frontmatter returns None if no closing delimiter is found
     // But we need to distinguish between missing opening and missing closing
-    if content.trim_start().starts_with("---") &&
-       extract_frontmatter(content).is_none() {
+    if content.trim_start().starts_with("---") && extract_frontmatter(content).is_none() {
         return Err(FrontmatterError::UnclosedFrontmatter);
     }
 
@@ -218,7 +217,10 @@ This is the body content.
         let (frontmatter, body) = result.unwrap();
         assert_eq!(frontmatter.name, "test-skill");
         assert_eq!(frontmatter.description, "A test skill for validation");
-        assert_eq!(frontmatter.tools, Some(vec!["Bash".to_string(), "Read".to_string()]));
+        assert_eq!(
+            frontmatter.tools,
+            Some(vec!["Bash".to_string(), "Read".to_string()])
+        );
         assert_eq!(frontmatter.last_updated, Some("2025-12-29".to_string()));
         assert_eq!(frontmatter.hash, Some("abc123".to_string()));
         assert!(body.contains("# Test Skill"));
@@ -239,7 +241,10 @@ Body content here.
 
         let (frontmatter, body) = result.unwrap();
         assert_eq!(frontmatter.name, "minimal-skill");
-        assert_eq!(frontmatter.description, "Minimal skill with only required fields");
+        assert_eq!(
+            frontmatter.description,
+            "Minimal skill with only required fields"
+        );
         assert_eq!(frontmatter.tools, None);
         assert_eq!(frontmatter.last_updated, None);
         assert_eq!(frontmatter.hash, None);
@@ -269,9 +274,12 @@ description: Missing closing delimiter
         assert!(result.is_err());
 
         match result.unwrap_err() {
-            FrontmatterError::UnclosedFrontmatter => {},
-            FrontmatterError::MissingFrontmatter => {},
-            other => panic!("Expected UnclosedFrontmatter or MissingFrontmatter, got {:?}", other),
+            FrontmatterError::UnclosedFrontmatter => {}
+            FrontmatterError::MissingFrontmatter => {}
+            other => panic!(
+                "Expected UnclosedFrontmatter or MissingFrontmatter, got {:?}",
+                other
+            ),
         }
     }
 
@@ -289,7 +297,7 @@ Body
         match result.unwrap_err() {
             FrontmatterError::InvalidYaml(_) => {
                 // serde will fail to deserialize without name field
-            },
+            }
             other => panic!("Expected InvalidYaml for missing name, got {:?}", other),
         }
     }
@@ -308,8 +316,11 @@ Body
         match result.unwrap_err() {
             FrontmatterError::InvalidYaml(_) => {
                 // serde will fail to deserialize without description field
-            },
-            other => panic!("Expected InvalidYaml for missing description, got {:?}", other),
+            }
+            other => panic!(
+                "Expected InvalidYaml for missing description, got {:?}",
+                other
+            ),
         }
     }
 
@@ -370,7 +381,11 @@ Body
         let (frontmatter, _) = result.unwrap();
         assert_eq!(
             frontmatter.tools,
-            Some(vec!["Bash".to_string(), "Read".to_string(), "Write".to_string()])
+            Some(vec![
+                "Bash".to_string(),
+                "Read".to_string(),
+                "Write".to_string()
+            ])
         );
     }
 
@@ -410,7 +425,7 @@ Body
         assert!(result.is_err());
 
         match result.unwrap_err() {
-            FrontmatterError::InvalidYaml(_) => {},
+            FrontmatterError::InvalidYaml(_) => {}
             other => panic!("Expected InvalidYaml, got {:?}", other),
         }
     }

@@ -59,7 +59,9 @@ pub fn format_terminal(result: &LinkResult) -> String {
         output.push('\n');
         output.push_str(&format!(
             "{}\n",
-            format!("Summary: {} failed", result.total_failed()).red().bold()
+            format!("Summary: {} failed", result.total_failed())
+                .red()
+                .bold()
         ));
     }
 
@@ -109,20 +111,24 @@ fn format_skill_link(link: &SkillLink) -> String {
             format!(
                 "- {}: {}",
                 topic_name,
-                format!("{} already linked, created link for {}",
+                format!(
+                    "{} already linked, created link for {}",
                     "OpenCode".italic(),
                     "Claude Code".italic()
-                ).green()
+                )
+                .green()
             )
         }
         (SkillAction::NoneAlreadyLinked, SkillAction::CreatedLink) => {
             format!(
                 "- {}: {}",
                 topic_name,
-                format!("{} already linked, created link for {}",
+                format!(
+                    "{} already linked, created link for {}",
                     "Claude Code".italic(),
                     "OpenCode".italic()
-                ).green()
+                )
+                .green()
             )
         }
 
@@ -161,8 +167,8 @@ fn format_skill_link(link: &SkillLink) -> String {
         }
 
         // Failures
-        (SkillAction::FailedPermissionDenied(msg), _) |
-        (_, SkillAction::FailedPermissionDenied(msg)) => {
+        (SkillAction::FailedPermissionDenied(msg), _)
+        | (_, SkillAction::FailedPermissionDenied(msg)) => {
             format!(
                 "- {}: {}",
                 topic_name,
@@ -170,8 +176,7 @@ fn format_skill_link(link: &SkillLink) -> String {
             )
         }
 
-        (SkillAction::FailedOther(msg), _) |
-        (_, SkillAction::FailedOther(msg)) => {
+        (SkillAction::FailedOther(msg), _) | (_, SkillAction::FailedOther(msg)) => {
             format!(
                 "- {}: {}",
                 topic_name,
@@ -183,12 +188,7 @@ fn format_skill_link(link: &SkillLink) -> String {
         (claude, opencode) => {
             let claude_status = format_action_status(claude, "Claude Code");
             let opencode_status = format_action_status(opencode, "OpenCode");
-            format!(
-                "- {}: {}, {}",
-                topic_name,
-                claude_status,
-                opencode_status
-            )
+            format!("- {}: {}, {}", topic_name, claude_status, opencode_status)
         }
     }
 }
@@ -197,14 +197,28 @@ fn format_skill_link(link: &SkillLink) -> String {
 fn format_action_status(action: &SkillAction, service: &str) -> String {
     match action {
         SkillAction::CreatedLink => format!("{}: {}", service.italic(), "created".green()),
-        SkillAction::NoneAlreadyLinked => format!("{}: {}", service.italic(), "already linked".dimmed()),
-        SkillAction::NoneLocalDefinition => format!("{}: {}", service.italic(), "local definition".yellow()),
-        SkillAction::NoneSkillDirectoryInvalid => format!("{}: {}", service.italic(), "invalid".yellow()),
+        SkillAction::NoneAlreadyLinked => {
+            format!("{}: {}", service.italic(), "already linked".dimmed())
+        }
+        SkillAction::NoneLocalDefinition => {
+            format!("{}: {}", service.italic(), "local definition".yellow())
+        }
+        SkillAction::NoneSkillDirectoryInvalid => {
+            format!("{}: {}", service.italic(), "invalid".yellow())
+        }
         SkillAction::FailedPermissionDenied(msg) => {
-            format!("{}: {}", service.italic(), format!("permission denied ({})", msg).red())
+            format!(
+                "{}: {}",
+                service.italic(),
+                format!("permission denied ({})", msg).red()
+            )
         }
         SkillAction::FailedOther(msg) => {
-            format!("{}: {}", service.italic(), format!("failed ({})", msg).red())
+            format!(
+                "{}: {}",
+                service.italic(),
+                format!("failed ({})", msg).red()
+            )
         }
     }
 }
@@ -456,7 +470,9 @@ mod tests {
             SkillAction::CreatedLink,
             SkillAction::NoneAlreadyLinked,
         ));
-        result.errors.push(("error-topic".to_string(), "test error".to_string()));
+        result
+            .errors
+            .push(("error-topic".to_string(), "test error".to_string()));
 
         let json = format_json(&result).unwrap();
         let deserialized: LinkResult = serde_json::from_str(&json).unwrap();
@@ -515,8 +531,12 @@ mod tests {
     #[test]
     fn test_format_json_errors_included() {
         let mut result = LinkResult::new();
-        result.errors.push(("topic1".to_string(), "error1".to_string()));
-        result.errors.push(("topic2".to_string(), "error2".to_string()));
+        result
+            .errors
+            .push(("topic1".to_string(), "error1".to_string()));
+        result
+            .errors
+            .push(("topic2".to_string(), "error2".to_string()));
 
         let json = format_json(&result).unwrap();
         assert!(json.contains("\"errors\""));

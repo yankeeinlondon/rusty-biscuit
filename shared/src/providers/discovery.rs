@@ -1,22 +1,17 @@
 //! Provider discovery via official APIs and hardcoded lists
 
+use super::base::Provider;
 use super::cache::{acquire_fetch_lock, check_cache, write_cache};
-use super::types::{LlmEntry, ProviderListFormat};
+use super::types::{LlmEntry, ProviderListFormat, OpenAIModelsResponse};
+use super::constants::*;
+use super::retry::*;
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::future::Future;
-use std::time::Duration;
 use thiserror::Error;
 use tracing::{info, warn};
 
-/// Rate limiting constants
-const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(1);
-const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
-const RETRY_MULTIPLIER: f64 = 2.0;
-const MAX_RETRIES: u32 = 3;
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_RESPONSE_SIZE: usize = 10 * 1024 * 1024; // 10MB
+// Constants and retry logic now imported from shared modules (Phase 0 refactoring)
 
 #[derive(Debug, Error)]
 pub enum ProviderError {
@@ -43,18 +38,18 @@ pub enum ProviderError {
 
     #[error("Invalid model name for URL generation: {model}")]
     InvalidUrl { model: String },
+
+    #[error("Unknown model '{model}' for provider {provider:?}")]
+    UnknownModel { provider: Provider, model: String },
+
+    #[error("Invalid model string format: '{input}' (expected 'provider/model-id')")]
+    InvalidModelString { input: String },
+
+    #[error("Validation timeout for provider {provider:?}")]
+    ValidationTimeout { provider: Provider },
 }
 
-/// OpenAI API response for /v1/models
-#[derive(Debug, Deserialize)]
-struct OpenAIModelsResponse {
-    data: Vec<OpenAIModel>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAIModel {
-    id: String,
-}
+// OpenAI types now imported from super::types (Phase 0 refactoring)
 
 /// Hugging Face API response for /api/models
 #[allow(dead_code)]
@@ -66,58 +61,7 @@ struct HuggingFaceModel {
     tags: Vec<String>,
 }
 
-/// Check if an error is a rate limit error
-fn is_rate_limit_error(error: &ProviderError) -> bool {
-    match error {
-        ProviderError::HttpError(e) => e
-            .status()
-            .map(|s| s.as_u16() == 429)
-            .unwrap_or(false),
-        ProviderError::RateLimitExceeded { .. } => true,
-        _ => false,
-    }
-}
-
-/// Fetch with exponential backoff retry logic
-async fn fetch_with_retry<F, Fut, T>(
-    fetch_fn: F,
-    provider_name: &str,
-) -> Result<T, ProviderError>
-where
-    F: Fn() -> Fut,
-    Fut: Future<Output = Result<T, ProviderError>>,
-{
-    let mut delay = INITIAL_RETRY_DELAY;
-
-    for attempt in 0..=MAX_RETRIES {
-        match tokio::time::timeout(REQUEST_TIMEOUT, fetch_fn()).await {
-            Ok(Ok(result)) => return Ok(result),
-            Ok(Err(e)) if is_rate_limit_error(&e) && attempt < MAX_RETRIES => {
-                warn!(
-                    "Rate limit hit for {}, retry {} after {:?}",
-                    provider_name,
-                    attempt + 1,
-                    delay
-                );
-                tokio::time::sleep(delay).await;
-                delay = std::cmp::min(
-                    Duration::from_secs_f64(delay.as_secs_f64() * RETRY_MULTIPLIER),
-                    MAX_RETRY_DELAY,
-                );
-            }
-            Ok(Err(e)) => return Err(e),
-            Err(_) => {
-                return Err(ProviderError::Timeout {
-                    provider: provider_name.to_string(),
-                })
-            }
-        }
-    }
-
-    Err(ProviderError::RateLimitExceeded {
-        provider: provider_name.to_string(),
-    })
-}
+// Retry logic now imported from super::retry (Phase 0 refactoring)
 
 /// Fetch models from OpenAI API
 async fn fetch_openai_models() -> Result<Vec<LlmEntry>, ProviderError> {

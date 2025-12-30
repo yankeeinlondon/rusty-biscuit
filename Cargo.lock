@@ -2816,6 +2816,7 @@ dependencies = [
  "once_cell",
  "proptest",
  "quote",
+ "regex",
  "reqwest",
  "rig-core",
  "scraper",

@@ -230,10 +230,7 @@ pub async fn check_missing_outputs(output_dir: &std::path::Path) -> Vec<MissingO
     for (name, filename) in EXPECTED_OUTPUTS {
         let path = output_dir.join(filename);
         if !path.exists() {
-            missing.push(MissingOutput {
-                name,
-                filename,
-            });
+            missing.push(MissingOutput { name, filename });
         }
     }
 
@@ -805,7 +802,7 @@ pub struct ResearchResult {
 /// ```
 fn split_into_files(content: &str) -> Vec<(String, String)> {
     let mut files = Vec::new();
-    let mut current_filename = "SKILL.md".to_string();  // First file is implicitly SKILL.md
+    let mut current_filename = "SKILL.md".to_string(); // First file is implicitly SKILL.md
     let mut current_content = String::new();
 
     for line in content.lines() {
@@ -816,7 +813,8 @@ fn split_into_files(content: &str) -> Vec<(String, String)> {
             }
 
             // Extract new filename from separator
-            current_filename = line.trim_start_matches("--- FILE:")
+            current_filename = line
+                .trim_start_matches("--- FILE:")
                 .trim_end_matches("---")
                 .trim()
                 .to_string();
@@ -1322,10 +1320,16 @@ async fn run_incremental_research(
     // Build status message
     let mut parts = Vec::new();
     if has_missing_prompts {
-        parts.push(format!("Regenerating {} missing prompt(s)", missing_prompts.len()));
+        parts.push(format!(
+            "Regenerating {} missing prompt(s)",
+            missing_prompts.len()
+        ));
     }
     if has_missing_outputs {
-        parts.push(format!("Regenerating {} missing output(s)", missing_outputs.len()));
+        parts.push(format!(
+            "Regenerating {} missing output(s)",
+            missing_outputs.len()
+        ));
     }
     if has_questions {
         parts.push(format!("Adding {} new question(s)", questions.len()));
@@ -1774,60 +1778,58 @@ async fn run_incremental_research(
     if skill_result.metrics.is_some()
         && let Ok(skill_content) = fs::read_to_string(skill_dir.join("SKILL.md")).await
     {
-            // Step 1: Split files BEFORE normalization
-            let files = if skill_content.contains("--- FILE:") {
-                split_into_files(&skill_content)
+        // Step 1: Split files BEFORE normalization
+        let files = if skill_content.contains("--- FILE:") {
+            split_into_files(&skill_content)
+        } else {
+            vec![("SKILL.md".to_string(), skill_content)]
+        };
+
+        // Step 2: Selectively normalize files (skip SKILL.md, normalize others)
+        for (filename, content) in files {
+            let final_content = if filename == "SKILL.md" {
+                // Don't normalize SKILL.md - preserve frontmatter exactly as LLM generated it
+                content
             } else {
-                vec![("SKILL.md".to_string(), skill_content)]
+                // Normalize supporting documentation files
+                normalize_markdown(&content)
             };
 
-            // Step 2: Selectively normalize files (skip SKILL.md, normalize others)
-            for (filename, content) in files {
-                let final_content = if filename == "SKILL.md" {
-                    // Don't normalize SKILL.md - preserve frontmatter exactly as LLM generated it
-                    content
-                } else {
-                    // Normalize supporting documentation files
-                    normalize_markdown(&content)
-                };
-
-                let file_path = skill_dir.join(&filename);
-                if let Err(e) = fs::write(&file_path, final_content).await {
-                    tracing::error!("Failed to write {}: {}", filename, e);
-                }
+            let file_path = skill_dir.join(&filename);
+            if let Err(e) = fs::write(&file_path, final_content).await {
+                tracing::error!("Failed to write {}: {}", filename, e);
             }
+        }
 
-            // Validate SKILL.md frontmatter and extract when_to_use
-            let skill_md_path = skill_dir.join("SKILL.md");
-            if let Ok(skill_content) = fs::read_to_string(&skill_md_path).await {
-                match parse_and_validate_frontmatter(&skill_content) {
-                    Ok((frontmatter, _body)) => {
-                        tracing::info!("✓ SKILL.md frontmatter is valid");
+        // Validate SKILL.md frontmatter and extract when_to_use
+        let skill_md_path = skill_dir.join("SKILL.md");
+        if let Ok(skill_content) = fs::read_to_string(&skill_md_path).await {
+            match parse_and_validate_frontmatter(&skill_content) {
+                Ok((frontmatter, _body)) => {
+                    tracing::info!("✓ SKILL.md frontmatter is valid");
 
-                        // Update metadata with when_to_use
-                        existing_metadata.when_to_use = Some(frontmatter.description.clone());
-                        existing_metadata.updated_at = Utc::now();
+                    // Update metadata with when_to_use
+                    existing_metadata.when_to_use = Some(frontmatter.description.clone());
+                    existing_metadata.updated_at = Utc::now();
 
-                        if let Err(e) = existing_metadata.save(&output_dir).await {
-                            tracing::error!("Failed to save metadata: {}", e);
-                        } else {
-                            tracing::info!("✓ Updated metadata.when_to_use");
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
-                        tracing::error!("  File: {}", skill_md_path.display());
-                        tracing::error!("  Please manually fix the frontmatter in SKILL.md");
-
-                        eprintln!("\n⚠️  Warning: SKILL.md frontmatter is invalid");
-                        eprintln!("   {}", e);
-                        eprintln!("   File: {}", skill_md_path.display());
-                        eprintln!(
-                            "   The skill may not activate correctly until this is fixed.\n"
-                        );
+                    if let Err(e) = existing_metadata.save(&output_dir).await {
+                        tracing::error!("Failed to save metadata: {}", e);
+                    } else {
+                        tracing::info!("✓ Updated metadata.when_to_use");
                     }
                 }
+                Err(e) => {
+                    tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
+                    tracing::error!("  File: {}", skill_md_path.display());
+                    tracing::error!("  Please manually fix the frontmatter in SKILL.md");
+
+                    eprintln!("\n⚠️  Warning: SKILL.md frontmatter is invalid");
+                    eprintln!("   {}", e);
+                    eprintln!("   File: {}", skill_md_path.display());
+                    eprintln!("   The skill may not activate correctly until this is fixed.\n");
+                }
             }
+        }
     }
 
     // Normalize deep_dive.md if it was generated
@@ -1983,7 +1985,12 @@ async fn run_incremental_research(
         json = json
     )
 )]
-pub async fn list(filters: Vec<String>, types: Vec<String>, verbose: bool, json: bool) -> Result<(), String> {
+pub async fn list(
+    filters: Vec<String>,
+    types: Vec<String>,
+    verbose: bool,
+    json: bool,
+) -> Result<(), String> {
     use list::{apply_filters, discover_topics, format_json, format_terminal};
 
     // Get RESEARCH_DIR from env (default to HOME)
@@ -2717,50 +2724,48 @@ pub async fn research(
     {
         // Step 1: Split files BEFORE normalization
         let files = if skill_content.contains("--- FILE:") {
-                split_into_files(&skill_content)
+            split_into_files(&skill_content)
+        } else {
+            vec![("SKILL.md".to_string(), skill_content)]
+        };
+
+        // Step 2: Selectively normalize files (skip SKILL.md, normalize others)
+        for (filename, content) in files {
+            let final_content = if filename == "SKILL.md" {
+                // Don't normalize SKILL.md - preserve frontmatter exactly as LLM generated it
+                content
             } else {
-                vec![("SKILL.md".to_string(), skill_content)]
+                // Normalize supporting documentation files
+                normalize_markdown(&content)
             };
 
-            // Step 2: Selectively normalize files (skip SKILL.md, normalize others)
-            for (filename, content) in files {
-                let final_content = if filename == "SKILL.md" {
-                    // Don't normalize SKILL.md - preserve frontmatter exactly as LLM generated it
-                    content
-                } else {
-                    // Normalize supporting documentation files
-                    normalize_markdown(&content)
-                };
+            let file_path = skill_dir.join(&filename);
+            if let Err(e) = fs::write(&file_path, final_content).await {
+                tracing::error!("Failed to write {}: {}", filename, e);
+            }
+        }
 
-                let file_path = skill_dir.join(&filename);
-                if let Err(e) = fs::write(&file_path, final_content).await {
-                    tracing::error!("Failed to write {}: {}", filename, e);
+        // Validate SKILL.md frontmatter and extract when_to_use
+        let skill_md_path = skill_dir.join("SKILL.md");
+        if let Ok(skill_content) = fs::read_to_string(&skill_md_path).await {
+            match parse_and_validate_frontmatter(&skill_content) {
+                Ok((frontmatter, _body)) => {
+                    tracing::info!("✓ SKILL.md frontmatter is valid");
+                    when_to_use = Some(frontmatter.description.clone());
+                    tracing::info!("✓ Extracted when_to_use from frontmatter");
+                }
+                Err(e) => {
+                    tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
+                    tracing::error!("  File: {}", skill_md_path.display());
+                    tracing::error!("  Please manually fix the frontmatter in SKILL.md");
+
+                    eprintln!("\n⚠️  Warning: SKILL.md frontmatter is invalid");
+                    eprintln!("   {}", e);
+                    eprintln!("   File: {}", skill_md_path.display());
+                    eprintln!("   The skill may not activate correctly until this is fixed.\n");
                 }
             }
-
-            // Validate SKILL.md frontmatter and extract when_to_use
-            let skill_md_path = skill_dir.join("SKILL.md");
-            if let Ok(skill_content) = fs::read_to_string(&skill_md_path).await {
-                match parse_and_validate_frontmatter(&skill_content) {
-                    Ok((frontmatter, _body)) => {
-                        tracing::info!("✓ SKILL.md frontmatter is valid");
-                        when_to_use = Some(frontmatter.description.clone());
-                        tracing::info!("✓ Extracted when_to_use from frontmatter");
-                    }
-                    Err(e) => {
-                        tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
-                        tracing::error!("  File: {}", skill_md_path.display());
-                        tracing::error!("  Please manually fix the frontmatter in SKILL.md");
-
-                        eprintln!("\n⚠️  Warning: SKILL.md frontmatter is invalid");
-                        eprintln!("   {}", e);
-                        eprintln!("   File: {}", skill_md_path.display());
-                        eprintln!(
-                            "   The skill may not activate correctly until this is fixed.\n"
-                        );
-                    }
-                }
-            }
+        }
     }
 
     // Normalize deep_dive.md if it was generated

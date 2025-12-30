@@ -230,9 +230,10 @@ pub fn validate_skill_source(path: &Path) -> bool {
 fn validate_no_traversal(path: &Path) -> Result<(), DetectionError> {
     for component in path.components() {
         if component == std::path::Component::ParentDir {
-            return Err(DetectionError::InvalidPath(
-                format!("Path contains '..' component: {}", path.display())
-            ));
+            return Err(DetectionError::InvalidPath(format!(
+                "Path contains '..' component: {}",
+                path.display()
+            )));
         }
     }
     Ok(())
@@ -271,13 +272,15 @@ fn validate_within_allowed_dirs(path: &Path) -> Result<(), DetectionError> {
     // Check if path starts with any allowed prefix
     if path_str.starts_with(&*claude_str)
         || path_str.starts_with(&*opencode_str)
-        || path.is_absolute() // Allow absolute paths for source directories
+        || path.is_absolute()
+    // Allow absolute paths for source directories
     {
         Ok(())
     } else {
-        Err(DetectionError::PathOutsideAllowed(
-            format!("Path is outside allowed directories: {}", path.display())
-        ))
+        Err(DetectionError::PathOutsideAllowed(format!(
+            "Path is outside allowed directories: {}",
+            path.display()
+        )))
     }
 }
 
@@ -331,19 +334,28 @@ pub fn determine_action(target_path: &Path, source_path: &Path) -> SkillAction {
 
     // Validate source is a valid skill directory
     if !validate_skill_source(source_path) {
-        debug!("Source skill directory is invalid: {}", source_path.display());
+        debug!(
+            "Source skill directory is invalid: {}",
+            source_path.display()
+        );
         return SkillAction::NoneSkillDirectoryInvalid;
     }
 
     // Check if target exists
     if check_local_definition_exists(target_path) {
-        debug!("Local definition exists at target: {}", target_path.display());
+        debug!(
+            "Local definition exists at target: {}",
+            target_path.display()
+        );
         return SkillAction::NoneLocalDefinition;
     }
 
     // Check if symlink exists (working or broken)
     if check_is_symlink(target_path) {
-        debug!("Symlink already exists at target: {}", target_path.display());
+        debug!(
+            "Symlink already exists at target: {}",
+            target_path.display()
+        );
         return SkillAction::NoneAlreadyLinked;
     }
 

@@ -154,9 +154,7 @@ fn analyze_topic(name: String, location: PathBuf) -> TopicInfo {
         Ok(metadata) => {
             topic.topic_type = metadata.kind.unwrap_or_else(|| "library".to_string());
             topic.description = metadata.brief;
-            topic.language = metadata
-                .library_info
-                .and_then(|li| li.language);
+            topic.language = metadata.library_info.and_then(|li| li.language);
             topic.missing_metadata = false;
         }
         Err(err) => {

@@ -146,7 +146,10 @@ pub fn ensure_parent_directory(path: &Path) -> Result<(), std::io::Error> {
 /// # Ok::<(), research_lib::link::creation::CreationError>(())
 /// ```
 #[instrument]
-pub fn create_skill_symlink(skill_dir: &Path, symlink_location: &Path) -> Result<(), CreationError> {
+pub fn create_skill_symlink(
+    skill_dir: &Path,
+    symlink_location: &Path,
+) -> Result<(), CreationError> {
     debug!(
         "Creating symlink: {:?} -> {:?}",
         symlink_location, skill_dir

@@ -31,15 +31,17 @@
 //! ```
 
 pub mod cache;
+pub mod constants;
 pub mod curated;
 pub mod discovery;
+pub mod retry;
 pub mod types;
 pub mod base;
 
 // Re-export main types and functions
 pub use curated::{get_curated_models, LAST_UPDATED, PROVIDER_COUNT};
 pub use discovery::{generate_provider_list, ProviderError};
-pub use types::{LlmEntry, ProviderListFormat};
+pub use types::{LlmEntry, ProviderListFormat, OpenAIModelsResponse, OpenAIModel, ProviderModel};
 pub use base::{
     Provider,
     has_provider_api_key,

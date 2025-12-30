@@ -40,16 +40,12 @@
 //! ```
 
 use std::collections::{HashMap, BTreeMap};
-use std::time::Duration;
 use lazy_static::lazy_static;
 use serde_json::Value;
 use url::Url;
 use strum_macros::EnumIter;
 use strum::IntoEnumIterator;
-use reqwest::Client;
-use serde::Deserialize;
-use futures::stream::{self, StreamExt};
-use tracing::{info, warn, debug};
+use tracing::{info, warn};
 use crate::providers::discovery::ProviderError;
 
 
@@ -124,7 +120,7 @@ lazy_static! {
 
 lazy_static! {
     /// Base URLs for provider APIs (OpenAI-compatible endpoints)
-    static ref PROVIDER_BASE_URLS: HashMap<Provider, &'static str> = {
+    pub static ref PROVIDER_BASE_URLS: HashMap<Provider, &'static str> = {
         let mut urls = HashMap::new();
         urls.insert(Provider::Anthropic, "https://api.anthropic.com");
         urls.insert(Provider::Deepseek, "https://api.deepseek.com");
@@ -141,31 +137,14 @@ lazy_static! {
 
 lazy_static! {
     /// Custom model endpoints for providers that don't use the standard /v1/models
-    static ref PROVIDER_MODELS_ENDPOINT: HashMap<Provider, &'static str> = {
+    pub static ref PROVIDER_MODELS_ENDPOINT: HashMap<Provider, &'static str> = {
         // Most providers use /v1/models (default)
         // Only add exceptions here if needed
         HashMap::new()
     };
 }
 
-/// Constants for HTTP requests (aligned with discovery.rs)
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_RESPONSE_SIZE: usize = 10 * 1024 * 1024; // 10MB
-const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(1);
-const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
-const RETRY_MULTIPLIER: f64 = 2.0;
-const MAX_RETRIES: u32 = 3;
-
-/// OpenAI-compatible API response for /v1/models
-#[derive(Debug, Deserialize)]
-struct OpenAIModelsResponse {
-    data: Vec<OpenAIModel>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAIModel {
-    id: String,
-}
+// Constants and types now imported from shared modules (Phase 0 refactoring)
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct ModelArchitecture {
@@ -258,7 +237,7 @@ pub struct ModelDefinition {
 ///
 /// Returns a tuple of (header_name, header_value).
 /// For providers with no authentication (like local Ollama), returns empty strings.
-fn build_auth_header(provider: &Provider, api_key: &str) -> (String, String) {
+pub fn build_auth_header(provider: &Provider, api_key: &str) -> (String, String) {
     match PROVIDER_AUTH.get(provider) {
         Some(ApiAuthMethod::BearerToken) => {
             ("Authorization".to_string(), format!("Bearer {}", api_key))
@@ -403,141 +382,8 @@ pub fn get_api_keys() -> BTreeMap<Provider, String> {
     api_keys
 }
 
-
-/// Check if an error is a rate limit error
-fn is_rate_limit_error(error: &ProviderError) -> bool {
-    match error {
-        ProviderError::HttpError(e) => e
-            .status()
-            .map(|s| s.as_u16() == 429)
-            .unwrap_or(false),
-        ProviderError::RateLimitExceeded { .. } => true,
-        _ => false,
-    }
-}
-
-/// Fetch with exponential backoff retry logic
-async fn fetch_with_retry<F, Fut, T>(
-    fetch_fn: F,
-    provider_name: &str,
-) -> Result<T, ProviderError>
-where
-    F: Fn() -> Fut,
-    Fut: std::future::Future<Output = Result<T, ProviderError>>,
-{
-    let mut delay = INITIAL_RETRY_DELAY;
-
-    for attempt in 0..=MAX_RETRIES {
-        match tokio::time::timeout(REQUEST_TIMEOUT, fetch_fn()).await {
-            Ok(Ok(result)) => return Ok(result),
-            Ok(Err(e)) if is_rate_limit_error(&e) && attempt < MAX_RETRIES => {
-                warn!(
-                    "Rate limit hit for {}, retry {} after {:?}",
-                    provider_name,
-                    attempt + 1,
-                    delay
-                );
-                tokio::time::sleep(delay).await;
-                delay = std::cmp::min(
-                    Duration::from_secs_f64(delay.as_secs_f64() * RETRY_MULTIPLIER),
-                    MAX_RETRY_DELAY,
-                );
-            }
-            Ok(Err(e)) => return Err(e),
-            Err(_) => {
-                return Err(ProviderError::Timeout {
-                    provider: provider_name.to_string(),
-                })
-            }
-        }
-    }
-
-    Err(ProviderError::RateLimitExceeded {
-        provider: provider_name.to_string(),
-    })
-}
-
-/// Fetch models from a single provider
-#[tracing::instrument(skip(api_key))]
-async fn fetch_models_for_provider(
-    provider: Provider,
-    api_key: &str,
-) -> Result<Vec<String>, ProviderError> {
-    // Skip ZenMux - it doesn't support /v1/models endpoint
-    if provider == Provider::ZenMux {
-        debug!("Skipping ZenMux - no /v1/models endpoint support");
-        return Ok(vec![]);
-    }
-
-    // Get base URL
-    let Some(base_url) = PROVIDER_BASE_URLS.get(&provider) else {
-        warn!("No base URL configured for {:?}", provider);
-        return Ok(vec![]);
-    };
-
-    // Get endpoint (default to /v1/models)
-    let endpoint = PROVIDER_MODELS_ENDPOINT
-        .get(&provider)
-        .copied()
-        .unwrap_or("/v1/models");
-
-    let url = format!("{}{}", base_url, endpoint);
-    let provider_name = format!("{:?}", provider).to_lowercase();
-
-    debug!("Fetching models from {} at {}", provider_name, url);
-
-    // Build auth header
-    let (header_name, header_value) = build_auth_header(&provider, api_key);
-
-    // Create HTTP client and make request
-    let client = Client::new();
-    let mut request = client.get(&url);
-
-    // Add auth header if not empty
-    if !header_name.is_empty() {
-        request = request.header(&header_name, &header_value);
-    }
-
-    // Make the request
-    let response = request.send().await?;
-
-    // Check for authentication failure
-    if response.status().as_u16() == 401 {
-        return Err(ProviderError::AuthenticationFailed {
-            provider: provider_name.clone(),
-        });
-    }
-
-    // Check for rate limiting
-    if response.status().as_u16() == 429 {
-        return Err(ProviderError::RateLimitExceeded {
-            provider: provider_name.clone(),
-        });
-    }
-
-    // Check response size
-    if let Some(content_length) = response.content_length()
-        && content_length as usize > MAX_RESPONSE_SIZE {
-            return Err(ProviderError::ResponseTooLarge {
-                provider: provider_name.clone(),
-                size: content_length as usize,
-            });
-        }
-
-    // Parse response
-    let data: OpenAIModelsResponse = response.json().await?;
-
-    // Prefix model IDs with provider name
-    let models: Vec<String> = data
-        .data
-        .into_iter()
-        .map(|model| format!("{}/{}", provider_name, model.id))
-        .collect();
-
-    info!("Fetched {} models from {}", models.len(), provider_name);
-
-    Ok(models)
-}
+// Retry logic now imported from super::retry (Phase 0 refactoring)
+// Model fetching logic now imported from crate::api::openai_compat (Phase 1 refactoring)
 
 /// Fetches available models from all configured providers with OpenAI-compatible APIs.
 ///
@@ -610,51 +456,17 @@ async fn fetch_models_for_provider(
 /// - Concurrent limit: 8 providers at once
 #[tracing::instrument]
 pub async fn get_provider_models() -> Result<Vec<String>, ProviderError> {
-    let api_keys = get_api_keys();
+    use crate::api::openai_compat::get_all_provider_models;
 
-    if api_keys.is_empty() {
-        info!("No API keys configured, returning empty model list");
-        return Ok(vec![]);
-    }
+    // Call the api module function to get all models
+    let all_models_by_provider = get_all_provider_models().await?;
 
-    info!("Fetching models from {} providers", api_keys.len());
-
-    // Create futures for each provider with staggered start times
-    let provider_futures: Vec<_> = api_keys
-        .iter()
-        .enumerate()
-        .map(|(i, (provider, api_key))| {
-            let provider = *provider;
-            let api_key = api_key.clone();
-            async move {
-                // Stagger start times to avoid overwhelming provider APIs
-                tokio::time::sleep(Duration::from_millis(100 * i as u64)).await;
-
-                // Wrap in retry logic
-                fetch_with_retry(
-                    || fetch_models_for_provider(provider, &api_key),
-                    &format!("{:?}", provider).to_lowercase(),
-                )
-                .await
-            }
-        })
-        .collect();
-
-    // Execute in parallel with buffer_unordered(8) to limit concurrent requests
-    let results: Vec<Result<Vec<String>, ProviderError>> = stream::iter(provider_futures)
-        .buffer_unordered(8)
-        .collect()
-        .await;
-
-    // Collect successful results and log errors
+    // Flatten the HashMap and add provider prefixes
     let mut all_models = Vec::new();
-    for result in results {
-        match result {
-            Ok(models) => all_models.extend(models),
-            Err(e) => {
-                warn!("Failed to fetch models from provider: {}", e);
-                // Continue with other providers
-            }
+    for (provider, models) in all_models_by_provider {
+        let provider_name = format!("{:?}", provider).to_lowercase();
+        for model_id in models {
+            all_models.push(format!("{}/{}", provider_name, model_id));
         }
     }
 
@@ -1165,59 +977,14 @@ mod tests {
         // For now, we test the helper functions individually
     }
 
-    #[tokio::test]
-    async fn test_fetch_with_retry_success() {
-        let result = fetch_with_retry(
-            || async { Ok::<i32, ProviderError>(42) },
-            "test_provider"
-        ).await;
-
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 42);
-    }
-
-    #[tokio::test]
-    async fn test_fetch_with_retry_timeout() {
-        let result = fetch_with_retry(
-            || async {
-                tokio::time::sleep(Duration::from_secs(60)).await;
-                Ok::<i32, ProviderError>(42)
-            },
-            "test_provider"
-        ).await;
-
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            ProviderError::Timeout { provider } => {
-                assert_eq!(provider, "test_provider");
-            }
-            _ => panic!("Expected Timeout error"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_is_rate_limit_error() {
-        let rate_limit_err = ProviderError::RateLimitExceeded {
-            provider: "test".to_string(),
-        };
-        assert!(is_rate_limit_error(&rate_limit_err));
-
-        let auth_err = ProviderError::AuthenticationFailed {
-            provider: "test".to_string(),
-        };
-        assert!(!is_rate_limit_error(&auth_err));
-    }
-
-    #[tokio::test]
-    async fn test_fetch_models_for_provider_zenmux_skipped() {
-        let result = fetch_models_for_provider(Provider::ZenMux, "fake-key").await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
-    }
+    // Tests for retry logic and model fetching have been moved to:
+    // - shared/src/providers/retry.rs (retry tests)
+    // - shared/src/api/openai_compat.rs (model fetching tests)
 
     #[tokio::test]
     #[serial_test::serial]
     async fn test_get_provider_models_parallel_execution() {
+        use std::time::Duration;
         use tokio::time::Instant;
 
         // This is a timing-based test to verify parallel execution

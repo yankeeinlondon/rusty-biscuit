@@ -11,7 +11,7 @@
 use research_lib::validation::frontmatter::{
     FrontmatterError, SkillFrontmatter, parse_and_validate_frontmatter,
 };
-use research_lib::{ResearchMetadata, LibraryInfo};
+use research_lib::{LibraryInfo, ResearchMetadata};
 
 /// Helper function to access the split_into_files function from lib.rs
 /// Since it's private, we'll test it through the public API or duplicate the logic here.
@@ -98,10 +98,7 @@ Full content here.
 
     let (frontmatter, body) = result.unwrap();
     assert_eq!(frontmatter.name, "complete-skill");
-    assert_eq!(
-        frontmatter.description,
-        "A complete skill with all fields"
-    );
+    assert_eq!(frontmatter.description, "A complete skill with all fields");
     assert_eq!(
         frontmatter.tools,
         Some(vec![
@@ -165,7 +162,10 @@ description: Missing closing delimiter
     // Should be either UnclosedFrontmatter or MissingFrontmatter
     match result.unwrap_err() {
         FrontmatterError::UnclosedFrontmatter | FrontmatterError::MissingFrontmatter => {}
-        other => panic!("Expected UnclosedFrontmatter or MissingFrontmatter, got {:?}", other),
+        other => panic!(
+            "Expected UnclosedFrontmatter or MissingFrontmatter, got {:?}",
+            other
+        ),
     }
 }
 
@@ -201,7 +201,10 @@ Body
     // serde will fail to deserialize without description field
     match result.unwrap_err() {
         FrontmatterError::InvalidYaml(_) => {}
-        other => panic!("Expected InvalidYaml for missing description, got {:?}", other),
+        other => panic!(
+            "Expected InvalidYaml for missing description, got {:?}",
+            other
+        ),
     }
 }
 
@@ -467,7 +470,10 @@ Example content."#;
 
     let (frontmatter, _body) = result.unwrap();
     assert_eq!(frontmatter.name, "test-lib");
-    assert_eq!(frontmatter.description, "Test library for regression testing");
+    assert_eq!(
+        frontmatter.description,
+        "Test library for regression testing"
+    );
 }
 
 #[test]
@@ -752,8 +758,16 @@ Example 2"#;
 
     // Verify each file has substantial content
     for (filename, file_content) in &files {
-        assert!(!file_content.trim().is_empty(), "{} should not be empty", filename);
-        assert!(file_content.contains("#"), "{} should contain headers", filename);
+        assert!(
+            !file_content.trim().is_empty(),
+            "{} should not be empty",
+            filename
+        );
+        assert!(
+            file_content.contains("#"),
+            "{} should contain headers",
+            filename
+        );
     }
 }
 

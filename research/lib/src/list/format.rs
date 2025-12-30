@@ -162,9 +162,7 @@ fn format_main_line(topic: &TopicInfo, hide_type_badge: bool, verbose: bool) -> 
     parts.push(format_language_icon(topic.language.as_ref()));
 
     // Description (if present and in verbose mode)
-    if verbose
-        && let Some(ref desc) = topic.description
-    {
+    if verbose && let Some(ref desc) = topic.description {
         parts.push(" : ".to_string());
         parts.push(desc.italic().to_string());
     }
@@ -288,7 +286,9 @@ fn format_type_badge(topic_type: &str) -> String {
     let (r, g, b) = get_badge_color(topic_type);
 
     // Format as " TYPE " with background on entire string including spaces
-    format!(" {} ", topic_type).on_truecolor(r, g, b).to_string()
+    format!(" {} ", topic_type)
+        .on_truecolor(r, g, b)
+        .to_string()
 }
 
 /// Format language icon based on language string

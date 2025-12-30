@@ -3,7 +3,7 @@
 //! These tests verify the complete end-to-end workflow of the link command,
 //! including topic discovery, filtering, and symlink creation.
 
-use research_lib::link::{link, SkillAction};
+use research_lib::link::{SkillAction, link};
 use serial_test::serial;
 use std::env;
 use std::fs;
@@ -226,10 +226,7 @@ async fn test_asymmetric_failure_claude_succeeds_opencode_fails() {
         skill_link.claude_action,
         SkillAction::CreatedLink | SkillAction::NoneAlreadyLinked
     ));
-    assert_eq!(
-        skill_link.opencode_action,
-        SkillAction::NoneLocalDefinition
-    );
+    assert_eq!(skill_link.opencode_action, SkillAction::NoneLocalDefinition);
 }
 
 #[tokio::test]
@@ -320,10 +317,7 @@ async fn test_topic_has_no_skill_directory_verification() {
         .iter()
         .find(|l| l.name == "valid-skill")
         .unwrap();
-    assert_ne!(
-        valid.claude_action,
-        SkillAction::NoneSkillDirectoryInvalid
-    );
+    assert_ne!(valid.claude_action, SkillAction::NoneSkillDirectoryInvalid);
 }
 
 #[tokio::test]
@@ -360,7 +354,10 @@ async fn test_idempotency_running_twice_produces_same_result() {
     }
 
     // Should have same number of processed topics
-    assert_eq!(link_result1.total_processed(), link_result2.total_processed());
+    assert_eq!(
+        link_result1.total_processed(),
+        link_result2.total_processed()
+    );
     assert_eq!(link_result1.total_processed(), 2);
 
     // First run should create links
@@ -371,10 +368,7 @@ async fn test_idempotency_running_twice_produces_same_result() {
 
     // Verify actions changed from CreatedLink to NoneAlreadyLinked
     for link in &link_result2.links {
-        assert!(matches!(
-            link.claude_action,
-            SkillAction::NoneAlreadyLinked
-        ));
+        assert!(matches!(link.claude_action, SkillAction::NoneAlreadyLinked));
         assert!(matches!(
             link.opencode_action,
             SkillAction::NoneAlreadyLinked
