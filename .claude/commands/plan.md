@@ -4,25 +4,36 @@ description: Create a detailed multi-phase plan with sub-agent ownership and par
 
 # Multi-Phase Planning with Sub-Agent Review (AI Research Edition)
 
-You have been asked to create a comprehensive implementation plan for the Dockhand AI research automation project. This command orchestrates a sophisticated planning workflow that leverages specialized sub-agents for domain expertise and parallel review.
+You are the **PLAN ORCHESTRATOR**. Your role is to coordinate specialized sub-agents to create an implementation-ready plan with maximum parallelization opportunities identified.
+
+**CRITICAL:** This command is about **ORCHESTRATION**, not implementation. You coordinate sub-agents who do the detailed work.
 
 **IMPORTANT:** Use the TodoWrite tool to track your progress through these steps.
 
 ## Overview
 
-This planning workflow:
+This planning workflow prioritizes **concurrency and orchestration**:
 
-1. Gathers requirements and analyzes the task
-2. Creates a detailed plan with phases and assigns principal owners
-3. Launches parallel reviews by domain specialists
-4. Consolidates feedback and identifies parallelization opportunities
-5. Produces a final, implementation-ready plan
+1. **FIRST**: Detect skills and analyze concurrency opportunities
+2. Gather requirements (delegated to exploration agents when appropriate)
+3. Create initial plan with parallelization groups identified
+4. **Launch ALL reviews in parallel** (enforced - validation required)
+5. Consolidate feedback and finalize parallelization strategy
+6. Produce implementation-ready plan
 
-## Skill Detection and Communication
+**Orchestration Pattern**: Main thread → Parallel sub-agents → Consolidation → Output
 
-**Before starting, detect and communicate which skills will be used:**
+---
 
-1. **Check if user specified skills:**
+## Step 0a: MANDATORY - Detect and Activate Skills
+
+**🚨 DO THIS FIRST - BEFORE ANY OTHER WORK 🚨**
+
+**Purpose**: Activate domain expertise before planning begins.
+
+**Actions**:
+
+1. **Detect user-specified skills:**
    - Look for phrases like "use the [skill-name] skill" or "with [skill-name]"
    - Parse out all mentioned skill names
 
@@ -33,9 +44,12 @@ This planning workflow:
    - CLI work: `clap`
    - Web scraping: `reqwest`, `pulldown-cmark`
 
-3. **Communicate skill usage via STDOUT:**
+3. **Create skills array:**
+   ```typescript
+   const skills = ["skill-1", "skill-2", "skill-3"]
+   ```
 
-   Output this at the start:
+4. **Communicate via STDOUT:**
    ```
    📦 Skills Configuration for Planning Phase
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -52,9 +66,74 @@ This planning workflow:
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
    ```
 
-4. **Store skills for later use:**
-   - Create a skills array: `const skills = ["skill-1", "skill-2", "skill-3"]`
-   - Pass this to all sub-agent prompts
+5. **Activate all skills NOW** (before proceeding)
+
+6. **Validation checkpoint:**
+   ```
+   ✅ Skills Activated: [skill-1], [skill-2], [skill-3]
+   Ready to proceed to concurrency analysis.
+   ```
+
+**⛔ DO NOT PROCEED until skills are activated and validated.**
+
+---
+
+## Step 0b: MANDATORY - Analyze Concurrency Opportunities
+
+**🚨 DO THIS SECOND - BEFORE REQUIREMENTS GATHERING 🚨**
+
+**Purpose**: Identify parallelization strategy UPFRONT, not as an afterthought.
+
+**Actions**:
+
+1. **Understand the request at a high level:**
+   - What type of work is this? (new feature, refactor, architecture, testing)
+   - How many major areas of work are involved?
+   - What are the obvious dependencies?
+
+2. **Identify concurrent work streams:**
+
+   Ask yourself:
+   - Can requirements gathering happen in parallel? (exploration agents)
+   - Can plan review happen in parallel? (multiple reviewer agents)
+   - Can implementation phases run concurrently? (independent modules)
+
+3. **Create initial concurrency map:**
+   ```markdown
+   ## Concurrency Analysis
+
+   **Planning Phase Parallelization:**
+   - Requirements exploration: [Can X, Y, Z be explored concurrently?]
+   - Plan reviews: [Rust Developer + Feature Tester in parallel]
+
+   **Implementation Phase Parallelization:**
+   - Independent phases: [Phase 1, 2 can run together]
+   - Dependent phases: [Phase 3 depends on 1, 2]
+   ```
+
+4. **Output concurrency strategy:**
+   ```
+   🔀 Concurrency Strategy
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+   Planning phase:
+   • Requirement exploration: [Sequential / Parallel with N agents]
+   • Plan reviews: [Parallel - Rust Dev + Tester]
+
+   Implementation phase groups:
+   • Group A: Phases [1, 2] - Parallel
+   • Group B: Phase [3] - After Group A
+
+   Estimated speedup: [X%] through parallelization
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ```
+
+5. **Validation checkpoint:**
+   - Have you identified ALL opportunities for parallel work?
+   - Are dependencies clearly noted?
+   - Is the parallelization strategy clear?
+
+**⛔ DO NOT PROCEED until concurrency strategy is documented.**
 
 ## Available Sub-Agents (Principal Owners)
 
@@ -352,11 +431,27 @@ For each phase and requirement, assign a principal owner based on:
 
 ---
 
-## Step 3: Parallel Sub-Agent Reviews
+## Step 3: CRITICAL - Launch ALL Reviews in Parallel
 
-**CRITICAL:** Launch ALL reviews in PARALLEL using multiple Task tool calls in a single message.
+**🚨 ORCHESTRATION CHECKPOINT: This is where you prove you're orchestrating, not implementing 🚨**
 
-### 3.1 Review Prompts
+**MANDATORY REQUIREMENTS:**
+1. **All review agents MUST be launched in a SINGLE message**
+2. **All Task calls MUST use `run_in_background: true`**
+3. **You MUST use multiple Task tool calls in ONE message**
+4. **Validation REQUIRED after launch**
+
+**Why this matters:** This command is about orchestration. If you launch agents sequentially, you're not orchestrating—you're micromanaging. Parallel execution is NON-NEGOTIABLE.
+
+### 3.1 Identify Reviewers
+
+Based on principal owners assigned in Step 2, determine which sub-agents need to review:
+- Rust Developer: If any phases assigned to them
+- Feature Tester (Rust): If any testing phases assigned
+
+**Minimum**: At least 2 reviewers should run in parallel for most plans.
+
+### 3.2 Review Prompts
 
 For each sub-agent with assigned ownership, create a review task:
 
@@ -589,30 +684,82 @@ Return your review as:
 })
 ```
 
-### 3.2 Launch Reviews in Parallel
+### 3.3 Launch All Reviews in Parallel (ENFORCED)
 
-**IMPORTANT:** Send ALL relevant Task calls in a SINGLE message to run them in parallel.
+**🚨 THIS IS THE CRITICAL ORCHESTRATION MOMENT 🚨**
 
-Only invoke sub-agents that have assigned ownership in the plan.
+**MANDATORY PATTERN:**
 
-Example parallel invocation:
+You MUST launch ALL reviewers in a SINGLE message with MULTIPLE Task tool calls:
 
 ```typescript
-// All in ONE message for parallel execution
-Task({ /* Rust Developer review */ run_in_background: true })
-Task({ /* Schema Architect review */ run_in_background: true })
-Task({ /* Feature Tester (Rust) review */ run_in_background: true })
+// ✅ CORRECT - All in ONE message for TRUE parallel execution
+Task({
+    subagent_type: "general-purpose",
+    description: "Rust Developer review",
+    run_in_background: true,
+    prompt: `[Rust Developer review prompt with skills]`
+})
+Task({
+    subagent_type: "general-purpose",
+    description: "Feature Tester review",
+    run_in_background: true,
+    prompt: `[Feature Tester review prompt with skills]`
+})
 ```
 
-### 3.3 Collect Review Results
+**❌ WRONG - Sequential launches (this is micromanaging, not orchestrating):**
+
+```typescript
+// First message
+Task({ /* Rust Developer */ })
+
+// Second message (LATER)
+Task({ /* Feature Tester */ })
+```
+
+**Before launching, output:**
+```
+🚀 Launching Parallel Reviews
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Reviewers launching NOW (in parallel):
+• Rust Developer (skills: [list])
+• Feature Tester (Rust) (skills: [list])
+
+Expected completion: [estimated time]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+### 3.4 Validation Checkpoint (MANDATORY)
+
+**After launching, IMMEDIATELY validate parallel execution:**
+
+```
+✅ Parallel Launch Validation
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+☑ All reviewers launched in a SINGLE message
+☑ All Task calls used run_in_background: true
+☑ [N] reviewers running concurrently
+☑ No sequential launches detected
+
+Orchestration pattern: CORRECT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+**If you cannot check all boxes above, you failed the orchestration requirement. Do not proceed.**
+
+### 3.5 Collect Review Results
 
 Use TaskOutput to collect results from all background tasks:
 
 ```typescript
 TaskOutput({ task_id: "rust-review-id", block: true })
-TaskOutput({ task_id: "schema-review-id", block: true })
 TaskOutput({ task_id: "tester-review-id", block: true })
 ```
+
+**Collect results sequentially** (this is fine—agents ran in parallel, you're just gathering output)
 
 ---
 

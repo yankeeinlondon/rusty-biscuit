@@ -47,6 +47,12 @@ pub enum ProviderError {
 
     #[error("Validation timeout for provider {provider:?}")]
     ValidationTimeout { provider: Provider },
+
+    #[error("No providers available (no API keys configured)")]
+    NoProvidersAvailable,
+
+    #[error("Code generation failed: {details}")]
+    CodegenFailed { details: String },
 }
 
 // OpenAI types now imported from super::types (Phase 0 refactoring)

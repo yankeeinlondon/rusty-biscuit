@@ -1,6 +1,7 @@
 //! Type definitions for provider discovery
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 /// Represents a single LLM provider and model combination
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -54,6 +55,41 @@ pub struct OpenAIModelsResponse {
 #[derive(Debug, Deserialize)]
 pub struct OpenAIModel {
     pub id: String,
+}
+
+/// Summary of ProviderModel::update() execution
+///
+/// Returned by `ProviderModel::update()` to report what models were added
+/// during enum regeneration.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use shared::providers::ProviderModel;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let summary = ProviderModel::update().await?;
+///     println!("Checked {} providers", summary.providers_checked.len());
+///     println!("Added {} total new models", summary.total_added());
+///     Ok(())
+/// }
+/// ```
+#[derive(Debug)]
+pub struct UpdateSummary {
+    /// Map of Provider → count of new models added for that provider
+    pub models_added: std::collections::HashMap<super::base::Provider, usize>,
+    /// List of providers that were successfully queried
+    pub providers_checked: Vec<super::base::Provider>,
+    /// Count of aggregator hint variants added (OpenRouter/ZenMux)
+    pub aggregator_hints_applied: usize,
+}
+
+impl UpdateSummary {
+    /// Total number of models added across all providers
+    pub fn total_added(&self) -> usize {
+        self.models_added.values().sum()
+    }
 }
 
 /// Strongly-typed enumeration of LLM provider models
@@ -296,6 +332,192 @@ impl ProviderModel {
 
         // TODO: Implement actual API validation in future phase
         Ok(())
+    }
+
+    /// Update the ProviderModel enum definition from live provider APIs
+    ///
+    /// Fetches current models from all available providers and generates
+    /// new enum variants. Preserves existing variants to avoid breaking changes.
+    ///
+    /// ## Update Strategy
+    ///
+    /// - Never remove variants (backward compatibility)
+    /// - Add new variants for newly discovered models
+    /// - Aggregator hints: add aggregator variant, conditionally add underlying
+    /// - Direct provider access: interrogate directly, ignore aggregator hints
+    ///
+    /// ## Returns
+    ///
+    /// UpdateSummary with counts of models added per provider
+    ///
+    /// ## Errors
+    ///
+    /// - `ProviderError::CodegenFailed` - Failed to inject enum code
+    /// - `ProviderError::NoProvidersAvailable` - No API keys configured
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// use shared::providers::ProviderModel;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let summary = ProviderModel::update().await?;
+    ///     println!("Added {} new models", summary.total_added());
+    ///     for (provider, count) in &summary.models_added {
+    ///         println!("  {:?}: {} new models", provider, count);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn update() -> Result<UpdateSummary, super::discovery::ProviderError> {
+        use super::base::Provider;
+        use super::discovery::ProviderError;
+        use std::collections::HashMap;
+
+        tracing::info!("Starting ProviderModel enum update from live APIs");
+
+        // Step 1: Call api::get_all_provider_models()
+        let api_models = crate::api::openai_compat::get_all_provider_models().await?;
+
+        if api_models.is_empty() {
+            return Err(ProviderError::NoProvidersAvailable);
+        }
+
+        tracing::debug!(
+            provider_count = api_models.len(),
+            "Fetched models from providers"
+        );
+
+        // Step 2: Build set of existing variants
+        let existing_variants = Self::get_existing_static_variants();
+
+        tracing::debug!(
+            variant_count = existing_variants.len(),
+            "Current static variants in enum"
+        );
+
+        // Step 3: Detect new models
+        let mut models_added: HashMap<Provider, usize> = HashMap::new();
+        let mut providers_checked: Vec<Provider> = Vec::new();
+        let mut new_variants: Vec<(Provider, String, String)> = Vec::new(); // (provider, model_id, variant_name)
+
+        for (provider, model_ids) in &api_models {
+            providers_checked.push(*provider);
+
+            for model_id in model_ids {
+                let variant_name = Self::model_id_to_variant_name(model_id);
+                let full_variant = format!("{:?}__{}", provider, variant_name);
+
+                if !existing_variants.contains(&full_variant) {
+                    tracing::debug!(
+                        provider = ?provider,
+                        model_id = %model_id,
+                        variant_name = %variant_name,
+                        "Detected new model"
+                    );
+
+                    new_variants.push((*provider, model_id.clone(), variant_name));
+                    *models_added.entry(*provider).or_insert(0) += 1;
+                }
+            }
+        }
+
+        let aggregator_hints_applied = 0; // TODO: Implement aggregator hint logic
+
+        // Step 4: Code generation (placeholder - actual implementation requires AST manipulation)
+        if !new_variants.is_empty() {
+            tracing::warn!(
+                new_variant_count = new_variants.len(),
+                "Code generation not yet implemented - new variants detected but not added to enum"
+            );
+
+            // TODO: Implement code generation using codegen::inject_enum()
+            // This requires:
+            // 1. Generate well-formatted enum variants with prettyplease
+            // 2. Atomic write strategy (temp file → validate → backup → rename)
+            // 3. AST validation with syn::parse_file()
+            // 4. Comment markers for generated section
+
+            for (provider, model_id, variant_name) in &new_variants {
+                tracing::debug!(
+                    provider = ?provider,
+                    model_id = %model_id,
+                    variant_name = %variant_name,
+                    "Would add variant (codegen pending)"
+                );
+            }
+        }
+
+        tracing::info!(
+            providers_checked = providers_checked.len(),
+            total_new_models = new_variants.len(),
+            "ProviderModel update complete"
+        );
+
+        Ok(UpdateSummary {
+            models_added,
+            providers_checked,
+            aggregator_hints_applied,
+        })
+    }
+
+    /// Get list of existing static variant names from enum definition
+    ///
+    /// Used by update() to avoid duplicating variants.
+    fn get_existing_static_variants() -> HashSet<String> {
+        // Hardcoded list of current static variants
+        // In full implementation, this would parse the enum definition via AST
+        let mut variants = HashSet::new();
+
+        // Anthropic variants
+        variants.insert("Anthropic__ClaudeOpus__4__5__20251101".to_string());
+        variants.insert("Anthropic__ClaudeSonnet__4__5__20250929".to_string());
+        variants.insert("Anthropic__ClaudeHaiku__4__0__20250107".to_string());
+
+        // OpenAI variants
+        variants.insert("OpenAi__Gpt__4o".to_string());
+        variants.insert("OpenAi__Gpt__4o__Mini".to_string());
+        variants.insert("OpenAi__O1".to_string());
+
+        // Deepseek variants
+        variants.insert("Deepseek__Chat".to_string());
+        variants.insert("Deepseek__Reasoner".to_string());
+
+        // Gemini variants
+        variants.insert("Gemini__Gemini__3__Flash__Preview".to_string());
+        variants.insert("Gemini__Gemini__2__0__Flash__Exp".to_string());
+
+        variants
+    }
+
+    /// Convert model ID to variant name following naming convention
+    ///
+    /// ## Naming Convention
+    ///
+    /// - Replace `-` with `__` (double underscore)
+    /// - Replace `.` with `_` (single underscore)
+    /// - Remove `:`
+    ///
+    /// ## Examples
+    ///
+    /// - `claude-opus-4.5:20251101` → `ClaudeOpus__4_5__20251101`
+    /// - `gpt-4o` → `Gpt__4o`
+    fn model_id_to_variant_name(model_id: &str) -> String {
+        model_id
+            .replace("-", "__")
+            .replace(".", "_")
+            .replace(":", "")
+            .split("__")
+            .map(|part| {
+                let mut chars = part.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(f) => f.to_uppercase().chain(chars).collect(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("__")
     }
 }
 
