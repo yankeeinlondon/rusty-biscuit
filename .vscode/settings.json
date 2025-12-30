@@ -10,8 +10,10 @@
         "isterminal",
         "mdcat",
         "mockall",
+        "moonshotai",
         "nextest",
         "opencode",
+        "OPENROUTER",
         "proptest",
         "ratatui",
         "resvg",
@@ -20,6 +22,7 @@
         "TASKLISTS",
         "usvg",
         "wezterm",
+        "zenmux",
         "zigbuild"
     ]
 }

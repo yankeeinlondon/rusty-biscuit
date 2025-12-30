@@ -179,6 +179,9 @@ pub struct MissingPrompt {
 /// Check which standard prompts are missing from the output directory.
 ///
 /// Returns a list of prompts that don't have corresponding output files.
+#[deprecated(
+    note = "Use research_health() from validation::health module. Note: research_health() requires ResearchType and builds paths internally using RESEARCH_DIR environment variable or current directory."
+)]
 pub async fn check_missing_standard_prompts(output_dir: &std::path::Path) -> Vec<MissingPrompt> {
     let mut missing = Vec::new();
 
@@ -189,6 +192,47 @@ pub async fn check_missing_standard_prompts(output_dir: &std::path::Path) -> Vec
                 name,
                 filename,
                 template,
+            });
+        }
+    }
+
+    missing
+}
+
+/// A final output file that is missing from the research directory.
+#[derive(Debug, Clone)]
+pub struct MissingOutput {
+    pub name: &'static str,
+    pub filename: &'static str,
+}
+
+/// Expected final output files that should be generated
+const EXPECTED_OUTPUTS: &[(&str, &str)] = &[
+    ("Skill", "skill/SKILL.md"),
+    ("Deep Dive", "deep_dive.md"),
+    ("Brief", "brief.md"),
+];
+
+/// Check which final output files are missing from the output directory.
+///
+/// This checks for the presence of:
+/// - skill/SKILL.md (not just the skill/ directory)
+/// - deep_dive.md
+/// - brief.md
+///
+/// Returns a list of outputs that don't exist.
+#[deprecated(
+    note = "Use research_health() from validation::health module. Note: research_health() requires ResearchType and builds paths internally using RESEARCH_DIR environment variable or current directory."
+)]
+pub async fn check_missing_outputs(output_dir: &std::path::Path) -> Vec<MissingOutput> {
+    let mut missing = Vec::new();
+
+    for (name, filename) in EXPECTED_OUTPUTS {
+        let path = output_dir.join(filename);
+        if !path.exists() {
+            missing.push(MissingOutput {
+                name,
+                filename,
             });
         }
     }
@@ -958,10 +1002,10 @@ where
                 elapsed_secs: elapsed,
             };
 
-            let normalized = normalize_markdown(&content);
-
+            // Write raw content without normalization
+            // Normalization happens selectively later (e.g., SKILL.md preserves frontmatter)
             let path = output_dir.join(filename);
-            match fs::write(&path, &normalized).await {
+            match fs::write(&path, &content).await {
                 Ok(_) => {
                     println!(
                         "  [{}/{}] ✓ {} ({:.1}s) | tokens: {} in, {} out, {} total",
@@ -1247,43 +1291,43 @@ async fn run_incremental_research(
     mut existing_metadata: ResearchMetadata,
     questions: Vec<(usize, String)>,
     missing_prompts: Vec<MissingPrompt>,
+    missing_outputs: Vec<MissingOutput>,
 ) -> Result<ResearchResult, ResearchError> {
     // Load environment variables from .env file
     dotenvy::dotenv().ok();
 
-    let has_missing = !missing_prompts.is_empty();
+    let has_missing_prompts = !missing_prompts.is_empty();
+    let has_missing_outputs = !missing_outputs.is_empty();
     let has_questions = !questions.is_empty();
 
     // Print what we're doing
-    match (has_missing, has_questions) {
-        (true, true) => println!(
-            "\nIncremental research: Regenerating {} missing prompt(s) and adding {} new question(s)...\n",
-            missing_prompts.len(),
-            questions.len()
-        ),
-        (true, false) => println!(
-            "\nIncremental research: Regenerating {} missing prompt(s)...\n",
-            missing_prompts.len()
-        ),
-        (false, true) => println!(
-            "\nIncremental research: Adding {} new question(s)...\n",
-            questions.len()
-        ),
-        (false, false) => {
-            // Nothing to do - should not reach here, but handle gracefully
-            return Ok(ResearchResult {
-                topic: topic.to_string(),
-                output_dir,
-                succeeded: 0,
-                failed: 0,
-                cancelled: false,
-                total_time_secs: 0.0,
-                total_input_tokens: 0,
-                total_output_tokens: 0,
-                total_tokens: 0,
-            });
-        }
+    if !has_missing_prompts && !has_missing_outputs && !has_questions {
+        // Nothing to do - should not reach here, but handle gracefully
+        return Ok(ResearchResult {
+            topic: topic.to_string(),
+            output_dir,
+            succeeded: 0,
+            failed: 0,
+            cancelled: false,
+            total_time_secs: 0.0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_tokens: 0,
+        });
     }
+
+    // Build status message
+    let mut parts = Vec::new();
+    if has_missing_prompts {
+        parts.push(format!("Regenerating {} missing prompt(s)", missing_prompts.len()));
+    }
+    if has_missing_outputs {
+        parts.push(format!("Regenerating {} missing output(s)", missing_outputs.len()));
+    }
+    if has_questions {
+        parts.push(format!("Adding {} new question(s)", questions.len()));
+    }
+    println!("\nIncremental research: {}...\n", parts.join(" and "));
 
     // Set up cancellation flag for SIGINT handling
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -1783,6 +1827,17 @@ async fn run_incremental_research(
         }
     }
 
+    // Normalize deep_dive.md if it was generated
+    if deep_dive_result.metrics.is_some() {
+        let deep_dive_path = output_dir.join("deep_dive.md");
+        if let Ok(content) = fs::read_to_string(&deep_dive_path).await {
+            let normalized = normalize_markdown(&content);
+            if let Err(e) = fs::write(&deep_dive_path, normalized).await {
+                tracing::error!("Failed to normalize deep_dive.md: {}", e);
+            }
+        }
+    }
+
     // === Phase 2b: Generate brief from deep_dive (if successful) ===
     let (brief_text, summary_text) = if deep_dive_result.metrics.is_some() {
         println!("Generating brief summary...\n");
@@ -2058,11 +2113,26 @@ pub async fn research(
         println!("Found existing research for '{}'", topic);
 
         // Check for missing standard prompts
+        // NOTE: Using deprecated function because research() accepts custom output_dir
+        // and doesn't have ResearchType context. This function should be kept until
+        // research() is refactored to require ResearchType parameter or can infer it.
+        #[allow(deprecated)]
         let missing_prompts = check_missing_standard_prompts(&output_dir).await;
         if !missing_prompts.is_empty() {
             println!("  ⚠ Missing {} standard prompt(s):", missing_prompts.len());
             for mp in &missing_prompts {
                 println!("    - {}", mp.filename);
+            }
+        }
+
+        // Check for missing output files
+        // NOTE: Using deprecated function for same reason as above
+        #[allow(deprecated)]
+        let missing_outputs = check_missing_outputs(&output_dir).await;
+        if !missing_outputs.is_empty() {
+            println!("  ⚠ Missing {} output file(s):", missing_outputs.len());
+            for mo in &missing_outputs {
+                println!("    - {}", mo.filename);
             }
         }
 
@@ -2101,8 +2171,8 @@ pub async fn research(
             }
         }
 
-        // If nothing to do (no missing prompts and no new questions), return early
-        if missing_prompts.is_empty() && questions_to_run.is_empty() {
+        // If nothing to do (no missing prompts, no missing outputs, and no new questions), return early
+        if missing_prompts.is_empty() && missing_outputs.is_empty() && questions_to_run.is_empty() {
             println!("  Research is complete. Use additional prompts to expand research.");
             return Ok(ResearchResult {
                 topic: topic.to_string(),
@@ -2117,13 +2187,14 @@ pub async fn research(
             });
         }
 
-        // Run incremental research with missing prompts and/or new questions
+        // Run incremental research with missing prompts, missing outputs, and/or new questions
         return run_incremental_research(
             topic,
             output_dir,
             existing_metadata,
             questions_to_run,
             missing_prompts,
+            missing_outputs,
         )
         .await;
     }
@@ -2689,6 +2760,17 @@ pub async fn research(
         }
     }
 
+    // Normalize deep_dive.md if it was generated
+    if deep_dive_result.metrics.is_some() {
+        let deep_dive_path = output_dir.join("deep_dive.md");
+        if let Ok(content) = fs::read_to_string(&deep_dive_path).await {
+            let normalized = normalize_markdown(&content);
+            if let Err(e) = fs::write(&deep_dive_path, normalized).await {
+                tracing::error!("Failed to normalize deep_dive.md: {}", e);
+            }
+        }
+    }
+
     // === Phase 2b: Generate brief from deep_dive (if successful) ===
     let (brief_text, summary_text) = if deep_dive_result.metrics.is_some() {
         println!("Generating brief summary...\n");
@@ -3028,6 +3110,7 @@ mod tests {
     // ===========================================
 
     #[tokio::test]
+    #[allow(deprecated)]
     async fn test_check_missing_prompts_all_missing() {
         let temp = tempdir().unwrap();
         let missing = check_missing_standard_prompts(temp.path()).await;
@@ -3044,6 +3127,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(deprecated)]
     async fn test_check_missing_prompts_some_present() {
         let temp = tempdir().unwrap();
 
@@ -3065,6 +3149,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(deprecated)]
     async fn test_check_missing_prompts_all_present() {
         let temp = tempdir().unwrap();
 

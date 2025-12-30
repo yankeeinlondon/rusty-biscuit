@@ -298,9 +298,9 @@ fn format_language_icon(language: Option<&String>) -> String {
         Some("Rust") => " 🦀".to_string(),
         Some("Python") => " 🐍".to_string(),
         Some("PHP") => " 🐘".to_string(),
-        Some("Javascript") | Some("TypeScript") | Some("Typescript") => {
+        Some("JavaScript/TypeScript") => {
             // Blue background (0,122,204), black text
-            format!(" {}", "ʦ".black().on_truecolor(0, 122, 204))
+            format!(" {}", " ʦ ".black().on_truecolor(0, 122, 204))
         }
         _ => String::new(),
     }
