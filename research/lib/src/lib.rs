@@ -603,7 +603,7 @@ async fn check_packagist(client: &HttpClient, name: &str) -> Option<LibraryInfo>
 
     // Look for an exact match in the package name
     let matching = results.into_iter().find(|r| {
-        let package_name = r.name.split('/').last().unwrap_or(&r.name);
+        let package_name = r.name.split('/').next_back().unwrap_or(&r.name);
         package_name == name
     })?;
 
@@ -669,16 +669,16 @@ async fn check_go(client: &HttpClient, name: &str) -> Option<LibraryInfo> {
         let url = format!("https://pkg.go.dev/{}", module);
         let response = client.head(&url).send().await.ok();
 
-        if let Some(resp) = response {
-            if resp.status().is_success() {
-                return Some(LibraryInfo {
-                    package_manager: "pkg.go.dev".to_string(),
-                    language: "Go".to_string(),
-                    url,
-                    repository: None,
-                    description: None,
-                });
-            }
+        if let Some(resp) = response
+            && resp.status().is_success()
+        {
+            return Some(LibraryInfo {
+                package_manager: "pkg.go.dev".to_string(),
+                language: "Go".to_string(),
+                url,
+                repository: None,
+                description: None,
+            });
         }
     }
 
@@ -950,6 +950,7 @@ struct PromptTaskResult {
 }
 
 /// Run a prompt task and save result, printing progress as it completes
+#[allow(clippy::too_many_arguments)]
 async fn run_prompt_task<M>(
     name: &'static str,
     filename: &'static str,
@@ -1061,6 +1062,7 @@ pub fn tools_available() -> bool {
         prompt_len = prompt.len()
     )
 )]
+#[allow(clippy::too_many_arguments)]
 async fn run_agent_prompt_task<M>(
     name: &'static str,
     filename: &'static str,
@@ -1175,6 +1177,7 @@ pub fn default_output_dir(topic: &str) -> PathBuf {
 }
 
 /// Run a dynamic question task and save result
+#[allow(clippy::too_many_arguments)]
 async fn run_question_task<M>(
     question_num: usize,
     topic: String,
@@ -1349,7 +1352,7 @@ async fn run_incremental_research(
     let use_tools = tools_available();
     if use_tools {
         let plan = std::env::var("BRAVE_PLAN")
-            .map(|s| BravePlan::from_str(&s))
+            .map(|s| BravePlan::from_string(&s))
             .unwrap_or_default();
         println!(
             "  ✓ Web research tools enabled (BRAVE_API_KEY found, {:?} plan)\n",
@@ -1697,17 +1700,17 @@ async fn run_incremental_research(
     // Read all additional question files
     let mut additional_content = String::new();
     for filename in existing_metadata.additional_files.keys() {
-        if let Ok(content) = fs::read_to_string(output_dir.join(filename)).await {
-            if !content.is_empty() {
-                let num = filename
-                    .strip_prefix("question_")
-                    .and_then(|s| s.strip_suffix(".md"))
-                    .unwrap_or("?");
-                additional_content.push_str(&format!(
-                    "\n## Additional Research: Question {}\n\n{}\n",
-                    num, content
-                ));
-            }
+        if let Ok(content) = fs::read_to_string(output_dir.join(filename)).await
+            && !content.is_empty()
+        {
+            let num = filename
+                .strip_prefix("question_")
+                .and_then(|s| s.strip_suffix(".md"))
+                .unwrap_or("?");
+            additional_content.push_str(&format!(
+                "\n## Additional Research: Question {}\n\n{}\n",
+                num, content
+            ));
         }
     }
 
@@ -1768,8 +1771,9 @@ async fn run_incremental_research(
     );
 
     // Parse skill output and split into multiple files if needed
-    if skill_result.metrics.is_some() {
-        if let Ok(skill_content) = fs::read_to_string(skill_dir.join("SKILL.md")).await {
+    if skill_result.metrics.is_some()
+        && let Ok(skill_content) = fs::read_to_string(skill_dir.join("SKILL.md")).await
+    {
             // Step 1: Split files BEFORE normalization
             let files = if skill_content.contains("--- FILE:") {
                 split_into_files(&skill_content)
@@ -1824,7 +1828,6 @@ async fn run_incremental_research(
                     }
                 }
             }
-        }
     }
 
     // Normalize deep_dive.md if it was generated
@@ -2231,7 +2234,7 @@ pub async fn research(
     Span::current().record("tools_enabled", use_tools);
     if use_tools {
         let plan = std::env::var("BRAVE_PLAN")
-            .map(|s| BravePlan::from_str(&s))
+            .map(|s| BravePlan::from_string(&s))
             .unwrap_or_default();
         info!(?plan, "Web research tools enabled");
         println!(
@@ -2639,13 +2642,13 @@ pub async fn research(
     let mut additional_content = String::new();
     for i in 1..=num_questions {
         let filename = format!("question_{}.md", i);
-        if let Ok(content) = fs::read_to_string(output_dir.join(&filename)).await {
-            if !content.is_empty() {
-                additional_content.push_str(&format!(
-                    "\n## Additional Research: Question {}\n\n{}\n",
-                    i, content
-                ));
-            }
+        if let Ok(content) = fs::read_to_string(output_dir.join(&filename)).await
+            && !content.is_empty()
+        {
+            additional_content.push_str(&format!(
+                "\n## Additional Research: Question {}\n\n{}\n",
+                i, content
+            ));
         }
     }
 
@@ -2709,10 +2712,11 @@ pub async fn research(
     // Also validate frontmatter and extract when_to_use for metadata
     let mut when_to_use: Option<String> = None;
 
-    if skill_result.metrics.is_some() {
-        if let Ok(skill_content) = fs::read_to_string(skill_dir.join("SKILL.md")).await {
-            // Step 1: Split files BEFORE normalization
-            let files = if skill_content.contains("--- FILE:") {
+    if skill_result.metrics.is_some()
+        && let Ok(skill_content) = fs::read_to_string(skill_dir.join("SKILL.md")).await
+    {
+        // Step 1: Split files BEFORE normalization
+        let files = if skill_content.contains("--- FILE:") {
                 split_into_files(&skill_content)
             } else {
                 vec![("SKILL.md".to_string(), skill_content)]
@@ -2757,7 +2761,6 @@ pub async fn research(
                     }
                 }
             }
-        }
     }
 
     // Normalize deep_dive.md if it was generated

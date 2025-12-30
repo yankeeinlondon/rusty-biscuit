@@ -40,3 +40,10 @@ pub mod base;
 pub use curated::{get_curated_models, LAST_UPDATED, PROVIDER_COUNT};
 pub use discovery::{generate_provider_list, ProviderError};
 pub use types::{LlmEntry, ProviderListFormat};
+pub use base::{
+    Provider,
+    has_provider_api_key,
+    get_api_keys,
+    get_provider_models,
+    artificial_analysis_url
+};

@@ -61,18 +61,18 @@ struct ResponsePart {
 ///
 /// # Example
 /// ```no_run
-/// use research_lib::utils::filename::chooseFilename;
+/// use research_lib::utils::filename::choose_filename;
 ///
 /// #[tokio::main]
 /// async fn main() {
-///     let filename = chooseFilename("What are the best practices for async Rust?").await;
+///     let filename = choose_filename("What are the best practices for async Rust?").await;
 ///     match filename {
 ///         Ok(name) => println!("Generated: {}", name),
 ///         Err(e) => eprintln!("Fallback to question_1.md: {}", e),
 ///     }
 /// }
 /// ```
-pub async fn chooseFilename(prompt: &str) -> Result<String, FilenameError> {
+pub async fn choose_filename(prompt: &str) -> Result<String, FilenameError> {
     // Get API key from environment
     let api_key = std::env::var("GEMINI_API_KEY")
         .map_err(|_| FilenameError::NoApiKey)?;

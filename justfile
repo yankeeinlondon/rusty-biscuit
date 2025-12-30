@@ -2,7 +2,7 @@ set dotenv-load
 set positional-arguments
 
 # List of areas in this monorepo
-areas := "research shared"
+areas := "shared research so-you-say"
 
 BOLD := '\033[1m'
 RESET := '\033[0m'
@@ -71,7 +71,7 @@ install:
                 echo "Installing from $area..."
                 just -f "$area/justfile" install
             else
-                echo "- no **install** command for the area **$area**" >&2
+                echo "- no {{BOLD}}install{{RESET}} command for the area **$area**" >&2
             fi
         else
             echo "- no justfile for the area **$area**" >&2

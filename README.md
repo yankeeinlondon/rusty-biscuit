@@ -22,6 +22,35 @@ For detailed documentation, see [`/research/README.md`](./research/README.md).
 
 A CLI which leverages the shared library's TTS functionality to provide a cross-platform way to announce progress leveraging the underlying host's resources.
 
+- **Binary name:** `speak`
+- **Usage:** Convert text to speech using system TTS
+
+**Examples:**
+
+```bash
+# Speak text from command-line arguments
+speak Hello world
+
+# Speak text from stdin (pipe support)
+echo "Hello world" | speak
+
+# Speak text from a file
+cat announcement.txt | speak
+
+# Multi-word with punctuation
+speak "Good morning, team!"
+```
+
+**Installation:**
+
+```bash
+# Install globally
+cargo install --path so-you-say
+
+# Binary will be available at ~/.cargo/bin/speak
+speak "Installation successful"
+```
+
 ### Shared Library (`/shared`)
 
 Common utilities shared across multiple areas of the monorepo.

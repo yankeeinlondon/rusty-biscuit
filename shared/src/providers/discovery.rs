@@ -57,6 +57,7 @@ struct OpenAIModel {
 }
 
 /// Hugging Face API response for /api/models
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct HuggingFaceModel {
     #[serde(rename = "modelId")]
@@ -171,6 +172,7 @@ async fn fetch_openai_models() -> Result<Vec<LlmEntry>, ProviderError> {
 }
 
 /// Get hardcoded Anthropic models (no public API available)
+#[allow(dead_code)]
 async fn fetch_anthropic_models() -> Result<Vec<LlmEntry>, ProviderError> {
     Ok(vec![
         LlmEntry::new("anthropic", "claude-opus-4.5-20250929"),
@@ -180,6 +182,7 @@ async fn fetch_anthropic_models() -> Result<Vec<LlmEntry>, ProviderError> {
 }
 
 /// Fetch models from Hugging Face API
+#[allow(dead_code)]
 async fn fetch_huggingface_models() -> Result<Vec<LlmEntry>, ProviderError> {
     let api_token = match std::env::var("HUGGINGFACE_TOKEN") {
         Ok(token) if !token.is_empty() => token,
@@ -232,6 +235,7 @@ async fn fetch_huggingface_models() -> Result<Vec<LlmEntry>, ProviderError> {
 }
 
 /// Get hardcoded Google Gemini models (no easy public API)
+#[allow(dead_code)]
 async fn fetch_gemini_models() -> Result<Vec<LlmEntry>, ProviderError> {
     Ok(vec![
         LlmEntry::new("gemini", "gemini-3-flash-preview"),

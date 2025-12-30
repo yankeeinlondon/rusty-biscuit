@@ -40,10 +40,11 @@ use thiserror::Error;
 use tracing::{Span, debug, info, instrument, warn};
 
 /// Output format for scraped content.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputFormat {
     /// Markdown formatted content
+    #[default]
     Markdown,
     /// Raw HTML content
     Html,
@@ -53,12 +54,6 @@ pub enum OutputFormat {
     Json,
     /// Extract only links from the page
     Links,
-}
-
-impl Default for OutputFormat {
-    fn default() -> Self {
-        Self::Markdown
-    }
 }
 
 /// Proxy mode for requests.
@@ -371,21 +366,21 @@ impl ScreenScrapeTool {
         ];
 
         for selector_str in selectors {
-            if let Ok(selector) = Selector::parse(selector_str) {
-                if let Some(element) = document.select(&selector).next() {
-                    let content: String = element.text().collect::<Vec<_>>().join("\n");
-                    if !content.trim().is_empty() {
-                        return content;
-                    }
+            if let Ok(selector) = Selector::parse(selector_str)
+                && let Some(element) = document.select(&selector).next()
+            {
+                let content: String = element.text().collect::<Vec<_>>().join("\n");
+                if !content.trim().is_empty() {
+                    return content;
                 }
             }
         }
 
         // Fallback to body content
-        if let Ok(selector) = Selector::parse("body") {
-            if let Some(element) = document.select(&selector).next() {
-                return element.text().collect::<Vec<_>>().join("\n");
-            }
+        if let Ok(selector) = Selector::parse("body")
+            && let Some(element) = document.select(&selector).next()
+        {
+            return element.text().collect::<Vec<_>>().join("\n");
         }
 
         html.to_string()
@@ -429,31 +424,31 @@ impl ScreenScrapeTool {
         }
 
         // Extract lists
-        if let Ok(ul_selector) = Selector::parse("ul") {
-            if let Ok(li_selector) = Selector::parse("li") {
-                for ul in document.select(&ul_selector) {
-                    for li in ul.select(&li_selector) {
-                        let text: String = li.text().collect::<Vec<_>>().join(" ");
-                        if !text.trim().is_empty() {
-                            markdown.push_str(&format!("- {}\n", text.trim()));
-                        }
+        if let Ok(ul_selector) = Selector::parse("ul")
+            && let Ok(li_selector) = Selector::parse("li")
+        {
+            for ul in document.select(&ul_selector) {
+                for li in ul.select(&li_selector) {
+                    let text: String = li.text().collect::<Vec<_>>().join(" ");
+                    if !text.trim().is_empty() {
+                        markdown.push_str(&format!("- {}\n", text.trim()));
                     }
-                    markdown.push('\n');
                 }
+                markdown.push('\n');
             }
         }
 
-        if let Ok(ol_selector) = Selector::parse("ol") {
-            if let Ok(li_selector) = Selector::parse("li") {
-                for ol in document.select(&ol_selector) {
-                    for (i, li) in ol.select(&li_selector).enumerate() {
-                        let text: String = li.text().collect::<Vec<_>>().join(" ");
-                        if !text.trim().is_empty() {
-                            markdown.push_str(&format!("{}. {}\n", i + 1, text.trim()));
-                        }
+        if let Ok(ol_selector) = Selector::parse("ol")
+            && let Ok(li_selector) = Selector::parse("li")
+        {
+            for ol in document.select(&ol_selector) {
+                for (i, li) in ol.select(&li_selector).enumerate() {
+                    let text: String = li.text().collect::<Vec<_>>().join(" ");
+                    if !text.trim().is_empty() {
+                        markdown.push_str(&format!("{}. {}\n", i + 1, text.trim()));
                     }
-                    markdown.push('\n');
                 }
+                markdown.push('\n');
             }
         }
 

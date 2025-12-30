@@ -230,14 +230,14 @@ async fn main() {
 
 fn announce_completion(topic: &str) {
     if let Ok(mut tts) = Tts::default() {
-        if let Ok(voices) = tts.voices() {
-            if let Some(voice) = voices.iter().find(|v| {
+        if let Ok(voices) = tts.voices()
+            && let Some(voice) = voices.iter().find(|v| {
                 !v.id().contains("compact")
                     && !v.id().contains("eloquence")
                     && v.language().starts_with("en")
-            }) {
-                let _ = tts.set_voice(voice);
-            }
+            })
+        {
+            let _ = tts.set_voice(voice);
         }
 
         let message = format!("Research for the {} library has completed", topic);

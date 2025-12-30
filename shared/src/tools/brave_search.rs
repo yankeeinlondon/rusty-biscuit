@@ -58,7 +58,7 @@ pub enum BravePlan {
 
 impl BravePlan {
     /// Parse plan from string (case-insensitive).
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_string(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "base" => Self::Base,
             "pro" => Self::Pro,
@@ -140,7 +140,7 @@ impl BraveSearchConfig {
     /// Panics if `BRAVE_API_KEY` is not set.
     pub fn from_env() -> Self {
         let plan = env::var("BRAVE_PLAN")
-            .map(|s| BravePlan::from_str(&s))
+            .map(|s| BravePlan::from_string(&s))
             .unwrap_or_default();
 
         info!(
@@ -182,7 +182,7 @@ impl BraveSearchConfig {
 }
 
 /// Input parameters for the Brave Search tool.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SearchArgs {
     /// The search query string
     pub query: String,
@@ -210,20 +210,6 @@ pub struct SearchArgs {
     /// Freshness filter ("pd" = past day, "pw" = past week, "pm" = past month)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub freshness: Option<String>,
-}
-
-impl Default for SearchArgs {
-    fn default() -> Self {
-        Self {
-            query: String::new(),
-            count: None,
-            offset: None,
-            country: None,
-            search_lang: None,
-            safesearch: None,
-            freshness: None,
-        }
-    }
 }
 
 /// Brave Search API response structure.
@@ -367,7 +353,7 @@ impl BraveSearchTool {
         // Acquire rate limit before making request
         self.rate_limiter.acquire().await;
 
-        let count = args.count.unwrap_or(10).min(20).max(1);
+        let count = args.count.unwrap_or(10).clamp(1, 20);
         let offset = args.offset.unwrap_or(0);
 
         debug!(
@@ -575,15 +561,15 @@ mod tests {
 
     #[test]
     fn test_brave_plan_from_str() {
-        assert_eq!(BravePlan::from_str("free"), BravePlan::Free);
-        assert_eq!(BravePlan::from_str("FREE"), BravePlan::Free);
-        assert_eq!(BravePlan::from_str("base"), BravePlan::Base);
-        assert_eq!(BravePlan::from_str("BASE"), BravePlan::Base);
-        assert_eq!(BravePlan::from_str("pro"), BravePlan::Pro);
-        assert_eq!(BravePlan::from_str("PRO"), BravePlan::Pro);
+        assert_eq!(BravePlan::from_string("free"), BravePlan::Free);
+        assert_eq!(BravePlan::from_string("FREE"), BravePlan::Free);
+        assert_eq!(BravePlan::from_string("base"), BravePlan::Base);
+        assert_eq!(BravePlan::from_string("BASE"), BravePlan::Base);
+        assert_eq!(BravePlan::from_string("pro"), BravePlan::Pro);
+        assert_eq!(BravePlan::from_string("PRO"), BravePlan::Pro);
         // Unknown values default to Free
-        assert_eq!(BravePlan::from_str("unknown"), BravePlan::Free);
-        assert_eq!(BravePlan::from_str(""), BravePlan::Free);
+        assert_eq!(BravePlan::from_string("unknown"), BravePlan::Free);
+        assert_eq!(BravePlan::from_string(""), BravePlan::Free);
     }
 
     #[test]

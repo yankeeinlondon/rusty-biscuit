@@ -162,11 +162,11 @@ fn format_main_line(topic: &TopicInfo, hide_type_badge: bool, verbose: bool) -> 
     parts.push(format_language_icon(topic.language.as_ref()));
 
     // Description (if present and in verbose mode)
-    if verbose {
-        if let Some(ref desc) = topic.description {
-            parts.push(" : ".to_string());
-            parts.push(desc.italic().to_string());
-        }
+    if verbose
+        && let Some(ref desc) = topic.description
+    {
+        parts.push(" : ".to_string());
+        parts.push(desc.italic().to_string());
     }
 
     // In non-verbose mode, add icons after the description

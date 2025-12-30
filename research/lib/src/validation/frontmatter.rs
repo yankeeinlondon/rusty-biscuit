@@ -112,13 +112,10 @@ pub fn extract_frontmatter(content: &str) -> Option<(String, String)> {
                 let body = if body_start < after_opening.len() {
                     // Skip the newline after closing ---
                     let body_content = &after_opening[body_start..];
-                    if body_content.starts_with('\n') {
-                        &body_content[1..]
-                    } else if body_content.starts_with("\r\n") {
-                        &body_content[2..]
-                    } else {
-                        body_content
-                    }
+                    body_content
+                        .strip_prefix("\r\n")
+                        .or_else(|| body_content.strip_prefix('\n'))
+                        .unwrap_or(body_content)
                 } else {
                     ""
                 };

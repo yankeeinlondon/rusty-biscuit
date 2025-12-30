@@ -217,7 +217,7 @@ pub async fn link(
     // Format output
     if json {
         let output = format::format_json(&result)
-            .map_err(|e| LinkError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| LinkError::Io(std::io::Error::other(e)))?;
         println!("{}", output);
     } else {
         let output = format::format_terminal(&result);

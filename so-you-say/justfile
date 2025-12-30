@@ -26,7 +26,7 @@ default:
 build *args="":
     @echo ""
     @echo "Build so-you-say CLI"
-    @echo "--------------------s"
+    @echo "--------------------"
     @echo ""
     @cargo build -p so-you-say {{args}}
 
@@ -38,10 +38,17 @@ test *args="":
     @echo ""
     @cargo test -p so-you-say {{args}}
 
+lint *args="":
+    @echo ""
+    @echo "Linting so-you-say CLI"
+    @echo "----------------------"
+    @echo ""
+    @cargo clippy 
+
 # install the `research` binary into the executable path
 install:
-    @cargo build --release -p research-cli
-    @cargo install --path ./cli --locked
+    @cargo build --release -p so-you-say
+    @cargo install --path "." --locked
 
 # run the debug release of the Research CLI
 cli *args="":

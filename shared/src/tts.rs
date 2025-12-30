@@ -24,15 +24,15 @@ use tts::Tts;
 pub fn speak(message: &str) {
     if let Ok(mut tts) = Tts::default() {
         // Try to select a good English voice
-        if let Ok(voices) = tts.voices() {
-            if let Some(voice) = voices.iter().find(|v| {
+        if let Ok(voices) = tts.voices()
+            && let Some(voice) = voices.iter().find(|v| {
                 let id = v.id().to_lowercase();
                 !id.contains("compact")
                     && !id.contains("eloquence")
                     && v.language().starts_with("en")
-            }) {
-                let _ = tts.set_voice(voice);
-            }
+            })
+        {
+            let _ = tts.set_voice(voice);
         }
 
         // Speak and wait for completion
