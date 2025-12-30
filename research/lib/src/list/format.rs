@@ -50,6 +50,7 @@ pub fn format_json(topics: &[TopicInfo]) -> Result<String, serde_json::Error> {
 ///
 /// * `topics` - Slice of TopicInfo structs to format
 /// * `filter_single_type` - If true, hide type badges (used when filtering by type)
+/// * `verbose` - If true, show detailed sub-bullets; if false, show only icons
 ///
 /// # Returns
 ///
@@ -57,13 +58,18 @@ pub fn format_json(topics: &[TopicInfo]) -> Result<String, serde_json::Error> {
 ///
 /// # Format
 ///
-/// Each topic is formatted as:
+/// In verbose mode, each topic is formatted as:
 /// ```text
 /// - {name} [TYPE_BADGE] : {description}
-///     - 🐞 **metadata.json** missing required props: ...
-///     - 🐞 missing *underlying* research docs: ...
-///     - 🐞 missing *final* output deliverables: ...
+///     - 🐞 metadata.json missing required props: ...
+///     - 🐞 missing underlying research docs: ...
+///     - 🐞 missing final output deliverables: ...
 ///     - 💡 {#} additional prompts used in research: ...
+/// ```
+///
+/// In non-verbose mode:
+/// ```text
+/// - {name} [TYPE_BADGE] : {description} 💡 🐞
 /// ```
 ///
 /// # Examples
@@ -75,51 +81,62 @@ pub fn format_json(topics: &[TopicInfo]) -> Result<String, serde_json::Error> {
 /// let topics = vec![
 ///     TopicInfo::new("my-topic".to_string(), PathBuf::from("/research/my-topic"))
 /// ];
-/// let output = format_terminal(&topics, false);
+/// let output = format_terminal(&topics, false, true);
 /// println!("{}", output);
 /// ```
-pub fn format_terminal(topics: &[TopicInfo], filter_single_type: bool) -> String {
+pub fn format_terminal(topics: &[TopicInfo], filter_single_type: bool, verbose: bool) -> String {
     if topics.is_empty() {
         return String::new();
     }
 
-    topics
+    let mut output = topics
         .iter()
-        .map(|topic| format_topic(topic, filter_single_type))
+        .map(|topic| format_topic(topic, filter_single_type, verbose))
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+
+    // Add help text at the end in non-verbose mode
+    if !verbose && !topics.is_empty() {
+        output.push_str("\n\n- use ");
+        output.push_str(&" --verbose ".on_truecolor(80, 80, 80).to_string());
+        output.push_str(" for greater metadata on the topics");
+    }
+
+    output
 }
 
 /// Formats a single topic for terminal display.
-fn format_topic(topic: &TopicInfo, hide_type_badge: bool) -> String {
+fn format_topic(topic: &TopicInfo, hide_type_badge: bool, verbose: bool) -> String {
     let mut lines = Vec::new();
 
     // Format the main topic line
-    let main_line = format_main_line(topic, hide_type_badge);
+    let main_line = format_main_line(topic, hide_type_badge, verbose);
     lines.push(main_line);
 
-    // Add sub-bullets for issues (if any)
-    if let Some(metadata_line) = format_metadata_issue(topic) {
-        lines.push(metadata_line);
-    }
+    // In verbose mode, add sub-bullets for issues
+    if verbose {
+        if let Some(metadata_line) = format_metadata_issue(topic) {
+            lines.push(metadata_line);
+        }
 
-    if let Some(underlying_line) = format_underlying_issues(topic) {
-        lines.push(underlying_line);
-    }
+        if let Some(underlying_line) = format_underlying_issues(topic) {
+            lines.push(underlying_line);
+        }
 
-    if let Some(output_line) = format_output_issues(topic) {
-        lines.push(output_line);
-    }
+        if let Some(output_line) = format_output_issues(topic) {
+            lines.push(output_line);
+        }
 
-    if let Some(additional_line) = format_additional_prompts(topic) {
-        lines.push(additional_line);
+        if let Some(additional_line) = format_additional_prompts(topic) {
+            lines.push(additional_line);
+        }
     }
 
     lines.join("\n")
 }
 
 /// Formats the main topic line with name, type badge, and description.
-fn format_main_line(topic: &TopicInfo, hide_type_badge: bool) -> String {
+fn format_main_line(topic: &TopicInfo, hide_type_badge: bool, verbose: bool) -> String {
     let mut parts = Vec::new();
 
     // Bullet prefix (no formatting)
@@ -141,10 +158,35 @@ fn format_main_line(topic: &TopicInfo, hide_type_badge: bool) -> String {
         parts.push(format_type_badge(&topic.topic_type));
     }
 
-    // Description (if present)
-    if let Some(ref desc) = topic.description {
-        parts.push(" : ".to_string());
-        parts.push(desc.italic().to_string());
+    // Language icon after type badge (in all modes)
+    parts.push(format_language_icon(topic.language.as_ref()));
+
+    // Description (if present and in verbose mode)
+    if verbose {
+        if let Some(ref desc) = topic.description {
+            parts.push(" : ".to_string());
+            parts.push(desc.italic().to_string());
+        }
+    }
+
+    // In non-verbose mode, add icons after the description
+    if !verbose {
+        let mut icons = Vec::new();
+
+        // Add 💡 icon if there are additional prompts
+        if !topic.additional_files.is_empty() {
+            icons.push("💡");
+        }
+
+        // Add 🐞 icon if there are any issues
+        if topic.has_issues() {
+            icons.push("🐞");
+        }
+
+        if !icons.is_empty() {
+            parts.push(" ".to_string());
+            parts.push(icons.join(" "));
+        }
     }
 
     parts.concat()
@@ -245,10 +287,23 @@ fn format_type_badge(topic_type: &str) -> String {
     // Get theme-aware background color
     let (r, g, b) = get_badge_color(topic_type);
 
-    // Apply the background color using truecolor
-    let formatted = topic_type.on_truecolor(r, g, b).to_string();
+    // Format as " TYPE " with background on entire string including spaces
+    format!(" {} ", topic_type).on_truecolor(r, g, b).to_string()
+}
 
-    format!("[{}]", formatted)
+/// Format language icon based on language string
+/// Returns empty string if no icon applies
+fn format_language_icon(language: Option<&String>) -> String {
+    match language.map(|s| s.as_str()) {
+        Some("Rust") => " 🦀".to_string(),
+        Some("Python") => " 🐍".to_string(),
+        Some("PHP") => " 🐘".to_string(),
+        Some("Javascript") | Some("TypeScript") | Some("Typescript") => {
+            // Blue background (0,122,204), black text
+            format!(" {}", "ʦ".black().on_truecolor(0, 122, 204))
+        }
+        _ => String::new(),
+    }
 }
 
 /// Formats metadata issues if present.
@@ -257,7 +312,10 @@ fn format_metadata_issue(topic: &TopicInfo) -> Option<String> {
         return None;
     }
 
-    Some("    - 🐞 **metadata.json** missing required props".to_string())
+    Some(format!(
+        "    - 🐞 {} missing required props",
+        "metadata.json".bold()
+    ))
 }
 
 /// Formats underlying research document issues if present.
@@ -268,7 +326,8 @@ fn format_underlying_issues(topic: &TopicInfo) -> Option<String> {
 
     let files = topic.missing_underlying.join(", ");
     Some(format!(
-        "    - 🐞 missing *underlying* research docs: {}",
+        "    - 🐞 missing {} research docs: {}",
+        "underlying".italic(),
         files
     ))
 }
@@ -287,7 +346,8 @@ fn format_output_issues(topic: &TopicInfo) -> Option<String> {
         .join(", ");
 
     Some(format!(
-        "    - 🐞 missing *final* output deliverables: {}",
+        "    - 🐞 missing {} output deliverables: {}",
+        "final".italic(),
         outputs
     ))
 }
@@ -332,6 +392,7 @@ mod tests {
             name: "test-library".to_string(),
             topic_type: "library".to_string(),
             description: Some("A test library for testing".to_string()),
+            language: None,
             additional_files: vec!["custom_prompt".to_string()],
             missing_underlying: vec!["overview.md".to_string()],
             missing_output: vec![ResearchOutput::Brief],
@@ -371,6 +432,7 @@ mod tests {
             name: "lib-one".to_string(),
             topic_type: "library".to_string(),
             description: Some("First library".to_string()),
+            language: None,
             additional_files: vec![],
             missing_underlying: vec![],
             missing_output: vec![],
@@ -382,6 +444,7 @@ mod tests {
             name: "lib-two".to_string(),
             topic_type: "framework".to_string(),
             description: Some("Second framework".to_string()),
+            language: None,
             additional_files: vec!["question_1".to_string(), "question_2".to_string()],
             missing_underlying: vec!["overview.md".to_string()],
             missing_output: vec![ResearchOutput::DeepDive, ResearchOutput::Skill],
@@ -393,6 +456,7 @@ mod tests {
             name: "lib-three".to_string(),
             topic_type: "software".to_string(),
             description: None,
+            language: None,
             additional_files: vec![],
             missing_underlying: vec!["use_cases.md".to_string(), "best_practices.md".to_string()],
             missing_output: vec![ResearchOutput::Brief],
@@ -443,6 +507,7 @@ mod tests {
             name: "complete-topic".to_string(),
             topic_type: "library".to_string(),
             description: Some("Complete topic".to_string()),
+            language: None,
             additional_files: vec!["file1".to_string()],
             missing_underlying: vec!["doc1.md".to_string()],
             missing_output: vec![ResearchOutput::Brief],
@@ -471,7 +536,7 @@ mod tests {
     #[test]
     fn test_format_terminal_empty_list() {
         let topics: Vec<TopicInfo> = vec![];
-        let output = format_terminal(&topics, false);
+        let output = format_terminal(&topics, false, true);
         assert_eq!(output, "");
     }
 
@@ -480,7 +545,7 @@ mod tests {
         let mut topic = create_test_topic("test-lib");
         topic.description = Some("A test library for testing".to_string());
 
-        let output = format_terminal(&[topic], false);
+        let output = format_terminal(&[topic], false, true);
 
         // Should contain name, type badge, and description
         assert!(output.contains("test-lib"));
@@ -495,7 +560,7 @@ mod tests {
     fn test_complete_topic_without_description() {
         let topic = create_test_topic("test-lib");
 
-        let output = format_terminal(&[topic], false);
+        let output = format_terminal(&[topic], false, true);
 
         // Should contain name and type badge
         assert!(output.contains("test-lib"));
@@ -512,13 +577,13 @@ mod tests {
         topic.missing_output.push(ResearchOutput::DeepDive);
         topic.missing_output.push(ResearchOutput::Brief);
 
-        let output = format_terminal(&[topic], false);
+        let output = format_terminal(&[topic], false, true);
 
         // Should contain the topic name
         assert!(output.contains("incomplete-lib"));
         // Should have issue marker
         assert!(output.contains("🐞"));
-        assert!(output.contains("missing *final* output deliverables"));
+        assert!(output.contains("output deliverables"));
         assert!(output.contains("Deep Dive Document"));
         assert!(output.contains("Brief"));
     }
@@ -529,13 +594,13 @@ mod tests {
         topic.missing_underlying.push("overview.md".to_string());
         topic.missing_underlying.push("use_cases.md".to_string());
 
-        let output = format_terminal(&[topic], false);
+        let output = format_terminal(&[topic], false, true);
 
         // Should contain the topic name
         assert!(output.contains("partial-lib"));
         // Should have issue marker
         assert!(output.contains("🐞"));
-        assert!(output.contains("missing *underlying* research docs"));
+        assert!(output.contains("research docs"));
         assert!(output.contains("overview.md"));
         assert!(output.contains("use_cases.md"));
     }
@@ -545,13 +610,13 @@ mod tests {
         let mut topic = create_test_topic("no-meta-lib");
         topic.missing_metadata = true;
 
-        let output = format_terminal(&[topic], false);
+        let output = format_terminal(&[topic], false, true);
 
         // Should contain the topic name
         assert!(output.contains("no-meta-lib"));
         // Should have issue marker
         assert!(output.contains("🐞"));
-        assert!(output.contains("**metadata.json** missing required props"));
+        assert!(output.contains("metadata.json"));
     }
 
     #[test]
@@ -561,7 +626,7 @@ mod tests {
         topic.additional_files.push("question_2".to_string());
         topic.additional_files.push("custom_analysis".to_string());
 
-        let output = format_terminal(&[topic], false);
+        let output = format_terminal(&[topic], false, true);
 
         // Should contain the topic name
         assert!(output.contains("custom-lib"));
@@ -576,18 +641,19 @@ mod tests {
     #[test]
     fn test_type_badge_shown_when_not_filtered() {
         let topic = create_test_topic("test-lib");
-        let output = format_terminal(&[topic], false);
+        let output = format_terminal(&[topic], false, true);
 
         // Should contain type badge (with color codes)
         assert!(output.contains("library"));
-        assert!(output.contains('['));
-        assert!(output.contains(']'));
+        // Strip ANSI codes and verify the badge format
+        let stripped = strip_ansi_codes(&output);
+        assert!(stripped.contains(" library "));
     }
 
     #[test]
     fn test_type_badge_hidden_when_filtered() {
         let topic = create_test_topic("test-lib");
-        let output = format_terminal(&[topic], true);
+        let output = format_terminal(&[topic], true, true);
 
         // Should contain the topic name
         assert!(output.contains("test-lib"));
@@ -603,7 +669,7 @@ mod tests {
         let mut topic2 = create_test_topic("lib-b");
         topic2.missing_output.push(ResearchOutput::Skill);
 
-        let output = format_terminal(&[topic1, topic2], false);
+        let output = format_terminal(&[topic1, topic2], false, true);
 
         // Should contain both topics
         assert!(output.contains("lib-a"));
@@ -622,14 +688,14 @@ mod tests {
         topic.missing_output.push(ResearchOutput::DeepDive);
         topic.additional_files.push("question_1".to_string());
 
-        let output = format_terminal(&[topic], false);
+        let output = format_terminal(&[topic], false, true);
 
         // Should contain all markers
         assert!(output.contains("complex-lib"));
         assert!(output.contains("Complex library with issues"));
-        assert!(output.contains("**metadata.json** missing required props"));
-        assert!(output.contains("missing *underlying* research docs"));
-        assert!(output.contains("missing *final* output deliverables"));
+        assert!(output.contains("metadata.json"));
+        assert!(output.contains("research docs"));
+        assert!(output.contains("output deliverables"));
         assert!(output.contains("1 additional prompts used in research"));
     }
 
@@ -637,8 +703,37 @@ mod tests {
     fn test_format_type_badge_library() {
         let badge = format_type_badge("library");
         assert!(badge.contains("library"));
-        assert!(badge.starts_with('['));
-        assert!(badge.ends_with(']'));
+        // Badge format is " TYPE " with background color (ANSI codes like [48;2; are present)
+        // Strip ANSI codes to check the actual text
+        let stripped = strip_ansi_codes(&badge);
+        assert_eq!(stripped.trim(), "library");
+        assert!(stripped.starts_with(' '));
+        assert!(stripped.ends_with(' '));
+    }
+
+    /// Helper to strip ANSI escape codes
+    fn strip_ansi_codes(s: &str) -> String {
+        let mut result = String::new();
+        let mut chars = s.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            if ch == '\x1b' {
+                // Skip ESC sequence
+                if chars.peek() == Some(&'[') {
+                    chars.next(); // skip '['
+                    // Skip until 'm'
+                    while let Some(&next_ch) = chars.peek() {
+                        chars.next();
+                        if next_ch == 'm' {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                result.push(ch);
+            }
+        }
+        result
     }
 
     #[test]
@@ -665,8 +760,8 @@ mod tests {
             .missing_underlying
             .push("overview.md".to_string());
 
-        let critical_output = format_terminal(&[critical_topic], false);
-        let minor_output = format_terminal(&[minor_topic], false);
+        let critical_output = format_terminal(&[critical_topic], false, true);
+        let minor_output = format_terminal(&[minor_topic], false, true);
 
         // Both should contain their names
         assert!(critical_output.contains("critical-lib"));
@@ -682,14 +777,79 @@ mod tests {
         let mut topic = create_test_topic("indent-lib");
         topic.missing_metadata = true;
 
-        let output = format_terminal(&[topic], false);
+        let output = format_terminal(&[topic], false, true);
 
         // Find the sub-bullet line
         let lines: Vec<&str> = output.lines().collect();
-        let sub_bullet = lines.iter().find(|l| l.contains("**metadata.json**"));
+        let sub_bullet = lines.iter().find(|l| l.contains("metadata.json"));
         assert!(sub_bullet.is_some());
 
         // Should start with 4 spaces
         assert!(sub_bullet.unwrap().starts_with("    - "));
+    }
+
+    #[test]
+    fn test_verbose_mode_shows_sub_bullets() {
+        let mut topic = create_test_topic("test-lib");
+        topic.missing_metadata = true;
+        topic.missing_underlying.push("overview.md".to_string());
+        topic.additional_files.push("question_1".to_string());
+
+        let output = format_terminal(&[topic], false, true);
+
+        // Should contain sub-bullets
+        assert!(output.contains("    - 🐞"));
+        assert!(output.contains("metadata.json"));
+        assert!(output.contains("research docs"));
+        assert!(output.contains("additional prompts used in research"));
+    }
+
+    #[test]
+    fn test_non_verbose_mode_shows_only_icons() {
+        let mut topic = create_test_topic("test-lib");
+        topic.missing_metadata = true;
+        topic.missing_underlying.push("overview.md".to_string());
+        topic.additional_files.push("question_1".to_string());
+
+        let output = format_terminal(&[topic], false, false);
+
+        // Should contain icons on main line
+        assert!(output.contains("💡"));
+        assert!(output.contains("🐞"));
+
+        // Should NOT contain sub-bullets
+        assert!(!output.contains("    - "));
+        assert!(!output.contains("metadata.json"));
+        assert!(!output.contains("research docs"));
+        assert!(!output.contains("additional prompts used in research"));
+    }
+
+    #[test]
+    fn test_non_verbose_mode_shows_help_text() {
+        let topic = create_test_topic("test-lib");
+        let output = format_terminal(&[topic], false, false);
+
+        // Should contain help text
+        assert!(output.contains("use"));
+        assert!(output.contains("--verbose"));
+        assert!(output.contains("for greater metadata on the topics"));
+    }
+
+    #[test]
+    fn test_verbose_mode_does_not_show_help_text() {
+        let topic = create_test_topic("test-lib");
+        let output = format_terminal(&[topic], false, true);
+
+        // Should NOT contain help text
+        assert!(!output.contains("for greater metadata on the topics"));
+    }
+
+    #[test]
+    fn test_non_verbose_empty_list_no_help_text() {
+        let topics: Vec<TopicInfo> = vec![];
+        let output = format_terminal(&topics, false, false);
+
+        // Empty list should not show help text
+        assert_eq!(output, "");
     }
 }

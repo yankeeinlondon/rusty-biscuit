@@ -58,6 +58,9 @@ pub struct TopicInfo {
     /// One-sentence description from metadata.json `brief` property
     pub description: Option<String>,
 
+    /// Programming language from metadata.json `library_info.language` property
+    pub language: Option<String>,
+
     /// Additional custom prompt files beyond core research prompts
     /// (e.g., question_*.md files without the .md extension)
     pub additional_files: Vec<String>,
@@ -86,6 +89,7 @@ impl TopicInfo {
             name,
             topic_type: "library".to_string(),
             description: None,
+            language: None,
             additional_files: Vec::new(),
             missing_underlying: Vec::new(),
             missing_output: Vec::new(),
@@ -219,6 +223,7 @@ mod tests {
             name: "test-lib".to_string(),
             topic_type: "library".to_string(),
             description: Some("A test library".to_string()),
+            language: None,
             additional_files: vec!["custom_prompt".to_string()],
             missing_underlying: vec!["overview.md".to_string()],
             missing_output: vec![ResearchOutput::Brief],

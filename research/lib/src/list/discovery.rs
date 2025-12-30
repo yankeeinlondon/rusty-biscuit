@@ -27,6 +27,12 @@ pub enum DiscoveryError {
     MetadataParse(#[from] serde_json::Error),
 }
 
+/// Library information from metadata.json
+#[derive(Debug, Deserialize)]
+struct LibraryInfo {
+    language: Option<String>,
+}
+
 /// Metadata structure as defined in metadata.json files.
 ///
 /// This represents the schema of the metadata.json file that should exist
@@ -34,10 +40,15 @@ pub enum DiscoveryError {
 #[derive(Debug, Deserialize)]
 struct Metadata {
     /// The kind/type of research (e.g., "library", "software", "framework")
+    #[serde(alias = "type")]
     kind: Option<String>,
 
     /// Brief one-sentence description of the topic
     brief: Option<String>,
+
+    /// Library-specific information (language, etc.)
+    #[serde(default)]
+    library_info: Option<LibraryInfo>,
 }
 
 /// Expected underlying research document filenames.
@@ -143,12 +154,15 @@ fn analyze_topic(name: String, location: PathBuf) -> TopicInfo {
         Ok(metadata) => {
             topic.topic_type = metadata.kind.unwrap_or_else(|| "library".to_string());
             topic.description = metadata.brief;
+            topic.language = metadata
+                .library_info
+                .and_then(|li| li.language);
             topic.missing_metadata = false;
         }
         Err(err) => {
             debug!("Failed to read metadata for topic '{}': {}", name, err);
             topic.missing_metadata = true;
-            // Keep default values for topic_type and description
+            // Keep default values for topic_type, description, and language
         }
     }
 

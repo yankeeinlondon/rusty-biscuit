@@ -17,6 +17,11 @@ The Research area provides automated research capabilities for software librarie
 
 For detailed documentation, see [`/research/README.md`](./research/README.md).
 
+
+### SoYouSay Area (`/so-you-say`)
+
+A CLI which leverages the shared library's TTS functionality to provide a cross-platform way to announce progress leveraging the underlying host's resources.
+
 ### Shared Library (`/shared`)
 
 Common utilities shared across multiple areas of the monorepo.

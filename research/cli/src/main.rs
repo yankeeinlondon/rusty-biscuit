@@ -12,8 +12,8 @@ use tts::Tts;
 #[command(about = "Automated research tool for software libraries", long_about = None)]
 struct Cli {
     /// Increase verbosity (-v, -vv, -vvv)
-    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
-    verbose: u8,
+    #[arg(short = 'v', action = clap::ArgAction::Count, global = true)]
+    log_verbosity: u8,
 
     /// Output logs as JSON
     #[arg(long, global = true)]
@@ -49,6 +49,10 @@ enum Commands {
         /// Filter by research type (repeatable: -t library -t software)
         #[arg(short = 't', long = "type", value_name = "TYPE")]
         types: Vec<String>,
+
+        /// Show detailed metadata for each topic (sub-bullets with issues)
+        #[arg(short = 'v', long)]
+        verbose: bool,
 
         /// Output as JSON instead of terminal format
         #[arg(long)]
@@ -129,7 +133,7 @@ async fn main() {
     dotenvy::dotenv().ok();
 
     let cli = Cli::parse();
-    init_tracing(cli.verbose, cli.json);
+    init_tracing(cli.log_verbosity, cli.json);
 
     tracing::info!("Research CLI starting");
 
@@ -192,9 +196,10 @@ async fn main() {
         Commands::List {
             filters,
             types,
+            verbose,
             json,
         } => {
-            match research_lib::list(filters, types, json).await {
+            match research_lib::list(filters, types, verbose, json).await {
                 Ok(()) => {
                     // Success - output already written to stdout
                 }
@@ -211,8 +216,8 @@ async fn main() {
             json,
         } => {
             match research_lib::link(filters, types, json).await {
-                Ok(()) => {
-                    // Success - output already written to stdout
+                Ok(_) => {
+                    // Output already printed by library
                 }
                 Err(e) => {
                     eprintln!("Link failed: {}", e);

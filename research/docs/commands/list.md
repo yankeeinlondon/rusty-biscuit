@@ -21,6 +21,7 @@ Lists out all **research** topics.
 - `--type`, `-t` this switch provides a filter on a particular type of research topic:
     - `research list -t library` will list all topics which are of the type "library"
     - more than one type can be achieved by using this switch more than once. For instance, `research list -t library -t software` will list all topics which are either of the type "library" or "software".
+- `--verbose` will output detailed metadata with sub-bullets showing issues and additional prompts (note: `-v` is reserved for global logging verbosity)
 
 #### Output
 
@@ -57,9 +58,19 @@ struct TopicInfo {
         - is BOLD and ORANGE when there is a missing _underlying_ document (but all output files are present as is `metadata.json`)
     - then -- unless we're filtering on only one "type" -- we show the type:
         - The type will have a background color and be padded with a space and after it's name (which will receive the background color too)
+    - now add some contextual icons if they meet the criteria:
+        - 🦀 if the `metadata.json`'s has a `library_info.language` property and it's equal to "Rust"
+        - 🐍 if the `metadata.json`'s has a `library_info.language` property and it's equal to "Python"
+        - 🐘 if the `metadata.json`'s has a `library_info.language` property and it's equal to "PHP"
+        - `ʦ` (BLUE background, BLACK text) if the `metadata.json`'s has a `library_info.language` property and it's equal to "Javascript" or "Typescript"
     - Add `: {{ITALIC}}{{Description}}{{RESET}}` where the "description" is the one sentence description in the `brief` property of the `metadata.json` file.
-    - Now we will add sub-bullets for the following optional/conditional items (indented 4 spaces from primary list):
-        - if there are missing properties in the `metadata.json` then we will report: `- 🐞 {{BOLD}}metadata.json{{RESET}} missing required props: PROP, PROP, ...`
-        - if there are missing _underlying_ documents then report `- 🐞 missing {{ITALIC}}underlying{{RESEARCH}} research docs: FILE, FILE, ...`
-        - if there are missing final outputs then report: `- 🐞 missing {{ITALIC}} final{{RESET}} output deliverables: (Deep Dive Document | Skill | Brief)[]`
-        - if there are additional custom prompts beyond the core research prompts then report: `- 💡 {{#}} additional prompts used in research: FileNoExt, FileNoExt, ...`        
+    - In verbose mode: 
+        - Now we will add sub-bullets for the following optional/conditional items (indented 4 spaces from primary list):
+            - if there are missing properties in the `metadata.json` then we will report: `- 🐞 {{BOLD}}metadata.json{{RESET}} missing required props: PROP, PROP, ...`
+            - if there are missing _underlying_ documents then report `- 🐞 missing {{ITALIC}}underlying{{RESEARCH}} research docs: FILE, FILE, ...`
+            - if there are missing final outputs then report: `- 🐞 missing {{ITALIC}} final{{RESET}} output deliverables: (Deep Dive Document | Skill | Brief)[]`
+            - if there are additional custom prompts beyond the core research prompts then report: `- 💡 {{#}} additional prompts used in research: FileNoExt, FileNoExt, ...`        
+    - In non-verbose mode:
+        - Add a `💡` icon after a research topic which has additional prompts
+        - Add a `🐞` icon to a topic which is missing data
+        - at the very end of output add a blank line and then `- use {{BG_GREY}} --verbose {{RESET}} for greater metadata on the topics`

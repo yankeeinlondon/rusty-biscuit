@@ -43,8 +43,13 @@ pub enum DetectionError {
 ///
 /// Returns `DetectionError::HomeDirectoryNotFound` if the home directory
 /// cannot be determined.
-fn get_claude_skills_dir() -> Result<PathBuf, DetectionError> {
-    let home = dirs::home_dir().ok_or(DetectionError::HomeDirectoryNotFound)?;
+pub fn get_claude_skills_dir() -> Result<PathBuf, DetectionError> {
+    // In tests, prefer HOME env var over dirs::home_dir() to avoid caching issues
+    let home = if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home)
+    } else {
+        dirs::home_dir().ok_or(DetectionError::HomeDirectoryNotFound)?
+    };
     Ok(home.join(".claude/skills"))
 }
 
@@ -54,8 +59,13 @@ fn get_claude_skills_dir() -> Result<PathBuf, DetectionError> {
 ///
 /// Returns `DetectionError::HomeDirectoryNotFound` if the home directory
 /// cannot be determined.
-fn get_opencode_skills_dir() -> Result<PathBuf, DetectionError> {
-    let home = dirs::home_dir().ok_or(DetectionError::HomeDirectoryNotFound)?;
+pub fn get_opencode_skills_dir() -> Result<PathBuf, DetectionError> {
+    // In tests, prefer HOME env var over dirs::home_dir() to avoid caching issues
+    let home = if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home)
+    } else {
+        dirs::home_dir().ok_or(DetectionError::HomeDirectoryNotFound)?
+    };
     Ok(home.join(".config/opencode/skill"))
 }
 

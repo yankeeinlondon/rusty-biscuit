@@ -14,6 +14,8 @@
 pub mod link;
 pub mod list;
 pub mod providers;
+pub mod utils;
+pub mod validation;
 
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
@@ -36,6 +38,8 @@ use std::time::Instant;
 use thiserror::Error;
 use tokio::fs;
 use tracing::{Span, debug, info, info_span, instrument, warn};
+
+use crate::validation::parse_and_validate_frontmatter;
 
 /// A PromptHook that emits tracing events for agent interactions.
 ///
@@ -229,6 +233,9 @@ pub enum ResearchKind {
 /// Metadata for a research output
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResearchMetadata {
+    /// Schema version for future evolution (defaults to 0 for backward compatibility)
+    #[serde(default)]
+    pub schema_version: u32,
     /// The kind of research
     pub kind: ResearchKind,
     /// Information about the library (if kind is Library)
@@ -247,6 +254,9 @@ pub struct ResearchMetadata {
     /// Paragraph summary
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    /// Guidance on when to use this research (e.g., "Use when working with X library")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when_to_use: Option<String>,
 }
 
 /// Library info stored in metadata (serializable version)
@@ -275,6 +285,7 @@ impl ResearchMetadata {
     pub fn new_library(library_info: Option<&LibraryInfo>) -> Self {
         let now = Utc::now();
         Self {
+            schema_version: 0,
             kind: ResearchKind::Library,
             library_info: library_info.map(LibraryInfoMetadata::from),
             additional_files: std::collections::HashMap::new(),
@@ -282,6 +293,7 @@ impl ResearchMetadata {
             updated_at: now,
             brief: None,
             summary: None,
+            when_to_use: None,
         }
     }
 
@@ -734,6 +746,49 @@ pub struct ResearchResult {
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
     pub total_tokens: u64,
+}
+
+/// Split multi-file LLM output into separate files.
+/// Handles the implicit first file (SKILL.md) that doesn't have a separator before it.
+///
+/// LLM output format expected:
+/// ```text
+/// [Content for SKILL.md]
+/// --- FILE: advanced-usage.md ---
+/// [Content for advanced-usage.md]
+/// --- FILE: examples.md ---
+/// [Content for examples.md]
+/// ```
+fn split_into_files(content: &str) -> Vec<(String, String)> {
+    let mut files = Vec::new();
+    let mut current_filename = "SKILL.md".to_string();  // First file is implicitly SKILL.md
+    let mut current_content = String::new();
+
+    for line in content.lines() {
+        if line.starts_with("--- FILE:") && line.ends_with("---") {
+            // Save previous file
+            if !current_content.trim().is_empty() {
+                files.push((current_filename.clone(), current_content.trim().to_string()));
+            }
+
+            // Extract new filename from separator
+            current_filename = line.trim_start_matches("--- FILE:")
+                .trim_end_matches("---")
+                .trim()
+                .to_string();
+            current_content = String::new();
+        } else {
+            current_content.push_str(line);
+            current_content.push('\n');
+        }
+    }
+
+    // Don't forget the last file
+    if !current_content.trim().is_empty() {
+        files.push((current_filename, current_content.trim().to_string()));
+    }
+
+    files
 }
 
 /// Normalize markdown by parsing and re-serializing it.
@@ -1671,32 +1726,58 @@ async fn run_incremental_research(
     // Parse skill output and split into multiple files if needed
     if skill_result.metrics.is_some() {
         if let Ok(skill_content) = fs::read_to_string(skill_dir.join("SKILL.md")).await {
-            if skill_content.contains("--- FILE:") {
-                let mut current_file: Option<String> = None;
-                let mut current_content = String::new();
+            // Step 1: Split files BEFORE normalization
+            let files = if skill_content.contains("--- FILE:") {
+                split_into_files(&skill_content)
+            } else {
+                vec![("SKILL.md".to_string(), skill_content)]
+            };
 
-                for line in skill_content.lines() {
-                    if line.starts_with("--- FILE:") && line.ends_with("---") {
-                        if let Some(ref filename) = current_file {
-                            let file_path = skill_dir.join(filename);
-                            let normalized = normalize_markdown(&current_content);
-                            let _ = fs::write(&file_path, normalized).await;
-                        }
-                        let filename = line
-                            .trim_start_matches("--- FILE:")
-                            .trim_end_matches("---")
-                            .trim();
-                        current_file = Some(filename.to_string());
-                        current_content = String::new();
-                    } else if current_file.is_some() {
-                        current_content.push_str(line);
-                        current_content.push('\n');
-                    }
+            // Step 2: Selectively normalize files (skip SKILL.md, normalize others)
+            for (filename, content) in files {
+                let final_content = if filename == "SKILL.md" {
+                    // Don't normalize SKILL.md - preserve frontmatter exactly as LLM generated it
+                    content
+                } else {
+                    // Normalize supporting documentation files
+                    normalize_markdown(&content)
+                };
+
+                let file_path = skill_dir.join(&filename);
+                if let Err(e) = fs::write(&file_path, final_content).await {
+                    tracing::error!("Failed to write {}: {}", filename, e);
                 }
-                if let Some(ref filename) = current_file {
-                    let file_path = skill_dir.join(filename);
-                    let normalized = normalize_markdown(&current_content);
-                    let _ = fs::write(&file_path, normalized).await;
+            }
+
+            // Validate SKILL.md frontmatter and extract when_to_use
+            let skill_md_path = skill_dir.join("SKILL.md");
+            if let Ok(skill_content) = fs::read_to_string(&skill_md_path).await {
+                match parse_and_validate_frontmatter(&skill_content) {
+                    Ok((frontmatter, _body)) => {
+                        tracing::info!("✓ SKILL.md frontmatter is valid");
+
+                        // Update metadata with when_to_use
+                        existing_metadata.when_to_use = Some(frontmatter.description.clone());
+                        existing_metadata.updated_at = Utc::now();
+
+                        if let Err(e) = existing_metadata.save(&output_dir).await {
+                            tracing::error!("Failed to save metadata: {}", e);
+                        } else {
+                            tracing::info!("✓ Updated metadata.when_to_use");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
+                        tracing::error!("  File: {}", skill_md_path.display());
+                        tracing::error!("  Please manually fix the frontmatter in SKILL.md");
+
+                        eprintln!("\n⚠️  Warning: SKILL.md frontmatter is invalid");
+                        eprintln!("   {}", e);
+                        eprintln!("   File: {}", skill_md_path.display());
+                        eprintln!(
+                            "   The skill may not activate correctly until this is fixed.\n"
+                        );
+                    }
                 }
             }
         }
@@ -1820,6 +1901,7 @@ async fn run_incremental_research(
 /// ## Arguments
 /// * `filters` - Glob patterns to filter topics (e.g., ["foo*", "bar"])
 /// * `types` - Research types to filter (e.g., ["library", "software"])
+/// * `verbose` - If true, show detailed sub-bullets with metadata issues
 /// * `json` - If true, output as JSON; otherwise use terminal format
 ///
 /// ## Environment Variables
@@ -1839,10 +1921,11 @@ async fn run_incremental_research(
     fields(
         filter_count = filters.len(),
         type_count = types.len(),
+        verbose = verbose,
         json = json
     )
 )]
-pub async fn list(filters: Vec<String>, types: Vec<String>, json: bool) -> Result<(), String> {
+pub async fn list(filters: Vec<String>, types: Vec<String>, verbose: bool, json: bool) -> Result<(), String> {
     use list::{apply_filters, discover_topics, format_json, format_terminal};
 
     // Get RESEARCH_DIR from env (default to HOME)
@@ -1878,7 +1961,7 @@ pub async fn list(filters: Vec<String>, types: Vec<String>, json: bool) -> Resul
             format_json(&filtered_topics).map_err(|e| format!("Failed to format JSON: {}", e))?;
         println!("{}", output);
     } else {
-        let output = format_terminal(&filtered_topics, filter_single_type);
+        let output = format_terminal(&filtered_topics, filter_single_type, verbose);
         println!("{}", output);
     }
 
@@ -2552,38 +2635,55 @@ pub async fn research(
     );
 
     // Parse skill output and split into multiple files if needed
+    // Also validate frontmatter and extract when_to_use for metadata
+    let mut when_to_use: Option<String> = None;
+
     if skill_result.metrics.is_some() {
         if let Ok(skill_content) = fs::read_to_string(skill_dir.join("SKILL.md")).await {
-            // Check if the output contains multiple files
-            if skill_content.contains("--- FILE:") {
-                let mut current_file: Option<String> = None;
-                let mut current_content = String::new();
+            // Step 1: Split files BEFORE normalization
+            let files = if skill_content.contains("--- FILE:") {
+                split_into_files(&skill_content)
+            } else {
+                vec![("SKILL.md".to_string(), skill_content)]
+            };
 
-                for line in skill_content.lines() {
-                    if line.starts_with("--- FILE:") && line.ends_with("---") {
-                        // Save previous file if any
-                        if let Some(ref filename) = current_file {
-                            let file_path = skill_dir.join(filename);
-                            let normalized = normalize_markdown(&current_content);
-                            let _ = fs::write(&file_path, normalized).await;
-                        }
-                        // Start new file
-                        let filename = line
-                            .trim_start_matches("--- FILE:")
-                            .trim_end_matches("---")
-                            .trim();
-                        current_file = Some(filename.to_string());
-                        current_content = String::new();
-                    } else if current_file.is_some() {
-                        current_content.push_str(line);
-                        current_content.push('\n');
-                    }
+            // Step 2: Selectively normalize files (skip SKILL.md, normalize others)
+            for (filename, content) in files {
+                let final_content = if filename == "SKILL.md" {
+                    // Don't normalize SKILL.md - preserve frontmatter exactly as LLM generated it
+                    content
+                } else {
+                    // Normalize supporting documentation files
+                    normalize_markdown(&content)
+                };
+
+                let file_path = skill_dir.join(&filename);
+                if let Err(e) = fs::write(&file_path, final_content).await {
+                    tracing::error!("Failed to write {}: {}", filename, e);
                 }
-                // Save last file
-                if let Some(ref filename) = current_file {
-                    let file_path = skill_dir.join(filename);
-                    let normalized = normalize_markdown(&current_content);
-                    let _ = fs::write(&file_path, normalized).await;
+            }
+
+            // Validate SKILL.md frontmatter and extract when_to_use
+            let skill_md_path = skill_dir.join("SKILL.md");
+            if let Ok(skill_content) = fs::read_to_string(&skill_md_path).await {
+                match parse_and_validate_frontmatter(&skill_content) {
+                    Ok((frontmatter, _body)) => {
+                        tracing::info!("✓ SKILL.md frontmatter is valid");
+                        when_to_use = Some(frontmatter.description.clone());
+                        tracing::info!("✓ Extracted when_to_use from frontmatter");
+                    }
+                    Err(e) => {
+                        tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
+                        tracing::error!("  File: {}", skill_md_path.display());
+                        tracing::error!("  Please manually fix the frontmatter in SKILL.md");
+
+                        eprintln!("\n⚠️  Warning: SKILL.md frontmatter is invalid");
+                        eprintln!("   {}", e);
+                        eprintln!("   File: {}", skill_md_path.display());
+                        eprintln!(
+                            "   The skill may not activate correctly until this is fixed.\n"
+                        );
+                    }
                 }
             }
         }
@@ -2673,12 +2773,15 @@ pub async fn research(
     let mut metadata = ResearchMetadata::new_library(library_info.as_ref());
     metadata.brief = brief_text;
     metadata.summary = summary_text;
+    metadata.when_to_use = when_to_use;
     for (i, question) in questions.iter().enumerate() {
         let filename = format!("question_{}.md", i + 1);
         metadata.add_additional_file(filename, question.clone());
     }
     if let Err(e) = metadata.save(&output_dir).await {
         eprintln!("Warning: Failed to write metadata.json: {}", e);
+    } else if metadata.when_to_use.is_some() {
+        tracing::info!("✓ Updated metadata.when_to_use");
     }
 
     // Exit the phase 2 span
@@ -3192,6 +3295,145 @@ mod tests {
         assert_eq!(OverlapVerdict::New, OverlapVerdict::New);
         assert_eq!(OverlapVerdict::Conflict, OverlapVerdict::Conflict);
         assert_ne!(OverlapVerdict::New, OverlapVerdict::Conflict);
+    }
+
+    // ===========================================
+    // Tests for split_into_files
+    // ===========================================
+
+    #[test]
+    fn test_split_into_files_single_file_no_separators() {
+        let content = "---\ntitle: Test Skill\n---\n\n# Test Content\n\nSome content here.";
+        let files = split_into_files(content);
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].0, "SKILL.md");
+        assert!(files[0].1.contains("Test Content"));
+    }
+
+    #[test]
+    fn test_split_into_files_multiple_files() {
+        let content = r#"---
+title: Test Skill
+---
+
+# Main Content
+
+--- FILE: advanced-usage.md ---
+
+# Advanced Usage
+
+Some advanced content.
+
+--- FILE: examples.md ---
+
+# Examples
+
+Example content here."#;
+
+        let files = split_into_files(content);
+
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[0].0, "SKILL.md");
+        assert!(files[0].1.contains("Main Content"));
+
+        assert_eq!(files[1].0, "advanced-usage.md");
+        assert!(files[1].1.contains("Advanced Usage"));
+
+        assert_eq!(files[2].0, "examples.md");
+        assert!(files[2].1.contains("Examples"));
+    }
+
+    #[test]
+    fn test_split_into_files_empty_content_between_separators() {
+        let content = r#"---
+title: Test Skill
+---
+
+# Main Content
+
+--- FILE: empty.md ---
+
+--- FILE: real.md ---
+
+# Real Content"#;
+
+        let files = split_into_files(content);
+
+        // Empty file should be skipped
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].0, "SKILL.md");
+        assert_eq!(files[1].0, "real.md");
+        assert!(files[1].1.contains("Real Content"));
+    }
+
+    #[test]
+    fn test_split_into_files_separator_at_end() {
+        let content = r#"---
+title: Test Skill
+---
+
+# Main Content
+
+--- FILE: additional.md ---
+
+# Additional Content
+
+Last line."#;
+
+        let files = split_into_files(content);
+
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].0, "SKILL.md");
+        assert_eq!(files[1].0, "additional.md");
+        assert!(files[1].1.contains("Last line"));
+    }
+
+    #[test]
+    fn test_split_into_files_starting_with_separator() {
+        // This is the current bug scenario where LLM output starts with a separator
+        let content = r#"--- FILE: SKILL.md ---
+---
+title: Test Skill
+---
+
+# Main Content
+
+--- FILE: advanced.md ---
+
+# Advanced"#;
+
+        let files = split_into_files(content);
+
+        // First file should still be SKILL.md (the implicit one)
+        // But it will be empty, so it gets skipped
+        // Then we get SKILL.md from the separator
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].0, "SKILL.md");
+        assert!(files[0].1.contains("Main Content"));
+        assert_eq!(files[1].0, "advanced.md");
+    }
+
+    #[test]
+    fn test_split_into_files_whitespace_handling() {
+        let content = r#"
+
+---
+title: Test
+---
+
+# Content
+
+--- FILE:   spaces.md   ---
+
+Content with spaces in separator."#;
+
+        let files = split_into_files(content);
+
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].0, "SKILL.md");
+        // Filename should be trimmed
+        assert_eq!(files[1].0, "spaces.md");
     }
 
     // ===========================================

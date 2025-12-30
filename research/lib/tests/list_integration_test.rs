@@ -223,7 +223,7 @@ fn test_json_output_format() {
 fn test_terminal_output_format() {
     let topics = discover_topics(fixtures_dir()).expect("Failed to discover topics");
 
-    let output = format_terminal(&topics, false);
+    let output = format_terminal(&topics, false, true);
 
     // Verify topic names appear in output
     assert!(
@@ -246,7 +246,7 @@ fn test_terminal_output_format() {
 #[test]
 fn test_terminal_output_empty_topics() {
     let topics = Vec::new();
-    let output = format_terminal(&topics, false);
+    let output = format_terminal(&topics, false, true);
 
     assert!(
         output.is_empty(),

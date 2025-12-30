@@ -711,6 +711,15 @@ Present the final plan to the user with:
 5. **Key Risks** - Top risks and mitigations
 6. **Open Questions** - Items needing user input
 
+After presenting the report to the console, you should speak to the user: "The plan in {{REPO_NAME}} called {{PLAN NAME}} has completed." using TTS.
+
+- TTS
+  - if the command `so-you-say` is available in the executable path then use this for TTS: `so-you-say "{{MESSAGE}}"`
+  - if a command `say` is available on the host system (as it will be on macOS) then use that: `say "{{MESSAGE}}"`
+  - if the host system has an executable called "speak" or "speak-ng" the use it for TTS: `speak "{{MESSAGE}}"` 
+- `{{PLAN_NAME}}` should be the plan's file name without the leading date information and excluding the file extension.
+- `{{REPO_NAME}}` should be derived the 
+
 ### 5.2 Request Approval
 
 Ask the user to:
