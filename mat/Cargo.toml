@@ -12,3 +12,9 @@ shared = { path = "../shared" }
 clap = { version = "4.5", features = ["derive"] }
 color-eyre = "0.6"
 serde_json = "1.0"
+atty = "0.2"
+open = "5"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"

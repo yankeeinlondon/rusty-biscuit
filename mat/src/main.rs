@@ -1,6 +1,8 @@
-use clap::{Parser, Subcommand};
-use color_eyre::eyre::{Context, Result};
-use shared::markdown::highlighting::{ColorMode, ThemePair};
+use clap::{ArgGroup, Parser};
+use color_eyre::eyre::{eyre, Context, Result};
+use shared::markdown::highlighting::{
+    detect_code_theme, detect_color_mode, detect_prose_theme, ColorMode, ThemePair,
+};
 use shared::markdown::output::{for_terminal, HtmlOptions, TerminalOptions};
 use shared::markdown::Markdown;
 use std::io::{self, Read};
@@ -8,173 +10,214 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "mat", about = "Markdown Awesome Tool", version)]
+#[command(group = ArgGroup::new("output-mode")
+    .args(["html", "show_html", "ast", "clean", "clean_save"])
+    .multiple(false))]
 struct Cli {
-    /// Input file path or "-" for stdin
-    input: PathBuf,
+    /// Input file path (reads from stdin if not provided, use "-" for explicit stdin)
+    input: Option<PathBuf>,
 
-    #[command(subcommand)]
-    command: Commands,
+    /// Theme for prose content (kebab-case name)
+    #[arg(long, value_parser = parse_theme_name)]
+    theme: Option<ThemePair>,
+
+    /// Theme for code blocks (overrides derived theme)
+    #[arg(long, value_parser = parse_theme_name)]
+    code_theme: Option<ThemePair>,
+
+    /// List available themes
+    #[arg(long)]
+    list_themes: bool,
+
+    /// Clean up markdown formatting (output to stdout)
+    #[arg(long, group = "output-mode")]
+    clean: bool,
+
+    /// Clean up and save back to file
+    #[arg(long, group = "output-mode")]
+    clean_save: bool,
+
+    /// Output as HTML
+    #[arg(long, group = "output-mode")]
+    html: bool,
+
+    /// Generate HTML and open in browser
+    #[arg(long, group = "output-mode")]
+    show_html: bool,
+
+    /// Output MDAST JSON
+    #[arg(long, group = "output-mode")]
+    ast: bool,
+
+    /// Merge JSON into frontmatter (JSON wins on conflicts)
+    #[arg(long, value_name = "JSON")]
+    fm_merge_with: Option<String>,
+
+    /// Set default frontmatter values (document wins on conflicts)
+    #[arg(long, value_name = "JSON")]
+    fm_defaults: Option<String>,
+
+    /// Include line numbers in code blocks
+    #[arg(long)]
+    line_numbers: bool,
 }
 
-#[derive(Subcommand)]
-enum Commands {
-    /// Cleanup and normalize markdown
-    Clean {
-        /// Output file path (prints to stdout if not specified)
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-    },
-    /// Render to HTML
-    Html {
-        /// Theme for code blocks
-        #[arg(long, default_value = "github")]
-        theme: String,
-
-        /// Color mode (light or dark)
-        #[arg(long, default_value = "dark")]
-        mode: String,
-
-        /// Output file path (prints to stdout if not specified)
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-    },
-    /// Render to terminal with ANSI codes
-    View {
-        /// Theme for code blocks
-        #[arg(long, default_value = "github")]
-        theme: String,
-
-        /// Color mode (light or dark)
-        #[arg(long, default_value = "dark")]
-        mode: String,
-
-        /// Include line numbers in code blocks
-        #[arg(long)]
-        line_numbers: bool,
-    },
-    /// Export AST as JSON
-    Ast {
-        /// Output file path (prints to stdout if not specified)
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-    },
+/// Parses a theme name string into ThemePair.
+fn parse_theme_name(s: &str) -> Result<ThemePair, String> {
+    ThemePair::try_from(s).map_err(|e| e.to_string())
 }
 
 fn main() -> Result<()> {
     color_eyre::install()?;
-
     let cli = Cli::parse();
 
-    // Load markdown from file or stdin
-    let mut md = load_markdown(&cli.input)
-        .with_context(|| format!("Failed to load markdown from {:?}", cli.input))?;
-
-    // Execute the requested command
-    match cli.command {
-        Commands::Clean { output } => {
-            md.cleanup();
-            let cleaned = md.as_string();
-            write_output(&cleaned, output)?;
-        }
-        Commands::Html { theme, mode, output } => {
-            let theme_pair = parse_theme(&theme)?;
-            let color_mode = parse_color_mode(&mode)?;
-
-            let mut options = HtmlOptions::default();
-            options.code_theme = theme_pair;
-            options.prose_theme = theme_pair;
-            options.color_mode = color_mode;
-
-            let html = md
-                .as_html(options)
-                .context("Failed to convert markdown to HTML")?;
-
-            write_output(&html, output)?;
-        }
-        Commands::View {
-            theme,
-            mode,
-            line_numbers,
-        } => {
-            let theme_pair = parse_theme(&theme)?;
-            let color_mode = parse_color_mode(&mode)?;
-
-            let mut options = TerminalOptions::default();
-            options.code_theme = theme_pair;
-            options.prose_theme = theme_pair;
-            options.color_mode = color_mode;
-            options.include_line_numbers = line_numbers;
-            options.color_depth = None; // Auto-detect
-
-            let terminal_output = for_terminal(&md, options)
-                .context("Failed to render markdown for terminal")?;
-
-            println!("{}", terminal_output);
-        }
-        Commands::Ast { output } => {
-            let ast = md.as_ast().context("Failed to generate AST")?;
-
-            let json = serde_json::to_string_pretty(&ast)
-                .context("Failed to serialize AST to JSON")?;
-
-            write_output(&json, output)?;
-        }
+    // Handle --list-themes first (no input needed)
+    if cli.list_themes {
+        list_themes();
+        return Ok(());
     }
+
+    // Load markdown from input or stdin
+    let mut md = load_markdown(cli.input.as_ref())?;
+
+    // Handle frontmatter operations
+    if let Some(ref json) = cli.fm_merge_with {
+        let data: serde_json::Value =
+            serde_json::from_str(json).wrap_err("Invalid JSON in --fm-merge-with argument")?;
+        // TODO: Implement fm_merge_with when Markdown API is available
+        eprintln!("Frontmatter merge: {:?}", data);
+        return Ok(());
+    }
+
+    if let Some(ref json) = cli.fm_defaults {
+        let data: serde_json::Value =
+            serde_json::from_str(json).wrap_err("Invalid JSON in --fm-defaults argument")?;
+        // TODO: Implement fm_defaults when Markdown API is available
+        eprintln!("Frontmatter defaults: {:?}", data);
+        return Ok(());
+    }
+
+    // Handle clean operations
+    if cli.clean {
+        md.cleanup();
+        println!("{}", md.as_string());
+        return Ok(());
+    }
+
+    if cli.clean_save {
+        let path = cli
+            .input
+            .ok_or_else(|| eyre!("--clean-save requires a file path, not stdin"))?;
+        md.cleanup();
+        std::fs::write(&path, md.as_string())
+            .wrap_err_with(|| format!("Failed to write to {:?}", path))?;
+        eprintln!("Saved cleaned content to {:?}", path);
+        return Ok(());
+    }
+
+    // Resolve themes
+    let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
+    let code_theme = cli
+        .code_theme
+        .unwrap_or_else(|| detect_code_theme(prose_theme));
+    let color_mode = detect_color_mode();
+
+    // Handle output modes
+    if cli.ast {
+        let ast = md.as_ast().context("Failed to generate AST")?;
+        println!("{}", serde_json::to_string_pretty(&ast)?);
+        return Ok(());
+    }
+
+    if cli.html {
+        let mut options = HtmlOptions::default();
+        options.prose_theme = prose_theme;
+        options.code_theme = code_theme;
+        options.color_mode = color_mode;
+
+        let html = md.as_html(options).context("Failed to convert to HTML")?;
+        println!("{}", html);
+        return Ok(());
+    }
+
+    if cli.show_html {
+        let mut options = HtmlOptions::default();
+        options.prose_theme = prose_theme;
+        options.code_theme = code_theme;
+        options.color_mode = color_mode;
+
+        let html = md.as_html(options).context("Failed to convert to HTML")?;
+        let temp_path = std::env::temp_dir().join("mat-preview.html");
+        std::fs::write(&temp_path, &html)
+            .wrap_err("Failed to write temp HTML file")?;
+
+        // Non-blocking open, graceful error handling
+        if let Err(e) = open::that(&temp_path) {
+            eprintln!("Failed to open browser: {}", e);
+            eprintln!("Preview available at: {}", temp_path.display());
+        }
+        return Ok(());
+    }
+
+    // Default: render to terminal
+    let mut options = TerminalOptions::default();
+    options.prose_theme = prose_theme;
+    options.code_theme = code_theme;
+    options.color_mode = color_mode;
+    options.include_line_numbers = cli.line_numbers;
+    options.color_depth = None; // Auto-detect
+
+    let terminal_output =
+        for_terminal(&md, options).context("Failed to render markdown for terminal")?;
+
+    println!("{}", terminal_output);
 
     Ok(())
 }
 
-/// Loads markdown from a file path or stdin if path is "-".
-fn load_markdown(path: &PathBuf) -> Result<Markdown> {
-    if path.to_str() == Some("-") {
-        // Read from stdin
-        let mut buffer = String::new();
-        io::stdin()
-            .read_to_string(&mut buffer)
-            .context("Failed to read from stdin")?;
-        Ok(buffer.into())
+/// Loads markdown from a file path or stdin.
+fn load_markdown(path: Option<&PathBuf>) -> Result<Markdown> {
+    if let Some(p) = path {
+        if p.to_str() == Some("-") {
+            // Explicit stdin marker
+            read_from_stdin()
+        } else {
+            Markdown::try_from(p.as_path())
+                .wrap_err_with(|| format!("Failed to read file: {:?}", p))
+        }
     } else {
-        // Read from file
-        Markdown::try_from(path.as_path())
-            .with_context(|| format!("Failed to read file: {:?}", path))
+        // No path provided - check if stdin has data
+        if atty::is(atty::Stream::Stdin) {
+            // Interactive terminal - no input available
+            Err(eyre!(
+                "No input file provided. Use `mat --help` for usage."
+            ))
+        } else {
+            // Piped input available
+            read_from_stdin()
+        }
     }
 }
 
-/// Writes output to a file or stdout if no path is provided.
-fn write_output(content: &str, path: Option<PathBuf>) -> Result<()> {
-    if let Some(output_path) = path {
-        std::fs::write(&output_path, content)
-            .with_context(|| format!("Failed to write to {:?}", output_path))?;
-        eprintln!("Output written to {:?}", output_path);
-    } else {
-        println!("{}", content);
-    }
-    Ok(())
+/// Reads markdown content from stdin.
+fn read_from_stdin() -> Result<Markdown> {
+    let mut buffer = String::new();
+    io::stdin()
+        .read_to_string(&mut buffer)
+        .wrap_err("Failed to read from stdin")?;
+    Ok(buffer.into())
 }
 
-/// Parses a theme string into a ThemePair.
-fn parse_theme(theme: &str) -> Result<ThemePair> {
-    match theme.to_lowercase().as_str() {
-        "github" => Ok(ThemePair::Github),
-        "solarized" => Ok(ThemePair::Solarized),
-        "dracula" => Ok(ThemePair::Dracula),
-        "monokai" => Ok(ThemePair::Monokai),
-        "nord" => Ok(ThemePair::Nord),
-        _ => Err(color_eyre::eyre::eyre!(
-            "Unknown theme: {}. Valid themes: github, solarized, dracula, monokai, nord",
-            theme
-        )),
+/// Lists all available themes with descriptions.
+fn list_themes() {
+    println!("Available themes:\n");
+    for theme_pair in ThemePair::all() {
+        println!(
+            "  {:20} {}",
+            theme_pair.kebab_name(),
+            theme_pair.description(ColorMode::Dark)
+        );
     }
-}
-
-/// Parses a color mode string into a ColorMode.
-fn parse_color_mode(mode: &str) -> Result<ColorMode> {
-    match mode.to_lowercase().as_str() {
-        "light" => Ok(ColorMode::Light),
-        "dark" => Ok(ColorMode::Dark),
-        _ => Err(color_eyre::eyre::eyre!(
-            "Unknown color mode: {}. Valid modes: light, dark",
-            mode
-        )),
-    }
+    println!("\nUse --theme <name> to set prose theme");
+    println!("Use --code-theme <name> to override code theme");
 }
