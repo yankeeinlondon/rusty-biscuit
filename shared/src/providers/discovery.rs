@@ -413,6 +413,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn generate_provider_list_string_literals() {
         // This will use hardcoded models since we don't have API keys in tests
         let result = generate_provider_list(Some(ProviderListFormat::StringLiterals))
@@ -420,12 +421,13 @@ mod tests {
             .unwrap();
 
         assert!(result.contains("anthropic/claude"));
-        assert!(result.contains("gemini/gemini"));
+        assert!(result.contains("google/gemini")); // Curated models use "google" not "gemini"
         assert!(result.starts_with('['));
         assert!(result.ends_with(']'));
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn generate_provider_list_rust_enum() {
         let result = generate_provider_list(Some(ProviderListFormat::RustEnum))
             .await
@@ -433,7 +435,7 @@ mod tests {
 
         assert!(result.contains("pub enum ModelProvider"));
         assert!(result.contains("Anthropic_"));
-        assert!(result.contains("Gemini_"));
+        assert!(result.contains("Google_")); // Curated models use "google" not "gemini"
     }
 
     #[tokio::test]

@@ -120,6 +120,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn check_cache_returns_none_when_missing() {
         // Ensure cache doesn't exist
         let _ = invalidate_cache();
@@ -129,6 +130,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn write_and_read_cache() {
         // Clear cache first
         let _ = invalidate_cache();
@@ -152,6 +154,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn invalidate_removes_cache() {
         // Clear cache first
         let _ = invalidate_cache();
