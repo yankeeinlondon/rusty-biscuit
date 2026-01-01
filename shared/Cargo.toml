@@ -25,6 +25,7 @@ reqwest = { version = "0.12", features = ["json", "gzip"] }
 scraper = "0.20"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_yaml = "0.9"
 thiserror = "2.0"
 url = "2.5"
 tokio = { version = "1.48", features = ["time", "macros", "rt-multi-thread"] }
@@ -51,6 +52,19 @@ futures = "0.3"
 clap = { version = "4.5", features = ["derive"] }
 color-eyre = "0.6"
 
+# Terminal capabilities (Phase 1)
+termini = "1.0"
+
+# Syntax highlighting (Phase 5)
+syntect = "5.2"
+two-face = "0.4"
+
+# Markdown parsing and rendering
+pulldown-cmark = "0.12"
+pulldown-cmark-to-cmark = "18"
+markdown = { version = "1.0.0-alpha.22", features = ["serde"] }
+html-escape = "0.2"
+
 [dev-dependencies]
 tokio = { version = "1.48", features = ["full", "test-util"] }
 tracing-test = "0.2"
@@ -58,3 +72,4 @@ wiremock = "0.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1.4"
 serial_test = "3.0"
+insta = "1.41"
