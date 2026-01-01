@@ -279,6 +279,10 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
 
             // List handling
             Event::Start(Tag::List(start_num)) => {
+                // When a nested list starts inside an item, add newline to separate from parent text
+                if !list_stack.is_empty() && !output.is_empty() && !output.ends_with('\n') {
+                    output.push('\n');
+                }
                 list_stack.push(start_num);
             }
             Event::End(TagEnd::List(_)) => {
@@ -875,10 +879,8 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         let plain = strip_ansi_codes(&output);
-        // In pulldown-cmark, nested lists are inside the parent item, so
-        // the parent item's bullet and text appear first, then nested items
-        // The parent doesn't get a newline until after its nested content
-        assert!(plain.contains("- Parent item"));
+        // Parent item should have newline before nested list starts
+        assert!(plain.contains("- Parent item\n"), "Parent should end with newline, got:\n{}", plain);
         assert!(plain.contains("  - Child item\n"));
         assert!(plain.contains("  - Another child\n"));
         assert!(plain.contains("- Second parent\n"));
@@ -893,5 +895,84 @@ fn main() {}
         // List items should be separate lines
         assert!(plain.contains("- Use cargo build\n"));
         assert!(plain.contains("- Run cargo test\n"));
+    }
+
+    // ==================== Regression Tests ====================
+
+    /// Regression test: nested lists must render each item on its own line
+    /// Bug: nested list items were concatenated horizontally instead of vertically
+    #[test]
+    fn test_nested_list_items_on_separate_lines() {
+        let md: Markdown = "- Parent\n  - Child\n  - Child2".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        // Each item must be on its own line - not concatenated like "- Parent  - Child"
+        assert!(
+            !plain.contains("Parent  - Child"),
+            "Nested list items should not be concatenated, got:\n{}",
+            plain
+        );
+        assert!(
+            plain.contains("- Parent\n"),
+            "Parent item should have newline before nested list, got:\n{}",
+            plain
+        );
+        assert!(plain.contains("  - Child\n"));
+        assert!(plain.contains("  - Child2\n"));
+    }
+
+    /// Regression test: deeply nested lists with inline code render correctly
+    /// Bug: lists like "- Use ### (H3)\n  - Example:\n    - `## Env`" rendered on one line
+    #[test]
+    fn test_deeply_nested_list_with_inline_code() {
+        let md: Markdown = r#"- Use ### Heading (H3) only for subsections
+  - Example:
+    - `## Environment Variables`
+    - `### Priority Order`
+    - `### Fallback Behavior`"#.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+
+        // Each level should be on its own line with proper indentation
+        assert!(
+            plain.contains("- Use ### Heading (H3) only for subsections\n"),
+            "Top level item should end with newline, got:\n{}",
+            plain
+        );
+        assert!(
+            plain.contains("  - Example:\n"),
+            "Second level should have 2-space indent, got:\n{}",
+            plain
+        );
+        assert!(
+            plain.contains("    - ## Environment Variables\n"),
+            "Third level should have 4-space indent, got:\n{}",
+            plain
+        );
+        // Items should NOT be concatenated horizontally
+        assert!(
+            !plain.contains("subsections  - Example"),
+            "Items should not be on same line, got:\n{}",
+            plain
+        );
+    }
+
+    /// Regression test: triple-nested lists render with correct indentation
+    #[test]
+    fn test_triple_nested_list_indentation() {
+        let md: Markdown = "- Level 1\n  - Level 2\n    - Level 3\n    - Level 3b\n  - Level 2b\n- Level 1b".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+
+        // Verify each level has correct indentation and newlines
+        assert!(plain.contains("- Level 1\n"), "Level 1 should end with newline");
+        assert!(plain.contains("  - Level 2\n"), "Level 2 should have 2-space indent");
+        assert!(plain.contains("    - Level 3\n"), "Level 3 should have 4-space indent");
+        assert!(plain.contains("    - Level 3b\n"), "Level 3b should have 4-space indent");
+        assert!(plain.contains("  - Level 2b\n"), "Level 2b should return to 2-space indent");
+        assert!(plain.contains("- Level 1b\n"), "Level 1b should return to no indent");
     }
 }

@@ -52,7 +52,9 @@ pub fn cleanup_content(content: &str) -> String {
 
     // cmark handles blank line insertion via its Options - defaults are correct:
     // newlines_after_headline: 2, newlines_after_paragraph: 2, etc.
-    let options = CmarkOptions::default();
+    // Override code_block_token_count: default is 4, but standard markdown uses 3
+    let mut options = CmarkOptions::default();
+    options.code_block_token_count = 3;
 
     // cmark expects borrowed events
     let borrowed: Vec<_> = processed.iter().map(std::borrow::Cow::Borrowed).collect();
@@ -233,12 +235,12 @@ mod tests {
 
     #[test]
     fn test_cleanup_adds_blank_line_after_code_block() {
-        let content = "````rust\nfn main() {}\n````\nParagraph after";
+        let content = "```rust\nfn main() {}\n```\nParagraph after";
         let cleaned = cleanup_content(content);
 
         // Should have blank line after code block
         assert!(
-            cleaned.contains("````\n\nParagraph"),
+            cleaned.contains("```\n\nParagraph"),
             "Expected blank line after code block, got:\n{}",
             cleaned
         );
@@ -391,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_preserves_code_block_content() {
-        let content = "````rust\nfn main() {\n    println!(\"Hello\");\n}\n````";
+        let content = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```";
         let cleaned = cleanup_content(content);
         assert!(cleaned.contains("fn main()"));
         assert!(cleaned.contains("println!"));
@@ -472,6 +474,48 @@ mod tests {
         assert!(
             !cleaned.contains("\\`"),
             "Code spans should not have escaped backticks, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_code_block_uses_three_backticks() {
+        // Regression test: code blocks should use 3 backticks, not 4
+        // pulldown-cmark-to-cmark defaults to 4 backticks (code_block_token_count)
+        // which is non-standard and causes rendering issues
+        let content = "```rust\nfn main() {}\n```";
+        let cleaned = cleanup_content(content);
+
+        // Should use exactly 3 backticks for fence
+        assert!(
+            cleaned.contains("```rust"),
+            "Code blocks should start with 3 backticks, got:\n{}",
+            cleaned
+        );
+        // Should NOT have 4 backticks (the buggy default)
+        assert!(
+            !cleaned.contains("````"),
+            "Code blocks should not use 4 backticks, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_code_block_without_language_uses_three_backticks() {
+        // Regression test: code blocks without language specifier
+        let content = "```\nsome code\n```";
+        let cleaned = cleanup_content(content);
+
+        // Should start with exactly "```\n"
+        assert!(
+            cleaned.starts_with("```\n") || cleaned.contains("\n```\n"),
+            "Code blocks without language should use 3 backticks, got:\n{}",
+            cleaned
+        );
+        // Should NOT have 4 backticks
+        assert!(
+            !cleaned.contains("````"),
+            "Code blocks should not use 4 backticks, got:\n{}",
             cleaned
         );
     }
