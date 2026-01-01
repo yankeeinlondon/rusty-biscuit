@@ -31,7 +31,7 @@ use crate::markdown::{
     highlighting::{prose::ProseHighlighter, scope_cache::ScopeCache, CodeHighlighter, ColorMode, ThemePair},
     Markdown, MarkdownError,
 };
-use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color, Style};
 use syntect::parsing::{Scope, SyntaxReference};
@@ -166,7 +166,8 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
     // Track scope stack for prose highlighting (functional style)
     let mut scope_stack: Vec<Scope> = vec![prose_highlighter.base_scope()];
 
-    let parser = Parser::new(md.content());
+    // Enable table parsing extension
+    let parser = Parser::new_ext(md.content(), Options::ENABLE_TABLES);
     let mut in_code_block = false;
     let mut code_buffer = String::new();
     let mut code_language = String::new();
@@ -174,6 +175,12 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
 
     // List tracking
     let mut list_stack: Vec<Option<u64>> = Vec::new(); // None = unordered, Some(start) = ordered
+
+    // Table tracking - buffer entire table for proper rendering
+    let mut in_table = false;
+    let mut table_rows: Vec<Vec<String>> = Vec::new(); // All rows including header
+    let mut current_row: Vec<String> = Vec::new();
+    let mut current_cell = String::new();
 
     for event in parser {
         match event {
@@ -328,23 +335,33 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
             }
 
             Event::Text(text) if !in_code_block => {
-                // Apply current prose styling based on scope stack
-                let style = if scope_stack.len() > 1 {
-                    // We have nested scopes, compute style from stack
-                    // Use a neutral tag reference for computing the style
-                    let tag = Tag::Paragraph;
-                    prose_highlighter.style_for_tag(&tag, &scope_stack)
+                if in_table {
+                    // Buffer text for table cell
+                    current_cell.push_str(&text);
                 } else {
-                    prose_highlighter.base_style()
-                };
-                output.push_str(&emit_prose_text(&text, style));
+                    // Apply current prose styling based on scope stack
+                    let style = if scope_stack.len() > 1 {
+                        // We have nested scopes, compute style from stack
+                        // Use a neutral tag reference for computing the style
+                        let tag = Tag::Paragraph;
+                        prose_highlighter.style_for_tag(&tag, &scope_stack)
+                    } else {
+                        prose_highlighter.base_style()
+                    };
+                    output.push_str(&emit_prose_text(&text, style));
+                }
             }
 
             Event::Code(code) => {
-                // Inline code with styling (no backticks in terminal output)
-                let style = prose_highlighter.style_for_inline_code(&scope_stack);
-                // Use background color from the style if available
-                output.push_str(&emit_inline_code(&code, style));
+                if in_table {
+                    // Buffer inline code for table cell (mark with special prefix for styling later)
+                    current_cell.push_str(&format!("\x00CODE\x00{}\x00/CODE\x00", code));
+                } else {
+                    // Inline code with styling (no backticks in terminal output)
+                    let style = prose_highlighter.style_for_inline_code(&scope_stack);
+                    // Use background color from the style if available
+                    output.push_str(&emit_inline_code(&code, style));
+                }
             }
 
             Event::SoftBreak => {
@@ -353,6 +370,48 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
             Event::HardBreak => {
                 output.push('\n');
             }
+
+            // Table handling - buffer entire table for proper rendering
+            Event::Start(Tag::Table(_alignments)) => {
+                in_table = true;
+                table_rows.clear();
+                // Add blank line before table if needed
+                if !output.is_empty() && !output.ends_with("\n\n") {
+                    if output.ends_with('\n') {
+                        output.push('\n');
+                    } else {
+                        output.push_str("\n\n");
+                    }
+                }
+            }
+            Event::End(TagEnd::Table) => {
+                in_table = false;
+                // Render the buffered table with proper formatting
+                output.push_str(&render_table(&table_rows, &prose_highlighter, &scope_stack));
+                table_rows.clear();
+            }
+            Event::Start(Tag::TableHead) => {
+                current_row.clear();
+            }
+            Event::End(TagEnd::TableHead) => {
+                table_rows.push(current_row.clone());
+                current_row.clear();
+            }
+            Event::Start(Tag::TableRow) => {
+                current_row.clear();
+            }
+            Event::End(TagEnd::TableRow) => {
+                table_rows.push(current_row.clone());
+                current_row.clear();
+            }
+            Event::Start(Tag::TableCell) => {
+                current_cell.clear();
+            }
+            Event::End(TagEnd::TableCell) => {
+                current_row.push(current_cell.clone());
+                current_cell.clear();
+            }
+
             _ => {} // Ignore other events
         }
     }
@@ -390,6 +449,247 @@ fn emit_inline_code(text: &str, style: Style) -> String {
             50, 50, 55, fg.r, fg.g, fg.b, text
         )
     }
+}
+
+/// Renders a buffered table with box-drawing characters and alternating row colors.
+///
+/// ## Arguments
+///
+/// * `rows` - Vector of rows, where each row is a vector of cell strings.
+///            First row is treated as header.
+/// * `prose_highlighter` - For styling text
+/// * `scope_stack` - Current scope stack for styling
+fn render_table(
+    rows: &[Vec<String>],
+    prose_highlighter: &ProseHighlighter,
+    scope_stack: &[Scope],
+) -> String {
+    if rows.is_empty() {
+        return String::new();
+    }
+
+    // Calculate column widths (max width of each column across all rows)
+    let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    let mut col_widths: Vec<usize> = vec![0; col_count];
+
+    for row in rows {
+        for (i, cell) in row.iter().enumerate() {
+            // Strip our inline code markers for width calculation
+            let plain = cell
+                .replace("\x00CODE\x00", "")
+                .replace("\x00/CODE\x00", "");
+            col_widths[i] = col_widths[i].max(plain.chars().count());
+        }
+    }
+
+    // Ensure minimum column width
+    for w in &mut col_widths {
+        *w = (*w).max(3);
+    }
+
+    let mut output = String::new();
+
+    // Box-drawing characters
+    let top_left = '┌';
+    let top_right = '┐';
+    let bottom_left = '└';
+    let bottom_right = '┘';
+    let horizontal = '─';
+    let vertical = '│';
+    let top_tee = '┬';
+    let bottom_tee = '┴';
+    let left_tee = '├';
+    let right_tee = '┤';
+    let cross = '┼';
+
+    // Colors
+    let border_color = "\x1b[38;2;100;100;110m"; // Gray border
+    let header_bg = "\x1b[48;2;60;63;70m"; // Darker header background
+    let even_row_bg = "\x1b[48;2;45;48;55m"; // Subtle background for even rows
+    let odd_row_bg = ""; // No background for odd rows (use terminal default)
+    let reset = "\x1b[0m";
+
+    // Get text style from prose highlighter (used in render_cell_content)
+    let _text_style = prose_highlighter.base_style();
+
+    // Top border: ┌───┬───┬───┐
+    output.push_str(border_color);
+    output.push(top_left);
+    for (i, &width) in col_widths.iter().enumerate() {
+        for _ in 0..width + 2 {
+            output.push(horizontal);
+        }
+        if i < col_widths.len() - 1 {
+            output.push(top_tee);
+        }
+    }
+    output.push(top_right);
+    output.push_str(reset);
+    output.push('\n');
+
+    // Render rows
+    for (row_idx, row) in rows.iter().enumerate() {
+        let is_header = row_idx == 0;
+        let bg = if is_header {
+            header_bg
+        } else if row_idx % 2 == 0 {
+            even_row_bg
+        } else {
+            odd_row_bg
+        };
+
+        // Row content: │ cell │ cell │ cell │
+        output.push_str(border_color);
+        output.push(vertical);
+        output.push_str(reset);
+
+        for (col_idx, cell) in row.iter().enumerate() {
+            let width = col_widths.get(col_idx).copied().unwrap_or(3);
+
+            // Apply background for this cell
+            output.push_str(bg);
+            output.push(' ');
+
+            // Render cell content with styling
+            let rendered = render_cell_content(cell, prose_highlighter, scope_stack, is_header);
+            output.push_str(&rendered);
+
+            // Calculate plain text length for padding
+            let plain_len = cell
+                .replace("\x00CODE\x00", "")
+                .replace("\x00/CODE\x00", "")
+                .chars()
+                .count();
+
+            // Pad to column width
+            for _ in plain_len..width {
+                output.push(' ');
+            }
+            output.push(' ');
+            output.push_str(reset);
+
+            output.push_str(border_color);
+            output.push(vertical);
+            output.push_str(reset);
+        }
+
+        // Handle missing cells (pad with empty)
+        for col_idx in row.len()..col_count {
+            let width = col_widths.get(col_idx).copied().unwrap_or(3);
+            output.push_str(bg);
+            for _ in 0..width + 2 {
+                output.push(' ');
+            }
+            output.push_str(reset);
+            output.push_str(border_color);
+            output.push(vertical);
+            output.push_str(reset);
+        }
+
+        output.push('\n');
+
+        // After header row, draw separator: ├───┼───┼───┤
+        if is_header {
+            output.push_str(border_color);
+            output.push(left_tee);
+            for (i, &width) in col_widths.iter().enumerate() {
+                for _ in 0..width + 2 {
+                    output.push(horizontal);
+                }
+                if i < col_widths.len() - 1 {
+                    output.push(cross);
+                }
+            }
+            output.push(right_tee);
+            output.push_str(reset);
+            output.push('\n');
+        }
+    }
+
+    // Bottom border: └───┴───┴───┘
+    output.push_str(border_color);
+    output.push(bottom_left);
+    for (i, &width) in col_widths.iter().enumerate() {
+        for _ in 0..width + 2 {
+            output.push(horizontal);
+        }
+        if i < col_widths.len() - 1 {
+            output.push(bottom_tee);
+        }
+    }
+    output.push(bottom_right);
+    output.push_str(reset);
+    output.push('\n');
+
+    output
+}
+
+/// Renders cell content with proper styling for inline code.
+fn render_cell_content(
+    cell: &str,
+    prose_highlighter: &ProseHighlighter,
+    scope_stack: &[Scope],
+    is_header: bool,
+) -> String {
+    let mut output = String::new();
+    let text_style = prose_highlighter.base_style();
+
+    // Bold for headers
+    if is_header {
+        output.push_str("\x1b[1m");
+    }
+
+    const CODE_START: &str = "\x00CODE\x00";
+    const CODE_END: &str = "\x00/CODE\x00";
+
+    // Process cell content, handling inline code markers
+    let mut pos = 0;
+
+    while pos < cell.len() {
+        if let Some(start_offset) = cell[pos..].find(CODE_START) {
+            let start = pos + start_offset;
+
+            // Text before code marker
+            if start > pos {
+                let before = &cell[pos..start];
+                output.push_str(&format!(
+                    "\x1b[38;2;{};{};{}m{}",
+                    text_style.foreground.r, text_style.foreground.g, text_style.foreground.b,
+                    before
+                ));
+            }
+
+            // Find end marker
+            let after_start = start + CODE_START.len();
+            if let Some(end_offset) = cell[after_start..].find(CODE_END) {
+                let code = &cell[after_start..after_start + end_offset];
+                // Render inline code with distinct styling
+                let code_style = prose_highlighter.style_for_inline_code(scope_stack);
+                output.push_str(&emit_inline_code(code, code_style));
+                pos = after_start + end_offset + CODE_END.len();
+            } else {
+                // No end marker found, treat rest as plain text
+                pos = cell.len();
+            }
+        } else {
+            // No more code markers, output remaining text
+            let remaining = &cell[pos..];
+            if !remaining.is_empty() {
+                output.push_str(&format!(
+                    "\x1b[38;2;{};{};{}m{}",
+                    text_style.foreground.r, text_style.foreground.g, text_style.foreground.b,
+                    remaining
+                ));
+            }
+            break;
+        }
+    }
+
+    if is_header {
+        output.push_str("\x1b[22m"); // Reset bold
+    }
+
+    output
 }
 
 /// Emits code text with both foreground and background colors.
@@ -974,5 +1274,147 @@ fn main() {}
         assert!(plain.contains("    - Level 3b\n"), "Level 3b should have 4-space indent");
         assert!(plain.contains("  - Level 2b\n"), "Level 2b should return to 2-space indent");
         assert!(plain.contains("- Level 1b\n"), "Level 1b should return to no indent");
+    }
+
+    // ==================== Table Regression Tests ====================
+
+    /// Regression test: tables must render with rows on separate lines
+    /// Bug: table rows were concatenated horizontally instead of vertically
+    #[test]
+    fn test_table_rows_on_separate_lines() {
+        let md: Markdown = "| A | B |\n|---|---|\n| 1 | 2 |".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+
+        // Table should have box-drawing characters
+        assert!(
+            plain.contains("┌") && plain.contains("┐"),
+            "Table should have top border, got:\n{}",
+            plain
+        );
+        assert!(
+            plain.contains("└") && plain.contains("┘"),
+            "Table should have bottom border, got:\n{}",
+            plain
+        );
+        // Header and data should be present
+        assert!(plain.contains("A"), "Header cell A missing");
+        assert!(plain.contains("B"), "Header cell B missing");
+        assert!(plain.contains("1"), "Data cell 1 missing");
+        assert!(plain.contains("2"), "Data cell 2 missing");
+        // Multiple lines (not concatenated)
+        assert!(
+            plain.lines().count() >= 5,
+            "Table should have multiple lines (top border, header, separator, data, bottom border), got:\n{}",
+            plain
+        );
+    }
+
+    /// Regression test: tables with multiple rows render correctly
+    #[test]
+    fn test_table_multiple_rows() {
+        let md: Markdown = "| Col1 | Col2 |\n|------|------|\n| A | B |\n| C | D |\n| E | F |".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+
+        // Table should have box-drawing structure
+        assert!(plain.contains("┌"), "Should have top-left corner");
+        assert!(plain.contains("├"), "Should have header separator");
+        assert!(plain.contains("└"), "Should have bottom-left corner");
+
+        // Verify content is present
+        assert!(plain.contains("Col1"), "Header Col1 missing");
+        assert!(plain.contains("Col2"), "Header Col2 missing");
+        assert!(plain.contains(" A "), "Data A missing");
+        assert!(plain.contains(" E "), "Data E missing");
+
+        // Should have multiple data rows (at least 7 lines: top, header, sep, 3 data, bottom)
+        let line_count = plain.lines().count();
+        assert!(
+            line_count >= 7,
+            "Should have at least 7 lines, got {} in:\n{}",
+            line_count, plain
+        );
+    }
+
+    /// Regression test: tables with inline code in cells render correctly
+    #[test]
+    fn test_table_with_inline_code() {
+        let md: Markdown = "| Variable | Description |\n|----------|-------------|\n| `FOO` | A variable |".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+
+        // Inline code should be present (without backticks in terminal)
+        assert!(
+            plain.contains("FOO"),
+            "Inline code content should be present, got:\n{}",
+            plain
+        );
+        // Table should have box-drawing borders
+        assert!(
+            plain.contains("┌") && plain.contains("┘"),
+            "Table should have box-drawing borders, got:\n{}",
+            plain
+        );
+    }
+
+    /// Regression test: table after heading has proper spacing
+    #[test]
+    fn test_table_after_heading_spacing() {
+        let md: Markdown = "## Environment Variables\n\n| Var | Desc |\n|-----|------|\n| A | B |".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+
+        // Should have heading followed by table with box-drawing
+        assert!(
+            plain.contains("## Environment Variables"),
+            "Heading should be present, got:\n{}",
+            plain
+        );
+        assert!(
+            plain.contains("┌"),
+            "Table should have box-drawing borders after heading, got:\n{}",
+            plain
+        );
+        // Table should be separated from heading
+        assert!(
+            plain.contains("Variables\n\n┌"),
+            "Table should have blank line after heading, got:\n{}",
+            plain
+        );
+    }
+
+    /// Test that tables have alternating row backgrounds (via ANSI codes)
+    #[test]
+    fn test_table_alternating_rows() {
+        let md: Markdown = "| A |\n|---|\n| 1 |\n| 2 |\n| 3 |".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain background color codes for alternating rows
+        // Header has one bg, even rows another, odd rows no bg
+        let bg_count = output.matches("\x1b[48;2;").count();
+        assert!(
+            bg_count >= 2,
+            "Should have background colors for header and alternating rows, got {} occurrences",
+            bg_count
+        );
+    }
+
+    /// Test that table headers are bold
+    #[test]
+    fn test_table_header_bold() {
+        let md: Markdown = "| Header |\n|--------|\n| Data |".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain bold code (\x1b[1m) for header
+        assert!(
+            output.contains("\x1b[1m"),
+            "Header should be bold, output:\n{}",
+            output
+        );
     }
 }
