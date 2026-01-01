@@ -54,6 +54,10 @@ color-eyre = "0.6"
 
 # Terminal capabilities (Phase 1)
 termini = "1.0"
+terminal_size = "0.3"
+
+# Table rendering
+comfy-table = "7.1"
 
 # Syntax highlighting (Phase 5)
 syntect = "5.2"

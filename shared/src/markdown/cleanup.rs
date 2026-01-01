@@ -53,8 +53,10 @@ pub fn cleanup_content(content: &str) -> String {
     // cmark handles blank line insertion via its Options - defaults are correct:
     // newlines_after_headline: 2, newlines_after_paragraph: 2, etc.
     // Override code_block_token_count: default is 4, but standard markdown uses 3
-    let mut options = CmarkOptions::default();
-    options.code_block_token_count = 3;
+    let options = CmarkOptions {
+        code_block_token_count: 3,
+        ..Default::default()
+    };
 
     // cmark expects borrowed events
     let borrowed: Vec<_> = processed.iter().map(std::borrow::Cow::Borrowed).collect();
