@@ -90,3 +90,47 @@ let escaped_no_inline = as_24_bit_terminal_escaped(&ranges, false);
 print!("{}", escaped_with_inline);
 ```
 
+## Critical: Always Use `LinesWithEndings`
+
+When iterating over code for syntax highlighting, **always use `LinesWithEndings`** instead of `.lines()`:
+
+```rust
+// ❌ WRONG - breaks syntax highlighting for bash/shell and other grammars
+for line in code.lines() {
+    let ranges = hl.highlight_line(line, &ps).unwrap();
+}
+
+// ✅ CORRECT - preserves parser state across lines
+use syntect::util::LinesWithEndings;
+for line in LinesWithEndings::from(code) {
+    let ranges = hl.highlight_line(line, &ps).unwrap();
+}
+```
+
+### Why This Matters
+
+Syntect's grammar parser tracks state across lines. Without newlines:
+
+1. The parser can't properly reset state at line boundaries
+2. For bash, a shebang like `#!/bin/bash` starts a "comment" scope
+3. Without the newline, this comment scope bleeds into ALL subsequent lines
+4. **Result**: everything renders as the same gray color instead of colorful syntax
+
+### Symptoms
+
+If all code in a block has the same color (usually gray/comment color) instead of distinct colors for keywords, strings, etc., this is likely the cause.
+
+### Solution
+
+Use `LinesWithEndings::from(code)` for parsing, then strip newlines from output *after* `highlight_line()`:
+
+```rust
+for line in LinesWithEndings::from(code) {
+    let ranges = hl.highlight_line(line, &ps).unwrap();
+    for (style, text) in &ranges {
+        let text = text.trim_end_matches('\n');
+        // render styled text without the newline
+    }
+}
+```
+

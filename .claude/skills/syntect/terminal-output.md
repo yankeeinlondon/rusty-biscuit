@@ -111,6 +111,43 @@ let syntax = ps.find_syntax_by_first_line(first_line)
 - **State is preserved**: `HighlightLines` maintains state across lines for multi-line constructs
 - **24-bit terminal support**: Ensure your terminal supports TrueColor (most modern terminals do)
 
+### Critical: Why `LinesWithEndings` Matters
+
+Using `.lines()` instead of `LinesWithEndings` can **completely break syntax highlighting** for some grammars, particularly **bash/shell**:
+
+```rust
+// ❌ WRONG - breaks bash highlighting
+for line in code.lines() {
+    let ranges = hl.highlight_line(line, &ps).unwrap();
+}
+
+// ✅ CORRECT - preserves parser state
+for line in LinesWithEndings::from(code) {
+    let ranges = hl.highlight_line(line, &ps).unwrap();
+}
+```
+
+**Why this happens**: Syntect's grammar parser tracks state across lines. Without newlines:
+1. The parser can't properly reset state at line boundaries
+2. For bash, a shebang like `#!/bin/bash` starts a "comment" scope
+3. Without the newline, this comment scope bleeds into ALL subsequent lines
+4. Result: everything renders as gray comment text instead of colorful syntax
+
+**Symptoms**: All code in a block has the same color (usually gray/comment color) instead of distinct colors for keywords, strings, etc.
+
+**Fix**: Always use `LinesWithEndings::from(code)` when iterating over code for highlighting. If you need to strip newlines from output, do it *after* calling `highlight_line()`:
+
+```rust
+for line in LinesWithEndings::from(code) {
+    let ranges = hl.highlight_line(line, &ps).unwrap();
+    for (style, text) in &ranges {
+        // Strip newline from text for output, but parsing already happened correctly
+        let text = text.trim_end_matches('\n');
+        // ... render styled text
+    }
+}
+```
+
 ## Related
 
 - [Large File Handling](./large-files.md) - Streaming large files efficiently

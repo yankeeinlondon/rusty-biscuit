@@ -35,7 +35,6 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color, Style};
 use syntect::parsing::{Scope, SyntaxReference};
-use syntect::util::as_24_bit_terminal_escaped;
 
 /// Color depth capability for terminal.
 ///
@@ -764,7 +763,10 @@ fn highlight_code(
     // Get background color from theme
     let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
 
-    let lines: Vec<&str> = code.lines().collect();
+    // Use LinesWithEndings to preserve newlines - required for proper multi-line
+    // syntax parsing in grammars like bash/shell that track state across lines
+    use syntect::util::LinesWithEndings;
+    let lines: Vec<&str> = LinesWithEndings::from(code).collect();
     let mut output = String::with_capacity(code.len() * 2);
 
     // Determine line number width
@@ -801,13 +803,22 @@ fn highlight_code(
             .highlight_line(line, highlighter.syntax_set())
             .map_err(|e| MarkdownError::ThemeLoad(format!("Syntax highlighting failed: {}", e)))?;
 
-        // Convert to terminal escape codes (true for background)
-        let highlighted = as_24_bit_terminal_escaped(&ranges, false);
+        // Convert styled ranges to ANSI escape codes, but filter out newlines
+        // from the output (we handle line breaks ourselves)
+        for (style, text) in &ranges {
+            let text_without_newline = text.trim_end_matches('\n');
+            if !text_without_newline.is_empty() {
+                output.push_str(&format!(
+                    "\x1b[38;2;{};{};{}m{}",
+                    style.foreground.r, style.foreground.g, style.foreground.b,
+                    text_without_newline
+                ));
+            }
+        }
 
-        output.push_str(&highlighted);
-
-        // Reset background at end of line
-        output.push_str("\x1b[0m");
+        // Clear to end of line with background color, then reset
+        // \x1b[K clears from cursor to end of line using current background
+        output.push_str("\x1b[K\x1b[0m");
 
         // Add newline except for last line
         if idx < lines.len() - 1 {
@@ -819,6 +830,12 @@ fn highlight_code(
 }
 
 /// Finds syntax definition by language identifier.
+///
+/// Searches in the following order:
+/// 1. By file extension (e.g., "rs", "py", "js")
+/// 2. By exact name (e.g., "Rust", "Python")
+/// 3. By case-insensitive name match (e.g., "rust" -> "Rust")
+/// 4. By common alias mapping (e.g., "shell" -> "bash", "c++" -> "cpp")
 fn find_syntax<'a>(
     language: &str,
     syntax_set: &'a syntect::parsing::SyntaxSet,
@@ -832,8 +849,35 @@ fn find_syntax<'a>(
         return Some(syntax);
     }
 
-    // Try by name
-    syntax_set.find_syntax_by_name(language)
+    // Try by exact name
+    if let Some(syntax) = syntax_set.find_syntax_by_name(language) {
+        return Some(syntax);
+    }
+
+    // Try case-insensitive name match
+    let language_lower = language.to_lowercase();
+    for syntax in syntax_set.syntaxes() {
+        if syntax.name.to_lowercase() == language_lower {
+            return Some(syntax);
+        }
+    }
+
+    // Try common aliases that differ from extension/name
+    let alias = match language_lower.as_str() {
+        "shell" | "zsh" => "bash",
+        "c++" => "cpp",
+        "dockerfile" => "Dockerfile",
+        "makefile" | "make" => "Makefile",
+        "javascript" => "js",
+        "typescript" => "ts",
+        "python3" => "py",
+        _ => return None,
+    };
+
+    // Try alias as extension first, then as name
+    syntax_set
+        .find_syntax_by_extension(alias)
+        .or_else(|| syntax_set.find_syntax_by_name(alias))
 }
 
 #[cfg(test)]
@@ -978,6 +1022,7 @@ fn main() {}
         // Should contain ANSI escape codes
         assert!(output.contains("\x1b["));
     }
+
 
     #[test]
     fn test_find_syntax_by_extension() {
@@ -1498,6 +1543,180 @@ fn main() {}
             !even_row.contains("bar\x1b[0m "),
             "Should not have full reset immediately after inline code, got:\n{}",
             even_row
+        );
+    }
+
+    // ==================== Code Block Syntax Highlighting Regression Tests ====================
+
+    /// Regression test: find_syntax must handle case-insensitive language names.
+    ///
+    /// Bug: `find_syntax("rust", ...)` returned None because it only tried
+    /// extension match ("rust" is not an extension) and exact name match
+    /// ("rust" != "Rust"). This caused code blocks with `\`\`\`rust` to fall back
+    /// to plain text with no syntax highlighting.
+    #[test]
+    fn test_find_syntax_case_insensitive() {
+        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+
+        // These should all find the Rust syntax
+        assert!(find_syntax("rust", highlighter.syntax_set()).is_some(), "lowercase 'rust' should find Rust syntax");
+        assert!(find_syntax("Rust", highlighter.syntax_set()).is_some(), "exact 'Rust' should find Rust syntax");
+        assert!(find_syntax("RUST", highlighter.syntax_set()).is_some(), "uppercase 'RUST' should find Rust syntax");
+        assert!(find_syntax("rs", highlighter.syntax_set()).is_some(), "extension 'rs' should find Rust syntax");
+
+        // Python
+        assert!(find_syntax("python", highlighter.syntax_set()).is_some(), "lowercase 'python' should find Python syntax");
+        assert!(find_syntax("Python", highlighter.syntax_set()).is_some(), "exact 'Python' should find Python syntax");
+        assert!(find_syntax("py", highlighter.syntax_set()).is_some(), "extension 'py' should find Python syntax");
+    }
+
+    /// Regression test: find_syntax must handle common aliases.
+    ///
+    /// Bug: Common language aliases like "shell" weren't mapped to their
+    /// actual syntax definitions like "bash".
+    #[test]
+    fn test_find_syntax_aliases() {
+        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+
+        // Bash aliases
+        assert!(find_syntax("bash", highlighter.syntax_set()).is_some(), "'bash' should find Bash syntax");
+        assert!(find_syntax("sh", highlighter.syntax_set()).is_some(), "'sh' should find Bash syntax");
+        assert!(find_syntax("shell", highlighter.syntax_set()).is_some(), "'shell' alias should find Bash syntax");
+
+        // JavaScript/TypeScript
+        assert!(find_syntax("js", highlighter.syntax_set()).is_some(), "'js' should find JavaScript syntax");
+        assert!(find_syntax("javascript", highlighter.syntax_set()).is_some(), "'javascript' alias should find JS syntax");
+        assert!(find_syntax("ts", highlighter.syntax_set()).is_some(), "'ts' should find TypeScript syntax");
+        assert!(find_syntax("typescript", highlighter.syntax_set()).is_some(), "'typescript' alias should find TS syntax");
+    }
+
+    /// Regression test: code blocks must have syntax highlighting with multiple colors.
+    ///
+    /// Bug: Even when the syntax was found, all tokens had the same foreground color
+    /// because the highlighting wasn't being applied correctly.
+    #[test]
+    fn test_code_block_has_multiple_colors() {
+        let md: Markdown = "```rust\nfn main() {\n    let x = 5;\n}\n```".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Count distinct foreground colors in the output
+        // Foreground colors have format: \x1b[38;2;R;G;Bm
+        let mut colors = std::collections::HashSet::new();
+        let mut i = 0;
+        let bytes = output.as_bytes();
+
+        while i < bytes.len() {
+            // Look for foreground color escape sequence
+            if i + 7 < bytes.len()
+                && bytes[i] == 0x1b
+                && bytes[i + 1] == b'['
+                && bytes[i + 2] == b'3'
+                && bytes[i + 3] == b'8'
+                && bytes[i + 4] == b';'
+                && bytes[i + 5] == b'2'
+                && bytes[i + 6] == b';'
+            {
+                // Extract the color values until 'm'
+                let start = i + 7;
+                let mut end = start;
+                while end < bytes.len() && bytes[end] != b'm' {
+                    end += 1;
+                }
+                if end < bytes.len() {
+                    let color_str = &output[start..end];
+                    colors.insert(color_str.to_string());
+                }
+                i = end;
+            }
+            i += 1;
+        }
+
+        // Rust code with fn, let, numbers should have at least 3 different colors
+        // (keywords, identifiers, numbers typically get different colors)
+        assert!(
+            colors.len() >= 3,
+            "Code block should have at least 3 different foreground colors for proper syntax highlighting, found {} colors: {:?}",
+            colors.len(),
+            colors
+        );
+    }
+
+    /// Regression test: code block background must extend to end of line.
+    ///
+    /// Bug: Background color stopped at end of content instead of filling
+    /// to terminal edge. Fixed by adding \x1b[K (clear to EOL) after content.
+    #[test]
+    fn test_code_block_background_extends_to_eol() {
+        let md: Markdown = "```rust\nfn main() {}\n```".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // The output should contain \x1b[K (clear to end of line) for each code line
+        // This ensures the background color extends to the terminal edge
+        assert!(
+            output.contains("\x1b[K"),
+            "Code block should use clear-to-EOL (\\x1b[K) to extend background to terminal edge"
+        );
+
+        // Verify the pattern is: background color -> content -> [K -> reset
+        // The [K should come after the highlighted content and before the reset
+        let has_eol_pattern = output.contains("\x1b[K\x1b[0m");
+        assert!(
+            has_eol_pattern,
+            "Clear-to-EOL should be followed by reset: expected '\\x1b[K\\x1b[0m' pattern"
+        );
+    }
+
+    /// Regression test: bash/shell syntax highlighting requires LinesWithEndings.
+    ///
+    /// Bug: Using `.lines()` strips newlines, but syntect's bash grammar requires
+    /// newlines to properly track parser state across lines. Without newlines,
+    /// everything gets the same "comment" color because the shebang line's comment
+    /// state bleeds into subsequent lines.
+    #[test]
+    fn test_bash_highlighting_uses_lines_with_endings() {
+        let md: Markdown = "```bash\n#!/bin/bash\necho \"Hello\"\n```".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Count distinct foreground colors - bash code should have multiple
+        // (shebang/comments get one color, echo gets another, string gets another)
+        let mut colors = std::collections::HashSet::new();
+        let mut i = 0;
+        let bytes = output.as_bytes();
+
+        while i < bytes.len() {
+            if i + 7 < bytes.len()
+                && bytes[i] == 0x1b
+                && bytes[i + 1] == b'['
+                && bytes[i + 2] == b'3'
+                && bytes[i + 3] == b'8'
+                && bytes[i + 4] == b';'
+                && bytes[i + 5] == b'2'
+                && bytes[i + 6] == b';'
+            {
+                let start = i + 7;
+                let mut end = start;
+                while end < bytes.len() && bytes[end] != b'm' {
+                    end += 1;
+                }
+                if end < bytes.len() {
+                    let color_str = &output[start..end];
+                    colors.insert(color_str.to_string());
+                }
+                i = end;
+            }
+            i += 1;
+        }
+
+        // With proper LinesWithEndings, bash should have at least 2 different colors:
+        // - One for comments/shebang
+        // - One for echo command or strings
+        // Without LinesWithEndings, everything would be the same gray comment color
+        assert!(
+            colors.len() >= 2,
+            "Bash code should have at least 2 different colors (comments vs commands), found {} colors: {:?}. \
+            This likely means LinesWithEndings is not being used for syntax parsing.",
+            colors.len(),
+            colors
         );
     }
 }
