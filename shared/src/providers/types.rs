@@ -423,30 +423,92 @@ impl ProviderModel {
             }
         }
 
-        let aggregator_hints_applied = 0; // TODO: Implement aggregator hint logic
+        // Step 4: Handle aggregator hints (OpenRouter/ZenMux)
+        let mut aggregator_hints_applied = 0;
 
-        // Step 4: Code generation (placeholder - actual implementation requires AST manipulation)
+        for (provider, model_ids) in &api_models {
+            if matches!(provider, Provider::OpenRouter | Provider::ZenMux) {
+                for model_id in model_ids {
+                    // Parse aggregator model IDs like "anthropic/claude-opus-4-5"
+                    if let Some((underlying_provider_str, _underlying_model)) = model_id.split_once('/') {
+                        // Try to match to a known provider
+                        if let Some(underlying_provider) = Self::parse_provider_name(underlying_provider_str) {
+                            // Check if we have direct access to underlying provider
+                            if super::base::has_provider_api_key(&underlying_provider) {
+                                tracing::debug!(
+                                    aggregator = ?provider,
+                                    underlying = ?underlying_provider,
+                                    model_id = %model_id,
+                                    "Skipping aggregator hint - have direct provider access"
+                                );
+                                // Skip - we'll interrogate the underlying provider directly
+                            } else {
+                                // No direct access - add both aggregator and underlying hints
+                                tracing::debug!(
+                                    aggregator = ?provider,
+                                    underlying = ?underlying_provider,
+                                    model_id = %model_id,
+                                    "Adding aggregator hint - no direct provider access"
+                                );
+
+                                let variant_name = Self::model_id_to_variant_name(model_id);
+                                let aggregator_variant = format!("{:?}__{}", provider, variant_name);
+
+                                if !existing_variants.contains(&aggregator_variant) {
+                                    new_variants.push((*provider, model_id.clone(), variant_name.clone()));
+                                    *models_added.entry(*provider).or_insert(0) += 1;
+                                    aggregator_hints_applied += 1;
+                                }
+
+                                // Also add underlying provider variant as hint
+                                let underlying_variant = format!("{:?}__{}", underlying_provider, variant_name);
+                                if !existing_variants.contains(&underlying_variant) {
+                                    new_variants.push((underlying_provider, model_id.clone(), variant_name));
+                                    *models_added.entry(underlying_provider).or_insert(0) += 1;
+                                    aggregator_hints_applied += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 5: Code generation
         if !new_variants.is_empty() {
-            tracing::warn!(
+            tracing::info!(
                 new_variant_count = new_variants.len(),
-                "Code generation not yet implemented - new variants detected but not added to enum"
+                "Generating enum variants via codegen"
             );
 
-            // TODO: Implement code generation using codegen::inject_enum()
-            // This requires:
-            // 1. Generate well-formatted enum variants with prettyplease
-            // 2. Atomic write strategy (temp file → validate → backup → rename)
-            // 3. AST validation with syn::parse_file()
-            // 4. Comment markers for generated section
+            // Prepare variant names for injection
+            let variant_names: Vec<String> = new_variants
+                .iter()
+                .map(|(provider, _model_id, variant_name)| {
+                    format!("{:?}__{}", provider, variant_name)
+                })
+                .collect();
 
-            for (provider, model_id, variant_name) in &new_variants {
-                tracing::debug!(
-                    provider = ?provider,
-                    model_id = %model_id,
-                    variant_name = %variant_name,
-                    "Would add variant (codegen pending)"
-                );
-            }
+            // Use codegen module to inject variants
+            let types_rs_path = std::env::current_dir()
+                .ok()
+                .and_then(|p| p.join("shared/src/providers/types.rs").canonicalize().ok())
+                .unwrap_or_else(|| std::path::PathBuf::from("shared/src/providers/types.rs"));
+
+            let variant_count = crate::codegen::inject_enum_variants(
+                "ProviderModel",
+                &variant_names,
+                types_rs_path.to_str().unwrap(),
+                false, // not a dry run
+            )
+            .map_err(|e| ProviderError::CodegenFailed {
+                details: format!("{:?}", e),
+            })?;
+
+            tracing::info!(
+                variants_injected = variant_count,
+                "Successfully injected enum variants"
+            );
         }
 
         tracing::info!(
@@ -519,11 +581,40 @@ impl ProviderModel {
             .collect::<Vec<_>>()
             .join("__")
     }
+
+    /// Parse provider name from string (case-insensitive)
+    ///
+    /// ## Examples
+    ///
+    /// - `"anthropic"` → `Some(Provider::Anthropic)`
+    /// - `"openai"` → `Some(Provider::OpenAi)`
+    /// - `"unknown"` → `None`
+    fn parse_provider_name(name: &str) -> Option<super::base::Provider> {
+        use super::base::Provider;
+        match name.to_lowercase().as_str() {
+            "anthropic" => Some(Provider::Anthropic),
+            "openai" => Some(Provider::OpenAi),
+            "deepseek" => Some(Provider::Deepseek),
+            "gemini" | "google" => Some(Provider::Gemini),
+            "moonshotai" | "moonshot" => Some(Provider::MoonshotAi),
+            "ollama" => Some(Provider::Ollama),
+            "openrouter" => Some(Provider::OpenRouter),
+            "zai" => Some(Provider::Zai),
+            "zenmux" => Some(Provider::ZenMux),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for ProviderModel {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", self.to_identifier())
+    }
+}
+
+impl From<ProviderModel> for String {
+    fn from(model: ProviderModel) -> String {
+        model.to_identifier()
     }
 }
 

@@ -30,7 +30,7 @@
 mod inject;
 mod validation;
 
-pub use inject::inject_enum;
+pub use inject::{inject_enum, inject_enum_variants};
 pub use validation::validate_syntax;
 
 use thiserror::Error;
