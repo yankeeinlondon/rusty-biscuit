@@ -2,7 +2,7 @@ set dotenv-load
 set positional-arguments
 
 # List of areas in this monorepo
-areas := "shared research so-you-say"
+areas := "shared research so-you-say mat"
 
 BOLD := '\033[1m'
 RESET := '\033[0m'
