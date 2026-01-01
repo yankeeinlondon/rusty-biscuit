@@ -92,9 +92,27 @@ To export our content to either HTML (for the browser) or escaped-coded text (fo
 
 Because this is a bit more involved then the other parts of this `struct` we have included these additional knowledge documents:
 
-- [The export Options hash]()
-- [Using syntect to output to Terminal]()
-- [Using syntext to output to HTML]()
-- [Themes]()
-- [Theme Strategy]()
-- [Integrating pulldown-cmark with syntect]()
+The `syntect` crate is critical to our ability to output to the terminal and browser/html:
+
+- [Using `syntect` to output to Terminal](./md/syntect-terminal-output.md)
+- [Using `syntect` to output to HTML](./md/syntect-html-output.md)
+
+When exporting Markdown content as either HTML or to the terminal we leverage the idea of using **Grammars** and **Themes**. In both cases this will involve the use of [syntect](https://crates.io/crates/syntect) but we've added the [two-face](https://crates.io/crates/two-face) crate to _extend_ the themes and grammars.
+
+- [Themes](./md/themes.md)
+- [Grammars](./md/grammars.md)
+
+When we are parsing fenced code blocks inside of Markdown content we will be using a _different_ theme for these code blocks then we use for the surrounding Markdown.
+
+- [Theme Strategy](./md/theme-strategy.md)
+
+The code blocks we are highlighting allow us to capture the full first line of the code block which includes an area we will call the **Code Block Meta**. This Code Block Meta allows us to provide a small DSL for more control over formatting of these code blocks.
+
+- [Handling Code Block Meta](./md/handling-code-block-meta.md)
+- [Code Block DSL](./md/code-block-dsl.md)
+
+The discussion up to now for code highlighting has been focused on highlighting the code blocks in the Markdown, but we need to make sure that the surrounding Markdown is _also_ highlighted.
+
+- [Highlighting the Prose](./md/highlighting-the-prose.md)
+
+

@@ -1,99 +1,4 @@
-# Themed Output
-
-When exporting Markdown content as either HTML or to the terminal we leverage the idea of using **Grammars** and **Themes**. In both cases this will involve the use of [syntect](https://crates.io/crates/syntect) but we've added the [two-face](https://crates.io/crates/two-face) crate to _extend_ the themes and grammars.
-
-## Supported Grammars
-
-### Via `syntect`
-
-- Systems programming: `C`,`C++`,`Rust`,Go`,`Haskell`, and `Erlang`
-- Web: `HTML`, `CSS`, `Javascript`, `PHP`, `ASP`, `Ruby on Rails`
-- Scripting: `Python`, `Ruby`, `Perl`, `Bash`, `Lua`, and `TCL`
-- Data/Configuration: `XML`, `JSON`, `YAML`, `Markdown`, and `Makefile`
-- Java Ecosystem: `Java`, `Scala`, `Groovy`
-- Apple Ecosystem: `Objective-C`, `Swift`
-- Windows Ecosystem: `C#`, `Batch(DOS)`
-
-### Via `two-face`
-
-`two-face` -- which takes it's grammars from the [`bat`](https://github.com/sharkdp/bat) project -- provides a **super set** of grammars by taking in all the syntect grammars, in some cases providing new features to them and then adding new grammars on top.
-
-1. **Modern Frontend**
-
-   While syntect handles basic JS/CSS, two-face covers the modern ecosystem:
-
-   - Frameworks: `JSX`, `TSX (React)`, `Vue Component`, `Svelte`, `Angular Template`.
-   - Stylesheets: `SCSS`, `Sass`, `Less`, `Stylus`, `PostCSS`.
-   - Languages: `CoffeeScript`, `Elm`, `PureScript`, `Dart`.
-
-2. **Infrastructure & DevOps**
-
-   This is where syntect is most lacking and two-face shines:
-
-   - Infrastructure as Code: `Terraform (HCL)`, `CloudFormation`.
-   - Containerization: `Dockerfile`, `Docker Compose` (via YAML enhancements).
-   - Config Files: `Dotenv` (.env), `INI`, `Crontab`, `SshConfig`, `Systemd unit files`.
-   - Web Servers: `Nginx`, `Apache Conf` (.htaccess).
-   - Logging: `Syslog`, `Log file` (generic colorizers).
-
-3. Systems & Niche Languages
-   - Modern Systems: `Zig`, `Nim`, `Crystal`, `LLVM IR`.
-   - Functional: `Clojure`, `F#`, `OCaml`, `Elixir`.
-   - Niche/Scientific: `Julia`, `MATLAB`, `R`, `LaTeX`, `Protocol Buffers` (Protobuf), `GraphQL`.
-
-4. **Shell & Scripting**
-
-    `syntect` has **Bash**, but `two-face` adds:
-
-    - Modern Shells: `Fish`, `Zsh`.
-    - Windows: `PowerShell`, `Regedit` (.reg).
-    - Automation: `Ansible` (extended YAML), `Jenkinsfile` (Groovy variants).
-
-5. **Documentation and Data**
-
-    - Data Formats: `TOML` (essential for Rust), `CSV`, `TSV`.
-    - Docs: `Asciidoc`, `reStructuredText` (RST), `Org-mode`.
-
-To know what a particular binary supports you can run the following:
-
-```rust
-let ps = two_face::syntax::extra_newlines(); // or SyntaxSet::load_defaults_newlines()
-
-for syntax in ps.syntaxes() {
-    println!("Name: {} | Extensions: {:?}", syntax.name, syntax.file_extensions);
-}
-```
-
-### Grammar Matching Utils
-
-`syntect` provides some important matching utilities we will need to use:
-
-```rust
-
-```
-
-
-
-### Using Grammars
-
-We will be drawing our grammars from _both_ `syntect` and `two-face` so in order to have a full list we'll first want to create an enumeration:
-
-```
-pub enum Grammar {
-    C,
-    CPlusPlus,
-    Rust,
-    Go,
-    // ... add remaining syntect grammars
-    Typescript,
-    TOML,
-    Docker,
-    Nginx,
-    GraphQL
-}
-```
-
-Now that we have a universal way to reference a grammar, we need to also 
+# Language Grammars
 
 
 ## Supported Themes
@@ -247,14 +152,14 @@ pub enum ThemePair {
 > **Note:** we may be able to get away from having _another_ description for ThemePair's if we just agree to use a formula for combining the light and dark themes in a smart way:
 >
 > - bullet point description for themes with natural light/dark
->   - **light mode:** _description_
->   - **dark mode:** _description_
+>     - **light mode:** _description_
+>     - **dark mode:** _description_
 > - for dark-only named themes
->   - **dark mode** (THEME NAME): _description_
->   - _light mode_ (half_light): _description_
+>     - **dark mode** (THEME NAME): _description_
+>     - _light mode_ (half_light): _description_
 > - for light-only named themes
->   - **light mode** (THEME NAME): _description_
->   - _dark mode_ (visual_studio_dark_plus): _description_
+>     - **light mode** (THEME NAME): _description_
+>     - _dark mode_ (visual_studio_dark_plus): _description_
 
 
 
