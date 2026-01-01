@@ -502,11 +502,11 @@ fn render_table(
     let right_tee = '┤';
     let cross = '┼';
 
-    // Colors
+    // Colors - use explicit backgrounds for all rows to ensure consistent rendering
     let border_color = "\x1b[38;2;100;100;110m"; // Gray border
     let header_bg = "\x1b[48;2;60;63;70m"; // Darker header background
     let even_row_bg = "\x1b[48;2;45;48;55m"; // Subtle background for even rows
-    let odd_row_bg = ""; // No background for odd rows (use terminal default)
+    let odd_row_bg = "\x1b[48;2;30;33;40m"; // Darker background for odd rows (explicit, not default)
     let reset = "\x1b[0m";
 
     // Get text style from prose highlighter (used in render_cell_content)
@@ -539,19 +539,22 @@ fn render_table(
         };
 
         // Row content: │ cell │ cell │ cell │
-        output.push_str(border_color);
+        // Combine bg + border color for dividers to ensure both are set
+        let divider_style = format!("{}{}", bg, border_color);
+
+        // First divider
+        output.push_str(&divider_style);
         output.push(vertical);
-        output.push_str(reset);
 
         for (col_idx, cell) in row.iter().enumerate() {
             let width = col_widths.get(col_idx).copied().unwrap_or(3);
 
-            // Apply background for this cell
+            // Leading space with row background
             output.push_str(bg);
             output.push(' ');
 
-            // Render cell content with styling
-            let rendered = render_cell_content(cell, prose_highlighter, scope_stack, is_header);
+            // Render cell content with styling (pass row background for restoration)
+            let rendered = render_cell_content(cell, prose_highlighter, scope_stack, is_header, bg);
             output.push_str(&rendered);
 
             // Calculate plain text length for padding
@@ -561,16 +564,16 @@ fn render_table(
                 .chars()
                 .count();
 
-            // Pad to column width
+            // Pad to column width with row background
+            output.push_str(bg);
             for _ in plain_len..width {
                 output.push(' ');
             }
             output.push(' ');
-            output.push_str(reset);
 
-            output.push_str(border_color);
+            // Column divider with row background + border color
+            output.push_str(&divider_style);
             output.push(vertical);
-            output.push_str(reset);
         }
 
         // Handle missing cells (pad with empty)
@@ -580,11 +583,12 @@ fn render_table(
             for _ in 0..width + 2 {
                 output.push(' ');
             }
-            output.push_str(reset);
-            output.push_str(border_color);
+            output.push_str(&divider_style);
             output.push(vertical);
-            output.push_str(reset);
         }
+
+        // Reset at end of row
+        output.push_str(reset);
 
         output.push('\n');
 
@@ -625,11 +629,15 @@ fn render_table(
 }
 
 /// Renders cell content with proper styling for inline code.
+///
+/// The `row_bg` parameter is the ANSI escape sequence for the row background color,
+/// which must be restored after inline code styling to maintain consistent row coloring.
 fn render_cell_content(
     cell: &str,
     prose_highlighter: &ProseHighlighter,
     scope_stack: &[Scope],
     is_header: bool,
+    row_bg: &str,
 ) -> String {
     let mut output = String::new();
     let text_style = prose_highlighter.base_style();
@@ -665,7 +673,7 @@ fn render_cell_content(
                 let code = &cell[after_start..after_start + end_offset];
                 // Render inline code with distinct styling
                 let code_style = prose_highlighter.style_for_inline_code(scope_stack);
-                output.push_str(&emit_inline_code(code, code_style));
+                output.push_str(&emit_inline_code_in_table(code, code_style, row_bg, is_header));
                 pos = after_start + end_offset + CODE_END.len();
             } else {
                 // No end marker found, treat rest as plain text
@@ -690,6 +698,36 @@ fn render_cell_content(
     }
 
     output
+}
+
+/// Emits inline code within a table cell, restoring row background after.
+///
+/// Unlike regular `emit_inline_code`, this version restores the row background
+/// and header bold state instead of doing a full reset, ensuring consistent
+/// row coloring throughout the table.
+fn emit_inline_code_in_table(text: &str, style: Style, row_bg: &str, is_header: bool) -> String {
+    let fg = style.foreground;
+    let bg = style.background;
+
+    // Determine the code background color
+    let code_bg = if bg.a > 0 && (bg.r > 0 || bg.g > 0 || bg.b > 0) {
+        format!("\x1b[48;2;{};{};{}m", bg.r, bg.g, bg.b)
+    } else {
+        // Use a subtle dark gray background for contrast
+        "\x1b[48;2;50;50;55m".to_string()
+    };
+
+    // Build the restore sequence: row background + bold if header
+    let restore = if is_header {
+        format!("{}\x1b[1m", row_bg)
+    } else {
+        row_bg.to_string()
+    };
+
+    format!(
+        "{}\x1b[38;2;{};{};{}m{}{}",
+        code_bg, fg.r, fg.g, fg.b, text, restore
+    )
 }
 
 /// Emits code text with both foreground and background colors.
@@ -1415,6 +1453,51 @@ fn main() {}
             output.contains("\x1b[1m"),
             "Header should be bold, output:\n{}",
             output
+        );
+    }
+
+    /// Regression test: row background persists after inline code styling.
+    ///
+    /// This bug caused row backgrounds to reset to terminal default after
+    /// inline code because `emit_inline_code` used `\x1b[0m` (full reset).
+    /// The fix uses `emit_inline_code_in_table` which restores the row background.
+    #[test]
+    fn test_table_row_background_persists_after_inline_code() {
+        let md: Markdown =
+            "| Field | Description |\n|-------|-------------|\n| `foo` | A var |\n| `bar` | Another |"
+                .into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // The row background colors
+        let even_row_bg = "\x1b[48;2;45;48;55m"; // Used for row index 2 (even)
+
+        // Split output into lines and check body rows
+        let lines: Vec<&str> = output.lines().collect();
+        // Line 0: top border
+        // Line 1: header row
+        // Line 2: header separator
+        // Line 3: first body row (row_idx=1, odd - no bg)
+        // Line 4: second body row (row_idx=2, even - has bg)
+
+        // The even row (second body row) should have background color that persists
+        // after inline code. Check that the bg appears AFTER inline code content.
+        let even_row = lines.get(4).unwrap_or(&"");
+        let bar_pos = even_row.find("bar");
+        let bg_after_bar = even_row.rfind(even_row_bg);
+
+        assert!(
+            bar_pos.is_some() && bg_after_bar.is_some() && bg_after_bar > bar_pos,
+            "Row background should be restored after inline code 'bar', got row:\n{}",
+            even_row
+        );
+
+        // Also verify we're NOT using full reset (\x1b[0m) right after inline code text
+        // within the table cell content. The pattern `bar\x1b[0m` would indicate the bug.
+        // Instead, we should see the row background restored.
+        assert!(
+            !even_row.contains("bar\x1b[0m "),
+            "Should not have full reset immediately after inline code, got:\n{}",
+            even_row
         );
     }
 }
