@@ -280,10 +280,10 @@ The research system auto-detects package managers:
 
 ### Rust Documentation Best Practices
 
-- Avoid explicit # Heading (H1) inside /// unless intentionally titling the item
+- Avoid explicit `# Heading` (H1) inside a `///` docblock unless intentionally titling the item
     - Rustdoc already supplies the item name as a top-level title.
     - Adding an H1 duplicates visual hierarchy and is usually redundant.
-- Use ## Heading (H2) for primary sections
+- Use `## Heading` (H2) for primary sections
     - Example Sections:
         - `## Returns`
         - `## Errors`
@@ -335,7 +335,7 @@ For complete dependency information, see `docs/dependencies.md`.
 **Semantic Conventions** (OpenTelemetry):
 
 | Field | Description | Example |
-|-------|-------------|---------|
+|-------|-------------| :---------: |
 | `tool.name` | Tool being called | `"brave_search"` |
 | `tool.query` | Search query/URL | `"rust async"` |
 | `tool.duration_ms` | Execution time | `1234` |
