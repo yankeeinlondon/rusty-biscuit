@@ -143,7 +143,7 @@ cargo build -p so-you-say
 
 ### Testing
 
-```bash
+```sh
 # Test all areas
 just test
 
