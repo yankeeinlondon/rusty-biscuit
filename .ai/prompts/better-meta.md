@@ -155,14 +155,27 @@ This feature request involves improving the metadata capture in the Research Are
         /// The kind of research
         pub kind: ResearchKind,
 
-        /// the underlying documents produced while doing
-        /// research
+        /// the underlying research documents produced while 
+        /// doing research
         pub underlying_research: Vec<UnderlyingResearch>,
+
+        /// Details which are specific to the _kind_ of research
+        /// which is being done.
+        pub details: ResearchDetails,
 
     }
 
     ```
 
+    - since there is a `schema_version` property in we will be moving from 0 to 1
+    - we will likely need a upgrade function to upgrade from 0 to 1
 
+2. we need to make sure once we've refactored from #1 that the library command works as expected.
 
-2. the `SkillFrontmatter` structure defines a `tool` property but this is incorrect and should be called `allowed_tools`. Rename and make sure all references in code and docs reflects this change.
+3. now it's time to add a new command to the Research CLI:
+
+    - we will add the `api` command which will add the `Api` type of research
+    - the syntax is `research api <api-name> [...prompt]`
+    - structurally this is very similar to the 'library' command 
+
+4. the `SkillFrontmatter` structure defines a `tool` property but this is incorrect and should be called `allowed_tools`. Rename and make sure all references in code and docs reflects this change.
