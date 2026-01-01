@@ -433,17 +433,21 @@ impl BraveSearchTool {
             })
             .unwrap_or_default();
 
-        if results.is_empty() {
-            warn!("Search returned no results");
-            return Err(BraveSearchError::NoResults);
-        }
-
         let elapsed = start.elapsed();
-        info!(
-            tool.results_count = results.len(),
-            tool.duration_ms = elapsed.as_millis() as u64,
-            "Search completed"
-        );
+
+        if results.is_empty() {
+            debug!(
+                query = %args.query,
+                tool.duration_ms = elapsed.as_millis() as u64,
+                "Search returned no results (this is not an error)"
+            );
+        } else {
+            info!(
+                tool.results_count = results.len(),
+                tool.duration_ms = elapsed.as_millis() as u64,
+                "Search completed"
+            );
+        }
 
         Ok(results)
     }
@@ -674,12 +678,9 @@ mod tests {
         assert!(display.contains("Unauthorized"));
     }
 
-    #[test]
-    fn test_error_display_no_results() {
-        let error = BraveSearchError::NoResults;
-        let display = format!("{}", error);
-        assert!(display.contains("No results"));
-    }
+    // Note: NoResults error variant is no longer used in production code.
+    // Empty results are now returned as Ok(vec![]) instead of Err(NoResults).
+    // This allows the agent to handle "no results" gracefully rather than treating it as an error.
 
     #[test]
     fn test_error_display_config_error() {
@@ -868,7 +869,9 @@ mod tests {
         };
 
         let result = tool.call(args).await;
-        assert!(matches!(result, Err(BraveSearchError::NoResults)));
+        // Empty results should be Ok with an empty vector, not an error
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 0);
     }
 
     #[tokio::test]
