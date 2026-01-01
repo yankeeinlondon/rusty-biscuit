@@ -28,13 +28,13 @@
 
 use crate::markdown::{
     dsl::parse_code_info,
-    highlighting::{CodeHighlighter, ColorMode, ThemePair},
+    highlighting::{prose::ProseHighlighter, scope_cache::ScopeCache, CodeHighlighter, ColorMode, ThemePair},
     Markdown, MarkdownError,
 };
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use syntect::easy::HighlightLines;
-use syntect::highlighting::Color;
-use syntect::parsing::SyntaxReference;
+use syntect::highlighting::{Color, Style};
+use syntect::parsing::{Scope, SyntaxReference};
 use syntect::util::as_24_bit_terminal_escaped;
 
 /// Color depth capability for terminal.
@@ -110,10 +110,16 @@ pub struct TerminalOptions {
 
 impl Default for TerminalOptions {
     fn default() -> Self {
+        use crate::markdown::highlighting::{detect_prose_theme, detect_code_theme, detect_color_mode};
+
+        let prose_theme = detect_prose_theme();
+        let code_theme = detect_code_theme(prose_theme);
+        let color_mode = detect_color_mode();
+
         Self {
-            code_theme: ThemePair::Github,
-            prose_theme: ThemePair::Github,
-            color_mode: ColorMode::Dark,
+            code_theme,
+            prose_theme,
+            color_mode,
             include_line_numbers: false,
             color_depth: None,
         }
@@ -146,8 +152,19 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
         return Ok(md.content().to_string());
     }
 
-    let highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+    let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
+
+    // Load prose theme for ProseHighlighter
+    let prose_syntect_theme = crate::markdown::highlighting::themes::load_theme(
+        options.prose_theme,
+        options.color_mode,
+    );
+    let prose_highlighter = ProseHighlighter::new(&prose_syntect_theme);
+
     let mut output = String::with_capacity(md.content().len() * 2);
+
+    // Track scope stack for prose highlighting (functional style)
+    let mut scope_stack: Vec<Scope> = vec![prose_highlighter.base_scope()];
 
     let parser = Parser::new(md.content());
     let mut in_code_block = false;
@@ -190,7 +207,7 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
                 let highlighted = highlight_code(
                     &code_buffer,
                     &code_language,
-                    &highlighter,
+                    &code_highlighter,
                     &options,
                     &meta,
                 )?;
@@ -200,7 +217,12 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
             Event::Text(text) if in_code_block => {
                 code_buffer.push_str(&text);
             }
-            Event::Start(Tag::Heading { level, .. }) => {
+
+            // Prose highlighting with scope tracking
+            Event::Start(ref tag @ Tag::Heading { level, .. }) => {
+                if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
+                    scope_stack.push(scope);
+                }
                 let marker = match level {
                     pulldown_cmark::HeadingLevel::H1 => "# ",
                     pulldown_cmark::HeadingLevel::H2 => "## ",
@@ -209,35 +231,99 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
                     pulldown_cmark::HeadingLevel::H5 => "##### ",
                     pulldown_cmark::HeadingLevel::H6 => "###### ",
                 };
-                output.push_str(marker);
+                let style = prose_highlighter.style_for_tag(tag, &scope_stack);
+                output.push_str(&emit_prose_text(marker, style));
             }
             Event::End(TagEnd::Heading(_)) => {
+                scope_stack.pop();
                 output.push('\n');
             }
+
+            Event::Start(ref tag @ Tag::Strong) => {
+                if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
+                    scope_stack.push(scope);
+                }
+            }
+            Event::End(TagEnd::Strong) => {
+                scope_stack.pop();
+            }
+
+            Event::Start(ref tag @ Tag::Emphasis) => {
+                if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
+                    scope_stack.push(scope);
+                }
+            }
+            Event::End(TagEnd::Emphasis) => {
+                scope_stack.pop();
+            }
+
+            Event::Start(ref tag @ Tag::Link { .. }) => {
+                if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
+                    scope_stack.push(scope);
+                }
+            }
+            Event::End(TagEnd::Link) => {
+                scope_stack.pop();
+            }
+
             Event::Start(Tag::Paragraph) => {}
             Event::End(TagEnd::Paragraph) => {
                 output.push_str("\n\n");
             }
+
             Event::Text(text) if !in_code_block => {
-                output.push_str(&text);
+                // Apply current prose styling based on scope stack
+                let style = if scope_stack.len() > 1 {
+                    // We have nested scopes, compute style from stack
+                    // Use a neutral tag reference for computing the style
+                    let tag = Tag::Paragraph;
+                    prose_highlighter.style_for_tag(&tag, &scope_stack)
+                } else {
+                    prose_highlighter.base_style()
+                };
+                output.push_str(&emit_prose_text(&text, style));
             }
+
             Event::Code(code) => {
-                // Inline code - just add backticks for now
+                // Inline code with styling
+                let style = prose_highlighter.style_for_inline_code(&scope_stack);
                 output.push('`');
-                output.push_str(&code);
+                output.push_str(&emit_prose_text(&code, style));
                 output.push('`');
             }
+
             Event::SoftBreak => {
                 output.push(' ');
             }
             Event::HardBreak => {
                 output.push('\n');
             }
-            _ => {} // Ignore other events for Phase 9
+            _ => {} // Ignore other events
         }
     }
 
+    // Always emit terminal reset at end
+    output.push_str("\x1b[0m");
+
     Ok(output)
+}
+
+/// Emits prose text with foreground color only (no background).
+fn emit_prose_text(text: &str, style: Style) -> String {
+    let fg = style.foreground;
+    format!("\x1b[38;2;{};{};{}m{}\x1b[0m", fg.r, fg.g, fg.b, text)
+}
+
+/// Emits code text with both foreground and background colors.
+#[cfg(test)]
+fn emit_code_text(text: &str, style: Style, bg_color: Color) -> String {
+    let fg = style.foreground;
+    format!(
+        "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
+        bg_color.r, bg_color.g, bg_color.b,
+        fg.r, fg.g, fg.b,
+        text
+    )
 }
 
 /// Formats a code block title with ANSI codes.
@@ -353,10 +439,13 @@ mod tests {
     }
 
     #[test]
-    fn test_terminal_options_default() {
+    fn test_terminal_options_default_uses_detection() {
+        // Default options should use environment detection
         let options = TerminalOptions::default();
-        assert_eq!(options.code_theme, ThemePair::Github);
-        assert_eq!(options.color_mode, ColorMode::Dark);
+
+        // Should have valid themes (not checking specific values since they depend on env)
+        assert!(ThemePair::all().contains(&options.prose_theme));
+        assert!(ThemePair::all().contains(&options.code_theme));
         assert!(!options.include_line_numbers);
         assert!(options.color_depth.is_none());
     }
@@ -522,5 +611,119 @@ fn main() {}
 
         // Should return plain content
         assert_eq!(output, md.content());
+    }
+
+    #[test]
+    fn test_for_terminal_prose_no_background() {
+        let md: Markdown = "# Hello World\n\nSome **bold** text.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain foreground color codes (38;2)
+        assert!(output.contains("\x1b[38;2;"));
+
+        // Prose should NOT contain background color codes (48;2)
+        // Split at code blocks and check prose sections
+        let prose_section = output.split("```").next().unwrap_or(&output);
+        // Count background codes - should be minimal for prose
+        let bg_count = prose_section.matches("\x1b[48;2;").count();
+        assert_eq!(bg_count, 0, "Prose should not have background colors");
+    }
+
+    #[test]
+    fn test_for_terminal_code_has_background() {
+        let md: Markdown = "```rust\nfn main() {}\n```".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Code blocks should have background color
+        assert!(output.contains("\x1b[48;2;"), "Code should have background colors");
+    }
+
+    #[test]
+    fn test_for_terminal_ends_with_reset() {
+        let md: Markdown = "# Test".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Output should end with reset code
+        assert!(output.ends_with("\x1b[0m"), "Output should end with terminal reset");
+    }
+
+    #[test]
+    fn test_emit_prose_text_no_background() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
+            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            font_style: FontStyle::empty(),
+        };
+
+        let result = emit_prose_text("Hello", style);
+
+        // Should have foreground
+        assert!(result.contains("\x1b[38;2;255;128;64m"));
+        // Should NOT have background
+        assert!(!result.contains("\x1b[48;2;"));
+        // Should end with reset
+        assert!(result.contains("\x1b[0m"));
+    }
+
+    #[test]
+    fn test_emit_code_text_has_background() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
+            background: Color { r: 30, g: 30, b: 30, a: 255 },
+            font_style: FontStyle::empty(),
+        };
+        let bg = Color { r: 30, g: 30, b: 30, a: 255 };
+
+        let result = emit_code_text("code", style, bg);
+
+        // Should have both foreground and background
+        assert!(result.contains("\x1b[48;2;30;30;30m"));
+        assert!(result.contains("\x1b[38;2;255;128;64m"));
+    }
+
+    #[test]
+    fn test_for_terminal_heading_styled() {
+        let md: Markdown = "# Heading 1\n\n## Heading 2".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain ANSI codes for styling
+        assert!(output.contains("\x1b[38;2;"));
+
+        // Should contain heading markers
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("# Heading 1"));
+        assert!(plain.contains("## Heading 2"));
+    }
+
+    #[test]
+    fn test_for_terminal_inline_code_styled() {
+        let md: Markdown = "Use `cargo build` to compile.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain ANSI codes
+        assert!(output.contains("\x1b[38;2;"));
+
+        // Should NOT have background for inline code (prose style)
+        let bg_count = output.matches("\x1b[48;2;").count();
+        assert_eq!(bg_count, 0, "Inline code should not have background colors in prose");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("`cargo build`"));
+    }
+
+    #[test]
+    fn test_for_terminal_nested_styling() {
+        let md: Markdown = "# Heading with **bold** text".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain ANSI codes
+        assert!(output.contains("\x1b[38;2;"));
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("# Heading with bold text"));
     }
 }
