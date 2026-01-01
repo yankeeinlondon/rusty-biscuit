@@ -68,6 +68,7 @@ pulldown-cmark = "0.12"
 pulldown-cmark-to-cmark = "18"
 markdown = { version = "1.0.0-alpha.22", features = ["serde"] }
 html-escape = "0.2"
+unicode-width = "0.2.2"
 
 [dev-dependencies]
 tokio = { version = "1.48", features = ["full", "test-util"] }
@@ -78,3 +79,4 @@ proptest = "1.4"
 serial_test = "3.0"
 insta = "1.41"
 pulldown-cmark = "0.12"
+unicode-width = "0.2.2"

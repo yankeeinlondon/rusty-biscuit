@@ -169,6 +169,7 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
     let terminal_width = terminal_size()
         .map(|(Width(w), _)| w)
         .unwrap_or(DEFAULT_TERMINAL_WIDTH);
+    tracing::debug!(terminal_width, "Terminal width detected for table rendering");
 
     let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
 
@@ -408,6 +409,8 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
                 in_table = false;
                 // Render the buffered table with proper formatting
                 output.push_str(&render_table(&table_rows, &table_alignments, terminal_width));
+                // Add blank line after table for spacing from following content
+                output.push_str("\n\n");
                 table_rows.clear();
             }
             Event::Start(Tag::TableHead) => {
@@ -483,6 +486,13 @@ fn emit_inline_code(text: &str, style: Style) -> String {
 /// ## Returns
 ///
 /// String with inline code markers replaced by ANSI-styled text
+///
+/// ## Note
+///
+/// This function is currently only used in tests. Production code uses
+/// `strip_code_markers()` instead because raw ANSI injection causes
+/// comfy-table to misalign columns.
+#[cfg(test)]
 fn process_cell_content(content: &str) -> String {
     const START_MARKER: &str = "\x00CODE\x00";
     const END_MARKER: &str = "\x00/CODE\x00";
@@ -529,6 +539,39 @@ fn process_cell_content(content: &str) -> String {
     result
 }
 
+/// Strips inline code markers from cell content for width calculation.
+///
+/// The markers `\x00CODE\x00` and `\x00/CODE\x00` are used to mark inline code
+/// during parsing and are later converted to ANSI styling. They must be removed
+/// before calculating display width.
+fn strip_code_markers(s: &str) -> String {
+    s.replace("\x00CODE\x00", "").replace("\x00/CODE\x00", "")
+}
+
+/// Calculates the minimum width needed for a column to avoid mid-word breaks.
+///
+/// Returns the length of the longest "word" (space-delimited segment) in the column,
+/// considering ANSI escape codes and inline code markers which don't contribute
+/// to visual width.
+fn calculate_min_column_width(rows: &[Vec<String>], col_index: usize) -> usize {
+    use unicode_width::UnicodeWidthStr;
+
+    let mut max_word_len = 0;
+    for row in rows {
+        if let Some(cell) = row.get(col_index) {
+            // Strip ANSI codes AND inline code markers for width calculation
+            let plain_content = strip_code_markers(&crate::testing::strip_ansi_codes(cell));
+
+            // Find the longest word (space-separated)
+            for word in plain_content.split_whitespace() {
+                let word_width = UnicodeWidthStr::width(word);
+                max_word_len = max_word_len.max(word_width);
+            }
+        }
+    }
+    max_word_len
+}
+
 /// Renders a buffered table using comfy-table with automatic wrapping.
 ///
 /// Box-drawing characters are used regardless of color depth. When `ColorDepth::None`
@@ -550,7 +593,7 @@ fn render_table(
     alignments: &[CellAlignment],
     terminal_width: u16,
 ) -> String {
-    use comfy_table::Color as ComfyColor;
+    use comfy_table::{ColumnConstraint, Color as ComfyColor, Width};
 
     if rows.is_empty() {
         return String::new();
@@ -569,12 +612,15 @@ fn render_table(
     table.load_preset(presets::UTF8_BORDERS_ONLY);
 
     // Add header row with bold styling
+    // Note: We strip inline code markers but don't convert to ANSI - comfy-table
+    // doesn't handle raw ANSI injection well during content wrapping, causing
+    // alignment issues and broken escape sequences.
     if let Some(header) = rows.first() {
         table.set_header(header.iter().enumerate().map(|(i, cell_content)| {
             let alignment = alignments.get(i).copied().unwrap_or(CellAlignment::Left);
-            // Process inline code markers with styling
-            let styled_content = process_cell_content(cell_content);
-            Cell::new(styled_content)
+            // Strip markers without ANSI conversion - headers shouldn't have them anyway
+            let plain_content = strip_code_markers(cell_content);
+            Cell::new(plain_content)
                 .set_alignment(alignment)
                 .add_attribute(Attribute::Bold)
                 .fg(ComfyColor::White)
@@ -582,13 +628,66 @@ fn render_table(
     }
 
     // Add data rows
+    // We strip inline code markers rather than converting to ANSI because:
+    // 1. comfy-table breaks ANSI sequences during content wrapping
+    // 2. This causes misalignment between headers and data columns
+    // 3. Stripped markers preserve content while allowing proper width calculation
     for row in rows.iter().skip(1) {
         table.add_row(row.iter().enumerate().map(|(i, cell_content)| {
             let alignment = alignments.get(i).copied().unwrap_or(CellAlignment::Left);
-            // Process inline code markers with styling
-            let styled_content = process_cell_content(cell_content);
-            Cell::new(styled_content).set_alignment(alignment)
+            // Strip markers - trade off inline code styling for proper alignment
+            let plain_content = strip_code_markers(cell_content);
+            Cell::new(plain_content).set_alignment(alignment)
         }));
+    }
+
+    // Calculate minimum column widths based on longest words to prevent mid-word breaks.
+    // This ensures that identifiers like "tool.duration_ms" won't be split.
+    // We apply LowerBoundary constraints after adding content so columns exist.
+    //
+    // Strategy:
+    // 1. Calculate the natural minimum width for each column (longest word)
+    // 2. If total fits within terminal, apply as LowerBoundary constraints
+    // 3. If total exceeds terminal, apply scaled-down constraints that still
+    //    provide reasonable minimums to avoid the worst word breaks
+    let min_widths: Vec<usize> = (0..col_count)
+        .map(|i| calculate_min_column_width(rows, i) + 2) // +2 for padding
+        .collect();
+
+    // Calculate total minimum width including borders and column separators
+    // comfy-table uses: │ col1 │ col2 │ col3 │ which adds 1 char per column + 1 for final border
+    let border_overhead = col_count + 1;
+    let total_min_width: usize = min_widths.iter().sum::<usize>() + border_overhead;
+
+    // Always apply constraints, but scale them down if needed
+    let usable_width = terminal_width.saturating_sub(border_overhead as u16) as usize;
+    let constraints: Vec<ColumnConstraint> = if total_min_width <= terminal_width as usize {
+        // All constraints fit - use them directly
+        min_widths
+            .into_iter()
+            .map(|w| ColumnConstraint::LowerBoundary(Width::Fixed(w as u16)))
+            .collect()
+    } else if usable_width > 0 {
+        // Constraints don't all fit - scale them proportionally
+        // This gives each column a fair share while respecting relative importance
+        let total_requested: usize = min_widths.iter().sum();
+        let scale_factor = usable_width as f64 / total_requested as f64;
+
+        min_widths
+            .into_iter()
+            .map(|w| {
+                // Scale down but ensure at least 4 chars minimum (for very narrow terminals)
+                let scaled = ((w as f64 * scale_factor) as usize).max(4);
+                ColumnConstraint::LowerBoundary(Width::Fixed(scaled as u16))
+            })
+            .collect()
+    } else {
+        // Terminal too narrow for any meaningful constraints - let comfy-table handle it
+        Vec::new()
+    };
+
+    if !constraints.is_empty() {
+        table.set_constraints(constraints);
     }
 
     table.to_string()
@@ -1308,6 +1407,10 @@ fn main() {}
     }
 
     /// Regression test: tables with inline code in cells render correctly
+    ///
+    /// Note: Inline code in table cells does NOT receive background styling because
+    /// raw ANSI injection causes comfy-table to miscalculate column widths and break
+    /// content alignment. The markers are stripped and content is rendered plain.
     #[test]
     fn test_table_with_inline_code() {
         let md: Markdown = "| Variable | Description |\n|----------|-------------|\n| `FOO` | A variable |".into();
@@ -1328,10 +1431,11 @@ fn main() {}
             plain
         );
 
-        // Inline code should have background styling (48;2 = RGB background)
+        // Inline code in tables does NOT have background styling - this is intentional
+        // to prevent alignment issues. See test_table_inline_code_markers_stripped_for_width.
         assert!(
-            output.contains("\x1b[48;2;50;50;55m"),
-            "Inline code in table should have background color styling (\\x1b[48;2;50;50;55m), got:\n{}",
+            !output.contains("\x1b[48;2;50;50;55m"),
+            "Inline code in table should NOT have background styling (causes alignment issues), got:\n{}",
             output
         );
     }
@@ -1701,6 +1805,233 @@ fn main() {}
         assert!(plain.contains("Column B"));
         assert!(plain.contains("Column C"));
         assert!(plain.contains("Value 1"));
+    }
+
+    /// Regression test: table width must be constrained to terminal width
+    ///
+    /// Bug: Tables were not respecting terminal width, causing content to overflow
+    /// and words to split mid-word (e.g., "tool.duration_ms" -> "tool.duration_m" / "s")
+    ///
+    /// Fix: Added LowerBoundary column constraints based on longest word in each column.
+    /// This prevents mid-word breaks when the terminal is wide enough to fit the content.
+    #[test]
+    fn test_table_width_constraint_enforced() {
+        use unicode_width::UnicodeWidthStr;
+
+        // Create a table with content that would exceed 50 chars per row
+        let rows = vec![
+            vec!["Field".to_string(), "Description".to_string(), "Example".to_string()],
+            vec!["tool.name".to_string(), "Tool being called".to_string(), "\"brave_search\"".to_string()],
+            vec!["tool.query".to_string(), "Search query/URL".to_string(), "\"rust async\"".to_string()],
+            vec!["tool.duration_ms".to_string(), "Execution time".to_string(), "1234".to_string()],
+        ];
+        let alignments = vec![CellAlignment::Left, CellAlignment::Left, CellAlignment::Center];
+
+        // Use width that can fit the content without mid-word breaks
+        let adequate_width: u16 = 60;
+
+        let output = render_table(&rows, &alignments, adequate_width);
+        let plain = strip_ansi_codes(&output);
+
+        // Every line should be <= adequate_width in display width
+        for (i, line) in plain.lines().enumerate() {
+            let display_width = UnicodeWidthStr::width(line);
+            assert!(
+                display_width <= adequate_width as usize,
+                "Line {} exceeds width constraint: {} > {} in:\n{}\nFull table:\n{}",
+                i, display_width, adequate_width, line, plain
+            );
+        }
+
+        // Content should NOT be split mid-word at this width
+        assert!(
+            plain.contains("tool.duration_ms"),
+            "tool.duration_ms should not be split, got:\n{}",
+            plain
+        );
+        assert!(
+            plain.contains("tool.name"),
+            "tool.name should not be split, got:\n{}",
+            plain
+        );
+    }
+
+    /// Regression test: tables should not split words in the middle
+    ///
+    /// Bug: comfy-table was splitting "tool.duration_ms" into "tool.duration_m" and "s"
+    /// when the terminal was narrow. This was caused by ANSI escape codes interfering
+    /// with width calculation, or incorrect ContentArrangement settings.
+    #[test]
+    fn test_table_no_mid_word_splitting() {
+        // Table from the bug report screenshot
+        let rows = vec![
+            vec!["Field".to_string(), "Description".to_string(), "Example".to_string()],
+            vec!["tool.name".to_string(), "Tool being called".to_string(), "\"brave_search\"".to_string()],
+            vec!["tool.query".to_string(), "Search query/URL".to_string(), "\"rust async\"".to_string()],
+            vec!["tool.duration_ms".to_string(), "Execution time".to_string(), "1234".to_string()],
+            vec!["tool.results_count".to_string(), "Results returned".to_string(), "10".to_string()],
+            vec!["http.status_code".to_string(), "HTTP response".to_string(), "200".to_string()],
+            vec!["otel.kind".to_string(), "Span kind".to_string(), "\"client\"".to_string()],
+        ];
+        let alignments = vec![CellAlignment::Left, CellAlignment::Left, CellAlignment::Center];
+
+        // Test with narrow width (60 chars) like the screenshot showed
+        let narrow_width: u16 = 60;
+
+        let output = render_table(&rows, &alignments, narrow_width);
+        let plain = strip_ansi_codes(&output);
+
+        // Check for mid-word splits by looking at line breaks
+        // Bad patterns: word followed immediately by newline with continuation on next line
+        let bad_patterns = [
+            "duration_m\n",  // duration_ms split after duration_m
+            "results_co\n",  // results_count split
+            "status_cod\n",  // status_code split
+            "_m │",         // duration_ms split at underscore
+            "_co │",        // results_count split
+        ];
+
+        for pattern in bad_patterns {
+            assert!(
+                !plain.contains(pattern),
+                "Bad word split detected: found '{}' in:\n{}",
+                pattern.escape_default(), plain
+            );
+        }
+
+        // Verify full identifiers are present (not split across lines)
+        // Each identifier should appear complete on at least one line
+        for identifier in ["tool.duration_ms", "tool.results_count", "http.status_code"] {
+            let found_complete = plain.lines().any(|line| line.contains(identifier));
+            assert!(
+                found_complete,
+                "Identifier '{}' should appear complete on a single line:\n{}",
+                identifier, plain
+            );
+        }
+    }
+
+    /// Test table rendering with very narrow width (40 chars) to stress-test wrapping
+    #[test]
+    fn test_table_very_narrow_width() {
+        use unicode_width::UnicodeWidthStr;
+
+        // Table from the bug report screenshot
+        let rows = vec![
+            vec!["Field".to_string(), "Description".to_string(), "Example".to_string()],
+            vec!["tool.name".to_string(), "Tool being called".to_string(), "\"brave_search\"".to_string()],
+            vec!["tool.query".to_string(), "Search query/URL".to_string(), "\"rust async\"".to_string()],
+            vec!["tool.duration_ms".to_string(), "Execution time".to_string(), "1234".to_string()],
+        ];
+        let alignments = vec![CellAlignment::Left, CellAlignment::Left, CellAlignment::Center];
+
+        // Very narrow width to force issues
+        let narrow_width: u16 = 40;
+
+        let output = render_table(&rows, &alignments, narrow_width);
+        let plain = strip_ansi_codes(&output);
+
+        eprintln!("Table at width {}:\n{}", narrow_width, plain);
+
+        // Every line should respect the width constraint
+        for (i, line) in plain.lines().enumerate() {
+            let display_width = UnicodeWidthStr::width(line);
+            assert!(
+                display_width <= narrow_width as usize,
+                "Line {} exceeds width constraint: {} > {} in:\n{}\nFull table:\n{}",
+                i, display_width, narrow_width, line, plain
+            );
+        }
+    }
+
+    /// Regression test: inline code markers must not affect width calculation
+    ///
+    /// Bug: The markers `\x00CODE\x00` and `\x00/CODE\x00` were being counted in
+    /// width calculation, causing columns to be sized incorrectly. Headers and
+    /// data columns would not align because headers had no markers but data did.
+    #[test]
+    fn test_table_inline_code_markers_stripped_for_width() {
+        // Simulate rows WITH inline code markers (as they come from markdown parsing)
+        let rows = vec![
+            vec!["Field".to_string(), "Description".to_string(), "Example".to_string()],
+            // Data cells with inline code markers (like real markdown `tool.name`)
+            vec![
+                "\x00CODE\x00tool.name\x00/CODE\x00".to_string(),
+                "Tool being called".to_string(),
+                "\x00CODE\x00\"brave_search\"\x00/CODE\x00".to_string(),
+            ],
+            vec![
+                "\x00CODE\x00tool.duration_ms\x00/CODE\x00".to_string(),
+                "Execution time".to_string(),
+                "\x00CODE\x001234\x00/CODE\x00".to_string(),
+            ],
+        ];
+        let alignments = vec![CellAlignment::Left, CellAlignment::Left, CellAlignment::Center];
+
+        // With adequate width, markers should not cause misalignment
+        let width: u16 = 70;
+        let output = render_table(&rows, &alignments, width);
+        let plain = strip_ansi_codes(&output);
+
+        // The markers should be converted to ANSI (and stripped), not visible
+        assert!(
+            !plain.contains("CODE"),
+            "Markers should not appear in output:\n{}",
+            plain
+        );
+
+        // Content should be intact (markers converted to styling)
+        assert!(plain.contains("tool.name"), "tool.name should be present:\n{}", plain);
+        assert!(plain.contains("tool.duration_ms"), "tool.duration_ms should be present:\n{}", plain);
+        assert!(plain.contains("brave_search"), "brave_search should be present:\n{}", plain);
+
+        // Headers and data should align - check that column separators line up
+        // by verifying all lines have similar structure
+        let lines: Vec<&str> = plain.lines().collect();
+        assert!(lines.len() >= 3, "Table should have header + separator + data rows");
+
+        // All content lines should have the same width (proper alignment)
+        let content_widths: Vec<usize> = lines.iter()
+            .map(|line| unicode_width::UnicodeWidthStr::width(*line))
+            .collect();
+        let first_width = content_widths[0];
+        for (i, &w) in content_widths.iter().enumerate() {
+            assert_eq!(
+                w, first_width,
+                "Line {} has width {} but expected {} (misalignment):\n{}",
+                i, w, first_width, plain
+            );
+        }
+    }
+
+    /// Debug test to visualize table rendering at different widths
+    #[test]
+    #[ignore] // Run with: cargo test -p shared --lib test_table_width_visual -- --ignored --nocapture
+    fn test_table_width_visual() {
+        use unicode_width::UnicodeWidthStr;
+
+        let rows = vec![
+            vec!["Field".to_string(), "Description".to_string(), "Example".to_string()],
+            vec!["tool.name".to_string(), "Tool being called".to_string(), "\"brave_search\"".to_string()],
+            vec!["tool.query".to_string(), "Search query/URL".to_string(), "\"rust async\"".to_string()],
+            vec!["tool.duration_ms".to_string(), "Execution time".to_string(), "1234".to_string()],
+            vec!["tool.results_count".to_string(), "Results returned".to_string(), "10".to_string()],
+            vec!["http.status_code".to_string(), "HTTP response".to_string(), "200".to_string()],
+            vec!["otel.kind".to_string(), "Span kind".to_string(), "\"client\"".to_string()],
+        ];
+        let alignments = vec![CellAlignment::Left, CellAlignment::Left, CellAlignment::Center];
+
+        for width in [40u16, 60, 80, 100, 120] {
+            eprintln!("\n{}\nTerminal width: {}\n{}", "=".repeat(60), width, "=".repeat(60));
+
+            let output = render_table(&rows, &alignments, width);
+            let plain = strip_ansi_codes(&output);
+
+            for (i, line) in plain.lines().enumerate() {
+                let display_width = UnicodeWidthStr::width(line);
+                eprintln!("Line {:2}: {:3} chars | {}", i, display_width, line);
+            }
+        }
     }
 
     /// Test that very long cell content wraps correctly within table cells

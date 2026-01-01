@@ -3200,6 +3200,7 @@ dependencies = [
  "tracing-test",
  "tts",
  "two-face",
+ "unicode-width",
  "url",
  "wiremock",
 ]
