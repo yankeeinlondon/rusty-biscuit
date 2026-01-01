@@ -31,7 +31,7 @@ use rig::providers::{gemini, openai};
 use serde::{Deserialize, Serialize};
 use shared::tools::{BravePlan, BraveSearchTool, ScreenScrapeTool};
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
@@ -764,6 +764,12 @@ pub enum ResearchError {
 
     #[error("Operation cancelled by user")]
     Cancelled,
+
+    #[error("Skill regeneration failed: {0}")]
+    SkillRegenerationFailed(String),
+
+    #[error("Invalid flag combination: {0}")]
+    InvalidFlagCombination(String),
 }
 
 /// Metrics from a completed prompt
@@ -1279,6 +1285,122 @@ where
     PromptTaskResult { metrics }
 }
 
+/// Generate skill files (SKILL.md and supporting docs) from research
+///
+/// This function is extracted from the existing Phase 2a skill generation logic.
+/// It can be called both during normal research flow and during `--skill` regeneration.
+///
+/// ## Arguments
+///
+/// * `topic` - The library/package name
+/// * `output_dir` - Base output directory (skill/ will be created inside this)
+/// * `combined_context` - Combined research context from all Phase 1 documents
+/// * `openai` - OpenAI client for LLM calls
+/// * `cancelled` - Cancellation flag
+/// * `metadata` - Mutable reference to metadata (will update when_to_use field)
+///
+/// ## Returns
+///
+/// Returns completion metrics (token counts) from the LLM call if successful,
+/// or `None` if the task was cancelled or failed.
+///
+/// ## Errors
+///
+/// Returns `ResearchError` if file operations fail.
+async fn generate_skill_files(
+    topic: &str,
+    output_dir: &std::path::Path,
+    combined_context: &str,
+    openai: &openai::Client,
+    cancelled: Arc<AtomicBool>,
+    metadata: &mut ResearchMetadata,
+) -> Result<Option<PromptMetrics>, ResearchError> {
+    // Build skill prompt
+    let skill_prompt = prompts::SKILL
+        .replace("{{topic}}", topic)
+        .replace("{{context}}", combined_context);
+
+    // Create skill subdirectory
+    let skill_dir = output_dir.join("skill");
+    fs::create_dir_all(&skill_dir).await?;
+
+    // Get model for skill generation
+    let skill_gen = openai.completion_model("gpt-5.2");
+
+    let phase2_counter = Arc::new(AtomicUsize::new(0));
+    let phase2_start = Instant::now();
+
+    // Run skill generation task
+    let skill_result = run_prompt_task(
+        "skill",
+        "SKILL.md",
+        skill_dir.clone(),
+        skill_gen,
+        skill_prompt,
+        phase2_counter,
+        1,
+        phase2_start,
+        cancelled,
+    )
+    .await;
+
+    // Parse skill output and split into multiple files if needed
+    if skill_result.metrics.is_some()
+        && let Ok(skill_content) = fs::read_to_string(skill_dir.join("SKILL.md")).await
+    {
+        // Step 1: Split files BEFORE normalization
+        let files = if skill_content.contains("--- FILE:") {
+            split_into_files(&skill_content)
+        } else {
+            vec![("SKILL.md".to_string(), skill_content)]
+        };
+
+        // Step 2: Selectively normalize files (skip SKILL.md, normalize others)
+        for (filename, content) in files {
+            let final_content = if filename == "SKILL.md" {
+                // Don't normalize SKILL.md - preserve frontmatter exactly as LLM generated it
+                content
+            } else {
+                // Normalize supporting documentation files
+                normalize_markdown(&content)
+            };
+
+            let file_path = skill_dir.join(&filename);
+            if let Err(e) = fs::write(&file_path, final_content).await {
+                tracing::error!("Failed to write {}: {}", filename, e);
+            }
+        }
+
+        // Validate SKILL.md frontmatter and extract when_to_use
+        let skill_md_path = skill_dir.join("SKILL.md");
+        if let Ok(skill_content) = fs::read_to_string(&skill_md_path).await {
+            match parse_and_validate_frontmatter(&skill_content) {
+                Ok((frontmatter, _body)) => {
+                    tracing::info!("✓ SKILL.md frontmatter is valid");
+
+                    // Update metadata with when_to_use
+                    metadata.when_to_use = Some(frontmatter.description.clone());
+                    metadata.updated_at = Utc::now();
+
+                    tracing::info!("✓ Extracted when_to_use from frontmatter");
+                }
+                Err(e) => {
+                    tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
+                    tracing::error!("  File: {}", skill_md_path.display());
+                    tracing::error!("  Please manually fix the frontmatter in SKILL.md");
+
+                    eprintln!("\n⚠️  Warning: SKILL.md frontmatter is invalid");
+                    eprintln!("   {}", e);
+                    eprintln!("   File: {}", skill_md_path.display());
+                    eprintln!("   The skill may not activate correctly until this is fixed.\n");
+                }
+            }
+        }
+    }
+
+    Ok(skill_result.metrics)
+}
+
 /// Run incremental research by regenerating missing prompts and/or adding new questions.
 ///
 /// This is called when metadata.json exists and either:
@@ -1729,37 +1851,25 @@ async fn run_incremental_research(
         .replace("{{additional_content}}", &additional_content);
 
     // Build prompts for phase 2
-    let skill_prompt = prompts::SKILL
-        .replace("{{topic}}", topic)
-        .replace("{{context}}", &combined_context);
-
     let deep_dive_prompt = prompts::DEEP_DIVE
         .replace("{{topic}}", topic)
         .replace("{{context}}", &combined_context);
 
-    // Create skill subdirectory
-    let skill_dir = output_dir.join("skill");
-    fs::create_dir_all(&skill_dir).await?;
-
-    // Get models for phase 2
-    let skill_gen = openai.completion_model("gpt-5.2");
+    // Get model for deep_dive
     let deep_dive_gen = openai.completion_model("gpt-5.2");
 
     let phase2_counter = Arc::new(AtomicUsize::new(0));
     let phase2_start = Instant::now();
 
     // Run phase 2 prompts in parallel
-    let (skill_result, deep_dive_result) = tokio::join!(
-        run_prompt_task(
-            "skill",
-            "SKILL.md",
-            skill_dir.clone(),
-            skill_gen,
-            skill_prompt,
-            phase2_counter.clone(),
-            2,
-            phase2_start,
+    let (skill_metrics_result, deep_dive_result) = tokio::join!(
+        generate_skill_files(
+            topic,
+            &output_dir,
+            &combined_context,
+            &openai,
             cancelled.clone(),
+            &mut existing_metadata,
         ),
         run_prompt_task(
             "deep_dive",
@@ -1774,61 +1884,12 @@ async fn run_incremental_research(
         ),
     );
 
-    // Parse skill output and split into multiple files if needed
-    if skill_result.metrics.is_some()
-        && let Ok(skill_content) = fs::read_to_string(skill_dir.join("SKILL.md")).await
-    {
-        // Step 1: Split files BEFORE normalization
-        let files = if skill_content.contains("--- FILE:") {
-            split_into_files(&skill_content)
+    // Save metadata after skill generation (which updated when_to_use)
+    if skill_metrics_result.is_ok() && existing_metadata.when_to_use.is_some() {
+        if let Err(e) = existing_metadata.save(&output_dir).await {
+            tracing::error!("Failed to save metadata: {}", e);
         } else {
-            vec![("SKILL.md".to_string(), skill_content)]
-        };
-
-        // Step 2: Selectively normalize files (skip SKILL.md, normalize others)
-        for (filename, content) in files {
-            let final_content = if filename == "SKILL.md" {
-                // Don't normalize SKILL.md - preserve frontmatter exactly as LLM generated it
-                content
-            } else {
-                // Normalize supporting documentation files
-                normalize_markdown(&content)
-            };
-
-            let file_path = skill_dir.join(&filename);
-            if let Err(e) = fs::write(&file_path, final_content).await {
-                tracing::error!("Failed to write {}: {}", filename, e);
-            }
-        }
-
-        // Validate SKILL.md frontmatter and extract when_to_use
-        let skill_md_path = skill_dir.join("SKILL.md");
-        if let Ok(skill_content) = fs::read_to_string(&skill_md_path).await {
-            match parse_and_validate_frontmatter(&skill_content) {
-                Ok((frontmatter, _body)) => {
-                    tracing::info!("✓ SKILL.md frontmatter is valid");
-
-                    // Update metadata with when_to_use
-                    existing_metadata.when_to_use = Some(frontmatter.description.clone());
-                    existing_metadata.updated_at = Utc::now();
-
-                    if let Err(e) = existing_metadata.save(&output_dir).await {
-                        tracing::error!("Failed to save metadata: {}", e);
-                    } else {
-                        tracing::info!("✓ Updated metadata.when_to_use");
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
-                    tracing::error!("  File: {}", skill_md_path.display());
-                    tracing::error!("  Please manually fix the frontmatter in SKILL.md");
-
-                    eprintln!("\n⚠️  Warning: SKILL.md frontmatter is invalid");
-                    eprintln!("   {}", e);
-                    eprintln!("   File: {}", skill_md_path.display());
-                    eprintln!("   The skill may not activate correctly until this is fixed.\n");
-                }
-            }
+            tracing::info!("✓ Updated metadata.when_to_use");
         }
     }
 
@@ -1894,6 +1955,11 @@ async fn run_incremental_research(
         }
     } else {
         (None, None)
+    };
+
+    // Convert skill_metrics_result to PromptTaskResult for metrics aggregation
+    let skill_result = PromptTaskResult {
+        metrics: skill_metrics_result.ok().flatten(),
     };
 
     let phase2_results = [skill_result, deep_dive_result];
@@ -2087,18 +2153,323 @@ pub async fn link(filters: Vec<String>, types: Vec<String>, json: bool) -> Resul
     Ok(())
 }
 
+/// Regenerate skill files from existing underlying research documents
+///
+/// This is called when the user provides the `--skill` flag. It validates that
+/// all underlying research documents exist, removes the skill/* directory contents
+/// (preserving the directory itself for symlinks), and regenerates SKILL.md.
+///
+/// ## Errors
+///
+/// Returns `ResearchError::SkillRegenerationFailed` if:
+/// - Any underlying research documents are missing
+/// - Research type is not `ResearchKind::Library`
+/// - LLM call to generate skill fails
+/// - File I/O operations fail
+async fn regenerate_skill_from_existing_research(
+    topic: &str,
+    output_dir: &Path,
+) -> Result<ResearchResult, ResearchError> {
+    let start_time = std::time::Instant::now();
+
+    // 1. Validate metadata exists
+    let mut metadata = ResearchMetadata::load(output_dir).await.ok_or_else(|| {
+        ResearchError::SkillRegenerationFailed(
+            "No metadata.json found. Run research without --skill first.".to_string(),
+        )
+    })?;
+
+    // 2. Validate research type
+    if metadata.kind != ResearchKind::Library {
+        return Err(ResearchError::SkillRegenerationFailed(format!(
+            "Cannot regenerate skill for non-library research (found: {:?})",
+            metadata.kind
+        )));
+    }
+
+    // 3. Validate all underlying research documents exist
+    let required_docs = vec![
+        "overview.md",
+        "similar_libraries.md",
+        "integration_partners.md",
+        "use_cases.md",
+        "changelog.md",
+    ];
+
+    let mut missing_docs = Vec::new();
+    for doc in &required_docs {
+        let path = output_dir.join(doc);
+        match tokio::fs::try_exists(&path).await {
+            Ok(exists) if !exists => missing_docs.push(doc.to_string()),
+            Err(_) => missing_docs.push(doc.to_string()),
+            _ => {}
+        }
+    }
+
+    // Check additional files from metadata
+    for file in metadata.additional_files.keys() {
+        let path = output_dir.join(file);
+        match tokio::fs::try_exists(&path).await {
+            Ok(exists) if !exists => missing_docs.push(file.clone()),
+            Err(_) => missing_docs.push(file.clone()),
+            _ => {}
+        }
+    }
+
+    if !missing_docs.is_empty() {
+        return Err(ResearchError::SkillRegenerationFailed(format!(
+            "Cannot regenerate skill: Missing underlying research documents: {}",
+            missing_docs.join(", ")
+        )));
+    }
+
+    // 4. Validate files have content (not just empty files)
+    for doc in &required_docs {
+        let path = output_dir.join(doc);
+        let file_metadata = tokio::fs::metadata(&path).await?;
+        if file_metadata.len() == 0 {
+            return Err(ResearchError::SkillRegenerationFailed(format!(
+                "Document {} exists but is empty",
+                doc
+            )));
+        }
+    }
+
+    for file in metadata.additional_files.keys() {
+        let path = output_dir.join(file);
+        let file_metadata = tokio::fs::metadata(&path).await?;
+        if file_metadata.len() == 0 {
+            return Err(ResearchError::SkillRegenerationFailed(format!(
+                "Document {} exists but is empty",
+                file
+            )));
+        }
+    }
+
+    // 5. Remove skill/* contents (but keep directory)
+    let skill_dir = output_dir.join("skill");
+    if matches!(tokio::fs::try_exists(&skill_dir).await, Ok(true)) {
+        // Remove all files in skill directory
+        let mut entries = fs::read_dir(&skill_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            if entry.file_type().await?.is_file() {
+                fs::remove_file(entry.path()).await?;
+            }
+        }
+    } else {
+        fs::create_dir(&skill_dir).await?;
+    }
+
+    println!("🔄 Regenerating skill files from existing research...");
+
+    // 6. Read all underlying research documents
+    let overview_content = fs::read_to_string(output_dir.join("overview.md")).await?;
+    let similar_libraries_content =
+        fs::read_to_string(output_dir.join("similar_libraries.md")).await?;
+    let integration_partners_content =
+        fs::read_to_string(output_dir.join("integration_partners.md")).await?;
+    let use_cases_content = fs::read_to_string(output_dir.join("use_cases.md")).await?;
+    let changelog_content = fs::read_to_string(output_dir.join("changelog.md")).await?;
+
+    // Read additional files if any
+    let mut additional_content = String::new();
+    for filename in metadata.additional_files.keys() {
+        let content = fs::read_to_string(output_dir.join(filename)).await?;
+        additional_content.push_str(&format!("\n\n## {}\n\n{}", filename, content));
+    }
+
+    // 7. Build combined context (same format as normal research workflow)
+    let combined_context = prompts::CONTEXT
+        .replace("{{topic}}", topic)
+        .replace("{{overview}}", &overview_content)
+        .replace("{{similar_libraries}}", &similar_libraries_content)
+        .replace("{{integration_partners}}", &integration_partners_content)
+        .replace("{{use_cases}}", &use_cases_content)
+        .replace("{{changelog}}", &changelog_content)
+        .replace("{{additional_content}}", &additional_content);
+
+    // 8. Get OpenAI client
+    let openai = openai::Client::from_env();
+    let cancelled = Arc::new(AtomicBool::new(false));
+
+    // 9. Call generate_skill_files to regenerate SKILL.md
+    let skill_metrics = generate_skill_files(
+        topic,
+        output_dir,
+        &combined_context,
+        &openai,
+        cancelled,
+        &mut metadata,
+    )
+    .await?;
+
+    // 10. Validate regenerated skill frontmatter
+    let skill_path = skill_dir.join("SKILL.md");
+    if let Ok(skill_content) = fs::read_to_string(&skill_path).await {
+        match parse_and_validate_frontmatter(&skill_content) {
+            Ok((frontmatter, _body)) => {
+                tracing::info!("✓ SKILL.md frontmatter is valid");
+                // Update metadata with when_to_use from frontmatter
+                metadata.when_to_use = Some(frontmatter.description.clone());
+                metadata.save(output_dir).await?;
+                tracing::info!("✓ Extracted when_to_use from frontmatter");
+            }
+            Err(e) => {
+                tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
+                return Err(ResearchError::SkillRegenerationFailed(format!(
+                    "Generated SKILL.md has invalid frontmatter: {}",
+                    e
+                )));
+            }
+        }
+    }
+
+    println!("✓ Skill files regenerated successfully");
+
+    // 11. Return ResearchResult with metrics
+    let (input_tokens, output_tokens, total_tokens) = if let Some(metrics) = skill_metrics {
+        (
+            metrics.input_tokens,
+            metrics.output_tokens,
+            metrics.total_tokens,
+        )
+    } else {
+        (0, 0, 0)
+    };
+
+    Ok(ResearchResult {
+        topic: topic.to_string(),
+        output_dir: output_dir.to_path_buf(),
+        succeeded: 1, // Only skill regenerated
+        failed: 0,
+        cancelled: false,
+        total_time_secs: start_time.elapsed().as_secs_f32(),
+        total_input_tokens: input_tokens,
+        total_output_tokens: output_tokens,
+        total_tokens,
+    })
+}
+
+/// Delete existing ResearchOutput documents (overview, similar_libraries, etc.)
+///
+/// This is called when the user provides the `--force` flag. It removes all
+/// standard research output documents but preserves:
+/// - metadata.json (will be updated after regeneration)
+///
+/// User-provided questions (question_*.md) from metadata.additional_files
+/// are also deleted and will be re-researched.
+///
+/// ## Errors
+///
+/// Returns `ResearchError::Io` if file deletion fails.
+async fn delete_research_output_documents(output_dir: &std::path::Path) -> Result<(), ResearchError> {
+    // Standard research documents to delete
+    let documents_to_delete = vec![
+        "overview.md",
+        "similar_libraries.md",
+        "integration_partners.md",
+        "use_cases.md",
+        "changelog.md",
+    ];
+
+    for doc in documents_to_delete {
+        let path = output_dir.join(doc);
+        if path.exists() {
+            fs::remove_file(&path).await?;
+            debug!("Deleted {}", doc);
+        }
+    }
+
+    // Also delete additional files (question_*.md) from metadata if it exists
+    if let Some(metadata) = ResearchMetadata::load(output_dir).await {
+        for file in metadata.additional_files.keys() {
+            let path = output_dir.join(file);
+            if path.exists() {
+                fs::remove_file(&path).await?;
+                debug!("Deleted {}", file);
+            }
+        }
+    }
+
+    // Delete final outputs (will be regenerated in Phase 2)
+    for (_, file) in EXPECTED_OUTPUTS {
+        let path = output_dir.join(file);
+        if path.exists() {
+            fs::remove_file(&path).await?;
+            debug!("Deleted {}", file);
+        }
+    }
+
+    Ok(())
+}
+
+/// Research a library topic and generate comprehensive documentation.
+///
+/// This function orchestrates the research workflow, including package detection,
+/// incremental research mode, and parallel LLM execution for document generation.
+///
+/// ## Arguments
+///
+/// * `topic` - The library/package name to research
+/// * `output_dir` - Optional output directory (defaults to `$RESEARCH_DIR/library/{topic}`)
+/// * `questions` - Additional research questions beyond standard prompts
+/// * `skill_regenerate` - If true, regenerate skill/* files from existing research
+/// * `force_recreation` - If true, force recreation of all ResearchOutput documents
+///
 /// ## Returns
 /// A `ResearchResult` containing metrics about the operation
 ///
 /// ## Errors
 /// Returns `ResearchError` if the output directory cannot be created
 /// or if all prompts fail.
+///
+/// ## Examples
+///
+/// Basic research (no flags):
+/// ```no_run
+/// use research_lib::research;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let result = research("clap", None, &[], false, false).await?;
+///     println!("Research complete: {} documents generated", result.succeeded);
+///     Ok(())
+/// }
+/// ```
+///
+/// Regenerate skill files from existing research:
+/// ```no_run
+/// use research_lib::research;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     // Requires all underlying research documents to exist
+///     let result = research("clap", None, &[], true, false).await?;
+///     println!("Skill regenerated successfully");
+///     Ok(())
+/// }
+/// ```
+///
+/// Force recreation of all research documents:
+/// ```no_run
+/// use research_lib::research;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     // Bypasses incremental mode, regenerates everything
+///     let result = research("clap", None, &[], false, true).await?;
+///     println!("All documents regenerated");
+///     Ok(())
+/// }
+/// ```
 #[instrument(
     name = "research",
-    skip(output_dir, questions),
+    skip(output_dir, questions, skill_regenerate, force_recreation),
     fields(
         topic = %topic,
         question_count = questions.len(),
+        skill_regenerate = skill_regenerate,
+        force_recreation = force_recreation,
         tools_enabled = tracing::field::Empty
     )
 )]
@@ -2106,11 +2477,20 @@ pub async fn research(
     topic: &str,
     output_dir: Option<PathBuf>,
     questions: &[String],
+    skill_regenerate: bool,
+    force_recreation: bool,
 ) -> Result<ResearchResult, ResearchError> {
     info!("Starting research session");
 
     // Load environment variables from .env file
     dotenvy::dotenv().ok();
+
+    // Validate flag combinations
+    if skill_regenerate && force_recreation {
+        return Err(ResearchError::InvalidFlagCombination(
+            "Cannot use --skill and --force together. Use --force alone to regenerate everything, or --skill to regenerate only skill files.".to_string()
+        ));
+    }
 
     // Use provided output_dir or default to research/{topic}
     let output_dir = output_dir.unwrap_or_else(|| default_output_dir(topic));
@@ -2118,8 +2498,21 @@ pub async fn research(
     // Create output directory
     fs::create_dir_all(&output_dir).await?;
 
-    // Check for existing metadata (incremental mode)
-    if let Some(existing_metadata) = ResearchMetadata::load(&output_dir).await {
+    // Handle --skill flag (regenerate skill from existing research)
+    if skill_regenerate {
+        return regenerate_skill_from_existing_research(topic, &output_dir).await;
+    }
+
+    // Handle --force flag (force recreation of all documents)
+    if force_recreation {
+        println!("🔄 Force recreation mode: Regenerating all research documents...");
+        delete_research_output_documents(&output_dir).await?;
+        // Continue to normal research workflow (will regenerate everything)
+        // Skip incremental mode check by not entering the if block below
+    }
+
+    // Check for existing metadata (incremental mode) - skip if force_recreation is true
+    if !force_recreation && let Some(existing_metadata) = ResearchMetadata::load(&output_dir).await {
         println!("Found existing research for '{}'", topic);
 
         // Check for missing standard prompts
@@ -2670,37 +3063,28 @@ pub async fn research(
         .replace("{{additional_content}}", &additional_content);
 
     // Build prompts for phase 2 from templates
-    let skill_prompt = prompts::SKILL
-        .replace("{{topic}}", topic)
-        .replace("{{context}}", &combined_context);
-
     let deep_dive_prompt = prompts::DEEP_DIVE
         .replace("{{topic}}", topic)
         .replace("{{context}}", &combined_context);
 
-    // Create skill subdirectory
-    let skill_dir = output_dir.join("skill");
-    fs::create_dir_all(&skill_dir).await?;
-
-    // Get fresh model instances for phase 2
-    let skill_gen = openai.completion_model("gpt-5.2");
+    // Get fresh model instance for deep_dive
     let deep_dive_gen = openai.completion_model("gpt-5.2");
 
     let phase2_counter = Arc::new(AtomicUsize::new(0));
     let phase2_start = Instant::now();
 
+    // Create a temporary metadata struct for skill generation to update
+    let mut temp_metadata = ResearchMetadata::new_library(library_info.as_ref());
+
     // Run phase 2 prompts in parallel
-    let (skill_result, deep_dive_result) = tokio::join!(
-        run_prompt_task(
-            "skill",
-            "SKILL.md",
-            skill_dir.clone(),
-            skill_gen,
-            skill_prompt,
-            phase2_counter.clone(),
-            2,
-            phase2_start,
+    let (skill_metrics_result, deep_dive_result) = tokio::join!(
+        generate_skill_files(
+            topic,
+            &output_dir,
+            &combined_context,
+            &openai,
             cancelled.clone(),
+            &mut temp_metadata,
         ),
         run_prompt_task(
             "deep_dive",
@@ -2715,58 +3099,8 @@ pub async fn research(
         ),
     );
 
-    // Parse skill output and split into multiple files if needed
-    // Also validate frontmatter and extract when_to_use for metadata
-    let mut when_to_use: Option<String> = None;
-
-    if skill_result.metrics.is_some()
-        && let Ok(skill_content) = fs::read_to_string(skill_dir.join("SKILL.md")).await
-    {
-        // Step 1: Split files BEFORE normalization
-        let files = if skill_content.contains("--- FILE:") {
-            split_into_files(&skill_content)
-        } else {
-            vec![("SKILL.md".to_string(), skill_content)]
-        };
-
-        // Step 2: Selectively normalize files (skip SKILL.md, normalize others)
-        for (filename, content) in files {
-            let final_content = if filename == "SKILL.md" {
-                // Don't normalize SKILL.md - preserve frontmatter exactly as LLM generated it
-                content
-            } else {
-                // Normalize supporting documentation files
-                normalize_markdown(&content)
-            };
-
-            let file_path = skill_dir.join(&filename);
-            if let Err(e) = fs::write(&file_path, final_content).await {
-                tracing::error!("Failed to write {}: {}", filename, e);
-            }
-        }
-
-        // Validate SKILL.md frontmatter and extract when_to_use
-        let skill_md_path = skill_dir.join("SKILL.md");
-        if let Ok(skill_content) = fs::read_to_string(&skill_md_path).await {
-            match parse_and_validate_frontmatter(&skill_content) {
-                Ok((frontmatter, _body)) => {
-                    tracing::info!("✓ SKILL.md frontmatter is valid");
-                    when_to_use = Some(frontmatter.description.clone());
-                    tracing::info!("✓ Extracted when_to_use from frontmatter");
-                }
-                Err(e) => {
-                    tracing::error!("✗ SKILL.md frontmatter validation failed: {}", e);
-                    tracing::error!("  File: {}", skill_md_path.display());
-                    tracing::error!("  Please manually fix the frontmatter in SKILL.md");
-
-                    eprintln!("\n⚠️  Warning: SKILL.md frontmatter is invalid");
-                    eprintln!("   {}", e);
-                    eprintln!("   File: {}", skill_md_path.display());
-                    eprintln!("   The skill may not activate correctly until this is fixed.\n");
-                }
-            }
-        }
-    }
+    // Extract when_to_use from temporary metadata
+    let when_to_use = temp_metadata.when_to_use;
 
     // Normalize deep_dive.md if it was generated
     if deep_dive_result.metrics.is_some() {
@@ -2830,6 +3164,11 @@ pub async fn research(
         }
     } else {
         (None, None)
+    };
+
+    // Convert skill_metrics_result to PromptTaskResult for metrics aggregation
+    let skill_result = PromptTaskResult {
+        metrics: skill_metrics_result.ok().flatten(),
     };
 
     let phase2_results = [skill_result, deep_dive_result];

@@ -10,8 +10,7 @@ The **research** CLI has a `library` command which generates comprehensive resea
 
 - `library-name` **(required)**: The name of the library to research
   - Can be a simple name like `axum` or `pulldown-cmark`
-  - Can include language/ecosystem context like `rust/tokio` or `typescript/vitest`
-  - The command will detect the programming language and ecosystem
+  - The command will detect the programming language and package manager ecosystem
 
 ### Switches
 
@@ -19,13 +18,48 @@ The **research** CLI has a `library` command which generates comprehensive resea
   - Defaults to `~/.claude/research/` for global research
   - Can specify a local path like `./research/` for project-specific research
 
-- `--skill`
-    - Adding this flag indicates the user believes the topic is already finished (with both underlying and final outputs rendered/produced)
-    - If the user is correct that the topic has all files produced (note: an invalid structure to the `SKILL.md` is fine and often the reason someone would use this command) then:
-        - we will removed the files in the topic's `skill/*` directory (but not remove the directory itself as that would break symbolic links that point to this directory)
-        - We then regenerate the skill files from the underlying research documents
-- `--force`
-    - This will force the recreation of all ResearchOutput documents even if the documents were already created.
+- `--skill`: Regenerate skill files from existing research
+    - Use this flag when you want to regenerate only the `skill/SKILL.md` file without re-running the full research process
+    - **Requirements:** All underlying research documents must already exist:
+        - `overview.md`
+        - `similar_libraries.md`
+        - `integration_partners.md`
+        - `use_cases.md`
+        - `changelog.md`
+        - Any additional question files (e.g., `question_1.md`)
+    - **Implementation:**
+        - Validates all required research documents exist
+        - Removes files in the `skill/*` directory (preserves directory to maintain symlinks)
+        - Regenerates `SKILL.md` using Phase 2a logic (LLM synthesis from existing research)
+    - **Error handling:** If any underlying research documents are missing, returns a clear error message listing which files are needed
+    - **Use cases:**
+        - Fix invalid SKILL.md frontmatter structure
+        - Improve skill file formatting
+        - Regenerate after manual edits to underlying research documents
+    - **Cannot be combined with `--force`** (mutually exclusive flags)
+
+- `--force`: Force recreation of all research output documents
+    - Use this flag when you want to completely regenerate all research documents from scratch
+    - **Implementation:**
+        - Bypasses incremental mode (ignores existing `metadata.json`)
+        - Deletes all ResearchOutput documents:
+            - `overview.md`
+            - `similar_libraries.md`
+            - `integration_partners.md`
+            - `use_cases.md`
+            - `changelog.md`
+            - Any additional question files from previous research
+        - Deletes final outputs:
+            - `skill/SKILL.md` (and supporting files)
+            - `deep_dive.md`
+            - `brief.md`
+        - Preserves `metadata.json` (will be updated after regeneration)
+        - Runs full research workflow (Phase 1 + Phase 2)
+    - **Use cases:**
+        - Library has had major version update
+        - Previous research was incomplete or incorrect
+        - Want fresh perspective on the library
+    - **Cannot be combined with `--skill`** (mutually exclusive flags)
 
 ## Output
 
@@ -182,13 +216,32 @@ Generate research in a project-specific directory:
 research library serde --output ./docs/research
 ```
 
-### Force Regeneration
+### Regenerate Skill Files Only
 
-Completely regenerate all artifacts:
+If your research is complete but the SKILL.md file has issues (e.g., invalid frontmatter), regenerate just the skill files:
+
+```bash
+research library axum --skill
+```
+
+This is much faster than full regeneration as it only runs the LLM skill synthesis step using existing research documents.
+
+**Error example:**
+```bash
+$ research library incomplete-lib --skill
+Error: Cannot regenerate skill: Missing underlying research documents: overview.md, changelog.md
+Run research without --skill first to generate these files.
+```
+
+### Force Complete Regeneration
+
+Completely regenerate all research documents from scratch:
 
 ```bash
 research library tokio --force
 ```
+
+This bypasses incremental mode and re-generates all documents (overview, similar libraries, changelog, skill files, deep dive, and brief).
 
 ### Verbose Output
 
@@ -222,6 +275,14 @@ The skill will then be automatically activated by Claude Code when working on pr
 - The `when_to_use` field in metadata.json is automatically populated from the SKILL.md frontmatter description
 - All generated markdown files are normalized for consistent formatting (except SKILL.md frontmatter which is preserved exactly)
 - Multi-file skills are supported via `--- FILE: filename.md ---` separators in LLM output
+
+### Flag Combinations
+
+- **`--skill` and `--force` are mutually exclusive:** You cannot use both flags together
+    - If both are provided, the command returns an error: `"Cannot use --skill and --force together. Use --force alone to regenerate everything, or --skill to regenerate only skill files."`
+    - **Rationale:** These flags have opposite goals - `--skill` is for fast regeneration of just skill files, while `--force` regenerates everything. Using both together is semantically unclear.
+- **`--skill` with additional questions:** Questions parameter is ignored when `--skill` is used (only skill files are regenerated from existing research)
+- **`--force` with additional questions:** New questions are added and researched along with standard prompts
 
 ## Error Handling
 

@@ -38,6 +38,20 @@ enum Commands {
         /// Output directory for research files [default: research/<TOPIC>]
         #[arg(short, long, value_name = "DIR")]
         output: Option<PathBuf>,
+
+        /// Regenerate skill files from existing research
+        ///
+        /// Requires all underlying research documents (overview, similar_libraries, etc.)
+        /// to exist. Removes skill/* contents and regenerates SKILL.md.
+        #[arg(long)]
+        skill: bool,
+
+        /// Force recreation of all research output documents
+        ///
+        /// Bypasses incremental mode and regenerates all ResearchOutput documents
+        /// (overview, similar_libraries, etc.) even if they already exist.
+        #[arg(long)]
+        force: bool,
     },
 
     /// List all research topics
@@ -142,6 +156,8 @@ async fn main() {
             topic,
             questions,
             output,
+            skill,
+            force,
         } => {
             // Read topic from stdin if "-" is provided
             let topic = if topic == "-" {
@@ -160,7 +176,7 @@ async fn main() {
                 topic
             };
 
-            match research(&topic, output, &questions).await {
+            match research(&topic, output, &questions, skill, force).await {
                 Ok(result) => {
                     println!("\n{}", "=".repeat(60));
                     if result.cancelled {

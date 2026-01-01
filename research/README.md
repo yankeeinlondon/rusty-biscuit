@@ -58,7 +58,33 @@ research library clap
 
 # With additional questions
 research library clap "How does it compare to structopt?" "What are the derive macros?"
+
+# With custom filenames (new in 2025-12-30 refactoring)
+research library clap "comparison -> How does it compare to structopt?"
+research library clap "derive-macros -> What are the derive macros?"
 ```
+
+**Custom Prompt Naming Syntax (New):**
+
+By default, additional prompts are saved as `question_1.md`, `question_2.md`, etc. You can now specify custom filenames using the arrow syntax:
+
+```bash
+# Syntax: "filename -> prompt text"
+research library rig "agent-architecture -> How do agents work in rig?"
+# Generates: agent-architecture.md with the prompt "How do agents work in rig?"
+
+# Multiple custom prompts
+research library tokio \
+  "runtime -> How does the runtime work?" \
+  "channels -> What channel types are available?"
+# Generates: runtime.md and channels.md
+```
+
+**Rules:**
+- Filename must come before the arrow (`->`)
+- Filename will be sanitized (lowercase, hyphens for spaces, `.md` appended)
+- Prompts without `->` still use `question_N.md` naming
+- Can mix custom and default naming in the same command
 
 ## Library Research Output
 

@@ -6,7 +6,7 @@ use research_lib::research;
 async fn main() {
     let topic = "rig-core";
 
-    match research(topic, None, &[]).await {
+    match research(topic, None, &[], false, false).await {
         Ok(result) => {
             println!("\n{}", "=".repeat(60));
             println!(
