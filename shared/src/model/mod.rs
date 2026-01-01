@@ -6,13 +6,16 @@
 //! # Examples
 //!
 //! ```rust
-//! use shared::model::{get_model, ModelKind, ModelQuality};
+//! use shared::model::{get_model, ModelKind, ModelQuality, ModelError};
 //!
+//! # fn main() -> Result<(), ModelError> {
 //! // Select a fast model for scraping
 //! let client = get_model(
 //!     ModelKind::Quality(ModelQuality::Fast),
 //!     Some("scrape web content")
 //! )?;
+//! # Ok(())
+//! # }
 //! ```
 
 pub mod selection;

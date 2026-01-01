@@ -52,13 +52,16 @@ pub enum ModelError {
 /// # Examples
 ///
 /// ```rust,no_run
-/// use shared::model::{get_model, ModelKind, ModelQuality};
+/// use shared::model::{get_model, ModelKind, ModelQuality, ModelError};
 ///
+/// # fn main() -> Result<(), ModelError> {
 /// // Select a fast model for scraping
 /// let client = get_model(
 ///     ModelKind::Quality(ModelQuality::Fast),
 ///     Some("scrape web content")
 /// )?;
+/// # Ok(())
+/// # }
 /// ```
 pub fn get_model(kind: ModelKind, desc: Option<&str>) -> Result<LlmClient, ModelError> {
     let stack = match kind {

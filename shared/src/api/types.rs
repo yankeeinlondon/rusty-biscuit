@@ -52,7 +52,7 @@ pub enum ApiAuth {
 /// ```
 #[derive(Debug, Clone)]
 pub struct ApiEndpoint {
-    /// Base URL for the API (e.g., "https://api.openai.com")
+    /// Base URL for the API (e.g., `https://api.openai.com`)
     pub base_url: String,
     /// Path for the specific endpoint (e.g., "/v1/models")
     pub path: String,
