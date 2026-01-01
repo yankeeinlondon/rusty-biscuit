@@ -29,6 +29,7 @@
         "syntect",
         "TASKLISTS",
         "terminfo",
+        "textwrap",
         "usvg",
         "wezterm",
         "Zenburn",
