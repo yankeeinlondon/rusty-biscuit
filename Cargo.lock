@@ -1789,6 +1789,8 @@ dependencies = [
  "predicates",
  "serde_json",
  "shared",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

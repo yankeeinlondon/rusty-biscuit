@@ -7,6 +7,7 @@ use shared::markdown::output::{for_terminal, HtmlOptions, TerminalOptions};
 use shared::markdown::Markdown;
 use std::io::{self, Read};
 use std::path::PathBuf;
+use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser)]
 #[command(name = "mat", about = "Markdown Awesome Tool", version)]
@@ -60,6 +61,10 @@ struct Cli {
     /// Include line numbers in code blocks
     #[arg(long)]
     line_numbers: bool,
+
+    /// Increase verbosity (-v INFO, -vv DEBUG, -vvv TRACE, -vvvv TRACE with file/line)
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
+    verbose: u8,
 }
 
 /// Parses a theme name string into ThemePair.
@@ -67,9 +72,53 @@ fn parse_theme_name(s: &str) -> Result<ThemePair, String> {
     ThemePair::try_from(s).map_err(|e| e.to_string())
 }
 
+/// Initialize tracing subscriber based on verbosity level.
+///
+/// Verbosity levels:
+/// - 0 (default): WARN only (errors and warnings)
+/// - 1 (-v): INFO (tool calls, phase transitions)
+/// - 2 (-vv): DEBUG (tool arguments, API requests)
+/// - 3 (-vvv): TRACE (request/response bodies)
+/// - 4+ (-vvvv): TRACE with file/line numbers
+fn init_tracing(verbose: u8) {
+    // Only initialize if verbose mode is enabled
+    if verbose == 0 {
+        return;
+    }
+
+    let base_filter = match std::env::var("RUST_LOG") {
+        Ok(filter) => filter,
+        Err(_) => match verbose {
+            // -v: Show INFO for progress and tool calls
+            1 => "info,mat=info,shared=info".to_string(),
+            // -vv: Show DEBUG for tool arguments and requests
+            2 => "info,mat=debug,shared=debug".to_string(),
+            // -vvv+: Show TRACE for detailed debugging
+            _ => "debug,mat=trace,shared=trace".to_string(),
+        },
+    };
+
+    let filter = EnvFilter::try_new(&base_filter).unwrap_or_else(|_| EnvFilter::new("warn"));
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(
+            fmt::layer()
+                .with_target(true)
+                .with_level(true)
+                .with_thread_ids(false)
+                .with_file(verbose >= 4)
+                .with_line_number(verbose >= 4)
+                .with_writer(std::io::stderr)
+                .compact(),
+        )
+        .init();
+}
+
 fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
+    init_tracing(cli.verbose);
 
     // Handle --list-themes first (no input needed)
     if cli.list_themes {
