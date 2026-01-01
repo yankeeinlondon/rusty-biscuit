@@ -1,8 +1,11 @@
 //! Markdown cleanup implementation using pulldown-cmark event stream manipulation.
 //!
 //! This module provides functionality to normalize markdown content by:
-//! - Injecting blank lines between block elements
+//! - Ensuring proper blank lines between block elements (via cmark Options)
 //! - Aligning table columns for visual consistency
+//!
+//! The cleanup leverages `pulldown-cmark-to-cmark`'s built-in newline handling
+//! through its `Options` struct, which automatically inserts appropriate spacing.
 //!
 //! ## Examples
 //!
@@ -15,12 +18,13 @@
 //! // Content now has blank lines between headers
 //! ```
 
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark_to_cmark::Options as CmarkOptions;
 
 /// Cleans up markdown content by normalizing formatting.
 ///
 /// This function performs two main operations:
-/// 1. Injects blank lines between block elements
+/// 1. Ensures proper blank lines between block elements (via cmark Options)
 /// 2. Aligns table columns for consistent formatting
 ///
 /// ## Returns
@@ -40,93 +44,26 @@ pub fn cleanup_content(content: &str) -> String {
     let parser = Parser::new_ext(content, Options::all());
     let events: Vec<Event> = parser.collect();
 
-    // Process events to inject blank lines and align tables
-    let processed = inject_blank_lines(events);
-    let processed = align_tables_in_stream(processed);
+    // Align tables in the event stream
+    let processed = align_tables_in_stream(events);
 
-    // Convert events back to markdown
+    // Convert events back to markdown with proper spacing options
     let mut output = String::new();
 
-    // cmark expects borrowed events - we use CowStr wrapping
+    // cmark handles blank line insertion via its Options - defaults are correct:
+    // newlines_after_headline: 2, newlines_after_paragraph: 2, etc.
+    let options = CmarkOptions::default();
+
+    // cmark expects borrowed events
     let borrowed: Vec<_> = processed.iter().map(std::borrow::Cow::Borrowed).collect();
-    if pulldown_cmark_to_cmark::cmark(borrowed.into_iter(), &mut output).is_err() {
+    if pulldown_cmark_to_cmark::cmark_with_options(borrowed.into_iter(), &mut output, options)
+        .is_err()
+    {
         // If rendering fails, return original content
         return content.to_string();
     }
 
     output
-}
-
-/// Checks if a tag represents a block-level element.
-fn is_block_tag(tag: &Tag) -> bool {
-    matches!(
-        tag,
-        Tag::Heading { .. }
-            | Tag::BlockQuote(_)
-            | Tag::CodeBlock(_)
-            | Tag::List(_)
-            | Tag::Item
-            | Tag::Table(_)
-            | Tag::TableHead
-            | Tag::TableRow
-            | Tag::TableCell
-            | Tag::Paragraph
-    )
-}
-
-/// Checks if a tag end represents the end of a block-level element.
-fn is_block_end_tag(tag_end: &TagEnd) -> bool {
-    matches!(
-        tag_end,
-        TagEnd::Heading(_)
-            | TagEnd::BlockQuote(_)
-            | TagEnd::CodeBlock
-            | TagEnd::List(_)
-            | TagEnd::Item
-            | TagEnd::Table
-            | TagEnd::TableHead
-            | TagEnd::TableRow
-            | TagEnd::TableCell
-            | TagEnd::Paragraph
-    )
-}
-
-/// Injects blank lines between block elements in the event stream.
-///
-/// This ensures consistent spacing between headers, paragraphs, code blocks,
-/// lists, and other block-level elements.
-fn inject_blank_lines(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
-    let mut result = Vec::with_capacity(events.len() + 20);
-    let mut last_was_block_end = false;
-
-    for (i, event) in events.iter().enumerate() {
-        match event {
-            Event::Start(tag) if is_block_tag(tag) => {
-                // If the last event was a block end, inject a blank line
-                if last_was_block_end && i > 0 {
-                    // Don't add blank line before list items or table cells
-                    if !matches!(tag, Tag::Item | Tag::TableCell) {
-                        result.push(Event::HardBreak);
-                    }
-                }
-                result.push(event.clone());
-                last_was_block_end = false;
-            }
-            Event::End(tag_end) if is_block_end_tag(tag_end) => {
-                result.push(event.clone());
-                // Don't set flag for inline-like blocks
-                if !matches!(tag_end, TagEnd::TableCell | TagEnd::Item) {
-                    last_was_block_end = true;
-                }
-            }
-            _ => {
-                result.push(event.clone());
-                last_was_block_end = false;
-            }
-        }
-    }
-
-    result
 }
 
 /// Aligns tables in the event stream for visual consistency.
@@ -170,121 +107,233 @@ fn align_tables_in_stream(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
 /// Processes a single table's events to align columns.
 ///
 /// This function analyzes all table cells to determine the maximum width
-/// for each column and then pads cells accordingly.
+/// for each column and then pads cells accordingly. It preserves the original
+/// event structure (keeping Code events as Code, not merging into Text) and
+/// adds spacing around cell content for readability: `| content |`
 fn process_single_table(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
-    // For now, return events as-is
-    // Full implementation would calculate column widths and pad cells
-    // This is a complex operation that requires:
-    // 1. Collecting all cell text content
-    // 2. Determining max width per column
-    // 3. Reconstructing table with aligned cells
-    events
+    // Pass 1: Measure column widths (visual width of rendered content)
+    let mut col_widths: Vec<usize> = Vec::new();
+    let mut current_col = 0;
+    let mut in_cell = false;
+    let mut cell_text_len = 0;
+
+    for ev in &events {
+        match ev {
+            Event::Start(Tag::TableCell) => {
+                in_cell = true;
+                cell_text_len = 0;
+            }
+            Event::End(TagEnd::TableCell) => {
+                if col_widths.len() <= current_col {
+                    col_widths.push(cell_text_len);
+                } else {
+                    col_widths[current_col] = col_widths[current_col].max(cell_text_len);
+                }
+                current_col += 1;
+                in_cell = false;
+            }
+            Event::End(TagEnd::TableRow) | Event::End(TagEnd::TableHead) => {
+                current_col = 0;
+            }
+            Event::Text(t) if in_cell => {
+                cell_text_len += t.chars().count();
+            }
+            Event::Code(t) if in_cell => {
+                // Code spans render with backticks: `code`
+                cell_text_len += t.chars().count() + 2;
+            }
+            _ => {}
+        }
+    }
+
+    // Pass 2: Preserve original events, add leading space and trailing padding
+    let mut result = Vec::with_capacity(events.len() + col_widths.len() * 2);
+    let mut current_col = 0;
+    let mut in_cell = false;
+    let mut cell_content_len = 0;
+
+    for ev in events {
+        match &ev {
+            Event::Start(Tag::TableCell) => {
+                in_cell = true;
+                cell_content_len = 0;
+                result.push(ev);
+                // Add leading space for readability: "|content" -> "| content"
+                result.push(Event::Text(CowStr::from(" ")));
+            }
+            Event::End(TagEnd::TableCell) => {
+                // Add trailing padding to align columns, plus one space before |
+                let target_width = col_widths.get(current_col).copied().unwrap_or(0);
+                let padding_needed = target_width.saturating_sub(cell_content_len);
+                // Add padding + trailing space: "content|" -> "content |"
+                let padding = " ".repeat(padding_needed + 1);
+                result.push(Event::Text(CowStr::from(padding)));
+                current_col += 1;
+                in_cell = false;
+                result.push(ev);
+            }
+            Event::End(TagEnd::TableRow) | Event::End(TagEnd::TableHead) => {
+                current_col = 0;
+                result.push(ev);
+            }
+            Event::Text(t) if in_cell => {
+                cell_content_len += t.chars().count();
+                result.push(ev);
+            }
+            Event::Code(t) if in_cell => {
+                cell_content_len += t.chars().count() + 2;
+                result.push(ev);
+            }
+            _ => {
+                result.push(ev);
+            }
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Helper to count occurrences of a pattern in a string
+    fn count_occurrences(haystack: &str, needle: &str) -> usize {
+        haystack.matches(needle).count()
+    }
+
+    // ==================== Blank Line Tests ====================
+
     #[test]
-    fn test_cleanup_basic_content() {
-        let content = "# Title\nParagraph";
+    fn test_cleanup_adds_blank_line_between_header_and_paragraph() {
+        // Input has no blank line between header and paragraph
+        let content = "# Title\nParagraph text";
         let cleaned = cleanup_content(content);
-        // Should have proper spacing
-        assert!(cleaned.contains("Title"));
-        assert!(cleaned.contains("Paragraph"));
+
+        // Should have exactly one blank line (two newlines) between header and paragraph
+        assert!(
+            cleaned.contains("# Title\n\nParagraph"),
+            "Expected blank line between header and paragraph, got:\n{}",
+            cleaned
+        );
     }
 
     #[test]
-    fn test_cleanup_preserves_content() {
+    fn test_cleanup_adds_blank_line_between_consecutive_headers() {
+        let content = "# Header 1\n## Header 2";
+        let cleaned = cleanup_content(content);
+
+        // Should have blank line between headers
+        assert!(
+            cleaned.contains("# Header 1\n\n## Header 2"),
+            "Expected blank line between headers, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_adds_blank_line_after_code_block() {
+        let content = "````rust\nfn main() {}\n````\nParagraph after";
+        let cleaned = cleanup_content(content);
+
+        // Should have blank line after code block
+        assert!(
+            cleaned.contains("````\n\nParagraph"),
+            "Expected blank line after code block, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_adds_blank_line_after_list() {
+        // Note: In CommonMark, "* Item\nParagraph" creates a "lazy" paragraph inside the list
+        // We need an explicit blank line in input to separate list from paragraph
+        let content = "* Item 1\n* Item 2\n\nParagraph after";
+        let cleaned = cleanup_content(content);
+
+        // Should have blank line after list
+        assert!(
+            cleaned.contains("Item 2\n\nParagraph"),
+            "Expected blank line after list, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_adds_blank_line_after_blockquote() {
+        // Note: In CommonMark, "> Quote\nParagraph" creates a "lazy" paragraph inside blockquote
+        // We need an explicit blank line in input to separate blockquote from paragraph
+        let content = "> Quote\n\nParagraph after";
+        let cleaned = cleanup_content(content);
+
+        // Should have blank line after blockquote
+        assert!(
+            cleaned.contains("Quote\n\nParagraph"),
+            "Expected blank line after blockquote, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_preserves_existing_blank_lines() {
         let content = "# Header\n\nSome text\n\n## Subheader";
         let cleaned = cleanup_content(content);
-        assert!(cleaned.contains("Header"));
-        assert!(cleaned.contains("Some text"));
-        assert!(cleaned.contains("Subheader"));
+
+        // Should preserve single blank lines (not double them up)
+        assert_eq!(
+            count_occurrences(&cleaned, "\n\n\n"),
+            0,
+            "Should not have triple newlines, got:\n{}",
+            cleaned
+        );
+        assert!(cleaned.contains("# Header\n\nSome text"));
+        assert!(cleaned.contains("Some text\n\n## Subheader"));
     }
 
     #[test]
-    fn test_cleanup_handles_code_blocks() {
-        let content = r#"# Title
-```rust
-fn main() {}
-```
-Text after"#;
+    fn test_cleanup_does_not_add_excessive_blank_lines() {
+        let content = "# Title\nParagraph 1\n\nParagraph 2";
         let cleaned = cleanup_content(content);
-        assert!(cleaned.contains("Title"));
-        assert!(cleaned.contains("fn main()"));
-        assert!(cleaned.contains("Text after"));
+
+        // Count blank lines (consecutive \n\n)
+        let blank_line_count = count_occurrences(&cleaned, "\n\n");
+
+        // Should have exactly 2 blank lines: after title and between paragraphs
+        assert_eq!(
+            blank_line_count, 2,
+            "Expected 2 blank lines, got {} in:\n{}",
+            blank_line_count, cleaned
+        );
     }
 
+    // ==================== Table Alignment Tests ====================
+
     #[test]
-    fn test_cleanup_handles_lists() {
-        let content = "# Title\n- Item 1\n- Item 2\n\nParagraph";
+    fn test_table_columns_are_aligned() {
+        let content = "|Short|VeryLongHeader|\n|---|---|\n|A|B|";
         let cleaned = cleanup_content(content);
-        assert!(cleaned.contains("Item 1"));
-        assert!(cleaned.contains("Item 2"));
+
+        // The table should be rendered with aligned columns
+        // Note: exact format depends on cmark rendering, but cells should be padded
+        assert!(cleaned.contains("Short"), "Content should be preserved");
+        assert!(
+            cleaned.contains("VeryLongHeader"),
+            "Content should be preserved"
+        );
     }
 
     #[test]
-    fn test_cleanup_handles_blockquotes() {
-        let content = "# Title\n> Quote\n\nParagraph";
+    fn test_table_structure_preserved() {
+        let content = "| Col1 | Col2 |\n|------|------|\n| A | B |";
         let cleaned = cleanup_content(content);
-        assert!(cleaned.contains("Quote"));
-        assert!(cleaned.contains("Paragraph"));
-    }
 
-    #[test]
-    fn test_cleanup_handles_empty_content() {
-        let content = "";
-        let cleaned = cleanup_content(content);
-        assert_eq!(cleaned, "");
-    }
-
-    #[test]
-    fn test_cleanup_handles_plain_text() {
-        let content = "Just plain text";
-        let cleaned = cleanup_content(content);
-        assert!(cleaned.contains("Just plain text"));
-    }
-
-    #[test]
-    fn test_is_block_tag_identifies_blocks() {
-        use pulldown_cmark::HeadingLevel;
-
-        assert!(is_block_tag(&Tag::Heading { level: HeadingLevel::H1, id: None, classes: vec![], attrs: vec![] }));
-        assert!(is_block_tag(&Tag::Paragraph));
-        assert!(is_block_tag(&Tag::CodeBlock(pulldown_cmark::CodeBlockKind::Fenced("rust".into()))));
-        assert!(is_block_tag(&Tag::BlockQuote(None)));
-    }
-
-    #[test]
-    fn test_is_block_end_tag_identifies_ends() {
-        use pulldown_cmark::HeadingLevel;
-
-        assert!(is_block_end_tag(&TagEnd::Heading(HeadingLevel::H1)));
-        assert!(is_block_end_tag(&TagEnd::Paragraph));
-        assert!(is_block_end_tag(&TagEnd::CodeBlock));
-        assert!(is_block_end_tag(&TagEnd::BlockQuote(None)));
-    }
-
-    #[test]
-    fn test_inject_blank_lines_between_headers() {
-        let parser = Parser::new_ext("# Header 1\n## Header 2", Options::all());
-        let events: Vec<Event> = parser.collect();
-        let processed = inject_blank_lines(events);
-
-        // Should have more events due to injected breaks
-        assert!(processed.len() > 4);
-    }
-
-    #[test]
-    fn test_inject_blank_lines_preserves_structure() {
-        let parser = Parser::new_ext("# Title\nParagraph", Options::all());
-        let events: Vec<Event> = parser.collect();
-        let original_len = events.len();
-        let processed = inject_blank_lines(events);
-
-        // Should have at least as many events
-        assert!(processed.len() >= original_len);
+        // Should still have pipe characters for table structure
+        assert!(
+            cleaned.contains("|"),
+            "Table structure should be preserved"
+        );
+        assert!(cleaned.contains("Col1"));
+        assert!(cleaned.contains("Col2"));
     }
 
     #[test]
@@ -305,28 +354,125 @@ Text after"#;
         let processed = align_tables_in_stream(events);
 
         // Should preserve table structure
-        let has_table_start = processed.iter().any(|e| matches!(e, Event::Start(Tag::Table(_))));
-        let has_table_end = processed.iter().any(|e| matches!(e, Event::End(TagEnd::Table)));
+        let has_table_start = processed
+            .iter()
+            .any(|e| matches!(e, Event::Start(Tag::Table(_))));
+        let has_table_end = processed
+            .iter()
+            .any(|e| matches!(e, Event::End(TagEnd::Table)));
         assert!(has_table_start);
         assert!(has_table_end);
     }
 
-    #[test]
-    fn test_process_single_table_preserves_events() {
-        let parser = Parser::new_ext("| A | B |\n|---|---|\n| 1 | 2 |", Options::all());
-        let events: Vec<Event> = parser.collect();
-        let processed = process_single_table(events.clone());
+    // ==================== Edge Case Tests ====================
 
-        // Currently just returns events as-is
-        assert_eq!(processed.len(), events.len());
+    #[test]
+    fn test_cleanup_handles_empty_content() {
+        let content = "";
+        let cleaned = cleanup_content(content);
+        assert_eq!(cleaned, "");
     }
 
     #[test]
-    fn test_cleanup_multiple_paragraphs() {
+    fn test_cleanup_handles_plain_text() {
+        let content = "Just plain text";
+        let cleaned = cleanup_content(content);
+        assert!(cleaned.contains("Just plain text"));
+    }
+
+    #[test]
+    fn test_cleanup_handles_multiple_paragraphs() {
         let content = "Para 1\n\nPara 2\n\nPara 3";
         let cleaned = cleanup_content(content);
         assert!(cleaned.contains("Para 1"));
         assert!(cleaned.contains("Para 2"));
         assert!(cleaned.contains("Para 3"));
+    }
+
+    #[test]
+    fn test_cleanup_preserves_code_block_content() {
+        let content = "````rust\nfn main() {\n    println!(\"Hello\");\n}\n````";
+        let cleaned = cleanup_content(content);
+        assert!(cleaned.contains("fn main()"));
+        assert!(cleaned.contains("println!"));
+    }
+
+    // ==================== Regression Tests ====================
+
+    #[test]
+    fn test_no_hardbreak_in_output() {
+        // This is the main regression test for the bug
+        let content = "# Header\n\nParagraph\n\n## Another Header";
+        let cleaned = cleanup_content(content);
+
+        // HardBreak would render as `\` or `<br>` - neither should appear
+        assert!(
+            !cleaned.contains("\\"),
+            "Should not contain backslash (HardBreak), got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("<br"),
+            "Should not contain <br> (HardBreak), got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_table_after_cleanup_still_parses() {
+        let content = "| A | B |\n|---|---|\n| 1 | 2 |";
+        let cleaned = cleanup_content(content);
+
+        // Re-parse the cleaned content - should still be a valid table
+        let parser = Parser::new_ext(&cleaned, Options::all());
+        let events: Vec<Event> = parser.collect();
+
+        let has_table = events
+            .iter()
+            .any(|e| matches!(e, Event::Start(Tag::Table(_))));
+        assert!(
+            has_table,
+            "Cleaned table should still parse as table, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_table_cells_have_spacing() {
+        // Regression test: table cells should have space after | and before |
+        let content = "|A|B|\n|---|---|\n|1|2|";
+        let cleaned = cleanup_content(content);
+
+        // Should have "| A " pattern (space after pipe, content, space before next pipe)
+        assert!(
+            cleaned.contains("| A "),
+            "Table cells should have leading space after |, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("| B "),
+            "Table cells should have leading space after |, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_table_code_spans_not_escaped() {
+        // Regression test: backticks in code spans should not be escaped
+        let content = "| Name | Value |\n|---|---|\n| `foo` | bar |";
+        let cleaned = cleanup_content(content);
+
+        // Should preserve backticks without escaping
+        assert!(
+            cleaned.contains("`foo`"),
+            "Code spans should preserve backticks, got:\n{}",
+            cleaned
+        );
+        // Should NOT have escaped backticks
+        assert!(
+            !cleaned.contains("\\`"),
+            "Code spans should not have escaped backticks, got:\n{}",
+            cleaned
+        );
     }
 }

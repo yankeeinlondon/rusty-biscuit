@@ -23,7 +23,7 @@ This struct should implement a `cleanup` method which will cleanup the markdown 
 - this process must ensure the output Markdown is valid CommonMark markdown (allowing for GFM)
 - in addition we do want to ensure that a header, code block, or list is always isolated by blank lines, you need to manually inspect the Event stream and inject a "spacing" logic (see example 1).
 - Although not a requirement for CommonMark Markdown, we want to ensure that Markdown tables have blank spaces padded into the cell to align the columns of the tables; making them much more readable by humans.
-- The final example show how _both_ requirements could be met.
+
 
 [Markdown Cleanup Examples](./md/markdown-cleanup.md)
 
