@@ -4,10 +4,11 @@
 //! and grammar loading utilities for syntax highlighting using syntect.
 
 mod grammars;
-mod scope_cache;
-mod themes;
+pub mod prose;
+pub(crate) mod scope_cache;
+pub(crate) mod themes;
 
-pub use themes::{ColorMode, ThemePair};
+pub use themes::{ColorMode, ThemePair, InvalidThemeName, get_code_theme_for_prose, detect_prose_theme, detect_code_theme, detect_color_mode};
 
 use syntect::highlighting::Theme as SyntectTheme;
 use syntect::parsing::SyntaxSet;
