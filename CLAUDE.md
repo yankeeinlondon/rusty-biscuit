@@ -302,12 +302,12 @@ The research system auto-detects package managers:
      - ### Fallback Behavior
 - Recommended section order
   1. Brief summary paragraph (no heading)
-  2. ## Examples
-  3. ## Returns (functions)
-  4. ## Errors (if applicable)
-  5. ## Panics (if applicable)
-  6. ## Safety (for unsafe APIs)
-  7. ## Notes or ## Implementation Notes
+  2. `## Examples`
+  3. `## Returns` (functions)
+  4. `## Errors` (if applicable)
+  5. `## Panics` (if applicable)
+  6. `## Safety` (for unsafe APIs)
+  7. `## Notes` or `## Implementation Notes`
 
 ### Testing
 
