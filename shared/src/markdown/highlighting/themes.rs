@@ -211,12 +211,16 @@ pub(crate) enum Theme {
 
 impl Theme {
     /// Returns the embedded theme name for two-face loading.
+    ///
+    /// Note: two-face's `EmbeddedThemeName::Github` and `InspiredGithub` are both
+    /// light themes. For GithubDark we use ColdarkDark as a suitable dark alternative.
     fn to_embedded_name(self) -> EmbeddedThemeName {
         match self {
             Theme::Base16OceanDark => EmbeddedThemeName::Base16OceanDark,
             Theme::Base16OceanLight => EmbeddedThemeName::Base16OceanLight,
-            Theme::GithubDark => EmbeddedThemeName::Github,
-            Theme::GithubLight => EmbeddedThemeName::InspiredGithub,
+            // Note: two-face's Github themes are both light. ColdarkDark is a good dark substitute.
+            Theme::GithubDark => EmbeddedThemeName::ColdarkDark,
+            Theme::GithubLight => EmbeddedThemeName::Github,
             Theme::GruvboxDark => EmbeddedThemeName::GruvboxDark,
             Theme::GruvboxLight => EmbeddedThemeName::GruvboxLight,
             Theme::OneHalfDark => EmbeddedThemeName::OneHalfDark,
@@ -472,12 +476,28 @@ mod tests {
     fn test_load_theme_github_dark() {
         let theme = load_theme(ThemePair::Github, ColorMode::Dark);
         assert!(theme.settings.background.is_some());
+
+        // Dark themes should have dark backgrounds (r,g,b all < 100 typically)
+        let bg = theme.settings.background.unwrap();
+        assert!(bg.r < 100 && bg.g < 100 && bg.b < 100,
+            "Expected dark background, got RGB({},{},{})", bg.r, bg.g, bg.b);
     }
 
     #[test]
     fn test_load_theme_solarized_light() {
         let theme = load_theme(ThemePair::Solarized, ColorMode::Light);
         assert!(theme.settings.background.is_some());
+    }
+
+    #[test]
+    fn test_github_light_has_light_background() {
+        let theme = load_theme(ThemePair::Github, ColorMode::Light);
+        assert!(theme.settings.background.is_some());
+
+        // Light themes should have light backgrounds (r,g,b all > 200 typically)
+        let bg = theme.settings.background.unwrap();
+        assert!(bg.r > 200 && bg.g > 200 && bg.b > 200,
+            "Expected light background, got RGB({},{},{})", bg.r, bg.g, bg.b);
     }
 
     #[test]

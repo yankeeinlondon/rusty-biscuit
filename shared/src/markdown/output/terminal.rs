@@ -172,6 +172,9 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
     let mut code_language = String::new();
     let mut code_info_string = String::new();
 
+    // List tracking
+    let mut list_stack: Vec<Option<u64>> = Vec::new(); // None = unordered, Some(start) = ordered
+
     for event in parser {
         match event {
             Event::Start(Tag::CodeBlock(kind)) => {
@@ -223,6 +226,14 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
                 }
+                // Add blank line before heading (unless at start of output)
+                if !output.is_empty() && !output.ends_with("\n\n") {
+                    if output.ends_with('\n') {
+                        output.push('\n');
+                    } else {
+                        output.push_str("\n\n");
+                    }
+                }
                 let marker = match level {
                     pulldown_cmark::HeadingLevel::H1 => "# ",
                     pulldown_cmark::HeadingLevel::H2 => "## ",
@@ -236,7 +247,7 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
             }
             Event::End(TagEnd::Heading(_)) => {
                 scope_stack.pop();
-                output.push('\n');
+                output.push_str("\n\n"); // Blank line after heading
             }
 
             Event::Start(ref tag @ Tag::Strong) => {
@@ -266,9 +277,50 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
                 scope_stack.pop();
             }
 
-            Event::Start(Tag::Paragraph) => {}
+            // List handling
+            Event::Start(Tag::List(start_num)) => {
+                list_stack.push(start_num);
+            }
+            Event::End(TagEnd::List(_)) => {
+                list_stack.pop();
+                // Add blank line after top-level list ends
+                if list_stack.is_empty() {
+                    output.push('\n');
+                }
+            }
+            Event::Start(Tag::Item) => {
+                // Calculate indentation based on nesting level
+                let indent = "  ".repeat(list_stack.len().saturating_sub(1));
+
+                // Get the marker for this item
+                if let Some(list_type) = list_stack.last_mut() {
+                    match list_type {
+                        Some(num) => {
+                            // Ordered list: emit number and increment
+                            let style = prose_highlighter.base_style();
+                            output.push_str(&emit_prose_text(&format!("{}{}. ", indent, num), style));
+                            *num += 1;
+                        }
+                        None => {
+                            // Unordered list: emit bullet
+                            let style = prose_highlighter.base_style();
+                            output.push_str(&emit_prose_text(&format!("{}- ", indent), style));
+                        }
+                    }
+                }
+            }
+            Event::End(TagEnd::Item) => {
+                output.push('\n');
+            }
+
+            Event::Start(Tag::Paragraph) => {
+                // Don't add extra spacing inside list items
+            }
             Event::End(TagEnd::Paragraph) => {
-                output.push_str("\n\n");
+                // Only add double newline for paragraphs outside of lists
+                if list_stack.is_empty() {
+                    output.push_str("\n\n");
+                }
             }
 
             Event::Text(text) if !in_code_block => {
@@ -285,11 +337,10 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
             }
 
             Event::Code(code) => {
-                // Inline code with styling
+                // Inline code with styling (no backticks in terminal output)
                 let style = prose_highlighter.style_for_inline_code(&scope_stack);
-                output.push('`');
-                output.push_str(&emit_prose_text(&code, style));
-                output.push('`');
+                // Use background color from the style if available
+                output.push_str(&emit_inline_code(&code, style));
             }
 
             Event::SoftBreak => {
@@ -312,6 +363,29 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
 fn emit_prose_text(text: &str, style: Style) -> String {
     let fg = style.foreground;
     format!("\x1b[38;2;{};{};{}m{}\x1b[0m", fg.r, fg.g, fg.b, text)
+}
+
+/// Emits inline code with both foreground and background colors.
+///
+/// Uses the style's background color if available, otherwise uses a subtle gray.
+fn emit_inline_code(text: &str, style: Style) -> String {
+    let fg = style.foreground;
+    let bg = style.background;
+
+    // Check if background is meaningful (not transparent/zero alpha)
+    if bg.a > 0 && (bg.r > 0 || bg.g > 0 || bg.b > 0) {
+        // Use provided background
+        format!(
+            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
+            bg.r, bg.g, bg.b, fg.r, fg.g, fg.b, text
+        )
+    } else {
+        // Use a subtle dark gray background for contrast
+        format!(
+            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
+            50, 50, 55, fg.r, fg.g, fg.b, text
+        )
+    }
 }
 
 /// Emits code text with both foreground and background colors.
@@ -517,7 +591,9 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("`cargo build`"));
+        // Inline code should NOT have backticks in terminal output
+        assert!(plain.contains("cargo build"));
+        assert!(!plain.contains("`cargo build`"), "Backticks should be removed in terminal output");
     }
 
     #[test]
@@ -707,12 +783,14 @@ fn main() {}
         // Should contain ANSI codes
         assert!(output.contains("\x1b[38;2;"));
 
-        // Should NOT have background for inline code (prose style)
+        // Inline code SHOULD have background color for contrast
         let bg_count = output.matches("\x1b[48;2;").count();
-        assert_eq!(bg_count, 0, "Inline code should not have background colors in prose");
+        assert!(bg_count > 0, "Inline code should have background color for contrast");
 
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("`cargo build`"));
+        // No backticks in terminal output
+        assert!(plain.contains("cargo build"));
+        assert!(!plain.contains("`"), "Backticks should be removed in terminal output");
     }
 
     #[test]
@@ -725,5 +803,95 @@ fn main() {}
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("# Heading with bold text"));
+    }
+
+    #[test]
+    fn test_for_terminal_heading_has_blank_line_after() {
+        let md: Markdown = "# Heading\n\nParagraph text.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        // Heading should be followed by blank line before paragraph
+        assert!(plain.contains("# Heading\n\nParagraph text."));
+    }
+
+    #[test]
+    fn test_for_terminal_heading_has_blank_line_before() {
+        let md: Markdown = "Some text.\n\n## Heading".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        // Should have blank line between paragraph and heading
+        assert!(plain.contains("Some text.\n\n## Heading"));
+    }
+
+    #[test]
+    fn test_for_terminal_heading_after_list_has_blank_line() {
+        let md: Markdown = "- Item one\n- Item two\n\n### Heading".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        // Should have blank line between list and heading
+        assert!(plain.contains("- Item two\n\n### Heading"));
+    }
+
+    #[test]
+    fn test_for_terminal_first_heading_no_leading_blank() {
+        let md: Markdown = "# First Heading".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        // First heading should not have leading blank lines
+        assert!(plain.starts_with("# First Heading"));
+    }
+
+    #[test]
+    fn test_for_terminal_unordered_list() {
+        let md: Markdown = "- First item\n- Second item\n- Third item".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        // Each item should be on its own line with bullet marker
+        assert!(plain.contains("- First item\n"));
+        assert!(plain.contains("- Second item\n"));
+        assert!(plain.contains("- Third item\n"));
+    }
+
+    #[test]
+    fn test_for_terminal_ordered_list() {
+        let md: Markdown = "1. First item\n2. Second item\n3. Third item".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        // Each item should be on its own line with number marker
+        assert!(plain.contains("1. First item\n"));
+        assert!(plain.contains("2. Second item\n"));
+        assert!(plain.contains("3. Third item\n"));
+    }
+
+    #[test]
+    fn test_for_terminal_nested_list() {
+        let md: Markdown = "- Parent item\n  - Child item\n  - Another child\n- Second parent".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        // In pulldown-cmark, nested lists are inside the parent item, so
+        // the parent item's bullet and text appear first, then nested items
+        // The parent doesn't get a newline until after its nested content
+        assert!(plain.contains("- Parent item"));
+        assert!(plain.contains("  - Child item\n"));
+        assert!(plain.contains("  - Another child\n"));
+        assert!(plain.contains("- Second parent\n"));
+    }
+
+    #[test]
+    fn test_for_terminal_list_with_inline_code() {
+        let md: Markdown = "- Use `cargo build`\n- Run `cargo test`".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        // List items should be separate lines
+        assert!(plain.contains("- Use cargo build\n"));
+        assert!(plain.contains("- Run cargo test\n"));
     }
 }
