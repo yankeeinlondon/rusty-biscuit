@@ -351,10 +351,18 @@ pub fn get_code_theme_for_prose(prose_theme: ThemePair) -> ThemePair {
 /// let theme = detect_prose_theme();
 /// ```
 pub fn detect_prose_theme() -> ThemePair {
-    std::env::var("THEME")
+    let theme = std::env::var("THEME")
         .ok()
         .map(|s| ThemePair::from_str_or_default(&s))
-        .unwrap_or(ThemePair::OneHalf)
+        .unwrap_or(ThemePair::OneHalf);
+
+    tracing::info!(
+        prose_theme = %theme.kebab_name(),
+        env_var = std::env::var("THEME").ok().as_deref(),
+        "Detected prose theme"
+    );
+
+    theme
 }
 
 /// Detects the code theme from environment variables or derives it from prose theme.
@@ -370,10 +378,21 @@ pub fn detect_prose_theme() -> ThemePair {
 /// let code_theme = detect_code_theme(ThemePair::OneHalf);
 /// ```
 pub fn detect_code_theme(prose_theme: ThemePair) -> ThemePair {
-    std::env::var("CODE_THEME")
-        .ok()
-        .map(|s| ThemePair::from_str_or_default(&s))
-        .unwrap_or_else(|| get_code_theme_for_prose(prose_theme))
+    let env_theme = std::env::var("CODE_THEME").ok();
+    let theme = env_theme
+        .as_ref()
+        .map(|s| ThemePair::from_str_or_default(s))
+        .unwrap_or_else(|| get_code_theme_for_prose(prose_theme));
+
+    tracing::info!(
+        code_theme = %theme.kebab_name(),
+        prose_theme = %prose_theme.kebab_name(),
+        env_var = env_theme.as_deref(),
+        derived = env_theme.is_none(),
+        "Detected code theme"
+    );
+
+    theme
 }
 
 /// Detects the color mode from environment variables.
@@ -392,6 +411,11 @@ pub fn detect_code_theme(prose_theme: ThemePair) -> ThemePair {
 pub fn detect_color_mode() -> ColorMode {
     // Check NO_COLOR first (respect user preference per no-color.org)
     if std::env::var("NO_COLOR").is_ok() {
+        tracing::info!(
+            color_mode = "dark",
+            source = "NO_COLOR",
+            "Detected color mode from NO_COLOR env var"
+        );
         return ColorMode::Dark;
     }
 
@@ -400,10 +424,23 @@ pub fn detect_color_mode() -> ColorMode {
         && let Some(bg) = colorfgbg.split(';').next_back()
         && let Ok(bg_num) = bg.parse::<u8>()
     {
-        return if bg_num < 7 { ColorMode::Dark } else { ColorMode::Light };
+        let mode = if bg_num < 7 { ColorMode::Dark } else { ColorMode::Light };
+        tracing::info!(
+            color_mode = %if mode == ColorMode::Dark { "dark" } else { "light" },
+            source = "COLORFGBG",
+            colorfgbg = %colorfgbg,
+            bg_value = bg_num,
+            "Detected color mode from COLORFGBG env var"
+        );
+        return mode;
     }
 
     // Default to dark mode (more common in terminal environments)
+    tracing::info!(
+        color_mode = "dark",
+        source = "default",
+        "Using default dark color mode (no env vars set)"
+    );
     ColorMode::Dark
 }
 

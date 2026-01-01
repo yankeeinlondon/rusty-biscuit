@@ -73,3 +73,4 @@ criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1.4"
 serial_test = "3.0"
 insta = "1.41"
+pulldown-cmark = "0.12"

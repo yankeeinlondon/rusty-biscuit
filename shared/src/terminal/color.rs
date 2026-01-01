@@ -39,6 +39,12 @@ pub fn color_depth() -> u32 {
     if let Ok(colorterm) = env::var("COLORTERM") {
         let colorterm_lower = colorterm.to_lowercase();
         if colorterm_lower == "truecolor" || colorterm_lower == "24bit" {
+            tracing::info!(
+                color_depth = 16_777_216,
+                source = "COLORTERM",
+                colorterm = %colorterm,
+                "Detected truecolor support from COLORTERM env var"
+            );
             return 16_777_216; // 2^24 colors
         }
     }
@@ -47,12 +53,26 @@ pub fn color_depth() -> u32 {
     match TermInfo::from_env() {
         Ok(term_info) => {
             // Query the MaxColors capability
-            term_info
+            let depth = term_info
                 .number_cap(NumberCapability::MaxColors)
                 .map(|n| n as u32)
-                .unwrap_or(0)
+                .unwrap_or(0);
+            tracing::info!(
+                color_depth = depth,
+                source = "terminfo",
+                "Detected color depth from terminfo"
+            );
+            depth
         }
-        Err(_) => 0,
+        Err(e) => {
+            tracing::info!(
+                color_depth = 0,
+                source = "fallback",
+                error = %e,
+                "Failed to query terminfo, defaulting to no color"
+            );
+            0
+        }
     }
 }
 
