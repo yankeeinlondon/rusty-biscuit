@@ -45,11 +45,13 @@ This planning workflow prioritizes **concurrency and orchestration**:
    - Web scraping: `reqwest`, `pulldown-cmark`
 
 3. **Create skills array:**
+
    ```typescript
    const skills = ["skill-1", "skill-2", "skill-3"]
    ```
 
 4. **Communicate via STDOUT:**
+
    ```
    📦 Skills Configuration for Planning Phase
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -69,6 +71,7 @@ This planning workflow prioritizes **concurrency and orchestration**:
 5. **Activate all skills NOW** (before proceeding)
 
 6. **Validation checkpoint:**
+
    ```
    ✅ Skills Activated: [skill-1], [skill-2], [skill-3]
    Ready to proceed to concurrency analysis.
@@ -99,6 +102,7 @@ This planning workflow prioritizes **concurrency and orchestration**:
    - Can implementation phases run concurrently? (independent modules)
 
 3. **Create initial concurrency map:**
+
    ```markdown
    ## Concurrency Analysis
 
@@ -112,6 +116,7 @@ This planning workflow prioritizes **concurrency and orchestration**:
    ```
 
 4. **Output concurrency strategy:**
+
    ```
    🔀 Concurrency Strategy
    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -436,6 +441,7 @@ For each phase and requirement, assign a principal owner based on:
 **🚨 ORCHESTRATION CHECKPOINT: This is where you prove you're orchestrating, not implementing 🚨**
 
 **MANDATORY REQUIREMENTS:**
+
 1. **All review agents MUST be launched in a SINGLE message**
 2. **All Task calls MUST use `run_in_background: true`**
 3. **You MUST use multiple Task tool calls in ONE message**
@@ -446,6 +452,7 @@ For each phase and requirement, assign a principal owner based on:
 ### 3.1 Identify Reviewers
 
 Based on principal owners assigned in Step 2, determine which sub-agents need to review:
+
 - Rust Developer: If any phases assigned to them
 - Feature Tester (Rust): If any testing phases assigned
 
@@ -458,6 +465,7 @@ For each sub-agent with assigned ownership, create a review task:
 **Rust Developer Review:**
 
 Before launching, output:
+
 ```
 🔍 Launching Rust Developer Review
 Skills to activate: [list of skills]
@@ -572,6 +580,7 @@ Return your review as:
 **Feature Tester Review (Rust):**
 
 Before launching, output:
+
 ```
 🔍 Launching Feature Tester (Rust) Review
 Skills to activate: [list of skills]
@@ -719,6 +728,7 @@ Task({ /* Feature Tester */ })
 ```
 
 **Before launching, output:**
+
 ```
 🚀 Launching Parallel Reviews
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -861,9 +871,9 @@ Present the final plan to the user with:
 After presenting the report to the console, you should speak to the user: "The plan in {{REPO_NAME}} called {{PLAN NAME}} has completed." using TTS.
 
 - TTS
-  - if the command `so-you-say` is available in the executable path then use this for TTS: `so-you-say "{{MESSAGE}}"`
-  - if a command `say` is available on the host system (as it will be on macOS) then use that: `say "{{MESSAGE}}"`
-  - if the host system has an executable called "speak" or "speak-ng" the use it for TTS: `speak "{{MESSAGE}}"` 
+    - if the command `so-you-say` is available in the executable path then use this for TTS: `so-you-say "{{MESSAGE}}"`
+    - if a command `say` is available on the host system (as it will be on macOS) then use that: `say "{{MESSAGE}}"`
+    - if the host system has an executable called "speak" or "speak-ng" the use it for TTS: `speak "{{MESSAGE}}"` 
 - `{{PLAN_NAME}}` should be the plan's file name without the leading date information and excluding the file extension.
 - `{{REPO_NAME}}` should be derived the 
 
@@ -984,6 +994,7 @@ The `/execute-plan` command uses orchestrator agents to coordinate implementatio
 **Why This Matters:**
 
 Orchestrators will verify implementation by:
+
 - Running `ls` on expected files
 - Running `grep` on Cargo.toml for dependencies
 - Running `cargo test` or `just test` within the blast radius

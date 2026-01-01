@@ -18,8 +18,8 @@ struct Markdown {
 This struct should implement a `cleanup` method which will cleanup the markdown content.
 
 - this cleanup will be achieved by using `pulldown-cmark-to-cmark` crate alongside the `pulldown-cmark` crate.
-  - `pulldown-cmark` acts as the Producer / Parser
-  - `pulldown-cmark-to-cmark` acts as the Consumer / Renderer
+    - `pulldown-cmark` acts as the Producer / Parser
+    - `pulldown-cmark-to-cmark` acts as the Consumer / Renderer
 - this process must ensure the output Markdown is valid CommonMark markdown (allowing for GFM)
 - in addition we do want to ensure that a header, code block, or list is always isolated by blank lines, you need to manually inspect the Event stream and inject a "spacing" logic (see example 1).
 - Although not a requirement for CommonMark Markdown, we want to ensure that Markdown tables have blank spaces padded into the cell to align the columns of the tables; making them much more readable by humans.
