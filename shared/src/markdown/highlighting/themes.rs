@@ -56,7 +56,7 @@ pub enum ThemePair {
 }
 
 impl ThemePair {
-    /// Resolves the theme pair to a specific theme variant based on color mode.
+    /// Resolves the theme pair to a specific theme variant based on color mode (light/dark).
     ///
     /// This is an internal method for resolving to the Theme enum.
     pub(crate) fn resolve(self, mode: ColorMode) -> Theme {

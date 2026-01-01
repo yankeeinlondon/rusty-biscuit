@@ -12,8 +12,8 @@ The Research area provides automated research capabilities for software librarie
 
 - **Research Library** (`/research/lib`) - Core library providing AI integration via the `rig` crate
 - **Research CLI** (`/research/cli`) - Command-line interface exposing research capabilities
-  - Binary name: `research`
-  - Usage: `research library <topic> [additional questions...]`
+    - Binary name: `research`
+    - Usage: `research library <topic> [additional questions...]`
 
 For detailed documentation, see [`/research/README.md`](./research/README.md).
 
@@ -22,23 +22,20 @@ For detailed documentation, see [`/research/README.md`](./research/README.md).
 
 A CLI which leverages the shared library's TTS functionality to provide a cross-platform way to announce progress leveraging the underlying host's resources.
 
-- **Binary name:** `speak`
-- **Usage:** Convert text to speech using system TTS
-
 **Examples:**
 
 ```bash
 # Speak text from command-line arguments
-speak Hello world
+so-you-say Hello world
 
 # Speak text from stdin (pipe support)
-echo "Hello world" | speak
+echo "Hello world" | so-you-say
 
 # Speak text from a file
-cat announcement.txt | speak
+cat announcement.txt | so-you-say
 
 # Multi-word with punctuation
-speak "Good morning, team!"
+so-you-say "Good morning, team!"
 ```
 
 **Installation:**
@@ -48,7 +45,7 @@ speak "Good morning, team!"
 cargo install --path so-you-say
 
 # Binary will be available at ~/.cargo/bin/speak
-speak "Installation successful"
+so-you-say "Installation successful"
 ```
 
 ### Shared Library (`/shared`)
