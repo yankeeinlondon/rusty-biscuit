@@ -281,25 +281,25 @@ The research system auto-detects package managers:
 ### Rust Documentation Best Practices
 
 - Avoid explicit # Heading (H1) inside /// unless intentionally titling the item
-  - Rustdoc already supplies the item name as a top-level title.
-  - Adding an H1 duplicates visual hierarchy and is usually redundant.
+    - Rustdoc already supplies the item name as a top-level title.
+    - Adding an H1 duplicates visual hierarchy and is usually redundant.
 - Use ## Heading (H2) for primary sections
-  - Example Sections:
-    - ## Returns
-    - ## Errors
-    - ## Panics
-    - ## Safety
-    - ## Examples
-    - ## Notes
+    - Example Sections:
+        - `## Returns`
+        - `## Errors`
+        - `## Panics`
+        - `## Safety`
+        - `## Examples`
+        - `## Notes`
 - This aligns with:
-  - Rust Standard Library documentation
-  - rustc and clippy codebases
-  - IDE hover and symbol views
+    - Rust Standard Library documentation
+    - rustc and clippy codebases
+    - IDE hover and symbol views
 - Use ### Heading (H3) only for subsections
-   - Example:
-     - ## Environment Variables
-     - ### Priority Order
-     - ### Fallback Behavior
+    - Example:
+        - `## Environment Variables`
+        - `### Priority Order`
+        - `### Fallback Behavior`
 - Recommended section order
   1. Brief summary paragraph (no heading)
   2. `## Examples`
