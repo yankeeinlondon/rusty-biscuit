@@ -83,6 +83,65 @@ impl ColorDepth {
     }
 }
 
+/// Controls how italic text is rendered to the terminal.
+///
+/// Different terminals have varying levels of support for italic text rendering.
+/// This enum allows explicit control over italic behavior.
+///
+/// ## Examples
+///
+/// ```
+/// use shared::markdown::output::terminal::{TerminalOptions, ItalicMode};
+///
+/// // Auto-detect (safe default)
+/// let mut options = TerminalOptions::default();
+/// assert!(matches!(options.italic_mode, ItalicMode::Auto));
+///
+/// // Force italics for pre-rendering to unknown terminals
+/// options.italic_mode = ItalicMode::Always;
+///
+/// // Disable italics for terminals known not to support them
+/// options.italic_mode = ItalicMode::Never;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ItalicMode {
+    /// Auto-detect italic support using terminal capabilities.
+    ///
+    /// Uses [`supports_italics()`](crate::terminal::supports_italics) to query
+    /// the terminal. This is the safest option for direct terminal output.
+    #[default]
+    Auto,
+
+    /// Always emit italic escape codes (`\x1b[3m`).
+    ///
+    /// Use this when pre-rendering content for a future terminal where
+    /// capabilities cannot be detected. Assumes italic support is available.
+    Always,
+
+    /// Never emit italic escape codes.
+    ///
+    /// Use this when rendering for terminals known not to support italics,
+    /// or when italic styling is not desired.
+    Never,
+}
+
+impl ItalicMode {
+    /// Resolves the mode to a boolean indicating whether to emit italic codes.
+    ///
+    /// ## Returns
+    ///
+    /// - `Auto`: Result of `supports_italics()` terminal capability check
+    /// - `Always`: `true`
+    /// - `Never`: `false`
+    fn should_emit_italic(&self) -> bool {
+        match self {
+            ItalicMode::Auto => crate::terminal::supports_italics(),
+            ItalicMode::Always => true,
+            ItalicMode::Never => false,
+        }
+    }
+}
+
 /// Maximum image file size (10MB).
 const MAX_IMAGE_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
@@ -324,6 +383,19 @@ impl ImageRenderer {
 /// options.base_path = Some(PathBuf::from("/docs"));
 /// ```
 ///
+/// ## Italic Mode
+///
+/// ```
+/// use shared::markdown::output::terminal::{TerminalOptions, ItalicMode};
+///
+/// let mut options = TerminalOptions::default();
+/// // Auto-detect (default) - uses terminal capability detection
+/// assert!(matches!(options.italic_mode, ItalicMode::Auto));
+///
+/// // Force italics for pre-rendering to unknown terminals
+/// options.italic_mode = ItalicMode::Always;
+/// ```
+///
 /// **Note:** Due to `#[non_exhaustive]`, use `let mut opts = TerminalOptions::default();`
 /// and then set fields individually rather than struct update syntax.
 #[derive(Debug, Clone)]
@@ -345,6 +417,12 @@ pub struct TerminalOptions {
     /// Base path for resolving relative image paths.
     /// If `None`, uses current working directory.
     pub base_path: Option<PathBuf>,
+    /// Controls how italic text is rendered.
+    ///
+    /// - `Auto` (default): Detect terminal capability via `supports_italics()`
+    /// - `Always`: Always emit italic escape codes (for pre-rendering)
+    /// - `Never`: Never emit italic escape codes
+    pub italic_mode: ItalicMode,
 }
 
 impl Default for TerminalOptions {
@@ -363,6 +441,7 @@ impl Default for TerminalOptions {
             color_depth: None,
             render_images: true,
             base_path: None,
+            italic_mode: ItalicMode::default(),
         }
     }
 }
@@ -442,6 +521,9 @@ pub fn write_terminal<W: std::io::Write>(
         return Ok(());
     }
 
+    // Resolve italic mode once at start (avoids repeated capability detection)
+    let emit_italic = options.italic_mode.should_emit_italic();
+
     // Query terminal width once at start
     const DEFAULT_TERMINAL_WIDTH: u16 = 80;
     let terminal_width = terminal_size()
@@ -490,6 +572,11 @@ pub fn write_terminal<W: std::io::Write>(
     } else {
         None
     };
+
+    // Track semantic font styles for proper rendering
+    // Some themes don't set font_style for markup scopes, so we track this explicitly
+    let mut in_emphasis = false;
+    let mut in_strong = false;
 
     for event in parser {
         match event {
@@ -567,12 +654,12 @@ pub fn write_terminal<W: std::io::Write>(
                     pulldown_cmark::HeadingLevel::H1 => "█ ",
                     pulldown_cmark::HeadingLevel::H2 => "██ ",
                     pulldown_cmark::HeadingLevel::H3 => "████ ",
-                    pulldown_cmark::HeadingLevel::H4 => "▅▅▅▅▅▅ ",
-                    pulldown_cmark::HeadingLevel::H5 => "##### ",
-                    pulldown_cmark::HeadingLevel::H6 => "###### ",
+                    pulldown_cmark::HeadingLevel::H4 => "███████ ",
+                    pulldown_cmark::HeadingLevel::H5 => "███████████ ",
+                    pulldown_cmark::HeadingLevel::H6 => "███████████████ ",
                 };
                 let style = prose_highlighter.style_for_tag(tag, &scope_stack);
-                output.push_str(&emit_prose_text(marker, style));
+                output.push_str(&emit_prose_text(marker, style, emit_italic));
             }
             Event::End(TagEnd::Heading(_)) => {
                 scope_stack.pop();
@@ -580,20 +667,24 @@ pub fn write_terminal<W: std::io::Write>(
             }
 
             Event::Start(ref tag @ Tag::Strong) => {
+                in_strong = true;
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
                 }
             }
             Event::End(TagEnd::Strong) => {
+                in_strong = false;
                 scope_stack.pop();
             }
 
             Event::Start(ref tag @ Tag::Emphasis) => {
+                in_emphasis = true;
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
                 }
             }
             Event::End(TagEnd::Emphasis) => {
+                in_emphasis = false;
                 scope_stack.pop();
             }
 
@@ -631,13 +722,13 @@ pub fn write_terminal<W: std::io::Write>(
                         Some(num) => {
                             // Ordered list: emit number and increment
                             let style = prose_highlighter.base_style();
-                            output.push_str(&emit_prose_text(&format!("{}{}. ", indent, num), style));
+                            output.push_str(&emit_prose_text(&format!("{}{}. ", indent, num), style, emit_italic));
                             *num += 1;
                         }
                         None => {
                             // Unordered list: emit bullet
                             let style = prose_highlighter.base_style();
-                            output.push_str(&emit_prose_text(&format!("{}- ", indent), style));
+                            output.push_str(&emit_prose_text(&format!("{}- ", indent), style, emit_italic));
                         }
                     }
                 }
@@ -669,15 +760,34 @@ pub fn write_terminal<W: std::io::Write>(
                     current_cell.push_str(&text);
                 } else {
                     // Apply current prose styling based on scope stack
-                    let style = if scope_stack.len() > 1 {
-                        // We have nested scopes, compute style from stack
-                        // Use a neutral tag reference for computing the style
+                    // For emphasis/strong: use parent color, only change font style
+                    use syntect::highlighting::FontStyle;
+
+                    let mut style = if in_emphasis || in_strong {
+                        // Compute style from parent scopes (exclude emphasis/strong scopes)
+                        // to preserve the parent's color
+                        let parent_depth = scope_stack.len()
+                            - (in_emphasis as usize)
+                            - (in_strong as usize);
+                        let parent_scopes = &scope_stack[..parent_depth.max(1)];
+                        let tag = Tag::Paragraph;
+                        prose_highlighter.style_for_tag(&tag, parent_scopes)
+                    } else if scope_stack.len() > 1 {
                         let tag = Tag::Paragraph;
                         prose_highlighter.style_for_tag(&tag, &scope_stack)
                     } else {
                         prose_highlighter.base_style()
                     };
-                    output.push_str(&emit_prose_text(&text, style));
+
+                    // Apply semantic font styles - italic/bold only change style, not color
+                    if in_emphasis {
+                        style.font_style |= FontStyle::ITALIC;
+                    }
+                    if in_strong {
+                        style.font_style |= FontStyle::BOLD;
+                    }
+
+                    output.push_str(&emit_prose_text(&text, style, emit_italic));
                 }
             }
 
@@ -791,10 +901,33 @@ pub fn write_terminal<W: std::io::Write>(
     Ok(())
 }
 
-/// Emits prose text with foreground color only (no background).
-fn emit_prose_text(text: &str, style: Style) -> String {
+/// Emits prose text with foreground color and font style (bold, italic, underline).
+///
+/// ## Arguments
+///
+/// * `text` - The text content to emit
+/// * `style` - The syntect style including foreground color and font styles
+/// * `emit_italic` - Whether to emit italic escape codes when font_style contains ITALIC
+fn emit_prose_text(text: &str, style: Style, emit_italic: bool) -> String {
+    use syntect::highlighting::FontStyle;
+
     let fg = style.foreground;
-    format!("\x1b[38;2;{};{};{}m{}\x1b[0m", fg.r, fg.g, fg.b, text)
+    let mut result = String::new();
+
+    // Apply font styles (bold=1, italic=3, underline=4)
+    if style.font_style.contains(FontStyle::BOLD) {
+        result.push_str("\x1b[1m");
+    }
+    if emit_italic && style.font_style.contains(FontStyle::ITALIC) {
+        result.push_str("\x1b[3m");
+    }
+    if style.font_style.contains(FontStyle::UNDERLINE) {
+        result.push_str("\x1b[4m");
+    }
+
+    // Apply foreground color and text
+    result.push_str(&format!("\x1b[38;2;{};{};{}m{}\x1b[0m", fg.r, fg.g, fg.b, text));
+    result
 }
 
 /// Emits inline code with both foreground and background colors.
@@ -1415,8 +1548,9 @@ mod tests {
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         // Strip ANSI codes and check content
+        // H1 uses block marker: █
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("# Hello World"));
+        assert!(plain.contains("█ Hello World"));
     }
 
     #[test]
@@ -2093,7 +2227,7 @@ fn main() {}
             font_style: FontStyle::empty(),
         };
 
-        let result = emit_prose_text("Hello", style);
+        let result = emit_prose_text("Hello", style, true);
 
         // Should have foreground
         assert!(result.contains("\x1b[38;2;255;128;64m"));
@@ -2101,6 +2235,141 @@ fn main() {}
         assert!(!result.contains("\x1b[48;2;"));
         // Should end with reset
         assert!(result.contains("\x1b[0m"));
+    }
+
+    /// Regression test: italic text should include ANSI italic escape code (\x1b[3m).
+    ///
+    /// Previously, emit_prose_text only emitted foreground color, ignoring font_style.
+    /// This caused italic markdown (*text*) to render without italic styling in terminals.
+    #[test]
+    fn test_emit_prose_text_italic() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
+            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            font_style: FontStyle::ITALIC,
+        };
+
+        // With emit_italic=true, should emit italic code
+        let result = emit_prose_text("italic text", style, true);
+
+        // Should have italic escape code
+        assert!(
+            result.contains("\x1b[3m"),
+            "Italic text should include \\x1b[3m escape code, got: {:?}",
+            result
+        );
+        // Should have foreground color
+        assert!(result.contains("\x1b[38;2;255;128;64m"));
+        // Should end with reset
+        assert!(result.contains("\x1b[0m"));
+    }
+
+    /// Regression test: italic escape codes should be suppressed when emit_italic=false.
+    ///
+    /// This tests the ItalicMode::Never behavior where italics are disabled.
+    #[test]
+    fn test_emit_prose_text_italic_suppressed() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
+            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            font_style: FontStyle::ITALIC,
+        };
+
+        // With emit_italic=false, should NOT emit italic code
+        let result = emit_prose_text("italic text", style, false);
+
+        // Should NOT have italic escape code
+        assert!(
+            !result.contains("\x1b[3m"),
+            "Italic text with emit_italic=false should NOT include \\x1b[3m, got: {:?}",
+            result
+        );
+        // Should still have foreground color
+        assert!(result.contains("\x1b[38;2;255;128;64m"));
+    }
+
+    /// Regression test: bold text should include ANSI bold escape code (\x1b[1m).
+    #[test]
+    fn test_emit_prose_text_bold() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
+            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            font_style: FontStyle::BOLD,
+        };
+
+        let result = emit_prose_text("bold text", style, true);
+
+        // Should have bold escape code
+        assert!(
+            result.contains("\x1b[1m"),
+            "Bold text should include \\x1b[1m escape code, got: {:?}",
+            result
+        );
+        // Should have foreground color
+        assert!(result.contains("\x1b[38;2;255;128;64m"));
+    }
+
+    /// Regression test: underline text should include ANSI underline escape code (\x1b[4m).
+    #[test]
+    fn test_emit_prose_text_underline() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
+            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            font_style: FontStyle::UNDERLINE,
+        };
+
+        let result = emit_prose_text("underline text", style, true);
+
+        // Should have underline escape code
+        assert!(
+            result.contains("\x1b[4m"),
+            "Underline text should include \\x1b[4m escape code, got: {:?}",
+            result
+        );
+    }
+
+    /// Regression test: combined styles (bold + italic) should include both escape codes.
+    #[test]
+    fn test_emit_prose_text_bold_italic() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
+            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            font_style: FontStyle::BOLD | FontStyle::ITALIC,
+        };
+
+        let result = emit_prose_text("bold italic", style, true);
+
+        // Should have both escape codes
+        assert!(result.contains("\x1b[1m"), "Should have bold");
+        assert!(result.contains("\x1b[3m"), "Should have italic");
+    }
+
+    /// Regression test: bold+italic with emit_italic=false should only emit bold.
+    #[test]
+    fn test_emit_prose_text_bold_italic_no_italic() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
+            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            font_style: FontStyle::BOLD | FontStyle::ITALIC,
+        };
+
+        let result = emit_prose_text("bold italic", style, false);
+
+        // Should have bold but NOT italic
+        assert!(result.contains("\x1b[1m"), "Should have bold");
+        assert!(!result.contains("\x1b[3m"), "Should NOT have italic when emit_italic=false");
     }
 
     #[test]
@@ -2129,10 +2398,93 @@ fn main() {}
         // Should contain ANSI codes for styling
         assert!(output.contains("\x1b[38;2;"));
 
-        // Should contain heading markers
+        // Should contain heading markers (block characters)
+        // H1: █, H2: ██
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("# Heading 1"));
-        assert!(plain.contains("## Heading 2"));
+        assert!(plain.contains("█ Heading 1"));
+        assert!(plain.contains("██ Heading 2"));
+    }
+
+    /// Regression test: italic markdown should render with ANSI italic escape code
+    /// when ItalicMode::Always is used.
+    ///
+    /// This tests the full rendering pipeline from markdown to terminal output.
+    #[test]
+    fn test_for_terminal_italic_styled() {
+        let md: Markdown = "Text blocks get some _title love_ too.".into();
+        let mut options = TerminalOptions::default();
+        options.italic_mode = ItalicMode::Always;
+        let output = for_terminal(&md, options).unwrap();
+
+        // Should contain ANSI italic escape code (\x1b[3m)
+        assert!(
+            output.contains("\x1b[3m"),
+            "Italic markdown should produce \\x1b[3m escape code, got: {:?}",
+            output
+        );
+
+        // Plain text should have the italic content
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("title love"));
+    }
+
+    /// Regression test: italic escape codes should be suppressed when
+    /// ItalicMode::Never is configured.
+    ///
+    /// This ensures that terminals without italic support don't receive
+    /// unsupported escape codes.
+    #[test]
+    fn test_for_terminal_italic_never() {
+        let md: Markdown = "Text blocks get some _title love_ too.".into();
+        let mut options = TerminalOptions::default();
+        options.italic_mode = ItalicMode::Never;
+        let output = for_terminal(&md, options).unwrap();
+
+        // Should NOT contain ANSI italic escape code
+        assert!(
+            !output.contains("\x1b[3m"),
+            "ItalicMode::Never should not produce \\x1b[3m escape code, got: {:?}",
+            output
+        );
+
+        // Plain text should still have the content
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("title love"));
+    }
+
+    /// Test that ItalicMode::Always forces italic rendering even when
+    /// the terminal might not support it.
+    #[test]
+    fn test_for_terminal_italic_always_forces_italic() {
+        let md: Markdown = "This has *emphasis* text.".into();
+        let mut options = TerminalOptions::default();
+        options.italic_mode = ItalicMode::Always;
+        let output = for_terminal(&md, options).unwrap();
+
+        // Should contain italic code
+        assert!(
+            output.contains("\x1b[3m"),
+            "ItalicMode::Always should produce \\x1b[3m, got: {:?}",
+            output
+        );
+    }
+
+    /// Regression test: bold markdown should render with ANSI bold escape code.
+    #[test]
+    fn test_for_terminal_bold_styled() {
+        let md: Markdown = "Some **bold text** here.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain ANSI bold escape code (\x1b[1m)
+        assert!(
+            output.contains("\x1b[1m"),
+            "Bold markdown should produce \\x1b[1m escape code, got: {:?}",
+            output
+        );
+
+        // Plain text should have the bold content
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("bold text"));
     }
 
     #[test]
@@ -2161,8 +2513,9 @@ fn main() {}
         // Should contain ANSI codes
         assert!(output.contains("\x1b[38;2;"));
 
+        // H1 uses block marker: █
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("# Heading with bold text"));
+        assert!(plain.contains("█ Heading with bold text"));
     }
 
     #[test]
@@ -2171,8 +2524,9 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         let plain = strip_ansi_codes(&output);
+        // H1 uses block marker: █
         // Heading should be followed by blank line before paragraph
-        assert!(plain.contains("# Heading\n\nParagraph text."));
+        assert!(plain.contains("█ Heading\n\nParagraph text."));
     }
 
     #[test]
@@ -2181,8 +2535,9 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         let plain = strip_ansi_codes(&output);
+        // H2 uses block marker: ██
         // Should have blank line between paragraph and heading
-        assert!(plain.contains("Some text.\n\n## Heading"));
+        assert!(plain.contains("Some text.\n\n██ Heading"));
     }
 
     #[test]
@@ -2191,8 +2546,9 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         let plain = strip_ansi_codes(&output);
+        // H3 uses block marker: ████
         // Should have blank line between list and heading
-        assert!(plain.contains("- Item two\n\n### Heading"));
+        assert!(plain.contains("- Item two\n\n████ Heading"));
     }
 
     #[test]
@@ -2201,8 +2557,9 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         let plain = strip_ansi_codes(&output);
+        // H1 uses block marker: █
         // First heading should not have leading blank lines
-        assert!(plain.starts_with("# First Heading"));
+        assert!(plain.starts_with("█ First Heading"));
     }
 
     #[test]
@@ -2437,9 +2794,10 @@ fn main() {}
 
         let plain = strip_ansi_codes(&output);
 
+        // H2 uses block marker: ██
         // Should have heading followed by table with box-drawing
         assert!(
-            plain.contains("## Environment Variables"),
+            plain.contains("██ Environment Variables"),
             "Heading should be present, got:\n{}",
             plain
         );
@@ -3230,9 +3588,10 @@ More text after the table.
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
         let plain = strip_ansi_codes(&output);
 
+        // H1 uses block marker: █, H2 uses: ██
         // Should have heading
-        assert!(plain.contains("# Documentation"));
-        assert!(plain.contains("## Configuration"));
+        assert!(plain.contains("█ Documentation"));
+        assert!(plain.contains("██ Configuration"));
 
         // Should have paragraph text
         assert!(plain.contains("intro text"));
@@ -3274,9 +3633,10 @@ More text after the table.
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
         let plain = strip_ansi_codes(&output);
 
+        // H2 uses block marker: ██
         // Should have both headings
-        assert!(plain.contains("## Table 1"));
-        assert!(plain.contains("## Table 2"));
+        assert!(plain.contains("██ Table 1"));
+        assert!(plain.contains("██ Table 2"));
 
         // Should have first table content
         assert!(plain.contains("A"));
@@ -3635,7 +3995,8 @@ More text after the table.
         let output = for_terminal(&md, options).unwrap();
         let plain = strip_ansi_codes(&output);
 
-        assert!(plain.contains("# Hello"));
+        // H1 uses block marker: █
+        assert!(plain.contains("█ Hello"));
         assert!(plain.contains("Some text here"));
         // Should NOT contain image fallback
         assert!(!plain.contains("▉ IMAGE"));
