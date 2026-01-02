@@ -542,6 +542,9 @@ pub fn write_terminal<W: std::io::Write>(
                 )?;
                 output.push_str(&highlighted);
                 output.push('\n');
+
+                // Add trailing blank line with theme background
+                output.push_str(&emit_padding_row(bg_color));
             }
             Event::Text(text) if in_code_block => {
                 code_buffer.push_str(&text);
@@ -561,10 +564,10 @@ pub fn write_terminal<W: std::io::Write>(
                     }
                 }
                 let marker = match level {
-                    pulldown_cmark::HeadingLevel::H1 => "# ",
-                    pulldown_cmark::HeadingLevel::H2 => "## ",
-                    pulldown_cmark::HeadingLevel::H3 => "### ",
-                    pulldown_cmark::HeadingLevel::H4 => "#### ",
+                    pulldown_cmark::HeadingLevel::H1 => "█ ",
+                    pulldown_cmark::HeadingLevel::H2 => "██ ",
+                    pulldown_cmark::HeadingLevel::H3 => "████ ",
+                    pulldown_cmark::HeadingLevel::H4 => "▅▅▅▅▅▅ ",
                     pulldown_cmark::HeadingLevel::H5 => "##### ",
                     pulldown_cmark::HeadingLevel::H6 => "###### ",
                 };
@@ -1093,9 +1096,9 @@ fn format_header_row(
     let lang = if language.is_empty() { "text" } else { language };
 
     // Calculate visible widths for spacing
-    // Title: "▌ {title} " = 1 + 1 + title.len() + 1 = title.len() + 3
+    // Title: " {title} " = 1 + title.len() + 1 = title.len() + 2
     // Language: " {lang} " = 1 + lang.len() + 1 = lang.len() + 2
-    let title_width = title.map(|t| t.chars().count() + 3).unwrap_or(0);
+    let title_width = title.map(|t| t.chars().count() + 2).unwrap_or(0);
     let lang_width = lang.chars().count() + 2;
     let total_content_width = title_width + lang_width;
 
@@ -1110,9 +1113,9 @@ fn format_header_row(
 
     // Left side: title (if present)
     if let Some(t) = title {
-        // Bold + BG + FG + prefix + space + title + space + reset
+        // Bold + BG + FG + space + title + space + reset
         output.push_str(&format!(
-            "\x1b[1m\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m▌ {} \x1b[0m",
+            "\x1b[1m\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m {} \x1b[0m",
             bg_color.r, bg_color.g, bg_color.b,
             text_color.0, text_color.1, text_color.2,
             t
@@ -1460,8 +1463,8 @@ fn main() {}
         let md: Markdown = content.into();
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
-        // Should contain title with prefix
-        assert!(output.contains("▌ Example"));
+        // Should contain title (without prefix)
+        assert!(output.contains("Example"));
 
         // Title should be bold
         assert!(output.contains("\x1b[1m"));
@@ -1567,14 +1570,14 @@ fn main() {}
     #[test]
     fn test_header_row_right_alignment() {
         let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
-        // Title "Test" (4 chars) + prefix "▌ " (2) + space (1) = 7 visible chars
+        // Title "Test" (4 chars) + leading/trailing spaces = 6 visible chars
         // Language "rs" (2 chars) + spaces " rs " = 4 visible chars
-        // Total content: 11 chars, terminal width: 80, so spacing: 69 chars
+        // Total content: 10 chars, terminal width: 80, so spacing: 70 chars
         let header = format_header_row(Some("Test"), "rs", bg_color, ColorMode::Dark, 80);
         let plain = strip_ansi_codes(&header);
 
-        // Title should be at the start, language at the end
-        assert!(plain.starts_with("▌ Test "));
+        // Title should be at the start with leading space, language at the end
+        assert!(plain.starts_with(" Test "));
         assert!(plain.ends_with(" rs "));
 
         // Total visible width should be 80 (terminal width)
@@ -2003,10 +2006,10 @@ fn main() {}
         assert!(raw.contains("\x1b["));
 
         // Verify content after stripping ANSI
-        // Output includes: right-aligned header row (spacing + language) + newline + top padding + left padding + code + bottom padding
+        // Output includes: right-aligned header row (spacing + language) + newline + top padding + left padding + code + bottom padding + trailing blank line
         // Terminal width is 80, language " rust " is 6 chars, so 74 spaces of padding
         let plain = strip_ansi_codes(&raw);
-        assert!(plain.ends_with(" rust \n\n fn test() {}\n"));
+        assert!(plain.ends_with(" rust \n\n fn test() {}\n\n"));
         assert!(plain.contains("rust"));
     }
 
