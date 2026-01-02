@@ -239,11 +239,13 @@ mod tests {
     }
 
     #[test]
-    fn model_stack_fast_returns_haiku_and_flash() {
+    fn model_stack_fast_returns_flash_haiku_gpt_and_openrouter() {
         let stack = ModelStack::fast();
-        assert_eq!(stack.0.len(), 2);
-        assert_eq!(stack.0[0].provider, "anthropic");
-        assert!(stack.0[0].model.contains("haiku"));
+        assert_eq!(stack.0.len(), 4);
+        assert_eq!(stack.0[0].provider, "gemini");
+        assert!(stack.0[0].model.contains("flash"));
+        assert_eq!(stack.0[1].provider, "anthropic");
+        assert!(stack.0[1].model.contains("haiku"));
     }
 
     #[test]
@@ -265,15 +267,15 @@ mod tests {
     #[test]
     fn model_stack_for_quality_fast() {
         let stack = ModelStack::for_quality(ModelQuality::Fast);
-        assert_eq!(stack.0.len(), 2);
-        assert!(stack.0[0].model.contains("haiku"));
+        assert_eq!(stack.0.len(), 4);
+        assert!(stack.0[0].model.contains("flash"));
     }
 
     #[test]
     fn model_stack_for_task_scrape_defaults_to_fast() {
         let stack = ModelStack::for_task(TaskKind::Scrape, None);
-        assert_eq!(stack.0.len(), 2);
-        assert!(stack.0[0].model.contains("haiku"));
+        assert_eq!(stack.0.len(), 4);
+        assert!(stack.0[0].model.contains("flash"));
     }
 
     #[test]
