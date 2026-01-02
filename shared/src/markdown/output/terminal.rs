@@ -516,11 +516,20 @@ pub fn write_terminal<W: std::io::Write>(
                 // Render code block with highlighting
                 let meta = parse_code_info(&code_info_string).unwrap_or_default();
 
-                // Add title if present
-                if let Some(title) = &meta.title {
-                    output.push_str(&format_title(title));
-                    output.push('\n');
-                }
+                // Get background color from theme for header row
+                let theme = code_highlighter.theme();
+                let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+
+                // Add header row with title and language (right-aligned)
+                let header = format_header_row(
+                    meta.title.as_deref(),
+                    &code_language,
+                    bg_color,
+                    options.color_mode,
+                    terminal_width,
+                );
+                output.push_str(&header);
+                output.push('\n');
 
                 // Highlight and render code
                 let highlighted = highlight_code(
@@ -529,6 +538,7 @@ pub fn write_terminal<W: std::io::Write>(
                     &code_highlighter,
                     &options,
                     &meta,
+                    options.color_mode,
                 )?;
                 output.push_str(&highlighted);
                 output.push('\n');
@@ -1038,20 +1048,189 @@ fn emit_code_text(text: &str, style: Style, bg_color: Color) -> String {
     )
 }
 
-/// Formats a code block title with ANSI codes.
-fn format_title(title: &str) -> String {
-    // Bold: \x1b[1m
-    // Reset: \x1b[0m
-    format!("\x1b[1m▌ {}\x1b[0m", title)
+/// Returns the text color for header rows based on color mode.
+///
+/// ## Arguments
+///
+/// * `color_mode` - The color mode (dark or light)
+///
+/// ## Returns
+///
+/// RGB tuple: (255, 255, 255) for dark mode (white text), (0, 0, 0) for light mode (black text)
+fn header_text_color(color_mode: ColorMode) -> (u8, u8, u8) {
+    match color_mode {
+        ColorMode::Dark => (255, 255, 255),  // WHITE
+        ColorMode::Light => (0, 0, 0),       // BLACK
+    }
+}
+
+/// Formats a code block header row with title (left) and language (right-aligned).
+///
+/// Creates a header row showing the title on the left (bold) and language on the right
+/// (not bold). Both use the theme's background color. Spacing fills the gap to push
+/// the language to the right edge of the terminal.
+///
+/// ## Arguments
+///
+/// * `title` - Optional title text for the code block
+/// * `language` - Language identifier (defaults to "text" if empty)
+/// * `bg_color` - Background color for title and language spans
+/// * `color_mode` - Color mode for determining text color
+/// * `terminal_width` - Terminal width for right-alignment calculation
+///
+/// ## Returns
+///
+/// ANSI-formatted string with title (if present) on the left and language right-aligned.
+/// Title is bold, language is not.
+fn format_header_row(
+    title: Option<&str>,
+    language: &str,
+    bg_color: Color,
+    color_mode: ColorMode,
+    terminal_width: u16,
+) -> String {
+    let text_color = header_text_color(color_mode);
+    let lang = if language.is_empty() { "text" } else { language };
+
+    // Calculate visible widths for spacing
+    // Title: "▌ {title} " = 1 + 1 + title.len() + 1 = title.len() + 3
+    // Language: " {lang} " = 1 + lang.len() + 1 = lang.len() + 2
+    let title_width = title.map(|t| t.chars().count() + 3).unwrap_or(0);
+    let lang_width = lang.chars().count() + 2;
+    let total_content_width = title_width + lang_width;
+
+    // Calculate spacing to right-align language
+    let spacing = if (terminal_width as usize) > total_content_width {
+        terminal_width as usize - total_content_width
+    } else {
+        1 // Minimum 1 space between title and language
+    };
+
+    let mut output = String::new();
+
+    // Left side: title (if present)
+    if let Some(t) = title {
+        // Bold + BG + FG + prefix + space + title + space + reset
+        output.push_str(&format!(
+            "\x1b[1m\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m▌ {} \x1b[0m",
+            bg_color.r, bg_color.g, bg_color.b,
+            text_color.0, text_color.1, text_color.2,
+            t
+        ));
+    }
+
+    // Add spacing to push language to the right
+    for _ in 0..spacing {
+        output.push(' ');
+    }
+
+    // Right side: language (right-aligned)
+    // BG + FG + space + lang + space + reset
+    output.push_str(&format!(
+        "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m {} \x1b[0m",
+        bg_color.r, bg_color.g, bg_color.b,
+        text_color.0, text_color.1, text_color.2,
+        lang
+    ));
+
+    output
+}
+
+/// Emits a padding row with the specified background color.
+///
+/// The padding row consists of:
+/// - Setting the background color
+/// - Clearing to end of line (\x1b[K)
+/// - Resetting all attributes (\x1b[0m)
+/// - Adding a newline
+fn emit_padding_row(bg_color: Color) -> String {
+    format!(
+        "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m\n",
+        bg_color.r, bg_color.g, bg_color.b
+    )
+}
+
+/// Computes a highlighted background color based on the theme background and color mode.
+///
+/// For dark mode, adds brightness to the theme background (capped at 235).
+/// For light mode, subtracts brightness from the theme background.
+///
+/// ## Examples
+///
+/// ```
+/// use shared::markdown::highlighting::ColorMode;
+/// use syntect::highlighting::Color;
+///
+/// let theme_bg = Color { r: 40, g: 40, b: 40, a: 255 };
+/// let highlight_bg = compute_highlight_bg(theme_bg, ColorMode::Dark);
+/// // Result: Color { r: 70, g: 65, b: 40, a: 255 }
+/// ```
+fn compute_highlight_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
+    match color_mode {
+        ColorMode::Dark => Color {
+            r: theme_bg.r.saturating_add(30).min(235),
+            g: theme_bg.g.saturating_add(25).min(235),
+            b: theme_bg.b,
+            a: 255,
+        },
+        ColorMode::Light => Color {
+            r: theme_bg.r.saturating_sub(20),
+            g: theme_bg.g.saturating_sub(15),
+            b: theme_bg.b,
+            a: 255,
+        },
+    }
 }
 
 /// Highlights code with syntax highlighting and optional line numbers.
+///
+/// Applies syntax highlighting using syntect, adds top/bottom padding rows,
+/// and optionally renders line numbers and line highlighting based on DSL metadata.
+///
+/// ## Arguments
+///
+/// * `code` - Source code to highlight
+/// * `language` - Programming language identifier (e.g., "rust", "python")
+/// * `highlighter` - Code highlighter with loaded syntax set and theme
+/// * `options` - Terminal rendering options (includes global line numbering flag)
+/// * `meta` - Code block DSL metadata (title, highlight ranges, line numbering override)
+/// * `color_mode` - Dark or light mode for computing highlight background colors
+///
+/// ## Returns
+///
+/// ANSI-formatted string with:
+/// - Top padding row (blank line with theme background)
+/// - Code lines with syntax highlighting, optional line numbers, and highlight backgrounds
+/// - Bottom padding row (blank line with theme background)
+///
+/// ## Examples
+///
+/// ```
+/// use shared::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
+/// use shared::markdown::output::TerminalOptions;
+/// use shared::markdown::dsl::CodeBlockMeta;
+///
+/// let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+/// let options = TerminalOptions::default();
+/// let meta = CodeBlockMeta::default();
+///
+/// let result = highlight_code(
+///     "fn main() {}",
+///     "rust",
+///     &highlighter,
+///     &options,
+///     &meta,
+///     ColorMode::Dark
+/// );
+/// // Result: ANSI-formatted code with padding, syntax colors, and backgrounds
+/// ```
 fn highlight_code(
     code: &str,
     language: &str,
     highlighter: &CodeHighlighter,
     options: &TerminalOptions,
     meta: &crate::markdown::dsl::CodeBlockMeta,
+    color_mode: ColorMode,
 ) -> Result<String, MarkdownError> {
     let syntax = find_syntax(language, highlighter.syntax_set())
         .unwrap_or_else(|| highlighter.syntax_set().find_syntax_plain_text());
@@ -1073,11 +1252,22 @@ fn highlight_code(
         0
     };
 
+    // Add top padding row
+    output.push_str(&emit_padding_row(bg_color));
+
     // Create highlighter for this code block
     let mut hl = HighlightLines::new(syntax, theme);
 
     for (idx, line) in lines.iter().enumerate() {
         let line_number = idx + 1;
+
+        // Determine if this line should be highlighted
+        let is_highlighted = meta.highlight.contains(line_number);
+        let line_bg = if is_highlighted {
+            compute_highlight_bg(bg_color, color_mode)
+        } else {
+            bg_color
+        };
 
         // Add line number gutter if enabled
         if line_number_width > 0 {
@@ -1092,8 +1282,11 @@ fn highlight_code(
         // Set background color for the line
         output.push_str(&format!(
             "\x1b[48;2;{};{};{}m",
-            bg_color.r, bg_color.g, bg_color.b
+            line_bg.r, line_bg.g, line_bg.b
         ));
+
+        // Add left padding (1 character)
+        output.push(' ');
 
         // Highlight the line and get styled ranges
         let ranges = hl
@@ -1122,6 +1315,12 @@ fn highlight_code(
             output.push('\n');
         }
     }
+
+    // Add bottom padding row (without trailing newline to avoid double spacing)
+    output.push_str(&format!(
+        "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m",
+        bg_color.r, bg_color.g, bg_color.b
+    ));
 
     Ok(output)
 }
@@ -1290,18 +1489,108 @@ fn main() {}
     }
 
     #[test]
-    fn test_format_title() {
-        let title = format_title("Test Title");
+    fn test_header_row_with_title() {
+        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        let header = format_header_row(Some("Example"), "rust", bg_color, ColorMode::Dark, 80);
 
-        // Should contain bold ANSI code
-        assert!(title.contains("\x1b[1m"));
-        // Should contain reset code
-        assert!(title.contains("\x1b[0m"));
-        // Should contain prefix
-        assert!(title.contains("▌"));
+        // Should contain both title and language
+        let plain = strip_ansi_codes(&header);
+        assert!(plain.contains("Example"));
+        assert!(plain.contains("rust"));
 
-        let plain = strip_ansi_codes(&title);
-        assert_eq!(plain, "▌ Test Title");
+        // Should contain ANSI codes
+        assert!(header.contains("\x1b["));
+    }
+
+    #[test]
+    fn test_header_row_no_title() {
+        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        let header = format_header_row(None, "javascript", bg_color, ColorMode::Dark, 80);
+
+        // Should only contain language
+        let plain = strip_ansi_codes(&header);
+        assert!(plain.contains("javascript"));
+        assert!(!plain.contains("Example"));
+
+        // Should contain ANSI codes
+        assert!(header.contains("\x1b["));
+    }
+
+    #[test]
+    fn test_header_row_default_language() {
+        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        let header = format_header_row(None, "", bg_color, ColorMode::Dark, 80);
+
+        // Should default to "text"
+        let plain = strip_ansi_codes(&header);
+        assert!(plain.contains("text"));
+    }
+
+    #[test]
+    fn test_header_row_dark_mode() {
+        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        let header = format_header_row(Some("Title"), "rust", bg_color, ColorMode::Dark, 80);
+
+        // Should contain white text color (255, 255, 255)
+        assert!(header.contains("\x1b[38;2;255;255;255m"));
+    }
+
+    #[test]
+    fn test_header_row_light_mode() {
+        let bg_color = Color { r: 240, g: 240, b: 240, a: 255 };
+        let header = format_header_row(Some("Title"), "rust", bg_color, ColorMode::Light, 80);
+
+        // Should contain black text color (0, 0, 0)
+        assert!(header.contains("\x1b[38;2;0;0;0m"));
+    }
+
+    #[test]
+    fn test_header_row_bold_title() {
+        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        let header = format_header_row(Some("Title"), "rust", bg_color, ColorMode::Dark, 80);
+
+        // Should contain bold code
+        assert!(header.contains("\x1b[1m"));
+    }
+
+    #[test]
+    fn test_header_row_no_bold_language() {
+        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        let header = format_header_row(None, "rust", bg_color, ColorMode::Dark, 80);
+
+        // Language-only header should not start with bold (title is what gets bolded)
+        // The format is: "\x1b[48;2;...m\x1b[38;2;...m rust \x1b[0m"
+        // It should NOT contain "\x1b[1m" when there's no title
+        assert!(!header.contains("\x1b[1m"));
+    }
+
+    #[test]
+    fn test_header_row_right_alignment() {
+        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        // Title "Test" (4 chars) + prefix "▌ " (2) + space (1) = 7 visible chars
+        // Language "rs" (2 chars) + spaces " rs " = 4 visible chars
+        // Total content: 11 chars, terminal width: 80, so spacing: 69 chars
+        let header = format_header_row(Some("Test"), "rs", bg_color, ColorMode::Dark, 80);
+        let plain = strip_ansi_codes(&header);
+
+        // Title should be at the start, language at the end
+        assert!(plain.starts_with("▌ Test "));
+        assert!(plain.ends_with(" rs "));
+
+        // Total visible width should be 80 (terminal width)
+        assert_eq!(plain.chars().count(), 80);
+    }
+
+    #[test]
+    fn test_header_text_color_dark() {
+        let color = header_text_color(ColorMode::Dark);
+        assert_eq!(color, (255, 255, 255)); // White
+    }
+
+    #[test]
+    fn test_header_text_color_light() {
+        let color = header_text_color(ColorMode::Light);
+        assert_eq!(color, (0, 0, 0)); // Black
     }
 
     #[test]
@@ -1311,7 +1600,7 @@ fn main() {}
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
-        let result = highlight_code(code, "rust", &highlighter, &options, &meta);
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
 
         assert!(result.is_ok());
         let output = result.unwrap();
@@ -1320,6 +1609,366 @@ fn main() {}
         assert!(output.contains("\x1b["));
     }
 
+    #[test]
+    fn test_code_block_padding() {
+        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+        let options = TerminalOptions::default();
+        let meta = crate::markdown::dsl::CodeBlockMeta::default();
+
+        let code = "fn main() {}";
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+
+        // Get background color from theme
+        let theme = highlighter.theme();
+        let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+        let bg_code = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
+
+        // Should start with top padding row (bg color + clear + reset + newline)
+        assert!(
+            output.starts_with(&format!("{}\x1b[K\x1b[0m\n", bg_code)),
+            "Output should start with top padding row"
+        );
+
+        // Should end with bottom padding row (bg color + clear + reset, no newline)
+        assert!(
+            output.ends_with(&format!("{}\x1b[K\x1b[0m", bg_code)),
+            "Output should end with bottom padding row"
+        );
+    }
+
+    #[test]
+    fn test_code_block_left_padding() {
+        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+        let options = TerminalOptions::default();
+        let meta = crate::markdown::dsl::CodeBlockMeta::default();
+
+        let code = "fn main() {}";
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+
+        // Get background color from theme
+        let theme = highlighter.theme();
+        let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+        let bg_code = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
+
+        // After the top padding row and background color set, should have a space for left padding
+        let expected_sequence = format!("{}\x1b[K\x1b[0m\n{} ", bg_code, bg_code);
+        assert!(
+            output.contains(&expected_sequence),
+            "Code lines should have 1-character left padding after background color"
+        );
+    }
+
+    #[test]
+    fn test_code_block_padding_uses_theme_background() {
+        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+        let options = TerminalOptions::default();
+        let meta = crate::markdown::dsl::CodeBlockMeta::default();
+
+        let code = "test";
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+
+        // Get expected background color from theme
+        let theme = highlighter.theme();
+        let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+        let expected_bg = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
+
+        // Verify padding rows use the theme's background color
+        assert!(
+            output.contains(&expected_bg),
+            "Padding should use theme background color"
+        );
+
+        // Count occurrences of background color code
+        let bg_count = output.matches(&expected_bg).count();
+        // Should appear at least twice: top padding + at least one code line
+        assert!(
+            bg_count >= 2,
+            "Background color should appear in padding rows and code lines"
+        );
+    }
+
+    #[test]
+    fn test_code_block_highlight_single_line() {
+        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+        let options = TerminalOptions::default();
+        let mut meta = crate::markdown::dsl::CodeBlockMeta::default();
+        meta.highlight.add_line(2);
+
+        let code = "line 1\nline 2\nline 3";
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+
+        // Get expected background colors
+        let theme = highlighter.theme();
+        let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+        let highlight_bg = compute_highlight_bg(bg_color, ColorMode::Dark);
+
+        let normal_bg = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
+        let highlighted_bg = format!(
+            "\x1b[48;2;{};{};{}m",
+            highlight_bg.r, highlight_bg.g, highlight_bg.b
+        );
+
+        // Verify both normal and highlighted backgrounds are present
+        assert!(
+            output.contains(&normal_bg),
+            "Output should contain normal background color"
+        );
+        assert!(
+            output.contains(&highlighted_bg),
+            "Output should contain highlighted background color for line 2"
+        );
+    }
+
+    #[test]
+    fn test_code_block_highlight_range() {
+        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+        let options = TerminalOptions::default();
+        let mut meta = crate::markdown::dsl::CodeBlockMeta::default();
+        meta.highlight.add_range(2, 4).unwrap();
+
+        let code = "line 1\nline 2\nline 3\nline 4\nline 5";
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+
+        // Get expected background colors
+        let theme = highlighter.theme();
+        let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+        let highlight_bg = compute_highlight_bg(bg_color, ColorMode::Dark);
+
+        let highlighted_bg = format!(
+            "\x1b[48;2;{};{};{}m",
+            highlight_bg.r, highlight_bg.g, highlight_bg.b
+        );
+
+        // Verify highlighted background is present
+        assert!(
+            output.contains(&highlighted_bg),
+            "Output should contain highlighted background for lines 2-4"
+        );
+    }
+
+    #[test]
+    fn test_code_block_highlight_mixed() {
+        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+        let options = TerminalOptions::default();
+        let mut meta = crate::markdown::dsl::CodeBlockMeta::default();
+        meta.highlight.add_line(1);
+        meta.highlight.add_range(4, 6).unwrap();
+
+        let code = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6";
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+
+        // Get expected background colors
+        let theme = highlighter.theme();
+        let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+        let highlight_bg = compute_highlight_bg(bg_color, ColorMode::Dark);
+
+        let normal_bg = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
+        let highlighted_bg = format!(
+            "\x1b[48;2;{};{};{}m",
+            highlight_bg.r, highlight_bg.g, highlight_bg.b
+        );
+
+        // Verify both normal and highlighted backgrounds are present
+        assert!(
+            output.contains(&normal_bg),
+            "Output should contain normal background color"
+        );
+        assert!(
+            output.contains(&highlighted_bg),
+            "Output should contain highlighted background for lines 1,4-6"
+        );
+    }
+
+    #[test]
+    fn test_highlight_with_line_numbers() {
+        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+        let mut options = TerminalOptions::default();
+        options.include_line_numbers = true;
+        let mut meta = crate::markdown::dsl::CodeBlockMeta::default();
+        meta.highlight.add_line(2);
+
+        let code = "line 1\nline 2\nline 3";
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+
+        // Get expected background colors
+        let theme = highlighter.theme();
+        let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+        let highlight_bg = compute_highlight_bg(bg_color, ColorMode::Dark);
+
+        let highlighted_bg = format!(
+            "\x1b[48;2;{};{};{}m",
+            highlight_bg.r, highlight_bg.g, highlight_bg.b
+        );
+
+        // Verify line numbers are present
+        assert!(
+            output.contains("│"),
+            "Output should contain line number separator"
+        );
+
+        // Verify highlighting works with line numbers
+        assert!(
+            output.contains(&highlighted_bg),
+            "Output should contain highlighted background even with line numbers"
+        );
+    }
+
+    #[test]
+    fn test_padding_preserves_line_numbers_alignment() {
+        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+        let mut options = TerminalOptions::default();
+        options.include_line_numbers = true;
+        let meta = crate::markdown::dsl::CodeBlockMeta::default();
+
+        let code = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10";
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+
+        // Strip ANSI to verify alignment visually
+        let plain = strip_ansi_codes(&output);
+
+        // Verify line numbers are present and properly aligned
+        assert!(plain.contains(" 1 │"), "Line 1 should have proper padding");
+        assert!(plain.contains("10 │"), "Line 10 should align with line 1");
+
+        // Count separator occurrences (should equal number of code lines)
+        let separator_count = plain.matches("│").count();
+        assert_eq!(
+            separator_count, 10,
+            "Should have 10 line number separators for 10 lines of code"
+        );
+    }
+
+    #[test]
+    fn test_highlight_ignores_zero() {
+        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+        let options = TerminalOptions::default();
+        let mut meta = crate::markdown::dsl::CodeBlockMeta::default();
+        meta.highlight.add_line(0); // Line 0 should be ignored (1-indexed)
+
+        let code = "line 1\nline 2\nline 3";
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+
+        // Get expected background colors
+        let theme = highlighter.theme();
+        let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+        let highlight_bg = compute_highlight_bg(bg_color, ColorMode::Dark);
+
+        let normal_bg = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
+        let highlighted_bg = format!(
+            "\x1b[48;2;{};{};{}m",
+            highlight_bg.r, highlight_bg.g, highlight_bg.b
+        );
+
+        // Should contain normal background
+        assert!(
+            output.contains(&normal_bg),
+            "Output should contain normal background"
+        );
+
+        // Should NOT contain highlighted background (since line 0 is invalid)
+        assert!(
+            !output.contains(&highlighted_bg),
+            "Output should NOT contain highlighted background when only line 0 is specified"
+        );
+    }
+
+    #[test]
+    fn test_highlight_out_of_range() {
+        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+        let options = TerminalOptions::default();
+        let mut meta = crate::markdown::dsl::CodeBlockMeta::default();
+        meta.highlight.add_line(100); // Line 100 on 5-line code should be ignored
+
+        let code = "line 1\nline 2\nline 3\nline 4\nline 5";
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+
+        // Get expected background colors
+        let theme = highlighter.theme();
+        let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+        let highlight_bg = compute_highlight_bg(bg_color, ColorMode::Dark);
+
+        let normal_bg = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
+        let highlighted_bg = format!(
+            "\x1b[48;2;{};{};{}m",
+            highlight_bg.r, highlight_bg.g, highlight_bg.b
+        );
+
+        // Should contain normal background
+        assert!(
+            output.contains(&normal_bg),
+            "Output should contain normal background"
+        );
+
+        // Should NOT contain highlighted background (since line 100 is out of range)
+        assert!(
+            !output.contains(&highlighted_bg),
+            "Output should NOT contain highlighted background when line is out of range"
+        );
+    }
+
+    #[test]
+    fn test_highlight_dark_mode_color() {
+        let theme_bg = Color {
+            r: 40,
+            g: 40,
+            b: 40,
+            a: 255,
+        };
+        let highlight_bg = compute_highlight_bg(theme_bg, ColorMode::Dark);
+
+        // Dark mode should add brightness
+        assert_eq!(highlight_bg.r, 70); // 40 + 30
+        assert_eq!(highlight_bg.g, 65); // 40 + 25
+        assert_eq!(highlight_bg.b, 40); // unchanged
+        assert_eq!(highlight_bg.a, 255);
+    }
+
+    #[test]
+    fn test_highlight_light_mode_color() {
+        let theme_bg = Color {
+            r: 240,
+            g: 240,
+            b: 240,
+            a: 255,
+        };
+        let highlight_bg = compute_highlight_bg(theme_bg, ColorMode::Light);
+
+        // Light mode should subtract brightness
+        assert_eq!(highlight_bg.r, 220); // 240 - 20
+        assert_eq!(highlight_bg.g, 225); // 240 - 15
+        assert_eq!(highlight_bg.b, 240); // unchanged
+        assert_eq!(highlight_bg.a, 255);
+    }
 
     #[test]
     fn test_find_syntax_by_extension() {
@@ -1353,8 +2002,12 @@ fn main() {}
         let raw = terminal.get_output();
         assert!(raw.contains("\x1b["));
 
-        // Verify content after stripping ANSI (output includes trailing newline)
-        terminal.assert_output("fn test() {}\n");
+        // Verify content after stripping ANSI
+        // Output includes: right-aligned header row (spacing + language) + newline + top padding + left padding + code + bottom padding
+        // Terminal width is 80, language " rust " is 6 chars, so 74 spaces of padding
+        let plain = strip_ansi_codes(&raw);
+        assert!(plain.ends_with(" rust \n\n fn test() {}\n"));
+        assert!(plain.contains("rust"));
     }
 
     #[test]
@@ -2983,5 +3636,61 @@ More text after the table.
         assert!(plain.contains("Some text here"));
         // Should NOT contain image fallback
         assert!(!plain.contains("▉ IMAGE"));
+    }
+
+    /// Integration test: Full code block with all features
+    #[test]
+    fn test_full_code_block_all_features() {
+        let content = r#"```rust title="Complete Example" line-numbering=true highlight=2,4-5
+fn line1() {}
+fn line2() {}
+fn line3() {}
+fn line4() {}
+fn line5() {}
+fn line6() {}
+```"#;
+        let md: Markdown = content.into();
+
+        let mut options = TerminalOptions::default();
+        options.include_line_numbers = true;
+
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Verify title is present in header row
+        assert!(plain.contains("Complete Example"), "Header should contain title");
+
+        // Verify language is present in header row
+        assert!(plain.contains("rust"), "Header should contain language");
+
+        // Verify line numbers are present (with gutter)
+        assert!(plain.contains("│"), "Should contain line number gutter");
+
+        // Verify code content is present
+        assert!(plain.contains("fn line1"), "Should contain line1 function");
+        assert!(plain.contains("fn line6"), "Should contain line6 function");
+
+        // Verify ANSI codes are present (highlighting and formatting)
+        assert!(output.contains("\x1b["), "Should contain ANSI escape codes");
+    }
+
+    /// Integration test: Empty code block renders padding correctly
+    #[test]
+    fn test_empty_code_block() {
+        let content = "```rust\n```";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain header row with language
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("rust"), "Header should contain language");
+
+        // Should contain padding (top and bottom)
+        // Padding rows are: \x1b[48;2;R;G;Bm\x1b[K\x1b[0m\n
+        assert!(output.contains("\x1b[K"), "Should contain padding clear codes");
+
+        // Should have proper ANSI structure even with no code lines
+        assert!(output.contains("\x1b[48;2;"), "Should contain background color codes");
+        assert!(output.contains("\x1b[0m"), "Should contain reset codes");
     }
 }
