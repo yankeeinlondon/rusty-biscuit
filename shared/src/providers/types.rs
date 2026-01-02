@@ -370,7 +370,7 @@ impl ProviderModel {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn update() -> Result<UpdateSummary, super::discovery::ProviderError> {
+    pub async fn update(dry_run: bool) -> Result<UpdateSummary, super::discovery::ProviderError> {
         use super::base::Provider;
         use super::discovery::ProviderError;
         use std::collections::HashMap;
@@ -430,18 +430,19 @@ impl ProviderModel {
             if matches!(provider, Provider::OpenRouter | Provider::ZenMux) {
                 for model_id in model_ids {
                     // Parse aggregator model IDs like "anthropic/claude-opus-4-5"
-                    if let Some((underlying_provider_str, _underlying_model)) = model_id.split_once('/') {
+                    if let Some((underlying_provider_str, underlying_model)) = model_id.split_once('/') {
                         // Try to match to a known provider
                         if let Some(underlying_provider) = Self::parse_provider_name(underlying_provider_str) {
-                            // Check if we have direct access to underlying provider
-                            if super::base::has_provider_api_key(&underlying_provider) {
+                            // Check if we successfully queried the underlying provider directly
+                            // (not just having an API key - some providers don't support /v1/models)
+                            if api_models.contains_key(&underlying_provider) {
                                 tracing::debug!(
                                     aggregator = ?provider,
                                     underlying = ?underlying_provider,
                                     model_id = %model_id,
-                                    "Skipping aggregator hint - have direct provider access"
+                                    "Skipping aggregator hint - have direct provider models"
                                 );
-                                // Skip - we'll interrogate the underlying provider directly
+                                // Skip - we already have models from the underlying provider
                             } else {
                                 // No direct access - add both aggregator and underlying hints
                                 tracing::debug!(
@@ -451,19 +452,23 @@ impl ProviderModel {
                                     "Adding aggregator hint - no direct provider access"
                                 );
 
-                                let variant_name = Self::model_id_to_variant_name(model_id);
-                                let aggregator_variant = format!("{:?}__{}", provider, variant_name);
+                                // Aggregator variant: {AGGREGATOR}__{PROVIDER}__{MODEL}
+                                // Uses full model_id (e.g., "google/gemini-3-flash") which becomes Google___Gemini__3__Flash
+                                let aggregator_variant_name = Self::model_id_to_variant_name(model_id);
+                                let aggregator_variant = format!("{:?}__{}", provider, aggregator_variant_name);
 
                                 if !existing_variants.contains(&aggregator_variant) {
-                                    new_variants.push((*provider, model_id.clone(), variant_name.clone()));
+                                    new_variants.push((*provider, model_id.clone(), aggregator_variant_name));
                                     *models_added.entry(*provider).or_insert(0) += 1;
                                     aggregator_hints_applied += 1;
                                 }
 
-                                // Also add underlying provider variant as hint
-                                let underlying_variant = format!("{:?}__{}", underlying_provider, variant_name);
+                                // Underlying provider variant: {PROVIDER}__{MODEL}
+                                // Uses just the model part (e.g., "gemini-3-flash") which becomes Gemini__3__Flash
+                                let underlying_variant_name = Self::model_id_to_variant_name(underlying_model);
+                                let underlying_variant = format!("{:?}__{}", underlying_provider, underlying_variant_name);
                                 if !existing_variants.contains(&underlying_variant) {
-                                    new_variants.push((underlying_provider, model_id.clone(), variant_name));
+                                    new_variants.push((underlying_provider, underlying_model.to_string(), underlying_variant_name));
                                     *models_added.entry(underlying_provider).or_insert(0) += 1;
                                     aggregator_hints_applied += 1;
                                 }
@@ -499,7 +504,7 @@ impl ProviderModel {
                 "ProviderModel",
                 &variant_names,
                 types_rs_path.to_str().unwrap(),
-                false, // not a dry run
+                dry_run,
             )
             .map_err(|e| ProviderError::CodegenFailed {
                 details: format!("{:?}", e),
@@ -557,6 +562,7 @@ impl ProviderModel {
     ///
     /// ## Naming Convention
     ///
+    /// - Replace `/` with `___` (triple underscore, for aggregator prefixes)
     /// - Replace `-` with `__` (double underscore)
     /// - Replace `.` with `_` (single underscore)
     /// - Remove `:`
@@ -565,8 +571,10 @@ impl ProviderModel {
     ///
     /// - `claude-opus-4.5:20251101` → `ClaudeOpus__4_5__20251101`
     /// - `gpt-4o` → `Gpt__4o`
+    /// - `anthropic/claude-3.5-sonnet` → `Anthropic___Claude__3_5__Sonnet`
     fn model_id_to_variant_name(model_id: &str) -> String {
         model_id
+            .replace("/", "___") // aggregator prefix separator (must come first)
             .replace("-", "__")
             .replace(".", "_")
             .replace(":", "")
