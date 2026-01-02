@@ -4,9 +4,9 @@
 //! and capabilities, useful for callers that need to adapt their output
 //! to the terminal's capabilities.
 
-mod color;
+mod supports;
 
-pub use color::{color_depth, supports_setting_foreground};
+pub use supports::{color_depth, supports_italics, supports_setting_foreground};
 
 #[cfg(test)]
 mod tests;

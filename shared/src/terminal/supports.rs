@@ -1,8 +1,3 @@
-//! Terminal color detection utilities
-//!
-//! This module provides functions for detecting the color depth and capabilities
-//! of the current terminal.
-
 use std::env;
 use termini::{NumberCapability, StringCapability, TermInfo};
 
@@ -106,4 +101,99 @@ pub fn supports_setting_foreground() -> bool {
         }
         Err(_) => false,
     }
+}
+
+/// Returns whether the terminal supports italic text rendering.
+///
+/// This function uses a multi-layer detection strategy:
+///
+/// 1. **Terminfo** (authoritative): Checks for the `EnterItalicsMode` (`sitm`) capability
+/// 2. **TERM_PROGRAM**: Recognizes modern terminal emulators known to support italics
+/// 3. **TERM**: Falls back to pattern matching for common terminal types
+///
+/// This layered approach compensates for outdated terminfo databases that may lack
+/// italic capabilities for terminals that actually support them.
+///
+/// ## Returns
+///
+/// - `true` if the terminal supports italic text
+/// - `false` if stdout is not a TTY, TERM is "dumb", or no support is detected
+///
+/// ## Examples
+///
+/// ```
+/// use shared::terminal::supports_italics;
+///
+/// if supports_italics() {
+///     println!("\x1b[3mThis text is italic!\x1b[23m");
+/// } else {
+///     println!("This text has no styling");
+/// }
+/// ```
+pub fn supports_italics() -> bool {
+    use std::io::IsTerminal;
+
+    // If stdout is not a TTY, don't use styling
+    if !std::io::stdout().is_terminal() {
+        return false;
+    }
+
+    // Check for dumb terminal
+    let term = env::var("TERM").unwrap_or_default();
+    if term == "dumb" {
+        return false;
+    }
+
+    // 1. Query terminfo for EnterItalicsMode (sitm) capability (authoritative)
+    if let Ok(term_info) = TermInfo::from_env() {
+        if term_info
+            .utf8_string_cap(StringCapability::EnterItalicsMode)
+            .is_some()
+        {
+            return true;
+        }
+    }
+
+    // 2. Check TERM_PROGRAM for known terminal emulators that support italics
+    if let Ok(term_program) = env::var("TERM_PROGRAM") {
+        let dominated = matches!(
+            term_program.as_str(),
+            "iTerm.app"
+                | "Apple_Terminal"
+                | "Alacritty"
+                | "kitty"
+                | "WezTerm"
+                | "vscode"
+                | "Hyper"
+                | "Tabby"
+                | "Rio"
+        );
+        if dominated {
+            return true;
+        }
+    }
+
+    // 3. Check for Windows Terminal (uses WT_SESSION env var)
+    if env::var("WT_SESSION").is_ok() {
+        return true;
+    }
+
+    // 4. Fallback: check TERM for patterns indicating modern terminals
+    let dominated = matches!(
+        term.as_str(),
+        "xterm-256color"
+            | "xterm-direct"
+            | "alacritty"
+            | "alacritty-direct"
+            | "kitty"
+            | "kitty-direct"
+            | "wezterm"
+            | "tmux-256color"
+            | "screen-256color"
+    );
+    if dominated {
+        return true;
+    }
+
+    false
 }
