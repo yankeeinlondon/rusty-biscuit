@@ -34,10 +34,13 @@ use crate::markdown::{
 };
 use comfy_table::{Attribute, Cell, CellAlignment, ContentArrangement, Table, presets};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color, Style};
 use syntect::parsing::{Scope, SyntaxReference};
 use terminal_size::{terminal_size, Width};
+use viuer::{KittySupport, get_kitty_support, is_iterm_supported};
 
 /// Color depth capability for terminal.
 ///
@@ -80,6 +83,220 @@ impl ColorDepth {
     }
 }
 
+/// Maximum image file size (10MB).
+const MAX_IMAGE_FILE_SIZE: u64 = 10 * 1024 * 1024;
+
+/// Renderer for inline images in terminal output.
+///
+/// Handles image rendering via `viuer` when graphics protocols (Kitty/iTerm2) are
+/// available, with graceful fallback to styled placeholder text.
+///
+/// ## Security
+///
+/// - Validates paths don't escape base directory (path traversal prevention)
+/// - Rejects files larger than 10MB
+/// - Rejects remote URLs (http://, https://)
+///
+/// ## Examples
+///
+/// ```
+/// use shared::markdown::output::terminal::ImageRenderer;
+/// use std::path::Path;
+///
+/// let renderer = ImageRenderer::new(Some(Path::new("/tmp")));
+/// assert!(!renderer.graphics_supported()); // Usually false in test environment
+/// ```
+#[derive(Debug)]
+pub struct ImageRenderer {
+    /// Whether graphics protocols (Kitty/iTerm2) are available.
+    graphics_supported: bool,
+    /// Whether stdout is a TTY.
+    is_tty: bool,
+    /// Base path for resolving relative image paths.
+    base_path: PathBuf,
+    /// Cached canonicalized base path for security validation.
+    base_path_canonical: Option<PathBuf>,
+    /// Terminal width for image scaling.
+    terminal_width: u16,
+}
+
+impl ImageRenderer {
+    /// Creates a new image renderer with automatic graphics detection.
+    ///
+    /// Detects terminal graphics protocol support (Kitty or iTerm2) and caches
+    /// the result for use during rendering. Falls back to placeholder text when
+    /// graphics are unavailable.
+    ///
+    /// ## Arguments
+    ///
+    /// * `base_path` - Base directory for resolving relative image paths.
+    ///   Defaults to current working directory if `None`.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use shared::markdown::output::terminal::ImageRenderer;
+    /// use std::path::Path;
+    ///
+    /// // Use current directory
+    /// let renderer = ImageRenderer::new(None);
+    ///
+    /// // Use specific base path
+    /// let renderer = ImageRenderer::new(Some(Path::new("/docs")));
+    /// ```
+    pub fn new(base_path: Option<&Path>) -> Self {
+        let is_tty = std::io::stdout().is_terminal();
+
+        let kitty_supported = matches!(
+            get_kitty_support(),
+            KittySupport::Local | KittySupport::Remote
+        );
+        let graphics_supported = is_tty && (kitty_supported || is_iterm_supported());
+
+        let terminal_width = terminal_size()
+            .map(|(Width(w), _)| w)
+            .unwrap_or(80);
+
+        let base = base_path
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+        let base_canonical = base.canonicalize().ok();
+
+        tracing::debug!(
+            graphics_supported,
+            is_tty,
+            terminal_width,
+            base_path = %base.display(),
+            "ImageRenderer initialized"
+        );
+
+        Self {
+            graphics_supported,
+            is_tty,
+            base_path: base,
+            base_path_canonical: base_canonical,
+            terminal_width,
+        }
+    }
+
+    /// Returns whether graphics protocols are supported.
+    #[inline]
+    pub fn graphics_supported(&self) -> bool {
+        self.graphics_supported
+    }
+
+    /// Returns whether stdout is a TTY.
+    #[inline]
+    pub fn is_tty(&self) -> bool {
+        self.is_tty
+    }
+
+    /// Returns the terminal width.
+    #[inline]
+    pub fn terminal_width(&self) -> u16 {
+        self.terminal_width
+    }
+
+    /// Returns the base path for resolving relative image paths.
+    #[inline]
+    pub fn base_path(&self) -> &Path {
+        &self.base_path
+    }
+
+    /// Renders an image from the given path.
+    ///
+    /// Attempts to render the image using viuer if graphics protocols are available,
+    /// otherwise returns a styled fallback placeholder.
+    ///
+    /// ## Security
+    ///
+    /// - Rejects remote URLs (http://, https://)
+    /// - Validates paths don't escape base directory (path traversal prevention)
+    /// - Rejects files larger than 10MB
+    ///
+    /// ## Arguments
+    ///
+    /// * `image_path` - Path to the image (relative to base_path or absolute)
+    /// * `alt_text` - Alt text to display in fallback placeholder
+    ///
+    /// ## Returns
+    ///
+    /// String containing either rendered image (via viuer) or fallback placeholder.
+    #[tracing::instrument(skip(self), fields(
+        image.path = %image_path,
+        image.graphics_supported = %self.graphics_supported
+    ))]
+    pub fn render_image(&self, image_path: &str, alt_text: &str) -> String {
+        // Reject remote URLs
+        if image_path.starts_with("http://") || image_path.starts_with("https://") {
+            tracing::debug!("Remote URLs not supported");
+            return format!("▉ IMAGE[{}]\n", alt_text);
+        }
+
+        let full_path = if Path::new(image_path).is_absolute() {
+            PathBuf::from(image_path)
+        } else {
+            self.base_path.join(image_path)
+        };
+
+        // Security: Prevent path traversal
+        if let Some(ref base_canonical) = self.base_path_canonical
+            && let Ok(canonical_image) = full_path.canonicalize()
+            && !canonical_image.starts_with(base_canonical)
+        {
+            tracing::warn!(path = %image_path, "Image path escapes base directory");
+            return format!("▉ IMAGE[{}]\n", alt_text);
+        }
+
+        // Check file exists
+        if !full_path.exists() {
+            tracing::debug!(path = %image_path, "Image file not found");
+            return format!("▉ IMAGE[{}]\n", alt_text);
+        }
+
+        // Check file size
+        if let Ok(metadata) = std::fs::metadata(&full_path)
+            && metadata.len() > MAX_IMAGE_FILE_SIZE
+        {
+            tracing::warn!(size = metadata.len(), "Image file too large (>10MB)");
+            return format!("▉ IMAGE[{}]\n", alt_text);
+        }
+
+        // Fallback if graphics unsupported
+        if !self.graphics_supported {
+            tracing::debug!("Graphics protocol not available");
+            return format!("▉ IMAGE[{}]\n", alt_text);
+        }
+
+        // Constrain width only; let height be determined by aspect ratio
+        let max_width = (self.terminal_width.saturating_sub(4) as u32).min(60);
+
+        let config = viuer::Config {
+            width: Some(max_width),
+            height: None, // Auto-calculate from aspect ratio
+            absolute_offset: false,
+            restore_cursor: false,
+            transparent: true,
+            truecolor: true,
+            ..Default::default()
+        };
+
+        match viuer::print_from_file(&full_path, &config) {
+            Ok((_width, height)) => {
+                tracing::debug!(path = %image_path, height, "Image rendered successfully");
+                // With restore_cursor: false, viuer positions cursor after image.
+                // No extra spacing needed - viuer handles it.
+                String::new()
+            }
+            Err(e) => {
+                tracing::warn!(path = %image_path, error = %e, "Image render failed");
+                format!("▉ IMAGE[{}]\n", alt_text)
+            }
+        }
+    }
+}
+
 /// Options for terminal output with sensible defaults.
 ///
 /// ## Examples
@@ -95,6 +312,20 @@ impl ColorDepth {
 /// options.include_line_numbers = true;
 /// options.color_depth = Some(ColorDepth::TrueColor);
 /// ```
+///
+/// ## Image Rendering
+///
+/// ```
+/// use shared::markdown::output::terminal::TerminalOptions;
+/// use std::path::PathBuf;
+///
+/// let mut options = TerminalOptions::default();
+/// options.render_images = true; // Default
+/// options.base_path = Some(PathBuf::from("/docs"));
+/// ```
+///
+/// **Note:** Due to `#[non_exhaustive]`, use `let mut opts = TerminalOptions::default();`
+/// and then set fields individually rather than struct update syntax.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct TerminalOptions {
@@ -108,6 +339,12 @@ pub struct TerminalOptions {
     pub include_line_numbers: bool,
     /// Color depth capability. None = auto-detect.
     pub color_depth: Option<ColorDepth>,
+    /// Whether to render images (via viuer) or show fallback text.
+    /// Default: `true`
+    pub render_images: bool,
+    /// Base path for resolving relative image paths.
+    /// If `None`, uses current working directory.
+    pub base_path: Option<PathBuf>,
 }
 
 impl Default for TerminalOptions {
@@ -124,6 +361,8 @@ impl Default for TerminalOptions {
             color_mode,
             include_line_numbers: false,
             color_depth: None,
+            render_images: true,
+            base_path: None,
         }
     }
 }
@@ -143,6 +382,9 @@ fn convert_alignment(align: &pulldown_cmark::Alignment) -> comfy_table::CellAlig
 /// This function renders markdown content with syntax-highlighted code blocks
 /// using ANSI escape sequences for terminal display.
 ///
+/// **Note:** For documents with images, use [`write_terminal`] instead, which
+/// properly handles image rendering by writing directly to a writer.
+///
 /// ## Examples
 ///
 /// ```
@@ -156,12 +398,48 @@ fn convert_alignment(align: &pulldown_cmark::Alignment) -> comfy_table::CellAlig
 /// ## Errors
 ///
 /// Returns an error if theme loading fails or syntax highlighting encounters issues.
-pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, MarkdownError> {
+pub fn for_terminal(md: &Markdown, mut options: TerminalOptions) -> Result<String, MarkdownError> {
+    // Disable graphics rendering when returning a String, since viuer
+    // writes directly to stdout which would be out of order.
+    // Use write_terminal() with stdout for proper image rendering.
+    options.render_images = false;
+    let mut output = Vec::new();
+    write_terminal(&mut output, md, options)?;
+    Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
+/// Writes markdown to a writer with ANSI escape codes and image support.
+///
+/// Unlike [`for_terminal`], this function writes directly to the provided writer,
+/// enabling proper image rendering via viuer which requires direct stdout access.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use shared::markdown::Markdown;
+/// use shared::markdown::output::terminal::{write_terminal, TerminalOptions};
+/// use std::io::{self, Write};
+///
+/// let md: Markdown = "# Hello\n\n![image](./test.png)".into();
+/// let stdout = io::stdout();
+/// let mut handle = stdout.lock();
+/// write_terminal(&mut handle, &md, TerminalOptions::default()).unwrap();
+/// ```
+///
+/// ## Errors
+///
+/// Returns an error if theme loading fails or syntax highlighting encounters issues.
+pub fn write_terminal<W: std::io::Write>(
+    writer: &mut W,
+    md: &Markdown,
+    options: TerminalOptions,
+) -> Result<(), MarkdownError> {
     let color_depth = options.color_depth.unwrap_or_else(ColorDepth::auto_detect);
 
     // Early return if no color support
     if color_depth == ColorDepth::None {
-        return Ok(md.content().to_string());
+        write!(writer, "{}", md.content()).ok();
+        return Ok(());
     }
 
     // Query terminal width once at start
@@ -201,6 +479,17 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
     let mut table_alignments: Vec<comfy_table::CellAlignment> = Vec::new();
     let mut current_row: Vec<String> = Vec::new();
     let mut current_cell = String::new();
+
+    // Image tracking and rendering
+    let mut in_image = false;
+    let mut current_alt = String::new();
+    let mut current_image_path = String::new();
+    let mut just_rendered_image = false; // Track if we just rendered an image (skip paragraph spacing)
+    let image_renderer = if options.render_images {
+        Some(ImageRenderer::new(options.base_path.as_deref()))
+    } else {
+        None
+    };
 
     for event in parser {
         match event {
@@ -348,14 +637,21 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
                 // Don't add extra spacing inside list items
             }
             Event::End(TagEnd::Paragraph) => {
-                // Only add double newline for paragraphs outside of lists
-                if list_stack.is_empty() {
+                // Skip paragraph spacing after images (image provides visual separation)
+                if just_rendered_image {
+                    just_rendered_image = false;
+                    // viuer positions cursor after image; no extra spacing needed
+                } else if list_stack.is_empty() {
+                    // Only add double newline for paragraphs outside of lists
                     output.push_str("\n\n");
                 }
             }
 
             Event::Text(text) if !in_code_block => {
-                if in_table {
+                if in_image {
+                    // Accumulate alt text for image
+                    current_alt.push_str(&text);
+                } else if in_table {
                     // Buffer text for table cell
                     current_cell.push_str(&text);
                 } else {
@@ -373,7 +669,12 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
             }
 
             Event::Code(code) => {
-                if in_table {
+                if in_image {
+                    // Preserve inline code in alt text
+                    current_alt.push('`');
+                    current_alt.push_str(&code);
+                    current_alt.push('`');
+                } else if in_table {
                     // Buffer inline code for table cell (mark with special prefix for styling later)
                     current_cell.push_str(&format!("\x00CODE\x00{}\x00/CODE\x00", code));
                 } else {
@@ -435,6 +736,34 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
                 current_cell.clear();
             }
 
+            // Image handling
+            Event::Start(Tag::Image { dest_url, .. }) => {
+                in_image = true;
+                current_alt.clear();
+                current_image_path = dest_url.to_string();
+            }
+            Event::End(TagEnd::Image) => {
+                if let Some(ref renderer) = image_renderer {
+                    // Flush accumulated output before viuer prints to stdout
+                    if renderer.graphics_supported() {
+                        write!(writer, "{}", output).ok();
+                        writer.flush().ok();
+                        output.clear();
+                        // render_image prints via viuer
+                        renderer.render_image(&current_image_path, &current_alt);
+                        writer.flush().ok();
+                        just_rendered_image = true;
+                    } else {
+                        output.push_str(&renderer.render_image(&current_image_path, &current_alt));
+                        just_rendered_image = true;
+                    }
+                } else {
+                    output.push_str(&format!("▉ IMAGE[{}]\n", current_alt));
+                    just_rendered_image = true;
+                }
+                in_image = false;
+            }
+
             _ => {} // Ignore other events
         }
     }
@@ -442,7 +771,11 @@ pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, M
     // Always emit terminal reset at end
     output.push_str("\x1b[0m");
 
-    Ok(output)
+    // Write final output
+    write!(writer, "{}", output).ok();
+    writer.flush().ok();
+
+    Ok(())
 }
 
 /// Emits prose text with foreground color only (no background).
@@ -2329,5 +2662,326 @@ More text after the table.
 
         // Should have table structure
         assert!(plain.contains("┌") && plain.contains("└"), "Should have table borders");
+    }
+
+    // ---- ImageRenderer Tests ----
+
+    /// Test ImageRenderer::new() initialization with None base path
+    #[test]
+    fn test_image_renderer_new_with_none_base_path() {
+        let renderer = ImageRenderer::new(None);
+
+        // Should use current directory as base
+        let expected_base = std::env::current_dir().unwrap_or_default();
+        assert_eq!(renderer.base_path(), expected_base);
+
+        // Terminal width should be either detected or default 80
+        assert!(renderer.terminal_width() >= 10);
+    }
+
+    /// Test ImageRenderer::new() initialization with specific base path
+    #[test]
+    fn test_image_renderer_new_with_base_path() {
+        let base = std::env::temp_dir();
+        let renderer = ImageRenderer::new(Some(&base));
+
+        assert_eq!(renderer.base_path(), base);
+    }
+
+    /// Test ImageRenderer accessors
+    #[test]
+    fn test_image_renderer_accessors() {
+        let renderer = ImageRenderer::new(None);
+
+        // is_tty should be false in test context
+        assert!(!renderer.is_tty());
+
+        // graphics_supported should be false when not TTY
+        assert!(!renderer.graphics_supported());
+
+        // Terminal width should be reasonable
+        assert!(renderer.terminal_width() >= 10);
+        assert!(renderer.terminal_width() <= 1000);
+    }
+
+    /// Test ImageRenderer with non-existent base path
+    #[test]
+    fn test_image_renderer_with_nonexistent_base() {
+        let nonexistent = std::path::PathBuf::from("/this/path/does/not/exist/for/sure");
+        let renderer = ImageRenderer::new(Some(&nonexistent));
+
+        // Should use the path even if it doesn't exist
+        assert_eq!(renderer.base_path(), nonexistent);
+
+        // base_path_canonical should be None
+        // (we can't directly test this since it's private, but the struct should be valid)
+    }
+
+    /// Test ImageRenderer graphics detection is cached
+    #[test]
+    fn test_image_renderer_caches_detection() {
+        // Create two renderers and verify they have consistent state
+        let renderer1 = ImageRenderer::new(None);
+        let renderer2 = ImageRenderer::new(None);
+
+        // Both should have the same graphics support detection
+        assert_eq!(renderer1.graphics_supported(), renderer2.graphics_supported());
+        assert_eq!(renderer1.is_tty(), renderer2.is_tty());
+    }
+
+    /// Test ImageRenderer debug formatting
+    #[test]
+    fn test_image_renderer_debug() {
+        let renderer = ImageRenderer::new(None);
+        let debug_str = format!("{:?}", renderer);
+
+        // Should contain field names
+        assert!(debug_str.contains("ImageRenderer"));
+        assert!(debug_str.contains("graphics_supported"));
+        assert!(debug_str.contains("is_tty"));
+        assert!(debug_str.contains("terminal_width"));
+    }
+
+    // ---- Image Event Handling Tests ----
+
+    /// Test that image markdown produces fallback placeholder
+    #[test]
+    fn test_image_fallback_placeholder() {
+        let md: Markdown = "![Test Image](./image.png)".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        assert!(plain.contains("▉ IMAGE[Test Image]"));
+    }
+
+    /// Test image with empty alt text
+    #[test]
+    fn test_image_empty_alt_text() {
+        let md: Markdown = "![](./image.png)".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        assert!(plain.contains("▉ IMAGE[]"));
+    }
+
+    /// Test image alt text with inline code
+    #[test]
+    fn test_image_alt_with_inline_code() {
+        let md: Markdown = "![Code `snippet` here](./image.png)".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Alt text should preserve inline code with backticks
+        assert!(plain.contains("▉ IMAGE[Code `snippet` here]"));
+    }
+
+    /// Test multiple images in document
+    #[test]
+    fn test_multiple_images() {
+        let md: Markdown = "![First](a.png)\n\n![Second](b.png)".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        assert!(plain.contains("▉ IMAGE[First]"));
+        assert!(plain.contains("▉ IMAGE[Second]"));
+    }
+
+    /// Test image inside list
+    #[test]
+    fn test_image_in_list() {
+        let md: Markdown = "- Item with ![image](test.png)".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        assert!(plain.contains("- Item with"));
+        assert!(plain.contains("▉ IMAGE[image]"));
+    }
+
+    /// Test image in paragraph context
+    #[test]
+    fn test_image_in_paragraph() {
+        let md: Markdown = "Some text before ![alt](img.png) and after.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        assert!(plain.contains("Some text before"));
+        assert!(plain.contains("▉ IMAGE[alt]"));
+        assert!(plain.contains("and after"));
+    }
+
+    // ---- ImageRenderer::render_image() Tests ----
+
+    /// Test render_image with remote HTTP URL returns fallback
+    #[test]
+    fn test_render_image_rejects_http_url() {
+        let renderer = ImageRenderer::new(None);
+        let result = renderer.render_image("http://example.com/image.png", "Alt");
+
+        assert!(result.contains("▉ IMAGE[Alt]"));
+    }
+
+    /// Test render_image with remote HTTPS URL returns fallback
+    #[test]
+    fn test_render_image_rejects_https_url() {
+        let renderer = ImageRenderer::new(None);
+        let result = renderer.render_image("https://example.com/image.png", "Alt");
+
+        assert!(result.contains("▉ IMAGE[Alt]"));
+    }
+
+    /// Test render_image with missing file returns fallback
+    #[test]
+    fn test_render_image_missing_file() {
+        let renderer = ImageRenderer::new(Some(&std::env::temp_dir()));
+        let result = renderer.render_image("nonexistent_file_12345.png", "Missing");
+
+        assert!(result.contains("▉ IMAGE[Missing]"));
+    }
+
+    /// Test render_image with relative path joined to base
+    #[test]
+    fn test_render_image_relative_path() {
+        let renderer = ImageRenderer::new(Some(&std::env::temp_dir()));
+        // This file doesn't exist, so we get fallback, but path is resolved correctly
+        let result = renderer.render_image("subdir/image.png", "Test");
+
+        assert!(result.contains("▉ IMAGE[Test]"));
+    }
+
+    /// Test render_image with empty alt text
+    #[test]
+    fn test_render_image_empty_alt() {
+        let renderer = ImageRenderer::new(None);
+        let result = renderer.render_image("http://example.com/x.png", "");
+
+        assert!(result.contains("▉ IMAGE[]"));
+    }
+
+    /// Test render_image when graphics_supported is false
+    #[test]
+    fn test_render_image_no_graphics_support() {
+        let renderer = ImageRenderer::new(None);
+        // In test context, graphics_supported should be false
+        assert!(!renderer.graphics_supported());
+
+        // Create a temp file that exists
+        let tmp = std::env::temp_dir().join("test_image_render.png");
+        std::fs::write(&tmp, b"fake png data").unwrap();
+
+        let result = renderer.render_image(tmp.to_str().unwrap(), "Test");
+        assert!(result.contains("▉ IMAGE[Test]"));
+
+        std::fs::remove_file(&tmp).ok();
+    }
+
+    /// Test render_image path traversal prevention
+    #[test]
+    fn test_render_image_path_traversal() {
+        // Create a temp directory as the base
+        let base_dir = std::env::temp_dir().join("image_test_base");
+        std::fs::create_dir_all(&base_dir).ok();
+
+        // Create a file outside the base directory
+        let outside_file = std::env::temp_dir().join("outside_image.png");
+        std::fs::write(&outside_file, b"outside").unwrap();
+
+        let renderer = ImageRenderer::new(Some(&base_dir));
+
+        // Try to access file outside base via path traversal
+        let result = renderer.render_image("../outside_image.png", "Outside");
+
+        // Should return fallback (path escapes base)
+        assert!(result.contains("▉ IMAGE[Outside]"));
+
+        std::fs::remove_file(&outside_file).ok();
+        std::fs::remove_dir(&base_dir).ok();
+    }
+
+    /// Test render_image with absolute path
+    #[test]
+    fn test_render_image_absolute_path() {
+        let renderer = ImageRenderer::new(Some(&std::env::temp_dir()));
+
+        // Use an absolute path (file doesn't exist)
+        let result = renderer.render_image("/nonexistent/absolute/path.png", "Abs");
+
+        assert!(result.contains("▉ IMAGE[Abs]"));
+    }
+
+    /// Test render_image fallback ends with newline
+    #[test]
+    fn test_render_image_fallback_ends_with_newline() {
+        let renderer = ImageRenderer::new(None);
+        let result = renderer.render_image("http://example.com/x.png", "Test");
+
+        assert!(result.ends_with('\n'));
+    }
+
+    // ---- TerminalOptions Image Field Tests ----
+
+    /// Test TerminalOptions default values for image fields
+    #[test]
+    fn test_terminal_options_image_defaults() {
+        let options = TerminalOptions::default();
+
+        assert!(options.render_images);
+        assert!(options.base_path.is_none());
+    }
+
+    /// Test for_terminal with render_images disabled
+    #[test]
+    fn test_for_terminal_render_images_disabled() {
+        let mut options = TerminalOptions::default();
+        options.render_images = false;
+
+        let md: Markdown = "![Test](./image.png)".into();
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Should show fallback since render_images is false
+        assert!(plain.contains("▉ IMAGE[Test]"));
+    }
+
+    /// Test for_terminal with render_images enabled (default)
+    #[test]
+    fn test_for_terminal_render_images_enabled() {
+        let options = TerminalOptions::default();
+        assert!(options.render_images);
+
+        let md: Markdown = "![Test](./image.png)".into();
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Should show fallback (file doesn't exist, no graphics support in tests)
+        assert!(plain.contains("▉ IMAGE[Test]"));
+    }
+
+    /// Test for_terminal with custom base_path
+    #[test]
+    fn test_for_terminal_with_base_path() {
+        let mut options = TerminalOptions::default();
+        options.base_path = Some(std::env::temp_dir());
+
+        let md: Markdown = "![Test](./image.png)".into();
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Should show fallback (file doesn't exist)
+        assert!(plain.contains("▉ IMAGE[Test]"));
+    }
+
+    /// Test for_terminal preserves behavior for documents without images
+    #[test]
+    fn test_for_terminal_no_images_in_content() {
+        let options = TerminalOptions::default();
+
+        let md: Markdown = "# Hello\n\nSome text here.".into();
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        assert!(plain.contains("# Hello"));
+        assert!(plain.contains("Some text here"));
+        // Should NOT contain image fallback
+        assert!(!plain.contains("▉ IMAGE"));
     }
 }

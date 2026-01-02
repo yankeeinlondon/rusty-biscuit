@@ -3,7 +3,7 @@ use color_eyre::eyre::{eyre, Context, Result};
 use shared::markdown::highlighting::{
     detect_code_theme, detect_color_mode, detect_prose_theme, ColorMode, ThemePair,
 };
-use shared::markdown::output::{for_terminal, HtmlOptions, TerminalOptions};
+use shared::markdown::output::{HtmlOptions, TerminalOptions, write_terminal};
 use shared::markdown::Markdown;
 use std::io::{self, Read};
 use std::path::PathBuf;
@@ -61,6 +61,10 @@ struct Cli {
     /// Include line numbers in code blocks
     #[arg(long)]
     line_numbers: bool,
+
+    /// Disable image rendering (show placeholders instead)
+    #[arg(long)]
+    no_images: bool,
 
     /// Increase verbosity (-v INFO, -vv DEBUG, -vvv TRACE, -vvvv TRACE with file/line)
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
@@ -215,11 +219,20 @@ fn main() -> Result<()> {
     options.color_mode = color_mode;
     options.include_line_numbers = cli.line_numbers;
     options.color_depth = None; // Auto-detect
+    options.render_images = !cli.no_images;
 
-    let terminal_output =
-        for_terminal(&md, options).context("Failed to render markdown for terminal")?;
+    // Derive base_path from input file for relative image resolution
+    if let Some(ref path) = cli.input
+        && path.to_str() != Some("-")
+    {
+        options.base_path = path.parent().map(|p| p.to_path_buf());
+    }
 
-    println!("{}", terminal_output);
+    // Use write_terminal with stdout for proper image rendering
+    // (viuer requires direct stdout access for graphics protocols)
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    write_terminal(&mut handle, &md, options).context("Failed to render markdown for terminal")?;
 
     Ok(())
 }
