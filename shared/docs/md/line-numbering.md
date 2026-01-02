@@ -2,6 +2,15 @@ Integrating line numbers into a rendering pipeline using `pulldown-cmark`, `synt
 
 Here is how you can handle this for both HTML and Terminal output.
 
+> **Version Compatibility Note**
+>
+> This document targets:
+> - `pulldown-cmark` 0.10+ (uses `TagEnd` for `Event::End` variants)
+> - `syntect` 5.x
+> - `two-face` 0.4+
+>
+> If using older versions, adjust the `Event::End` patterns accordingly.
+
 ---
 
 ## 1. The Strategy: Custom Event Mapping
@@ -13,10 +22,9 @@ Instead of passing the `pulldown-cmark` events directly to a string, you iterate
 For HTML, the cleanest way is to use an HTML table or a flexbox layout where line numbers are in a separate non-selectable column.
 
 ```rust
-use pulldown_cmark::{Event, Parser, Tag, CodeBlockKind};
+use pulldown_cmark::{Event, Parser, Tag, TagEnd, CodeBlockKind};
 use syntect::parsing::SyntaxSet;
 use syntect::highlighting::ThemeSet;
-use syntect::html::highlighted_html_for_string;
 
 // In your rendering loop:
 let mut html_output = String::new();
@@ -31,10 +39,12 @@ for event in parser {
             // 2. Split the highlighted HTML by lines
             // 3. Wrap each line in a <tr> or <span> with a counter
         }
+        Event::End(TagEnd::CodeBlock) => {
+            // Process the buffered code block
+        }
         _ => { /* handle other events */ }
     }
 }
-
 ```
 
 **Implementation Tip:** `syntect` provides `start_highlighted_html_for_string`, but for line numbers, it’s often easier to use the `HighlightLines` API to get an iterator of styled ranges, then wrap each line in:
@@ -50,19 +60,21 @@ For the terminal, you can use the `two-face` library (which provides extra theme
 
 ```rust
 use syntect::easy::HighlightLines;
+use syntect::highlighting::Style;
 use syntect::util::as_24_bit_terminal_escaped;
 
 let mut highlighter = HighlightLines::new(syntax, theme);
-let lines = code_content.lines();
 
-for (idx, line) in lines.enumerate() {
-    let ranges: Vec<(Style, &str)> = highlighter.highlight_line(line, &ss)?;
+for (idx, line) in code_content.lines().enumerate() {
+    // Append newline for syntect's stateful parsing
+    let line_with_nl = format!("{}\n", line);
+    let ranges: Vec<(Style, &str)> = highlighter.highlight_line(&line_with_nl, &ss)?;
+    // false = don't include background colors in output
     let escaped = as_24_bit_terminal_escaped(&ranges[..], false);
-    
-    // Print the line number in a muted color, then the highlighted code
-    println!("\x1b[38;5;244m{:>3} │\x1b[0m {}", idx + 1, escaped);
-}
 
+    // Print: grey line number │ highlighted code (escaped includes reset)
+    println!("\x1b[38;5;244m{:>3} │\x1b[0m {}", idx + 1, escaped.trim_end());
+}
 ```
 
 ---
@@ -95,35 +107,40 @@ To ensure line numbers aren't copied when a user selects the code, we use a `dat
 
 ```rust
 use syntect::easy::HighlightLines;
+use syntect::highlighting::{Theme, ThemeSet};
 use syntect::html::{styled_line_to_highlighted_html, IncludeBackground};
 use syntect::parsing::SyntaxSet;
-use syntect::highlighting::{ThemeSet, Style};
 
-fn render_html_with_line_numbers(code: &str, syntax_name: &str) -> String {
-    let ss = SyntaxSet::load_defaults_newlines();
-    let ts = ThemeSet::load_defaults();
-    let syntax = ss.find_syntax_by_token(syntax_name).unwrap_or_else(|| ss.find_syntax_plain_text());
-    let theme = &ts.themes["base16-ocean.dark"];
-    
+fn render_html_with_line_numbers(
+    code: &str,
+    lang: &str,
+    ss: &SyntaxSet,
+    theme: &Theme,
+) -> String {
+    let syntax = ss
+        .find_syntax_by_token(lang)
+        .unwrap_or_else(|| ss.find_syntax_plain_text());
+
     let mut h = HighlightLines::new(syntax, theme);
-    let mut html = String::from("<pre class=\"code\"><table>");
+    let mut html = String::from("<pre class=\"code-block\"><table class=\"code-table\">");
 
-    for (i, line) in code.lines().enumerate() {
-        let regions = h.highlight_line(line, &ss).unwrap();
-        let highlighted_line = styled_line_to_highlighted_html(&regions[..], IncludeBackground::No).unwrap();
-        
-        // Wrap in table rows for perfect alignment
+    for (i, line) in code.trim_end_matches('\n').lines().enumerate() {
+        // Re-add newline for syntect's stateful parsing
+        let line_with_nl = format!("{}\n", line);
+        let regions = h.highlight_line(&line_with_nl, ss).unwrap();
+        // styled_line_to_highlighted_html returns String, not Result
+        let highlighted = styled_line_to_highlighted_html(&regions[..], IncludeBackground::No);
+
         html.push_str(&format!(
-            "<tr><td class=\"ln\">{}</td><td>{}</td></tr>",
+            "<tr><td class=\"ln-gutter\">{}</td><td class=\"code-content\">{}</td></tr>",
             i + 1,
-            highlighted_line
+            highlighted
         ));
     }
 
     html.push_str("</table></pre>");
     html
 }
-
 ```
 
 ### 2. Terminal Implementation
@@ -131,26 +148,32 @@ fn render_html_with_line_numbers(code: &str, syntax_name: &str) -> String {
 For the terminal, we use ANSI escape codes. `two-face` provides great themes, but the actual printing is handled by `syntect`'s terminal utilities.
 
 ```rust
+use syntect::easy::HighlightLines;
+use syntect::parsing::SyntaxSet;
 use syntect::util::as_24_bit_terminal_escaped;
 
 fn render_terminal_with_line_numbers(code: &str, syntax_name: &str) {
     let ss = SyntaxSet::load_defaults_newlines();
-    let theme = two_face::theme_set().get_theme("Monokai Pro"); // Example using two-face
-    let syntax = ss.find_syntax_by_token(syntax_name).unwrap_or_else(|| ss.find_syntax_plain_text());
+    // two-face provides extra themes via two_face::theme::extra()
+    let ts = two_face::theme::extra();
+    let theme = &ts.themes["Monokai Pro"];
+    let syntax = ss
+        .find_syntax_by_token(syntax_name)
+        .unwrap_or_else(|| ss.find_syntax_plain_text());
 
     let mut h = HighlightLines::new(syntax, theme);
 
-    for (i, line) in code.lines().enumerate() {
-        // Ensure the line has a newline for state tracking, but we'll trim for printing
+    for (i, line) in code.trim_end_matches('\n').lines().enumerate() {
+        // Append newline for syntect's stateful parsing
         let line_with_nl = format!("{}\n", line);
         let regions = h.highlight_line(&line_with_nl, &ss).unwrap();
+        // false = don't include background colors
         let escaped = as_24_bit_terminal_escaped(&regions[..], false);
-        
-        // Print: Gray line number + Vertical pipe + Highlighted code
+
+        // Print: gray line number │ highlighted code
         println!("\x1b[38;5;244m{:>3} │\x1b[0m {}", i + 1, escaped.trim_end());
     }
 }
-
 ```
 
 ---
@@ -170,17 +193,27 @@ Since you are using `pulldown-cmark`, you need to intercept the events. Here is 
 To make the HTML output look professional, add this to your stylesheet:
 
 ```css
-.ln {
+.ln-gutter {
     color: #666;
     padding-right: 15px;
     text-align: right;
     user-select: none; /* Prevents line numbers from being copied */
     border-right: 1px solid #444;
-    margin-right: 10px;
 }
-table { border-collapse: collapse; }
-td { padding: 0 5px; }
 
+.code-content {
+    padding-left: 10px;
+    white-space: pre;
+}
+
+.code-table {
+    border-collapse: collapse;
+}
+
+.code-table td {
+    padding: 0 5px;
+    vertical-align: top;
+}
 ```
 
 ## Example
@@ -192,12 +225,12 @@ Integrating this into `pulldown-cmark` requires a "stateful" loop. Since a singl
 You can create a custom function that consumes the parser and returns the final string. This ensures that while standard Markdown (headers, lists) is handled normally, code blocks are intercepted for your custom rendering.
 
 ```rust
-use pulldown_cmark::{Event, Parser, Tag, CodeBlockKind};
+use pulldown_cmark::{Event, Parser, Tag, TagEnd, CodeBlockKind};
 
 pub fn markdown_to_html_with_line_numbers(markdown_input: &str) -> String {
     let parser = Parser::new(markdown_input);
     let mut result = String::new();
-    
+
     // State tracking for code blocks
     let mut in_code_block = false;
     let mut code_buffer = String::new();
@@ -211,12 +244,13 @@ pub fn markdown_to_html_with_line_numbers(markdown_input: &str) -> String {
                     current_lang = lang.to_string();
                 }
             }
-            Event::End(Tag::CodeBlock(_)) => {
+            // pulldown-cmark 0.10+: Event::End uses TagEnd, not Tag
+            Event::End(TagEnd::CodeBlock) => {
                 in_code_block = false;
                 // Now process the fully captured block
                 let highlighted = render_html_with_line_numbers(&code_buffer, &current_lang);
                 result.push_str(&highlighted);
-                
+
                 code_buffer.clear();
                 current_lang.clear();
             }
@@ -227,16 +261,13 @@ pub fn markdown_to_html_with_line_numbers(markdown_input: &str) -> String {
                     result.push_str(&text);
                 }
             }
-            // Pass all other events (headers, bold, etc.) to a standard renderer or push manually
-            _ => { 
-                // Note: For a real app, use pulldown_cmark::html::push_html
-                // or handle other Tags here.
-            }
+            // Pass all other events (headers, bold, etc.) to a standard renderer
+            // Note: For a real app, use pulldown_cmark::html::push_html
+            _ => {}
         }
     }
     result
 }
-
 ```
 
 ### Why this approach is necessary
@@ -263,16 +294,15 @@ You should initialize these once (e.g., in a `lazy_static` or a `OnceCell`) beca
 use syntect::parsing::SyntaxSet;
 use syntect::highlighting::ThemeSet;
 
-// Load Syntect's default syntaxes
+// Load Syntect's default syntaxes (use _newlines variant for line-by-line)
 let syntax_set = SyntaxSet::load_defaults_newlines();
 
 // Load Two-Face's extra themes
 // This includes "Monokai Pro", "GitHub Dark", "One Dark", etc.
-let theme_set = two_face::theme_set(); 
+let theme_set: ThemeSet = two_face::theme::extra();
 
 // Choose a theme by name
 let theme = &theme_set.themes["Monokai Pro"];
-
 ```
 
 ---
@@ -282,50 +312,51 @@ let theme = &theme_set.themes["Monokai Pro"];
 Here is how you combine `pulldown-cmark`, `syntect`, and `two-face` into a single logic flow. Note how we handle the `Event` stream to ensure standard Markdown text is still rendered as HTML while code blocks are intercepted.
 
 ```rust
-use pulldown_cmark::{html, Event, Options, Parser, Tag, CodeBlockKind};
+use pulldown_cmark::{html, Event, Options, Parser, Tag, TagEnd, CodeBlockKind};
+use syntect::parsing::SyntaxSet;
 
 pub fn render_markdown(markdown_input: &str) -> String {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
-    
+
     let parser = Parser::new_with_options(markdown_input, options);
     let mut output = String::new();
-    
-    // Setup Syntect/Two-Face
+
+    // Setup Syntect/Two-Face (in production, use lazy_static or OnceCell)
     let ss = SyntaxSet::load_defaults_newlines();
-    let ts = two_face::theme_set();
+    let ts = two_face::theme::extra();
     let theme = &ts.themes["Monokai Pro"];
 
     let mut in_code_block = false;
     let mut code_buffer = String::new();
     let mut lang_id = String::new();
 
-    // Custom loop to intercept events
-    let events = parser.map(|event| {
+    // Custom loop to intercept code block events
+    let events = parser.filter_map(|event| {
         match event {
             Event::Start(Tag::CodeBlock(kind)) => {
                 in_code_block = true;
                 if let CodeBlockKind::Fenced(lang) = kind {
                     lang_id = lang.to_string();
                 }
-                Event::Text("".into()) // Suppress the start tag
+                None // Suppress the start tag
             }
-            Event::End(Tag::CodeBlock(_)) => {
+            Event::End(TagEnd::CodeBlock) => {
                 in_code_block = false;
                 // Highlight the whole block at once
                 let html = render_html_with_line_numbers(&code_buffer, &lang_id, &ss, theme);
                 code_buffer.clear();
-                Event::Html(html.into()) // Inject our custom HTML
+                Some(Event::Html(html.into())) // Inject our custom HTML
             }
             Event::Text(t) => {
                 if in_code_block {
                     code_buffer.push_str(&t);
-                    Event::Text("".into()) // Buffer it, don't emit yet
+                    None // Buffer it, don't emit yet
                 } else {
-                    Event::Text(t) // Regular text
+                    Some(Event::Text(t)) // Regular text
                 }
             }
-            _ => event, // Pass through headers, links, etc.
+            _ => Some(event), // Pass through headers, links, etc.
         }
     });
 
@@ -333,7 +364,6 @@ pub fn render_markdown(markdown_input: &str) -> String {
     html::push_html(&mut output, events);
     output
 }
-
 ```
 
 ---
@@ -418,17 +448,26 @@ pre.code-block {
 When you assemble the HTML in your Rust loop, ensure you use the classes defined above.
 
 ```rust
+use syntect::easy::HighlightLines;
+use syntect::highlighting::Theme;
+use syntect::html::{styled_line_to_highlighted_html, IncludeBackground};
+use syntect::parsing::SyntaxSet;
+
 fn render_html_with_line_numbers(code: &str, lang: &str, ss: &SyntaxSet, theme: &Theme) -> String {
-    let syntax = ss.find_syntax_by_token(lang).unwrap_or_else(|| ss.find_syntax_plain_text());
+    let syntax = ss
+        .find_syntax_by_token(lang)
+        .unwrap_or_else(|| ss.find_syntax_plain_text());
     let mut h = HighlightLines::new(syntax, theme);
-    
+
     let mut html = String::from("<pre class=\"code-block\"><table class=\"code-table\">");
 
-    // Use lines() but be mindful of the trailing newline from pulldown-cmark
+    // Trim trailing newline from pulldown-cmark, then re-add for stateful parsing
     for (i, line) in code.trim_end_matches('\n').lines().enumerate() {
-        let regions = h.highlight_line(line, ss).unwrap();
-        let highlighted = styled_line_to_highlighted_html(&regions[..], IncludeBackground::No).unwrap();
-        
+        let line_with_nl = format!("{}\n", line);
+        let regions = h.highlight_line(&line_with_nl, ss).unwrap();
+        // styled_line_to_highlighted_html returns String directly
+        let highlighted = styled_line_to_highlighted_html(&regions[..], IncludeBackground::No);
+
         html.push_str("<tr>");
         html.push_str(&format!("<td class=\"ln-gutter\">{}</td>", i + 1));
         html.push_str(&format!("<td class=\"code-content\">{}</td>", highlighted));
@@ -438,7 +477,6 @@ fn render_html_with_line_numbers(code: &str, lang: &str, ss: &SyntaxSet, theme: 
     html.push_str("</table></pre>");
     html
 }
-
 ```
 
 ---
@@ -468,9 +506,8 @@ By using a `Highlighter` struct, you load the assets once and then pass referenc
 This struct encapsulates `syntect` and `two-face`, providing a clean interface for your Markdown parser.
 
 ```rust
-use syntect::parsing::SyntaxSet;
 use syntect::highlighting::{Theme, ThemeSet};
-use two_face;
+use syntect::parsing::SyntaxSet;
 
 pub struct CodeHighlighter {
     pub syntax_set: SyntaxSet,
@@ -480,8 +517,8 @@ pub struct CodeHighlighter {
 impl CodeHighlighter {
     pub fn new(theme_name: &str) -> Self {
         let syntax_set = SyntaxSet::load_defaults_newlines();
-        let theme_set = two_face::theme_set();
-        
+        let theme_set: ThemeSet = two_face::theme::extra();
+
         // Fallback to a default theme if the name is not found
         let theme = theme_set
             .themes
@@ -492,7 +529,6 @@ impl CodeHighlighter {
         Self { syntax_set, theme }
     }
 }
-
 ```
 
 ### 2. Implementation with the Event Loop
@@ -500,53 +536,52 @@ impl CodeHighlighter {
 Now you can pass this struct into a function that handles your `pulldown-cmark` events. This keeps your logic decoupled from your assets.
 
 ```rust
-use pulldown_cmark::{html, Event, Parser, Tag, CodeBlockKind};
+use pulldown_cmark::{html, Event, Parser, Tag, TagEnd, CodeBlockKind};
 
 pub fn render_markdown_to_html(markdown: &str, highlighter: &CodeHighlighter) -> String {
     let parser = Parser::new(markdown);
     let mut output = String::new();
-    
+
     let mut in_code_block = false;
     let mut code_buffer = String::new();
     let mut lang_id = String::new();
 
-    let events = parser.map(|event| {
+    let events = parser.filter_map(|event| {
         match event {
             Event::Start(Tag::CodeBlock(kind)) => {
                 in_code_block = true;
                 if let CodeBlockKind::Fenced(lang) = kind {
                     lang_id = lang.to_string();
                 }
-                Event::Text("".into())
+                None
             }
-            Event::End(Tag::CodeBlock(_)) => {
+            Event::End(TagEnd::CodeBlock) => {
                 in_code_block = false;
                 // Use our struct's assets here
                 let html = render_html_with_line_numbers(
-                    &code_buffer, 
-                    &lang_id, 
-                    &highlighter.syntax_set, 
-                    &highlighter.theme
+                    &code_buffer,
+                    &lang_id,
+                    &highlighter.syntax_set,
+                    &highlighter.theme,
                 );
                 code_buffer.clear();
-                Event::Html(html.into())
+                Some(Event::Html(html.into()))
             }
             Event::Text(t) => {
                 if in_code_block {
                     code_buffer.push_str(&t);
-                    Event::Text("".into())
+                    None
                 } else {
-                    Event::Text(t)
+                    Some(Event::Text(t))
                 }
             }
-            _ => event,
+            _ => Some(event),
         }
     });
 
     html::push_html(&mut output, events);
     output
 }
-
 ```
 
 ### 3. Usage Pattern
@@ -594,27 +629,51 @@ mod tests {
     #[test]
     fn test_line_number_integrity() {
         let highlighter = CodeHighlighter::new("Monokai Pro");
+        // 4 lines: fn main, let s = "multi-line, string";, }
         let code = "fn main() {\n    let s = \"multi-line\n    string\";\n}";
-        
-        // We expect 4 lines of output
+
         let html = render_html_with_line_numbers(
-            code, 
-            "rust", 
-            &highlighter.syntax_set, 
-            &highlighter.theme
+            code,
+            "rust",
+            &highlighter.syntax_set,
+            &highlighter.theme,
         );
 
-        // Assert that we see the line number indicators in the HTML
+        // Assert that we see exactly 4 line number indicators
         assert!(html.contains("<td class=\"ln-gutter\">1</td>"));
         assert!(html.contains("<td class=\"ln-gutter\">2</td>"));
         assert!(html.contains("<td class=\"ln-gutter\">3</td>"));
         assert!(html.contains("<td class=\"ln-gutter\">4</td>"));
-        
-        // Ensure we haven't created a 5th empty line
+
+        // Ensure no phantom 5th line from trailing newline
         assert!(!html.contains("<td class=\"ln-gutter\">5</td>"));
     }
-}
 
+    #[test]
+    fn test_empty_code_block() {
+        let highlighter = CodeHighlighter::new("Monokai Pro");
+        let html = render_html_with_line_numbers("", "rust", &highlighter.syntax_set, &highlighter.theme);
+
+        // Empty code should produce no line numbers
+        assert!(!html.contains("<td class=\"ln-gutter\">1</td>"));
+    }
+
+    #[test]
+    fn test_unknown_language_fallback() {
+        let highlighter = CodeHighlighter::new("Monokai Pro");
+        let code = "some random text";
+
+        // Should not panic with unknown language
+        let html = render_html_with_line_numbers(
+            code,
+            "nonexistent-lang",
+            &highlighter.syntax_set,
+            &highlighter.theme,
+        );
+
+        assert!(html.contains("<td class=\"ln-gutter\">1</td>"));
+    }
+}
 ```
 
 ### 2. Handling the "Missing Newline" State
@@ -628,15 +687,15 @@ To ensure syntax like multi-line comments (`/* ... */`) highlights correctly on 
 ```rust
 for (i, line) in code.trim_end_matches('\n').lines().enumerate() {
     // Re-add the newline so syntect knows the line ended (important for state)
-    let line_for_syntect = format!("{}\n", line); 
+    let line_for_syntect = format!("{}\n", line);
     let regions = h.highlight_line(&line_for_syntect, ss).unwrap();
-    
+
     // Convert to HTML (IncludeBackground::No prevents nested background colors)
-    let highlighted = styled_line_to_highlighted_html(&regions[..], IncludeBackground::No).unwrap();
-    
+    // Note: styled_line_to_highlighted_html returns String, not Result
+    let highlighted = styled_line_to_highlighted_html(&regions[..], IncludeBackground::No);
+
     // ... push to table row ...
 }
-
 ```
 
 ### 3. Summary of the Architecture

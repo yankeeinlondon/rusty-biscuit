@@ -47,7 +47,3 @@ The **highlight** feature allows you to highlight a particular row (or rows) in 
     - each member in a group is either a single number or a range of numbers
 
 All code blocks start with line number 1.
-
-
-
-
