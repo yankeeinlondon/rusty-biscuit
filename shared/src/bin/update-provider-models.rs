@@ -134,7 +134,7 @@ async fn main() -> Result<()> {
     }
 
     // Call ProviderModel::update()
-    let summary = ProviderModel::update()
+    let summary = ProviderModel::update(args.dry_run)
         .await
         .context("Failed to update ProviderModel enum")?;
 

@@ -166,8 +166,10 @@ impl ModelStack {
     /// Get fast model stack
     pub fn fast() -> Self {
         Self(vec![
-            ModelProvider::new("anthropic", "claude-haiku-4-5-20250929"),
             ModelProvider::new("gemini", "gemini-3-flash-preview"),
+            ModelProvider::new("anthropic", "claude-haiku-4-5-20250929"),
+            ModelProvider::new("openai", "gpt-4-turbo-preview"),
+            ModelProvider::new("openrouter", "anthropic/claude-haiku-4-5-20250929"),
         ])
     }
 

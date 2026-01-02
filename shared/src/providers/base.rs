@@ -66,6 +66,8 @@ pub enum Provider {
 pub enum ApiAuthMethod {
     BearerToken,
     ApiKey(String),
+    /// API key passed as query parameter (e.g., Gemini uses `?key=API_KEY`)
+    QueryParam(String),
     None
 }
 
@@ -130,7 +132,7 @@ lazy_static! {
         urls.insert(Provider::OpenAi, "https://api.openai.com");
         urls.insert(Provider::OpenRouter, "https://openrouter.ai/api");
         urls.insert(Provider::Zai, "https://api.zai.chat");
-        // ZenMux marked as unsupported (no /v1/models endpoint - see research above)
+        urls.insert(Provider::ZenMux, "https://zenmux.ai/api");
         urls
     };
 }
@@ -138,9 +140,10 @@ lazy_static! {
 lazy_static! {
     /// Custom model endpoints for providers that don't use the standard /v1/models
     pub static ref PROVIDER_MODELS_ENDPOINT: HashMap<Provider, &'static str> = {
-        // Most providers use /v1/models (default)
-        // Only add exceptions here if needed
-        HashMap::new()
+        let mut endpoints = HashMap::new();
+        // Gemini uses v1beta API
+        endpoints.insert(Provider::Gemini, "/v1beta/models");
+        endpoints
     };
 }
 
@@ -244,6 +247,10 @@ pub fn build_auth_header(provider: &Provider, api_key: &str) -> (String, String)
         }
         Some(ApiAuthMethod::ApiKey(header_name)) => {
             (header_name.clone(), api_key.to_string())
+        }
+        Some(ApiAuthMethod::QueryParam(_)) => {
+            // Query param auth handled separately in URL building
+            ("".to_string(), "".to_string())
         }
         Some(ApiAuthMethod::None) | None => {
             // For local providers or unknown auth, no header needed

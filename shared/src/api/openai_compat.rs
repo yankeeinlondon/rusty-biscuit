@@ -40,7 +40,6 @@ use crate::providers::types::OpenAIModelsResponse;
 ///
 /// ## Notes
 ///
-/// - ZenMux is skipped (no /v1/models endpoint support)
 /// - Providers without configured base URLs are skipped
 /// - Uses retry logic with exponential backoff for transient failures
 ///
@@ -65,12 +64,6 @@ pub async fn get_provider_models_from_api(
     provider: Provider,
     api_key: &str,
 ) -> Result<Vec<String>, ProviderError> {
-    // Skip ZenMux - it doesn't support /v1/models endpoint
-    if provider == Provider::ZenMux {
-        debug!("Skipping ZenMux - no /v1/models endpoint support");
-        return Ok(vec![]);
-    }
-
     // Get base URL
     let Some(base_url) = PROVIDER_BASE_URLS.get(&provider) else {
         warn!("No base URL configured for {:?}", provider);
@@ -98,6 +91,11 @@ pub async fn get_provider_models_from_api(
     // Add auth header if not empty
     if !header_name.is_empty() {
         request = request.header(&header_name, &header_value);
+    }
+
+    // Anthropic requires anthropic-version header
+    if provider == Provider::Anthropic {
+        request = request.header("anthropic-version", "2023-06-01");
     }
 
     // Make the request
@@ -267,13 +265,6 @@ mod tests {
         // Note: This test would need PROVIDER_BASE_URLS to be mockable
         // For now, we verify the structure is correct
         // In a real implementation, we'd use dependency injection for the base URL
-    }
-
-    #[tokio::test]
-    async fn test_get_provider_models_from_api_zenmux_skipped() {
-        let result = get_provider_models_from_api(Provider::ZenMux, "test-key").await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Vec::<String>::new());
     }
 
     #[tokio::test]
