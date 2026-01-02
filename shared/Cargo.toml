@@ -72,6 +72,7 @@ pulldown-cmark-to-cmark = "18"
 markdown = { version = "1.0.0-alpha.22", features = ["serde"] }
 html-escape = "0.2"
 unicode-width = "0.2.2"
+supports-hyperlinks = "3.2.0"
 
 [dev-dependencies]
 tokio = { version = "1.48", features = ["full", "test-util"] }

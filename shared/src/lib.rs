@@ -20,6 +20,7 @@ pub mod codegen;
 pub mod markdown;
 pub mod model;
 pub mod providers;
+pub mod render;
 pub mod terminal;
 pub mod testing;
 pub mod tools;
