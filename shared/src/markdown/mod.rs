@@ -32,6 +32,7 @@ mod types;
 pub mod highlighting;
 pub mod cleanup;
 pub mod dsl;
+pub mod inline;
 pub mod output;
 
 pub use frontmatter::{Frontmatter, MergeStrategy};

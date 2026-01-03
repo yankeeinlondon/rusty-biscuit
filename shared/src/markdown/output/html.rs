@@ -24,11 +24,12 @@
 //! assert!(html.contains("<code"));
 //! ```
 
-use crate::markdown::{Markdown, MarkdownResult};
-use crate::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
 use crate::markdown::dsl::parse_code_info;
+use crate::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
+use crate::markdown::inline::{InlineEvent, InlineTag, MarkProcessor};
+use crate::markdown::{Markdown, MarkdownResult};
 use html_escape;
-use pulldown_cmark::{Event, Options, Parser, Tag, CodeBlockKind, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use syntect::easy::HighlightLines;
 use syntect::util::LinesWithEndings;
 
@@ -105,8 +106,9 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
         output.push_str(&generate_styles(&code_highlighter, &options));
     }
 
-    // Parse markdown content with GFM strikethrough extension
+    // Parse markdown content with GFM strikethrough extension and wrap with MarkProcessor
     let parser = Parser::new_ext(md.content(), Options::ENABLE_STRIKETHROUGH);
+    let events = MarkProcessor::new(parser);
 
     // Track state for code blocks
     let mut in_code_block = false;
@@ -114,15 +116,23 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     let mut code_lang = String::new();
     let mut code_info = String::new();
 
-    for event in parser {
+    for event in events {
         match event {
-            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => {
+            // Handle custom inline tags (highlight/mark)
+            InlineEvent::Start(InlineTag::Mark) => {
+                output.push_str("<mark>");
+            }
+            InlineEvent::End(InlineTag::Mark) => {
+                output.push_str("</mark>");
+            }
+            // Handle standard pulldown-cmark events
+            InlineEvent::Standard(Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info)))) => {
                 in_code_block = true;
                 code_info = info.to_string();
                 code_buffer.clear();
                 code_lang.clear();
             }
-            Event::End(TagEnd::CodeBlock) => {
+            InlineEvent::Standard(Event::End(TagEnd::CodeBlock)) => {
                 if in_code_block {
                     // Parse DSL metadata
                     let meta = parse_code_info(&code_info)?;
@@ -141,10 +151,10 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                     in_code_block = false;
                 }
             }
-            Event::Text(text) if in_code_block => {
+            InlineEvent::Standard(Event::Text(text)) if in_code_block => {
                 code_buffer.push_str(&text);
             }
-            Event::Start(Tag::Heading { level, .. }) => {
+            InlineEvent::Standard(Event::Start(Tag::Heading { level, .. })) => {
                 let level_num = match level {
                     pulldown_cmark::HeadingLevel::H1 => 1,
                     pulldown_cmark::HeadingLevel::H2 => 2,
@@ -155,7 +165,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                 };
                 output.push_str(&format!("<h{}>", level_num));
             }
-            Event::End(TagEnd::Heading(level)) => {
+            InlineEvent::Standard(Event::End(TagEnd::Heading(level))) => {
                 let level_num = match level {
                     pulldown_cmark::HeadingLevel::H1 => 1,
                     pulldown_cmark::HeadingLevel::H2 => 2,
@@ -166,55 +176,55 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                 };
                 output.push_str(&format!("</h{}>", level_num));
             }
-            Event::Start(Tag::Paragraph) => {
+            InlineEvent::Standard(Event::Start(Tag::Paragraph)) => {
                 output.push_str("<p>");
             }
-            Event::End(TagEnd::Paragraph) => {
+            InlineEvent::Standard(Event::End(TagEnd::Paragraph)) => {
                 output.push_str("</p>\n");
             }
-            Event::Start(Tag::Strong) => {
+            InlineEvent::Standard(Event::Start(Tag::Strong)) => {
                 output.push_str("<strong>");
             }
-            Event::End(TagEnd::Strong) => {
+            InlineEvent::Standard(Event::End(TagEnd::Strong)) => {
                 output.push_str("</strong>");
             }
-            Event::Start(Tag::Emphasis) => {
+            InlineEvent::Standard(Event::Start(Tag::Emphasis)) => {
                 output.push_str("<em>");
             }
-            Event::End(TagEnd::Emphasis) => {
+            InlineEvent::Standard(Event::End(TagEnd::Emphasis)) => {
                 output.push_str("</em>");
             }
-            Event::Start(Tag::Strikethrough) => {
+            InlineEvent::Standard(Event::Start(Tag::Strikethrough)) => {
                 output.push_str("<del>");
             }
-            Event::End(TagEnd::Strikethrough) => {
+            InlineEvent::Standard(Event::End(TagEnd::Strikethrough)) => {
                 output.push_str("</del>");
             }
-            Event::Start(Tag::List(None)) => {
+            InlineEvent::Standard(Event::Start(Tag::List(None))) => {
                 output.push_str("<ul>\n");
             }
-            Event::End(TagEnd::List(false)) => {
+            InlineEvent::Standard(Event::End(TagEnd::List(false))) => {
                 output.push_str("</ul>\n");
             }
-            Event::Start(Tag::List(Some(_))) => {
+            InlineEvent::Standard(Event::Start(Tag::List(Some(_)))) => {
                 output.push_str("<ol>\n");
             }
-            Event::End(TagEnd::List(true)) => {
+            InlineEvent::Standard(Event::End(TagEnd::List(true))) => {
                 output.push_str("</ol>\n");
             }
-            Event::Start(Tag::Item) => {
+            InlineEvent::Standard(Event::Start(Tag::Item)) => {
                 output.push_str("<li>");
             }
-            Event::End(TagEnd::Item) => {
+            InlineEvent::Standard(Event::End(TagEnd::Item)) => {
                 output.push_str("</li>\n");
             }
-            Event::Start(Tag::BlockQuote(_)) => {
+            InlineEvent::Standard(Event::Start(Tag::BlockQuote(_))) => {
                 output.push_str("<blockquote>\n");
             }
-            Event::End(TagEnd::BlockQuote(_)) => {
+            InlineEvent::Standard(Event::End(TagEnd::BlockQuote(_))) => {
                 output.push_str("</blockquote>\n");
             }
-            Event::Start(Tag::Link { dest_url, title, .. }) => {
+            InlineEvent::Standard(Event::Start(Tag::Link { dest_url, title, .. })) => {
                 output.push_str(&format!(
                     r#"<a href="{}"{}>"#,
                     html_escape::encode_text(&dest_url),
@@ -225,25 +235,25 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                     }
                 ));
             }
-            Event::End(TagEnd::Link) => {
+            InlineEvent::Standard(Event::End(TagEnd::Link)) => {
                 output.push_str("</a>");
             }
-            Event::Code(text) => {
+            InlineEvent::Standard(Event::Code(text)) => {
                 output.push_str(&format!(
                     "<code>{}</code>",
                     html_escape::encode_text(&text)
                 ));
             }
-            Event::Text(text) if !in_code_block => {
+            InlineEvent::Standard(Event::Text(text)) if !in_code_block => {
                 output.push_str(html_escape::encode_text(&text).as_ref());
             }
-            Event::SoftBreak => {
+            InlineEvent::Standard(Event::SoftBreak) => {
                 output.push('\n');
             }
-            Event::HardBreak => {
+            InlineEvent::Standard(Event::HardBreak) => {
                 output.push_str("<br>\n");
             }
-            Event::Html(html) | Event::InlineHtml(html) => {
+            InlineEvent::Standard(Event::Html(html) | Event::InlineHtml(html)) => {
                 // Raw HTML - escape it for safety
                 output.push_str(html_escape::encode_text(&html).as_ref());
             }
@@ -416,6 +426,13 @@ pre {{
 code {{
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     font-size: 0.9em;
+}}
+
+mark {{
+    background-color: var(--highlight-bg, #fff3b8);
+    color: var(--highlight-fg, inherit);
+    padding: 0.1em 0.2em;
+    border-radius: 2px;
 }}
 </style>
 "#,
@@ -684,5 +701,101 @@ fn main() {}
         assert!(html.contains("</del>"), "Should contain closing del tag");
         assert!(html.contains("bold"));
         assert!(html.contains("strikethrough"));
+    }
+
+    // Highlight/Mark tests
+    #[test]
+    fn test_html_highlight_basic() {
+        let md: Markdown = "This is ==highlighted== text.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(html.contains("<mark>"), "Should contain opening mark tag");
+        assert!(html.contains("</mark>"), "Should contain closing mark tag");
+        assert!(html.contains("highlighted"));
+    }
+
+    #[test]
+    fn test_html_highlight_multiple() {
+        let md: Markdown = "This has ==one== and ==two== highlights.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        let mark_count = html.matches("<mark>").count();
+        assert!(
+            mark_count >= 2,
+            "Should contain at least 2 mark tags, got: {}",
+            mark_count
+        );
+        assert!(html.contains("one"));
+        assert!(html.contains("two"));
+    }
+
+    #[test]
+    fn test_html_highlight_nested_bold() {
+        let md: Markdown = "This is **==bold highlight==** text.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(html.contains("<strong>"), "Should contain strong tag");
+        assert!(html.contains("<mark>"), "Should contain mark tag");
+        assert!(html.contains("bold highlight"));
+    }
+
+    #[test]
+    fn test_html_highlight_nested_italic() {
+        let md: Markdown = "This is *==italic highlight==* text.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(html.contains("<em>"), "Should contain em tag");
+        assert!(html.contains("<mark>"), "Should contain mark tag");
+        assert!(html.contains("italic highlight"));
+    }
+
+    #[test]
+    fn test_html_highlight_no_markers() {
+        let md: Markdown = "This is normal text without highlights.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(
+            !html.contains("<mark>"),
+            "Should not contain mark tag for normal text"
+        );
+    }
+
+    #[test]
+    fn test_html_highlight_unclosed() {
+        let md: Markdown = "This has ==unclosed highlight text.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        // Unclosed markers should be rendered literally
+        assert!(
+            html.contains("==unclosed") || html.contains("=="),
+            "Unclosed markers should render literally"
+        );
+    }
+
+    #[test]
+    fn test_html_highlight_in_inline_code() {
+        let md: Markdown = "Use `==code==` syntax.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        // Should have code tag but not process == inside code
+        assert!(html.contains("<code>"), "Should contain code tag");
+        assert!(html.contains("==code=="), "Should preserve == in inline code");
+    }
+
+    #[test]
+    fn test_html_highlight_css_included() {
+        let md: Markdown = "==test==".into();
+        let options = HtmlOptions {
+            include_styles: true,
+            ..Default::default()
+        };
+        let html = as_html(&md, options).unwrap();
+        assert!(html.contains("mark {"), "CSS should include mark selector");
+        assert!(
+            html.contains("--highlight-bg"),
+            "CSS should include CSS variable"
+        );
+    }
+
+    #[test]
+    fn test_html_highlight_preserves_other_styles() {
+        let md: Markdown = "**bold** and ==highlight== and *italic*".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(html.contains("<strong>"), "Should preserve strong");
+        assert!(html.contains("<mark>"), "Should have mark");
+        assert!(html.contains("<em>"), "Should preserve em");
     }
 }

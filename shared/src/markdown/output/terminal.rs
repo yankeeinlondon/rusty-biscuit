@@ -30,6 +30,7 @@
 use crate::markdown::{
     dsl::parse_code_info,
     highlighting::{prose::ProseHighlighter, scope_cache::ScopeCache, CodeHighlighter, ColorMode, ThemePair},
+    inline::{InlineEvent, InlineTag, MarkProcessor},
     Markdown, MarkdownError,
 };
 use comfy_table::{Attribute, Cell, CellAlignment, ContentArrangement, Table, presets};
@@ -546,8 +547,9 @@ pub fn write_terminal<W: std::io::Write>(
     // Track scope stack for prose highlighting (functional style)
     let mut scope_stack: Vec<Scope> = vec![prose_highlighter.base_scope()];
 
-    // Enable table parsing extension
+    // Enable table parsing extension and wrap with MarkProcessor for ==highlight== support
     let parser = Parser::new_ext(md.content(), Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH);
+    let events = MarkProcessor::new(parser);
     let mut in_code_block = false;
     let mut code_buffer = String::new();
     let mut code_language = String::new();
@@ -579,10 +581,23 @@ pub fn write_terminal<W: std::io::Write>(
     let mut in_emphasis = false;
     let mut in_strong = false;
     let mut in_strikethrough = false;
+    let mut in_mark = false;
 
-    for event in parser {
+    for event in events {
         match event {
-            Event::Start(Tag::CodeBlock(kind)) => {
+            // Handle custom inline tags first
+            InlineEvent::Start(InlineTag::Mark) => {
+                in_mark = true;
+                let scope = ScopeCache::global().scope_for_inline_tag(InlineTag::Mark);
+                scope_stack.push(scope);
+            }
+            InlineEvent::End(InlineTag::Mark) => {
+                in_mark = false;
+                scope_stack.pop();
+            }
+
+            // Standard pulldown-cmark events
+            InlineEvent::Standard(Event::Start(Tag::CodeBlock(kind))) => {
                 in_code_block = true;
                 code_buffer.clear();
 
@@ -599,7 +614,7 @@ pub fn write_terminal<W: std::io::Write>(
                     }
                 }
             }
-            Event::End(TagEnd::CodeBlock) => {
+            InlineEvent::Standard(Event::End(TagEnd::CodeBlock)) => {
                 in_code_block = false;
 
                 // Render code block with highlighting
@@ -635,12 +650,12 @@ pub fn write_terminal<W: std::io::Write>(
                 // Add trailing blank line with theme background
                 wrapper.push_with_newlines(&emit_padding_row(bg_color));
             }
-            Event::Text(text) if in_code_block => {
+            InlineEvent::Standard(Event::Text(text)) if in_code_block => {
                 code_buffer.push_str(&text);
             }
 
             // Prose highlighting with scope tracking
-            Event::Start(ref tag @ Tag::Heading { level, .. }) => {
+            InlineEvent::Standard(Event::Start(ref tag @ Tag::Heading { level, .. })) => {
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
                 }
@@ -663,69 +678,69 @@ pub fn write_terminal<W: std::io::Write>(
                 let style = prose_highlighter.style_for_tag(tag, &scope_stack);
                 wrapper.emit_styled_marker(marker, style, emit_italic);
             }
-            Event::End(TagEnd::Heading(_)) => {
+            InlineEvent::Standard(Event::End(TagEnd::Heading(_))) => {
                 scope_stack.pop();
                 wrapper.push_with_newlines("\n\n"); // Blank line after heading
             }
 
-            Event::Start(ref tag @ Tag::Strong) => {
+            InlineEvent::Standard(Event::Start(ref tag @ Tag::Strong)) => {
                 in_strong = true;
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
                 }
             }
-            Event::End(TagEnd::Strong) => {
+            InlineEvent::Standard(Event::End(TagEnd::Strong)) => {
                 in_strong = false;
                 scope_stack.pop();
             }
 
-            Event::Start(ref tag @ Tag::Emphasis) => {
+            InlineEvent::Standard(Event::Start(ref tag @ Tag::Emphasis)) => {
                 in_emphasis = true;
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
                 }
             }
-            Event::End(TagEnd::Emphasis) => {
+            InlineEvent::Standard(Event::End(TagEnd::Emphasis)) => {
                 in_emphasis = false;
                 scope_stack.pop();
             }
 
-            Event::Start(ref tag @ Tag::Strikethrough) => {
+            InlineEvent::Standard(Event::Start(ref tag @ Tag::Strikethrough)) => {
                 in_strikethrough = true;
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
                 }
             }
-            Event::End(TagEnd::Strikethrough) => {
+            InlineEvent::Standard(Event::End(TagEnd::Strikethrough)) => {
                 in_strikethrough = false;
                 scope_stack.pop();
             }
 
-            Event::Start(ref tag @ Tag::Link { .. }) => {
+            InlineEvent::Standard(Event::Start(ref tag @ Tag::Link { .. })) => {
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
                 }
             }
-            Event::End(TagEnd::Link) => {
+            InlineEvent::Standard(Event::End(TagEnd::Link)) => {
                 scope_stack.pop();
             }
 
             // List handling
-            Event::Start(Tag::List(start_num)) => {
+            InlineEvent::Standard(Event::Start(Tag::List(start_num))) => {
                 // When a nested list starts inside an item, add newline to separate from parent text
                 if !list_stack.is_empty() && !wrapper.output().is_empty() && !wrapper.output().ends_with('\n') {
                     wrapper.newline();
                 }
                 list_stack.push(start_num);
             }
-            Event::End(TagEnd::List(_)) => {
+            InlineEvent::Standard(Event::End(TagEnd::List(_))) => {
                 list_stack.pop();
                 // Add blank line after top-level list ends
                 if list_stack.is_empty() {
                     wrapper.newline();
                 }
             }
-            Event::Start(Tag::Item) => {
+            InlineEvent::Standard(Event::Start(Tag::Item)) => {
                 // Calculate indentation based on nesting level
                 let indent = "  ".repeat(list_stack.len().saturating_sub(1));
 
@@ -746,14 +761,14 @@ pub fn write_terminal<W: std::io::Write>(
                     }
                 }
             }
-            Event::End(TagEnd::Item) => {
+            InlineEvent::Standard(Event::End(TagEnd::Item)) => {
                 wrapper.newline();
             }
 
-            Event::Start(Tag::Paragraph) => {
+            InlineEvent::Standard(Event::Start(Tag::Paragraph)) => {
                 // Don't add extra spacing inside list items
             }
-            Event::End(TagEnd::Paragraph) => {
+            InlineEvent::Standard(Event::End(TagEnd::Paragraph)) => {
                 // Skip paragraph spacing after images (image provides visual separation)
                 if just_rendered_image {
                     just_rendered_image = false;
@@ -764,7 +779,7 @@ pub fn write_terminal<W: std::io::Write>(
                 }
             }
 
-            Event::Text(text) if !in_code_block => {
+            InlineEvent::Standard(Event::Text(text)) if !in_code_block => {
                 if in_image {
                     // Accumulate alt text for image
                     current_alt.push_str(&text);
@@ -773,16 +788,17 @@ pub fn write_terminal<W: std::io::Write>(
                     current_cell.push_str(&text);
                 } else {
                     // Apply current prose styling based on scope stack
-                    // For emphasis/strong: use parent color, only change font style
+                    // For emphasis/strong/mark: use parent color, only change font style
                     use syntect::highlighting::FontStyle;
 
-                    let mut style = if in_emphasis || in_strong || in_strikethrough {
-                        // Compute style from parent scopes (exclude emphasis/strong/strikethrough scopes)
+                    let mut style = if in_emphasis || in_strong || in_strikethrough || in_mark {
+                        // Compute style from parent scopes (exclude inline formatting scopes)
                         // to preserve the parent's color
                         let parent_depth = scope_stack.len()
                             - (in_emphasis as usize)
                             - (in_strong as usize)
-                            - (in_strikethrough as usize);
+                            - (in_strikethrough as usize)
+                            - (in_mark as usize);
                         let parent_scopes = &scope_stack[..parent_depth.max(1)];
                         let tag = Tag::Paragraph;
                         prose_highlighter.style_for_tag(&tag, parent_scopes)
@@ -802,11 +818,12 @@ pub fn write_terminal<W: std::io::Write>(
                     }
 
                     // Use LineWrapper for proper word wrapping
-                    wrapper.emit_styled(&text, style, emit_italic, in_strikethrough);
+                    // Pass in_mark to enable background highlighting
+                    wrapper.emit_styled(&text, style, emit_italic, in_strikethrough, in_mark);
                 }
             }
 
-            Event::Code(code) => {
+            InlineEvent::Standard(Event::Code(code)) => {
                 if in_image {
                     // Preserve inline code in alt text
                     current_alt.push('`');
@@ -823,18 +840,18 @@ pub fn write_terminal<W: std::io::Write>(
                 }
             }
 
-            Event::SoftBreak => {
+            InlineEvent::Standard(Event::SoftBreak) => {
                 // SoftBreak is a space - only emit if not at start of line
                 if wrapper.current_col() > 0 {
                     wrapper.emit_raw(" ");
                 }
             }
-            Event::HardBreak => {
+            InlineEvent::Standard(Event::HardBreak) => {
                 wrapper.newline();
             }
 
             // Table handling - buffer entire table for proper rendering
-            Event::Start(Tag::Table(alignments)) => {
+            InlineEvent::Standard(Event::Start(Tag::Table(alignments))) => {
                 in_table = true;
                 table_rows.clear();
                 table_alignments = alignments.iter().map(convert_alignment).collect();
@@ -847,7 +864,7 @@ pub fn write_terminal<W: std::io::Write>(
                     }
                 }
             }
-            Event::End(TagEnd::Table) => {
+            InlineEvent::Standard(Event::End(TagEnd::Table)) => {
                 in_table = false;
                 // Render the buffered table with proper formatting
                 wrapper.push_with_newlines(&render_table(&table_rows, &table_alignments, terminal_width));
@@ -855,35 +872,35 @@ pub fn write_terminal<W: std::io::Write>(
                 wrapper.push_with_newlines("\n\n");
                 table_rows.clear();
             }
-            Event::Start(Tag::TableHead) => {
+            InlineEvent::Standard(Event::Start(Tag::TableHead)) => {
                 current_row.clear();
             }
-            Event::End(TagEnd::TableHead) => {
+            InlineEvent::Standard(Event::End(TagEnd::TableHead)) => {
                 table_rows.push(current_row.clone());
                 current_row.clear();
             }
-            Event::Start(Tag::TableRow) => {
+            InlineEvent::Standard(Event::Start(Tag::TableRow)) => {
                 current_row.clear();
             }
-            Event::End(TagEnd::TableRow) => {
+            InlineEvent::Standard(Event::End(TagEnd::TableRow)) => {
                 table_rows.push(current_row.clone());
                 current_row.clear();
             }
-            Event::Start(Tag::TableCell) => {
+            InlineEvent::Standard(Event::Start(Tag::TableCell)) => {
                 current_cell.clear();
             }
-            Event::End(TagEnd::TableCell) => {
+            InlineEvent::Standard(Event::End(TagEnd::TableCell)) => {
                 current_row.push(current_cell.clone());
                 current_cell.clear();
             }
 
             // Image handling
-            Event::Start(Tag::Image { dest_url, .. }) => {
+            InlineEvent::Standard(Event::Start(Tag::Image { dest_url, .. })) => {
                 in_image = true;
                 current_alt.clear();
                 current_image_path = dest_url.to_string();
             }
-            Event::End(TagEnd::Image) => {
+            InlineEvent::Standard(Event::End(TagEnd::Image)) => {
                 if let Some(ref renderer) = image_renderer {
                     // Flush accumulated output before viuer prints to stdout
                     if renderer.graphics_supported() {
@@ -906,7 +923,7 @@ pub fn write_terminal<W: std::io::Write>(
                 in_image = false;
             }
 
-            _ => {} // Ignore other events
+            InlineEvent::Standard(_) => {} // Ignore other standard events
         }
     }
 
@@ -931,7 +948,8 @@ pub fn write_terminal<W: std::io::Write>(
 /// * `style` - The syntect style including foreground color and font styles
 /// * `emit_italic` - Whether to emit italic escape codes when font_style contains ITALIC
 /// * `in_strikethrough` - Whether to apply strikethrough formatting
-fn emit_prose_text(text: &str, style: Style, emit_italic: bool, in_strikethrough: bool) -> String {
+/// * `in_mark` - Whether to apply highlight background color
+fn emit_prose_text(text: &str, style: Style, emit_italic: bool, in_strikethrough: bool, in_mark: bool) -> String {
     use syntect::highlighting::FontStyle;
 
     let fg = style.foreground;
@@ -951,8 +969,17 @@ fn emit_prose_text(text: &str, style: Style, emit_italic: bool, in_strikethrough
         result.push_str("\x1b[9m");
     }
 
-    // Apply foreground color and text
-    result.push_str(&format!("\x1b[38;2;{};{};{}m{}\x1b[0m", fg.r, fg.g, fg.b, text));
+    // Apply background color for highlighted/marked text
+    // Uses a yellow background similar to <mark> in HTML
+    if in_mark {
+        // Yellow highlight background (255, 243, 184) - matches CSS var(--highlight-bg, #fff3b8)
+        result.push_str("\x1b[48;2;255;243;184m");
+        // Use dark text for contrast on yellow background
+        result.push_str(&format!("\x1b[38;2;0;0;0m{}\x1b[0m", text));
+    } else {
+        // Apply foreground color and text
+        result.push_str(&format!("\x1b[38;2;{};{};{}m{}\x1b[0m", fg.r, fg.g, fg.b, text));
+    }
     result
 }
 
@@ -1346,7 +1373,9 @@ impl LineWrapper {
     /// * `text` - The plain text to emit
     /// * `style` - The syntect style for coloring
     /// * `emit_italic` - Whether to emit italic escape codes
-    fn emit_styled(&mut self, text: &str, style: Style, emit_italic: bool, in_strikethrough: bool) {
+    /// * `in_strikethrough` - Whether to apply strikethrough formatting
+    /// * `in_mark` - Whether to apply highlight background
+    fn emit_styled(&mut self, text: &str, style: Style, emit_italic: bool, in_strikethrough: bool, in_mark: bool) {
         // Split into segments, preserving whitespace
         // We iterate over whitespace-separated words, handling spaces between them
         let mut chars = text.chars().peekable();
@@ -1356,7 +1385,7 @@ impl LineWrapper {
             if ch.is_whitespace() {
                 // Emit accumulated word first
                 if !current_word.is_empty() {
-                    self.emit_word(&current_word, style, emit_italic, in_strikethrough);
+                    self.emit_word(&current_word, style, emit_italic, in_strikethrough, in_mark);
                     current_word.clear();
                 }
                 // Handle whitespace
@@ -1367,8 +1396,13 @@ impl LineWrapper {
                 } else {
                     // Space or tab - emit if not at start of line
                     if self.current_col > 0 {
-                        self.output.push(' ');
-                        self.current_col += 1;
+                        // For marked text, emit styled space to preserve background
+                        if in_mark {
+                            self.emit_word(" ", style, emit_italic, in_strikethrough, in_mark);
+                        } else {
+                            self.output.push(' ');
+                            self.current_col += 1;
+                        }
                     }
                 }
             } else {
@@ -1378,12 +1412,12 @@ impl LineWrapper {
 
         // Emit any remaining word
         if !current_word.is_empty() {
-            self.emit_word(&current_word, style, emit_italic, in_strikethrough);
+            self.emit_word(&current_word, style, emit_italic, in_strikethrough, in_mark);
         }
     }
 
     /// Emits a single word, wrapping if necessary.
-    fn emit_word(&mut self, word: &str, style: Style, emit_italic: bool, in_strikethrough: bool) {
+    fn emit_word(&mut self, word: &str, style: Style, emit_italic: bool, in_strikethrough: bool, in_mark: bool) {
         use unicode_width::UnicodeWidthStr;
 
         let word_width = UnicodeWidthStr::width(word);
@@ -1396,7 +1430,7 @@ impl LineWrapper {
         }
 
         // Emit the styled word
-        self.output.push_str(&emit_prose_text(word, style, emit_italic, in_strikethrough));
+        self.output.push_str(&emit_prose_text(word, style, emit_italic, in_strikethrough, in_mark));
         self.current_col += word_width;
     }
 
@@ -1419,7 +1453,7 @@ impl LineWrapper {
     /// These are emitted directly without word-wrap logic.
     fn emit_styled_marker(&mut self, text: &str, style: Style, emit_italic: bool) {
         use unicode_width::UnicodeWidthStr;
-        self.output.push_str(&emit_prose_text(text, style, emit_italic, false));
+        self.output.push_str(&emit_prose_text(text, style, emit_italic, false, false));
         self.current_col += UnicodeWidthStr::width(text);
     }
 
@@ -1909,6 +1943,118 @@ fn main() {}
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("completed item"));
         assert!(plain.contains("active item"));
+    }
+
+    // =========================================================================
+    // Highlight (==text==) tests
+    // =========================================================================
+
+    #[test]
+    fn test_terminal_highlight_basic() {
+        let md: Markdown = "This is ==highlighted== text.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain background color ANSI code \x1b[48;2;255;243;184m (yellow background)
+        assert!(output.contains("\x1b[48;2;255;243;184m"), "Should contain highlight background ANSI code");
+
+        // Content should be present when stripped
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("highlighted"));
+    }
+
+    #[test]
+    fn test_terminal_highlight_nested_bold() {
+        let md: Markdown = "This is **==bold highlight==** text.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain both bold and highlight background codes
+        assert!(output.contains("\x1b[1m"), "Should contain bold code");
+        assert!(output.contains("\x1b[48;2;255;243;184m"), "Should contain highlight background code");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("bold highlight"));
+    }
+
+    #[test]
+    fn test_terminal_highlight_nested_italic() {
+        let md: Markdown = "This is *==italic highlight==* text.".into();
+        let mut options = TerminalOptions::default();
+        options.italic_mode = ItalicMode::Always;
+        let output = for_terminal(&md, options).unwrap();
+
+        // Should contain both italic and highlight background codes
+        assert!(output.contains("\x1b[3m"), "Should contain italic code");
+        assert!(output.contains("\x1b[48;2;255;243;184m"), "Should contain highlight background code");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("italic highlight"));
+    }
+
+    #[test]
+    fn test_terminal_no_highlight_without_markers() {
+        let md: Markdown = "This is normal text without highlights.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should NOT contain highlight background ANSI code (specifically yellow highlight)
+        assert!(!output.contains("\x1b[48;2;255;243;184m"), "Should not contain highlight background without markers");
+    }
+
+    #[test]
+    fn test_terminal_highlight_unclosed() {
+        let md: Markdown = "This has ==unclosed highlight markers.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Unclosed markers should be rendered literally, not as highlight
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("==unclosed"), "Unclosed markers should render literally");
+    }
+
+    #[test]
+    fn test_terminal_highlight_multiple() {
+        let md: Markdown = "This has ==one== and ==two== highlights.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain highlight background code (at least once)
+        assert!(output.contains("\x1b[48;2;255;243;184m"), "Should contain highlight background code");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("one"));
+        assert!(plain.contains("two"));
+    }
+
+    #[test]
+    fn test_terminal_highlight_in_list() {
+        let md: Markdown = "- ==highlighted item==\n- normal item".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain highlight background code
+        assert!(output.contains("\x1b[48;2;255;243;184m"), "Highlight should work in list items");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("highlighted item"));
+        assert!(plain.contains("normal item"));
+    }
+
+    #[test]
+    fn test_terminal_highlight_in_code_block_unchanged() {
+        let md: Markdown = "```\n==not highlighted==\n```".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // The == markers should appear literally in code block content
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("==not highlighted=="), "Code block should preserve == markers");
+    }
+
+    #[test]
+    fn test_terminal_highlight_empty() {
+        let md: Markdown = "This has ==== empty highlight.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Empty highlight (====) creates start + end events with no content between
+        // so no text actually gets the background color applied, but the events are balanced
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("empty highlight"), "Text after empty highlight should render");
+        // The ==== should not cause any rendering issues
     }
 
     #[test]
@@ -2513,11 +2659,11 @@ fn main() {}
             font_style: FontStyle::empty(),
         };
 
-        let result = emit_prose_text("Hello", style, true, false);
+        let result = emit_prose_text("Hello", style, true, false, false);
 
         // Should have foreground
         assert!(result.contains("\x1b[38;2;255;128;64m"));
-        // Should NOT have background
+        // Should NOT have background (unless in_mark is true)
         assert!(!result.contains("\x1b[48;2;"));
         // Should end with reset
         assert!(result.contains("\x1b[0m"));
@@ -2538,7 +2684,7 @@ fn main() {}
         };
 
         // With emit_italic=true, should emit italic code
-        let result = emit_prose_text("italic text", style, true, false);
+        let result = emit_prose_text("italic text", style, true, false, false);
 
         // Should have italic escape code
         assert!(
@@ -2566,7 +2712,7 @@ fn main() {}
         };
 
         // With emit_italic=false, should NOT emit italic code
-        let result = emit_prose_text("italic text", style, false, false);
+        let result = emit_prose_text("italic text", style, false, false, false);
 
         // Should NOT have italic escape code
         assert!(
@@ -2589,7 +2735,7 @@ fn main() {}
             font_style: FontStyle::BOLD,
         };
 
-        let result = emit_prose_text("bold text", style, true, false);
+        let result = emit_prose_text("bold text", style, true, false, false);
 
         // Should have bold escape code
         assert!(
@@ -2612,7 +2758,7 @@ fn main() {}
             font_style: FontStyle::UNDERLINE,
         };
 
-        let result = emit_prose_text("underline text", style, true, false);
+        let result = emit_prose_text("underline text", style, true, false, false);
 
         // Should have underline escape code
         assert!(
@@ -2633,7 +2779,7 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic", style, true, false);
+        let result = emit_prose_text("bold italic", style, true, false, false);
 
         // Should have both escape codes
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -2651,7 +2797,7 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic", style, false, false);
+        let result = emit_prose_text("bold italic", style, false, false, false);
 
         // Should have bold but NOT italic
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -2669,7 +2815,7 @@ fn main() {}
             font_style: FontStyle::empty(),
         };
 
-        let result = emit_prose_text("strikethrough text", style, true, true);
+        let result = emit_prose_text("strikethrough text", style, true, true, false);
 
         // Should have strikethrough escape code
         assert!(
@@ -2694,7 +2840,7 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic strikethrough", style, true, true);
+        let result = emit_prose_text("bold italic strikethrough", style, true, true, false);
 
         // Should have all three escape codes
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -4496,7 +4642,7 @@ fn line6() {}
 
         // Create wrapper with narrow width
         let mut wrapper = LineWrapper::new(20);
-        wrapper.emit_styled("Hello world this is a test", style, false, false);
+        wrapper.emit_styled("Hello world this is a test", style, false, false, false);
 
         let output = wrapper.into_output();
         let plain = strip_ansi_codes(&output);
@@ -4599,9 +4745,9 @@ fn line6() {}
         };
 
         let mut wrapper = LineWrapper::new(40);
-        wrapper.emit_styled("This has ", bold_style, true, false);
-        wrapper.emit_styled("mixed styles", italic_style, true, false);
-        wrapper.emit_styled(" in one line", bold_style, true, false);
+        wrapper.emit_styled("This has ", bold_style, true, false, false);
+        wrapper.emit_styled("mixed styles", italic_style, true, false, false);
+        wrapper.emit_styled(" in one line", bold_style, true, false, false);
 
         let output = wrapper.into_output();
 
