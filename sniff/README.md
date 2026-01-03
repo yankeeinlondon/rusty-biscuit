@@ -8,7 +8,7 @@
 
     - a set of utilities for detecting information about the host computer
     - leverages the `hardware-query`, `sysinfo`, and `getifaddrs` to detect hardware and network setup on the host machine
-    - 
+    - we use `sysinfo`
 
 2. Sniff CLI `sniff/cli`
 
