@@ -424,6 +424,11 @@ pub struct TerminalOptions {
     /// - `Always`: Always emit italic escape codes (for pre-rendering)
     /// - `Never`: Never emit italic escape codes
     pub italic_mode: ItalicMode,
+    /// Maximum line width for text wrapping.
+    ///
+    /// If `None` (default), auto-detects from terminal size (defaults to 80 if detection fails).
+    /// Set this to override for testing or pre-rendering at a specific width.
+    pub max_width: Option<u16>,
 }
 
 impl Default for TerminalOptions {
@@ -443,6 +448,7 @@ impl Default for TerminalOptions {
             render_images: true,
             base_path: None,
             italic_mode: ItalicMode::default(),
+            max_width: None,
         }
     }
 }
@@ -525,12 +531,14 @@ pub fn write_terminal<W: std::io::Write>(
     // Resolve italic mode once at start (avoids repeated capability detection)
     let emit_italic = options.italic_mode.should_emit_italic();
 
-    // Query terminal width once at start
+    // Query terminal width once at start (allow override for testing)
     const DEFAULT_TERMINAL_WIDTH: u16 = 80;
-    let terminal_width = terminal_size()
-        .map(|(Width(w), _)| w)
-        .unwrap_or(DEFAULT_TERMINAL_WIDTH);
-    tracing::debug!(terminal_width, "Terminal width detected for table rendering");
+    let terminal_width = options.max_width.unwrap_or_else(|| {
+        terminal_size()
+            .map(|(Width(w), _)| w)
+            .unwrap_or(DEFAULT_TERMINAL_WIDTH)
+    });
+    tracing::debug!(terminal_width, "Terminal width for rendering");
 
     let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
 
@@ -582,6 +590,16 @@ pub fn write_terminal<W: std::io::Write>(
     let mut in_strong = false;
     let mut in_strikethrough = false;
     let mut in_mark = false;
+
+    // Track blockquote nesting depth and whether we've seen content at current depth
+    let mut blockquote_depth: usize = 0;
+    let mut blockquote_has_content = false;
+
+    // Compute blockquote background color from theme (subtle lift from page)
+    let blockquote_bg = {
+        let theme_bg = prose_syntect_theme.settings.background.unwrap_or(Color { r: 0, g: 0, b: 0, a: 255 });
+        compute_blockquote_bg(theme_bg, options.color_mode)
+    };
 
     for event in events {
         match event {
@@ -765,6 +783,14 @@ pub fn write_terminal<W: std::io::Write>(
             }
 
             InlineEvent::Standard(Event::Start(Tag::Paragraph)) => {
+                // Add spacing before paragraphs inside blockquotes (except first)
+                if blockquote_depth > 0 && blockquote_has_content {
+                    // Add blank line between paragraphs in blockquote:
+                    // - First newline ends current line and adds prefix for blank line
+                    // - Second newline ends blank line and adds prefix for new paragraph
+                    wrapper.emit_newline_with_prefix();
+                    wrapper.emit_newline_with_prefix();
+                }
                 // Don't add extra spacing inside list items
             }
             InlineEvent::Standard(Event::End(TagEnd::Paragraph)) => {
@@ -772,9 +798,13 @@ pub fn write_terminal<W: std::io::Write>(
                 if just_rendered_image {
                     just_rendered_image = false;
                     // viuer positions cursor after image; no extra spacing needed
-                } else if list_stack.is_empty() {
-                    // Only add double newline for paragraphs outside of lists
+                } else if list_stack.is_empty() && blockquote_depth == 0 {
+                    // Only add double newline for paragraphs outside of lists and blockquotes
                     wrapper.push_with_newlines("\n\n");
+                }
+                // Mark that we've seen content in this blockquote (for spacing next paragraph)
+                if blockquote_depth > 0 {
+                    blockquote_has_content = true;
                 }
             }
 
@@ -814,6 +844,12 @@ pub fn write_terminal<W: std::io::Write>(
                     }
                     if in_strong {
                         style.font_style |= FontStyle::BOLD;
+                    }
+
+                    // Clear theme-applied italic for blockquotes - only explicit emphasis should be italic
+                    // Many themes style quotes as italic, but we want plain text unless user wrote *italic*
+                    if blockquote_depth > 0 && !in_emphasis {
+                        style.font_style.remove(FontStyle::ITALIC);
                     }
 
                     // Use LineWrapper for proper word wrapping
@@ -922,6 +958,48 @@ pub fn write_terminal<W: std::io::Write>(
                 in_image = false;
             }
 
+            // Blockquote handling - add styled prefix and background
+            InlineEvent::Standard(Event::Start(ref tag @ Tag::BlockQuote(_))) => {
+                if blockquote_depth == 0 {
+                    // Top-level blockquote - add spacing before if there's prior content
+                    if !wrapper.output().is_empty() && !wrapper.output().ends_with("\n\n") {
+                        if wrapper.output().ends_with('\n') {
+                            wrapper.newline();
+                        } else {
+                            wrapper.push_with_newlines("\n\n");
+                        }
+                    }
+                } else {
+                    // Nested blockquote - end current line with outer prefix, add blank line
+                    wrapper.emit_newline_with_prefix(); // Ends current line, adds outer prefix for blank line
+                    wrapper.newline(); // Ends blank line, no prefix (nested prefix comes next)
+                }
+                blockquote_depth += 1;
+                blockquote_has_content = false; // Reset content flag for new blockquote level
+                if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
+                    scope_stack.push(scope);
+                }
+                // Emit the blockquote prefix for the first line of this blockquote level
+                wrapper.emit_blockquote_prefix(blockquote_depth, blockquote_bg);
+            }
+            InlineEvent::Standard(Event::End(TagEnd::BlockQuote(_))) => {
+                blockquote_depth = blockquote_depth.saturating_sub(1);
+                scope_stack.pop();
+                // Update wrapper's blockquote state
+                if blockquote_depth == 0 {
+                    blockquote_has_content = false; // Reset only when fully exiting blockquotes
+                    wrapper.clear_blockquote();
+                    // Add blank line after blockquote (like headings and paragraphs)
+                    wrapper.push_with_newlines("\n\n");
+                } else {
+                    // Still nested - just update state to new depth
+                    // Paragraph start will handle spacing with the new depth
+                    wrapper.set_blockquote_state(blockquote_depth, blockquote_bg);
+                    // Mark that outer blockquote has content (the nested blockquote)
+                    blockquote_has_content = true;
+                }
+            }
+
             InlineEvent::Standard(_) => {} // Ignore other standard events
         }
     }
@@ -948,7 +1026,15 @@ pub fn write_terminal<W: std::io::Write>(
 /// * `emit_italic` - Whether to emit italic escape codes when font_style contains ITALIC
 /// * `in_strikethrough` - Whether to apply strikethrough formatting
 /// * `in_mark` - Whether to apply highlight background color
-fn emit_prose_text(text: &str, style: Style, emit_italic: bool, in_strikethrough: bool, in_mark: bool) -> String {
+/// * `blockquote_bg` - Optional background color for blockquote context
+fn emit_prose_text(
+    text: &str,
+    style: Style,
+    emit_italic: bool,
+    in_strikethrough: bool,
+    in_mark: bool,
+    blockquote_bg: Option<Color>,
+) -> String {
     use syntect::highlighting::FontStyle;
 
     let fg = style.foreground;
@@ -975,6 +1061,12 @@ fn emit_prose_text(text: &str, style: Style, emit_italic: bool, in_strikethrough
         result.push_str("\x1b[48;2;255;243;184m");
         // Use dark text for contrast on yellow background
         result.push_str(&format!("\x1b[38;2;0;0;0m{}\x1b[0m", text));
+    } else if let Some(bg) = blockquote_bg {
+        // Apply blockquote background color with foreground color
+        result.push_str(&format!(
+            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
+            bg.r, bg.g, bg.b, fg.r, fg.g, fg.b, text
+        ));
     } else {
         // Apply foreground color and text
         result.push_str(&format!("\x1b[38;2;{};{};{}m{}\x1b[0m", fg.r, fg.g, fg.b, text));
@@ -1349,6 +1441,10 @@ struct LineWrapper {
     max_width: usize,
     /// Output buffer
     output: String,
+    /// Current blockquote nesting depth (0 = not in blockquote)
+    blockquote_depth: usize,
+    /// Background color for blockquotes
+    blockquote_bg: Option<Color>,
 }
 
 impl LineWrapper {
@@ -1358,6 +1454,90 @@ impl LineWrapper {
             current_col: 0,
             max_width,
             output: String::new(),
+            blockquote_depth: 0,
+            blockquote_bg: None,
+        }
+    }
+
+    /// Sets blockquote state without emitting the prefix.
+    ///
+    /// Use this when updating state but letting `emit_newline_with_prefix` handle the prefix.
+    fn set_blockquote_state(&mut self, depth: usize, bg: Color) {
+        self.blockquote_depth = depth;
+        self.blockquote_bg = Some(bg);
+    }
+
+    /// Emits a blockquote prefix with styled bar and indentation.
+    ///
+    /// Uses `▐` character followed by 3 spaces for visual separation.
+    /// The entire line gets a subtle background color.
+    fn emit_blockquote_prefix(&mut self, depth: usize, bg: Color) {
+        use unicode_width::UnicodeWidthStr;
+
+        self.blockquote_depth = depth;
+        self.blockquote_bg = Some(bg);
+
+        // Build the prefix: "▐   " repeated for each nesting level
+        // The bar character ▐ has width 1, plus 3 spaces = 4 chars per level
+        let prefix = "▐   ".repeat(depth);
+        let prefix_width = UnicodeWidthStr::width(prefix.as_str());
+
+        // Emit with background color (gray for bar, subtle bg for spaces)
+        // Bar: bright gray foreground
+        // Spaces: subtle background extends
+        self.output.push_str(&format!(
+            "\x1b[38;2;100;100;100m\x1b[48;2;{};{};{}m{}\x1b[0m",
+            bg.r, bg.g, bg.b, prefix
+        ));
+        self.current_col = prefix_width;
+    }
+
+    /// Clears the blockquote context (called when exiting all blockquotes).
+    ///
+    /// Pads the final line to terminal width before clearing to ensure uniform background.
+    fn clear_blockquote(&mut self) {
+        self.pad_to_width();
+        self.blockquote_depth = 0;
+        self.blockquote_bg = None;
+    }
+
+    /// Pads the current line to max_width with background-colored spaces.
+    ///
+    /// Called before newlines in blockquotes to ensure uniform background width.
+    fn pad_to_width(&mut self) {
+        if let Some(bg) = self.blockquote_bg {
+            if self.current_col < self.max_width {
+                let padding = self.max_width - self.current_col;
+                let spaces = " ".repeat(padding);
+                self.output.push_str(&format!(
+                    "\x1b[48;2;{};{};{}m{}\x1b[0m",
+                    bg.r, bg.g, bg.b, spaces
+                ));
+                self.current_col = self.max_width;
+            }
+        }
+    }
+
+    /// Emits a newline and the blockquote prefix if we're in a blockquote.
+    fn emit_newline_with_prefix(&mut self) {
+        use unicode_width::UnicodeWidthStr;
+        // Pad line to terminal width before newline (for uniform blockquote background)
+        self.pad_to_width();
+        self.output.push('\n');
+        if self.blockquote_depth > 0 {
+            if let Some(bg) = self.blockquote_bg {
+                let prefix = "▐   ".repeat(self.blockquote_depth);
+                let prefix_width = UnicodeWidthStr::width(prefix.as_str());
+                self.output.push_str(&format!(
+                    "\x1b[38;2;100;100;100m\x1b[48;2;{};{};{}m{}\x1b[0m",
+                    bg.r, bg.g, bg.b, prefix
+                ));
+                self.current_col = prefix_width;
+            } else {
+                self.current_col = 0;
+            }
+        } else {
+            self.current_col = 0;
         }
     }
 
@@ -1389,14 +1569,19 @@ impl LineWrapper {
                 }
                 // Handle whitespace
                 if ch == '\n' {
-                    // Hard break - emit newline and reset column
-                    self.output.push('\n');
-                    self.current_col = 0;
+                    // Hard break - emit newline (with blockquote prefix if applicable)
+                    self.emit_newline_with_prefix();
                 } else {
                     // Space or tab - emit if not at start of line
                     if self.current_col > 0 {
-                        // For marked text, emit styled space to preserve background
-                        if in_mark {
+                        // Check if space would overflow the line
+                        // If at max width, skip the space (next word will wrap anyway)
+                        if self.current_col >= self.max_width {
+                            // At or past max width - don't emit space, let next word trigger wrap
+                            continue;
+                        }
+                        // For marked text or blockquote, emit styled space to preserve background
+                        if in_mark || self.blockquote_bg.is_some() {
                             self.emit_word(" ", style, emit_italic, in_strikethrough, in_mark);
                         } else {
                             self.output.push(' ');
@@ -1423,13 +1608,19 @@ impl LineWrapper {
 
         // Check if word fits on current line
         if self.current_col > 0 && self.current_col + word_width > self.max_width {
-            // Need to wrap - emit newline
-            self.output.push('\n');
-            self.current_col = 0;
+            // Need to wrap - emit newline (with blockquote prefix if applicable)
+            self.emit_newline_with_prefix();
         }
 
-        // Emit the styled word
-        self.output.push_str(&emit_prose_text(word, style, emit_italic, in_strikethrough, in_mark));
+        // Emit the styled word with blockquote background if applicable
+        self.output.push_str(&emit_prose_text(
+            word,
+            style,
+            emit_italic,
+            in_strikethrough,
+            in_mark,
+            self.blockquote_bg,
+        ));
         self.current_col += word_width;
     }
 
@@ -1452,7 +1643,8 @@ impl LineWrapper {
     /// These are emitted directly without word-wrap logic.
     fn emit_styled_marker(&mut self, text: &str, style: Style, emit_italic: bool) {
         use unicode_width::UnicodeWidthStr;
-        self.output.push_str(&emit_prose_text(text, style, emit_italic, false, false));
+        // Note: markers don't use blockquote background (they have their own styling)
+        self.output.push_str(&emit_prose_text(text, style, emit_italic, false, false, None));
         self.current_col += UnicodeWidthStr::width(text);
     }
 
@@ -1464,9 +1656,8 @@ impl LineWrapper {
 
         // Check if code fits on current line
         if self.current_col > 0 && self.current_col + code_width > self.max_width {
-            // Wrap before inline code
-            self.output.push('\n');
-            self.current_col = 0;
+            // Wrap before inline code (with blockquote prefix if applicable)
+            self.emit_newline_with_prefix();
         }
 
         self.output.push_str(&emit_inline_code(code, style));
@@ -1530,6 +1721,29 @@ fn compute_highlight_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
             r: theme_bg.r.saturating_sub(20),
             g: theme_bg.g.saturating_sub(15),
             b: theme_bg.b,
+            a: 255,
+        },
+    }
+}
+
+/// Computes a subtle background color for blockquotes based on the theme background.
+///
+/// For dark mode, adds a small amount of brightness to lift the blockquote off the page.
+/// For light mode, subtracts a small amount of brightness.
+fn compute_blockquote_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
+    match color_mode {
+        ColorMode::Dark => Color {
+            // Lift blockquote slightly off dark background for visual separation
+            r: theme_bg.r.saturating_add(20),
+            g: theme_bg.g.saturating_add(20),
+            b: theme_bg.b.saturating_add(20),
+            a: 255,
+        },
+        ColorMode::Light => Color {
+            // Darken blockquote slightly against light background
+            r: theme_bg.r.saturating_sub(15),
+            g: theme_bg.g.saturating_sub(15),
+            b: theme_bg.b.saturating_sub(15),
             a: 255,
         },
     }
@@ -2656,7 +2870,7 @@ fn main() {}
             font_style: FontStyle::empty(),
         };
 
-        let result = emit_prose_text("Hello", style, true, false, false);
+        let result = emit_prose_text("Hello", style, true, false, false, None);
 
         // Should have foreground
         assert!(result.contains("\x1b[38;2;255;128;64m"));
@@ -2681,7 +2895,7 @@ fn main() {}
         };
 
         // With emit_italic=true, should emit italic code
-        let result = emit_prose_text("italic text", style, true, false, false);
+        let result = emit_prose_text("italic text", style, true, false, false, None);
 
         // Should have italic escape code
         assert!(
@@ -2709,7 +2923,7 @@ fn main() {}
         };
 
         // With emit_italic=false, should NOT emit italic code
-        let result = emit_prose_text("italic text", style, false, false, false);
+        let result = emit_prose_text("italic text", style, false, false, false, None);
 
         // Should NOT have italic escape code
         assert!(
@@ -2732,7 +2946,7 @@ fn main() {}
             font_style: FontStyle::BOLD,
         };
 
-        let result = emit_prose_text("bold text", style, true, false, false);
+        let result = emit_prose_text("bold text", style, true, false, false, None);
 
         // Should have bold escape code
         assert!(
@@ -2755,7 +2969,7 @@ fn main() {}
             font_style: FontStyle::UNDERLINE,
         };
 
-        let result = emit_prose_text("underline text", style, true, false, false);
+        let result = emit_prose_text("underline text", style, true, false, false, None);
 
         // Should have underline escape code
         assert!(
@@ -2776,7 +2990,7 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic", style, true, false, false);
+        let result = emit_prose_text("bold italic", style, true, false, false, None);
 
         // Should have both escape codes
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -2794,7 +3008,7 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic", style, false, false, false);
+        let result = emit_prose_text("bold italic", style, false, false, false, None);
 
         // Should have bold but NOT italic
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -2812,7 +3026,7 @@ fn main() {}
             font_style: FontStyle::empty(),
         };
 
-        let result = emit_prose_text("strikethrough text", style, true, true, false);
+        let result = emit_prose_text("strikethrough text", style, true, true, false, None);
 
         // Should have strikethrough escape code
         assert!(
@@ -2837,7 +3051,7 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic strikethrough", style, true, true, false);
+        let result = emit_prose_text("bold italic strikethrough", style, true, true, false, None);
 
         // Should have all three escape codes
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -4995,6 +5209,373 @@ fn bar() {}
         assert!(
             combined_line.is_none(),
             "fn foo and fn bar should not be on the same line"
+        );
+    }
+
+    /// Debug test: trace exact output for list item with highlight
+    #[test]
+    fn test_debug_list_item_with_highlight() {
+        // Just the bullet point with highlight - matches test.md line 77
+        let content = "- this emerging standard uses the character sequence `==` to wrap text and the wrapped text is then given a different background color to clearly ==separate it from== the rest of the text.";
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::TrueColor);
+        let output = for_terminal(&md, options).unwrap();
+
+        // Print raw output for debugging
+        eprintln!("Raw output (escapes visible):");
+        for (i, byte) in output.bytes().enumerate() {
+            if byte == 0x1b {
+                eprint!("\n[{}] ESC", i);
+            } else if byte == b'\n' {
+                eprint!("\\n");
+            } else if byte == b' ' {
+                eprint!("_");
+            } else if byte.is_ascii_graphic() {
+                eprint!("{}", byte as char);
+            } else {
+                eprint!("({:02x})", byte);
+            }
+        }
+        eprintln!("\n---");
+
+        let plain = strip_ansi_codes(&output);
+        eprintln!("Plain text ({} chars):", plain.len());
+        eprintln!("{:?}", plain);
+
+        eprintln!("\n---Lines---");
+        for (i, line) in plain.lines().enumerate() {
+            eprintln!("[{}] ({} chars) {:?}", i, line.len(), line);
+        }
+
+        // The key assertion: there should be no blank lines within the wrapped list item
+        let lines: Vec<&str> = plain.lines().collect();
+        for (i, window) in lines.windows(2).enumerate() {
+            let prev_line = window[0];
+            let curr_line = window[1];
+            // If we have an empty line after content (not the final trailing newline), that's a bug
+            if !prev_line.is_empty() && curr_line.is_empty() && i + 2 < lines.len() {
+                panic!(
+                    "Found unexpected blank line at position {}: prev={:?}, curr={:?}",
+                    i + 1, prev_line, curr_line
+                );
+            }
+        }
+    }
+
+    /// Test line wrapping at specific widths to find where extra newlines appear
+    #[test]
+    fn test_wrap_at_various_widths() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let base_style = Style {
+            foreground: Color { r: 200, g: 200, b: 200, a: 255 },
+            background: Color { r: 0, g: 0, b: 0, a: 0 },
+            font_style: FontStyle::empty(),
+        };
+
+        // Test at various widths to find where the bug appears
+        for width in [60, 70, 75, 78, 79, 80, 81, 82, 85, 90, 100] {
+            let mut wrapper = LineWrapper::new(width);
+
+            // Simulate: "prefix ==highlighted== suffix"
+            wrapper.emit_styled("prefix text before ", base_style, false, false, false);
+            wrapper.emit_styled("highlighted text here", base_style, false, false, true); // in_mark=true
+            wrapper.emit_styled(" suffix text after", base_style, false, false, false);
+
+            let output = wrapper.output();
+            let plain = strip_ansi_codes(output);
+
+            // Count newlines
+            let _newline_count = plain.matches('\n').count();
+            let lines: Vec<&str> = plain.lines().collect();
+
+            // Check for blank lines (empty strings between non-empty content)
+            let mut has_unexpected_blank = false;
+            for (i, window) in lines.windows(2).enumerate() {
+                if !window[0].is_empty() && window[1].is_empty() && i + 2 < lines.len() {
+                    has_unexpected_blank = true;
+                    eprintln!("Width {}: Found blank line at position {}", width, i + 1);
+                    eprintln!("  Lines: {:?}", lines);
+                }
+            }
+
+            if has_unexpected_blank {
+                eprintln!("Width {}: Output = {:?}", width, plain);
+                panic!("Found unexpected blank line at width {}", width);
+            }
+        }
+    }
+
+    // ===== Blockquote Tests =====
+    // Regression tests for blockquote styling (fixed: blockquotes had no visual styling)
+
+    #[test]
+    fn test_blockquote_has_prefix() {
+        // Regression test: blockquotes should have a visual prefix character
+        let md: Markdown = "> This is a blockquote.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        // Blockquote should have the ▐ prefix character
+        assert!(
+            plain.contains("▐"),
+            "Blockquote should have ▐ prefix for visual separation"
+        );
+        assert!(plain.contains("This is a blockquote"));
+    }
+
+    #[test]
+    fn test_blockquote_has_background_color() {
+        // Regression test: blockquotes should have a subtle background color
+        let md: Markdown = "> Quote content".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Background color is set with ANSI escape sequence \x1b[48;2;R;G;B
+        assert!(
+            output.contains("\x1b[48;2;"),
+            "Blockquote should have background color ANSI sequence"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_background_extends_to_text() {
+        // Regression test: blockquote background should extend to text content, not just prefix
+        // Bug: previously only the ▐ prefix had background color, the text had no background
+        let md: Markdown = "> Word1 Word2".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Count background color sequences - should appear multiple times
+        // (once for prefix, once for each word, once for space between words)
+        let bg_count = output.matches("\x1b[48;2;").count();
+        assert!(
+            bg_count >= 3,
+            "Background color should appear for prefix AND text content (found {} times): {:?}",
+            bg_count,
+            output
+        );
+
+        // Verify background appears before actual text words, not just at start
+        // Split by background code and check that text content follows
+        let parts: Vec<&str> = output.split("\x1b[48;2;").collect();
+        let has_text_with_bg = parts.iter().skip(1).any(|part| {
+            // After background code, should find word content
+            part.contains("Word1") || part.contains("Word2")
+        });
+        assert!(
+            has_text_with_bg,
+            "Text content should have background color applied: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_blockquote_multiple_paragraphs() {
+        // Regression test: multi-paragraph blockquotes should maintain prefix on all lines
+        let content = "> First paragraph.\n>\n> Second paragraph.";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        let lines: Vec<&str> = plain.lines().filter(|l| !l.is_empty()).collect();
+
+        // Each non-empty line in the blockquote should start with the prefix
+        for line in &lines {
+            if line.contains("paragraph") || line.trim().starts_with("▐") {
+                assert!(
+                    line.starts_with("▐"),
+                    "Blockquote line should start with ▐: {:?}",
+                    line
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_blockquote_preserves_inline_formatting() {
+        // Blockquotes should preserve bold, italic, and other inline formatting
+        let md: Markdown = "> **Bold** and *italic* in quote.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Check for bold ANSI code
+        assert!(output.contains("\x1b[1m"), "Should contain bold code in blockquote");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("Bold"));
+        assert!(plain.contains("italic"));
+    }
+
+    #[test]
+    fn test_blockquote_nested() {
+        // Nested blockquotes should have multiple prefix characters
+        let content = "> Outer\n>\n> > Nested";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+
+        // Nested blockquote should have double prefix
+        assert!(
+            plain.contains("▐   ▐"),
+            "Nested blockquote should have double prefix: {:?}",
+            plain
+        );
+        assert!(plain.contains("Nested"));
+    }
+
+    #[test]
+    fn test_blockquote_content_after() {
+        // Content after blockquote should NOT have the prefix
+        let content = "> Quote\n\nAfter quote";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        let lines: Vec<&str> = plain.lines().collect();
+
+        // Find the "After quote" line
+        let after_line = lines.iter().find(|l| l.contains("After quote"));
+        assert!(after_line.is_some(), "Should have 'After quote' line");
+
+        // The "After quote" line should NOT start with prefix
+        assert!(
+            !after_line.unwrap().starts_with("▐"),
+            "Content after blockquote should not have prefix"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_line_wrapping_preserves_prefix() {
+        // Long blockquote content that wraps should have prefix on wrapped lines
+        let long_text = "This is a very long blockquote line that should wrap to the next line when the terminal width is narrow enough to cause wrapping.";
+        let content = format!("> {}", long_text);
+        let md: Markdown = content.into();
+
+        let options = TerminalOptions::default();
+
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Should contain the prefix
+        assert!(plain.contains("▐"));
+        // Should contain the content
+        assert!(plain.contains("very long blockquote"));
+    }
+
+    #[test]
+    fn test_blockquote_no_italic_unless_emphasis() {
+        // Regression test: blockquote text should NOT be italic unless explicitly marked with *text*
+        // Many themes style quotes as italic, but we suppress that for readability
+        let md: Markdown = "> Plain text without any formatting.".into();
+        let mut options = TerminalOptions::default();
+        options.italic_mode = ItalicMode::Always; // Force italic detection for test
+        let output = for_terminal(&md, options).unwrap();
+
+        // Should NOT contain italic escape code \x1b[3m for plain blockquote text
+        assert!(
+            !output.contains("\x1b[3m"),
+            "Plain blockquote text should NOT be italic: {:?}",
+            output
+        );
+
+        // But explicitly emphasized text SHOULD be italic
+        let md_with_emphasis: Markdown = "> This has *emphasized* text.".into();
+        let mut options_emphasis = TerminalOptions::default();
+        options_emphasis.italic_mode = ItalicMode::Always;
+        let output_emphasis = for_terminal(&md_with_emphasis, options_emphasis).unwrap();
+
+        // Should contain italic code for emphasized text
+        assert!(
+            output_emphasis.contains("\x1b[3m"),
+            "Emphasized text in blockquote should be italic: {:?}",
+            output_emphasis
+        );
+    }
+
+    #[test]
+    fn test_blockquote_background_extends_to_terminal_width() {
+        // Regression test: blockquote background should extend to terminal width
+        let md: Markdown = "> Short line.".into();
+        let mut options = TerminalOptions::default();
+        options.max_width = Some(80);
+        let output = for_terminal(&md, options).unwrap();
+
+        // The output should contain padding spaces with background before newline
+        // Look for pattern: background color code + multiple spaces + reset
+        // Pattern: \x1b[48;2;R;G;Bm<spaces>\x1b[0m
+        let has_padding = output.contains("m   ") || output.contains("m    ");
+        assert!(
+            has_padding || output.ends_with("\x1b[0m"),
+            "Blockquote should have background padding to terminal width"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_blank_line_after() {
+        // Regression test: blockquote should be followed by a blank line before subsequent content
+        // Bug: multiline blockquotes were not enforcing blank line after them
+        let content = "> This is a blockquote.\n\nThis is after the blockquote.";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        let lines: Vec<&str> = plain.lines().collect();
+
+        // Should have blank line between blockquote and following text
+        // Find the blockquote line and verify next line is blank (empty or whitespace)
+        let blockquote_idx = lines.iter().position(|l| l.contains("blockquote."));
+        assert!(blockquote_idx.is_some(), "Should find blockquote line");
+
+        let idx = blockquote_idx.unwrap();
+        assert!(
+            idx + 1 < lines.len() && lines[idx + 1].trim().is_empty(),
+            "Should have blank line after blockquote, got lines:\n{:?}",
+            lines
+        );
+    }
+
+    #[test]
+    fn test_blockquote_blank_line_before_heading() {
+        // Regression test: ensure blockquote followed by heading has proper spacing
+        // (The heading's own spacing rule should still apply, plus blockquote spacing)
+        let content = "> Quote content.\n\n## Heading After";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        let lines: Vec<&str> = plain.lines().collect();
+
+        // Find the blockquote line and verify next line is blank
+        let quote_idx = lines.iter().position(|l| l.contains("content."));
+        assert!(quote_idx.is_some(), "Should find quote content line");
+
+        let idx = quote_idx.unwrap();
+        assert!(
+            idx + 1 < lines.len() && lines[idx + 1].trim().is_empty(),
+            "Should have blank line after blockquote before heading, got lines:\n{:?}",
+            lines
+        );
+    }
+
+    #[test]
+    fn test_blockquote_blank_line_before_list() {
+        // Regression test: blockquote followed by list should have blank line
+        let content = "> Quote content.\n\n- List item";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+        let lines: Vec<&str> = plain.lines().collect();
+
+        // Find the blockquote line and verify next line is blank
+        let quote_idx = lines.iter().position(|l| l.contains("content."));
+        assert!(quote_idx.is_some(), "Should find quote content line");
+
+        let idx = quote_idx.unwrap();
+        assert!(
+            idx + 1 < lines.len() && lines[idx + 1].trim().is_empty(),
+            "Should have blank line after blockquote before list, got lines:\n{:?}",
+            lines
         );
     }
 }

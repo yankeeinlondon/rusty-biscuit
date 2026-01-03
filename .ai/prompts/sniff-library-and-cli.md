@@ -54,6 +54,13 @@ This area, unlike the other two, is sensitive to a particular directory. By defa
         - The list of branches locally and remotely
         - each with their last commit hash and last commit date
 
+- Repo Root
+    - Assuming the directory is in a git repo, this will find the repo's root directory
+    - if not in a repo then `None`
+- Monorepo Analysis
+    - Identify if the directory is a part of a monorepo
+    - If it is identify what monorepo standard is being used (npm workspaces, pnpm workspaces, Nx, Bazel, Pants, Gradle, etc.)
+
 ### Aggregating all Sniff Categories
 
 - the `detect()` utility function in @sniff/lib/src/lib.rs is meant to be a common way for people to interact with the Sniff Module. It will gather information from all three areas above.

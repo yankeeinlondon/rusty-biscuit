@@ -482,5 +482,50 @@ mod tests {
             .any(|e| matches!(e, InlineEvent::End(InlineTag::Mark)));
         assert!(has_end);
     }
+
+    /// Test the exact content from test.md line 77 that shows the bug
+    #[test]
+    fn test_line77_inline_code_with_highlight() {
+        let content = "- this emerging standard uses the character sequence `==` to wrap text and the wrapped text is then given a different background color to clearly ==separate it from== the rest of the text.";
+        let events = process_text(content);
+
+        // Debug: print all events
+        eprintln!("Events:");
+        for (i, e) in events.iter().enumerate() {
+            eprintln!("[{}] {:?}", i, e);
+        }
+
+        // Should have exactly one pair of mark events (for "separate it from")
+        let start_count = events
+            .iter()
+            .filter(|e| matches!(e, InlineEvent::Start(InlineTag::Mark)))
+            .count();
+        let end_count = events
+            .iter()
+            .filter(|e| matches!(e, InlineEvent::End(InlineTag::Mark)))
+            .count();
+
+        assert_eq!(
+            start_count, 1,
+            "Should have exactly 1 Start(Mark) for 'separate it from', got {}",
+            start_count
+        );
+        assert_eq!(
+            end_count, 1,
+            "Should have exactly 1 End(Mark), got {}",
+            end_count
+        );
+
+        // The inline code `==` should NOT produce mark events
+        let code_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, InlineEvent::Standard(Event::Code(_))))
+            .collect();
+        assert_eq!(
+            code_events.len(),
+            1,
+            "Should have exactly 1 Code event for `==`"
+        );
+    }
 }
 

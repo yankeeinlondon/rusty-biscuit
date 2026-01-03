@@ -76,4 +76,13 @@ Unlike the strikethrough functionality, the **highlight** feature for Markdown l
 
 - this emerging standard uses the character sequence `==` to wrap text and the wrapped text is then given a different background color to clearly ==separate it from== the rest of the text.
 
+## Block Quotes
 
+Block quotes are trigger by the use of the `>` character at the beginning of a line. Visually the are indented from the left side but with a vertical line running along the left-hand side to clearly demarcate the quote's line scope:
+
+> Ut faucibus mauris mauris, sed tincidunt augue hendrerit eu. In ultrices ultrices commodo. Sed ipsum metus, luctus vel faucibus sed, bibendum at erat. Suspendisse vulputate leo velit, ut interdum ante volutpat in. Cras cursus dui in est congue, non semper diam bibendum. Suspendisse sagittis vel ex vel suscipit. Phasellus eu dignissim metus, eu eleifend quam. Integer ac venenatis nibh. Proin vel ipsum eget tellus varius aliquet. Suspendisse a rutrum lacus.
+
+
+This same text is rendered in the VSCode previewer as:
+
+![VSCode's rendering](vscode-blockquote.png)
