@@ -2,7 +2,7 @@ set dotenv-load
 set positional-arguments
 
 # List of areas in this monorepo
-areas := "shared research so-you-say mat"
+areas := "shared research so-you-say mat sniff"
 
 BOLD := '\033[1m'
 RESET := '\033[0m'
@@ -78,6 +78,17 @@ install:
         fi
     done
 
+# executes the latest MD CLI code in debug mode
+md *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ""
+    echo -e "{{BOLD}}MD CLI{{RESET}} (latest debug build)"
+    echo -e "--------------------------------------------"
+    cd mat 2>/dev/null
+    cargo run {{args}}
+
+# executes the latest Research CLI code in debug mode
 research *args="":
     #!/usr/bin/env bash
     set -euo pipefail
