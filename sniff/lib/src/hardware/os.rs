@@ -8,8 +8,13 @@ use serde::{Deserialize, Serialize};
 pub struct OsInfo {
     /// Operating system name (e.g., "macOS", "Linux", "Windows")
     pub name: String,
-    /// Operating system version
+    /// Operating system version (short form)
     pub version: String,
+    /// Long OS version with additional details (e.g., "macOS 14.5 Sonoma")
+    pub long_version: Option<String>,
+    /// Linux distribution ID (e.g., "ubuntu", "fedora", "arch")
+    /// None on non-Linux systems
+    pub distribution: Option<String>,
     /// Kernel version
     pub kernel: String,
     /// System architecture (e.g., "x86_64", "aarch64")

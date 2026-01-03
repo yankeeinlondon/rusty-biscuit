@@ -56,11 +56,19 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
             .with_memory(MemoryRefreshKind::everything()),
     );
 
+    // Helper to convert empty strings to None
+    let non_empty = |s: String| if s.is_empty() { None } else { Some(s) };
+
     let os = OsInfo {
         name: System::name().unwrap_or_default(),
         version: System::os_version().unwrap_or_default(),
+        long_version: System::long_os_version(),
+        distribution: non_empty(System::distribution_id()),
         kernel: System::kernel_version().unwrap_or_default(),
-        arch: std::env::consts::ARCH.to_string(),
+        arch: {
+            let arch = System::cpu_arch();
+            if arch.is_empty() { std::env::consts::ARCH.to_string() } else { arch }
+        },
         hostname: System::host_name().unwrap_or_default(),
     };
 

@@ -2,7 +2,15 @@ use sniff_lib::SniffResult;
 
 pub fn print_text(result: &SniffResult) {
     println!("=== Hardware ===");
-    println!("OS: {} {}", result.hardware.os.name, result.hardware.os.version);
+    // Prefer long_version if available, otherwise fall back to name + version
+    if let Some(ref long_ver) = result.hardware.os.long_version {
+        println!("OS: {}", long_ver);
+    } else {
+        println!("OS: {} {}", result.hardware.os.name, result.hardware.os.version);
+    }
+    if let Some(ref distro) = result.hardware.os.distribution {
+        println!("Distribution: {}", distro);
+    }
     println!("Kernel: {}", result.hardware.os.kernel);
     println!("Architecture: {}", result.hardware.os.arch);
     println!("Hostname: {}", result.hardware.os.hostname);
