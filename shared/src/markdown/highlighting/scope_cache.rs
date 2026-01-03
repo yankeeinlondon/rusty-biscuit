@@ -16,6 +16,7 @@ pub struct ScopeCache {
     pub heading: Scope,
     pub bold: Scope,
     pub italic: Scope,
+    pub strikethrough: Scope,
     pub quote: Scope,
     pub link: Scope,
     pub code_inline: Scope,
@@ -39,6 +40,8 @@ impl ScopeCache {
                 .expect("Invalid hardcoded scope: markup.bold.markdown"),
             italic: Scope::new("markup.italic.markdown")
                 .expect("Invalid hardcoded scope: markup.italic.markdown"),
+            strikethrough: Scope::new("markup.strikethrough.markdown")
+                .expect("Invalid hardcoded scope: markup.strikethrough.markdown"),
             quote: Scope::new("markup.quote.markdown")
                 .expect("Invalid hardcoded scope: markup.quote.markdown"),
             link: Scope::new("markup.underline.link.markdown")
@@ -63,6 +66,7 @@ impl ScopeCache {
             Tag::Heading { .. } => Some(self.heading),
             Tag::Strong => Some(self.bold),
             Tag::Emphasis => Some(self.italic),
+            Tag::Strikethrough => Some(self.strikethrough),
             Tag::BlockQuote(_) => Some(self.quote),
             Tag::Link { .. } => Some(self.link),
             Tag::List(_) => Some(self.list),
@@ -149,5 +153,15 @@ mod tests {
         let scope = cache.scope_for_tag(&tag);
         assert!(scope.is_some());
         assert_eq!(scope.unwrap(), cache.link);
+    }
+
+    #[test]
+    fn test_scope_for_tag_strikethrough() {
+        let cache = ScopeCache::global();
+        let tag = Tag::Strikethrough;
+        let scope = cache.scope_for_tag(&tag);
+        assert!(scope.is_some(), "Strikethrough tag should have a scope");
+        assert_eq!(scope.unwrap(), cache.strikethrough);
+        assert_eq!(scope.unwrap().to_string(), "markup.strikethrough.markdown");
     }
 }

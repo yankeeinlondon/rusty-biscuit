@@ -28,7 +28,7 @@ use crate::markdown::{Markdown, MarkdownResult};
 use crate::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
 use crate::markdown::dsl::parse_code_info;
 use html_escape;
-use pulldown_cmark::{Event, Parser, Tag, CodeBlockKind, TagEnd};
+use pulldown_cmark::{Event, Options, Parser, Tag, CodeBlockKind, TagEnd};
 use syntect::easy::HighlightLines;
 use syntect::util::LinesWithEndings;
 
@@ -105,8 +105,8 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
         output.push_str(&generate_styles(&code_highlighter, &options));
     }
 
-    // Parse markdown content
-    let parser = Parser::new(md.content());
+    // Parse markdown content with GFM strikethrough extension
+    let parser = Parser::new_ext(md.content(), Options::ENABLE_STRIKETHROUGH);
 
     // Track state for code blocks
     let mut in_code_block = false;
@@ -183,6 +183,12 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             }
             Event::End(TagEnd::Emphasis) => {
                 output.push_str("</em>");
+            }
+            Event::Start(Tag::Strikethrough) => {
+                output.push_str("<del>");
+            }
+            Event::End(TagEnd::Strikethrough) => {
+                output.push_str("</del>");
             }
             Event::Start(Tag::List(None)) => {
                 output.push_str("<ul>\n");
@@ -620,5 +626,63 @@ fn main() {}
         assert!(html.contains("<ol>"));
         assert!(html.contains("First"));
         assert!(html.contains("</ol>"));
+    }
+
+    #[test]
+    fn test_html_strikethrough_basic() {
+        let md: Markdown = "This is ~~strikethrough~~ text.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(html.contains("<del>"), "Should contain opening del tag");
+        assert!(html.contains("</del>"), "Should contain closing del tag");
+        assert!(html.contains("strikethrough"));
+    }
+
+    #[test]
+    fn test_html_strikethrough_nested() {
+        let md: Markdown = "This is **~~bold strikethrough~~** text.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(html.contains("<strong>"), "Should contain strong tag");
+        assert!(html.contains("<del>"), "Should contain del tag");
+        assert!(html.contains("</del>"), "Should contain closing del tag");
+        assert!(html.contains("</strong>"), "Should contain closing strong tag");
+        assert!(html.contains("bold strikethrough"));
+    }
+
+    #[test]
+    fn test_html_no_strikethrough_without_markers() {
+        let md: Markdown = "This is normal text without strikethrough.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(!html.contains("<del>"), "Should not contain del tag for normal text");
+    }
+
+    #[test]
+    fn test_html_strikethrough_unclosed() {
+        let md: Markdown = "This has ~~unclosed strikethrough markers.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        // Unclosed markers should be rendered literally, not as strikethrough
+        assert!(html.contains("~~unclosed"), "Unclosed markers should render literally");
+    }
+
+    #[test]
+    fn test_html_strikethrough_multiple() {
+        let md: Markdown = "This has ~~one~~ and ~~two~~ strikethroughs.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        // Should contain multiple del tags
+        let del_count = html.matches("<del>").count();
+        assert!(del_count >= 2, "Should contain at least 2 del tags for multiple strikethroughs");
+        assert!(html.contains("one"));
+        assert!(html.contains("two"));
+    }
+
+    #[test]
+    fn test_html_strikethrough_preserves_other_styles() {
+        let md: Markdown = "This has **bold** and ~~strikethrough~~ text.".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(html.contains("<strong>"), "Should contain strong tag");
+        assert!(html.contains("</strong>"), "Should contain closing strong tag");
+        assert!(html.contains("<del>"), "Should contain del tag");
+        assert!(html.contains("</del>"), "Should contain closing del tag");
+        assert!(html.contains("bold"));
+        assert!(html.contains("strikethrough"));
     }
 }

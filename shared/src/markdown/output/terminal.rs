@@ -547,7 +547,7 @@ pub fn write_terminal<W: std::io::Write>(
     let mut scope_stack: Vec<Scope> = vec![prose_highlighter.base_scope()];
 
     // Enable table parsing extension
-    let parser = Parser::new_ext(md.content(), Options::ENABLE_TABLES);
+    let parser = Parser::new_ext(md.content(), Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH);
     let mut in_code_block = false;
     let mut code_buffer = String::new();
     let mut code_language = String::new();
@@ -578,6 +578,7 @@ pub fn write_terminal<W: std::io::Write>(
     // Some themes don't set font_style for markup scopes, so we track this explicitly
     let mut in_emphasis = false;
     let mut in_strong = false;
+    let mut in_strikethrough = false;
 
     for event in parser {
         match event {
@@ -689,6 +690,17 @@ pub fn write_terminal<W: std::io::Write>(
                 scope_stack.pop();
             }
 
+            Event::Start(ref tag @ Tag::Strikethrough) => {
+                in_strikethrough = true;
+                if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
+                    scope_stack.push(scope);
+                }
+            }
+            Event::End(TagEnd::Strikethrough) => {
+                in_strikethrough = false;
+                scope_stack.pop();
+            }
+
             Event::Start(ref tag @ Tag::Link { .. }) => {
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
@@ -764,12 +776,13 @@ pub fn write_terminal<W: std::io::Write>(
                     // For emphasis/strong: use parent color, only change font style
                     use syntect::highlighting::FontStyle;
 
-                    let mut style = if in_emphasis || in_strong {
-                        // Compute style from parent scopes (exclude emphasis/strong scopes)
+                    let mut style = if in_emphasis || in_strong || in_strikethrough {
+                        // Compute style from parent scopes (exclude emphasis/strong/strikethrough scopes)
                         // to preserve the parent's color
                         let parent_depth = scope_stack.len()
                             - (in_emphasis as usize)
-                            - (in_strong as usize);
+                            - (in_strong as usize)
+                            - (in_strikethrough as usize);
                         let parent_scopes = &scope_stack[..parent_depth.max(1)];
                         let tag = Tag::Paragraph;
                         prose_highlighter.style_for_tag(&tag, parent_scopes)
@@ -789,7 +802,7 @@ pub fn write_terminal<W: std::io::Write>(
                     }
 
                     // Use LineWrapper for proper word wrapping
-                    wrapper.emit_styled(&text, style, emit_italic);
+                    wrapper.emit_styled(&text, style, emit_italic, in_strikethrough);
                 }
             }
 
@@ -917,13 +930,14 @@ pub fn write_terminal<W: std::io::Write>(
 /// * `text` - The text content to emit
 /// * `style` - The syntect style including foreground color and font styles
 /// * `emit_italic` - Whether to emit italic escape codes when font_style contains ITALIC
-fn emit_prose_text(text: &str, style: Style, emit_italic: bool) -> String {
+/// * `in_strikethrough` - Whether to apply strikethrough formatting
+fn emit_prose_text(text: &str, style: Style, emit_italic: bool, in_strikethrough: bool) -> String {
     use syntect::highlighting::FontStyle;
 
     let fg = style.foreground;
     let mut result = String::new();
 
-    // Apply font styles (bold=1, italic=3, underline=4)
+    // Apply font styles (bold=1, italic=3, underline=4, strikethrough=9)
     if style.font_style.contains(FontStyle::BOLD) {
         result.push_str("\x1b[1m");
     }
@@ -932,6 +946,9 @@ fn emit_prose_text(text: &str, style: Style, emit_italic: bool) -> String {
     }
     if style.font_style.contains(FontStyle::UNDERLINE) {
         result.push_str("\x1b[4m");
+    }
+    if in_strikethrough {
+        result.push_str("\x1b[9m");
     }
 
     // Apply foreground color and text
@@ -1329,7 +1346,7 @@ impl LineWrapper {
     /// * `text` - The plain text to emit
     /// * `style` - The syntect style for coloring
     /// * `emit_italic` - Whether to emit italic escape codes
-    fn emit_styled(&mut self, text: &str, style: Style, emit_italic: bool) {
+    fn emit_styled(&mut self, text: &str, style: Style, emit_italic: bool, in_strikethrough: bool) {
         // Split into segments, preserving whitespace
         // We iterate over whitespace-separated words, handling spaces between them
         let mut chars = text.chars().peekable();
@@ -1339,7 +1356,7 @@ impl LineWrapper {
             if ch.is_whitespace() {
                 // Emit accumulated word first
                 if !current_word.is_empty() {
-                    self.emit_word(&current_word, style, emit_italic);
+                    self.emit_word(&current_word, style, emit_italic, in_strikethrough);
                     current_word.clear();
                 }
                 // Handle whitespace
@@ -1361,12 +1378,12 @@ impl LineWrapper {
 
         // Emit any remaining word
         if !current_word.is_empty() {
-            self.emit_word(&current_word, style, emit_italic);
+            self.emit_word(&current_word, style, emit_italic, in_strikethrough);
         }
     }
 
     /// Emits a single word, wrapping if necessary.
-    fn emit_word(&mut self, word: &str, style: Style, emit_italic: bool) {
+    fn emit_word(&mut self, word: &str, style: Style, emit_italic: bool, in_strikethrough: bool) {
         use unicode_width::UnicodeWidthStr;
 
         let word_width = UnicodeWidthStr::width(word);
@@ -1379,7 +1396,7 @@ impl LineWrapper {
         }
 
         // Emit the styled word
-        self.output.push_str(&emit_prose_text(word, style, emit_italic));
+        self.output.push_str(&emit_prose_text(word, style, emit_italic, in_strikethrough));
         self.current_col += word_width;
     }
 
@@ -1402,7 +1419,7 @@ impl LineWrapper {
     /// These are emitted directly without word-wrap logic.
     fn emit_styled_marker(&mut self, text: &str, style: Style, emit_italic: bool) {
         use unicode_width::UnicodeWidthStr;
-        self.output.push_str(&emit_prose_text(text, style, emit_italic));
+        self.output.push_str(&emit_prose_text(text, style, emit_italic, false));
         self.current_col += UnicodeWidthStr::width(text);
     }
 
@@ -1790,6 +1807,108 @@ fn main() {}
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("First paragraph"));
         assert!(plain.contains("Second paragraph"));
+    }
+
+    #[test]
+    fn test_terminal_strikethrough_basic() {
+        let md: Markdown = "This is ~~strikethrough~~ text.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain strikethrough ANSI code \x1b[9m
+        assert!(output.contains("\x1b[9m"), "Should contain strikethrough ANSI code");
+
+        // Content should be present when stripped
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("strikethrough"));
+    }
+
+    #[test]
+    fn test_terminal_strikethrough_nested_bold() {
+        let md: Markdown = "This is **~~bold strikethrough~~** text.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain both bold and strikethrough codes
+        assert!(output.contains("\x1b[1m"), "Should contain bold code");
+        assert!(output.contains("\x1b[9m"), "Should contain strikethrough code");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("bold strikethrough"));
+    }
+
+    #[test]
+    fn test_terminal_strikethrough_nested_italic() {
+        let md: Markdown = "This is *~~italic strikethrough~~* text.".into();
+        let mut options = TerminalOptions::default();
+        options.italic_mode = ItalicMode::Always;
+        let output = for_terminal(&md, options).unwrap();
+
+        // Should contain both italic and strikethrough codes
+        assert!(output.contains("\x1b[3m"), "Should contain italic code");
+        assert!(output.contains("\x1b[9m"), "Should contain strikethrough code");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("italic strikethrough"));
+    }
+
+    #[test]
+    fn test_terminal_strikethrough_all_styles() {
+        let md: Markdown = "This is ***~~all styles~~*** text.".into();
+        let mut options = TerminalOptions::default();
+        options.italic_mode = ItalicMode::Always;
+        let output = for_terminal(&md, options).unwrap();
+
+        // Should contain bold, italic, and strikethrough codes
+        assert!(output.contains("\x1b[1m"), "Should contain bold code");
+        assert!(output.contains("\x1b[3m"), "Should contain italic code");
+        assert!(output.contains("\x1b[9m"), "Should contain strikethrough code");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("all styles"));
+    }
+
+    #[test]
+    fn test_terminal_no_strikethrough_without_markers() {
+        let md: Markdown = "This is normal text without strikethrough.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should NOT contain strikethrough ANSI code
+        assert!(!output.contains("\x1b[9m"), "Should not contain strikethrough code for normal text");
+    }
+
+    #[test]
+    fn test_terminal_strikethrough_unclosed() {
+        let md: Markdown = "This has ~~unclosed strikethrough markers.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Unclosed markers should be rendered literally, not as strikethrough
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("~~unclosed"), "Unclosed markers should render literally");
+    }
+
+    #[test]
+    fn test_terminal_strikethrough_multiple() {
+        let md: Markdown = "This has ~~one~~ and ~~two~~ strikethroughs.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain strikethrough code (at least once, possibly multiple times)
+        assert!(output.contains("\x1b[9m"), "Should contain strikethrough code");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("one"));
+        assert!(plain.contains("two"));
+    }
+
+    #[test]
+    fn test_terminal_strikethrough_in_list() {
+        let md: Markdown = "- ~~completed item~~\n- active item".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain strikethrough code
+        assert!(output.contains("\x1b[9m"), "Strikethrough should work in list items");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("completed item"));
+        assert!(plain.contains("active item"));
     }
 
     #[test]
@@ -2394,7 +2513,7 @@ fn main() {}
             font_style: FontStyle::empty(),
         };
 
-        let result = emit_prose_text("Hello", style, true);
+        let result = emit_prose_text("Hello", style, true, false);
 
         // Should have foreground
         assert!(result.contains("\x1b[38;2;255;128;64m"));
@@ -2419,7 +2538,7 @@ fn main() {}
         };
 
         // With emit_italic=true, should emit italic code
-        let result = emit_prose_text("italic text", style, true);
+        let result = emit_prose_text("italic text", style, true, false);
 
         // Should have italic escape code
         assert!(
@@ -2447,7 +2566,7 @@ fn main() {}
         };
 
         // With emit_italic=false, should NOT emit italic code
-        let result = emit_prose_text("italic text", style, false);
+        let result = emit_prose_text("italic text", style, false, false);
 
         // Should NOT have italic escape code
         assert!(
@@ -2470,7 +2589,7 @@ fn main() {}
             font_style: FontStyle::BOLD,
         };
 
-        let result = emit_prose_text("bold text", style, true);
+        let result = emit_prose_text("bold text", style, true, false);
 
         // Should have bold escape code
         assert!(
@@ -2493,7 +2612,7 @@ fn main() {}
             font_style: FontStyle::UNDERLINE,
         };
 
-        let result = emit_prose_text("underline text", style, true);
+        let result = emit_prose_text("underline text", style, true, false);
 
         // Should have underline escape code
         assert!(
@@ -2514,7 +2633,7 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic", style, true);
+        let result = emit_prose_text("bold italic", style, true, false);
 
         // Should have both escape codes
         assert!(result.contains("\x1b[1m"), "Should have bold");
@@ -2532,11 +2651,55 @@ fn main() {}
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
-        let result = emit_prose_text("bold italic", style, false);
+        let result = emit_prose_text("bold italic", style, false, false);
 
         // Should have bold but NOT italic
         assert!(result.contains("\x1b[1m"), "Should have bold");
         assert!(!result.contains("\x1b[3m"), "Should NOT have italic when emit_italic=false");
+    }
+
+    /// Test: strikethrough text should include ANSI strikethrough escape code (\x1b[9m).
+    #[test]
+    fn test_emit_prose_text_strikethrough() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
+            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            font_style: FontStyle::empty(),
+        };
+
+        let result = emit_prose_text("strikethrough text", style, true, true);
+
+        // Should have strikethrough escape code
+        assert!(
+            result.contains("\x1b[9m"),
+            "Strikethrough text should include \\x1b[9m escape code, got: {:?}",
+            result
+        );
+        // Should have foreground color
+        assert!(result.contains("\x1b[38;2;255;128;64m"));
+        // Should end with reset
+        assert!(result.contains("\x1b[0m"));
+    }
+
+    /// Test: strikethrough combined with bold and italic.
+    #[test]
+    fn test_emit_prose_text_strikethrough_combined() {
+        use syntect::highlighting::{Color, FontStyle, Style};
+
+        let style = Style {
+            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
+            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            font_style: FontStyle::BOLD | FontStyle::ITALIC,
+        };
+
+        let result = emit_prose_text("bold italic strikethrough", style, true, true);
+
+        // Should have all three escape codes
+        assert!(result.contains("\x1b[1m"), "Should have bold");
+        assert!(result.contains("\x1b[3m"), "Should have italic");
+        assert!(result.contains("\x1b[9m"), "Should have strikethrough");
     }
 
     #[test]
@@ -2652,6 +2815,23 @@ fn main() {}
         // Plain text should have the bold content
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("bold text"));
+    }
+
+    #[test]
+    fn test_for_terminal_strikethrough_styled() {
+        let md: Markdown = "Some ~~strikethrough text~~ here.".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Should contain ANSI strikethrough escape code (\x1b[9m)
+        assert!(
+            output.contains("\x1b[9m"),
+            "Strikethrough markdown should produce \\x1b[9m escape code, got: {:?}",
+            output
+        );
+
+        // Plain text should have the strikethrough content
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("strikethrough text"));
     }
 
     #[test]
@@ -4316,7 +4496,7 @@ fn line6() {}
 
         // Create wrapper with narrow width
         let mut wrapper = LineWrapper::new(20);
-        wrapper.emit_styled("Hello world this is a test", style, false);
+        wrapper.emit_styled("Hello world this is a test", style, false, false);
 
         let output = wrapper.into_output();
         let plain = strip_ansi_codes(&output);
@@ -4419,9 +4599,9 @@ fn line6() {}
         };
 
         let mut wrapper = LineWrapper::new(40);
-        wrapper.emit_styled("This has ", bold_style, true);
-        wrapper.emit_styled("mixed styles", italic_style, true);
-        wrapper.emit_styled(" in one line", bold_style, true);
+        wrapper.emit_styled("This has ", bold_style, true, false);
+        wrapper.emit_styled("mixed styles", italic_style, true, false);
+        wrapper.emit_styled(" in one line", bold_style, true, false);
 
         let output = wrapper.into_output();
 
