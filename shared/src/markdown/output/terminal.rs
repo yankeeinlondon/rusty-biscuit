@@ -540,7 +540,8 @@ pub fn write_terminal<W: std::io::Write>(
     );
     let prose_highlighter = ProseHighlighter::new(&prose_syntect_theme);
 
-    let mut output = String::with_capacity(md.content().len() * 2);
+    // Use LineWrapper for proper word wrapping at terminal width
+    let mut wrapper = LineWrapper::new(terminal_width as usize);
 
     // Track scope stack for prose highlighting (functional style)
     let mut scope_stack: Vec<Scope> = vec![prose_highlighter.base_scope()];
@@ -615,8 +616,8 @@ pub fn write_terminal<W: std::io::Write>(
                     options.color_mode,
                     terminal_width,
                 );
-                output.push_str(&header);
-                output.push('\n');
+                wrapper.push_with_newlines(&header);
+                wrapper.newline();
 
                 // Highlight and render code
                 let highlighted = highlight_code(
@@ -627,11 +628,11 @@ pub fn write_terminal<W: std::io::Write>(
                     &meta,
                     options.color_mode,
                 )?;
-                output.push_str(&highlighted);
-                output.push('\n');
+                wrapper.push_with_newlines(&highlighted);
+                wrapper.newline();
 
                 // Add trailing blank line with theme background
-                output.push_str(&emit_padding_row(bg_color));
+                wrapper.push_with_newlines(&emit_padding_row(bg_color));
             }
             Event::Text(text) if in_code_block => {
                 code_buffer.push_str(&text);
@@ -643,11 +644,11 @@ pub fn write_terminal<W: std::io::Write>(
                     scope_stack.push(scope);
                 }
                 // Add blank line before heading (unless at start of output)
-                if !output.is_empty() && !output.ends_with("\n\n") {
-                    if output.ends_with('\n') {
-                        output.push('\n');
+                if !wrapper.output().is_empty() && !wrapper.output().ends_with("\n\n") {
+                    if wrapper.output().ends_with('\n') {
+                        wrapper.newline();
                     } else {
-                        output.push_str("\n\n");
+                        wrapper.push_with_newlines("\n\n");
                     }
                 }
                 let marker = match level {
@@ -659,11 +660,11 @@ pub fn write_terminal<W: std::io::Write>(
                     pulldown_cmark::HeadingLevel::H6 => "███████████████ ",
                 };
                 let style = prose_highlighter.style_for_tag(tag, &scope_stack);
-                output.push_str(&emit_prose_text(marker, style, emit_italic));
+                wrapper.emit_styled_marker(marker, style, emit_italic);
             }
             Event::End(TagEnd::Heading(_)) => {
                 scope_stack.pop();
-                output.push_str("\n\n"); // Blank line after heading
+                wrapper.push_with_newlines("\n\n"); // Blank line after heading
             }
 
             Event::Start(ref tag @ Tag::Strong) => {
@@ -700,8 +701,8 @@ pub fn write_terminal<W: std::io::Write>(
             // List handling
             Event::Start(Tag::List(start_num)) => {
                 // When a nested list starts inside an item, add newline to separate from parent text
-                if !list_stack.is_empty() && !output.is_empty() && !output.ends_with('\n') {
-                    output.push('\n');
+                if !list_stack.is_empty() && !wrapper.output().is_empty() && !wrapper.output().ends_with('\n') {
+                    wrapper.newline();
                 }
                 list_stack.push(start_num);
             }
@@ -709,7 +710,7 @@ pub fn write_terminal<W: std::io::Write>(
                 list_stack.pop();
                 // Add blank line after top-level list ends
                 if list_stack.is_empty() {
-                    output.push('\n');
+                    wrapper.newline();
                 }
             }
             Event::Start(Tag::Item) => {
@@ -722,19 +723,19 @@ pub fn write_terminal<W: std::io::Write>(
                         Some(num) => {
                             // Ordered list: emit number and increment
                             let style = prose_highlighter.base_style();
-                            output.push_str(&emit_prose_text(&format!("{}{}. ", indent, num), style, emit_italic));
+                            wrapper.emit_styled_marker(&format!("{}{}. ", indent, num), style, emit_italic);
                             *num += 1;
                         }
                         None => {
                             // Unordered list: emit bullet
                             let style = prose_highlighter.base_style();
-                            output.push_str(&emit_prose_text(&format!("{}- ", indent), style, emit_italic));
+                            wrapper.emit_styled_marker(&format!("{}- ", indent), style, emit_italic);
                         }
                     }
                 }
             }
             Event::End(TagEnd::Item) => {
-                output.push('\n');
+                wrapper.newline();
             }
 
             Event::Start(Tag::Paragraph) => {
@@ -747,7 +748,7 @@ pub fn write_terminal<W: std::io::Write>(
                     // viuer positions cursor after image; no extra spacing needed
                 } else if list_stack.is_empty() {
                     // Only add double newline for paragraphs outside of lists
-                    output.push_str("\n\n");
+                    wrapper.push_with_newlines("\n\n");
                 }
             }
 
@@ -787,7 +788,8 @@ pub fn write_terminal<W: std::io::Write>(
                         style.font_style |= FontStyle::BOLD;
                     }
 
-                    output.push_str(&emit_prose_text(&text, style, emit_italic));
+                    // Use LineWrapper for proper word wrapping
+                    wrapper.emit_styled(&text, style, emit_italic);
                 }
             }
 
@@ -803,16 +805,19 @@ pub fn write_terminal<W: std::io::Write>(
                 } else {
                     // Inline code with styling (no backticks in terminal output)
                     let style = prose_highlighter.style_for_inline_code(&scope_stack);
-                    // Use background color from the style if available
-                    output.push_str(&emit_inline_code(&code, style));
+                    // Use LineWrapper for proper word wrapping
+                    wrapper.emit_inline_code(&code, style);
                 }
             }
 
             Event::SoftBreak => {
-                output.push(' ');
+                // SoftBreak is a space - only emit if not at start of line
+                if wrapper.current_col() > 0 {
+                    wrapper.emit_raw(" ");
+                }
             }
             Event::HardBreak => {
-                output.push('\n');
+                wrapper.newline();
             }
 
             // Table handling - buffer entire table for proper rendering
@@ -821,20 +826,20 @@ pub fn write_terminal<W: std::io::Write>(
                 table_rows.clear();
                 table_alignments = alignments.iter().map(convert_alignment).collect();
                 // Add blank line before table if needed
-                if !output.is_empty() && !output.ends_with("\n\n") {
-                    if output.ends_with('\n') {
-                        output.push('\n');
+                if !wrapper.output().is_empty() && !wrapper.output().ends_with("\n\n") {
+                    if wrapper.output().ends_with('\n') {
+                        wrapper.newline();
                     } else {
-                        output.push_str("\n\n");
+                        wrapper.push_with_newlines("\n\n");
                     }
                 }
             }
             Event::End(TagEnd::Table) => {
                 in_table = false;
                 // Render the buffered table with proper formatting
-                output.push_str(&render_table(&table_rows, &table_alignments, terminal_width));
+                wrapper.push_with_newlines(&render_table(&table_rows, &table_alignments, terminal_width));
                 // Add blank line after table for spacing from following content
-                output.push_str("\n\n");
+                wrapper.push_with_newlines("\n\n");
                 table_rows.clear();
             }
             Event::Start(Tag::TableHead) => {
@@ -869,19 +874,20 @@ pub fn write_terminal<W: std::io::Write>(
                 if let Some(ref renderer) = image_renderer {
                     // Flush accumulated output before viuer prints to stdout
                     if renderer.graphics_supported() {
-                        write!(writer, "{}", output).ok();
+                        write!(writer, "{}", wrapper.output()).ok();
                         writer.flush().ok();
-                        output.clear();
+                        // Clear the wrapper by creating a new one (preserving max_width)
+                        wrapper = LineWrapper::new(terminal_width as usize);
                         // render_image prints via viuer
                         renderer.render_image(&current_image_path, &current_alt);
                         writer.flush().ok();
                         just_rendered_image = true;
                     } else {
-                        output.push_str(&renderer.render_image(&current_image_path, &current_alt));
+                        wrapper.push_with_newlines(&renderer.render_image(&current_image_path, &current_alt));
                         just_rendered_image = true;
                     }
                 } else {
-                    output.push_str(&format!("▉ IMAGE[{}]\n", current_alt));
+                    wrapper.push_with_newlines(&format!("▉ IMAGE[{}]\n", current_alt));
                     just_rendered_image = true;
                 }
                 in_image = false;
@@ -890,6 +896,9 @@ pub fn write_terminal<W: std::io::Write>(
             _ => {} // Ignore other events
         }
     }
+
+    // Get the final output from the wrapper
+    let mut output = wrapper.into_output();
 
     // Always emit terminal reset at end
     output.push_str("\x1b[0m");
@@ -1284,6 +1293,164 @@ fn emit_padding_row(bg_color: Color) -> String {
         "\x1b[48;2;{};{};{}m\x1b[K\x1b[0m\n",
         bg_color.r, bg_color.g, bg_color.b
     )
+}
+
+/// A wrapper that handles word-based line wrapping for prose text.
+///
+/// Tracks the current column position and wraps at word boundaries to prevent
+/// mid-word breaks and leading whitespace on continuation lines.
+struct LineWrapper {
+    /// Current column position (visual width, excluding ANSI codes)
+    current_col: usize,
+    /// Maximum line width
+    max_width: usize,
+    /// Output buffer
+    output: String,
+}
+
+impl LineWrapper {
+    /// Creates a new LineWrapper with the given maximum width.
+    fn new(max_width: usize) -> Self {
+        Self {
+            current_col: 0,
+            max_width,
+            output: String::new(),
+        }
+    }
+
+    /// Emits styled text with word wrapping.
+    ///
+    /// Splits the text into words and wraps at word boundaries. Each word is
+    /// emitted with the provided style. Leading whitespace on continuation lines
+    /// is stripped to prevent visible indentation after wrapping.
+    ///
+    /// ## Arguments
+    ///
+    /// * `text` - The plain text to emit
+    /// * `style` - The syntect style for coloring
+    /// * `emit_italic` - Whether to emit italic escape codes
+    fn emit_styled(&mut self, text: &str, style: Style, emit_italic: bool) {
+        // Split into segments, preserving whitespace
+        // We iterate over whitespace-separated words, handling spaces between them
+        let mut chars = text.chars().peekable();
+        let mut current_word = String::new();
+
+        while let Some(ch) = chars.next() {
+            if ch.is_whitespace() {
+                // Emit accumulated word first
+                if !current_word.is_empty() {
+                    self.emit_word(&current_word, style, emit_italic);
+                    current_word.clear();
+                }
+                // Handle whitespace
+                if ch == '\n' {
+                    // Hard break - emit newline and reset column
+                    self.output.push('\n');
+                    self.current_col = 0;
+                } else {
+                    // Space or tab - emit if not at start of line
+                    if self.current_col > 0 {
+                        self.output.push(' ');
+                        self.current_col += 1;
+                    }
+                }
+            } else {
+                current_word.push(ch);
+            }
+        }
+
+        // Emit any remaining word
+        if !current_word.is_empty() {
+            self.emit_word(&current_word, style, emit_italic);
+        }
+    }
+
+    /// Emits a single word, wrapping if necessary.
+    fn emit_word(&mut self, word: &str, style: Style, emit_italic: bool) {
+        use unicode_width::UnicodeWidthStr;
+
+        let word_width = UnicodeWidthStr::width(word);
+
+        // Check if word fits on current line
+        if self.current_col > 0 && self.current_col + word_width > self.max_width {
+            // Need to wrap - emit newline
+            self.output.push('\n');
+            self.current_col = 0;
+        }
+
+        // Emit the styled word
+        self.output.push_str(&emit_prose_text(word, style, emit_italic));
+        self.current_col += word_width;
+    }
+
+    /// Emits a raw string without styling (for markers, bullets, etc.).
+    /// Updates column position based on visual width.
+    fn emit_raw(&mut self, text: &str) {
+        use unicode_width::UnicodeWidthStr;
+        self.output.push_str(text);
+        // Update column for non-newline content
+        if let Some(last_line) = text.rsplit('\n').next() {
+            if text.contains('\n') {
+                self.current_col = UnicodeWidthStr::width(last_line);
+            } else {
+                self.current_col += UnicodeWidthStr::width(text);
+            }
+        }
+    }
+
+    /// Emits styled text for markers/prefixes (bullets, numbers).
+    /// These are emitted directly without word-wrap logic.
+    fn emit_styled_marker(&mut self, text: &str, style: Style, emit_italic: bool) {
+        use unicode_width::UnicodeWidthStr;
+        self.output.push_str(&emit_prose_text(text, style, emit_italic));
+        self.current_col += UnicodeWidthStr::width(text);
+    }
+
+    /// Emits inline code with styling.
+    fn emit_inline_code(&mut self, code: &str, style: Style) {
+        use unicode_width::UnicodeWidthStr;
+
+        let code_width = UnicodeWidthStr::width(code);
+
+        // Check if code fits on current line
+        if self.current_col > 0 && self.current_col + code_width > self.max_width {
+            // Wrap before inline code
+            self.output.push('\n');
+            self.current_col = 0;
+        }
+
+        self.output.push_str(&emit_inline_code(code, style));
+        self.current_col += code_width;
+    }
+
+    /// Adds a newline and resets column position.
+    fn newline(&mut self) {
+        self.output.push('\n');
+        self.current_col = 0;
+    }
+
+    /// Adds content that includes newlines (resets column tracking).
+    fn push_with_newlines(&mut self, text: &str) {
+        self.output.push_str(text);
+        if text.ends_with('\n') {
+            self.current_col = 0;
+        }
+    }
+
+    /// Consumes the wrapper and returns the output string.
+    fn into_output(self) -> String {
+        self.output
+    }
+
+    /// Gets a reference to the current output.
+    fn output(&self) -> &str {
+        &self.output
+    }
+
+    /// Gets the current column position.
+    fn current_col(&self) -> usize {
+        self.current_col
+    }
 }
 
 /// Computes a highlighted background color based on the theme background and color mode.
@@ -4056,5 +4223,216 @@ fn line6() {}
         // Should have proper ANSI structure even with no code lines
         assert!(output.contains("\x1b[48;2;"), "Should contain background color codes");
         assert!(output.contains("\x1b[0m"), "Should contain reset codes");
+    }
+
+    // ===== LINE WRAPPER REGRESSION TESTS =====
+    // Regression tests for the line wrapping bug where:
+    // 1. Words were being broken mid-word when wrapping
+    // 2. Continuation lines started with visible whitespace
+
+    /// Regression test: Words should not be broken mid-word when wrapping.
+    /// Bug: "character" was being split as "charac" / "ter"
+    #[test]
+    fn test_prose_no_mid_word_breaks() {
+        // Create text that will need to wrap at a narrow width
+        let content = "NOTE: use of italics in Markdown can use either the '_' character OR the '*' character";
+        let md: Markdown = content.into();
+
+        // Use narrow width (40 chars) to force wrapping
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::TrueColor);
+
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Check for common mid-word break patterns (word fragments at line ends)
+        let bad_patterns = [
+            "charac\n",   // "character" split
+            "Markdo\n",   // "Markdown" split
+            "itali\n",    // "italics" split
+            "eithe\n",    // "either" split
+        ];
+
+        for pattern in bad_patterns {
+            assert!(
+                !plain.contains(pattern),
+                "Bad word split detected: found '{}' in:\n{}",
+                pattern.escape_default(), plain
+            );
+        }
+
+        // Verify complete words exist
+        for word in ["italics", "Markdown", "character", "either"] {
+            assert!(
+                plain.contains(word),
+                "Complete word '{}' should be present:\n{}",
+                word, plain
+            );
+        }
+    }
+
+    /// Regression test: Continuation lines should not start with visible whitespace.
+    /// Bug: When text wrapped, the continuation line started with a space.
+    #[test]
+    fn test_prose_no_leading_whitespace_on_wrap() {
+        // Text with multiple words that will wrap
+        let content = "The strikethrough feature -- introduced in GFM -- uses ~~ around a block of text to represent the text which should be crossed out.";
+        let md: Markdown = content.into();
+
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::TrueColor);
+
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Check each line (except first) doesn't start with whitespace
+        for (i, line) in plain.lines().enumerate() {
+            if i == 0 {
+                continue; // First line can start however
+            }
+            // Skip empty lines
+            if line.is_empty() {
+                continue;
+            }
+            // Continuation lines should not start with space/tab
+            assert!(
+                !line.starts_with(' ') && !line.starts_with('\t'),
+                "Line {} starts with whitespace: '{}'\nFull output:\n{}",
+                i + 1, line.escape_default(), plain
+            );
+        }
+    }
+
+    /// Test LineWrapper wraps correctly at word boundaries
+    #[test]
+    fn test_line_wrapper_basic() {
+        use syntect::highlighting::Color;
+
+        let style = Style {
+            foreground: Color { r: 255, g: 255, b: 255, a: 255 },
+            background: Color::BLACK,
+            font_style: syntect::highlighting::FontStyle::empty(),
+        };
+
+        // Create wrapper with narrow width
+        let mut wrapper = LineWrapper::new(20);
+        wrapper.emit_styled("Hello world this is a test", style, false);
+
+        let output = wrapper.into_output();
+        let plain = strip_ansi_codes(&output);
+
+        // Should have wrapped - multiple lines
+        let lines: Vec<&str> = plain.lines().collect();
+        assert!(lines.len() > 1, "Text should have wrapped: '{}'", plain);
+
+        // No line should exceed the max width
+        for line in &lines {
+            let width = unicode_width::UnicodeWidthStr::width(*line);
+            assert!(
+                width <= 20,
+                "Line exceeds max width: '{}' (width: {})",
+                line, width
+            );
+        }
+
+        // Words should be complete, not split
+        assert!(plain.contains("Hello"), "Should contain 'Hello'");
+        assert!(plain.contains("world"), "Should contain 'world'");
+        assert!(plain.contains("this"), "Should contain 'this'");
+        assert!(plain.contains("test"), "Should contain 'test'");
+    }
+
+    /// Test LineWrapper handles inline code with wrapping
+    #[test]
+    fn test_line_wrapper_inline_code() {
+        use syntect::highlighting::Color;
+
+        let style = Style {
+            foreground: Color { r: 200, g: 200, b: 200, a: 255 },
+            background: Color { r: 40, g: 40, b: 40, a: 255 },
+            font_style: syntect::highlighting::FontStyle::empty(),
+        };
+
+        let mut wrapper = LineWrapper::new(30);
+        wrapper.emit_raw("Command: ");
+        wrapper.emit_inline_code("cargo build", style);
+        wrapper.emit_raw(" runs the build");
+
+        let output = wrapper.into_output();
+        let plain = strip_ansi_codes(&output);
+
+        // Should contain the inline code
+        assert!(plain.contains("cargo build"), "Should contain 'cargo build'");
+        // Should contain surrounding text
+        assert!(plain.contains("Command:"), "Should contain 'Command:'");
+    }
+
+    /// Test that long paragraphs wrap correctly at terminal width
+    #[test]
+    fn test_prose_paragraph_wrapping() {
+        // Long paragraph that will definitely need wrapping
+        let content = "This is a very long paragraph that contains many words and should definitely wrap when rendered to a terminal with a reasonable width. The wrapping should occur at word boundaries to maintain readability and prevent awkward mid-word breaks.";
+        let md: Markdown = content.into();
+
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::TrueColor);
+
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Remove trailing paragraph spacing for line check
+        let trimmed = plain.trim();
+
+        // Should have wrapped into multiple lines
+        let lines: Vec<&str> = trimmed.lines().collect();
+        assert!(
+            lines.len() > 1,
+            "Long paragraph should wrap into multiple lines:\n{}",
+            trimmed
+        );
+
+        // Verify key words are complete
+        for word in ["paragraph", "definitely", "wrapping", "boundaries", "readability"] {
+            assert!(
+                plain.contains(word),
+                "Word '{}' should be complete, not split:\n{}",
+                word, plain
+            );
+        }
+    }
+
+    /// Test LineWrapper with styled text (bold, italic)
+    #[test]
+    fn test_line_wrapper_styled_text() {
+        use syntect::highlighting::{Color, FontStyle};
+
+        let bold_style = Style {
+            foreground: Color { r: 255, g: 255, b: 255, a: 255 },
+            background: Color::BLACK,
+            font_style: FontStyle::BOLD,
+        };
+
+        let italic_style = Style {
+            foreground: Color { r: 255, g: 255, b: 255, a: 255 },
+            background: Color::BLACK,
+            font_style: FontStyle::ITALIC,
+        };
+
+        let mut wrapper = LineWrapper::new(40);
+        wrapper.emit_styled("This has ", bold_style, true);
+        wrapper.emit_styled("mixed styles", italic_style, true);
+        wrapper.emit_styled(" in one line", bold_style, true);
+
+        let output = wrapper.into_output();
+
+        // Should contain bold escape code
+        assert!(output.contains("\x1b[1m"), "Should contain bold code");
+        // Should contain italic escape code
+        assert!(output.contains("\x1b[3m"), "Should contain italic code");
+
+        let plain = strip_ansi_codes(&output);
+        assert!(plain.contains("This has"), "Should contain 'This has'");
+        assert!(plain.contains("mixed styles"), "Should contain 'mixed styles'");
+        assert!(plain.contains("in one line"), "Should contain 'in one line'");
     }
 }

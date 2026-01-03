@@ -22,6 +22,9 @@ pub mod model;
 pub mod providers;
 pub mod render;
 pub mod terminal;
+
+pub mod symbols;
+
 pub mod testing;
 pub mod tools;
 pub mod tts;
