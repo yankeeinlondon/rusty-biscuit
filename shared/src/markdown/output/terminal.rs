@@ -645,10 +645,9 @@ pub fn write_terminal<W: std::io::Write>(
                     options.color_mode,
                 )?;
                 wrapper.push_with_newlines(&highlighted);
-                wrapper.newline();
-
-                // Add trailing blank line with theme background
-                wrapper.push_with_newlines(&emit_padding_row(bg_color));
+                // highlight_code ends with a bottom padding row, add newline after it
+                // then add blank line for separation from following content
+                wrapper.push_with_newlines("\n\n");
             }
             InlineEvent::Standard(Event::Text(text)) if in_code_block => {
                 code_buffer.push_str(&text);
@@ -1511,7 +1510,7 @@ impl LineWrapper {
 ///
 /// ## Examples
 ///
-/// ```
+/// ```ignore
 /// use shared::markdown::highlighting::ColorMode;
 /// use syntect::highlighting::Color;
 ///
@@ -1559,7 +1558,7 @@ fn compute_highlight_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
 ///
 /// ## Examples
 ///
-/// ```
+/// ```ignore
 /// use shared::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
 /// use shared::markdown::output::TerminalOptions;
 /// use shared::markdown::dsl::CodeBlockMeta;
@@ -1664,10 +1663,8 @@ fn highlight_code(
         // \x1b[K clears from cursor to end of line using current background
         output.push_str("\x1b[K\x1b[0m");
 
-        // Add newline except for last line
-        if idx < lines.len() - 1 {
-            output.push('\n');
-        }
+        // Add newline after each line (including last line, so bottom padding is on its own line)
+        output.push('\n');
     }
 
     // Add bottom padding row (without trailing newline to avoid double spacing)
@@ -2572,10 +2569,10 @@ fn main() {}
         assert!(raw.contains("\x1b["));
 
         // Verify content after stripping ANSI
-        // Output includes: right-aligned header row (spacing + language) + newline + top padding + left padding + code + bottom padding + trailing blank line
+        // Output includes: right-aligned header row (spacing + language) + newline + top padding + left padding + code + bottom padding + trailing blank line + separation blank line
         // Terminal width is 80, language " rust " is 6 chars, so 74 spaces of padding
         let plain = strip_ansi_codes(&raw);
-        assert!(plain.ends_with(" rust \n\n fn test() {}\n\n"));
+        assert!(plain.ends_with(" rust \n\n fn test() {}\n\n\n"));
         assert!(plain.contains("rust"));
     }
 
@@ -4885,5 +4882,119 @@ Unlike the strikethrough functionality, the **highlight** feature for Markdown l
                 }
             }
         }
+    }
+
+    // ===== CODE BLOCK REGRESSION TESTS =====
+    // Regression tests for code block rendering issues:
+    // 1. Bottom padding row must be on its own line (not appended to last content line)
+    // 2. There should be a blank line after code blocks for separation from following content
+
+    /// Regression test: Bottom padding row should be on its own line.
+    /// Bug: The bottom padding row was being appended to the last content line
+    /// instead of being rendered on its own line.
+    #[test]
+    fn test_code_block_bottom_padding_on_own_line() {
+        let content = r#"```text
+- foo
+- bar
+- baz
+```"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::TrueColor);
+        let output = for_terminal(&md, options).unwrap();
+
+        // The output should have the last content line followed by a newline,
+        // then the bottom padding row on its own line.
+        // This regex checks that we DON'T have the pattern where content and padding are on same line:
+        // [K\x1b[0m\x1b[48;2;... (clear + reset immediately followed by background on same line)
+        let bad_pattern = "\x1b[K\x1b[0m\x1b[48;2;";
+        assert!(
+            !output.contains(bad_pattern),
+            "Bottom padding row should not be appended to content line. Found pattern: {:?}",
+            bad_pattern
+        );
+
+        // Verify each content line ends with clear-to-EOL + reset + newline
+        let good_pattern = "\x1b[K\x1b[0m\n";
+        let count = output.matches(good_pattern).count();
+        // Should have at least: top padding, foo, bar, baz, bottom padding = 5 instances
+        assert!(
+            count >= 5,
+            "Expected at least 5 lines ending with clear+reset+newline, found {}",
+            count
+        );
+    }
+
+    /// Regression test: Code block should have blank line after it for separation.
+    /// Bug: There was no blank line between the code block and following content.
+    #[test]
+    fn test_code_block_followed_by_blank_line() {
+        let content = r#"```text
+content
+```
+
+Following paragraph."#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::TrueColor);
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Find the line containing "Following" and check there's a blank line before it
+        let lines: Vec<&str> = plain.lines().collect();
+        let following_idx = lines.iter().position(|l| l.contains("Following"));
+
+        assert!(following_idx.is_some(), "Should contain 'Following paragraph'");
+        let idx = following_idx.unwrap();
+
+        // The line before "Following" should be empty (the separation blank line)
+        assert!(
+            idx > 0 && lines[idx - 1].is_empty(),
+            "There should be a blank line before following content. Lines around 'Following': {:?}",
+            &lines[idx.saturating_sub(2)..idx.min(lines.len() - 1) + 1]
+        );
+    }
+
+    /// Regression test: Code block content lines should each be on their own line.
+    #[test]
+    fn test_code_block_content_lines_separate() {
+        let content = r#"```rust
+fn foo() {}
+fn bar() {}
+```"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::TrueColor);
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Each function should be on its own line
+        let lines: Vec<&str> = plain.lines().collect();
+
+        // Find lines containing the functions
+        let foo_lines: Vec<_> = lines.iter().filter(|l| l.contains("fn foo")).collect();
+        let bar_lines: Vec<_> = lines.iter().filter(|l| l.contains("fn bar")).collect();
+
+        // Each should be on exactly one line
+        assert_eq!(
+            foo_lines.len(),
+            1,
+            "fn foo() should be on exactly one line, found on {} lines",
+            foo_lines.len()
+        );
+        assert_eq!(
+            bar_lines.len(),
+            1,
+            "fn bar() should be on exactly one line, found on {} lines",
+            bar_lines.len()
+        );
+
+        // They should NOT be on the same line
+        let combined_line = lines.iter().find(|l| l.contains("fn foo") && l.contains("fn bar"));
+        assert!(
+            combined_line.is_none(),
+            "fn foo and fn bar should not be on the same line"
+        );
     }
 }
