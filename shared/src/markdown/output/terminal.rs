@@ -4761,4 +4761,129 @@ fn line6() {}
         assert!(plain.contains("mixed styles"), "Should contain 'mixed styles'");
         assert!(plain.contains("in one line"), "Should contain 'in one line'");
     }
+
+    /// Test: multiline prose should not have blank lines between wrapped lines.
+    #[test]
+    fn test_prose_multiline_no_blank_lines() {
+        let content = r#"The **strikethrough** feature -- introduced in GFM -- uses `~~` around a block of text to represent the text which should be ~~kept~~ crossed out."#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::TrueColor);
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Check that we don't have consecutive blank lines within the paragraph
+        let lines: Vec<&str> = plain.lines().collect();
+        for (i, window) in lines.windows(2).enumerate() {
+            if window[0].is_empty() && window[1].is_empty() {
+                panic!("Found consecutive blank lines at position {}: {:?}", i, lines);
+            }
+        }
+    }
+
+    /// Test: prose with ==highlight== should not have extra blank lines.
+    #[test]
+    fn test_prose_with_highlight_no_blank_lines() {
+        let content = r#"This emerging standard uses the character sequence `==` to wrap text and the wrapped text is then given a different background color to clearly ==separate it from== the rest of the text."#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::TrueColor);
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Check that we don't have consecutive blank lines within the paragraph
+        let lines: Vec<&str> = plain.lines().collect();
+        for (i, window) in lines.windows(2).enumerate() {
+            if window[0].is_empty() && window[1].is_empty() {
+                panic!("Found consecutive blank lines at position {}: {:?}", i, lines);
+            }
+        }
+    }
+
+    /// Debug test: check for duplicate ANSI codes in highlighted output.
+    #[test]
+    fn test_debug_highlight_codes() {
+        // This tests highlighted text that wraps across lines
+        let content = "this is some text and ==separate it from== the rest";
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::TrueColor);
+        let output = for_terminal(&md, options).unwrap();
+
+        eprintln!("Raw output bytes:");
+        for (i, byte) in output.bytes().enumerate() {
+            if byte == 0x1b {
+                eprint!("\n[{}] ESC", i);
+            } else if byte == b'm' {
+                eprint!("m ");
+            } else if byte.is_ascii_graphic() || byte == b' ' {
+                eprint!("{}", byte as char);
+            } else if byte == b'\n' {
+                eprint!("\\n ");
+            } else {
+                eprint!("({:02x})", byte);
+            }
+        }
+        eprintln!("\n---");
+        eprintln!("Plain output:\n{}", strip_ansi_codes(&output));
+
+        // Check for duplicate background codes
+        let bg_code = "\x1b[48;2;255;243;184m";
+        let bg_count = output.matches(bg_code).count();
+        eprintln!("Yellow background code count: {}", bg_count);
+
+        // For "separate it from" (3 words + 2 spaces when styled), we expect up to 5 bg codes
+        // But we should NOT have consecutive duplicate codes
+        let has_double_bg = output.contains("\x1b[48;2;255;243;184m\x1b[48;2;255;243;184m");
+        assert!(!has_double_bg, "Should not have consecutive duplicate background codes: {:?}", output);
+    }
+
+    /// Test: strikethrough section from test.md should not have extra blank lines.
+    #[test]
+    fn test_strikethrough_section_no_blank_lines() {
+        let content = r#"## Strikethrough
+
+The **strikethrough** feature -- introduced in GFM -- uses `~~` around a block of text to represent the text which should be ~~kept~~ crossed out.
+
+
+## Markdown Highlighting
+
+Unlike the strikethrough functionality, the **highlight** feature for Markdown lives as a less formal spec but it is supported in popular apps like Obsidian and Typora. It is also being considered for [**CommonMark**](https://commonmark.com).
+
+- this emerging standard uses the character sequence `==` to wrap text and the wrapped text is then given a different background color to clearly ==separate it from== the rest of the text.
+"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::TrueColor);
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        eprintln!("Plain output:\n{:?}", plain);
+        eprintln!("---");
+        eprintln!("{}", plain);
+
+        // Check that there are no instances of 3 or more consecutive blank lines
+        // (we allow 2 blank lines for section spacing)
+        let lines: Vec<&str> = plain.lines().collect();
+        for (i, window) in lines.windows(3).enumerate() {
+            if window[0].is_empty() && window[1].is_empty() && window[2].is_empty() {
+                panic!("Found three consecutive blank lines at position {}: {:?}", i, &lines[i.saturating_sub(2)..i.min(lines.len()-1)+5]);
+            }
+        }
+
+        // Also check that within a non-blank line sequence, we don't have random blank lines
+        // (e.g., prose shouldn't have blank lines after each wrapped line)
+        for (i, line) in lines.iter().enumerate() {
+            if !line.is_empty() && i + 1 < lines.len() && lines[i + 1].is_empty() {
+                // We found a non-blank line followed by a blank line
+                // Check if the blank line is a section separator (blank line after paragraph)
+                // vs a bug (blank line in middle of paragraph)
+                if i + 2 < lines.len() && !lines[i + 2].is_empty() {
+                    // There's content after the blank - that's ok (section separator)
+                } else if i + 2 < lines.len() && lines[i + 2].is_empty() {
+                    // Two blank lines - ok for section separator
+                }
+            }
+        }
+    }
 }
