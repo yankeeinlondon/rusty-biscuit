@@ -1,0 +1,16 @@
+default:
+    @just --list
+
+build:
+    cargo build -p sniff-lib
+    cargo build -p sniff
+
+test:
+    cargo test -p sniff-lib
+    cargo test -p sniff
+
+lint:
+    cargo clippy -p sniff-lib -p sniff
+
+install:
+    cargo install --path cli
