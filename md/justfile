@@ -16,7 +16,7 @@ WHITE := '\033[37m'
 
 default:
     @echo
-    @echo "mat CLI"
+    @echo "md CLI"
     @echo "------------------------------------"
     @echo ""
     @just --list | grep -v 'default'
@@ -25,31 +25,31 @@ default:
 # build research modules (cli, lib)
 build *args="":
     @echo ""
-    @echo "Build mat CLI"
+    @echo "Build md CLI"
     @echo "--------------------"
     @echo ""
-    @cargo build -p mat {{args}}
+    @cargo build -p md {{args}}
 
 # run tests across research modules
 test *args="":
     @echo ""
-    @echo "Testing mat CLI"
+    @echo "Testing md CLI"
     @echo "----------------------"
     @echo ""
-    @cargo test -p mat {{args}}
+    @cargo test -p md {{args}}
 
 lint *args="":
     @echo ""
-    @echo "Linting mat CLI"
+    @echo "Linting md CLI"
     @echo "----------------------"
     @echo ""
     @cargo clippy 
 
 # install the `research` binary into the executable path
 install:
-    @cargo build --release -p mat
+    @cargo build --release -p md
     @cargo install --path "." --locked
 
 # run the debug release of the Research CLI
 cli *args="":
-    @cargo run -p mat -- {{args}}
+    @cargo run -p md -- {{args}}

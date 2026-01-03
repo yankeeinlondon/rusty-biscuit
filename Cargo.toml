@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["mat","research/cli", "research/lib", "shared", "sniff/lib", "so-you-say", "tui"]
+members = ["md", "research/cli", "research/lib", "shared", "sniff/lib", "so-you-say", "tui"]

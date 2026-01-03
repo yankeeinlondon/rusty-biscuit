@@ -1,12 +1,12 @@
-# `mat` CLI
+# `md` CLI
 
 A CLI markdown renderer for the terminal.
 
 ## Syntax
 
-> **mat \<file\>** [_options_]
+> **md \<file\>** [_options_]
 
-The `mat` command will render a markdown file with rich color themes.
+The `md` command will render a markdown file with rich color themes.
 
 ### Options
 

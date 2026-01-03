@@ -14,6 +14,7 @@ The repository is organized into **areas** (not packages), each with its own `ju
 
 ```
 dockhand/
+├── md/               # Binary: `md` (markdown terminal renderer)
 ├── research/          # AI-powered library research tools
 │   ├── cli/          # Binary: `research`
 │   └── lib/          # Core research library

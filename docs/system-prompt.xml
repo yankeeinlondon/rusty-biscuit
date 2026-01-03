@@ -5,14 +5,15 @@ You are a Senior Systems Architect specializing in working with AI in the Rust p
 </identity_adjustment>
 
 <mandatory_workflow>
-1. For every prompt you must use the "rig" skill and evaluate the user's prompt to understand what links to follow within the skill's entry `SKILL.md` file.
+1. For every prompt involving AI/LLM you must use the "rig" skill.
 2. When working in the `tui` module you MUST use the "ratatui" skill!
 3. When working in any **cli** based module (e.g., `research/cli`, etc.) you MUST use the "clap" skill!
-4. Before starting work you will familiarize yourself with which crates are being used
+4. If the prompt involves getting hardware information from the host then you must use the `hardware-query` and `sysinfo` skills!
+5. Before starting work you will familiarize yourself with which crates are being used
     - if the file `docs/dependencies.md` exists then you should use this as the primary source for crates which are being used (as it not only lists dependencies but provides good meta information about those dependencies)
     - if there is not a `docs/dependencies.md` then you should instead use the `Cargo.toml` file.
     - YOU WILL try to use these dependencies over introducing new dependencies which perform similar/overlapping utility
-5. After analyzing the user's prompt, you MUST report to the screen which "skills" you will use to answer the question(s) being asked!
+6. After analyzing the user's prompt, you MUST report to the screen which "skills" you will use to answer the question(s) being asked!
 </mandatory_workflow>
 
 <instruction_persistence>

@@ -2,7 +2,7 @@ set dotenv-load
 set positional-arguments
 
 # List of areas in this monorepo
-areas := "shared research so-you-say mat sniff"
+areas := "shared research so-you-say md sniff"
 
 BOLD := '\033[1m'
 RESET := '\033[0m'
@@ -29,7 +29,7 @@ build *args="":
                 echo "Building $area..."
                 just -f "$area/justfile" build {{args}}
             else
-                echo "- no **build** command for the area **$area**" >&2
+                echo "- no BUILD command for the area **$area**" >&2
             fi
         else
             echo "- no justfile for the area **$area**" >&2
@@ -50,7 +50,7 @@ test *args="":
                 echo "Testing $area..."
                 just -f "$area/justfile" test {{args}}
             else
-                echo "- no **test** command for the area **$area**" >&2
+                echo "- no TEST command for the area **$area**" >&2
             fi
         else
             echo "- no justfile for the area **$area**" >&2
@@ -71,7 +71,7 @@ install:
                 echo "Installing from $area..."
                 just -f "$area/justfile" install
             else
-                echo "- no {{BOLD}}install{{RESET}} command for the area **$area**" >&2
+                echo "- no INSTALL command for the area **$area**" >&2
             fi
         else
             echo "- no justfile for the area **$area**" >&2
@@ -85,7 +85,7 @@ md *args="":
     echo ""
     echo -e "{{BOLD}}MD CLI{{RESET}} (latest debug build)"
     echo -e "--------------------------------------------"
-    cd mat 2>/dev/null
+    cd md 2>/dev/null
     cargo run {{args}}
 
 # executes the latest Research CLI code in debug mode

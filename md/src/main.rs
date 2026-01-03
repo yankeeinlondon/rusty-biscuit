@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser)]
-#[command(name = "mat", about = "Markdown Awesome Tool", version)]
+#[command(name = "md", about = "Markdown Awesome Tool", version)]
 #[command(group = ArgGroup::new("output-mode")
     .args(["html", "show_html", "ast", "clean", "clean_save"])
     .multiple(false))]
@@ -94,11 +94,11 @@ fn init_tracing(verbose: u8) {
         Ok(filter) => filter,
         Err(_) => match verbose {
             // -v: Show INFO for progress and tool calls
-            1 => "info,mat=info,shared=info".to_string(),
+            1 => "info,md=info,shared=info".to_string(),
             // -vv: Show DEBUG for tool arguments and requests
-            2 => "info,mat=debug,shared=debug".to_string(),
+            2 => "info,md=debug,shared=debug".to_string(),
             // -vvv+: Show TRACE for detailed debugging
-            _ => "debug,mat=trace,shared=trace".to_string(),
+            _ => "debug,md=trace,shared=trace".to_string(),
         },
     };
 
@@ -200,7 +200,7 @@ fn main() -> Result<()> {
         options.color_mode = color_mode;
 
         let html = md.as_html(options).context("Failed to convert to HTML")?;
-        let temp_path = std::env::temp_dir().join("mat-preview.html");
+        let temp_path = std::env::temp_dir().join("md-preview.html");
         std::fs::write(&temp_path, &html)
             .wrap_err("Failed to write temp HTML file")?;
 
@@ -252,7 +252,7 @@ fn load_markdown(path: Option<&PathBuf>) -> Result<Markdown> {
         if atty::is(atty::Stream::Stdin) {
             // Interactive terminal - no input available
             Err(eyre!(
-                "No input file provided. Use `mat --help` for usage."
+                "No input file provided. Use `md --help` for usage."
             ))
         } else {
             // Piped input available
