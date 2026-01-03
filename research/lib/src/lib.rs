@@ -11,6 +11,7 @@
 //!
 //! Phase 2 prompts (synthesis) run without tools as they consolidate existing content.
 
+pub mod changelog;
 pub mod link;
 pub mod list;
 pub mod providers;
@@ -922,6 +923,74 @@ impl<'a> From<&'a LibraryInfoMetadata> for LibraryContext<'a> {
     }
 }
 
+/// Format VersionHistory as markdown for prompt injection.
+///
+/// Converts version history into markdown tables and lists that can be
+/// injected into the changelog prompt template.
+fn format_version_history_for_prompt(history: &changelog::types::VersionHistory) -> String {
+    let mut output = String::new();
+
+    // Version table
+    if !history.versions.is_empty() {
+        output.push_str("### Version Timeline\n\n");
+        output.push_str("| Version | Date | Significance | Summary |\n");
+        output.push_str("|---------|------|--------------|---------||\n");
+
+        for version in &history.versions {
+            let date_str = version.release_date
+                .map(|d| d.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            let significance = match version.significance {
+                changelog::types::VersionSignificance::Major => "Major",
+                changelog::types::VersionSignificance::Minor => "Minor",
+                changelog::types::VersionSignificance::Patch => "Patch",
+                changelog::types::VersionSignificance::Prerelease => "Prerelease",
+            };
+
+            let summary = version.summary.as_deref().unwrap_or("");
+
+            output.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                version.version, date_str, significance, summary
+            ));
+        }
+        output.push('\n');
+    }
+
+    // Breaking changes
+    let breaking_changes: Vec<_> = history.versions.iter()
+        .filter(|v| !v.breaking_changes.is_empty())
+        .collect();
+
+    if !breaking_changes.is_empty() {
+        output.push_str("### Breaking Changes\n\n");
+        for version in breaking_changes {
+            for change in &version.breaking_changes {
+                output.push_str(&format!("- v{}: {}\n", version.version, change));
+            }
+        }
+        output.push('\n');
+    }
+
+    // New features
+    let feature_versions: Vec<_> = history.versions.iter()
+        .filter(|v| !v.new_features.is_empty())
+        .collect();
+
+    if !feature_versions.is_empty() {
+        output.push_str("### New Features\n\n");
+        for version in feature_versions {
+            for feature in &version.new_features {
+                output.push_str(&format!("- v{}: {}\n", version.version, feature));
+            }
+        }
+        output.push('\n');
+    }
+
+    output
+}
+
 /// Build a prompt by replacing topic and library context placeholders.
 ///
 /// Replaces:
@@ -946,6 +1015,59 @@ fn build_prompt_with_context(template: &str, topic: &str, ctx: Option<&LibraryCo
         .replace("{{package_manager}}", package_manager)
         .replace("{{language}}", language)
         .replace("{{url}}", url)
+}
+
+/// Build the changelog prompt with optional version history injection.
+///
+/// If version history is provided, it will be injected into the template.
+/// Otherwise, the template will indicate no structured data is available.
+fn build_changelog_prompt(
+    template: &str,
+    topic: &str,
+    library_info: Option<&LibraryInfo>,
+    version_history: Option<&changelog::types::VersionHistory>,
+) -> String {
+    use changelog::types::{ChangelogSource, ConfidenceLevel};
+
+    let ctx = library_info.map(LibraryContext::from);
+    let mut prompt = build_prompt_with_context(template, topic, ctx.as_ref());
+
+    // Get current date for frontmatter
+    let current_date = Utc::now().format("%Y-%m-%d").to_string();
+    prompt = prompt.replace("{{current_date}}", &current_date);
+
+    // Inject version history data if available
+    if let Some(history) = version_history {
+        let version_data = format_version_history_for_prompt(history);
+        let confidence_str = match history.confidence {
+            ConfidenceLevel::High => "High",
+            ConfidenceLevel::Medium => "Medium",
+            ConfidenceLevel::Low => "Low",
+        };
+
+        let sources_str = history.sources_used.iter()
+            .map(|s| match s {
+                ChangelogSource::GitHubRelease => "github_releases",
+                ChangelogSource::ChangelogFile => "changelog_file",
+                ChangelogSource::RegistryVersion => "registry_versions",
+                ChangelogSource::LlmKnowledge => "llm_knowledge",
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        prompt = prompt
+            .replace("{{version_data}}", &version_data)
+            .replace("{{confidence_level}}", confidence_str)
+            .replace("{{sources_used}}", &sources_str);
+    } else {
+        // No structured data available - LLM-only fallback
+        prompt = prompt
+            .replace("{{version_data}}", "No structured version data available. Please generate from your training knowledge.")
+            .replace("{{confidence_level}}", "Low (LLM knowledge only)")
+            .replace("{{sources_used}}", "llm_knowledge");
+    }
+
+    prompt
 }
 
 /// Result of a single prompt task
@@ -1254,6 +1376,285 @@ where
                 Ok(_) => {
                     println!(
                         "  [{}/{}] ✓ {} ({:.1}s) | tokens: {} in, {} out, {} total",
+                        completed,
+                        total,
+                        name,
+                        elapsed,
+                        metrics.input_tokens,
+                        metrics.output_tokens,
+                        metrics.total_tokens,
+                    );
+                    Some(metrics)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "  [{}/{}] ✗ {} write failed: {} ({:.1}s)",
+                        completed, total, name, e, elapsed
+                    );
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "  [{}/{}] ✗ {} failed: {} ({:.1}s)",
+                completed, total, name, e, elapsed
+            );
+            None
+        }
+    };
+
+    PromptTaskResult { metrics }
+}
+
+/// Run changelog task with version history aggregation (agent version with tools).
+///
+/// This function:
+/// 1. Calls `aggregate_version_history()` to gather structured data
+/// 2. Builds changelog prompt with injected version data
+/// 3. Calls LLM agent with tools
+/// 4. Writes the result to changelog.md
+#[allow(clippy::too_many_arguments)]
+async fn run_changelog_agent_task<M>(
+    name: &'static str,
+    filename: &'static str,
+    output_dir: PathBuf,
+    agent: Agent<M>,
+    topic: String,
+    library_info: Option<LibraryInfo>,
+    client: HttpClient,
+    counter: Arc<AtomicUsize>,
+    total: usize,
+    start_time: Instant,
+    cancelled: Arc<AtomicBool>,
+) -> PromptTaskResult
+where
+    M: CompletionModel,
+{
+    // Check if already cancelled before starting
+    if cancelled.load(Ordering::SeqCst) {
+        debug!(task = name, "Task cancelled before starting");
+        return PromptTaskResult { metrics: None };
+    }
+
+    info!(task = name, "Starting changelog task with aggregator");
+    println!("  [{}] Aggregating version history...", name);
+
+    // 1. Aggregate version history from structured sources
+    let version_history = if let Some(ref lib_info) = library_info {
+        // Prefer repository URL if available, otherwise use package manager URL
+        let repo_url = lib_info.repository.as_deref().unwrap_or(&lib_info.url);
+
+        match changelog::aggregator::aggregate_version_history(
+            &client,
+            &topic,
+            &lib_info.package_manager,
+            repo_url,
+        )
+        .await
+        {
+            Ok(history) => {
+                info!(
+                    task = name,
+                    versions_found = history.versions.len(),
+                    latest_version = %history.latest_version,
+                    confidence = ?history.confidence,
+                    "Version history aggregated successfully"
+                );
+                Some(history)
+            }
+            Err(e) => {
+                warn!(task = name, error = %e, "Version history aggregation failed, falling back to LLM-only");
+                None
+            }
+        }
+    } else {
+        warn!(task = name, "No library info available, using LLM-only mode");
+        None
+    };
+
+    // 2. Build prompt with version history injected
+    let prompt = build_changelog_prompt(
+        prompts::CHANGELOG,
+        &topic,
+        library_info.as_ref(),
+        version_history.as_ref(),
+    );
+
+    println!("  [{}] Starting LLM generation...", name);
+
+    // 3. Create a tracing hook for this task
+    let hook = TracingPromptHook::new(name);
+
+    // 4. Call LLM agent with tools
+    let result = agent.prompt(&prompt).multi_turn(15).with_hook(hook).await;
+
+    // Check if cancelled after the request completed
+    if cancelled.load(Ordering::SeqCst) {
+        println!("  [{}] Cancelled (response discarded)", name);
+        return PromptTaskResult { metrics: None };
+    }
+
+    let elapsed = start_time.elapsed().as_secs_f32();
+    let completed = counter.fetch_add(1, Ordering::SeqCst) + 1;
+
+    let metrics = match result {
+        Ok(content) => {
+            debug!(
+                task = name,
+                content_len = content.len(),
+                "Agent returned content"
+            );
+
+            let metrics = PromptMetrics {
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                elapsed_secs: elapsed,
+            };
+
+            let normalized = normalize_markdown(&content);
+
+            let path = output_dir.join(filename);
+            match fs::write(&path, &normalized).await {
+                Ok(_) => {
+                    println!(
+                        "  [{}/{}] ✓ {} ({:.1}s) | with version aggregation",
+                        completed, total, name, elapsed
+                    );
+                    Some(metrics)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "  [{}/{}] ✗ {} write failed: {} ({:.1}s)",
+                        completed, total, name, e, elapsed
+                    );
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "  [{}/{}] ✗ {} failed: {} ({:.1}s)",
+                completed, total, name, e, elapsed
+            );
+            None
+        }
+    };
+
+    PromptTaskResult { metrics }
+}
+
+/// Run changelog task with version history aggregation (non-agent version without tools).
+///
+/// This function:
+/// 1. Calls `aggregate_version_history()` to gather structured data
+/// 2. Builds changelog prompt with injected version data
+/// 3. Calls LLM completion model
+/// 4. Writes the result to changelog.md
+#[allow(clippy::too_many_arguments)]
+async fn run_changelog_completion_task<M>(
+    name: &'static str,
+    filename: &'static str,
+    output_dir: PathBuf,
+    model: M,
+    topic: String,
+    library_info: Option<LibraryInfo>,
+    client: HttpClient,
+    counter: Arc<AtomicUsize>,
+    total: usize,
+    start_time: Instant,
+    cancelled: Arc<AtomicBool>,
+) -> PromptTaskResult
+where
+    M: CompletionModel,
+{
+    // Check if already cancelled before starting
+    if cancelled.load(Ordering::SeqCst) {
+        return PromptTaskResult { metrics: None };
+    }
+
+    println!("  [{}] Aggregating version history...", name);
+
+    // 1. Aggregate version history from structured sources
+    let version_history = if let Some(ref lib_info) = library_info {
+        let repo_url = lib_info.repository.as_deref().unwrap_or(&lib_info.url);
+
+        match changelog::aggregator::aggregate_version_history(
+            &client,
+            &topic,
+            &lib_info.package_manager,
+            repo_url,
+        )
+        .await
+        {
+            Ok(history) => {
+                info!(
+                    task = name,
+                    versions_found = history.versions.len(),
+                    latest_version = %history.latest_version,
+                    confidence = ?history.confidence,
+                    "Version history aggregated successfully"
+                );
+                Some(history)
+            }
+            Err(e) => {
+                warn!(task = name, error = %e, "Version history aggregation failed, falling back to LLM-only");
+                None
+            }
+        }
+    } else {
+        warn!(task = name, "No library info available, using LLM-only mode");
+        None
+    };
+
+    // 2. Build prompt with version history injected
+    let prompt = build_changelog_prompt(
+        prompts::CHANGELOG,
+        &topic,
+        library_info.as_ref(),
+        version_history.as_ref(),
+    );
+
+    println!("  [{}] Starting LLM generation...", name);
+
+    // 3. Call LLM completion model
+    let result = model.completion_request(&prompt).send().await;
+
+    // Check if cancelled after the request completed
+    if cancelled.load(Ordering::SeqCst) {
+        println!("  [{}] Cancelled (response discarded)", name);
+        return PromptTaskResult { metrics: None };
+    }
+
+    let elapsed = start_time.elapsed().as_secs_f32();
+    let completed = counter.fetch_add(1, Ordering::SeqCst) + 1;
+
+    let metrics = match result {
+        Ok(response) => {
+            let content: String = response
+                .choice
+                .into_iter()
+                .filter_map(|c| match c {
+                    AssistantContent::Text(text) => Some(text.text),
+                    _ => None,
+                })
+                .collect();
+
+            let metrics = PromptMetrics {
+                input_tokens: response.usage.input_tokens,
+                output_tokens: response.usage.output_tokens,
+                total_tokens: response.usage.total_tokens,
+                elapsed_secs: elapsed,
+            };
+
+            let normalized = normalize_markdown(&content);
+
+            let path = output_dir.join(filename);
+            match fs::write(&path, &normalized).await {
+                Ok(_) => {
+                    println!(
+                        "  [{}/{}] ✓ {} ({:.1}s) | tokens: {} in, {} out, {} total | with version aggregation",
                         completed,
                         total,
                         name,
@@ -2629,6 +3030,12 @@ pub async fn research(
     let gemini = gemini::Client::from_env();
     let zai = zai::Client::from_env().ok();
 
+    // Create HTTP client for changelog aggregation
+    let http_client = HttpClient::builder()
+        .user_agent("research-lib/0.1.0")
+        .build()
+        .unwrap_or_default();
+
     // Check if research tools are available
     let use_tools = tools_available();
     Span::current().record("tools_enabled", use_tools);
@@ -2653,7 +3060,7 @@ pub async fn research(
     let integration_partners_prompt =
         build_prompt(prompts::INTEGRATION_PARTNERS, topic, lib_info_ref);
     let use_cases_prompt = build_prompt(prompts::USE_CASES, topic, lib_info_ref);
-    let changelog_prompt = build_prompt(prompts::CHANGELOG, topic, lib_info_ref);
+    // Note: changelog_prompt is built inside run_changelog_*_task with version history
 
     // Extract library context strings for question tasks (owned for boxed futures)
     let (pkg_mgr, lang, pkg_url) = match &library_info {
@@ -2793,19 +3200,21 @@ pub async fn research(
             cancelled.clone(),
         )));
 
-        // Changelog agent (using OpenAI GPT)
+        // Changelog agent (using OpenAI GPT) with version history aggregation
         let changelog_agent = openai
             .agent("gpt-5.2")
-            .preamble("You are a research assistant with web search and scraping tools. Search for recent releases, changelogs, and version history. Use 1-3 targeted searches, then synthesize your findings. Do not make excessive tool calls - write your final answer after gathering sufficient information.")
+            .preamble("You are a research assistant with web search and scraping tools. You have been provided with pre-gathered version data from structured sources. Synthesize this data into a readable changelog, enriching with context where helpful. Use tools only if you need additional information beyond the provided data.")
             .tool(search_tool.clone())
             .tool(scrape_tool.clone())
             .build();
-        phase1_futures.push(Box::pin(run_agent_prompt_task(
+        phase1_futures.push(Box::pin(run_changelog_agent_task(
             "changelog",
             "changelog.md",
             output_dir.clone(),
             changelog_agent,
-            changelog_prompt,
+            topic.to_string(),
+            library_info.clone(),
+            http_client.clone(),
             counter.clone(),
             total,
             start_time,
@@ -2915,12 +3324,14 @@ pub async fn research(
             start_time,
             cancelled.clone(),
         )));
-        phase1_futures.push(Box::pin(run_prompt_task(
+        phase1_futures.push(Box::pin(run_changelog_completion_task(
             "changelog",
             "changelog.md",
             output_dir.clone(),
             changelog_model,
-            changelog_prompt,
+            topic.to_string(),
+            library_info.clone(),
+            http_client.clone(),
             counter.clone(),
             total,
             start_time,

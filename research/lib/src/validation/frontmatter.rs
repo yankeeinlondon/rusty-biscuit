@@ -60,6 +60,25 @@ pub struct SkillFrontmatter {
     pub hash: Option<String>,
 }
 
+/// Represents the frontmatter metadata from a changelog.md file
+#[derive(Debug, Deserialize, Serialize, PartialEq)]
+pub struct ChangelogFrontmatter {
+    /// ISO 8601 date when this changelog was created (YYYY-MM-DD)
+    pub created_at: String,
+
+    /// ISO 8601 date of last update (YYYY-MM-DD)
+    pub updated_at: String,
+
+    /// The most recent version string (e.g., "2.5.3")
+    pub latest_version: String,
+
+    /// Confidence level: high, medium, or low
+    pub confidence: String,
+
+    /// List of data sources used
+    pub sources: Vec<String>,
+}
+
 /// Extract frontmatter and body from SKILL.md content
 ///
 /// Returns `Some((frontmatter_yaml, body_content))` if frontmatter delimiters are found,
@@ -189,6 +208,115 @@ pub fn parse_and_validate_frontmatter(
     frontmatter.description = frontmatter.description.trim().to_string();
 
     Ok((frontmatter, body))
+}
+
+/// Parse and validate changelog.md frontmatter
+///
+/// This function extracts the YAML frontmatter, parses it, validates required fields,
+/// and returns both the parsed frontmatter structure and the body content.
+///
+/// # Arguments
+///
+/// * `content` - The full content of the changelog.md file
+///
+/// # Returns
+///
+/// * `Ok((frontmatter, body))` - Successfully parsed and validated frontmatter with body content
+/// * `Err(FrontmatterError)` - Validation or parsing error
+///
+/// # Errors
+///
+/// * `MissingFrontmatter` - File doesn't start with `---`
+/// * `UnclosedFrontmatter` - Missing closing `---` delimiter
+/// * `InvalidYaml` - YAML parsing failed
+/// * `MissingRequiredField` - Required field is missing
+/// * `EmptyField` - Required field is empty
+pub fn parse_and_validate_changelog_frontmatter(
+    content: &str,
+) -> Result<(ChangelogFrontmatter, String), FrontmatterError> {
+    // Extract frontmatter and body
+    let (yaml_content, body) =
+        extract_frontmatter(content).ok_or(FrontmatterError::MissingFrontmatter)?;
+
+    // Check if we actually found a closing delimiter
+    if content.trim_start().starts_with("---") && extract_frontmatter(content).is_none() {
+        return Err(FrontmatterError::UnclosedFrontmatter);
+    }
+
+    // Parse YAML
+    let mut frontmatter: ChangelogFrontmatter = serde_yaml::from_str(&yaml_content)?;
+
+    // Validate required fields exist and are non-empty
+    if frontmatter.created_at.is_empty() {
+        return Err(FrontmatterError::EmptyField {
+            field: "created_at".to_string(),
+        });
+    }
+
+    if frontmatter.updated_at.is_empty() {
+        return Err(FrontmatterError::EmptyField {
+            field: "updated_at".to_string(),
+        });
+    }
+
+    if frontmatter.latest_version.is_empty() {
+        return Err(FrontmatterError::EmptyField {
+            field: "latest_version".to_string(),
+        });
+    }
+
+    if frontmatter.confidence.is_empty() {
+        return Err(FrontmatterError::EmptyField {
+            field: "confidence".to_string(),
+        });
+    }
+
+    // Validate confidence value
+    let confidence_lower = frontmatter.confidence.trim().to_lowercase();
+    if !["high", "medium", "low"].contains(&confidence_lower.as_str()) {
+        return Err(FrontmatterError::InvalidYaml(format!(
+            "confidence must be 'high', 'medium', or 'low', got '{}'",
+            frontmatter.confidence
+        )));
+    }
+
+    // Validate sources is non-empty
+    if frontmatter.sources.is_empty() {
+        return Err(FrontmatterError::EmptyField {
+            field: "sources".to_string(),
+        });
+    }
+
+    // Validate date formats (basic ISO 8601 check: YYYY-MM-DD)
+    if !is_valid_iso8601_date(&frontmatter.created_at) {
+        return Err(FrontmatterError::InvalidYaml(format!(
+            "created_at must be in ISO 8601 format (YYYY-MM-DD), got '{}'",
+            frontmatter.created_at
+        )));
+    }
+
+    if !is_valid_iso8601_date(&frontmatter.updated_at) {
+        return Err(FrontmatterError::InvalidYaml(format!(
+            "updated_at must be in ISO 8601 format (YYYY-MM-DD), got '{}'",
+            frontmatter.updated_at
+        )));
+    }
+
+    // Trim whitespace from required fields
+    frontmatter.created_at = frontmatter.created_at.trim().to_string();
+    frontmatter.updated_at = frontmatter.updated_at.trim().to_string();
+    frontmatter.latest_version = frontmatter.latest_version.trim().to_string();
+    frontmatter.confidence = frontmatter.confidence.trim().to_string();
+
+    Ok((frontmatter, body))
+}
+
+/// Validate ISO 8601 date format (YYYY-MM-DD)
+///
+/// Performs basic validation of the date string format.
+fn is_valid_iso8601_date(date: &str) -> bool {
+    use chrono::NaiveDate;
+    NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d").is_ok()
 }
 
 #[cfg(test)]
@@ -512,5 +640,487 @@ no closing delimiter"#;
 
         let result = extract_frontmatter(content);
         assert!(result.is_none());
+    }
+
+    // Changelog frontmatter tests
+    #[test]
+    fn test_valid_changelog_frontmatter_all_fields() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: 2024-12-30
+latest_version: "2.5.3"
+confidence: high
+sources:
+  - github_releases
+  - changelog_file
+  - registry_versions
+---
+# Version History
+
+Version timeline content here.
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_ok());
+
+        let (frontmatter, body) = result.unwrap();
+        assert_eq!(frontmatter.created_at, "2024-12-30");
+        assert_eq!(frontmatter.updated_at, "2024-12-30");
+        assert_eq!(frontmatter.latest_version, "2.5.3");
+        assert_eq!(frontmatter.confidence, "high");
+        assert_eq!(frontmatter.sources.len(), 3);
+        assert!(frontmatter.sources.contains(&"github_releases".to_string()));
+        assert!(body.contains("# Version History"));
+    }
+
+    #[test]
+    fn test_valid_changelog_frontmatter_minimal() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: 2024-12-30
+latest_version: "1.0.0"
+confidence: low
+sources:
+  - llm_knowledge
+---
+Body content here.
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_ok());
+
+        let (frontmatter, body) = result.unwrap();
+        assert_eq!(frontmatter.created_at, "2024-12-30");
+        assert_eq!(frontmatter.updated_at, "2024-12-30");
+        assert_eq!(frontmatter.latest_version, "1.0.0");
+        assert_eq!(frontmatter.confidence, "low");
+        assert_eq!(frontmatter.sources, vec!["llm_knowledge"]);
+        assert_eq!(body.trim(), "Body content here.");
+    }
+
+    #[test]
+    fn test_changelog_missing_frontmatter() {
+        let content = r#"# Version History
+
+No frontmatter here.
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), FrontmatterError::MissingFrontmatter);
+    }
+
+    #[test]
+    fn test_changelog_unclosed_frontmatter() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: 2024-12-30
+latest_version: "1.0.0"
+confidence: high
+sources:
+  - github_releases
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            FrontmatterError::UnclosedFrontmatter => {}
+            FrontmatterError::MissingFrontmatter => {}
+            other => panic!(
+                "Expected UnclosedFrontmatter or MissingFrontmatter, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_changelog_missing_created_at() {
+        let content = r#"---
+updated_at: 2024-12-30
+latest_version: "1.0.0"
+confidence: high
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            FrontmatterError::InvalidYaml(_) => {
+                // serde will fail to deserialize without created_at field
+            }
+            other => panic!("Expected InvalidYaml for missing created_at, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_changelog_missing_updated_at() {
+        let content = r#"---
+created_at: 2024-12-30
+latest_version: "1.0.0"
+confidence: high
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            FrontmatterError::InvalidYaml(_) => {
+                // serde will fail to deserialize without updated_at field
+            }
+            other => panic!("Expected InvalidYaml for missing updated_at, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_changelog_missing_latest_version() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: 2024-12-30
+confidence: high
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            FrontmatterError::InvalidYaml(_) => {
+                // serde will fail to deserialize without latest_version field
+            }
+            other => panic!(
+                "Expected InvalidYaml for missing latest_version, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_changelog_missing_confidence() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: 2024-12-30
+latest_version: "1.0.0"
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            FrontmatterError::InvalidYaml(_) => {
+                // serde will fail to deserialize without confidence field
+            }
+            other => panic!(
+                "Expected InvalidYaml for missing confidence, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_changelog_missing_sources() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: 2024-12-30
+latest_version: "1.0.0"
+confidence: high
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            FrontmatterError::InvalidYaml(_) => {
+                // serde will fail to deserialize without sources field
+            }
+            other => panic!("Expected InvalidYaml for missing sources, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_changelog_empty_created_at() {
+        let content = r#"---
+created_at: ""
+updated_at: 2024-12-30
+latest_version: "1.0.0"
+confidence: high
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            FrontmatterError::EmptyField {
+                field: "created_at".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_changelog_empty_updated_at() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: ""
+latest_version: "1.0.0"
+confidence: high
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            FrontmatterError::EmptyField {
+                field: "updated_at".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_changelog_empty_latest_version() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: 2024-12-30
+latest_version: ""
+confidence: high
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            FrontmatterError::EmptyField {
+                field: "latest_version".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_changelog_empty_confidence() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: 2024-12-30
+latest_version: "1.0.0"
+confidence: ""
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            FrontmatterError::EmptyField {
+                field: "confidence".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_changelog_empty_sources() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: 2024-12-30
+latest_version: "1.0.0"
+confidence: high
+sources: []
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            FrontmatterError::EmptyField {
+                field: "sources".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_changelog_invalid_confidence_value() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: 2024-12-30
+latest_version: "1.0.0"
+confidence: invalid
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            FrontmatterError::InvalidYaml(msg) => {
+                assert!(msg.contains("confidence must be"));
+            }
+            other => panic!("Expected InvalidYaml for invalid confidence, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_changelog_confidence_case_insensitive() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: 2024-12-30
+latest_version: "1.0.0"
+confidence: HIGH
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_ok());
+
+        let (frontmatter, _) = result.unwrap();
+        assert_eq!(frontmatter.confidence, "HIGH");
+    }
+
+    #[test]
+    fn test_changelog_invalid_created_at_date() {
+        let content = r#"---
+created_at: not-a-date
+updated_at: 2024-12-30
+latest_version: "1.0.0"
+confidence: high
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            FrontmatterError::InvalidYaml(msg) => {
+                assert!(msg.contains("ISO 8601"));
+                assert!(msg.contains("created_at"));
+            }
+            other => panic!("Expected InvalidYaml for invalid date, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_changelog_invalid_updated_at_date() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: 12/30/2024
+latest_version: "1.0.0"
+confidence: high
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            FrontmatterError::InvalidYaml(msg) => {
+                assert!(msg.contains("ISO 8601"));
+                assert!(msg.contains("updated_at"));
+            }
+            other => panic!("Expected InvalidYaml for invalid date, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_changelog_frontmatter_whitespace_trimming() {
+        let content = r#"---
+created_at: " 2024-12-30 "
+updated_at: " 2024-12-30 "
+latest_version: " 1.0.0 "
+confidence: " high "
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_ok());
+
+        let (frontmatter, _) = result.unwrap();
+        assert_eq!(frontmatter.created_at, "2024-12-30");
+        assert_eq!(frontmatter.updated_at, "2024-12-30");
+        assert_eq!(frontmatter.latest_version, "1.0.0");
+        assert_eq!(frontmatter.confidence, "high");
+    }
+
+    #[test]
+    fn test_changelog_invalid_yaml_syntax() {
+        let content = r#"---
+created_at: 2024-12-30
+updated_at: 2024-12-30
+latest_version: "1.0.0"
+confidence: high
+invalid: yaml: syntax: here
+sources:
+  - github_releases
+---
+Body
+"#;
+
+        let result = parse_and_validate_changelog_frontmatter(content);
+        assert!(result.is_err());
+
+        match result.unwrap_err() {
+            FrontmatterError::InvalidYaml(_) => {}
+            other => panic!("Expected InvalidYaml, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_is_valid_iso8601_date_valid() {
+        assert!(is_valid_iso8601_date("2024-12-30"));
+        assert!(is_valid_iso8601_date("2024-01-01"));
+        assert!(is_valid_iso8601_date("2000-12-31"));
+    }
+
+    #[test]
+    fn test_is_valid_iso8601_date_invalid() {
+        assert!(!is_valid_iso8601_date("not-a-date"));
+        assert!(!is_valid_iso8601_date("12/30/2024"));
+        assert!(!is_valid_iso8601_date("2024-13-01")); // Invalid month
+        assert!(!is_valid_iso8601_date("2024-12-32")); // Invalid day
+        assert!(!is_valid_iso8601_date("2024/12/30")); // Wrong separator
     }
 }
