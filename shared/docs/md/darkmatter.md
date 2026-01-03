@@ -55,3 +55,4 @@ The surprising thing is, is that this is not only valid **DarkMatter** but it is
         - if the `class` property is defined then the renderer will look for a definition of the class and will render those CSS properties associated with the class which are possible in a terminal.
 
         > For more detail on what is and is not supported in `style` or `class` properties in the terminal refer to the [Mapping CSS Styling to the Terminal](./mapping-css-styling-to-the-terminal.md).
+
