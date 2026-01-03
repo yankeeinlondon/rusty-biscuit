@@ -6,7 +6,10 @@
 
 mod supports;
 
-pub use supports::{color_depth, supports_italics, supports_setting_foreground};
+pub use supports::{
+    color_depth, supported_underline_variants, supports_italics, supports_setting_foreground,
+    supports_underline, UnderlineSupport, UnderlineVariants,
+};
 
 #[cfg(test)]
 mod tests;
