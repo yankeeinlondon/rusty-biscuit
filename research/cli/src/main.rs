@@ -87,6 +87,13 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Show a research topic's deep dive document
+    Show {
+        /// The topic to show (directory name under ~/.research/library/)
+        #[arg(value_name = "TOPIC")]
+        topic: String,
+    },
 }
 
 fn read_topic_from_stdin() -> io::Result<String> {
@@ -94,6 +101,40 @@ fn read_topic_from_stdin() -> io::Result<String> {
     let mut line = String::new();
     stdin.lock().read_line(&mut line)?;
     Ok(line.trim().to_string())
+}
+
+/// Show a research topic's deep dive document in the system's default application.
+///
+/// Discovers topics by globbing for `{RESEARCH_DIR}/.research/library/*/deep_dive.md`.
+fn show_topic(topic: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // Match the pattern used in research_lib (respects RESEARCH_DIR env var)
+    let base = std::env::var("RESEARCH_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from(".")));
+
+    let library_dir = base.join(".research").join("library");
+
+    // Glob only immediate children, matching discover_topics() behavior
+    let pattern = format!("{}/*/deep_dive.md", library_dir.display());
+
+    for entry in glob::glob(&pattern)? {
+        let path = entry?;
+        // Get parent (should be the topic directory)
+        if let Some(parent) = path.parent() {
+            if let Some(name) = parent.file_name() {
+                if name.to_string_lossy() == topic {
+                    open::that(&path)?;
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "Topic '{}' not found. Run 'research list' to see available topics.",
+        topic
+    )
+    .into())
 }
 
 /// Initialize tracing subscriber based on verbosity and output format
@@ -239,6 +280,13 @@ async fn main() {
                     eprintln!("Link failed: {}", e);
                     std::process::exit(1);
                 }
+            }
+        }
+
+        Commands::Show { topic } => {
+            if let Err(e) = show_topic(&topic) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
             }
         }
     }

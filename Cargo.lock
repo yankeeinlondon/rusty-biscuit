@@ -586,9 +586,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.53"
+version = "4.5.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9e340e012a1bf4935f5282ed1436d1489548e8f72308207ea5df0e23d2d03f8"
+checksum = "c6e6ff9dcd79cff5cd969a17a545d79e84ab086e444102a591e288a8aa3ce394"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -596,9 +596,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.53"
+version = "4.5.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d76b5d13eaa18c901fd2f7fca939fefe3a0727a953561fefdf3b2922b8569d00"
+checksum = "fa42cf4d2b7a41bc8f663a7cab4031ebafa1bf3875705bfaf8466dc60ab52c00"
 dependencies = [
  "anstream",
  "anstyle",
@@ -800,7 +800,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.5.53",
+ "clap 4.5.54",
  "criterion-plot",
  "is-terminal",
  "itertools 0.10.5",
@@ -2391,7 +2391,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "atty",
- "clap 4.5.53",
+ "clap 4.5.54",
  "color-eyre",
  "open",
  "predicates",
@@ -3668,8 +3668,11 @@ dependencies = [
 name = "research-cli"
 version = "0.1.0"
 dependencies = [
- "clap 4.5.53",
+ "clap 4.5.54",
+ "dirs",
  "dotenvy",
+ "glob",
+ "open",
  "research-lib",
  "tokio",
  "tracing",
@@ -4145,7 +4148,7 @@ name = "shared"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clap 4.5.53",
+ "clap 4.5.54",
  "color-eyre",
  "comfy-table",
  "criterion",
@@ -4295,7 +4298,7 @@ name = "sniff"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
- "clap 4.5.53",
+ "clap 4.5.54",
  "predicates",
  "serde_json",
  "sniff-lib",
@@ -4324,7 +4327,7 @@ dependencies = [
 name = "so-you-say"
 version = "0.1.0"
 dependencies = [
- "clap 4.5.53",
+ "clap 4.5.54",
  "shared",
 ]
 
@@ -4541,6 +4544,10 @@ dependencies = [
  "core-foundation-sys",
  "libc",
 ]
+
+[[package]]
+name = "tabby"
+version = "0.1.0"
 
 [[package]]
 name = "tempfile"
@@ -5062,6 +5069,13 @@ dependencies = [
  "serde",
  "serde_derive",
  "syntect",
+]
+
+[[package]]
+name = "ui"
+version = "0.1.0"
+dependencies = [
+ "clap 4.5.54",
 ]
 
 [[package]]
