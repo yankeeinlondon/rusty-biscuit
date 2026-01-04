@@ -197,6 +197,13 @@ fn main() -> Result<()> {
         options.prose_theme = prose_theme;
         options.code_theme = code_theme;
         options.color_mode = color_mode;
+        // For HTML output, default to interactive mermaid diagrams
+        // (browsers can render them natively via mermaid.js)
+        options.mermaid_mode = if cli.mermaid_alt {
+            MermaidMode::Text
+        } else {
+            MermaidMode::Image
+        };
 
         let html = md.as_html(options).context("Failed to convert to HTML")?;
         println!("{}", html);
@@ -208,6 +215,12 @@ fn main() -> Result<()> {
         options.prose_theme = prose_theme;
         options.code_theme = code_theme;
         options.color_mode = color_mode;
+        // For HTML output, default to interactive mermaid diagrams
+        options.mermaid_mode = if cli.mermaid_alt {
+            MermaidMode::Text
+        } else {
+            MermaidMode::Image
+        };
 
         let html = md.as_html(options).context("Failed to convert to HTML")?;
         let temp_path = std::env::temp_dir().join("md-preview.html");

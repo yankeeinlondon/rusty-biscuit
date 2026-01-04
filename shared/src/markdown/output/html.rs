@@ -27,7 +27,9 @@
 use crate::markdown::dsl::parse_code_info;
 use crate::markdown::highlighting::{CodeHighlighter, ColorMode, ThemePair};
 use crate::markdown::inline::{InlineEvent, InlineTag, MarkProcessor};
+use crate::markdown::output::terminal::MermaidMode;
 use crate::markdown::{Markdown, MarkdownResult};
+use crate::mermaid::Mermaid;
 use html_escape;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use syntect::easy::HighlightLines;
@@ -61,6 +63,12 @@ pub struct HtmlOptions {
     pub include_line_numbers: bool,
     /// Include inline CSS styles.
     pub include_styles: bool,
+    /// Controls how Mermaid diagrams are rendered.
+    ///
+    /// - `Off` (default): Show mermaid blocks as syntax-highlighted code
+    /// - `Image`: Render as interactive mermaid diagrams (includes mermaid.js)
+    /// - `Text`: Show as fenced code blocks (fallback format)
+    pub mermaid_mode: MermaidMode,
 }
 
 impl Default for HtmlOptions {
@@ -71,6 +79,7 @@ impl Default for HtmlOptions {
             color_mode: ColorMode::Dark,
             include_line_numbers: false,
             include_styles: true,
+            mermaid_mode: MermaidMode::default(),
         }
     }
 }
@@ -115,6 +124,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     let mut code_buffer = String::new();
     let mut code_lang = String::new();
     let mut code_info = String::new();
+    let mut has_mermaid = false;
 
     for event in events {
         match event {
@@ -138,15 +148,45 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                     let meta = parse_code_info(&code_info)?;
                     code_lang = meta.language.clone();
 
-                    // Render code block with highlighting
-                    let highlighted = highlight_code_block(
-                        &code_buffer,
-                        &code_lang,
-                        &meta,
-                        &code_highlighter,
-                        &options,
-                    )?;
-                    output.push_str(&highlighted);
+                    // Check for mermaid code blocks
+                    let is_mermaid = code_lang.eq_ignore_ascii_case("mermaid");
+
+                    if is_mermaid && options.mermaid_mode != MermaidMode::Off {
+                        match options.mermaid_mode {
+                            MermaidMode::Image => {
+                                // Render as interactive mermaid diagram
+                                has_mermaid = true;
+                                let diagram = Mermaid::new(&code_buffer);
+                                if let Some(title) = &meta.title {
+                                    let diagram = diagram.with_title(title.clone());
+                                    let html = diagram.render_for_html();
+                                    output.push_str(&html.body);
+                                    output.push('\n');
+                                } else {
+                                    let html = diagram.render_for_html();
+                                    output.push_str(&html.body);
+                                    output.push('\n');
+                                }
+                            }
+                            MermaidMode::Text => {
+                                // Render as fenced code block (fallback format)
+                                output.push_str("<pre><code class=\"language-mermaid\">");
+                                output.push_str(&html_escape::encode_text(&code_buffer));
+                                output.push_str("</code></pre>\n");
+                            }
+                            MermaidMode::Off => unreachable!(),
+                        }
+                    } else {
+                        // Render code block with highlighting
+                        let highlighted = highlight_code_block(
+                            &code_buffer,
+                            &code_lang,
+                            &meta,
+                            &code_highlighter,
+                            &options,
+                        )?;
+                        output.push_str(&highlighted);
+                    }
 
                     in_code_block = false;
                 }
@@ -259,6 +299,15 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             }
             _ => {}
         }
+    }
+
+    // Add mermaid.js script if we rendered any mermaid diagrams
+    if has_mermaid {
+        output.push_str(r#"<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true });
+</script>
+"#);
     }
 
     Ok(output)
@@ -797,5 +846,184 @@ fn main() {}
         assert!(html.contains("<strong>"), "Should preserve strong");
         assert!(html.contains("<mark>"), "Should have mark");
         assert!(html.contains("<em>"), "Should preserve em");
+    }
+
+    // Mermaid rendering tests - regression tests for mermaid code block rendering bug
+    #[test]
+    fn test_mermaid_off_renders_as_code_block() {
+        // With MermaidMode::Off (default), mermaid blocks are syntax-highlighted code
+        let content = r#"```mermaid
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let options = HtmlOptions {
+            mermaid_mode: MermaidMode::Off,
+            ..Default::default()
+        };
+        let html = as_html(&md, options).unwrap();
+        // Should render as normal code block, not as mermaid diagram
+        assert!(html.contains("code-block"), "Should have code-block class");
+        assert!(!html.contains("class=\"mermaid\""), "Should not have mermaid class");
+        assert!(!html.contains("mermaid.initialize"), "Should not include mermaid.js");
+    }
+
+    #[test]
+    fn test_mermaid_image_renders_as_diagram() {
+        // Regression test: MermaidMode::Image should render as interactive diagram
+        let content = r#"```mermaid
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let options = HtmlOptions {
+            mermaid_mode: MermaidMode::Image,
+            ..Default::default()
+        };
+        let html = as_html(&md, options).unwrap();
+        // Should render as mermaid pre element for mermaid.js
+        assert!(html.contains("class=\"mermaid\""), "Should have mermaid class for mermaid.js");
+        assert!(html.contains("role=\"img\""), "Should have ARIA role");
+        assert!(html.contains("aria-label="), "Should have ARIA label");
+        // Should include mermaid.js script
+        assert!(html.contains("mermaid.initialize"), "Should include mermaid initialization");
+        assert!(html.contains("cdn.jsdelivr.net/npm/mermaid"), "Should include mermaid CDN");
+    }
+
+    #[test]
+    fn test_mermaid_text_renders_as_code_block() {
+        // MermaidMode::Text renders as plain code block (fallback)
+        let content = r#"```mermaid
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let options = HtmlOptions {
+            mermaid_mode: MermaidMode::Text,
+            ..Default::default()
+        };
+        let html = as_html(&md, options).unwrap();
+        // Should render as pre/code with language-mermaid class
+        assert!(html.contains("language-mermaid"), "Should have language-mermaid class");
+        assert!(html.contains("flowchart"), "Should contain diagram source");
+        assert!(!html.contains("mermaid.initialize"), "Should not include mermaid.js");
+    }
+
+    #[test]
+    fn test_mermaid_with_title() {
+        // Mermaid blocks with title metadata
+        let content = r#"```mermaid title="My Flowchart"
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let options = HtmlOptions {
+            mermaid_mode: MermaidMode::Image,
+            ..Default::default()
+        };
+        let html = as_html(&md, options).unwrap();
+        assert!(html.contains("title=\"My Flowchart\""), "Should include title attribute");
+    }
+
+    #[test]
+    fn test_mermaid_multiple_diagrams() {
+        // Multiple mermaid diagrams should all render and only include script once
+        let content = r#"```mermaid
+flowchart LR
+    A --> B
+```
+
+Some text.
+
+```mermaid
+sequenceDiagram
+    A->>B: Hello
+```"#;
+        let md: Markdown = content.into();
+        let options = HtmlOptions {
+            mermaid_mode: MermaidMode::Image,
+            ..Default::default()
+        };
+        let html = as_html(&md, options).unwrap();
+        // Both diagrams should render
+        let mermaid_count = html.matches("class=\"mermaid\"").count();
+        assert_eq!(mermaid_count, 2, "Should have 2 mermaid diagrams");
+        // Script should only appear once (at the end)
+        let script_count = html.matches("mermaid.initialize").count();
+        assert_eq!(script_count, 1, "Should have only 1 mermaid script");
+    }
+
+    #[test]
+    fn test_mermaid_escapes_xss() {
+        // Mermaid content should be HTML-escaped
+        let content = r#"```mermaid
+flowchart LR
+    A["<script>alert('xss')</script>"] --> B
+```"#;
+        let md: Markdown = content.into();
+        let options = HtmlOptions {
+            mermaid_mode: MermaidMode::Image,
+            ..Default::default()
+        };
+        let html = as_html(&md, options).unwrap();
+        // Should escape script tags
+        assert!(!html.contains("<script>alert"), "Should escape XSS in mermaid content");
+        assert!(html.contains("&lt;script&gt;") || html.contains("&#60;script&#62;"), "Should have escaped entities");
+    }
+
+    #[test]
+    fn test_mermaid_case_insensitive() {
+        // Language detection should be case-insensitive
+        let content = r#"```MERMAID
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let options = HtmlOptions {
+            mermaid_mode: MermaidMode::Image,
+            ..Default::default()
+        };
+        let html = as_html(&md, options).unwrap();
+        assert!(html.contains("class=\"mermaid\""), "Should detect MERMAID (uppercase)");
+    }
+
+    #[test]
+    fn test_mermaid_mixed_with_regular_code() {
+        // Document with both mermaid and regular code blocks
+        let content = r#"```rust
+fn main() {}
+```
+
+```mermaid
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let options = HtmlOptions {
+            mermaid_mode: MermaidMode::Image,
+            ..Default::default()
+        };
+        let html = as_html(&md, options).unwrap();
+        // Should have both: syntax-highlighted rust and mermaid diagram
+        assert!(html.contains("code-block"), "Should have rust code block");
+        assert!(html.contains("class=\"mermaid\""), "Should have mermaid diagram");
+        assert!(html.contains("mermaid.initialize"), "Should include mermaid script");
+    }
+
+    #[test]
+    fn test_mermaid_no_script_when_no_diagrams() {
+        // When no mermaid diagrams exist, don't include the script
+        let content = r#"# Hello
+
+```rust
+fn main() {}
+```"#;
+        let md: Markdown = content.into();
+        let options = HtmlOptions {
+            mermaid_mode: MermaidMode::Image,
+            ..Default::default()
+        };
+        let html = as_html(&md, options).unwrap();
+        assert!(!html.contains("mermaid.initialize"), "Should not include mermaid script when no diagrams");
     }
 }

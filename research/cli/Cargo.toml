@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }
 research-lib = { path = "../lib" }
+shared = { path = "../../shared" }
 dirs = "5.0"
 dotenvy = "0.15.7"
 glob = "0.3"
@@ -17,4 +18,3 @@ open = "5"
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-tts = "0.26.3"

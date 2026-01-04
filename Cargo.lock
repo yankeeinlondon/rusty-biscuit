@@ -3795,10 +3795,10 @@ dependencies = [
  "glob",
  "open",
  "research-lib",
+ "shared",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "tts",
 ]
 
 [[package]]

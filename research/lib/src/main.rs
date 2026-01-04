@@ -20,7 +20,8 @@ async fn main() {
             println!("{}", "=".repeat(60));
 
             // Announce completion via TTS
-            shared::tts::announce_research_complete(&result.topic);
+            let message = format!("Research for the {} library has completed", result.topic);
+            shared::tts::speak_when_able(&message, &shared::tts::VoiceConfig::default());
         }
         Err(e) => {
             eprintln!("Research failed: {}", e);

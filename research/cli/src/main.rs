@@ -5,7 +5,6 @@ use research_lib::research;
 use std::io::{self, BufRead};
 use std::path::PathBuf;
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
-use tts::Tts;
 
 #[derive(Parser)]
 #[command(name = "research")]
@@ -240,7 +239,9 @@ async fn main() {
 
                     // Only announce if not cancelled
                     if !result.cancelled {
-                        announce_completion(&result.topic);
+                        use shared::tts::{speak_when_able, VoiceConfig};
+                        let message = format!("Research for the {} library has completed", result.topic);
+                        speak_when_able(&message, &VoiceConfig::default());
                     }
                 }
                 Err(e) => {
@@ -287,28 +288,6 @@ async fn main() {
             if let Err(e) = show_topic(&topic) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
-            }
-        }
-    }
-}
-
-fn announce_completion(topic: &str) {
-    if let Ok(mut tts) = Tts::default() {
-        if let Ok(voices) = tts.voices()
-            && let Some(voice) = voices.iter().find(|v| {
-                !v.id().contains("compact")
-                    && !v.id().contains("eloquence")
-                    && v.language().starts_with("en")
-            })
-        {
-            let _ = tts.set_voice(voice);
-        }
-
-        let message = format!("Research for the {} library has completed", topic);
-        if tts.speak(&message, false).is_ok() {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            while tts.is_speaking().unwrap_or(false) {
-                std::thread::sleep(std::time::Duration::from_millis(100));
             }
         }
     }

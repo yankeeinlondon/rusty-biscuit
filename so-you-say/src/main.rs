@@ -1,5 +1,24 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+use shared::tts::{Gender, VoiceConfig};
 use std::io::{self, Read};
+
+/// Gender preference for voice selection
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum GenderArg {
+    /// Use a male voice
+    Male,
+    /// Use a female voice
+    Female,
+}
+
+impl From<GenderArg> for Gender {
+    fn from(arg: GenderArg) -> Self {
+        match arg {
+            GenderArg::Male => Gender::Male,
+            GenderArg::Female => Gender::Female,
+        }
+    }
+}
 
 /// Simple text-to-speech CLI
 ///
@@ -9,6 +28,9 @@ use std::io::{self, Read};
 /// // Speak text from command-line arguments
 /// // speak Hello world
 ///
+/// // Speak text with a female voice
+/// // speak --gender female Hello world
+///
 /// // Speak text from stdin
 /// // echo "Hello world" | speak
 /// ```
@@ -17,6 +39,10 @@ use std::io::{self, Read};
 #[command(about = "Convert text to speech using system TTS", long_about = None)]
 #[command(version)]
 struct Cli {
+    /// Voice gender preference (male or female)
+    #[arg(short, long, value_enum)]
+    gender: Option<GenderArg>,
+
     /// Text to speak (reads from stdin if not provided)
     text: Vec<String>,
 }
@@ -76,8 +102,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         join_args(cli.text)
     };
 
+    // Build voice config with optional gender preference
+    let config = match cli.gender {
+        Some(gender) => VoiceConfig::new().of_gender(gender.into()),
+        None => VoiceConfig::default(),
+    };
+
     // Call the shared TTS function
-    shared::tts::speak(&message);
+    shared::tts::speak_when_able(&message, &config);
 
     Ok(())
 }
