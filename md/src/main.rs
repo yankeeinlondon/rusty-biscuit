@@ -66,6 +66,16 @@ struct Cli {
     #[arg(long)]
     no_images: bool,
 
+    /// Render mermaid diagrams to terminal as images.
+    /// Falls back to code blocks if terminal doesn't support images.
+    #[arg(long)]
+    mermaid: bool,
+
+    /// Display mermaid diagrams as text (code blocks) instead of images.
+    /// Useful for terminals that don't support inline images.
+    #[arg(long)]
+    mermaid_alt: bool,
+
     /// Increase verbosity (-v INFO, -vv DEBUG, -vvv TRACE, -vvvv TRACE with file/line)
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
     verbose: u8,

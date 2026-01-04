@@ -8,6 +8,7 @@
 //! - [`api`] - OpenAI-compatible API utilities for model discovery
 //! - [`codegen`] - Safe code injection with AST-based manipulation
 //! - [`markdown`] - Markdown document manipulation with frontmatter support (Phase 3)
+//! - [`mermaid`] - Mermaid diagram theming and rendering
 //! - [`model`] - Centralized model selection with fallback stacking (Phase 3 - in progress)
 //! - [`providers`] - LLM provider discovery and model listing (Phase 1 - in progress)
 //! - [`terminal`] - Terminal color detection utilities (Phase 1)
@@ -18,6 +19,7 @@
 pub mod api;
 pub mod codegen;
 pub mod markdown;
+pub mod mermaid;
 pub mod model;
 pub mod providers;
 pub mod render;
