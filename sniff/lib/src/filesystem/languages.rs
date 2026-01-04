@@ -1,7 +1,7 @@
+use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use walkdir::{DirEntry, WalkDir};
 use crate::Result;
 
 /// Maximum files to scan before early termination
@@ -32,16 +32,54 @@ pub struct LanguageStats {
     pub percentage: f64,
 }
 
+/// Non-programming languages that should not be considered as "primary".
+///
+/// These are documentation or data formats, not programming languages.
+const NON_PROGRAMMING_LANGUAGES: &[&str] = &[
+    "Markdown",
+    "JSON",
+    "YAML",
+    "TOML",
+    "XML",
+    "HTML",
+    "CSS",
+    "Text",
+    "Plain Text",
+    "reStructuredText",
+    "AsciiDoc",
+    "Org",
+    "TeX",
+    "LaTeX",
+    "BibTeX",
+    "Diff",
+    "Ignore List",
+    "INI",
+    "EditorConfig",
+    "Git Config",
+    "Git Attributes",
+    "Dockerfile",
+    "Makefile",
+    "CMake",
+    "Meson",
+    "Nix",
+];
+
+/// Checks if a language is a programming language (not just markup/config/data).
+fn is_programming_language(lang: &str) -> bool {
+    !NON_PROGRAMMING_LANGUAGES.contains(&lang)
+}
+
 /// Detects programming languages in a directory tree.
 ///
-/// Walks the directory tree starting from `root`, excluding common
-/// build/dependency directories, and uses hyperpolyglot to detect
+/// Walks the directory tree starting from `root`, respecting `.gitignore` rules
+/// and excluding common build/dependency directories. Uses hyperpolyglot to detect
 /// the programming language of each file.
 ///
 /// ## Returns
 ///
 /// Returns a `LanguageBreakdown` containing statistics about detected languages,
-/// sorted by file count in descending order.
+/// sorted by file count in descending order. The `primary` field only considers
+/// programming languages, not markup/documentation formats like Markdown.
 ///
 /// ## Errors
 ///
@@ -62,11 +100,18 @@ pub fn detect_languages(root: &Path) -> Result<LanguageBreakdown> {
     let mut language_counts: HashMap<String, usize> = HashMap::new();
     let mut total_files = 0;
 
-    for entry in WalkDir::new(root)
-        .into_iter()
+    // Use the `ignore` crate which respects .gitignore files
+    let walker = WalkBuilder::new(root)
+        .hidden(true)           // Skip hidden files (like .git)
+        .git_ignore(true)       // Respect .gitignore
+        .git_global(true)       // Respect global gitignore
+        .git_exclude(true)      // Respect .git/info/exclude
         .filter_entry(|e| !is_excluded_dir(e))
+        .build();
+
+    for entry in walker
         .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
+        .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
         .take(MAX_FILES)
     {
         total_files += 1;
@@ -78,7 +123,12 @@ pub fn detect_languages(root: &Path) -> Result<LanguageBreakdown> {
     }
 
     let languages = calculate_stats(&language_counts, total_files);
-    let primary = languages.first().map(|s| s.language.clone());
+
+    // Primary language must be a programming language, not markup/config
+    let primary = languages
+        .iter()
+        .find(|s| is_programming_language(&s.language))
+        .map(|s| s.language.clone());
 
     Ok(LanguageBreakdown {
         languages,
@@ -89,15 +139,15 @@ pub fn detect_languages(root: &Path) -> Result<LanguageBreakdown> {
 
 /// Checks if a directory entry should be excluded from language detection.
 ///
-/// Excludes common build artifacts, dependency directories, and version control
-/// directories to improve performance and accuracy.
-fn is_excluded_dir(entry: &DirEntry) -> bool {
-    if !entry.file_type().is_dir() {
+/// Excludes common build artifacts and dependency directories to improve
+/// performance and accuracy.
+fn is_excluded_dir(entry: &ignore::DirEntry) -> bool {
+    if !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
         return false;
     }
     matches!(
         entry.file_name().to_str(),
-        Some("node_modules" | "target" | ".git" | "vendor" | "dist" | "build" | "__pycache__")
+        Some("node_modules" | "target" | "vendor" | "dist" | "build" | "__pycache__")
     )
 }
 
@@ -176,8 +226,8 @@ mod tests {
         let excluded_dir = dir.path().join("target");
         fs::create_dir(&excluded_dir).unwrap();
 
-        // Test with WalkDir entries
-        for entry in WalkDir::new(dir.path()).into_iter().filter_map(|e| e.ok()) {
+        // Test with ignore WalkBuilder entries
+        for entry in WalkBuilder::new(dir.path()).build().filter_map(|e| e.ok()) {
             if entry.path() == regular_dir {
                 assert!(!is_excluded_dir(&entry), "src should not be excluded");
             }
@@ -204,5 +254,62 @@ mod tests {
         assert_eq!(stats[1].language, "JavaScript");
         assert_eq!(stats[1].file_count, 3);
         assert!((stats[1].percentage - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_primary_language_is_programming_language() {
+        // Markdown should not be considered a programming language
+        assert!(!is_programming_language("Markdown"));
+        assert!(!is_programming_language("JSON"));
+        assert!(!is_programming_language("YAML"));
+        assert!(!is_programming_language("TOML"));
+
+        // Real programming languages
+        assert!(is_programming_language("Rust"));
+        assert!(is_programming_language("JavaScript"));
+        assert!(is_programming_language("Python"));
+        assert!(is_programming_language("Go"));
+    }
+
+    #[test]
+    fn test_primary_skips_markdown_for_programming_language() {
+        let dir = TempDir::new().unwrap();
+        // Create more markdown files than Rust files
+        for i in 0..10 {
+            fs::write(dir.path().join(format!("doc{}.md", i)), "# Heading").unwrap();
+        }
+        fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+
+        let result = detect_languages(dir.path()).unwrap();
+        // Primary should be Rust, not Markdown
+        assert_eq!(result.primary.as_deref(), Some("Rust"));
+        // But Markdown should still be in the languages list
+        assert!(result.languages.iter().any(|l| l.language == "Markdown"));
+    }
+
+    #[test]
+    fn test_respects_gitignore() {
+        let dir = TempDir::new().unwrap();
+
+        // Create a .gitignore that ignores generated files
+        fs::write(dir.path().join(".gitignore"), "generated/\n").unwrap();
+
+        // Create a directory that should be ignored
+        fs::create_dir(dir.path().join("generated")).unwrap();
+        fs::write(
+            dir.path().join("generated/output.rs"),
+            "// This should be ignored",
+        )
+        .unwrap();
+
+        // Create a file that should be counted
+        fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+
+        // Initialize git repo so .gitignore is respected
+        fs::create_dir(dir.path().join(".git")).unwrap();
+
+        let result = detect_languages(dir.path()).unwrap();
+        // Should only count main.rs, not the file in generated/
+        assert_eq!(result.total_files, 1);
     }
 }

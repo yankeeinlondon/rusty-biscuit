@@ -10,7 +10,7 @@ pub mod dependencies;
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
 pub use git::{GitInfo, RepoStatus, RemoteInfo, HostingProvider, CommitInfo, detect_git};
 pub use monorepo::{MonorepoInfo, MonorepoTool, PackageLocation, detect_monorepo};
-pub use dependencies::{PackageManager, DependencyReport, detect_dependencies};
+pub use dependencies::{PackageManager, DependencyReport, ManifestLocation, detect_dependencies};
 
 /// Complete filesystem analysis for a directory.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -1,6 +1,56 @@
 use sniff_lib::SniffResult;
+use std::path::Path;
 
-pub fn print_text(result: &SniffResult) {
+/// Format bytes into human-readable units (KB, MB, GB, TB)
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    const TB: u64 = GB * 1024;
+
+    if bytes >= TB {
+        format!("{:.1} TB", bytes as f64 / TB as f64)
+    } else if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} bytes", bytes)
+    }
+}
+
+/// Format large numbers with comma separators
+fn format_number(n: usize) -> String {
+    let s = n.to_string();
+    let mut result = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            result.insert(0, ',');
+        }
+        result.insert(0, c);
+    }
+    result
+}
+
+/// Convert absolute path to relative path from repo root
+fn relative_path(path: &Path, repo_root: Option<&Path>) -> String {
+    if let Some(root) = repo_root {
+        if let Ok(rel) = path.strip_prefix(root) {
+            return rel.display().to_string();
+        }
+    }
+    path.display().to_string()
+}
+
+pub fn print_text(result: &SniffResult, verbose: u8) {
+    // Get repo root for relative paths
+    let repo_root = result
+        .filesystem
+        .as_ref()
+        .and_then(|fs| fs.git.as_ref())
+        .map(|git| git.repo_root.as_path());
     println!("=== Hardware ===");
     // Prefer long_version if available, otherwise fall back to name + version
     if let Some(ref long_ver) = result.hardware.os.long_version {
@@ -26,16 +76,31 @@ pub fn print_text(result: &SniffResult) {
     println!();
 
     println!("Memory:");
-    println!("  Total: {} GB", result.hardware.memory.total_bytes / (1024 * 1024 * 1024));
-    println!("  Available: {} GB", result.hardware.memory.available_bytes / (1024 * 1024 * 1024));
-    println!("  Used: {} GB", result.hardware.memory.used_bytes / (1024 * 1024 * 1024));
+    println!("  Total: {}", format_bytes(result.hardware.memory.total_bytes));
+    println!("  Available: {}", format_bytes(result.hardware.memory.available_bytes));
+    println!("  Used: {}", format_bytes(result.hardware.memory.used_bytes));
     println!();
 
     println!("Storage:");
     for disk in &result.hardware.storage {
-        println!("  {} ({})", disk.mount_point.display(), disk.file_system);
-        println!("    Total: {} GB", disk.total_bytes / (1024 * 1024 * 1024));
-        println!("    Available: {} GB", disk.available_bytes / (1024 * 1024 * 1024));
+        let mount_str = relative_path(&disk.mount_point, repo_root);
+        let kind_str = match disk.kind {
+            sniff_lib::hardware::StorageKind::Ssd => "SSD",
+            sniff_lib::hardware::StorageKind::Hdd => "HDD",
+            sniff_lib::hardware::StorageKind::Unknown => "",
+        };
+        if kind_str.is_empty() {
+            println!("  {} ({})", mount_str, disk.file_system);
+        } else {
+            println!("  {} ({}, {})", mount_str, disk.file_system, kind_str);
+        }
+        if verbose > 0 {
+            println!("    Total: {}", format_bytes(disk.total_bytes));
+            println!("    Available: {}", format_bytes(disk.available_bytes));
+            if disk.is_removable {
+                println!("    Removable: yes");
+            }
+        }
     }
     println!();
 
@@ -65,22 +130,24 @@ pub fn print_text(result: &SniffResult) {
         println!("=== Filesystem ===");
 
         if let Some(ref langs) = fs.languages {
-            println!("Languages ({} files analyzed):", langs.total_files);
+            println!("Languages ({} files analyzed):", format_number(langs.total_files));
             if let Some(ref primary) = langs.primary {
                 println!("  Primary: {}", primary);
             }
-            for lang in langs.languages.iter().take(5) {
-                println!("  {}: {} files ({:.1}%)", lang.language, lang.file_count, lang.percentage);
+            let show_count = if verbose > 0 { 10 } else { 5 };
+            for lang in langs.languages.iter().take(show_count) {
+                println!("  {}: {} files ({:.1}%)", lang.language, format_number(lang.file_count), lang.percentage);
             }
-            if langs.languages.len() > 5 {
-                println!("  ... and {} more", langs.languages.len() - 5);
+            if langs.languages.len() > show_count {
+                println!("  ... and {} more", langs.languages.len() - show_count);
             }
         }
         println!();
 
         if let Some(ref git) = fs.git {
             println!("Git Repository:");
-            println!("  Root: {}", git.repo_root.display());
+            let root_str = relative_path(&git.repo_root, repo_root);
+            println!("  Root: {}", if root_str.is_empty() { ".".to_string() } else { root_str });
             if let Some(ref branch) = git.current_branch {
                 println!("  Branch: {}", branch);
             }
@@ -104,11 +171,13 @@ pub fn print_text(result: &SniffResult) {
         if let Some(ref mono) = fs.monorepo {
             println!("Monorepo: {:?}", mono.tool);
             println!("  Packages: {}", mono.packages.len());
-            for pkg in mono.packages.iter().take(5) {
-                println!("    {}", pkg.name);
+            let show_count = if verbose > 0 { mono.packages.len() } else { 5 };
+            for pkg in mono.packages.iter().take(show_count) {
+                let path_str = relative_path(&pkg.path, repo_root);
+                println!("    {} ({})", pkg.name, path_str);
             }
-            if mono.packages.len() > 5 {
-                println!("    ... and {} more", mono.packages.len() - 5);
+            if mono.packages.len() > show_count {
+                println!("    ... and {} more", mono.packages.len() - show_count);
             }
         }
 
@@ -117,6 +186,12 @@ pub fn print_text(result: &SniffResult) {
                 println!("Package Managers:");
                 for pm in &deps.detected_managers {
                     println!("  {:?} ({})", pm, pm.primary_language());
+                }
+                if verbose > 0 && !deps.manifests.is_empty() {
+                    println!("Manifests ({}):", deps.manifests.len());
+                    for manifest in &deps.manifests {
+                        println!("  {:?}: {}", manifest.manager, manifest.path.display());
+                    }
                 }
             }
         }

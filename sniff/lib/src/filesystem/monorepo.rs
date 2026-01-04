@@ -235,6 +235,22 @@ fn detect_lerna(root: &Path) -> Result<Option<MonorepoInfo>> {
     }))
 }
 
+/// Creates a namespaced package name from a path relative to the repo root.
+///
+/// For example, `/repo/sniff/lib` becomes `sniff/lib` to avoid name collisions
+/// when multiple packages have the same directory name (like "lib" or "cli").
+fn make_namespaced_name(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .ok()
+        .and_then(|rel| rel.to_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default()
+        })
+}
+
 fn expand_glob_patterns(root: &Path, patterns: &[&str]) -> Vec<PackageLocation> {
     let mut packages = Vec::new();
 
@@ -248,11 +264,9 @@ fn expand_glob_patterns(root: &Path, patterns: &[&str]) -> Vec<PackageLocation> 
                 if let Ok(entries) = std::fs::read_dir(&search_dir) {
                     for entry in entries.filter_map(|e| e.ok()) {
                         if entry.path().is_dir() {
-                            let name = entry.file_name().to_string_lossy().to_string();
-                            packages.push(PackageLocation {
-                                name: name.clone(),
-                                path: entry.path(),
-                            });
+                            let path = entry.path();
+                            let name = make_namespaced_name(&path, root);
+                            packages.push(PackageLocation { name, path });
                         }
                     }
                 }
@@ -261,10 +275,7 @@ fn expand_glob_patterns(root: &Path, patterns: &[&str]) -> Vec<PackageLocation> 
             // Direct path
             let path = root.join(pattern);
             if path.exists() {
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
+                let name = make_namespaced_name(&path, root);
                 packages.push(PackageLocation { name, path });
             }
         }

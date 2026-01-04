@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
+use sysinfo::{CpuRefreshKind, DiskKind, Disks, MemoryRefreshKind, RefreshKind, System};
 
 use crate::Result;
 
@@ -11,7 +11,7 @@ mod storage;
 pub use cpu::CpuInfo;
 pub use memory::MemoryInfo;
 pub use os::OsInfo;
-pub use storage::StorageInfo;
+pub use storage::{StorageInfo, StorageKind};
 
 /// Complete hardware information.
 ///
@@ -97,6 +97,12 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
             total_bytes: d.total_space(),
             available_bytes: d.available_space(),
             file_system: d.file_system().to_string_lossy().to_string(),
+            kind: match d.kind() {
+                DiskKind::SSD => StorageKind::Ssd,
+                DiskKind::HDD => StorageKind::Hdd,
+                DiskKind::Unknown(_) => StorageKind::Unknown,
+            },
+            is_removable: d.is_removable(),
         })
         .collect();
 

@@ -12,9 +12,13 @@ struct Cli {
     #[arg(short, long)]
     base: Option<PathBuf>,
 
-    /// Output format
-    #[arg(short, long, value_enum, default_value = "text")]
-    format: OutputFormat,
+    /// Output as JSON instead of text
+    #[arg(long)]
+    json: bool,
+
+    /// Increase output verbosity
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    verbose: u8,
 
     /// Skip hardware detection
     #[arg(long)]
@@ -27,12 +31,6 @@ struct Cli {
     /// Skip filesystem detection
     #[arg(long)]
     skip_filesystem: bool,
-}
-
-#[derive(Clone, Copy, clap::ValueEnum)]
-enum OutputFormat {
-    Text,
-    Json,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -63,9 +61,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let result = detect_with_config(config)?;
 
-    match cli.format {
-        OutputFormat::Text => output::print_text(&result),
-        OutputFormat::Json => output::print_json(&result)?,
+    if cli.json {
+        output::print_json(&result)?;
+    } else {
+        output::print_text(&result, cli.verbose);
     }
 
     Ok(())

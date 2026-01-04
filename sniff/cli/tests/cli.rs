@@ -25,7 +25,7 @@ fn test_version_flag() {
 fn test_json_output() {
     Command::cargo_bin("sniff")
         .unwrap()
-        .args(["--format", "json"])
+        .arg("--json")
         .assert()
         .success()
         .stdout(predicate::str::contains("\"hardware\""));
@@ -33,9 +33,9 @@ fn test_json_output() {
 
 #[test]
 fn test_text_output() {
+    // Default output is text
     Command::cargo_bin("sniff")
         .unwrap()
-        .args(["--format", "text"])
         .assert()
         .success()
         .stdout(predicate::str::contains("=== Hardware ==="));
@@ -54,7 +54,7 @@ fn test_base_dir_flag() {
 fn test_skip_hardware_flag() {
     Command::cargo_bin("sniff")
         .unwrap()
-        .args(["--skip-hardware", "--format", "json"])
+        .args(["--skip-hardware", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"name\": \"\""));
@@ -64,7 +64,7 @@ fn test_skip_hardware_flag() {
 fn test_skip_network_flag() {
     Command::cargo_bin("sniff")
         .unwrap()
-        .args(["--skip-network", "--format", "json"])
+        .args(["--skip-network", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"interfaces\": []"));
@@ -74,17 +74,29 @@ fn test_skip_network_flag() {
 fn test_skip_filesystem_flag() {
     Command::cargo_bin("sniff")
         .unwrap()
-        .args(["--skip-filesystem", "--format", "json"])
+        .args(["--skip-filesystem", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"filesystem\": null"));
 }
 
 #[test]
-fn test_invalid_format_fails() {
+fn test_verbose_flag() {
+    // -v should show more details
     Command::cargo_bin("sniff")
         .unwrap()
-        .args(["--format", "invalid"])
+        .arg("-v")
         .assert()
-        .failure();
+        .success()
+        .stdout(predicate::str::contains("Total:"));
+}
+
+#[test]
+fn test_double_verbose_flag() {
+    // -vv should work (higher verbosity)
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .arg("-vv")
+        .assert()
+        .success();
 }
