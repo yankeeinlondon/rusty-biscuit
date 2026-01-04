@@ -1,0 +1,12 @@
+{
+    "kind": "library",
+    "library_info": {
+        "package_manager": "npm",
+        "language": "JavaScript",
+        "url": "https://www.npmjs.com/package/lodash"
+    },
+    "additional_files": {},
+    "created_at": "2023-12-01T08:00:00Z",
+    "updated_at": "2024-03-15T16:30:00Z",
+    "brief": "A modern JavaScript utility library"
+}

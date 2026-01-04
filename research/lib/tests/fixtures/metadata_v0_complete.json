@@ -1,0 +1,19 @@
+{
+    "schema_version": 0,
+    "kind": "library",
+    "library_info": {
+        "package_manager": "crates.io",
+        "language": "Rust",
+        "url": "https://crates.io/crates/serde",
+        "repository": "https://github.com/serde-rs/serde"
+    },
+    "additional_files": {
+        "question_1.md": "How does derive work?",
+        "question_2.md": "What are the performance characteristics?"
+    },
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-06-20T14:45:00Z",
+    "brief": "A serialization/deserialization framework for Rust",
+    "summary": "Serde is a framework for serializing and deserializing Rust data structures efficiently and generically. It supports JSON, YAML, TOML, and many other formats.",
+    "when_to_use": "Use when working with structured data formats like JSON, YAML, or TOML in Rust applications"
+}
