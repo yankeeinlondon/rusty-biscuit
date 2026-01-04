@@ -75,7 +75,7 @@ The command generates several artifacts in the output directory under `library/<
      ---
      name: library-name
      description: Expert knowledge for [library] - [capabilities]. Use when [scenarios].
-     tools: [Read, Write, Edit, Grep, Glob, Bash]
+     allowed_tools: [Read, Write, Edit, Grep, Glob, Bash]
      ---
      ```
 
@@ -92,17 +92,17 @@ The command generates several artifacts in the output directory under `library/<
    - Key concepts and common patterns
    - Quick-start examples
 
-4. **metadata.json** - Research metadata
+4. **metadata.json** - Research metadata (v1 schema)
 
    ```json
    {
-     "schema_version": 0,
-     "topic": "library-name",
-     "type": "library",
-     "library_info": {
-       "name": "library-name",
-       "language": "Rust|TypeScript|Python|etc",
-       "ecosystem": "crates.io|npm|pypi|etc",
+     "schema_version": 1,
+     "kind": "library",
+     "details": {
+       "type": "Library",
+       "package_manager": "crates.io",
+       "language": "Rust",
+       "url": "https://crates.io/crates/library-name",
        "repository": "https://github.com/..."
      },
      "brief": "One sentence description",
@@ -110,10 +110,14 @@ The command generates several artifacts in the output directory under `library/<
      "when_to_use": "Expert knowledge for... Use when...",
      "created_at": "2025-12-29T...",
      "updated_at": "2025-12-29T...",
-     "additional_files": ["question_1.md", "question_2.md"],
-     "research_questions": ["What is...?", "How does...?"]
+     "additional_files": {
+       "question_1.md": "What is...?",
+       "question_2.md": "How does...?"
+     }
    }
    ```
+
+   > **Note:** Legacy v0 metadata files are automatically migrated to v1 on load.
 
 ### Research Process
 
@@ -150,9 +154,11 @@ Validation checks for:
 
 - Proper YAML structure with `---` delimiters
 - Required fields: `name`, `description`
-- Optional fields: `tools`, `last_updated`, `hash`
+- Optional fields: `allowed_tools`, `last_updated`, `hash`
 - No empty field values
 - Valid YAML syntax
+
+> **Note:** The `tools` field name is also accepted as an alias for backward compatibility.
 
 ### Terminal Output
 

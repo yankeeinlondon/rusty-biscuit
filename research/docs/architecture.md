@@ -169,15 +169,18 @@ fn default_output_dir(topic: &str) -> PathBuf {
 - If set: `$RESEARCH_DIR/.research/library/<pkg>`
 - If not set: `$HOME/.research/library/<pkg>`
 
-### Metadata Schema
+### Metadata Schema (v1)
 
 ```json
 {
+  "schema_version": 1,
   "kind": "library",
-  "library_info": {
+  "details": {
+    "type": "Library",
     "package_manager": "crates.io",
     "language": "Rust",
-    "url": "https://crates.io/crates/<pkg>"
+    "url": "https://crates.io/crates/<pkg>",
+    "repository": "https://github.com/..."
   },
   "additional_files": {
     "question_1.md": "How does it compare to X?",
@@ -187,6 +190,13 @@ fn default_output_dir(topic: &str) -> PathBuf {
   "updated_at": "2025-12-28T10:00:00Z"
 }
 ```
+
+**Schema Evolution:**
+
+- **v0** (legacy): `library_info` at top level, no `schema_version` or `details`
+- **v1** (current): `schema_version: 1`, type-specific `details` field with `ResearchDetails` enum
+
+Legacy v0 metadata files are automatically migrated to v1 on load. A backup is created at `metadata.v0.json.backup` before migration.
 
 ## Incremental Research (DRY)
 
