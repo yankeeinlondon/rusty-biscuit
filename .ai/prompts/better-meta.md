@@ -4,11 +4,18 @@ This feature request involves improving the metadata capture in the Research Are
 
 ## Custom Providers
 
-- We have defined a custom provider for **Z.ai** but it is currently defined in the Research Area's Library module
-    - This needs to be moved to the shared library area so that everyone can benefit from the custom provider
-- We have started to define properties about the [**ZenMux**](https://zenmux.ai) aggregation provider but we currently do not have any way of using it through our **rig** implementation because we do not have a custom provider defined for it
-    - This needs to be added and should take advantage of the provider information metadata we've provided in @shared/src/providers/ 
-    - consider using `PROVIDER_AUTH`, `PROVIDER_BASE_URLS`, `PROVIDER_ENV_VARIABLES` while implementing this custom provider
+### Move Z.ai Provider to Shared Library
+
+- The Z.ai custom provider is currently defined in the Research Area's Library module
+- **Action**: Move the provider implementation to `shared/src/providers/`
+- **Cleanup**: Delete the original implementation from research area after moving (no re-export needed)
+
+### Add ZenMux Custom Provider
+
+- [**ZenMux**](https://zenmux.ai) is an aggregation provider with metadata defined in `@shared/src/providers/` but no rig implementation
+- **Action**: Create a custom rig provider for ZenMux
+- **Authentication**: Bearer token (standard `Authorization: Bearer <key>` header)
+- **Implementation**: Use `PROVIDER_AUTH`, `PROVIDER_BASE_URLS`, `PROVIDER_ENV_VARIABLES` from the providers module
 
 ## Library Area
 
@@ -23,45 +30,52 @@ This feature request involves improving the metadata capture in the Research Are
 
     > Treat the code below as a rough draft. You are free to mutate this as you see fit but hopefully it can act as a starting point to the design work that must be done.
 
+    **Implementation Notes:**
+    - All detail structs should be defined as empty unit structs initially (e.g., `pub struct PersonDetails;`)
+    - Fields will be added to each struct as that research type is implemented
+    - This allows the enum to be complete while deferring detailed design
+
     ```rust
     pub enum ResearchDetails {
-        /// `library` research involves information on _library software_ 
+        /// `library` research involves information on _library software_
         /// which was written to be _included_ or _composed_ into an
         /// application (or another library) by a programmer.
         Library(LibraryDetails),
 
-        /// Research which describes a kind of problem that software 
-        /// libraries or applications might try and solve for. Things 
+        /// Research which describes a kind of problem that software
+        /// libraries or applications might try and solve for. Things
         /// like "Concurrency in Rust" might be a topic you'd find here.
         SolutionSpace(SolutionSpaceDetails),
+
         /// `cli` is software that is packaged up as a CLI for use.
         /// The information researched for CLI software involves the
-        /// usage of the CLI, what commands/subcommands exist, what 
+        /// usage of the CLI, what commands/subcommands exist, what
         /// flags or switches exist, what structured and unstructured
         /// outputs are output and whether the structured outputs
         /// are "typed".
-        Cli(SoftwareDetails),
+        Cli(CliDetails),
 
-        /// Software bundled together as an executable application 
+        /// Software bundled together as an executable application
         /// (but not a CLI).
-        App(UtilityDetails),
+        App(AppDetails),
 
         /// Research into the services and software that a cloud provider
         /// is providing to it's users.
-        CloudProvider(InfraDetails),
+        CloudProvider(CloudProviderDetails),
 
-        /// Research around a recognized standard. The "kind" of 
-        /// standard could be anything (network standard, software 
+        /// Research around a recognized standard. The "kind" of
+        /// standard could be anything (network standard, software
         /// standard, education standard, regulatory standard, etc.)
         Standard(StandardDetails),
 
-        /// Research into a particular API. How is it defined? 
+        /// Research into a particular API. How is it defined?
         /// Does it use one or more standards for schema definition?
         /// Does it fit into the REST definition? Is it more of a RPC
-        /// based API? What is the API used for? 
+        /// based API? What is the API used for?
         Api(ApiDetails),
+
         /// This involves research into a particular person,
-        /// regardless of whether the person is a known friend, 
+        /// regardless of whether the person is a known friend,
         /// family member, someone famous, etc.
         Person(PersonDetails),
 
@@ -74,7 +88,7 @@ This feature request involves improving the metadata capture in the Research Are
 
         /// Research into a product for sale.
         Product(ProductDetails),
-        
+
         Company(CompanyDetails),
 
         CompanyCategory(CompanyCategoryDetails),
@@ -84,14 +98,41 @@ This feature request involves improving the metadata capture in the Research Are
         SkillSet(SkillSetDetails),
     }
 
+    // Initially all detail structs are empty unit structs:
+    pub struct LibraryDetails;      // Will get fields when refactoring existing library metadata
+    pub struct SolutionSpaceDetails;
+    pub struct CliDetails;
+    pub struct AppDetails;
+    pub struct CloudProviderDetails;
+    pub struct StandardDetails;
+    pub struct ApiDetails;          // Will get fields when implementing `research api` command
+    pub struct PersonDetails;
+    pub struct PeopleDetails;
+    pub struct PlaceDetails;
+    pub struct ProductDetails;
+    pub struct CompanyDetails;
+    pub struct CompanyCategoryDetails;
+    pub struct NewsDetails;
+    pub struct SkillSetDetails;
+
     /// Allows for a set of event driven scenarios
     /// which will determine whether content should
     /// be considered expired.
     pub enum ExpiryEvent {
-        // TODO
-        // should include an implementation for a
-        // `check(datetime)` function which will
-        // perform the expiry check.
+        /// A new major version of the software was released
+        NewMajorVersion,
+        /// The software/API has been officially deprecated
+        DeprecationAnnounced,
+        /// A security advisory has been issued
+        SecurityAdvisory,
+    }
+
+    impl ExpiryEvent {
+        /// Check if the expiry condition has been triggered
+        pub fn check(&self, datetime: DateTime<Utc>) -> bool {
+            // Implementation will query relevant sources based on event type
+            todo!()
+        }
     }
 
     /// Provides a means to describe how long content is
@@ -114,40 +155,53 @@ This feature request involves improving the metadata capture in the Research Are
         EventDriven(ExpiryEvent)
     }
 
-    pub struct ResearchSourcing {
-        /// the research was driven by an LLM prompt;
-        /// 
-        /// - the prompt and the kind of module used
-        ///   is also captured
-        PromptDriven(String, Model),
+    /// How the research content was generated/sourced.
+    /// Simplified to three variants with common metadata.
+    pub enum ResearchSourcing {
+        /// Content was generated by an LLM prompt
+        LlmGenerated {
+            /// The prompt used to generate the content
+            prompt: String,
+            /// The model that generated the response
+            model: Model,
+            /// When the content was generated
+            generated_at: DateTime<Utc>,
+        },
 
-        AlgorithmDriven(ExpirePolicy),
+        /// Content was derived from an external API
+        ApiDerived {
+            /// Name/identifier of the API source
+            api_name: String,
+            /// The endpoint or query used
+            source_url: Option<String>,
+            /// When the data was fetched
+            fetched_at: DateTime<Utc>,
+        },
 
-        ApiDriven(),
-        /// the document was manually provided by the
-        /// user.
-        StaticallyProvided,
-
+        /// Content was manually provided by the user
+        UserProvided {
+            /// When the content was added
+            added_at: DateTime<Utc>,
+        },
     }
 
     /// Research documents produced with knowledge which
-    /// will eventually be fed into final deliverables 
+    /// will eventually be fed into final deliverables
     /// but in isolation are not a "final product"
     pub struct UnderlyingResearch {
-        /// the filename for the research (usually without 
-        /// any directory structure but if the file is in 
+        /// The filename for the research (usually without
+        /// any directory structure but if the file is in
         /// a subdirectory of the root folder for that research
         /// then you can provide a relative path to it)
-        filename: String;
-        /// the frontmatter properties which MUST be present
+        pub filename: String,
+        /// The frontmatter properties which MUST be present
         /// in this document to be considered "valid"
-        required_frontmatter: Option<>
-        /// How was this content created (prompt, user provided,
-        /// etc.)
-        sourcing: ResearchSourcing,
-        created_at: DateTime<Utc>,
-        updated_at: DateTime<Utc>,
-        expires_at: Option<DateTime<Utc>>
+        pub required_frontmatter: Option<Vec<String>>,
+        /// How was this content created (prompt, user provided, etc.)
+        pub sourcing: ResearchSourcing,
+        pub created_at: DateTime<Utc>,
+        pub updated_at: DateTime<Utc>,
+        pub expires_at: Option<DateTime<Utc>>,
     }
 
     pub struct ResearchMetadata {
@@ -167,15 +221,28 @@ This feature request involves improving the metadata capture in the Research Are
 
     ```
 
-    - since there is a `schema_version` property in we will be moving from 0 to 1
-    - we will likely need a upgrade function to upgrade from 0 to 1
+    - since there is a `schema_version` property we will be moving from 0 to 1
 
-2. we need to make sure once we've refactored from #1 that the library command works as expected.
+2. **Schema Migration (v0 → v1)**
+    - **Strategy**: Auto-upgrade on read
+    - When reading a `metadata.json` with `schema_version: 0` (or missing version):
+        - Automatically convert to v1 format in memory
+        - Save the upgraded version back to disk
+    - This ensures seamless transition without requiring user intervention
+    - Add `fn migrate_v0_to_v1(old: MetadataV0) -> ResearchMetadata` function
 
-3. now it's time to add a new command to the Research CLI:
+3. Ensure the `library` command works correctly after the refactoring from #1 and #2.
 
-    - we will add the `api` command which will add the `Api` type of research
-    - the syntax is `research api <api-name> [...prompt]`
-    - structurally this is very similar to the 'library' command 
+4. **Add `api` Command**
+    - Add a new command to the Research CLI: `research api <api-name> [...prompt]`
+    - This adds the `Api` research type
+    - Structurally similar to the `library` command
+    - Will populate `ApiDetails` struct (initially empty, fields added as needed)
 
-4. the `SkillFrontmatter` structure defines a `tool` property but this is incorrect and should be called `allowed_tools`. Rename and make sure all references in code and docs reflects this change.
+5. **Rename `tool` to `allowed_tools` (Breaking Change)**
+    - The `SkillFrontmatter` structure incorrectly defines a `tool` property
+    - **Action**: Rename to `allowed_tools` (no deprecation period)
+    - Update all references in:
+        - Rust code (struct definitions, field accesses)
+        - Documentation files
+        - Any existing skill files that use this property
