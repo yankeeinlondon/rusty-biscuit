@@ -10,6 +10,6 @@ pub mod health;
 // Re-export commonly used types
 pub use frontmatter::{
     ChangelogFrontmatter, FrontmatterError, SkillFrontmatter, parse_and_validate_changelog_frontmatter,
-    parse_and_validate_frontmatter,
+    parse_and_validate_frontmatter, repair_skill_frontmatter,
 };
 pub use health::{ResearchHealth, ResearchType, ValidationError, research_health};

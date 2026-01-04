@@ -41,7 +41,7 @@ use thiserror::Error;
 use tokio::fs;
 use tracing::{Span, debug, info, info_span, instrument, warn};
 
-use crate::validation::parse_and_validate_frontmatter;
+use crate::validation::{parse_and_validate_frontmatter, repair_skill_frontmatter};
 
 /// A PromptHook that emits tracing events for agent interactions.
 ///
@@ -417,13 +417,40 @@ impl ResearchMetadata {
     }
 
     /// Extract when_to_use from SKILL.md frontmatter description field.
+    ///
+    /// This function attempts to repair malformed YAML frontmatter before parsing,
+    /// handling common LLM-generated issues like:
+    /// - `## name:` instead of `name:` (markdown headers in YAML)
+    /// - `tools: \[Read\]` instead of `tools: [Read]` (escaped brackets)
+    /// - Missing `---` delimiters
     async fn extract_when_to_use_from_skill(output_dir: &std::path::Path) -> Option<String> {
         let skill_path = output_dir.join("skill").join("SKILL.md");
         let content = fs::read_to_string(&skill_path).await.ok()?;
 
-        match validation::frontmatter::parse_and_validate_frontmatter(&content) {
-            Ok((frontmatter, _body)) => Some(frontmatter.description),
-            Err(_) => None,
+        // First try to parse as-is
+        if let Ok((frontmatter, _body)) = validation::frontmatter::parse_and_validate_frontmatter(&content) {
+            return Some(frontmatter.description);
+        }
+
+        tracing::debug!("Attempting repair on SKILL.md: {}", skill_path.display());
+
+        // If that fails, try repairing the content first
+        let repaired = repair_skill_frontmatter(&content);
+        match validation::frontmatter::parse_and_validate_frontmatter(&repaired) {
+            Ok((frontmatter, _body)) => {
+                // Repair worked! Also save the repaired content back to disk
+                if let Err(e) = fs::write(&skill_path, &repaired).await {
+                    tracing::warn!("Failed to save repaired SKILL.md: {}", e);
+                } else {
+                    tracing::info!("✓ Repaired and saved SKILL.md frontmatter");
+                }
+                Some(frontmatter.description)
+            }
+            Err(e) => {
+                tracing::debug!("Repair failed for {}: {}", skill_path.display(), e);
+                tracing::debug!("Repaired content first 500 chars: {}", &repaired[..500.min(repaired.len())]);
+                None
+            }
         }
     }
 
@@ -1837,11 +1864,14 @@ async fn generate_skill_files(
             vec![("SKILL.md".to_string(), skill_content)]
         };
 
-        // Step 2: Selectively normalize files (skip SKILL.md, normalize others)
+        // Step 2: Selectively process files
+        // - SKILL.md: Apply repair function then write (fixes LLM-generated YAML issues)
+        // - Other files: Normalize markdown
         for (filename, content) in files {
             let final_content = if filename == "SKILL.md" {
-                // Don't normalize SKILL.md - preserve frontmatter exactly as LLM generated it
-                content
+                // Apply repair function to fix common LLM-generated YAML issues
+                // like "## name:" instead of "name:", escaped brackets, missing delimiters
+                repair_skill_frontmatter(&content)
             } else {
                 // Normalize supporting documentation files
                 normalize_markdown(&content)
@@ -2541,6 +2571,20 @@ pub async fn list(
     list_with_migrate(filters, types, verbose, json, false).await
 }
 
+/// Check if a metadata.json file has the when_to_use field set.
+///
+/// This is a quick check using JSON parsing to avoid loading the full metadata.
+fn check_has_when_to_use(metadata_path: &std::path::Path) -> bool {
+    if let Ok(content) = std::fs::read_to_string(metadata_path) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(when_to_use) = value.get("when_to_use") {
+                return when_to_use.is_string() && !when_to_use.as_str().unwrap_or("").is_empty();
+            }
+        }
+    }
+    false
+}
+
 /// List research topics with optional metadata migration.
 ///
 /// When `migrate` is true, this function will load each topic's metadata using
@@ -2580,8 +2624,10 @@ pub async fn list_with_migrate(
     // If migrate flag is set, trigger migration for all topics
     if migrate {
         println!("🔄 Migrating metadata schemas...");
-        let mut migrated = 0;
-        let mut already_v1 = 0;
+        let mut v0_migrated = 0;
+        let mut when_to_use_extracted = 0;
+        let mut already_complete = 0;
+        let mut needs_manual_fix: Vec<String> = Vec::new();
         let mut errors = 0;
 
         // Also check the api directory
@@ -2600,27 +2646,46 @@ pub async fn list_with_migrate(
                     if path.is_dir() {
                         let metadata_path = path.join("metadata.json");
                         if metadata_path.exists() {
-                            // Check if backup already exists (already migrated)
                             let backup_path = path.join("metadata.v0.json.backup");
+                            let name = path
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default();
 
-                            // Load triggers migration if v0
+                            // Check state BEFORE calling load
+                            let backup_existed_before = backup_path.exists();
+                            let had_when_to_use_before = check_has_when_to_use(&metadata_path);
+
+                            // Load triggers migration if v0, and extracts when_to_use if missing
                             match ResearchMetadata::load(&path).await {
-                                Some(_) => {
-                                    if backup_path.exists() {
-                                        // Backup was just created, meaning migration happened
-                                        let name = path.file_name()
-                                            .map(|n| n.to_string_lossy().to_string())
-                                            .unwrap_or_default();
-                                        println!("  ✅ Migrated: {}", name);
-                                        migrated += 1;
+                                Some(metadata) => {
+                                    // Check what changed
+                                    let backup_exists_now = backup_path.exists();
+                                    let has_when_to_use_now = metadata.when_to_use.is_some();
+
+                                    if !backup_existed_before && backup_exists_now {
+                                        // v0 → v1 migration happened
+                                        println!("  ✅ Migrated v0→v1: {}", name);
+                                        v0_migrated += 1;
+                                    } else if !had_when_to_use_before && has_when_to_use_now {
+                                        // when_to_use was extracted from SKILL.md
+                                        println!("  ✅ Extracted when_to_use: {}", name);
+                                        when_to_use_extracted += 1;
+                                    } else if !has_when_to_use_now {
+                                        // Still missing when_to_use - couldn't extract from SKILL.md
+                                        let skill_path = path.join("skill").join("SKILL.md");
+                                        let reason = if !skill_path.exists() {
+                                            "missing skill/SKILL.md"
+                                        } else {
+                                            "invalid SKILL.md frontmatter"
+                                        };
+                                        println!("  ⚠️  {}: {} ({})", name, "needs when_to_use", reason);
+                                        needs_manual_fix.push(name);
                                     } else {
-                                        already_v1 += 1;
+                                        already_complete += 1;
                                     }
                                 }
                                 None => {
-                                    let name = path.file_name()
-                                        .map(|n| n.to_string_lossy().to_string())
-                                        .unwrap_or_default();
                                     println!("  ❌ Failed: {}", name);
                                     errors += 1;
                                 }
@@ -2633,7 +2698,36 @@ pub async fn list_with_migrate(
 
         println!();
         println!("Migration complete:");
-        println!("  {} migrated, {} already v1, {} errors", migrated, already_v1, errors);
+        if v0_migrated > 0 {
+            println!("  {} v0→v1 migrations", v0_migrated);
+        }
+        if when_to_use_extracted > 0 {
+            println!("  {} when_to_use extractions", when_to_use_extracted);
+        }
+        if !needs_manual_fix.is_empty() {
+            println!(
+                "  ⚠️  {} need manual fix (invalid SKILL.md frontmatter)",
+                needs_manual_fix.len()
+            );
+        }
+        println!(
+            "  {} already complete, {} errors",
+            already_complete, errors
+        );
+
+        // Show guidance if there are topics needing manual fix
+        if !needs_manual_fix.is_empty() {
+            println!();
+            println!("To fix SKILL.md frontmatter, ensure it starts with:");
+            println!("  ---");
+            println!("  name: <skill-name>");
+            println!("  description: <description>");
+            println!("  ---");
+            println!();
+            println!("Common issues:");
+            println!("  - '## name:' should be 'name:' (no markdown headers in YAML)");
+            println!("  - 'tools: \\[...]' should be 'tools: [...]' (no escaping)");
+        }
         println!();
     }
 
