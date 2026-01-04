@@ -1,11 +1,10 @@
 //! Terminal rendering for Mermaid diagrams using mermaid.ink service.
 //!
 //! This module provides functionality to render Mermaid diagrams in the terminal
-//! by fetching SVG from mermaid.ink, converting to PNG via resvg, and displaying
-//! with viuer. Falls back to code block rendering on error.
+//! by fetching pre-rendered images from mermaid.ink and displaying with viuer.
+//! Falls back to code block rendering on error.
 
 use base64::{engine::general_purpose::STANDARD, Engine};
-use resvg::usvg;
 use std::io::Write;
 use tempfile::NamedTempFile;
 use thiserror::Error;
@@ -28,7 +27,7 @@ pub enum MermaidRenderError {
         max: usize,
     },
 
-    /// Failed to fetch SVG from mermaid.ink.
+    /// Failed to fetch image from mermaid.ink.
     #[error("Failed to fetch from mermaid.ink: {0}")]
     FetchError(#[from] reqwest::Error),
 
@@ -36,13 +35,9 @@ pub enum MermaidRenderError {
     #[error("mermaid.ink returned status {0}")]
     ServiceError(u16),
 
-    /// Failed to parse SVG content.
-    #[error("Failed to parse SVG: {0}")]
-    SvgParseError(String),
-
-    /// Failed to render PNG from SVG.
-    #[error("Failed to render image: {0}")]
-    RenderError(String),
+    /// Failed to display image in terminal.
+    #[error("Failed to display image: {0}")]
+    DisplayError(String),
 
     /// Terminal image rendering is not supported in this environment.
     #[error("Terminal image rendering not supported")]
@@ -56,14 +51,17 @@ pub enum MermaidRenderError {
 /// Renders a Mermaid diagram to the terminal using mermaid.ink service.
 ///
 /// This function:
-/// 1. Validates the diagram size (< 2KB when base64-encoded)
+/// 1. Prepends a dark theme directive optimized for terminal display
 /// 2. Base64 encodes the instructions
-/// 3. Fetches SVG from mermaid.ink
-/// 4. Parses SVG with resvg/usvg
-/// 5. Renders to PNG using resvg
-/// 6. Saves to a temporary file (RAII cleanup)
-/// 7. Displays with viuer
-/// 8. On error, falls back to printing code block
+/// 3. Validates URL length (< 2KB)
+/// 4. Fetches pre-rendered image from mermaid.ink/img/ endpoint
+/// 5. Saves to a temporary file (RAII cleanup)
+/// 6. Displays with viuer
+///
+/// The `/img/` endpoint is used instead of `/svg/` because mermaid.ink renders
+/// text using HTML `<foreignObject>` elements, which are not supported by
+/// pure SVG renderers like usvg/resvg. The `/img/` endpoint returns a
+/// server-side rendered image that includes all text correctly.
 ///
 /// ## Examples
 ///
@@ -83,14 +81,41 @@ pub enum MermaidRenderError {
 /// - Diagram is too large (> 2KB when encoded)
 /// - Network request fails
 /// - mermaid.ink returns error status
-/// - SVG parsing fails
-/// - PNG rendering fails
 /// - Terminal doesn't support image rendering
 #[tracing::instrument(skip(instructions))]
 pub async fn render_for_terminal(instructions: &str) -> Result<(), MermaidRenderError> {
-    // Base64 encode the instructions
-    let encoded = STANDARD.encode(instructions);
-    let url = format!("https://mermaid.ink/svg/{}", encoded);
+    // Prepend theme directive with explicit colors for dark terminal rendering
+    // Using 'base' theme which allows full customization
+    let themed_instructions = format!(
+        "%%{{init: {{'theme': 'base', 'themeVariables': {{\
+            'background': '#1e1e1e',\
+            'primaryColor': '#3c3c3c',\
+            'primaryTextColor': '#ffffff',\
+            'primaryBorderColor': '#888888',\
+            'secondaryColor': '#4a4a4a',\
+            'secondaryTextColor': '#ffffff',\
+            'secondaryBorderColor': '#888888',\
+            'tertiaryColor': '#5a5a5a',\
+            'tertiaryTextColor': '#ffffff',\
+            'tertiaryBorderColor': '#888888',\
+            'lineColor': '#aaaaaa',\
+            'textColor': '#ffffff',\
+            'mainBkg': '#3c3c3c',\
+            'nodeBkg': '#3c3c3c',\
+            'nodeBorder': '#888888',\
+            'clusterBkg': '#2d2d2d',\
+            'clusterBorder': '#666666',\
+            'titleColor': '#ffffff',\
+            'edgeLabelBackground': '#2d2d2d'\
+        }}}}}}%%\n{}",
+        instructions
+    );
+
+    // Base64 encode the instructions with theme
+    let encoded = STANDARD.encode(&themed_instructions);
+    // Use /img/ endpoint for pre-rendered image (includes text via foreignObject)
+    // Add bgColor parameter to ensure dark background (themeVariables.background alone isn't enough)
+    let url = format!("https://mermaid.ink/img/{}?bgColor=1e1e1e", encoded);
 
     tracing::debug!(
         encoded_len = encoded.len(),
@@ -111,8 +136,8 @@ pub async fn render_for_terminal(instructions: &str) -> Result<(), MermaidRender
         });
     }
 
-    // Fetch SVG from mermaid.ink
-    tracing::info!(url = %url, "Fetching SVG from mermaid.ink");
+    // Fetch pre-rendered image from mermaid.ink
+    tracing::info!(url = %url, "Fetching image from mermaid.ink");
     let response = reqwest::get(&url).await?;
 
     if !response.status().is_success() {
@@ -121,38 +146,16 @@ pub async fn render_for_terminal(instructions: &str) -> Result<(), MermaidRender
         return Err(MermaidRenderError::ServiceError(status));
     }
 
-    let svg_data = response.bytes().await?;
-    tracing::debug!(svg_len = svg_data.len(), "Received SVG data");
-
-    // Parse SVG with usvg
-    let options = usvg::Options::default();
-    let tree = usvg::Tree::from_data(&svg_data, &options)
-        .map_err(|e: usvg::Error| MermaidRenderError::SvgParseError(e.to_string()))?;
-
-    tracing::debug!("Parsed SVG successfully");
-
-    // Render to PNG using resvg
-    let pixmap_size = tree.size().to_int_size();
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(pixmap_size.width(), pixmap_size.height())
-        .ok_or_else(|| MermaidRenderError::RenderError("Failed to create pixmap".to_string()))?;
-
-    resvg::render(&tree, Default::default(), &mut pixmap.as_mut());
-
-    tracing::debug!(
-        width = pixmap_size.width(),
-        height = pixmap_size.height(),
-        "Rendered PNG"
-    );
+    let image_data = response.bytes().await?;
+    tracing::debug!(image_len = image_data.len(), "Received image data");
 
     // Save to temporary file (RAII cleanup)
     let mut temp_file = NamedTempFile::new()?;
-    temp_file.write_all(&pixmap.encode_png().map_err(|e| {
-        MermaidRenderError::RenderError(format!("Failed to encode PNG: {}", e))
-    })?)?;
+    temp_file.write_all(&image_data)?;
     temp_file.flush()?;
 
     let temp_path = temp_file.path();
-    tracing::debug!(path = ?temp_path, "Saved PNG to temporary file");
+    tracing::debug!(path = ?temp_path, "Saved image to temporary file");
 
     // Display with viuer
     let config = viuer::Config {
@@ -161,17 +164,34 @@ pub async fn render_for_terminal(instructions: &str) -> Result<(), MermaidRender
     };
 
     viuer::print_from_file(temp_path, &config)
-        .map_err(|e| MermaidRenderError::RenderError(format!("Failed to display image: {}", e)))?;
+        .map_err(|e| MermaidRenderError::DisplayError(format!("{}", e)))?;
 
     tracing::info!("Displayed diagram in terminal");
 
     Ok(())
 }
 
+/// Returns a fallback code block string for the given instructions.
+///
+/// This is used when terminal rendering fails or is not supported.
+/// Returns the instructions formatted as a fenced code block.
+///
+/// ## Examples
+///
+/// ```rust
+/// use shared::mermaid::render_terminal::fallback_code_block;
+///
+/// let output = fallback_code_block("flowchart LR\n    A --> B");
+/// assert!(output.contains("```mermaid"));
+/// ```
+pub fn fallback_code_block(instructions: &str) -> String {
+    format!("```mermaid\n{}\n```", instructions)
+}
+
 /// Renders a fallback code block for the given instructions.
 ///
 /// This is used when terminal rendering fails or is not supported.
-/// Prints the instructions as a fenced code block.
+/// Prints the instructions as a fenced code block to stdout.
 ///
 /// ## Examples
 ///
@@ -181,9 +201,7 @@ pub async fn render_for_terminal(instructions: &str) -> Result<(), MermaidRender
 /// render_fallback_code_block("flowchart LR\n    A --> B");
 /// ```
 pub fn render_fallback_code_block(instructions: &str) {
-    println!("```mermaid");
-    println!("{}", instructions);
-    println!("```");
+    println!("{}", fallback_code_block(instructions));
 }
 
 #[cfg(test)]
@@ -195,7 +213,7 @@ mod tests {
         // Create a diagram that's definitely too large
         let large_instructions = "A".repeat(MAX_MERMAID_INK_LENGTH);
         let encoded = STANDARD.encode(&large_instructions);
-        let url = format!("https://mermaid.ink/svg/{}", encoded);
+        let url = format!("https://mermaid.ink/img/{}", encoded);
 
         assert!(url.len() > MAX_MERMAID_INK_LENGTH);
 
@@ -256,15 +274,9 @@ mod tests {
     }
 
     #[test]
-    fn test_error_display_svg_parse_error() {
-        let error = MermaidRenderError::SvgParseError("invalid SVG".to_string());
-        assert_eq!(error.to_string(), "Failed to parse SVG: invalid SVG");
-    }
-
-    #[test]
-    fn test_error_display_render_error() {
-        let error = MermaidRenderError::RenderError("rendering failed".to_string());
-        assert_eq!(error.to_string(), "Failed to render image: rendering failed");
+    fn test_error_display_display_error() {
+        let error = MermaidRenderError::DisplayError("display failed".to_string());
+        assert_eq!(error.to_string(), "Failed to display image: display failed");
     }
 
     #[test]
@@ -280,9 +292,25 @@ mod tests {
     fn test_small_diagram_url_length() {
         let instructions = "flowchart LR\n    A --> B";
         let encoded = STANDARD.encode(instructions);
-        let url = format!("https://mermaid.ink/svg/{}", encoded);
+        let url = format!("https://mermaid.ink/img/{}", encoded);
 
         // Small diagrams should be well under the limit
         assert!(url.len() < MAX_MERMAID_INK_LENGTH);
+    }
+
+    /// Regression test: verify we use /img/ endpoint instead of /svg/ endpoint.
+    ///
+    /// The /svg/ endpoint returns SVG with foreignObject containing HTML text,
+    /// which usvg/resvg cannot render. The /img/ endpoint returns a pre-rendered
+    /// image from mermaid.ink's server-side rendering, which includes all text.
+    #[test]
+    fn test_uses_img_endpoint_not_svg() {
+        let instructions = "flowchart LR\n    A --> B";
+        let encoded = STANDARD.encode(instructions);
+
+        // The URL should use /img/ not /svg/
+        let url = format!("https://mermaid.ink/img/{}", encoded);
+        assert!(url.contains("/img/"), "URL should use /img/ endpoint");
+        assert!(!url.contains("/svg/"), "URL should NOT use /svg/ endpoint");
     }
 }

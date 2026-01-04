@@ -3,7 +3,7 @@ use color_eyre::eyre::{eyre, Context, Result};
 use shared::markdown::highlighting::{
     detect_code_theme, detect_color_mode, detect_prose_theme, ColorMode, ThemePair,
 };
-use shared::markdown::output::{HtmlOptions, TerminalOptions, write_terminal};
+use shared::markdown::output::{HtmlOptions, MermaidMode, TerminalOptions, write_terminal};
 use shared::markdown::Markdown;
 use std::io::{self, Read};
 use std::path::PathBuf;
@@ -230,6 +230,13 @@ fn main() -> Result<()> {
     options.include_line_numbers = cli.line_numbers;
     options.color_depth = None; // Auto-detect
     options.render_images = !cli.no_images;
+    options.mermaid_mode = if cli.mermaid {
+        MermaidMode::Image
+    } else if cli.mermaid_alt {
+        MermaidMode::Text
+    } else {
+        MermaidMode::Off
+    };
 
     // Derive base_path from input file for relative image resolution
     if let Some(ref path) = cli.input

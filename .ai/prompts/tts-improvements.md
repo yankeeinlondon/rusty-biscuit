@@ -27,7 +27,6 @@ We need to make a few adjustments to this implementation:
       pub fn of_gender() -> this;
       pub fn with_default_volume() -> this;
     }
-
     ```
 
 

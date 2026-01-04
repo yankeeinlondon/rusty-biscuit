@@ -471,6 +471,12 @@ pub struct TerminalOptions {
     /// If `None` (default), auto-detects from terminal size (defaults to 80 if detection fails).
     /// Set this to override for testing or pre-rendering at a specific width.
     pub max_width: Option<u16>,
+    /// Controls how Mermaid diagrams are rendered.
+    ///
+    /// - `Off` (default): Show mermaid blocks as syntax-highlighted code
+    /// - `Image`: Render as images via mermaid.ink service
+    /// - `Text`: Show as fenced code blocks (fallback format)
+    pub mermaid_mode: MermaidMode,
 }
 
 impl Default for TerminalOptions {
@@ -491,6 +497,7 @@ impl Default for TerminalOptions {
             base_path: None,
             italic_mode: ItalicMode::default(),
             max_width: None,
+            mermaid_mode: MermaidMode::default(),
         }
     }
 }
@@ -677,37 +684,88 @@ pub fn write_terminal<W: std::io::Write>(
             InlineEvent::Standard(Event::End(TagEnd::CodeBlock)) => {
                 in_code_block = false;
 
-                // Render code block with highlighting
-                let meta = parse_code_info(&code_info_string).unwrap_or_default();
+                // Check for mermaid code blocks
+                let is_mermaid = code_language.eq_ignore_ascii_case("mermaid");
 
-                // Get background color from theme for header row
-                let theme = code_highlighter.theme();
-                let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+                if is_mermaid && options.mermaid_mode != MermaidMode::Off {
+                    match options.mermaid_mode {
+                        MermaidMode::Text => {
+                            // Render as fenced code block (fallback format)
+                            let fallback = crate::mermaid::render_terminal::fallback_code_block(&code_buffer);
+                            wrapper.push_with_newlines(&fallback);
+                            wrapper.push_with_newlines("\n\n");
+                        }
+                        MermaidMode::Image => {
+                            // Flush output before viuer prints to stdout
+                            write!(writer, "{}", wrapper.output()).ok();
+                            writer.flush().ok();
+                            wrapper = LineWrapper::new(terminal_width as usize);
 
-                // Add header row with title and language (right-aligned)
-                let header = format_header_row(
-                    meta.title.as_deref(),
-                    &code_language,
-                    bg_color,
-                    options.color_mode,
-                    terminal_width,
-                );
-                wrapper.push_with_newlines(&header);
-                wrapper.newline();
+                            // Render mermaid diagram as image (blocking on async)
+                            let diagram = crate::mermaid::Mermaid::new(&code_buffer);
 
-                // Highlight and render code
-                let highlighted = highlight_code(
-                    &code_buffer,
-                    &code_language,
-                    &code_highlighter,
-                    &options,
-                    &meta,
-                    options.color_mode,
-                )?;
-                wrapper.push_with_newlines(&highlighted);
-                // highlight_code ends with a bottom padding row, add newline after it
-                // then add blank line for separation from following content
-                wrapper.push_with_newlines("\n\n");
+                            // Create a runtime for the async call
+                            let render_succeeded = match tokio::runtime::Runtime::new() {
+                                Ok(rt) => {
+                                    match rt.block_on(diagram.render_for_terminal()) {
+                                        Ok(()) => true,
+                                        Err(e) => {
+                                            tracing::warn!(error = %e, "Mermaid image rendering failed");
+                                            false
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "Failed to create tokio runtime for mermaid");
+                                    false
+                                }
+                            };
+
+                            // If rendering failed, show fallback in the output stream
+                            if !render_succeeded {
+                                let fallback = crate::mermaid::render_terminal::fallback_code_block(&code_buffer);
+                                wrapper.push_with_newlines(&fallback);
+                                wrapper.push_with_newlines("\n\n");
+                            } else {
+                                // viuer already prints a newline, just add one more for spacing
+                                wrapper.push_with_newlines("\n");
+                            }
+                        }
+                        MermaidMode::Off => unreachable!(),
+                    }
+                } else {
+                    // Render code block with highlighting (normal path)
+                    let meta = parse_code_info(&code_info_string).unwrap_or_default();
+
+                    // Get background color from theme for header row
+                    let theme = code_highlighter.theme();
+                    let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+
+                    // Add header row with title and language (right-aligned)
+                    let header = format_header_row(
+                        meta.title.as_deref(),
+                        &code_language,
+                        bg_color,
+                        options.color_mode,
+                        terminal_width,
+                    );
+                    wrapper.push_with_newlines(&header);
+                    wrapper.newline();
+
+                    // Highlight and render code
+                    let highlighted = highlight_code(
+                        &code_buffer,
+                        &code_language,
+                        &code_highlighter,
+                        &options,
+                        &meta,
+                        options.color_mode,
+                    )?;
+                    wrapper.push_with_newlines(&highlighted);
+                    // highlight_code ends with a bottom padding row, add newline after it
+                    // then add blank line for separation from following content
+                    wrapper.push_with_newlines("\n\n");
+                }
             }
             InlineEvent::Standard(Event::Text(text)) if in_code_block => {
                 code_buffer.push_str(&text);

@@ -29,7 +29,7 @@ pub mod html;
 
 pub use string::as_string;
 pub use ast::as_ast;
-pub use terminal::{ColorDepth, ImageRenderer, ItalicMode, TerminalOptions, for_terminal, write_terminal};
+pub use terminal::{ColorDepth, ImageRenderer, ItalicMode, MermaidMode, TerminalOptions, for_terminal, write_terminal};
 pub use html::{HtmlOptions, as_html};
 
 #[cfg(test)]
