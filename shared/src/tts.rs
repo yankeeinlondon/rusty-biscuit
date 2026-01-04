@@ -317,6 +317,20 @@ pub struct SystemVoiceInfo {
     pub name: String,
     /// The language code for this voice (e.g., "en-US").
     pub language: String,
+    /// The gender of this voice, if known.
+    pub gender: Option<Gender>,
+}
+
+impl SystemVoiceInfo {
+    /// Returns a display string for the gender.
+    pub fn gender_str(&self) -> &'static str {
+        match self.gender {
+            Some(Gender::Male) => "Male",
+            Some(Gender::Female) => "Female",
+            Some(Gender::Any) => "Unknown",
+            None => "Unknown",
+        }
+    }
 }
 
 // ============================================================================
@@ -421,10 +435,18 @@ pub fn available_system_voices() -> Result<Vec<SystemVoiceInfo>, TtsError> {
 
     Ok(voices
         .into_iter()
-        .map(|v| SystemVoiceInfo {
-            id: v.id().to_string(),
-            name: v.name().to_string(),
-            language: v.language().to_string(),
+        .map(|v| {
+            let gender = match v.gender() {
+                Some(tts::Gender::Male) => Some(Gender::Male),
+                Some(tts::Gender::Female) => Some(Gender::Female),
+                _ => None,
+            };
+            SystemVoiceInfo {
+                id: v.id().to_string(),
+                name: v.name().to_string(),
+                language: v.language().to_string(),
+                gender,
+            }
         })
         .collect())
 }
@@ -444,12 +466,56 @@ fn is_excluded_voice(id: &str) -> bool {
     lower.contains("compact") || lower.contains("eloquence")
 }
 
+/// Check if a voice is Premium quality (highest on macOS).
+fn is_premium_voice(name: &str) -> bool {
+    name.contains("(Premium)")
+}
+
+/// Check if a voice is Enhanced quality (high on macOS).
+fn is_enhanced_voice(name: &str) -> bool {
+    name.contains("(Enhanced)")
+}
+
+/// Find a voice matching criteria, preferring Premium > Enhanced > regular.
+fn find_best_voice<'a>(
+    voices: &'a [tts::Voice],
+    lang_prefix: &str,
+    gender: Gender,
+) -> Option<&'a tts::Voice> {
+    let matches_criteria = |v: &&tts::Voice| {
+        !is_excluded_voice(&v.id())
+            && v.language().starts_with(lang_prefix)
+            && matches_gender(v, gender)
+    };
+
+    // Try Premium first
+    if let Some(voice) = voices
+        .iter()
+        .filter(matches_criteria)
+        .find(|v| is_premium_voice(&v.name()))
+    {
+        return Some(voice);
+    }
+
+    // Try Enhanced next
+    if let Some(voice) = voices
+        .iter()
+        .filter(matches_criteria)
+        .find(|v| is_enhanced_voice(&v.name()))
+    {
+        return Some(voice);
+    }
+
+    // Fall back to any matching voice
+    voices.iter().find(matches_criteria)
+}
+
 /// Select a voice based on the VoiceConfig.
 ///
 /// Algorithm:
 /// 1. Try each VoiceSelector in voice_stack order
-/// 2. Try language + gender filtering (if gender specified)
-/// 3. Fall back to language filtering only
+/// 2. Try language + gender filtering, preferring Premium > Enhanced > regular
+/// 3. Fall back to language filtering only (any gender), same quality preference
 /// 4. Fall back to any English voice
 /// 5. Return error if no voice found
 fn select_voice(tts: &mut Tts, config: &VoiceConfig) -> Result<(), TtsError> {
@@ -479,13 +545,9 @@ fn select_voice(tts: &mut Tts, config: &VoiceConfig) -> Result<(), TtsError> {
 
     let lang_prefix = config.language.code_prefix();
 
-    // Step 2: Try language + gender filtering (if gender specified)
+    // Step 2: Try language + gender filtering with quality preference
     if config.gender != Gender::Any {
-        if let Some(voice) = voices.iter().find(|v| {
-            !is_excluded_voice(&v.id())
-                && v.language().starts_with(lang_prefix)
-                && matches_gender(v, config.gender)
-        }) {
+        if let Some(voice) = find_best_voice(&voices, lang_prefix, config.gender) {
             return tts.set_voice(voice).map_err(|e| TtsError::VoiceSelectionFailed {
                 reason: format!(
                     "Failed to set {:?} voice for language '{}': {}",
@@ -495,10 +557,8 @@ fn select_voice(tts: &mut Tts, config: &VoiceConfig) -> Result<(), TtsError> {
         }
     }
 
-    // Step 3: Fall back to language filtering only (excluding compact/eloquence)
-    if let Some(voice) = voices.iter().find(|v| {
-        !is_excluded_voice(&v.id()) && v.language().starts_with(lang_prefix)
-    }) {
+    // Step 3: Fall back to language filtering only (any gender) with quality preference
+    if let Some(voice) = find_best_voice(&voices, lang_prefix, Gender::Any) {
         return tts.set_voice(voice).map_err(|e| TtsError::VoiceSelectionFailed {
             reason: format!("Failed to set voice for language '{}': {}", lang_prefix, e),
         });
@@ -687,10 +747,39 @@ mod tests {
             id: "com.apple.voice.Alex".into(),
             name: "Alex".into(),
             language: "en-US".into(),
+            gender: Some(Gender::Male),
         };
         assert_eq!(voice.id, "com.apple.voice.Alex");
         assert_eq!(voice.name, "Alex");
         assert_eq!(voice.language, "en-US");
+        assert_eq!(voice.gender, Some(Gender::Male));
+    }
+
+    #[test]
+    fn test_system_voice_info_gender_str() {
+        let male = SystemVoiceInfo {
+            id: "".into(),
+            name: "".into(),
+            language: "".into(),
+            gender: Some(Gender::Male),
+        };
+        assert_eq!(male.gender_str(), "Male");
+
+        let female = SystemVoiceInfo {
+            id: "".into(),
+            name: "".into(),
+            language: "".into(),
+            gender: Some(Gender::Female),
+        };
+        assert_eq!(female.gender_str(), "Female");
+
+        let unknown = SystemVoiceInfo {
+            id: "".into(),
+            name: "".into(),
+            language: "".into(),
+            gender: None,
+        };
+        assert_eq!(unknown.gender_str(), "Unknown");
     }
 
     // ========================================================================

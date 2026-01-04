@@ -48,7 +48,7 @@ fn test_cli_version_flag() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("speak"),
+        stdout.contains("so-you-say"),
         "Version output should contain binary name"
     );
 }
@@ -184,5 +184,202 @@ fn test_cli_special_chars_args() {
     assert!(
         output.status.success(),
         "CLI should handle special characters in arguments correctly"
+    );
+}
+
+#[test]
+fn test_cli_gender_flag_male() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "so-you-say",
+            "--",
+            "--gender",
+            "male",
+            "test",
+        ])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(
+        output.status.success(),
+        "CLI should accept --gender male flag"
+    );
+}
+
+#[test]
+fn test_cli_gender_flag_female() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "so-you-say",
+            "--",
+            "--gender",
+            "female",
+            "test",
+        ])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(
+        output.status.success(),
+        "CLI should accept --gender female flag"
+    );
+}
+
+#[test]
+fn test_cli_gender_flag_short() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "so-you-say", "--", "-g", "male", "test"])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(output.status.success(), "CLI should accept -g short flag");
+}
+
+#[test]
+fn test_cli_gender_flag_invalid() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "so-you-say",
+            "--",
+            "--gender",
+            "invalid",
+            "test",
+        ])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(
+        !output.status.success(),
+        "CLI should reject invalid gender value"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("invalid") || stderr.contains("error"),
+        "Error message should indicate invalid value"
+    );
+}
+
+#[test]
+fn test_cli_help_shows_gender_option() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "so-you-say", "--", "--help"])
+        .output()
+        .expect("Failed to execute");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--gender") && stdout.contains("-g"),
+        "Help should document --gender/-g flag"
+    );
+    assert!(
+        stdout.contains("male") && stdout.contains("female"),
+        "Help should show possible gender values"
+    );
+}
+
+#[test]
+fn test_cli_list_voices_flag() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "so-you-say", "--", "--list-voices"])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(
+        output.status.success(),
+        "CLI should accept --list-voices flag"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("NAME") && stdout.contains("LANGUAGE") && stdout.contains("GENDER"),
+        "Voices output should have table headers"
+    );
+    assert!(
+        stdout.contains("Bold") && stdout.contains("default"),
+        "Voices output should show legend for default voice"
+    );
+}
+
+#[test]
+fn test_cli_list_voices_with_gender_filter() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "so-you-say",
+            "--",
+            "--list-voices",
+            "--gender",
+            "female",
+        ])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(
+        output.status.success(),
+        "CLI should accept --list-voices with --gender filter"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should only show Female voices (or "No voices found" if none available)
+    assert!(
+        !stdout.contains("Male  ") || stdout.contains("Female"),
+        "Output should be filtered to female voices only"
+    );
+}
+
+#[test]
+fn test_cli_help_shows_list_voices_option() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "so-you-say", "--", "--help"])
+        .output()
+        .expect("Failed to execute");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--list-voices"),
+        "Help should document --list-voices flag"
+    );
+}
+
+#[test]
+fn test_cli_voice_option() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "so-you-say",
+            "--",
+            "--voice",
+            "Samantha",
+            "test",
+        ])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(
+        output.status.success(),
+        "CLI should accept --voice option"
+    );
+}
+
+#[test]
+fn test_cli_help_shows_voice_option() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "so-you-say", "--", "--help"])
+        .output()
+        .expect("Failed to execute");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--voice"),
+        "Help should document --voice option"
     );
 }
