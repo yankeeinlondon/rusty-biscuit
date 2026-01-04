@@ -415,3 +415,269 @@ fn test_migrated_v1_roundtrips() {
     assert_eq!(v1.summary, roundtrip.summary);
     assert_eq!(v1.when_to_use, roundtrip.when_to_use);
 }
+
+// =============================================================================
+// Regression Tests: when_to_use Extraction from SKILL.md
+// =============================================================================
+// Bug fix: Migration should populate when_to_use from SKILL.md frontmatter
+// if the metadata doesn't have it.
+
+/// Helper to create a valid SKILL.md with frontmatter
+fn create_skill_md(description: &str) -> String {
+    format!(
+        r#"---
+name: test-skill
+description: {description}
+---
+# Test Skill
+
+This is the body content.
+"#
+    )
+}
+
+#[tokio::test]
+async fn test_v0_migration_extracts_when_to_use_from_skill_md() {
+    // Regression test: v0 metadata without when_to_use should extract it from SKILL.md
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let output_dir = temp_dir.path();
+
+    // Create v0 metadata WITHOUT when_to_use
+    let v0_json = r#"{
+        "schema_version": 0,
+        "kind": "library",
+        "library_info": {
+            "package_manager": "npm",
+            "language": "JavaScript",
+            "url": "https://www.npmjs.com/package/chalk"
+        },
+        "additional_files": {},
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z",
+        "brief": "Terminal string styling library"
+    }"#;
+
+    let metadata_path = output_dir.join("metadata.json");
+    fs::write(&metadata_path, v0_json)
+        .await
+        .expect("Failed to write v0 metadata");
+
+    // Create skill/SKILL.md with frontmatter
+    let skill_dir = output_dir.join("skill");
+    fs::create_dir_all(&skill_dir)
+        .await
+        .expect("Failed to create skill dir");
+
+    let skill_content = create_skill_md(
+        "Expert knowledge for styling terminal output with Chalk. Use when building CLIs.",
+    );
+    fs::write(skill_dir.join("SKILL.md"), &skill_content)
+        .await
+        .expect("Failed to write SKILL.md");
+
+    // Load should trigger migration AND extract when_to_use from SKILL.md
+    let metadata = ResearchMetadata::load(output_dir)
+        .await
+        .expect("Failed to load metadata");
+
+    // Verify migration occurred
+    assert_eq!(metadata.schema_version, 1);
+
+    // Verify when_to_use was extracted from SKILL.md frontmatter
+    assert_eq!(
+        metadata.when_to_use,
+        Some("Expert knowledge for styling terminal output with Chalk. Use when building CLIs.".to_string())
+    );
+
+    // Verify it was saved to metadata.json
+    let saved_content = fs::read_to_string(&metadata_path)
+        .await
+        .expect("Failed to read saved metadata");
+    assert!(saved_content.contains("when_to_use"));
+    assert!(saved_content.contains("Expert knowledge for styling terminal output"));
+}
+
+#[tokio::test]
+async fn test_v1_without_when_to_use_extracts_from_skill_md() {
+    // Regression test: v1 metadata without when_to_use should extract it from SKILL.md
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let output_dir = temp_dir.path();
+
+    // Create v1 metadata WITHOUT when_to_use
+    let v1_json = r#"{
+        "schema_version": 1,
+        "kind": "library",
+        "details": {
+            "type": "Library",
+            "package_manager": "crates.io",
+            "language": "Rust"
+        },
+        "additional_files": {},
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z",
+        "brief": "A Rust library"
+    }"#;
+
+    let metadata_path = output_dir.join("metadata.json");
+    fs::write(&metadata_path, v1_json)
+        .await
+        .expect("Failed to write v1 metadata");
+
+    // Create skill/SKILL.md with frontmatter
+    let skill_dir = output_dir.join("skill");
+    fs::create_dir_all(&skill_dir)
+        .await
+        .expect("Failed to create skill dir");
+
+    let skill_content =
+        create_skill_md("Expert knowledge for error handling in Rust. Use when building libraries.");
+    fs::write(skill_dir.join("SKILL.md"), &skill_content)
+        .await
+        .expect("Failed to write SKILL.md");
+
+    // Load should extract when_to_use from SKILL.md
+    let metadata = ResearchMetadata::load(output_dir)
+        .await
+        .expect("Failed to load metadata");
+
+    // Verify when_to_use was extracted from SKILL.md frontmatter
+    assert_eq!(
+        metadata.when_to_use,
+        Some("Expert knowledge for error handling in Rust. Use when building libraries.".to_string())
+    );
+
+    // Verify it was saved to metadata.json
+    let saved_content = fs::read_to_string(&metadata_path)
+        .await
+        .expect("Failed to read saved metadata");
+    assert!(saved_content.contains("when_to_use"));
+    assert!(saved_content.contains("Expert knowledge for error handling"));
+}
+
+#[tokio::test]
+async fn test_existing_when_to_use_not_overwritten() {
+    // Ensure existing when_to_use is preserved and not overwritten by SKILL.md
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let output_dir = temp_dir.path();
+
+    // Create v1 metadata WITH when_to_use already set
+    let v1_json = r#"{
+        "schema_version": 1,
+        "kind": "library",
+        "details": {
+            "type": "Library",
+            "package_manager": "crates.io",
+            "language": "Rust"
+        },
+        "additional_files": {},
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z",
+        "when_to_use": "Original when_to_use value"
+    }"#;
+
+    let metadata_path = output_dir.join("metadata.json");
+    fs::write(&metadata_path, v1_json)
+        .await
+        .expect("Failed to write v1 metadata");
+
+    // Create skill/SKILL.md with DIFFERENT description
+    let skill_dir = output_dir.join("skill");
+    fs::create_dir_all(&skill_dir)
+        .await
+        .expect("Failed to create skill dir");
+
+    let skill_content = create_skill_md("Different description from SKILL.md");
+    fs::write(skill_dir.join("SKILL.md"), &skill_content)
+        .await
+        .expect("Failed to write SKILL.md");
+
+    // Load should NOT overwrite existing when_to_use
+    let metadata = ResearchMetadata::load(output_dir)
+        .await
+        .expect("Failed to load metadata");
+
+    // Verify original when_to_use was preserved
+    assert_eq!(
+        metadata.when_to_use,
+        Some("Original when_to_use value".to_string())
+    );
+}
+
+#[tokio::test]
+async fn test_missing_skill_md_no_when_to_use() {
+    // If SKILL.md doesn't exist, when_to_use remains None
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let output_dir = temp_dir.path();
+
+    // Create v1 metadata without when_to_use and no SKILL.md
+    let v1_json = r#"{
+        "schema_version": 1,
+        "kind": "library",
+        "details": {
+            "type": "Library"
+        },
+        "additional_files": {},
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z"
+    }"#;
+
+    let metadata_path = output_dir.join("metadata.json");
+    fs::write(&metadata_path, v1_json)
+        .await
+        .expect("Failed to write v1 metadata");
+
+    // No skill/SKILL.md created
+
+    // Load should return metadata with when_to_use still None
+    let metadata = ResearchMetadata::load(output_dir)
+        .await
+        .expect("Failed to load metadata");
+
+    assert!(metadata.when_to_use.is_none());
+}
+
+#[tokio::test]
+async fn test_invalid_skill_md_frontmatter_no_when_to_use() {
+    // If SKILL.md has invalid frontmatter, when_to_use remains None
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let output_dir = temp_dir.path();
+
+    // Create v1 metadata without when_to_use
+    let v1_json = r#"{
+        "schema_version": 1,
+        "kind": "library",
+        "details": {
+            "type": "Library"
+        },
+        "additional_files": {},
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z"
+    }"#;
+
+    let metadata_path = output_dir.join("metadata.json");
+    fs::write(&metadata_path, v1_json)
+        .await
+        .expect("Failed to write v1 metadata");
+
+    // Create skill/SKILL.md with INVALID frontmatter (missing required description)
+    let skill_dir = output_dir.join("skill");
+    fs::create_dir_all(&skill_dir)
+        .await
+        .expect("Failed to create skill dir");
+
+    let invalid_skill = r#"---
+name: test-skill
+---
+# Missing description field
+"#;
+    fs::write(skill_dir.join("SKILL.md"), invalid_skill)
+        .await
+        .expect("Failed to write SKILL.md");
+
+    // Load should return metadata with when_to_use still None (invalid frontmatter)
+    let metadata = ResearchMetadata::load(output_dir)
+        .await
+        .expect("Failed to load metadata");
+
+    assert!(metadata.when_to_use.is_none());
+}

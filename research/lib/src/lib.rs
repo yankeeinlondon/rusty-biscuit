@@ -370,6 +370,7 @@ impl ResearchMetadata {
     /// - A backup is created at `metadata.v0.json.backup`
     /// - The migrated v1 format is saved to `metadata.json`
     /// - `created_at` is preserved, `updated_at` is set to migration time
+    /// - `when_to_use` is extracted from SKILL.md frontmatter if missing
     pub async fn load(output_dir: &std::path::Path) -> Option<Self> {
         let path = output_dir.join("metadata.json");
         let content = fs::read_to_string(&path).await.ok()?;
@@ -378,10 +379,10 @@ impl ResearchMetadata {
         let value: serde_json::Value = serde_json::from_str(&content).ok()?;
         let version = metadata::migration::get_schema_version(&value);
 
-        if version == 0 {
+        let mut v1 = if version == 0 {
             // Parse as v0 and migrate
             let v0: metadata::MetadataV0 = serde_json::from_str(&content).ok()?;
-            let v1 = metadata::migration::migrate_v0_to_v1(v0);
+            let migrated = metadata::migration::migrate_v0_to_v1(v0);
 
             // Create backup before overwriting
             let backup_path = output_dir.join("metadata.v0.json.backup");
@@ -389,14 +390,40 @@ impl ResearchMetadata {
                 tracing::warn!("Failed to create v0 backup: {}", e);
             }
 
-            // Auto-save the upgraded version
+            migrated
+        } else {
+            serde_json::from_str(&content).ok()?
+        };
+
+        // Populate when_to_use from SKILL.md frontmatter if missing
+        let mut needs_save = version == 0; // Always save after v0 migration
+        if v1.when_to_use.is_none() {
+            if let Some(when_to_use) = Self::extract_when_to_use_from_skill(output_dir).await {
+                v1.when_to_use = Some(when_to_use);
+                v1.updated_at = Utc::now();
+                needs_save = true;
+                tracing::info!("✓ Extracted when_to_use from SKILL.md frontmatter");
+            }
+        }
+
+        // Save if we made any changes
+        if needs_save {
             if let Err(e) = v1.save(output_dir).await {
                 tracing::warn!("Failed to save migrated metadata: {}", e);
             }
+        }
 
-            Some(v1)
-        } else {
-            serde_json::from_str(&content).ok()
+        Some(v1)
+    }
+
+    /// Extract when_to_use from SKILL.md frontmatter description field.
+    async fn extract_when_to_use_from_skill(output_dir: &std::path::Path) -> Option<String> {
+        let skill_path = output_dir.join("skill").join("SKILL.md");
+        let content = fs::read_to_string(&skill_path).await.ok()?;
+
+        match validation::frontmatter::parse_and_validate_frontmatter(&content) {
+            Ok((frontmatter, _body)) => Some(frontmatter.description),
+            Err(_) => None,
         }
     }
 

@@ -53,6 +53,20 @@ struct Metadata {
     /// Library-specific information (language, etc.)
     #[serde(default)]
     library_info: Option<LibraryInfo>,
+
+    /// Guidance on when to use this research (required for v1 schema)
+    when_to_use: Option<String>,
+}
+
+impl Metadata {
+    /// Check if this metadata needs migration/repair.
+    ///
+    /// Returns true if:
+    /// - schema_version is 0 (needs v0 -> v1 migration)
+    /// - schema_version is 1 but when_to_use is missing (incomplete v1)
+    fn needs_migration(&self) -> bool {
+        self.schema_version == 0 || (self.schema_version >= 1 && self.when_to_use.is_none())
+    }
 }
 
 /// Expected underlying research document filenames.
@@ -156,12 +170,12 @@ fn analyze_topic(name: String, location: PathBuf) -> TopicInfo {
     let metadata_path = location.join("metadata.json");
     match read_metadata(&metadata_path) {
         Ok(metadata) => {
+            // Check if migration/repair is needed FIRST (before moving any fields)
+            topic.needs_migration = metadata.needs_migration();
+            topic.missing_metadata = false;
             topic.topic_type = metadata.kind.unwrap_or_else(|| "library".to_string());
             topic.description = metadata.brief;
             topic.language = metadata.library_info.and_then(|li| li.language);
-            topic.missing_metadata = false;
-            // Check if migration is needed (v0 -> v1)
-            topic.needs_migration = metadata.schema_version == 0;
         }
         Err(err) => {
             debug!("Failed to read metadata for topic '{}': {}", name, err);
@@ -322,7 +336,7 @@ mod tests {
     #[test]
     fn test_discover_complete_topic() {
         let temp_dir = TempDir::new().unwrap();
-        let metadata = r#"{"schema_version": 1, "kind": "library", "brief": "A test library"}"#;
+        let metadata = r#"{"schema_version": 1, "kind": "library", "brief": "A test library", "when_to_use": "Use for testing"}"#;
 
         create_test_topic(
             temp_dir.path(),
@@ -345,6 +359,7 @@ mod tests {
         assert_eq!(topic.topic_type, "library");
         assert_eq!(topic.description, Some("A test library".to_string()));
         assert!(!topic.missing_metadata);
+        assert!(!topic.needs_migration);
         assert!(topic.missing_output.is_empty());
         assert!(topic.missing_underlying.is_empty());
         assert!(topic.additional_files.is_empty());
@@ -522,7 +537,7 @@ mod tests {
         create_test_topic(
             temp_dir.path(),
             "topic2",
-            Some(r#"{"schema_version": 1, "kind": "framework"}"#),
+            Some(r#"{"schema_version": 1, "kind": "framework", "when_to_use": "Use for testing"}"#),
             &[
                 ResearchOutput::DeepDive,
                 ResearchOutput::Brief,
@@ -547,5 +562,121 @@ mod tests {
         assert!(topics[0].has_critical_issues()); // Missing outputs
         assert!(!topics[1].has_issues()); // Complete
         assert!(topics[2].has_critical_issues()); // Missing everything
+    }
+
+    // =========================================================================
+    // Regression Tests: needs_migration detection for when_to_use
+    // =========================================================================
+
+    #[test]
+    fn test_v0_schema_needs_migration() {
+        let temp_dir = TempDir::new().unwrap();
+        // v0 schema (no schema_version field defaults to 0)
+        let metadata = r#"{"kind": "library", "brief": "A v0 library"}"#;
+
+        create_test_topic(
+            temp_dir.path(),
+            "v0-lib",
+            Some(metadata),
+            &[
+                ResearchOutput::DeepDive,
+                ResearchOutput::Brief,
+                ResearchOutput::Skill,
+            ],
+            UNDERLYING_DOCS,
+            &[],
+        );
+
+        let topics = discover_topics(temp_dir.path().to_path_buf()).unwrap();
+        assert_eq!(topics.len(), 1);
+
+        let topic = &topics[0];
+        assert!(topic.needs_migration, "v0 schema should need migration");
+        assert!(topic.has_issues(), "v0 schema should have issues");
+    }
+
+    #[test]
+    fn test_v1_without_when_to_use_needs_migration() {
+        // Regression test: v1 metadata without when_to_use should flag for migration
+        let temp_dir = TempDir::new().unwrap();
+        let metadata = r#"{"schema_version": 1, "kind": "library", "brief": "A v1 library without when_to_use"}"#;
+
+        create_test_topic(
+            temp_dir.path(),
+            "incomplete-v1",
+            Some(metadata),
+            &[
+                ResearchOutput::DeepDive,
+                ResearchOutput::Brief,
+                ResearchOutput::Skill,
+            ],
+            UNDERLYING_DOCS,
+            &[],
+        );
+
+        let topics = discover_topics(temp_dir.path().to_path_buf()).unwrap();
+        assert_eq!(topics.len(), 1);
+
+        let topic = &topics[0];
+        assert!(
+            topic.needs_migration,
+            "v1 without when_to_use should need migration"
+        );
+        assert!(
+            topic.has_issues(),
+            "v1 without when_to_use should have issues"
+        );
+    }
+
+    #[test]
+    fn test_v1_with_when_to_use_complete() {
+        let temp_dir = TempDir::new().unwrap();
+        let metadata = r#"{"schema_version": 1, "kind": "library", "brief": "A complete v1 library", "when_to_use": "Expert knowledge for testing"}"#;
+
+        create_test_topic(
+            temp_dir.path(),
+            "complete-v1",
+            Some(metadata),
+            &[
+                ResearchOutput::DeepDive,
+                ResearchOutput::Brief,
+                ResearchOutput::Skill,
+            ],
+            UNDERLYING_DOCS,
+            &[],
+        );
+
+        let topics = discover_topics(temp_dir.path().to_path_buf()).unwrap();
+        assert_eq!(topics.len(), 1);
+
+        let topic = &topics[0];
+        assert!(
+            !topic.needs_migration,
+            "v1 with when_to_use should NOT need migration"
+        );
+        assert!(!topic.has_issues(), "complete v1 should have no issues");
+    }
+
+    #[test]
+    fn test_metadata_needs_migration_method() {
+        // Test the Metadata::needs_migration() method directly
+        let v0: Metadata = serde_json::from_str(r#"{"kind": "library"}"#).unwrap();
+        assert!(v0.needs_migration(), "v0 (default schema_version=0) needs migration");
+
+        let v1_incomplete: Metadata =
+            serde_json::from_str(r#"{"schema_version": 1, "kind": "library"}"#).unwrap();
+        assert!(
+            v1_incomplete.needs_migration(),
+            "v1 without when_to_use needs migration"
+        );
+
+        let v1_complete: Metadata = serde_json::from_str(
+            r#"{"schema_version": 1, "kind": "library", "when_to_use": "Use for X"}"#,
+        )
+        .unwrap();
+        assert!(
+            !v1_complete.needs_migration(),
+            "v1 with when_to_use does NOT need migration"
+        );
     }
 }
