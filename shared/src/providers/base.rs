@@ -131,7 +131,7 @@ lazy_static! {
         urls.insert(Provider::Ollama, "http://localhost:11434");
         urls.insert(Provider::OpenAi, "https://api.openai.com");
         urls.insert(Provider::OpenRouter, "https://openrouter.ai/api");
-        urls.insert(Provider::Zai, "https://api.zai.chat");
+        urls.insert(Provider::Zai, "https://api.z.ai/api/paas/v4");
         urls.insert(Provider::ZenMux, "https://zenmux.ai/api");
         urls
     };
