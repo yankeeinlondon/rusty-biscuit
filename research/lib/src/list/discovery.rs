@@ -39,6 +39,10 @@ struct LibraryInfo {
 /// in each research topic directory.
 #[derive(Debug, Deserialize)]
 struct Metadata {
+    /// Schema version (0 = legacy, 1 = current)
+    #[serde(default)]
+    schema_version: u32,
+
     /// The kind/type of research (e.g., "library", "software", "framework")
     #[serde(alias = "type")]
     kind: Option<String>,
@@ -156,6 +160,8 @@ fn analyze_topic(name: String, location: PathBuf) -> TopicInfo {
             topic.description = metadata.brief;
             topic.language = metadata.library_info.and_then(|li| li.language);
             topic.missing_metadata = false;
+            // Check if migration is needed (v0 -> v1)
+            topic.needs_migration = metadata.schema_version == 0;
         }
         Err(err) => {
             debug!("Failed to read metadata for topic '{}': {}", name, err);
@@ -316,7 +322,7 @@ mod tests {
     #[test]
     fn test_discover_complete_topic() {
         let temp_dir = TempDir::new().unwrap();
-        let metadata = r#"{"kind": "library", "brief": "A test library"}"#;
+        let metadata = r#"{"schema_version": 1, "kind": "library", "brief": "A test library"}"#;
 
         create_test_topic(
             temp_dir.path(),
@@ -516,7 +522,7 @@ mod tests {
         create_test_topic(
             temp_dir.path(),
             "topic2",
-            Some(r#"{"kind": "framework"}"#),
+            Some(r#"{"schema_version": 1, "kind": "framework"}"#),
             &[
                 ResearchOutput::DeepDive,
                 ResearchOutput::Brief,

@@ -97,9 +97,18 @@ pub fn format_terminal(topics: &[TopicInfo], filter_single_type: bool, verbose: 
 
     // Add help text at the end in non-verbose mode
     if !verbose && !topics.is_empty() {
+        // Check if any topics need migration
+        let has_migration = topics.iter().any(|t| t.needs_migration);
+
         output.push_str("\n\n- use ");
         output.push_str(&" --verbose ".on_truecolor(80, 80, 80).to_string());
         output.push_str(" for greater metadata on the topics");
+
+        if has_migration {
+            output.push_str("\n- use ");
+            output.push_str(&" --migrate ".on_truecolor(80, 80, 80).to_string());
+            output.push_str(" to upgrade 🔺 topics to v1 schema");
+        }
     }
 
     output
@@ -117,6 +126,10 @@ fn format_topic(topic: &TopicInfo, hide_type_badge: bool, verbose: bool) -> Stri
     if verbose {
         if let Some(metadata_line) = format_metadata_issue(topic) {
             lines.push(metadata_line);
+        }
+
+        if let Some(migration_line) = format_migration_issue(topic) {
+            lines.push(migration_line);
         }
 
         if let Some(underlying_line) = format_underlying_issues(topic) {
@@ -176,8 +189,13 @@ fn format_main_line(topic: &TopicInfo, hide_type_badge: bool, verbose: bool) -> 
             icons.push("💡");
         }
 
-        // Add 🐞 icon if there are any issues
-        if topic.has_issues() {
+        // Add 🔺 icon if metadata needs migration
+        if topic.needs_migration {
+            icons.push("🔺");
+        }
+
+        // Add 🐞 icon if there are any issues (other than migration)
+        if topic.missing_metadata || !topic.missing_output.is_empty() || !topic.missing_underlying.is_empty() {
             icons.push("🐞");
         }
 
@@ -366,6 +384,19 @@ fn format_additional_prompts(topic: &TopicInfo) -> Option<String> {
     ))
 }
 
+/// Formats migration needed indicator if present.
+fn format_migration_issue(topic: &TopicInfo) -> Option<String> {
+    if !topic.needs_migration {
+        return None;
+    }
+
+    Some(format!(
+        "    - 🔺 {} needs migration (run {} to upgrade)",
+        "metadata.json".bold(),
+        "research list --migrate".italic()
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,6 +428,7 @@ mod tests {
             missing_underlying: vec!["overview.md".to_string()],
             missing_output: vec![ResearchOutput::Brief],
             missing_metadata: false,
+            needs_migration: false,
             location: PathBuf::from("/test/test-library"),
         };
 
@@ -437,6 +469,7 @@ mod tests {
             missing_underlying: vec![],
             missing_output: vec![],
             missing_metadata: false,
+            needs_migration: false,
             location: PathBuf::from("/test/lib-one"),
         };
 
@@ -449,6 +482,7 @@ mod tests {
             missing_underlying: vec!["overview.md".to_string()],
             missing_output: vec![ResearchOutput::DeepDive, ResearchOutput::Skill],
             missing_metadata: true,
+            needs_migration: false,
             location: PathBuf::from("/test/lib-two"),
         };
 
@@ -461,6 +495,7 @@ mod tests {
             missing_underlying: vec!["use_cases.md".to_string(), "best_practices.md".to_string()],
             missing_output: vec![ResearchOutput::Brief],
             missing_metadata: false,
+            needs_migration: false,
             location: PathBuf::from("/test/lib-three"),
         };
 
@@ -512,6 +547,7 @@ mod tests {
             missing_underlying: vec!["doc1.md".to_string()],
             missing_output: vec![ResearchOutput::Brief],
             missing_metadata: true,
+            needs_migration: false,
             location: PathBuf::from("/test/complete"),
         };
 

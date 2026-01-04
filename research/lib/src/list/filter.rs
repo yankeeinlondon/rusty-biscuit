@@ -145,6 +145,7 @@ mod tests {
                 missing_underlying: vec![],
                 missing_output: vec![],
                 missing_metadata: false,
+                needs_migration: false,
                 location: PathBuf::from("/test/foo-library"),
             },
             TopicInfo {
@@ -156,6 +157,7 @@ mod tests {
                 missing_underlying: vec![],
                 missing_output: vec![],
                 missing_metadata: false,
+                needs_migration: false,
                 location: PathBuf::from("/test/bar-framework"),
             },
             TopicInfo {
@@ -167,6 +169,7 @@ mod tests {
                 missing_underlying: vec![],
                 missing_output: vec![],
                 missing_metadata: false,
+                needs_migration: false,
                 location: PathBuf::from("/test/baz-software"),
             },
             TopicInfo {
@@ -178,6 +181,7 @@ mod tests {
                 missing_underlying: vec![],
                 missing_output: vec![],
                 missing_metadata: false,
+                needs_migration: false,
                 location: PathBuf::from("/test/foobar-lib"),
             },
             TopicInfo {
@@ -189,6 +193,7 @@ mod tests {
                 missing_underlying: vec![],
                 missing_output: vec![],
                 missing_metadata: false,
+                needs_migration: false,
                 location: PathBuf::from("/test/rust-library"),
             },
         ]

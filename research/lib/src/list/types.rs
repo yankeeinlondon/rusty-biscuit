@@ -74,6 +74,9 @@ pub struct TopicInfo {
     /// Whether metadata.json is missing or has missing required properties
     pub missing_metadata: bool,
 
+    /// Whether metadata schema needs migration (v0 → v1)
+    pub needs_migration: bool,
+
     /// The filepath to this topic's directory
     pub location: PathBuf,
 }
@@ -94,6 +97,7 @@ impl TopicInfo {
             missing_underlying: Vec::new(),
             missing_output: Vec::new(),
             missing_metadata: false,
+            needs_migration: false,
             location,
         }
     }
@@ -101,6 +105,7 @@ impl TopicInfo {
     /// Returns true if this topic has any missing files or metadata issues.
     pub fn has_issues(&self) -> bool {
         self.missing_metadata
+            || self.needs_migration
             || !self.missing_output.is_empty()
             || !self.missing_underlying.is_empty()
     }
@@ -228,6 +233,7 @@ mod tests {
             missing_underlying: vec!["overview.md".to_string()],
             missing_output: vec![ResearchOutput::Brief],
             missing_metadata: false,
+            needs_migration: false,
             location: PathBuf::from("/test/test-lib"),
         };
 

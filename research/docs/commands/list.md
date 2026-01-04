@@ -22,6 +22,10 @@ Lists out all **research** topics.
     - `research list -t library` will list all topics which are of the type "library"
     - more than one type can be achieved by using this switch more than once. For instance, `research list -t library -t software` will list all topics which are either of the type "library" or "software".
 - `--verbose` will output detailed metadata with sub-bullets showing issues and additional prompts (note: `-v` is reserved for global logging verbosity)
+- `--migrate` will trigger automatic migration of all v0 metadata schemas to v1. This upgrades older research topics to the current metadata format:
+    - Creates a backup at `metadata.v0.json.backup` before migrating
+    - Reports which topics were migrated, already v1, or failed
+    - Run this before `research list` to clear 🔺 migration indicators
 
 #### Output
 
@@ -45,6 +49,8 @@ struct TopicInfo {
     missing_underlying: string[];
     missing_output: ResearchOutput[];
     missing_metadata: boolean;
+    /// whether metadata needs migration from v0 to v1
+    needs_migration: boolean;
     /// the filepath to this topic's directory
     location: string;
 }
@@ -64,13 +70,16 @@ struct TopicInfo {
         - 🐘 if the `metadata.json`'s has a `library_info.language` property and it's equal to "PHP"
         - `ʦ` (BLUE background, BLACK text) if the `metadata.json`'s has a `library_info.language` property and it's equal to "Javascript" or "Typescript"
     - Add `: {{ITALIC}}{{Description}}{{RESET}}` where the "description" is the one sentence description in the `brief` property of the `metadata.json` file.
-    - In verbose mode: 
+    - In verbose mode:
         - Now we will add sub-bullets for the following optional/conditional items (indented 4 spaces from primary list):
             - if there are missing properties in the `metadata.json` then we will report: `- 🐞 {{BOLD}}metadata.json{{RESET}} missing required props: PROP, PROP, ...`
+            - if metadata needs migration then report: `- 🔺 {{BOLD}}metadata.json{{RESET}} needs migration (run {{ITALIC}}research list --migrate{{RESET}} to upgrade)`
             - if there are missing _underlying_ documents then report `- 🐞 missing {{ITALIC}}underlying{{RESEARCH}} research docs: FILE, FILE, ...`
             - if there are missing final outputs then report: `- 🐞 missing {{ITALIC}} final{{RESET}} output deliverables: (Deep Dive Document | Skill | Brief)[]`
             - if there are additional custom prompts beyond the core research prompts then report: `- 💡 {{#}} additional prompts used in research: FileNoExt, FileNoExt, ...`        
     - In non-verbose mode:
         - Add a `💡` icon after a research topic which has additional prompts
+        - Add a `🔺` icon to a topic which needs metadata migration (v0 → v1)
         - Add a `🐞` icon to a topic which is missing data
         - at the very end of output add a blank line and then `- use {{BG_GREY}} --verbose {{RESET}} for greater metadata on the topics`
+        - if any topics need migration, add: `- use {{BG_GREY}} --migrate {{RESET}} to upgrade 🔺 topics to v1 schema`
