@@ -143,6 +143,48 @@ impl ItalicMode {
     }
 }
 
+/// Controls how Mermaid diagrams are rendered to the terminal.
+///
+/// Mermaid diagrams can be rendered as images (via mermaid.ink service)
+/// or displayed as code blocks.
+///
+/// ## Examples
+///
+/// ```
+/// use shared::markdown::output::terminal::{TerminalOptions, MermaidMode};
+///
+/// // Disable mermaid rendering (default - show as code block)
+/// let mut options = TerminalOptions::default();
+/// assert!(matches!(options.mermaid_mode, MermaidMode::Off));
+///
+/// // Enable image rendering
+/// options.mermaid_mode = MermaidMode::Image;
+///
+/// // Show as text fallback
+/// options.mermaid_mode = MermaidMode::Text;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MermaidMode {
+    /// Do not render mermaid diagrams specially (default).
+    ///
+    /// Mermaid code blocks are displayed as regular syntax-highlighted code.
+    #[default]
+    Off,
+
+    /// Render mermaid diagrams as images via mermaid.ink service.
+    ///
+    /// Uses mermaid.ink to convert diagrams to SVG, then resvg to convert
+    /// to PNG, and viuer to display in the terminal. Falls back to `Text`
+    /// mode if terminal doesn't support graphics or rendering fails.
+    Image,
+
+    /// Display mermaid diagrams as fenced code blocks.
+    ///
+    /// Useful for terminals that don't support inline images, or when
+    /// you want to see the diagram source.
+    Text,
+}
+
 /// Maximum image file size (10MB).
 const MAX_IMAGE_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
