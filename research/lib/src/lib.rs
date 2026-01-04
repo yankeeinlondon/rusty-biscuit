@@ -14,6 +14,7 @@
 pub mod changelog;
 pub mod link;
 pub mod list;
+pub mod metadata;
 pub mod providers;
 pub mod utils;
 pub mod validation;
@@ -21,7 +22,7 @@ pub mod validation;
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
 use inquire::{InquireError, Select};
-use providers::zai;
+use shared::providers::zai;
 use pulldown_cmark::{Options, Parser};
 use pulldown_cmark_to_cmark::cmark;
 use reqwest::Client as HttpClient;
@@ -268,21 +269,23 @@ impl fmt::Display for LibraryInfo {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ResearchKind {
+    /// Research about software libraries (packages, crates, modules)
     Library,
+    /// Research about public APIs (REST, GraphQL, RPC)
+    Api,
     // Future: Software, Standard, Company, etc.
 }
 
 /// Metadata for a research output
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResearchMetadata {
-    /// Schema version for future evolution (defaults to 0 for backward compatibility)
-    #[serde(default)]
+    /// Schema version for evolution (1 for current format)
+    #[serde(default = "default_schema_version")]
     pub schema_version: u32,
     /// The kind of research
     pub kind: ResearchKind,
-    /// Information about the library (if kind is Library)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub library_info: Option<LibraryInfoMetadata>,
+    /// Type-specific details for this research
+    pub details: metadata::ResearchDetails,
     /// Additional files created from user prompts (filename -> prompt)
     #[serde(default)]
     pub additional_files: std::collections::HashMap<String, String>,
@@ -299,6 +302,10 @@ pub struct ResearchMetadata {
     /// Guidance on when to use this research (e.g., "Use when working with X library")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when_to_use: Option<String>,
+}
+
+fn default_schema_version() -> u32 {
+    1
 }
 
 /// Library info stored in metadata (serializable version)
@@ -326,10 +333,19 @@ impl ResearchMetadata {
     /// Create new metadata for library research
     pub fn new_library(library_info: Option<&LibraryInfo>) -> Self {
         let now = Utc::now();
+        let details = match library_info {
+            Some(info) => metadata::ResearchDetails::Library(metadata::LibraryDetails {
+                package_manager: Some(info.package_manager.clone()),
+                language: Some(info.language.clone()),
+                url: Some(info.url.clone()),
+                repository: info.repository.clone(),
+            }),
+            None => metadata::ResearchDetails::Library(metadata::LibraryDetails::default()),
+        };
         Self {
-            schema_version: 0,
+            schema_version: 1,
             kind: ResearchKind::Library,
-            library_info: library_info.map(LibraryInfoMetadata::from),
+            details,
             additional_files: std::collections::HashMap::new(),
             created_at: now,
             updated_at: now,
@@ -339,11 +355,49 @@ impl ResearchMetadata {
         }
     }
 
-    /// Load metadata from a directory
+    /// Get library details if this is library research
+    pub fn library_details(&self) -> Option<&metadata::LibraryDetails> {
+        match &self.details {
+            metadata::ResearchDetails::Library(details) => Some(details),
+            _ => None,
+        }
+    }
+
+    /// Load metadata from a directory.
+    ///
+    /// Automatically migrates v0 metadata to v1 format if needed. When migration
+    /// occurs:
+    /// - A backup is created at `metadata.v0.json.backup`
+    /// - The migrated v1 format is saved to `metadata.json`
+    /// - `created_at` is preserved, `updated_at` is set to migration time
     pub async fn load(output_dir: &std::path::Path) -> Option<Self> {
         let path = output_dir.join("metadata.json");
         let content = fs::read_to_string(&path).await.ok()?;
-        serde_json::from_str(&content).ok()
+
+        // First try to parse as Value to check schema version
+        let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+        let version = metadata::migration::get_schema_version(&value);
+
+        if version == 0 {
+            // Parse as v0 and migrate
+            let v0: metadata::MetadataV0 = serde_json::from_str(&content).ok()?;
+            let v1 = metadata::migration::migrate_v0_to_v1(v0);
+
+            // Create backup before overwriting
+            let backup_path = output_dir.join("metadata.v0.json.backup");
+            if let Err(e) = fs::copy(&path, &backup_path).await {
+                tracing::warn!("Failed to create v0 backup: {}", e);
+            }
+
+            // Auto-save the upgraded version
+            if let Err(e) = v1.save(output_dir).await {
+                tracing::warn!("Failed to save migrated metadata: {}", e);
+            }
+
+            Some(v1)
+        } else {
+            serde_json::from_str(&content).ok()
+        }
     }
 
     /// Save metadata to a directory
@@ -1873,7 +1927,7 @@ async fn run_incremental_research(
     // Initialize providers
     let gemini = gemini::Client::from_env();
     let openai = openai::Client::from_env();
-    let zai = providers::zai::Client::from_env().ok();
+    let zai = zai::Client::from_env().ok();
 
     // Check if research tools are available
     let use_tools = tools_available();
@@ -1890,11 +1944,11 @@ async fn run_incremental_research(
     }
 
     // Extract library context from metadata (clone to owned strings for futures)
-    let (package_manager, language, url) = match &existing_metadata.library_info {
-        Some(info) => (
-            info.package_manager.clone(),
-            info.language.clone(),
-            info.url.clone(),
+    let (package_manager, language, url) = match existing_metadata.library_details() {
+        Some(details) => (
+            details.package_manager.clone().unwrap_or_else(|| "unknown".to_string()),
+            details.language.clone().unwrap_or_else(|| "unknown".to_string()),
+            details.url.clone().unwrap_or_else(|| "N/A".to_string()),
         ),
         None => (
             "unknown".to_string(),
@@ -1905,13 +1959,12 @@ async fn run_incremental_research(
 
     // Build library info for prompt building
     let library_info = existing_metadata
-        .library_info
-        .as_ref()
-        .map(|info| LibraryInfo {
-            package_manager: info.package_manager.clone(),
-            language: info.language.clone(),
-            url: info.url.clone(),
-            repository: info.repository.clone(),
+        .library_details()
+        .map(|details| LibraryInfo {
+            package_manager: details.package_manager.clone().unwrap_or_else(|| "unknown".to_string()),
+            language: details.language.clone().unwrap_or_else(|| "unknown".to_string()),
+            url: details.url.clone().unwrap_or_else(|| "N/A".to_string()),
+            repository: details.repository.clone(),
             description: None,
         });
     let lib_info_ref = library_info.as_ref();
@@ -1943,7 +1996,7 @@ async fn run_incremental_research(
                     // Use GLM-4.7 if available, otherwise fall back to Gemini
                     if let Some(ref z) = zai {
                         let agent = z
-                            .agent(providers::zai::GLM_4_7)
+                            .agent(zai::GLM_4_7)
                             .preamble("You are a research assistant with web search and scraping tools. Use 1-3 targeted searches to gather key information, then synthesize your findings into a comprehensive response. Do not make excessive tool calls - gather what you need efficiently and write your final answer.")
                             .tool(search_tool.clone())
                             .tool(scrape_tool.clone())
@@ -2062,7 +2115,7 @@ async fn run_incremental_research(
                 "overview" => {
                     // Use GLM-4.7 if available, otherwise fall back to Gemini
                     if let Some(ref z) = zai {
-                        let model = z.completion_model(providers::zai::GLM_4_7);
+                        let model = z.completion_model(zai::GLM_4_7);
                         phase1_futures.push(Box::pin(run_prompt_task(
                             task_name,
                             filename,
@@ -2458,6 +2511,31 @@ pub async fn list(
     verbose: bool,
     json: bool,
 ) -> Result<(), String> {
+    list_with_migrate(filters, types, verbose, json, false).await
+}
+
+/// List research topics with optional metadata migration.
+///
+/// When `migrate` is true, this function will load each topic's metadata using
+/// `ResearchMetadata::load()`, which triggers automatic v0 → v1 migration.
+#[tracing::instrument(
+    name = "list_with_migrate",
+    skip_all,
+    fields(
+        filter_count = filters.len(),
+        type_count = types.len(),
+        verbose = verbose,
+        json = json,
+        migrate = migrate
+    )
+)]
+pub async fn list_with_migrate(
+    filters: Vec<String>,
+    types: Vec<String>,
+    verbose: bool,
+    json: bool,
+    migrate: bool,
+) -> Result<(), String> {
     use list::{apply_filters, discover_topics, format_json, format_terminal};
 
     // Get RESEARCH_DIR from env (default to HOME)
@@ -2466,11 +2544,71 @@ pub async fn list(
     });
 
     // Construct library path: $RESEARCH_DIR/.research/library/
-    let library_path = PathBuf::from(research_dir)
+    let library_path = PathBuf::from(&research_dir)
         .join(".research")
         .join("library");
 
     debug!("Searching for topics in: {:?}", library_path);
+
+    // If migrate flag is set, trigger migration for all topics
+    if migrate {
+        println!("🔄 Migrating metadata schemas...");
+        let mut migrated = 0;
+        let mut already_v1 = 0;
+        let mut errors = 0;
+
+        // Also check the api directory
+        let api_path = PathBuf::from(&research_dir)
+            .join(".research")
+            .join("api");
+
+        for base_path in [&library_path, &api_path] {
+            if !base_path.exists() {
+                continue;
+            }
+
+            if let Ok(entries) = std::fs::read_dir(base_path) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let metadata_path = path.join("metadata.json");
+                        if metadata_path.exists() {
+                            // Check if backup already exists (already migrated)
+                            let backup_path = path.join("metadata.v0.json.backup");
+
+                            // Load triggers migration if v0
+                            match ResearchMetadata::load(&path).await {
+                                Some(_) => {
+                                    if backup_path.exists() {
+                                        // Backup was just created, meaning migration happened
+                                        let name = path.file_name()
+                                            .map(|n| n.to_string_lossy().to_string())
+                                            .unwrap_or_default();
+                                        println!("  ✅ Migrated: {}", name);
+                                        migrated += 1;
+                                    } else {
+                                        already_v1 += 1;
+                                    }
+                                }
+                                None => {
+                                    let name = path.file_name()
+                                        .map(|n| n.to_string_lossy().to_string())
+                                        .unwrap_or_default();
+                                    println!("  ❌ Failed: {}", name);
+                                    errors += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        println!();
+        println!("Migration complete:");
+        println!("  {} migrated, {} already v1, {} errors", migrated, already_v1, errors);
+        println!();
+    }
 
     // Discover topics
     let topics =
@@ -3648,6 +3786,119 @@ pub async fn research(
     })
 }
 
+/// Returns the default output directory for API research.
+///
+/// Uses the `RESEARCH_DIR` environment variable if set, otherwise falls back to `$HOME`.
+/// The full path is: `${RESEARCH_DIR:-$HOME}/.research/api/{api_name}`
+pub fn default_api_output_dir(api_name: &str) -> PathBuf {
+    let base = std::env::var("RESEARCH_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")));
+    base.join(".research").join("api").join(api_name)
+}
+
+/// Research a public API.
+///
+/// This is the entry point for API research, similar to [`research`] for libraries.
+/// It creates a research directory structure under `.research/api/<api-name>/`.
+///
+/// ## Parameters
+///
+/// - `api_name`: The name of the API to research (e.g., "stripe", "github", "openai")
+/// - `output_dir`: Optional custom output directory; defaults to `.research/api/<api-name>`
+/// - `questions`: Additional research questions to answer
+/// - `force_recreation`: If true, regenerate all documents even if they exist
+///
+/// ## Output Structure
+///
+/// ```text
+/// .research/api/<api-name>/
+/// ├── metadata.json       # Research metadata with ResearchKind::Api
+/// ├── overview.md         # API overview, endpoints, authentication
+/// ├── similar_apis.md     # Alternative APIs in the same space
+/// ├── use_cases.md        # Common integration patterns
+/// └── skill/
+///     └── SKILL.md        # Claude Code skill format
+/// ```
+#[tracing::instrument(
+    name = "research_api",
+    skip_all,
+    fields(
+        api_name = %api_name,
+        question_count = questions.len(),
+        force_recreation = force_recreation
+    )
+)]
+pub async fn research_api(
+    api_name: &str,
+    output_dir: Option<PathBuf>,
+    questions: &[String],
+    force_recreation: bool,
+) -> Result<ResearchResult, ResearchError> {
+    info!("Starting API research session");
+
+    // Load environment variables from .env file
+    dotenvy::dotenv().ok();
+
+    // Use provided output_dir or default to .research/api/{api_name}
+    let output_dir = output_dir.unwrap_or_else(|| default_api_output_dir(api_name));
+
+    // Create output directory
+    fs::create_dir_all(&output_dir).await?;
+
+    let start_time = std::time::Instant::now();
+
+    // Check for existing metadata
+    if !force_recreation {
+        if let Some(_existing_metadata) = ResearchMetadata::load(&output_dir).await {
+            println!("Found existing API research for '{}'", api_name);
+            // TODO: Implement incremental mode for API research
+        }
+    }
+
+    // Create initial metadata with Api kind
+    let now = Utc::now();
+    let metadata = ResearchMetadata {
+        schema_version: 1,
+        kind: ResearchKind::Api,
+        details: metadata::ResearchDetails::Api(metadata::ApiDetails::default()),
+        additional_files: std::collections::HashMap::new(),
+        created_at: now,
+        updated_at: now,
+        brief: None,
+        summary: None,
+        when_to_use: None,
+    };
+
+    // Save initial metadata
+    metadata.save(&output_dir).await?;
+
+    println!(
+        "📝 API research initialized for '{}' at {:?}",
+        api_name, output_dir
+    );
+    println!("ℹ️  API research prompts are not yet implemented.");
+    println!("   This is a placeholder that creates the research directory structure.");
+
+    if !questions.is_empty() {
+        println!("   {} additional question(s) provided (not yet processed)", questions.len());
+    }
+
+    let total_time = start_time.elapsed().as_secs_f32();
+
+    Ok(ResearchResult {
+        output_dir,
+        topic: api_name.to_string(),
+        succeeded: 1, // metadata creation counts as success
+        failed: 0,
+        cancelled: false,
+        total_time_secs: total_time,
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        total_tokens: 0,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3670,10 +3921,9 @@ mod tests {
         let metadata = ResearchMetadata::new_library(Some(&lib_info));
 
         assert_eq!(metadata.kind, ResearchKind::Library);
-        assert!(metadata.library_info.is_some());
-        let info = metadata.library_info.unwrap();
-        assert_eq!(info.package_manager, "crates.io");
-        assert_eq!(info.language, "Rust");
+        let details = metadata.library_details().expect("should have library details");
+        assert_eq!(details.package_manager.as_deref(), Some("crates.io"));
+        assert_eq!(details.language.as_deref(), Some("Rust"));
         assert!(metadata.additional_files.is_empty());
     }
 
@@ -3682,7 +3932,9 @@ mod tests {
         let metadata = ResearchMetadata::new_library(None);
 
         assert_eq!(metadata.kind, ResearchKind::Library);
-        assert!(metadata.library_info.is_none());
+        // Even without LibraryInfo, we still get default LibraryDetails
+        let details = metadata.library_details().expect("should have library details");
+        assert!(details.package_manager.is_none());
         assert!(metadata.additional_files.is_empty());
     }
 
@@ -4056,7 +4308,7 @@ mod tests {
 
         let loaded = loaded.unwrap();
         assert_eq!(loaded.kind, ResearchKind::Library);
-        assert!(loaded.library_info.is_some());
+        assert!(loaded.library_details().is_some());
         assert_eq!(loaded.additional_files.len(), 1);
     }
 

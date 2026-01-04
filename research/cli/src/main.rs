@@ -64,12 +64,16 @@ enum Commands {
         types: Vec<String>,
 
         /// Show detailed metadata for each topic (sub-bullets with issues)
-        #[arg(short = 'v', long)]
+        #[arg(long)]
         verbose: bool,
 
         /// Output as JSON instead of terminal format
         #[arg(long)]
         json: bool,
+
+        /// Migrate all v0 metadata files to v1 schema
+        #[arg(long)]
+        migrate: bool,
     },
 
     /// Create symbolic links from research skills to Claude Code and OpenCode
@@ -92,6 +96,25 @@ enum Commands {
         /// The topic to show (directory name under ~/.research/library/)
         #[arg(value_name = "TOPIC")]
         topic: String,
+    },
+
+    /// Research a public API
+    Api {
+        /// The API name (e.g., "stripe", "github", "openai")
+        #[arg(required = true, value_name = "API_NAME")]
+        api_name: String,
+
+        /// Additional research questions
+        #[arg(value_name = "QUESTIONS")]
+        questions: Vec<String>,
+
+        /// Output directory [default: $RESEARCH_DIR/.research/api/<api-name>]
+        #[arg(short, long, value_name = "DIR")]
+        output: Option<PathBuf>,
+
+        /// Force recreation even if research exists
+        #[arg(short, long)]
+        force: bool,
     },
 }
 
@@ -256,8 +279,9 @@ async fn main() {
             types,
             verbose,
             json,
+            migrate,
         } => {
-            match research_lib::list(filters, types, verbose, json).await {
+            match research_lib::list_with_migrate(filters, types, verbose, json, migrate).await {
                 Ok(()) => {
                     // Success - output already written to stdout
                 }
@@ -288,6 +312,47 @@ async fn main() {
             if let Err(e) = show_topic(&topic) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
+            }
+        }
+
+        Commands::Api {
+            api_name,
+            questions,
+            output,
+            force,
+        } => {
+            match research_lib::research_api(&api_name, output, &questions, force).await {
+                Ok(result) => {
+                    println!("\n{}", "=".repeat(60));
+                    if result.cancelled {
+                        println!(
+                            "Cancelled: {} succeeded, {} failed in {:.1}s",
+                            result.succeeded, result.failed, result.total_time_secs
+                        );
+                    } else {
+                        println!(
+                            "Complete: {} succeeded, {} failed in {:.1}s",
+                            result.succeeded, result.failed, result.total_time_secs
+                        );
+                    }
+                    println!(
+                        "Total tokens: {} in, {} out, {} total",
+                        result.total_input_tokens, result.total_output_tokens, result.total_tokens
+                    );
+                    println!("Output: {:?}", result.output_dir);
+                    println!("{}", "=".repeat(60));
+
+                    // Only announce if not cancelled
+                    if !result.cancelled {
+                        use shared::tts::{speak_when_able, VoiceConfig};
+                        let message = format!("Research for the {} API has completed", result.topic);
+                        speak_when_able(&message, &VoiceConfig::default());
+                    }
+                }
+                Err(e) => {
+                    eprintln!("API research failed: {}", e);
+                    std::process::exit(1);
+                }
             }
         }
     }
