@@ -69,7 +69,7 @@ description: Expert knowledge for testing
     let (frontmatter, body) = result.unwrap();
     assert_eq!(frontmatter.name, "test-library");
     assert_eq!(frontmatter.description, "Expert knowledge for testing");
-    assert_eq!(frontmatter.tools, None);
+    assert_eq!(frontmatter.allowed_tools, None);
     assert_eq!(frontmatter.last_updated, None);
     assert_eq!(frontmatter.hash, None);
     assert!(body.contains("# Test Library"));
@@ -100,7 +100,7 @@ Full content here.
     assert_eq!(frontmatter.name, "complete-skill");
     assert_eq!(frontmatter.description, "A complete skill with all fields");
     assert_eq!(
-        frontmatter.tools,
+        frontmatter.allowed_tools,
         Some(vec![
             "Read".to_string(),
             "Write".to_string(),
@@ -132,7 +132,7 @@ allowed-tools:
     assert_eq!(frontmatter.name, "allowed-tools-skill");
     // The "allowed-tools" field should be aliased to "tools"
     assert_eq!(
-        frontmatter.tools,
+        frontmatter.allowed_tools,
         Some(vec!["Grep".to_string(), "Glob".to_string()])
     );
 }
@@ -259,7 +259,7 @@ Body
     assert!(result.is_ok());
 
     let (frontmatter, _) = result.unwrap();
-    assert_eq!(frontmatter.tools, None);
+    assert_eq!(frontmatter.allowed_tools, None);
     assert_eq!(frontmatter.last_updated, None);
     assert_eq!(frontmatter.hash, None);
 }
@@ -303,52 +303,75 @@ fn test_metadata_with_when_to_use_serialization() {
 }
 
 #[test]
-fn test_metadata_schema_version_defaults_to_zero() {
+fn test_metadata_schema_version_defaults_to_one() {
+    // Since v1 migration, new metadata is created with schema_version: 1
     let metadata = ResearchMetadata::new_library(None);
-    assert_eq!(metadata.schema_version, 0);
+    assert_eq!(metadata.schema_version, 1);
 
     // Verify it serializes correctly
     let json = serde_json::to_string(&metadata).unwrap();
     let deserialized: ResearchMetadata = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized.schema_version, 0);
+    assert_eq!(deserialized.schema_version, 1);
 }
 
 #[test]
 fn test_backward_compatibility_missing_when_to_use() {
-    // Old metadata.json without when_to_use field
-    let old_json = r#"{
-        "schema_version": 0,
+    // V1 metadata.json without when_to_use field (optional field)
+    let v1_json = r#"{
+        "schema_version": 1,
         "kind": "library",
+        "details": {"type": "Library"},
         "created_at": "2025-01-01T00:00:00Z",
         "updated_at": "2025-01-01T00:00:00Z",
-        "brief": "",
-        "summary": "",
-        "questions": [],
         "additional_files": {}
     }"#;
 
-    let result: Result<ResearchMetadata, _> = serde_json::from_str(old_json);
+    let result: Result<ResearchMetadata, _> = serde_json::from_str(v1_json);
     assert!(result.is_ok());
     assert_eq!(result.unwrap().when_to_use, None);
 }
 
 #[test]
 fn test_backward_compatibility_missing_schema_version() {
-    // Very old metadata.json without schema_version field
-    let old_json = r#"{
+    // V1 metadata.json without explicit schema_version field
+    // The default_schema_version() function returns 1
+    let v1_json = r#"{
         "kind": "library",
+        "details": {"type": "Library"},
         "created_at": "2025-01-01T00:00:00Z",
         "updated_at": "2025-01-01T00:00:00Z",
-        "brief": "",
-        "summary": "",
-        "questions": [],
         "additional_files": {}
     }"#;
 
-    let result: Result<ResearchMetadata, _> = serde_json::from_str(old_json);
+    let result: Result<ResearchMetadata, _> = serde_json::from_str(v1_json);
     assert!(result.is_ok());
-    // Should default to 0
-    assert_eq!(result.unwrap().schema_version, 0);
+    // Should default to 1 (current schema version)
+    assert_eq!(result.unwrap().schema_version, 1);
+}
+
+#[test]
+fn test_v0_metadata_parsing() {
+    // V0 metadata.json should be parseable by MetadataV0 struct
+    use research_lib::metadata::MetadataV0;
+
+    let v0_json = r#"{
+        "schema_version": 0,
+        "kind": "library",
+        "library_info": {
+            "package_manager": "npm",
+            "language": "JavaScript",
+            "url": "https://example.com"
+        },
+        "created_at": "2025-01-01T00:00:00Z",
+        "updated_at": "2025-01-01T00:00:00Z",
+        "additional_files": {}
+    }"#;
+
+    let result: Result<MetadataV0, _> = serde_json::from_str(v0_json);
+    assert!(result.is_ok());
+    let v0 = result.unwrap();
+    assert_eq!(v0.schema_version, 0);
+    assert!(v0.library_info.is_some());
 }
 
 #[test]
@@ -675,7 +698,7 @@ hash: "sha256:abc123def456"
     assert!(result.is_ok());
 
     let (frontmatter, _) = result.unwrap();
-    assert_eq!(frontmatter.tools.as_ref().unwrap().len(), 5);
+    assert_eq!(frontmatter.allowed_tools.as_ref().unwrap().len(), 5);
     assert!(frontmatter.last_updated.is_some());
     assert!(frontmatter.hash.is_some());
 }
@@ -711,7 +734,7 @@ fn test_frontmatter_serialization_roundtrip() {
     let original = SkillFrontmatter {
         name: "test-skill".to_string(),
         description: "A test skill".to_string(),
-        tools: Some(vec!["Bash".to_string(), "Read".to_string()]),
+        allowed_tools: Some(vec!["Bash".to_string(), "Read".to_string()]),
         last_updated: Some("2025-12-29".to_string()),
         hash: Some("abc123".to_string()),
     };
@@ -724,7 +747,7 @@ fn test_frontmatter_serialization_roundtrip() {
 
     assert_eq!(original.name, deserialized.name);
     assert_eq!(original.description, deserialized.description);
-    assert_eq!(original.tools, deserialized.tools);
+    assert_eq!(original.allowed_tools, deserialized.allowed_tools);
     assert_eq!(original.last_updated, deserialized.last_updated);
     assert_eq!(original.hash, deserialized.hash);
 }

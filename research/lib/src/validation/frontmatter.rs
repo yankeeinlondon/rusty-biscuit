@@ -47,9 +47,9 @@ pub struct SkillFrontmatter {
     /// The description of the skill (used for activation triggers)
     pub description: String,
 
-    /// Optional list of allowed tools (accepts both "tools" and "allowed-tools")
-    #[serde(alias = "allowed-tools", skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<String>>,
+    /// Optional list of tools the skill is allowed to use
+    #[serde(alias = "tools", alias = "allowed-tools", skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<Vec<String>>,
 
     /// Optional last updated timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -346,7 +346,7 @@ This is the body content.
         assert_eq!(frontmatter.name, "test-skill");
         assert_eq!(frontmatter.description, "A test skill for validation");
         assert_eq!(
-            frontmatter.tools,
+            frontmatter.allowed_tools,
             Some(vec!["Bash".to_string(), "Read".to_string()])
         );
         assert_eq!(frontmatter.last_updated, Some("2025-12-29".to_string()));
@@ -373,7 +373,7 @@ Body content here.
             frontmatter.description,
             "Minimal skill with only required fields"
         );
-        assert_eq!(frontmatter.tools, None);
+        assert_eq!(frontmatter.allowed_tools, None);
         assert_eq!(frontmatter.last_updated, None);
         assert_eq!(frontmatter.hash, None);
         assert_eq!(body.trim(), "Body content here.");
@@ -508,7 +508,7 @@ Body
 
         let (frontmatter, _) = result.unwrap();
         assert_eq!(
-            frontmatter.tools,
+            frontmatter.allowed_tools,
             Some(vec![
                 "Bash".to_string(),
                 "Read".to_string(),
@@ -521,7 +521,7 @@ Body
     fn test_allowed_tools_alias() {
         let content = r#"---
 name: skill-with-allowed-tools
-description: Skill with allowed-tools field (should alias to tools)
+description: Skill with allowed-tools field (hyphenated form should work)
 allowed-tools:
   - Grep
   - Glob
@@ -534,8 +534,31 @@ Body
 
         let (frontmatter, _) = result.unwrap();
         assert_eq!(
-            frontmatter.tools,
+            frontmatter.allowed_tools,
             Some(vec!["Grep".to_string(), "Glob".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_allowed_tools_serialization() {
+        // Verify that serialization produces "allowed_tools" (not "tools")
+        let frontmatter = SkillFrontmatter {
+            name: "test-skill".to_string(),
+            description: "Test skill".to_string(),
+            allowed_tools: Some(vec!["Bash".to_string(), "Read".to_string()]),
+            last_updated: None,
+            hash: None,
+        };
+
+        let yaml = serde_yaml::to_string(&frontmatter).expect("Failed to serialize");
+        assert!(
+            yaml.contains("allowed_tools:"),
+            "Serialization should use 'allowed_tools', got: {}",
+            yaml
+        );
+        assert!(
+            !yaml.contains("tools:") || yaml.contains("allowed_tools:"),
+            "Serialization should not produce bare 'tools:'"
         );
     }
 
