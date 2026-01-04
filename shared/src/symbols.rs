@@ -12,6 +12,9 @@ impl TodoState {
   }
 }
 
+
+/// Represents "states" of a TODO item which can be represented
+/// well in the terminal (no progress, in process, completed, cancelled)
 pub enum Todo {
   NoProgress,
   InProgress,
