@@ -27,10 +27,25 @@ pub enum DiscoveryError {
     MetadataParse(#[from] serde_json::Error),
 }
 
-/// Library information from metadata.json
+/// Library information from metadata.json (v0 schema)
 #[derive(Debug, Deserialize)]
 struct LibraryInfo {
     language: Option<String>,
+}
+
+/// Library details from v1 schema's `details` field
+#[derive(Debug, Deserialize)]
+struct LibraryDetails {
+    language: Option<String>,
+}
+
+/// Research details from v1 schema (tagged enum)
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+enum ResearchDetails {
+    Library(LibraryDetails),
+    #[serde(other)]
+    Other,
 }
 
 /// Metadata structure as defined in metadata.json files.
@@ -50,9 +65,13 @@ struct Metadata {
     /// Brief one-sentence description of the topic
     brief: Option<String>,
 
-    /// Library-specific information (language, etc.)
+    /// Library-specific information (v0 schema)
     #[serde(default)]
     library_info: Option<LibraryInfo>,
+
+    /// Type-specific details (v1 schema)
+    #[serde(default)]
+    details: Option<ResearchDetails>,
 
     /// Guidance on when to use this research (required for v1 schema)
     when_to_use: Option<String>,
@@ -66,6 +85,25 @@ impl Metadata {
     /// - schema_version is 1 but when_to_use is missing (incomplete v1)
     fn needs_migration(&self) -> bool {
         self.schema_version == 0 || (self.schema_version >= 1 && self.when_to_use.is_none())
+    }
+
+    /// Extract language from either v0 library_info or v1 details.
+    fn language(&self) -> Option<String> {
+        // Try v0 field first
+        if let Some(ref lib_info) = self.library_info {
+            if let Some(ref lang) = lib_info.language {
+                return Some(lang.clone());
+            }
+        }
+
+        // Try v1 field
+        if let Some(ResearchDetails::Library(ref lib_details)) = self.details {
+            if let Some(ref lang) = lib_details.language {
+                return Some(lang.clone());
+            }
+        }
+
+        None
     }
 }
 
@@ -170,12 +208,13 @@ fn analyze_topic(name: String, location: PathBuf) -> TopicInfo {
     let metadata_path = location.join("metadata.json");
     match read_metadata(&metadata_path) {
         Ok(metadata) => {
-            // Check if migration/repair is needed FIRST (before moving any fields)
+            // Extract values that borrow BEFORE moving any fields
             topic.needs_migration = metadata.needs_migration();
+            topic.language = metadata.language();
             topic.missing_metadata = false;
+            // Now move the owned fields
             topic.topic_type = metadata.kind.unwrap_or_else(|| "library".to_string());
             topic.description = metadata.brief;
-            topic.language = metadata.library_info.and_then(|li| li.language);
         }
         Err(err) => {
             debug!("Failed to read metadata for topic '{}': {}", name, err);
@@ -678,5 +717,122 @@ mod tests {
             !v1_complete.needs_migration(),
             "v1 with when_to_use does NOT need migration"
         );
+    }
+
+    // =========================================================================
+    // Regression Tests: Language extraction from v0 and v1 schemas
+    // =========================================================================
+    // Bug fix: Language icons were not showing because discovery only read
+    // from v0 library_info, not v1 details.Library.language
+
+    #[test]
+    fn test_language_extraction_from_v0_library_info() {
+        // v0 schema stores language in library_info.language
+        let metadata: Metadata = serde_json::from_str(
+            r#"{
+                "kind": "library",
+                "library_info": {
+                    "language": "Rust"
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(metadata.language(), Some("Rust".to_string()));
+    }
+
+    #[test]
+    fn test_language_extraction_from_v1_details() {
+        // Regression test: v1 schema stores language in details.Library.language
+        let metadata: Metadata = serde_json::from_str(
+            r#"{
+                "schema_version": 1,
+                "kind": "library",
+                "details": {
+                    "type": "Library",
+                    "language": "TypeScript",
+                    "package_manager": "npm"
+                },
+                "when_to_use": "Use for testing"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(metadata.language(), Some("TypeScript".to_string()));
+    }
+
+    #[test]
+    fn test_language_extraction_v1_non_library_returns_none() {
+        // v1 non-Library types don't have language
+        let metadata: Metadata = serde_json::from_str(
+            r#"{
+                "schema_version": 1,
+                "kind": "api",
+                "details": {
+                    "type": "Api"
+                },
+                "when_to_use": "Use for API research"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(metadata.language(), None);
+    }
+
+    #[test]
+    fn test_language_extraction_no_language_field() {
+        // v1 Library without language field
+        let metadata: Metadata = serde_json::from_str(
+            r#"{
+                "schema_version": 1,
+                "kind": "library",
+                "details": {
+                    "type": "Library",
+                    "package_manager": "crates.io"
+                },
+                "when_to_use": "Use for testing"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(metadata.language(), None);
+    }
+
+    #[test]
+    fn test_discover_topic_with_v1_language() {
+        // Integration test: verify language is extracted from v1 details
+        let temp_dir = TempDir::new().unwrap();
+        let metadata = r#"{
+            "schema_version": 1,
+            "kind": "library",
+            "brief": "A v1 library with language in details",
+            "details": {
+                "type": "Library",
+                "language": "Python",
+                "package_manager": "PyPI"
+            },
+            "when_to_use": "Expert knowledge for Python testing"
+        }"#;
+
+        create_test_topic(
+            temp_dir.path(),
+            "python-lib",
+            Some(metadata),
+            &[
+                ResearchOutput::DeepDive,
+                ResearchOutput::Brief,
+                ResearchOutput::Skill,
+            ],
+            UNDERLYING_DOCS,
+            &[],
+        );
+
+        let topics = discover_topics(temp_dir.path().to_path_buf()).unwrap();
+        assert_eq!(topics.len(), 1);
+
+        let topic = &topics[0];
+        assert_eq!(topic.name, "python-lib");
+        assert_eq!(topic.language, Some("Python".to_string()));
+        assert!(!topic.needs_migration);
     }
 }
