@@ -69,8 +69,3 @@ Since your pipeline likely outputs a stream of strings, you should create a cust
 * **Sizing:** Terminal cells are non-square. To prevent stretching, you may need to query the terminal size (using `terminal_size` crate) to calculate the correct aspect ratio for the Kitty `c` (columns) and `r` (rows) parameters.
 * **Remote Images:** `pulldown-cmark` provides the URL string. You will need an HTTP client (like `reqwest`) to download the image to a buffer before passing it to the Kitty encoder.
 
----
-
-### Suggested Next Step
-
-Would you like me to provide a complete code example showing how to integrate `viuer` into a `pulldown-cmark` event loop?
