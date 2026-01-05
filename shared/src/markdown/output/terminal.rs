@@ -640,6 +640,11 @@ pub fn write_terminal<W: std::io::Write>(
     let mut in_strikethrough = false;
     let mut in_mark = false;
 
+    // Track hyperlinks for OSC8 terminal escape sequences
+    let mut in_link = false;
+    let mut current_link_url = String::new();
+    let mut current_link_text = String::new();
+
     // Track blockquote nesting depth and whether we've seen content at current depth
     let mut blockquote_depth: usize = 0;
     let mut blockquote_has_content = false;
@@ -688,14 +693,45 @@ pub fn write_terminal<W: std::io::Write>(
                 let is_mermaid = code_language.eq_ignore_ascii_case("mermaid");
 
                 if is_mermaid && options.mermaid_mode != MermaidMode::Off {
+                    // Parse metadata for mermaid blocks (supports title attribute)
+                    let meta = parse_code_info(&code_info_string).unwrap_or_default();
+
+                    // Get background color from theme for header row (matches code blocks)
+                    let theme = code_highlighter.theme();
+                    let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+
                     match options.mermaid_mode {
                         MermaidMode::Text => {
+                            // Text mode: show header with title and "mermaid" label (it's a code block)
+                            let header = format_header_row(
+                                meta.title.as_deref(),
+                                "mermaid",
+                                bg_color,
+                                options.color_mode,
+                                terminal_width,
+                            );
+                            wrapper.push_with_newlines(&header);
+                            wrapper.newline();
                             // Render as fenced code block (fallback format)
                             let fallback = crate::mermaid::render_terminal::fallback_code_block(&code_buffer);
                             wrapper.push_with_newlines(&fallback);
                             wrapper.push_with_newlines("\n\n");
                         }
                         MermaidMode::Image => {
+                            // Image mode: only show title header if title is present
+                            // (the rendered diagram makes "mermaid" label redundant)
+                            if let Some(title) = &meta.title {
+                                let header = format_header_row(
+                                    Some(title.as_str()),
+                                    "", // No language label for rendered images
+                                    bg_color,
+                                    options.color_mode,
+                                    terminal_width,
+                                );
+                                wrapper.push_with_newlines(&header);
+                                wrapper.newline();
+                            }
+
                             // Flush output before viuer prints to stdout
                             write!(writer, "{}", wrapper.output()).ok();
                             writer.flush().ok();
@@ -833,13 +869,52 @@ pub fn write_terminal<W: std::io::Write>(
                 scope_stack.pop();
             }
 
-            InlineEvent::Standard(Event::Start(ref tag @ Tag::Link { .. })) => {
+            InlineEvent::Standard(Event::Start(ref tag @ Tag::Link { ref dest_url, .. })) => {
+                in_link = true;
+                current_link_url = dest_url.to_string();
+                current_link_text.clear();
                 if let Some(scope) = ScopeCache::global().scope_for_tag(tag) {
                     scope_stack.push(scope);
                 }
             }
             InlineEvent::Standard(Event::End(TagEnd::Link)) => {
+                // Pop link scope to get parent scopes, then query theme for link styling
+                // (The link scope was pushed in Start(Link))
                 scope_stack.pop();
+                let link_tag = Tag::Link {
+                    link_type: pulldown_cmark::LinkType::Inline,
+                    dest_url: "".into(),
+                    title: "".into(),
+                    id: "".into(),
+                };
+                let mut style = prose_highlighter.style_for_tag(&link_tag, &scope_stack);
+
+                // Fallback: If theme doesn't define a distinct link color, use standard blue with underline.
+                // Many themes (e.g., OneHalf) don't style the markup.underline.link.markdown scope,
+                // causing links to appear identical to regular text. This ensures links are always
+                // visually distinguishable.
+                let base_style = prose_highlighter.base_style();
+                if style.foreground == base_style.foreground {
+                    // Apply standard link blue color (similar to HTML default #0066cc)
+                    style.foreground = Color { r: 65, g: 160, b: 225, a: 255 }; // Soft blue
+                    // Also add underline for extra visual distinction
+                    style.font_style |= syntect::highlighting::FontStyle::UNDERLINE;
+                }
+
+                // Emit styled hyperlink with OSC8 escape sequences
+                // IMPORTANT: Styling must be applied INSIDE the OSC8 sequence, not outside.
+                // OSC8 format: ESC]8;;URL BEL <styled_text> ESC]8;; BEL
+                // The styled text appears between the OSC8 open and close sequences.
+                wrapper.emit_styled_hyperlink(
+                    &current_link_text,
+                    &current_link_url,
+                    style,
+                    emit_italic,
+                );
+
+                in_link = false;
+                current_link_url.clear();
+                current_link_text.clear();
             }
 
             // List handling
@@ -912,6 +987,9 @@ pub fn write_terminal<W: std::io::Write>(
                 if in_image {
                     // Accumulate alt text for image
                     current_alt.push_str(&text);
+                } else if in_link {
+                    // Buffer text for link (rendered with OSC8 at End(Link))
+                    current_link_text.push_str(&text);
                 } else if in_table {
                     // Buffer text for table cell
                     current_cell.push_str(&text);
@@ -1453,7 +1531,8 @@ fn header_text_color(color_mode: ColorMode) -> (u8, u8, u8) {
 /// ## Arguments
 ///
 /// * `title` - Optional title text for the code block
-/// * `language` - Language identifier (defaults to "text" if empty)
+/// * `language` - Language identifier. If empty AND title is present, creates a
+///   title-only header (no language label). If empty with no title, defaults to "text".
 /// * `bg_color` - Background color for title and language spans
 /// * `color_mode` - Color mode for determining text color
 /// * `terminal_width` - Terminal width for right-alignment calculation
@@ -1461,7 +1540,8 @@ fn header_text_color(color_mode: ColorMode) -> (u8, u8, u8) {
 /// ## Returns
 ///
 /// ANSI-formatted string with title (if present) on the left and language right-aligned.
-/// Title is bold, language is not.
+/// Title is bold, language is not. For title-only headers (empty language with title),
+/// only the title is rendered.
 fn format_header_row(
     title: Option<&str>,
     language: &str,
@@ -1470,20 +1550,25 @@ fn format_header_row(
     terminal_width: u16,
 ) -> String {
     let text_color = header_text_color(color_mode);
+
+    // For empty language, default to "text" unless we have a title-only header
+    let show_language = !language.is_empty() || title.is_none();
     let lang = if language.is_empty() { "text" } else { language };
 
     // Calculate visible widths for spacing
     // Title: " {title} " = 1 + title.len() + 1 = title.len() + 2
     // Language: " {lang} " = 1 + lang.len() + 1 = lang.len() + 2
     let title_width = title.map(|t| t.chars().count() + 2).unwrap_or(0);
-    let lang_width = lang.chars().count() + 2;
+    let lang_width = if show_language { lang.chars().count() + 2 } else { 0 };
     let total_content_width = title_width + lang_width;
 
-    // Calculate spacing to right-align language
+    // Calculate spacing to right-align language (or fill line for title-only)
     let spacing = if (terminal_width as usize) > total_content_width {
         terminal_width as usize - total_content_width
-    } else {
+    } else if show_language {
         1 // Minimum 1 space between title and language
+    } else {
+        0 // No spacing needed for title-only
     };
 
     let mut output = String::new();
@@ -1504,14 +1589,16 @@ fn format_header_row(
         output.push(' ');
     }
 
-    // Right side: language (right-aligned)
-    // BG + FG + space + lang + space + reset
-    output.push_str(&format!(
-        "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m {} \x1b[0m",
-        bg_color.r, bg_color.g, bg_color.b,
-        text_color.0, text_color.1, text_color.2,
-        lang
-    ));
+    // Right side: language (right-aligned) - skip if title-only header
+    if show_language {
+        // BG + FG + space + lang + space + reset
+        output.push_str(&format!(
+            "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m {} \x1b[0m",
+            bg_color.r, bg_color.g, bg_color.b,
+            text_color.0, text_color.1, text_color.2,
+            lang
+        ));
+    }
 
     output
 }
@@ -1745,6 +1832,31 @@ impl LineWrapper {
         use unicode_width::UnicodeWidthStr;
         // Note: markers don't use blockquote background (they have their own styling)
         self.output.push_str(&emit_prose_text(text, style, emit_italic, false, false, None));
+        self.current_col += UnicodeWidthStr::width(text);
+    }
+
+    /// Emits a styled hyperlink with OSC8 escape sequences.
+    ///
+    /// The styling is applied INSIDE the OSC8 sequence so the visible text
+    /// retains its color (typically blue for links). The OSC8 wrapper makes
+    /// the text clickable in supporting terminals.
+    ///
+    /// Format: `ESC]8;;URL BEL <styled_text> ESC]8;; BEL`
+    fn emit_styled_hyperlink(&mut self, text: &str, url: &str, style: Style, emit_italic: bool) {
+        use unicode_width::UnicodeWidthStr;
+
+        // OSC8 hyperlink start: ESC ] 8 ; ; <url> BEL
+        self.output.push_str("\x1b]8;;");
+        self.output.push_str(url);
+        self.output.push('\x07');
+
+        // Emit styled text INSIDE the hyperlink
+        // Note: We don't use word wrapping for links - they stay on one line
+        self.output.push_str(&emit_prose_text(text, style, emit_italic, false, false, None));
+
+        // OSC8 hyperlink end: ESC ] 8 ; ; BEL
+        self.output.push_str("\x1b]8;;\x07");
+
         self.current_col += UnicodeWidthStr::width(text);
     }
 
@@ -5676,6 +5788,571 @@ fn bar() {}
             idx + 1 < lines.len() && lines[idx + 1].trim().is_empty(),
             "Should have blank line after blockquote before list, got lines:\n{:?}",
             lines
+        );
+    }
+
+    // ===== Mermaid Diagram Tests =====
+    // Regression tests for mermaid title rendering (fixed: titles were not displayed)
+
+    #[test]
+    fn test_mermaid_text_mode_has_header() {
+        // Regression test: mermaid blocks in Text mode should render header with "mermaid" label
+        let content = r#"```mermaid
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.mermaid_mode = MermaidMode::Text;
+
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Should contain "mermaid" label in header
+        assert!(
+            plain.contains("mermaid"),
+            "Mermaid block should have 'mermaid' label in header, got: {:?}",
+            plain
+        );
+    }
+
+    #[test]
+    fn test_mermaid_text_mode_with_title() {
+        // Regression test: mermaid blocks with title should display the title
+        // Bug: previously titles were not rendered for mermaid blocks
+        let content = r#"```mermaid title="My Flowchart"
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.mermaid_mode = MermaidMode::Text;
+
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Should contain the title
+        assert!(
+            plain.contains("My Flowchart"),
+            "Mermaid block should display title 'My Flowchart', got: {:?}",
+            plain
+        );
+
+        // Should also contain "mermaid" label
+        assert!(
+            plain.contains("mermaid"),
+            "Mermaid block should have 'mermaid' label in header"
+        );
+    }
+
+    #[test]
+    fn test_mermaid_title_is_bold() {
+        // Regression test: mermaid title should be bold (like regular code block titles)
+        let content = r#"```mermaid title="Bold Title"
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.mermaid_mode = MermaidMode::Text;
+
+        let output = for_terminal(&md, options).unwrap();
+
+        // Title should be bold (ANSI code \x1b[1m appears before the title)
+        assert!(
+            output.contains("\x1b[1m"),
+            "Mermaid title should be bold, got: {:?}",
+            output
+        );
+
+        // Bold should appear before the title text
+        let bold_pos = output.find("\x1b[1m");
+        let title_pos = output.find("Bold Title");
+        assert!(
+            bold_pos.is_some() && title_pos.is_some() && bold_pos.unwrap() < title_pos.unwrap(),
+            "Bold ANSI code should appear before title text"
+        );
+    }
+
+    #[test]
+    fn test_mermaid_title_with_spaces() {
+        // Regression test: mermaid titles with spaces should work correctly
+        let content = r#"```mermaid title="My Complex Flowchart Diagram"
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.mermaid_mode = MermaidMode::Text;
+
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        assert!(
+            plain.contains("My Complex Flowchart Diagram"),
+            "Mermaid block should display multi-word title, got: {:?}",
+            plain
+        );
+    }
+
+    #[test]
+    fn test_mermaid_uppercase_language() {
+        // Mermaid language detection should be case-insensitive
+        let content = r#"```MERMAID title="Uppercase Test"
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.mermaid_mode = MermaidMode::Text;
+
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Should still detect as mermaid and show title
+        assert!(
+            plain.contains("Uppercase Test"),
+            "MERMAID (uppercase) should display title, got: {:?}",
+            plain
+        );
+        assert!(
+            plain.contains("mermaid"),
+            "Header should show 'mermaid' label"
+        );
+    }
+
+    #[test]
+    fn test_mermaid_off_mode_renders_as_code() {
+        // When mermaid mode is Off, mermaid blocks render as regular code blocks
+        let content = r#"```mermaid title="Test Title"
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.mermaid_mode = MermaidMode::Off;
+
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Should render title since it's treated as regular code block
+        assert!(
+            plain.contains("Test Title"),
+            "Mermaid block in Off mode should display title as regular code block, got: {:?}",
+            plain
+        );
+
+        // Should NOT contain the fallback code block format (```mermaid)
+        assert!(
+            !plain.contains("```mermaid"),
+            "Off mode should render as highlighted code, not fallback format"
+        );
+    }
+
+    #[test]
+    fn test_mermaid_no_title_still_has_header() {
+        // Regression test: mermaid blocks without title should still show "mermaid" label
+        let content = r#"```mermaid
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.mermaid_mode = MermaidMode::Text;
+
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Should have "mermaid" label even without a title
+        assert!(
+            plain.contains("mermaid"),
+            "Mermaid block without title should still have 'mermaid' label, got: {:?}",
+            plain
+        );
+    }
+
+    // ===== format_header_row Tests =====
+    // Unit tests for the header row formatting function
+
+    #[test]
+    fn test_format_header_row_title_only() {
+        // When language is empty but title is present, show only the title (no language label)
+        // This is used for rendered mermaid diagrams where "mermaid" label is redundant
+        use syntect::highlighting::Color;
+
+        let header = format_header_row(
+            Some("My Diagram"),
+            "", // Empty language = title-only header
+            Color { r: 34, g: 34, b: 34, a: 255 },
+            ColorMode::Dark,
+            80,
+        );
+
+        let plain = strip_ansi_codes(&header);
+
+        // Should contain the title
+        assert!(
+            plain.contains("My Diagram"),
+            "Title-only header should contain the title, got: {:?}",
+            plain
+        );
+
+        // Should NOT contain "text" (the default language for empty strings)
+        assert!(
+            !plain.contains("text"),
+            "Title-only header should NOT show 'text' language label, got: {:?}",
+            plain
+        );
+    }
+
+    #[test]
+    fn test_format_header_row_empty_language_no_title_shows_text() {
+        // When both language is empty AND no title, default to "text" label
+        use syntect::highlighting::Color;
+
+        let header = format_header_row(
+            None,
+            "",
+            Color { r: 34, g: 34, b: 34, a: 255 },
+            ColorMode::Dark,
+            80,
+        );
+
+        let plain = strip_ansi_codes(&header);
+
+        // Should show "text" as default language
+        assert!(
+            plain.contains("text"),
+            "Header with no title and empty language should show 'text', got: {:?}",
+            plain
+        );
+    }
+
+    #[test]
+    fn test_format_header_row_with_both_title_and_language() {
+        // Normal case: both title and language are shown
+        use syntect::highlighting::Color;
+
+        let header = format_header_row(
+            Some("Example"),
+            "rust",
+            Color { r: 34, g: 34, b: 34, a: 255 },
+            ColorMode::Dark,
+            80,
+        );
+
+        let plain = strip_ansi_codes(&header);
+
+        assert!(plain.contains("Example"), "Should contain title");
+        assert!(plain.contains("rust"), "Should contain language");
+    }
+
+    // ===== Hyperlink Tests =====
+
+    #[test]
+    fn test_terminal_link_renders_display_text() {
+        // Regression test: links should render display text (not be silently dropped)
+        // Bug: links were only styled but the OSC8 hyperlink sequences weren't emitted
+        let content = "Check out [Zigbee2MQTT](https://www.zigbee2mqtt.io/) for details.";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+
+        // The display text "Zigbee2MQTT" must appear
+        assert!(
+            plain.contains("Zigbee2MQTT"),
+            "Link display text should be rendered, got: {:?}",
+            plain
+        );
+    }
+
+    #[test]
+    fn test_terminal_link_uses_link_struct() {
+        // Regression test: terminal output should use Link::to_terminal() which handles
+        // OSC8 escape sequences for clickable links (or fallback to [url] format)
+        let content = "[Example](https://example.com)";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+
+        // Should contain either OSC8 sequences (if terminal supports) or fallback [url]
+        // In test environment, typically falls back to "Example [https://example.com]"
+        assert!(
+            plain.contains("Example"),
+            "Link display text should be rendered, got: {:?}",
+            plain
+        );
+
+        // Either OSC8 start sequence OR fallback URL format should be present
+        let has_osc8 = output.contains("\x1b]8;;");
+        let has_fallback = plain.contains("[https://example.com]");
+
+        assert!(
+            has_osc8 || has_fallback,
+            "Link should use OSC8 or fallback format, got raw: {:?}, plain: {:?}",
+            output,
+            plain
+        );
+    }
+
+    #[test]
+    fn test_terminal_link_in_list() {
+        // Regression test: links inside list items should render correctly
+        let content = "- [Link One](https://one.com)\n- [Link Two](https://two.com)";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+
+        assert!(plain.contains("Link One"), "First link should render");
+        assert!(plain.contains("Link Two"), "Second link should render");
+    }
+
+    #[test]
+    fn test_terminal_multiple_links_in_paragraph() {
+        // Ensure multiple links in a single paragraph all render
+        let content = "Visit [Google](https://google.com) or [GitHub](https://github.com).";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        let plain = strip_ansi_codes(&output);
+
+        assert!(plain.contains("Google"), "First link should render");
+        assert!(plain.contains("GitHub"), "Second link should render");
+    }
+
+    #[test]
+    fn test_terminal_link_styling_inside_osc8() {
+        // Regression test: ANSI color codes must appear INSIDE the OSC8 sequence, not outside.
+        //
+        // Bug (before fix): Styling was applied to the entire OSC8 sequence including escape codes:
+        //   \x1b[38;2;R;G;Bm\x1b]8;;URL\x07TEXT\x1b]8;;\x07\x1b[0m
+        //   ^--- color start (invisible)                    ^--- color reset (too late!)
+        //
+        // Fix: Styling must wrap only the visible text INSIDE the hyperlink:
+        //   \x1b]8;;URL\x07\x1b[38;2;R;G;BmTEXT\x1b[0m\x1b]8;;\x07
+        //                  ^--- color start   ^--- reset   ^--- OSC8 close
+        //
+        let content = "[Click Here](https://example.com)";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Check that OSC8 sequences are present
+        let osc8_start = "\x1b]8;;";
+        let osc8_end = "\x1b]8;;\x07";
+
+        assert!(
+            output.contains(osc8_start),
+            "Output should contain OSC8 start sequence"
+        );
+        assert!(
+            output.contains(osc8_end),
+            "Output should contain OSC8 end sequence"
+        );
+
+        // Find the positions of key sequences
+        let start_pos = output.find(osc8_start).expect("OSC8 start should exist");
+        let end_pos = output.find(osc8_end).expect("OSC8 end should exist");
+
+        // The BEL after the URL marks where visible content begins
+        let after_url_bel = output[start_pos..].find('\x07').expect("BEL should exist after URL");
+        let content_start = start_pos + after_url_bel + 1;
+
+        // Extract the content between OSC8 open and close
+        let hyperlink_content = &output[content_start..end_pos];
+
+        // The ANSI reset sequence (\x1b[0m) should appear INSIDE the hyperlink content
+        // (before the OSC8 close sequence)
+        assert!(
+            hyperlink_content.contains("\x1b[0m"),
+            "ANSI reset should appear INSIDE the OSC8 hyperlink, not after it. \
+             Hyperlink content: {:?}",
+            hyperlink_content
+        );
+
+        // The hyperlink content should contain ANSI color codes (38;2 for 24-bit foreground)
+        assert!(
+            hyperlink_content.contains("\x1b[38;2;"),
+            "ANSI color code should appear INSIDE the OSC8 hyperlink. \
+             Hyperlink content: {:?}",
+            hyperlink_content
+        );
+
+        // The visible text should be inside the hyperlink
+        assert!(
+            hyperlink_content.contains("Click Here"),
+            "Link text should appear INSIDE the OSC8 hyperlink. \
+             Hyperlink content: {:?}",
+            hyperlink_content
+        );
+    }
+
+    #[test]
+    fn test_terminal_link_osc8_structure() {
+        // Verify the complete OSC8 structure:
+        // ESC]8;;URL BEL <styled_text> ESC]8;; BEL
+        let content = "[Test](https://test.com)";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // The URL should appear in the OSC8 start sequence
+        assert!(
+            output.contains("\x1b]8;;https://test.com\x07"),
+            "OSC8 start should contain the URL followed by BEL. Output: {:?}",
+            output
+        );
+
+        // The OSC8 close sequence should be present
+        assert!(
+            output.contains("\x1b]8;;\x07"),
+            "OSC8 close sequence should be present"
+        );
+    }
+
+    #[test]
+    fn test_terminal_link_styling_preserved_in_list() {
+        // Regression test: links in lists should also have styling inside OSC8
+        let content = "- [Link](https://example.com)";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Find OSC8 content region
+        let osc8_start = "\x1b]8;;";
+        let osc8_end = "\x1b]8;;\x07";
+
+        if let (Some(start_pos), Some(end_pos)) = (output.find(osc8_start), output.find(osc8_end)) {
+            let after_url_bel = output[start_pos..].find('\x07').unwrap();
+            let content_start = start_pos + after_url_bel + 1;
+            let hyperlink_content = &output[content_start..end_pos];
+
+            // Style should be inside the hyperlink
+            assert!(
+                hyperlink_content.contains("\x1b["),
+                "Link in list should have ANSI styling inside OSC8. Content: {:?}",
+                hyperlink_content
+            );
+        }
+    }
+
+    #[test]
+    fn test_terminal_link_always_has_distinct_color() {
+        // Regression test for: links sent to the terminal have NO STYLING
+        // Bug: Themes without link-specific colors (e.g., OneHalf) caused links
+        // to render with the same color as regular text, making them invisible.
+        // Fix: Apply fallback blue color and underline when theme returns base color.
+        let content = "[Click Here](https://example.com)";
+        let md: Markdown = content.into();
+
+        // Test with default OneHalf theme which doesn't define link colors
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Extract the content between OSC8 open and close
+        let osc8_start = "\x1b]8;;";
+        let osc8_end = "\x1b]8;;\x07";
+        let start_pos = output.find(osc8_start).expect("OSC8 start should exist");
+        let end_pos = output.find(osc8_end).expect("OSC8 end should exist");
+        let after_url_bel = output[start_pos..].find('\x07').unwrap();
+        let content_start = start_pos + after_url_bel + 1;
+        let hyperlink_content = &output[content_start..end_pos];
+
+        // The fallback blue color should be applied: RGB(65,160,225)
+        assert!(
+            hyperlink_content.contains("\x1b[38;2;65;160;225m"),
+            "Links without theme styling should use fallback blue color. \
+             Hyperlink content: {:?}",
+            hyperlink_content
+        );
+
+        // Underline should be added for extra visual distinction
+        assert!(
+            hyperlink_content.contains("\x1b[4m"),
+            "Links without theme styling should have underline. \
+             Hyperlink content: {:?}",
+            hyperlink_content
+        );
+    }
+
+    #[test]
+    fn test_terminal_link_uses_theme_color_when_available() {
+        // Regression test: themes that DO define link colors should use them
+        // (not the fallback blue). Github theme defines link color as RGB(230,211,122).
+        use crate::markdown::highlighting::ThemePair;
+
+        let content = "[Click Here](https://example.com)";
+        let md: Markdown = content.into();
+
+        let mut options = TerminalOptions::default();
+        options.prose_theme = ThemePair::Github;
+
+        let output = for_terminal(&md, options).unwrap();
+
+        // Extract the content between OSC8 open and close
+        let osc8_start = "\x1b]8;;";
+        let osc8_end = "\x1b]8;;\x07";
+        let start_pos = output.find(osc8_start).expect("OSC8 start should exist");
+        let end_pos = output.find(osc8_end).expect("OSC8 end should exist");
+        let after_url_bel = output[start_pos..].find('\x07').unwrap();
+        let content_start = start_pos + after_url_bel + 1;
+        let hyperlink_content = &output[content_start..end_pos];
+
+        // Github theme's link color (approximately 230,211,122 - yellow/gold)
+        // Should NOT be the fallback blue
+        assert!(
+            !hyperlink_content.contains("\x1b[38;2;65;160;225m"),
+            "Themes with link styling should NOT use fallback blue. \
+             Hyperlink content: {:?}",
+            hyperlink_content
+        );
+
+        // Should use the theme's link color
+        assert!(
+            hyperlink_content.contains("\x1b[38;2;230;211;122m"),
+            "Themes with link styling should use theme's link color. \
+             Hyperlink content: {:?}",
+            hyperlink_content
+        );
+
+        // Should NOT have underline (theme provides its own styling)
+        assert!(
+            !hyperlink_content.contains("\x1b[4m"),
+            "Themes with link styling should not add extra underline. \
+             Hyperlink content: {:?}",
+            hyperlink_content
+        );
+    }
+
+    #[test]
+    fn test_terminal_link_in_list_has_distinct_color() {
+        // Regression test: links inside list items should also get distinct styling
+        // This tests that the bug fix works for links in different contexts.
+        let content = "- [Zigbee2MQTT](https://www.zigbee2mqtt.io/)";
+        let md: Markdown = content.into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+
+        // Extract the content between OSC8 open and close
+        let osc8_start = "\x1b]8;;";
+        let osc8_end = "\x1b]8;;\x07";
+        let start_pos = output.find(osc8_start).expect("OSC8 start should exist");
+        let end_pos = output.find(osc8_end).expect("OSC8 end should exist");
+        let after_url_bel = output[start_pos..].find('\x07').unwrap();
+        let content_start = start_pos + after_url_bel + 1;
+        let hyperlink_content = &output[content_start..end_pos];
+
+        // The fallback blue color should be applied
+        assert!(
+            hyperlink_content.contains("\x1b[38;2;65;160;225m"),
+            "Links in lists should use fallback blue when theme lacks link styling. \
+             Hyperlink content: {:?}",
+            hyperlink_content
+        );
+
+        // Visible text should be present
+        assert!(
+            hyperlink_content.contains("Zigbee2MQTT"),
+            "Link text should be present. Hyperlink content: {:?}",
+            hyperlink_content
         );
     }
 }

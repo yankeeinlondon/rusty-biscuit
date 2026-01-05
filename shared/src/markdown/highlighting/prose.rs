@@ -237,4 +237,67 @@ mod tests {
         // Initialization should be fast (< 1ms)
         assert!(duration.as_millis() < 1, "Initialization took {}ms", duration.as_millis());
     }
+
+    #[test]
+    fn test_style_for_tag_link() {
+        // Test that link styling is returned correctly from the highlighter.
+        // Note: Whether the theme provides a distinct link color depends on the theme.
+        // Github theme has a distinct link color, OneHalf doesn't.
+        let theme = load_test_theme(); // Github theme
+        let highlighter = ProseHighlighter::new(&theme);
+
+        let link_tag = Tag::Link {
+            link_type: pulldown_cmark::LinkType::Inline,
+            dest_url: "".into(),
+            title: "".into(),
+            id: "".into(),
+        };
+        let style = highlighter.style_for_tag(&link_tag, &[highlighter.base_scope()]);
+
+        // Style should have some foreground color
+        assert!(style.foreground.a > 0, "Link style should have foreground color");
+    }
+
+    #[test]
+    fn test_link_style_varies_by_theme() {
+        // Different themes may or may not define link-specific colors.
+        // This test documents the behavior for themes used in the terminal output.
+
+        // Github theme has a distinct link color
+        let github_theme = crate::markdown::highlighting::themes::load_theme(
+            ThemePair::Github,
+            ColorMode::Dark,
+        );
+        let github_highlighter = ProseHighlighter::new(&github_theme);
+        let github_base = github_highlighter.base_style();
+        let link_tag = Tag::Link {
+            link_type: pulldown_cmark::LinkType::Inline,
+            dest_url: "".into(),
+            title: "".into(),
+            id: "".into(),
+        };
+        let github_link = github_highlighter.style_for_tag(&link_tag, &[github_highlighter.base_scope()]);
+
+        // Github theme should have different colors for base and link
+        assert_ne!(
+            github_base.foreground, github_link.foreground,
+            "Github theme should have distinct link color"
+        );
+
+        // OneHalf theme does NOT have a distinct link color
+        let onehalf_theme = crate::markdown::highlighting::themes::load_theme(
+            ThemePair::OneHalf,
+            ColorMode::Dark,
+        );
+        let onehalf_highlighter = ProseHighlighter::new(&onehalf_theme);
+        let onehalf_base = onehalf_highlighter.base_style();
+        let onehalf_link = onehalf_highlighter.style_for_tag(&link_tag, &[onehalf_highlighter.base_scope()]);
+
+        // OneHalf theme has the same color for base and link
+        // (this is why we need fallback styling in terminal.rs)
+        assert_eq!(
+            onehalf_base.foreground, onehalf_link.foreground,
+            "OneHalf theme should NOT have distinct link color (requires fallback in renderer)"
+        );
+    }
 }
