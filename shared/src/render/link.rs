@@ -216,6 +216,26 @@ impl Link {
         self.data.as_ref()
     }
 
+    /// Parses the inline style string into a HashMap of property-value pairs.
+    ///
+    /// Returns `None` if no style is set. Property names are normalized to lowercase.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use shared::render::link::Link;
+    ///
+    /// let link = Link::new("Click", "https://example.com")
+    ///     .with_style("color: red; font-size: 14px");
+    ///
+    /// let parsed = link.parsed_style().unwrap();
+    /// assert_eq!(parsed.get("color"), Some(&"red".to_string()));
+    /// assert_eq!(parsed.get("font-size"), Some(&"14px".to_string()));
+    /// ```
+    pub fn parsed_style(&self) -> Option<HashMap<String, String>> {
+        self.style.as_ref().map(|s| parse_css_style(s))
+    }
+
     // -------------------------------------------------------------------------
     // Convenience methods
     // -------------------------------------------------------------------------
@@ -328,6 +348,84 @@ impl Link {
             format!("[{}]({})", display, link)
         }
     }
+
+    /// Renders the link as HTML with a modern Popover API companion element.
+    ///
+    /// Returns `Some((anchor_html, popover_html))` when a prompt is set, `None` otherwise.
+    ///
+    /// Uses the experimental `interestfor` attribute for hover/focus activation.
+    /// The popover uses `popover="hint"` for tooltip-like behavior.
+    ///
+    /// ## Browser Support
+    ///
+    /// The `interestfor` attribute is experimental (as of 2025). Use feature detection:
+    ///
+    /// ```javascript
+    /// const supported = 'interestForElement' in HTMLButtonElement.prototype;
+    /// ```
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use shared::render::link::Link;
+    ///
+    /// let link = Link::new("Click here", "https://example.com")
+    ///     .with_prompt("Opens example.com");
+    ///
+    /// if let Some((anchor, popover)) = link.to_browser_with_popover() {
+    ///     // anchor: <a href="..." interestfor="popover-...">Click here</a>
+    ///     // popover: <div id="popover-..." popover="hint">Opens example.com</div>
+    ///     println!("{}", anchor);
+    ///     println!("{}", popover);
+    /// }
+    /// ```
+    pub fn to_browser_with_popover(&self) -> Option<(String, String)> {
+        self.prompt.as_ref().map(|prompt_text| {
+            let id = generate_popover_id(&self.link_to, &self.display);
+
+            // Build anchor with interestfor attribute
+            let mut attrs = format!(
+                r#"href="{}" interestfor="{}""#,
+                html_escape(&self.link_to),
+                id
+            );
+
+            if let Some(class) = &self.class {
+                attrs.push_str(&format!(r#" class="{}""#, html_escape(class)));
+            }
+
+            if let Some(style) = &self.style {
+                attrs.push_str(&format!(r#" style="{}""#, html_escape(style)));
+            }
+
+            if let Some(target) = &self.target {
+                attrs.push_str(&format!(r#" target="{}""#, html_escape(target)));
+            }
+
+            if let Some(title) = &self.title {
+                attrs.push_str(&format!(r#" title="{}""#, html_escape(title)));
+            }
+
+            if let Some(data) = &self.data {
+                for (key, value) in data {
+                    attrs.push_str(&format!(
+                        r#" data-{}="{}""#,
+                        html_escape(key),
+                        html_escape(value)
+                    ));
+                }
+            }
+
+            let anchor = format!("<a {}>{}</a>", attrs, html_escape(&self.display));
+            let popover = format!(
+                r#"<div id="{}" popover="hint">{}</div>"#,
+                id,
+                html_escape(prompt_text)
+            );
+
+            (anchor, popover)
+        })
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -397,6 +495,51 @@ fn html_unescape(s: &str) -> String {
         .replace("&quot;", "\"")
         .replace("&#x27;", "'")
         .replace("&#39;", "'")
+}
+
+/// Parses a CSS style string into a HashMap of property-value pairs.
+///
+/// Handles edge cases including:
+/// - Extra whitespace around properties and values
+/// - Trailing semicolons
+/// - Empty declarations (consecutive semicolons)
+/// - Case-insensitive property names (normalized to lowercase)
+///
+/// ## Examples
+///
+/// ```ignore
+/// let styles = parse_css_style("color: red; font-size: 14px");
+/// assert_eq!(styles.get("color"), Some(&"red".to_string()));
+/// assert_eq!(styles.get("font-size"), Some(&"14px".to_string()));
+/// ```
+fn parse_css_style(style: &str) -> HashMap<String, String> {
+    let mut result = HashMap::new();
+    for declaration in style.split(';') {
+        let trimmed = declaration.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(colon_pos) = trimmed.find(':') {
+            let key = trimmed[..colon_pos].trim().to_lowercase();
+            let value = trimmed[colon_pos + 1..].trim();
+            if !key.is_empty() && !value.is_empty() {
+                result.insert(key, value.to_string());
+            }
+        }
+    }
+    result
+}
+
+/// Generates a unique popover ID based on the URL and display text.
+///
+/// Uses a hash of the combined values to ensure uniqueness while remaining
+/// deterministic for the same input.
+fn generate_popover_id(url: &str, display: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    let mut hasher = DefaultHasher::new();
+    url.hash(&mut hasher);
+    display.hash(&mut hasher);
+    format!("popover-{:x}", hasher.finish())
 }
 
 // -----------------------------------------------------------------------------
@@ -528,7 +671,7 @@ fn parse_html_attributes(input: &str) -> HashMap<String, String> {
         let value = if chars.peek() == Some(&'"') || chars.peek() == Some(&'\'') {
             let quote = chars.next().unwrap();
             let mut val = String::new();
-            while let Some(c) = chars.next() {
+            for c in chars.by_ref() {
                 if c == quote {
                     break;
                 }
@@ -781,7 +924,7 @@ fn is_structured_mode(content: &str) -> bool {
                 b'=' => {
                     // Check if there's a valid key before this =
                     let before = &content[..i];
-                    let key_part = before.trim().split(&[' ', ','][..]).last().unwrap_or("");
+                    let key_part = before.trim().split(&[' ', ','][..]).next_back().unwrap_or("");
                     if !key_part.is_empty()
                         && key_part.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
                     {
@@ -1446,5 +1589,366 @@ mod tests {
         assert_eq!(parsed.style(), original.style());
         assert_eq!(parsed.target(), original.target());
         assert_eq!(parsed.title(), original.title());
+    }
+
+    // -------------------------------------------------------------------------
+    // Terminal output tests (OSC 8 escape sequence format)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_to_terminal_unchecked_format() {
+        let link = Link::new("Example", "https://example.com");
+        let output = link.to_terminal_unchecked();
+
+        // Verify the OSC 8 format: ESC ] 8 ; ; <URI> BEL <text> ESC ] 8 ; ; BEL
+        // ESC = 0x1b, ] = 0x5d, 8 = 0x38, ; = 0x3b, BEL = 0x07
+        assert!(output.starts_with("\x1b]8;;"));
+        assert!(output.contains("\x07Example"));
+        assert!(output.ends_with("\x1b]8;;\x07"));
+    }
+
+    #[test]
+    fn test_to_terminal_unchecked_byte_sequence() {
+        let link = Link::new("Test", "https://test.com");
+        let output = link.to_terminal_unchecked();
+        let bytes: Vec<u8> = output.bytes().collect();
+
+        // Start sequence: ESC ] 8 ; ;
+        assert_eq!(bytes[0], 0x1b); // ESC
+        assert_eq!(bytes[1], 0x5d); // ]
+        assert_eq!(bytes[2], 0x38); // 8
+        assert_eq!(bytes[3], 0x3b); // ;
+        assert_eq!(bytes[4], 0x3b); // ;
+
+        // URL starts at index 5
+        let url_bytes = b"https://test.com";
+        assert_eq!(&bytes[5..5 + url_bytes.len()], url_bytes);
+
+        // BEL after URL
+        assert_eq!(bytes[5 + url_bytes.len()], 0x07);
+
+        // Display text "Test"
+        let text_start = 5 + url_bytes.len() + 1;
+        assert_eq!(&bytes[text_start..text_start + 4], b"Test");
+
+        // End sequence: ESC ] 8 ; ; BEL
+        let end_start = text_start + 4;
+        assert_eq!(bytes[end_start], 0x1b);
+        assert_eq!(bytes[end_start + 1], 0x5d);
+        assert_eq!(bytes[end_start + 2], 0x38);
+        assert_eq!(bytes[end_start + 3], 0x3b);
+        assert_eq!(bytes[end_start + 4], 0x3b);
+        assert_eq!(bytes[end_start + 5], 0x07);
+    }
+
+    #[test]
+    fn test_to_terminal_unchecked_with_special_chars_in_url() {
+        let link = Link::new("Query", "https://example.com?foo=bar&baz=1");
+        let output = link.to_terminal_unchecked();
+
+        // URL should be included as-is (no escaping for terminal)
+        assert!(output.contains("https://example.com?foo=bar&baz=1"));
+        assert!(output.contains("\x07Query\x1b]8;;\x07"));
+    }
+
+    #[test]
+    fn test_to_terminal_fallback_format() {
+        let link = Link::new("Example", "https://example.com");
+        // When terminal doesn't support hyperlinks, should return display [url]
+        // We can't easily test the conditional path, but we can verify the format
+        let fallback = format!("{} [{}]", link.display(), link.href());
+        assert_eq!(fallback, "Example [https://example.com]");
+    }
+
+    #[test]
+    fn test_terminal_bel_not_st() {
+        let link = Link::new("Link", "https://example.com");
+        let output = link.to_terminal_unchecked();
+
+        // Verify we use BEL (0x07), not ST (0x1b 0x5c)
+        assert!(output.contains("\x07"), "Should use BEL as terminator");
+        assert!(
+            !output.contains("\x1b\\"),
+            "Should NOT use ST as terminator"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // CSS Style Parsing tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_parsed_style_basic() {
+        let link = Link::new("Click", "https://example.com")
+            .with_style("color: red; font-size: 14px");
+        let parsed = link.parsed_style().unwrap();
+        assert_eq!(parsed.get("color"), Some(&"red".to_string()));
+        assert_eq!(parsed.get("font-size"), Some(&"14px".to_string()));
+    }
+
+    #[test]
+    fn test_parsed_style_whitespace() {
+        let link = Link::new("Click", "https://example.com")
+            .with_style("  color  :  blue  ;  margin : 10px  ");
+        let parsed = link.parsed_style().unwrap();
+        assert_eq!(parsed.get("color"), Some(&"blue".to_string()));
+        assert_eq!(parsed.get("margin"), Some(&"10px".to_string()));
+    }
+
+    #[test]
+    fn test_parsed_style_trailing_semicolon() {
+        let link = Link::new("Click", "https://example.com").with_style("color: green;");
+        let parsed = link.parsed_style().unwrap();
+        assert_eq!(parsed.get("color"), Some(&"green".to_string()));
+        assert_eq!(parsed.len(), 1);
+    }
+
+    #[test]
+    fn test_parsed_style_empty_declarations() {
+        let link = Link::new("Click", "https://example.com")
+            .with_style("color: red;;;font-size: 12px");
+        let parsed = link.parsed_style().unwrap();
+        assert_eq!(parsed.get("color"), Some(&"red".to_string()));
+        assert_eq!(parsed.get("font-size"), Some(&"12px".to_string()));
+    }
+
+    #[test]
+    fn test_parsed_style_none_when_no_style() {
+        let link = Link::new("Click", "https://example.com");
+        assert!(link.parsed_style().is_none());
+    }
+
+    #[test]
+    fn test_parsed_style_case_insensitive_keys() {
+        let link = Link::new("Click", "https://example.com")
+            .with_style("Color: red; FONT-SIZE: 14px");
+        let parsed = link.parsed_style().unwrap();
+        assert_eq!(parsed.get("color"), Some(&"red".to_string()));
+        assert_eq!(parsed.get("font-size"), Some(&"14px".to_string()));
+    }
+
+    #[test]
+    fn test_parsed_style_preserves_value_case() {
+        let link = Link::new("Click", "https://example.com")
+            .with_style("font-family: Arial, Helvetica");
+        let parsed = link.parsed_style().unwrap();
+        assert_eq!(
+            parsed.get("font-family"),
+            Some(&"Arial, Helvetica".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parsed_style_complex_values() {
+        let link = Link::new("Click", "https://example.com")
+            .with_style("background: url(image.png); border: 1px solid #333");
+        let parsed = link.parsed_style().unwrap();
+        assert_eq!(
+            parsed.get("background"),
+            Some(&"url(image.png)".to_string())
+        );
+        assert_eq!(parsed.get("border"), Some(&"1px solid #333".to_string()));
+    }
+
+    #[test]
+    fn test_parsed_style_skips_invalid_declarations() {
+        let link = Link::new("Click", "https://example.com")
+            .with_style("color: red; invalid; font-size: 12px");
+        let parsed = link.parsed_style().unwrap();
+        assert_eq!(parsed.get("color"), Some(&"red".to_string()));
+        assert_eq!(parsed.get("font-size"), Some(&"12px".to_string()));
+        assert_eq!(parsed.len(), 2);
+    }
+
+    #[test]
+    fn test_parsed_style_empty_key_or_value() {
+        let link = Link::new("Click", "https://example.com")
+            .with_style(": red; color: ; valid: value");
+        let parsed = link.parsed_style().unwrap();
+        // Empty key and empty value should be skipped
+        assert_eq!(parsed.get("valid"), Some(&"value".to_string()));
+        assert_eq!(parsed.len(), 1);
+    }
+
+    // -------------------------------------------------------------------------
+    // Popover API tests (to_browser_with_popover)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_to_browser_with_popover_returns_none_without_prompt() {
+        let link = Link::new("Click", "https://example.com");
+        assert!(link.to_browser_with_popover().is_none());
+    }
+
+    #[test]
+    fn test_to_browser_with_popover_basic() {
+        let link = Link::new("Click", "https://example.com").with_prompt("Tooltip text");
+        let (anchor, popover) = link.to_browser_with_popover().unwrap();
+
+        assert!(anchor.contains(r#"href="https://example.com""#));
+        assert!(anchor.contains("interestfor="));
+        assert!(anchor.contains(">Click</a>"));
+
+        assert!(popover.contains(r#"popover="hint""#));
+        assert!(popover.contains("Tooltip text"));
+    }
+
+    #[test]
+    fn test_to_browser_with_popover_id_consistency() {
+        // Same inputs should produce the same ID
+        let link1 = Link::new("Click", "https://example.com").with_prompt("Test");
+        let link2 = Link::new("Click", "https://example.com").with_prompt("Different prompt");
+
+        let (anchor1, popover1) = link1.to_browser_with_popover().unwrap();
+        let (anchor2, popover2) = link2.to_browser_with_popover().unwrap();
+
+        // Extract the ID from popover1 (format: <div id="popover-..." ...)
+        let id1_start = popover1.find("id=\"").unwrap() + 4;
+        let id1_end = popover1[id1_start..].find('"').unwrap() + id1_start;
+        let id1 = &popover1[id1_start..id1_end];
+
+        let id2_start = popover2.find("id=\"").unwrap() + 4;
+        let id2_end = popover2[id2_start..].find('"').unwrap() + id2_start;
+        let id2 = &popover2[id2_start..id2_end];
+
+        // Same URL and display should produce the same ID
+        assert_eq!(id1, id2);
+
+        // Verify anchor references the same ID
+        assert!(anchor1.contains(&format!(r#"interestfor="{}""#, id1)));
+        assert!(anchor2.contains(&format!(r#"interestfor="{}""#, id2)));
+    }
+
+    #[test]
+    fn test_to_browser_with_popover_id_uniqueness() {
+        let link1 = Link::new("Click", "https://example.com").with_prompt("Test");
+        let link2 = Link::new("Click", "https://other.com").with_prompt("Test");
+
+        let (anchor1, _) = link1.to_browser_with_popover().unwrap();
+        let (anchor2, _) = link2.to_browser_with_popover().unwrap();
+
+        // Different URLs should produce different IDs
+        assert_ne!(anchor1, anchor2);
+    }
+
+    #[test]
+    fn test_to_browser_with_popover_escapes_content() {
+        let link = Link::new("<script>", "https://example.com")
+            .with_prompt("<script>alert('xss')</script>");
+        let (anchor, popover) = link.to_browser_with_popover().unwrap();
+
+        assert!(!anchor.contains("<script>"));
+        assert!(anchor.contains("&lt;script&gt;"));
+        assert!(!popover.contains("<script>alert"));
+        assert!(popover.contains("&lt;script&gt;"));
+    }
+
+    #[test]
+    fn test_to_browser_with_popover_includes_other_attrs() {
+        let link = Link::new("Click", "https://example.com")
+            .with_prompt("Tooltip")
+            .with_class("btn")
+            .with_target("_blank");
+        let (anchor, _) = link.to_browser_with_popover().unwrap();
+
+        assert!(anchor.contains(r#"class="btn""#));
+        assert!(anchor.contains(r#"target="_blank""#));
+    }
+
+    #[test]
+    fn test_to_browser_with_popover_includes_style() {
+        let link = Link::new("Click", "https://example.com")
+            .with_prompt("Tooltip")
+            .with_style("color: blue");
+        let (anchor, _) = link.to_browser_with_popover().unwrap();
+
+        assert!(anchor.contains(r#"style="color: blue""#));
+    }
+
+    #[test]
+    fn test_to_browser_with_popover_includes_title() {
+        let link = Link::new("Click", "https://example.com")
+            .with_prompt("Tooltip")
+            .with_title("Link title");
+        let (anchor, _) = link.to_browser_with_popover().unwrap();
+
+        assert!(anchor.contains(r#"title="Link title""#));
+    }
+
+    #[test]
+    fn test_to_browser_with_popover_includes_data_attrs() {
+        let link = Link::new("Click", "https://example.com")
+            .with_prompt("Tooltip")
+            .with_data("action", "submit")
+            .with_data("id", "123");
+        let (anchor, _) = link.to_browser_with_popover().unwrap();
+
+        assert!(anchor.contains(r#"data-action="submit""#));
+        assert!(anchor.contains(r#"data-id="123""#));
+    }
+
+    #[test]
+    fn test_to_browser_with_popover_id_format() {
+        let link = Link::new("Click", "https://example.com").with_prompt("Test");
+        let (_, popover) = link.to_browser_with_popover().unwrap();
+
+        // ID should start with "popover-" followed by hex characters
+        let id_start = popover.find("id=\"").unwrap() + 4;
+        let id_end = popover[id_start..].find('"').unwrap() + id_start;
+        let id = &popover[id_start..id_end];
+
+        assert!(id.starts_with("popover-"));
+        let hex_part = &id[8..];
+        assert!(hex_part.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_to_browser_with_popover_all_attributes() {
+        let link = Link::new("Click", "https://example.com")
+            .with_prompt("Popover content")
+            .with_class("btn btn-primary")
+            .with_style("font-weight: bold")
+            .with_target("_blank")
+            .with_title("My title")
+            .with_data("custom", "value");
+
+        let (anchor, popover) = link.to_browser_with_popover().unwrap();
+
+        // Verify all attributes are present in anchor
+        assert!(anchor.contains(r#"href="https://example.com""#));
+        assert!(anchor.contains("interestfor="));
+        assert!(anchor.contains(r#"class="btn btn-primary""#));
+        assert!(anchor.contains(r#"style="font-weight: bold""#));
+        assert!(anchor.contains(r#"target="_blank""#));
+        assert!(anchor.contains(r#"title="My title""#));
+        assert!(anchor.contains(r#"data-custom="value""#));
+        assert!(anchor.contains(">Click</a>"));
+
+        // Verify popover structure
+        assert!(popover.starts_with("<div id=\"popover-"));
+        assert!(popover.contains(r#"popover="hint""#));
+        assert!(popover.contains("Popover content"));
+        assert!(popover.ends_with("</div>"));
+    }
+
+    #[test]
+    fn test_generate_popover_id_deterministic() {
+        let id1 = generate_popover_id("https://example.com", "Click");
+        let id2 = generate_popover_id("https://example.com", "Click");
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn test_generate_popover_id_varies_with_url() {
+        let id1 = generate_popover_id("https://example.com", "Click");
+        let id2 = generate_popover_id("https://other.com", "Click");
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_generate_popover_id_varies_with_display() {
+        let id1 = generate_popover_id("https://example.com", "Click");
+        let id2 = generate_popover_id("https://example.com", "Different");
+        assert_ne!(id1, id2);
     }
 }

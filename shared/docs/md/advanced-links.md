@@ -47,34 +47,157 @@ The above example is a valid syntax and:
 - we can see that property values can be quoted but don't need to be (though "quoting generally considered the safer option")
 - key/values can be delimited by a `,` or whitespace
 
-No that we have the basic concept down let's discuss the `Link` struct and then move into the details of each target platform.
+Now that we have the basic concept down let's discuss the `Link` struct and then move into the details of each target platform.
 
 ## The Link struct
 
-The `Link` struct, defined in the shared library, has a lot of the implementation logic already implemented but there may be some things which are still needed such as:
+The `Link` struct, defined in the shared library (`shared/src/render/link.rs`), provides comprehensive support for creating and rendering links across different output targets.
 
-- support `data-*` properties
-- properly parse the `style` properties CSS into a key/value
+### Core Features
 
-The intention is that any valid Markdown string can be passed into the `Link` struct's builder methods or alternatively be parsed from the `try_from` implementation of string types.
+- **Builder pattern** for constructing links with optional attributes
+- **Parsing support** via `TryFrom<&str>` and `TryFrom<String>` for HTML and Markdown formats
+- **Multi-target output**: terminal (OSC 8), browser (HTML), and markdown
+
+### CSS Style Parsing
+
+The `parsed_style()` method allows you to access CSS properties as a structured `HashMap`:
+
+```rust
+use shared::render::link::Link;
+
+let link = Link::new("Click", "https://example.com")
+    .with_style("color: red; font-size: 14px; background: blue");
+
+if let Some(styles) = link.parsed_style() {
+    println!("Color: {:?}", styles.get("color")); // Some("red")
+    println!("Font size: {:?}", styles.get("font-size")); // Some("14px")
+}
+```
+
+The parser handles:
+- Whitespace normalization
+- Trailing semicolons
+- Empty declarations (e.g., `;;`)
+- Case-insensitive property names (normalized to lowercase)
+- Complex values (e.g., `url()`, multiple values)
 
 ## Output Targets
 
 ### Targeting the Terminal
 
-- The terminal needs to support basic linking first (currently not even this is working currently)
-    - this will use the `Link` struct which will detect if the terminal supports OSC8 and if not will add the link target as a separate text element
-- The Link struct should be able to be passed a Markdown Link using `try_from` to have it parsed.
+Terminal hyperlinks use the OSC 8 escape sequence format. The `Link` struct supports this via two methods:
 
+#### `to_terminal()`
+
+Renders a clickable hyperlink if the terminal supports OSC 8, otherwise falls back to displaying the URL in brackets:
+
+```rust
+let link = Link::new("Example", "https://example.com");
+
+// In a supporting terminal: clickable "Example" text
+// In a non-supporting terminal: "Example [https://example.com]"
+println!("{}", link.to_terminal());
+```
+
+#### `to_terminal_unchecked()`
+
+Always outputs OSC 8 format, bypassing terminal capability detection:
+
+```rust
+let link = Link::new("Example", "https://example.com");
+let osc8 = link.to_terminal_unchecked();
+// Always produces: ESC ] 8 ; ; <URL> BEL <text> ESC ] 8 ; ; BEL
+```
+
+The implementation uses BEL (`\x07`) as the sequence terminator, which has broader terminal support than the ST terminator (`ESC \`).
 
 ### Targeting the Browser
 
+#### Basic HTML Output
 
-Today all the popular browsers now provide a much more capable Popover system:
+The `to_browser()` method renders a standard HTML anchor element:
 
-- [Modern Popovers in the Browser](./modern-popovers-in-the-browser.md)
+```rust
+let link = Link::new("Click", "https://example.com")
+    .with_class("btn")
+    .with_style("color: blue")
+    .with_target("_blank")
+    .with_title("Tooltip text");
 
-> **IMPORTANT:** if you're planning or implementing a popover solution for HTML then you MUST read the link above for full context!
+let html = link.to_browser();
+// <a href="https://example.com" class="btn" style="color: blue" target="_blank" title="Tooltip text">Click</a>
+```
 
+#### Modern Popover API Integration
 
-We will use this system to make the Markdown links more capable when we render our Markdown to HTML.
+For links with a `prompt` attribute, use `to_browser_with_popover()` to generate HTML that leverages the modern Popover API:
+
+```rust
+let link = Link::new("Hover me", "https://example.com")
+    .with_prompt("This is tooltip content!")
+    .with_class("link-with-tooltip");
+
+if let Some((anchor, popover)) = link.to_browser_with_popover() {
+    println!("Anchor: {}", anchor);
+    // <a href="https://example.com" interestfor="popover-abc123" class="link-with-tooltip">Hover me</a>
+
+    println!("Popover: {}", popover);
+    // <div id="popover-abc123" popover="hint">This is tooltip content!</div>
+}
+```
+
+This generates:
+- An anchor with `interestfor="{id}"` for hover/focus activation
+- A companion `<div>` with `popover="hint"` containing the prompt content
+
+For more details on the Popover API, see [Modern Popovers in the Browser](./modern-popovers-in-the-browser.md).
+
+#### Browser Support Notes
+
+The `interestfor` attribute is experimental (as of 2025). Use feature detection in your JavaScript:
+
+```javascript
+// Check for interest invokers support
+const supportsInterest = 'interestForElement' in HTMLButtonElement.prototype;
+
+// Check for basic popover support
+const supportsPopover = 'popover' in HTMLElement.prototype;
+```
+
+For browsers that don't support `interestfor`, you may need JavaScript fallbacks:
+
+```javascript
+if (!supportsInterest) {
+    document.querySelectorAll('a[interestfor]').forEach(anchor => {
+        const targetId = anchor.getAttribute('interestfor');
+        const popover = document.getElementById(targetId);
+
+        anchor.addEventListener('mouseenter', () => popover?.showPopover());
+        anchor.addEventListener('mouseleave', () => popover?.hidePopover());
+    });
+}
+```
+
+## Parsing Links
+
+The `Link` struct can parse both HTML and Markdown link formats:
+
+```rust
+use shared::render::link::Link;
+use std::convert::TryFrom;
+
+// Parse HTML
+let html_link = Link::try_from(r#"<a href="https://example.com" class="btn">Click</a>"#)?;
+
+// Parse Markdown (basic)
+let md_link = Link::try_from("[Click](https://example.com)")?;
+
+// Parse Markdown (with title)
+let md_titled = Link::try_from(r#"[Click](https://example.com "My tooltip")"#)?;
+
+// Parse Markdown (structured mode)
+let md_structured = Link::try_from(
+    r#"[Click](https://example.com class="btn" prompt="hover text")"#
+)?;
+```
