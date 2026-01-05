@@ -35,7 +35,7 @@ This mode leverages the standard but extends it's capabilities by viewing the `t
 | `prompt`  | no effect    | adds the text to the `prompt` property of a link (which will trigger modern Popover) |
 | `class`   | limited*    | adds the classes specified in the key's value to the HTML link |
 | `style`   | limited*    | allows the user to add CSS properties to the HTML link |
-| `*`       | no effect   | all other key values are passed through as properties to the HTML link |
+| `data-*`       | no effect   | passed through as properties to the HTML link |
 
 
 The syntax which is used here follows a `key=value` syntax and can be delimited by a comma or whitespace:
@@ -47,11 +47,24 @@ The above example is a valid syntax and:
 - we can see that property values can be quoted but don't need to be (though "quoting generally considered the safer option")
 - key/values can be delimited by a `,` or whitespace
 
+No that we have the basic concept down let's discuss the `Link` struct and then move into the details of each target platform.
+
+## The Link struct
+
+The `Link` struct, defined in the shared library, has a lot of the implementation logic already implemented but there may be some things which are still needed such as:
+
+- support `data-*` properties
+- properly parse the `style` properties CSS into a key/value
+
+The intention is that any valid Markdown string can be passed into the `Link` struct's builder methods or alternatively be parsed from the `try_from` implementation of string types.
+
 ## Output Targets
 
 ### Targeting the Terminal
 
-
+- The terminal needs to support basic linking first (currently not even this is working currently)
+    - this will use the `Link` struct which will detect if the terminal supports OSC8 and if not will add the link target as a separate text element
+- The Link struct should be able to be passed a Markdown Link using `try_from` to have it parsed.
 
 
 ### Targeting the Browser
