@@ -1,0 +1,615 @@
+{
+  "hardware": {
+    "os": {
+      "name": "Darwin",
+      "version": "26.3",
+      "long_version": "macOS 26.3",
+      "distribution": "macos",
+      "kernel": "25.3.0",
+      "arch": "arm64",
+      "hostname": "wifi.shazam.home"
+    },
+    "cpu": {
+      "brand": "Apple M4 Max",
+      "logical_cores": 16,
+      "physical_cores": 16
+    },
+    "memory": {
+      "total_bytes": 137438953472,
+      "available_bytes": 16716578816,
+      "used_bytes": 89884868608
+    },
+    "storage": [
+      {
+        "name": "Macintosh HD",
+        "mount_point": "/",
+        "total_bytes": 3996329328640,
+        "available_bytes": 506262759104,
+        "file_system": "apfs",
+        "kind": "Ssd",
+        "is_removable": false
+      },
+      {
+        "name": "Macintosh HD",
+        "mount_point": "/System/Volumes/Data",
+        "total_bytes": 3996329328640,
+        "available_bytes": 506262857408,
+        "file_system": "apfs",
+        "kind": "Ssd",
+        "is_removable": false
+      },
+      {
+        "name": "coding",
+        "mount_point": "/Volumes/coding",
+        "total_bytes": 3996329328640,
+        "available_bytes": 506262857408,
+        "file_system": "apfs",
+        "kind": "Ssd",
+        "is_removable": false
+      },
+      {
+        "name": "The Dude",
+        "mount_point": "/Volumes/The Dude",
+        "total_bytes": 2048264327168,
+        "available_bytes": 2015041224704,
+        "file_system": "apfs",
+        "kind": "Unknown",
+        "is_removable": true
+      },
+      {
+        "name": "Big Labowski",
+        "mount_point": "/Volumes/Big Labowski",
+        "total_bytes": 6000764780544,
+        "available_bytes": 809459879936,
+        "file_system": "apfs",
+        "kind": "Unknown",
+        "is_removable": true
+      },
+      {
+        "name": "Fast Bastard",
+        "mount_point": "/Volumes/Fast Bastard",
+        "total_bytes": 4000577273856,
+        "available_bytes": 3690789216256,
+        "file_system": "apfs",
+        "kind": "Ssd",
+        "is_removable": true
+      }
+    ]
+  },
+  "network": {
+    "interfaces": [
+      {
+        "name": "anpi0",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "anpi1",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "anpi2",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "ap1",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "awdl0",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [
+          "fe80::74ba:7fff:fe6f:776f"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "bridge0",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "en0",
+        "mac_address": null,
+        "ipv4_addresses": [
+          "192.168.10.65"
+        ],
+        "ipv6_addresses": [
+          "fe80::1c4f:8168:d603:2252",
+          "fdec:b61d:dee:f47:1874:6f0:885f:cda5"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "en1",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "en2",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "en3",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "en4",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "en5",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "en6",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "en7",
+        "mac_address": null,
+        "ipv4_addresses": [
+          "192.168.100.47"
+        ],
+        "ipv6_addresses": [
+          "fe80::18b1:674c:dda6:2192"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "en8",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "en9",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "llw0",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [
+          "fe80::74ba:7fff:fe6f:776f"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "lo0",
+        "mac_address": null,
+        "ipv4_addresses": [
+          "127.0.0.1"
+        ],
+        "ipv6_addresses": [
+          "::1",
+          "fe80::1"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": true,
+          "is_running": true
+        }
+      },
+      {
+        "name": "utun0",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [
+          "fe80::c9ea:73a7:3a62:99fb"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "utun1",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [
+          "fe80::d03a:76ba:6216:7ca5"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "utun10",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [
+          "fe80::df31:5eed:ae82:eb30"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "utun11",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [
+          "fe80::28f:eec0:c394:923"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "utun2",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [
+          "fe80::4176:9978:a3cc:9b5f"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "utun3",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [
+          "fe80::ce81:b1c:bd2c:69e"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "utun4",
+        "mac_address": null,
+        "ipv4_addresses": [
+          "100.118.161.38"
+        ],
+        "ipv6_addresses": [
+          "fe80::826d:97ff:fe5d:f16a",
+          "fd7a:115c:a1e0:ab12:4843:cd96:6276:a126"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "utun5",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [
+          "fe80::8508:985d:8fa9:a5d5"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "utun6",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [
+          "fe80::811a:6866:4fb2:276c"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "utun7",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [
+          "fe80::8fd7:2cb3:3887:ff71"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      },
+      {
+        "name": "utun8",
+        "mac_address": null,
+        "ipv4_addresses": [],
+        "ipv6_addresses": [
+          "fe80::8906:6729:ee2a:4453"
+        ],
+        "flags": {
+          "is_up": true,
+          "is_loopback": false,
+          "is_running": true
+        }
+      }
+    ],
+    "primary_interface": "en0",
+    "permission_denied": false
+  },
+  "filesystem": {
+    "languages": {
+      "languages": [
+        {
+          "language": "Rust",
+          "file_count": 111,
+          "percentage": 44.047619047619044
+        },
+        {
+          "language": "Markdown",
+          "file_count": 97,
+          "percentage": 38.492063492063494
+        },
+        {
+          "language": "TOML",
+          "file_count": 15,
+          "percentage": 5.952380952380952
+        },
+        {
+          "language": "XML",
+          "file_count": 2,
+          "percentage": 0.7936507936507936
+        },
+        {
+          "language": "HTML",
+          "file_count": 1,
+          "percentage": 0.3968253968253968
+        },
+        {
+          "language": "JSON",
+          "file_count": 1,
+          "percentage": 0.3968253968253968
+        },
+        {
+          "language": "Text",
+          "file_count": 1,
+          "percentage": 0.3968253968253968
+        },
+        {
+          "language": "SVG",
+          "file_count": 1,
+          "percentage": 0.3968253968253968
+        },
+        {
+          "language": "Vue",
+          "file_count": 1,
+          "percentage": 0.3968253968253968
+        }
+      ],
+      "primary": "Rust",
+      "total_files": 252
+    },
+    "git": {
+      "repo_root": "/Volumes/coding/personal/dockhand/",
+      "current_branch": "main",
+      "head_commit": {
+        "sha": "6c61650ddac4768192bd819e6d881ac41fdfc8d0",
+        "message": "feat(shared): add mermaid diagram theming and rendering module\n\nImplement comprehensive Mermaid diagram support with:\n- MermaidTheme struct with 40+ color properties and JSON parsing\n- Static light/dark/neutral themes with WCAG 2.1 AA compliance\n- Mermaid struct with builder pattern for diagram configuration\n- XXH64 content hashing for diagram caching\n- HTML rendering with mermaid.js CDN, CSS variables, and ARIA attributes\n- Terminal rendering via mermaid.ink service with resvg PNG conversion\n- CLI flags (--mermaid, --mermaid-alt) for md binary\n- 90 tests (66 unit, 24 integration) with insta snapshots\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>",
+        "author": "Ken Snyder",
+        "timestamp": "2026-01-04T04:23:27Z"
+      },
+      "status": {
+        "is_dirty": true,
+        "staged_count": 0,
+        "unstaged_count": 16,
+        "untracked_count": 3
+      },
+      "remotes": []
+    },
+    "monorepo": {
+      "is_monorepo": true,
+      "tool": "CargoWorkspace",
+      "root": "/Volumes/coding/personal/dockhand",
+      "packages": [
+        {
+          "name": "md",
+          "path": "/Volumes/coding/personal/dockhand/md"
+        },
+        {
+          "name": "research/cli",
+          "path": "/Volumes/coding/personal/dockhand/research/cli"
+        },
+        {
+          "name": "research/lib",
+          "path": "/Volumes/coding/personal/dockhand/research/lib"
+        },
+        {
+          "name": "shared",
+          "path": "/Volumes/coding/personal/dockhand/shared"
+        },
+        {
+          "name": "sniff/cli",
+          "path": "/Volumes/coding/personal/dockhand/sniff/cli"
+        },
+        {
+          "name": "sniff/lib",
+          "path": "/Volumes/coding/personal/dockhand/sniff/lib"
+        },
+        {
+          "name": "so-you-say",
+          "path": "/Volumes/coding/personal/dockhand/so-you-say"
+        },
+        {
+          "name": "tabby",
+          "path": "/Volumes/coding/personal/dockhand/tabby"
+        },
+        {
+          "name": "tabby/ui",
+          "path": "/Volumes/coding/personal/dockhand/tabby/ui"
+        },
+        {
+          "name": "tui",
+          "path": "/Volumes/coding/personal/dockhand/tui"
+        }
+      ]
+    },
+    "dependencies": {
+      "detected_managers": [
+        "Cargo"
+      ],
+      "manifests": [
+        {
+          "manager": "Cargo",
+          "path": "Cargo.toml"
+        },
+        {
+          "manager": "Cargo",
+          "path": "research/cli/Cargo.toml"
+        },
+        {
+          "manager": "Cargo",
+          "path": "research/lib/Cargo.toml"
+        },
+        {
+          "manager": "Cargo",
+          "path": "tui/Cargo.toml"
+        },
+        {
+          "manager": "Cargo",
+          "path": "shared/Cargo.toml"
+        },
+        {
+          "manager": "Cargo",
+          "path": "so-you-say/Cargo.toml"
+        },
+        {
+          "manager": "Cargo",
+          "path": "sniff/cli/Cargo.toml"
+        },
+        {
+          "manager": "Cargo",
+          "path": "sniff/lib/Cargo.toml"
+        },
+        {
+          "manager": "Cargo",
+          "path": "md/Cargo.toml"
+        },
+        {
+          "manager": "Cargo",
+          "path": "tabby/Cargo.toml"
+        },
+        {
+          "manager": "Cargo",
+          "path": "tabby/ui/Cargo.toml"
+        }
+      ]
+    }
+  }
+}
