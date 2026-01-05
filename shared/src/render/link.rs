@@ -119,6 +119,54 @@ impl Link {
         }
     }
 
+    /// Creates a new link with a title that may contain structured content.
+    ///
+    /// The title is parsed to detect structured mode (key=value pairs) vs title mode:
+    /// - **Title Mode**: Simple string becomes the `title` attribute
+    /// - **Structured Mode**: Parses `class`, `style`, `prompt`, `title`, `target`, and `data-*`
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use shared::render::link::Link;
+    ///
+    /// // Title mode - simple title
+    /// let link = Link::with_title_parsed("Click", "https://example.com", "A tooltip");
+    /// assert_eq!(link.title(), Some("A tooltip"));
+    ///
+    /// // Structured mode - key=value pairs
+    /// let link = Link::with_title_parsed(
+    ///     "Click",
+    ///     "https://example.com",
+    ///     "class='btn' style='color:red' prompt='hover text'"
+    /// );
+    /// assert_eq!(link.class(), Some("btn"));
+    /// assert_eq!(link.style(), Some("color:red"));
+    /// assert_eq!(link.prompt(), Some("hover text"));
+    /// ```
+    pub fn with_title_parsed(
+        display: impl Into<String>,
+        link: impl Into<String>,
+        title: &str,
+    ) -> Self {
+        let mut result = Self::new(display, link);
+        let title = title.trim();
+
+        if title.is_empty() {
+            return result;
+        }
+
+        if is_structured_mode(title) {
+            // Parse structured properties
+            let _ = parse_structured_props(&mut result, title);
+        } else {
+            // Title mode - use as plain title
+            result.title = Some(parse_title_value(title));
+        }
+
+        result
+    }
+
     // -------------------------------------------------------------------------
     // Builder methods
     // -------------------------------------------------------------------------
@@ -1950,5 +1998,97 @@ mod tests {
         let id1 = generate_popover_id("https://example.com", "Click");
         let id2 = generate_popover_id("https://example.com", "Different");
         assert_ne!(id1, id2);
+    }
+
+    // -------------------------------------------------------------------------
+    // with_title_parsed tests - regression tests for structured link parsing
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_with_title_parsed_empty_title() {
+        let link = Link::with_title_parsed("Click", "https://example.com", "");
+        assert!(link.title().is_none());
+        assert!(link.class().is_none());
+        assert!(link.style().is_none());
+    }
+
+    #[test]
+    fn test_with_title_parsed_title_mode_plain_text() {
+        // Plain text without key=value should be treated as title
+        let link = Link::with_title_parsed("Click", "https://example.com", "A simple tooltip");
+        assert_eq!(link.title(), Some("A simple tooltip"));
+        assert!(link.class().is_none());
+        assert!(link.style().is_none());
+    }
+
+    #[test]
+    fn test_with_title_parsed_title_mode_quoted() {
+        // Quoted title should be parsed as title mode
+        let link = Link::with_title_parsed("Click", "https://example.com", "\"My tooltip\"");
+        assert_eq!(link.title(), Some("My tooltip"));
+    }
+
+    #[test]
+    fn test_with_title_parsed_structured_mode_class() {
+        // key=value pattern triggers structured mode
+        let link = Link::with_title_parsed("Click", "https://example.com", "class='btn'");
+        assert_eq!(link.class(), Some("btn"));
+        assert!(link.title().is_none());
+    }
+
+    #[test]
+    fn test_with_title_parsed_structured_mode_style() {
+        let link = Link::with_title_parsed("Click", "https://example.com", "style='color:red'");
+        assert_eq!(link.style(), Some("color:red"));
+    }
+
+    #[test]
+    fn test_with_title_parsed_structured_mode_multiple() {
+        let link = Link::with_title_parsed(
+            "Click",
+            "https://example.com",
+            "class='btn' style='color:red' prompt='hover me'",
+        );
+        assert_eq!(link.class(), Some("btn"));
+        assert_eq!(link.style(), Some("color:red"));
+        assert_eq!(link.prompt(), Some("hover me"));
+    }
+
+    #[test]
+    fn test_with_title_parsed_structured_mode_with_title_key() {
+        // In structured mode, title= sets the title
+        let link = Link::with_title_parsed(
+            "Click",
+            "https://example.com",
+            "title='My Title' class='btn'",
+        );
+        assert_eq!(link.title(), Some("My Title"));
+        assert_eq!(link.class(), Some("btn"));
+    }
+
+    #[test]
+    fn test_with_title_parsed_structured_mode_unquoted_values() {
+        let link = Link::with_title_parsed("Click", "https://example.com", "class=btn target=_blank");
+        assert_eq!(link.class(), Some("btn"));
+        assert_eq!(link.target(), Some("_blank"));
+    }
+
+    #[test]
+    fn test_with_title_parsed_structured_mode_data_attributes() {
+        let link = Link::with_title_parsed(
+            "Click",
+            "https://example.com",
+            "data-id='123' data-action='submit'",
+        );
+        let data = link.data().unwrap();
+        assert_eq!(data.get("id"), Some(&"123".to_string()));
+        assert_eq!(data.get("action"), Some(&"submit".to_string()));
+    }
+
+    #[test]
+    fn test_with_title_parsed_whitespace_handling() {
+        // Should handle extra whitespace
+        let link = Link::with_title_parsed("Click", "https://example.com", "  class='btn'  ");
+        assert_eq!(link.class(), Some("btn"));
     }
 }

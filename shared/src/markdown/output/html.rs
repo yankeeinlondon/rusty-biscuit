@@ -30,6 +30,7 @@ use crate::markdown::inline::{InlineEvent, InlineTag, MarkProcessor};
 use crate::markdown::output::terminal::MermaidMode;
 use crate::markdown::{Markdown, MarkdownResult};
 use crate::mermaid::Mermaid;
+use crate::render::link::Link;
 use html_escape;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use syntect::easy::HighlightLines;
@@ -265,15 +266,42 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                 output.push_str("</blockquote>\n");
             }
             InlineEvent::Standard(Event::Start(Tag::Link { dest_url, title, .. })) => {
-                output.push_str(&format!(
-                    r#"<a href="{}"{}>"#,
-                    html_escape::encode_text(&dest_url),
-                    if title.is_empty() {
-                        String::new()
-                    } else {
-                        format!(r#" title="{}""#, html_escape::encode_text(&title))
+                // Parse title for structured content (class, style, prompt, etc.)
+                // We use a placeholder display since we're streaming; actual text follows
+                let link = Link::with_title_parsed("", &*dest_url, &title);
+
+                // Build anchor tag with parsed attributes
+                let mut attrs = format!(r#"href="{}""#, html_escape::encode_text(&dest_url));
+
+                if let Some(class) = link.class() {
+                    attrs.push_str(&format!(r#" class="{}""#, html_escape::encode_text(class)));
+                }
+                if let Some(style) = link.style() {
+                    attrs.push_str(&format!(r#" style="{}""#, html_escape::encode_text(style)));
+                }
+                if let Some(target) = link.target() {
+                    attrs.push_str(&format!(r#" target="{}""#, html_escape::encode_text(target)));
+                }
+                if let Some(title) = link.title() {
+                    attrs.push_str(&format!(r#" title="{}""#, html_escape::encode_text(title)));
+                }
+                if let Some(prompt) = link.prompt() {
+                    attrs.push_str(&format!(
+                        r#" data-prompt="{}""#,
+                        html_escape::encode_text(prompt)
+                    ));
+                }
+                if let Some(data) = link.data() {
+                    for (key, value) in data {
+                        attrs.push_str(&format!(
+                            r#" data-{}="{}""#,
+                            html_escape::encode_text(key),
+                            html_escape::encode_text(value)
+                        ));
                     }
-                ));
+                }
+
+                output.push_str(&format!("<a {}>", attrs));
             }
             InlineEvent::Standard(Event::End(TagEnd::Link)) => {
                 output.push_str("</a>");
@@ -605,6 +633,38 @@ fn main() {
         assert!(html.contains(r#"<a href="https://example.com">"#));
         assert!(html.contains("Click here"));
         assert!(html.contains("</a>"));
+    }
+
+    #[test]
+    fn test_as_html_link_with_title() {
+        // Title mode - plain title becomes title attribute
+        let md: Markdown = r#"[Click here](https://example.com "A tooltip")"#.into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(html.contains(r#"href="https://example.com""#));
+        assert!(html.contains(r#"title="A tooltip""#));
+        assert!(html.contains("Click here"));
+    }
+
+    #[test]
+    fn test_as_html_link_structured_mode() {
+        // Structured mode - parses class, style, etc.
+        let md: Markdown =
+            r#"[Click here](https://example.com "class='btn' style='color:red'")"#.into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(html.contains(r#"href="https://example.com""#));
+        assert!(html.contains(r#"class="btn""#));
+        assert!(html.contains(r#"style="color:red""#));
+        // Should NOT have title attribute in structured mode (unless title= key is used)
+        assert!(!html.contains("title="));
+        assert!(html.contains("Click here"));
+    }
+
+    #[test]
+    fn test_as_html_link_structured_mode_with_prompt() {
+        let md: Markdown =
+            r#"[Hover me](https://example.com "prompt='Click for more info'")"#.into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+        assert!(html.contains(r#"data-prompt="Click for more info""#));
     }
 
     #[test]

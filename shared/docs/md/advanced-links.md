@@ -8,9 +8,15 @@ In Markdown the overwhelming popular usage for _hyperlinks_ is: `[display text](
 
 Most people do not know that the specification actually allows for a second parameter within the parenthesis:
 
-> [display text](resource title)
+> [display text](resource "title")
 
 The `title` was added to the original specification so that people could add some basic "popover" content since browsers have for a long time provided a rather crude popover effect for links if you added a `title` property.
+
+**Important:** Per the CommonMark specification, titles must be enclosed in quotes. Valid formats are:
+
+- Double quotes: `[text](url "title")`
+- Single quotes: `[text](url 'title')`
+- Parentheses: `[text](url (title))`
 
 ### How to use the `title` Property
 
@@ -23,11 +29,15 @@ The mode which will be used will be based on whether structured content is found
 
 #### Title Mode
 
-This mode resembles what the Markdown standard expects and Uses all content after the URI/resource link as the "title".
+This mode resembles what the Markdown standard expects. The quoted content after the URL becomes the link's title attribute:
+
+```markdown
+[Example](https://example.com "This is the title")
+```
 
 #### Structured Mode
 
-This mode leverages the standard but extends it's capabilities by viewing the `title` text as a bunch of key/value pairs. The key's which have special meaning are:
+This mode leverages the standard but extends its capabilities by viewing the `title` text as a bunch of key/value pairs. The key's which have special meaning are:
 
 | key       | terminal     | browser |
 | ---       | --------     | ------- |
@@ -38,14 +48,17 @@ This mode leverages the standard but extends it's capabilities by viewing the `t
 | `data-*`       | no effect   | passed through as properties to the HTML link |
 
 
-The syntax which is used here follows a `key=value` syntax and can be delimited by a comma or whitespace:
+The syntax follows a `key=value` format. The entire structured content must be quoted per CommonMark, and key/values within can be delimited by commas or whitespace:
 
-- `[my link](https://somewhere.com prompt="click me",class=buttercup style="background:red" )`
+```markdown
+[my link](https://somewhere.com "prompt='click me' class=buttercup style='background:red'")
+```
 
-The above example is a valid syntax and:
+Within the quoted title section:
 
-- we can see that property values can be quoted but don't need to be (though "quoting generally considered the safer option")
-- key/values can be delimited by a `,` or whitespace
+- Property values can use single quotes when the outer title uses double quotes (and vice versa)
+- Key/values can be delimited by `,` or whitespace
+- Unquoted values are allowed for simple identifiers (e.g., `class=btn`)
 
 Now that we have the basic concept down let's discuss the `Link` struct and then move into the details of each target platform.
 
