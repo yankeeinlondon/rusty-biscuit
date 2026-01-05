@@ -41,6 +41,7 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color, Style};
 use syntect::parsing::{Scope, SyntaxReference};
 use terminal_size::{terminal_size, Width};
+use unicode_width::UnicodeWidthStr;
 use viuer::{KittySupport, get_kitty_support, is_iterm_supported};
 
 /// Color depth capability for terminal.
@@ -71,12 +72,14 @@ impl ColorDepth {
     /// - `Colors16` if terminal supports basic 16 colors
     /// - `None` if no color support detected
     pub fn auto_detect() -> Self {
+        use crate::terminal::{TRUE_COLOR_DEPTH, COLORS_256_DEPTH, COLORS_16_DEPTH};
+
         let depth = crate::terminal::color_depth();
-        if depth >= 16_777_216 {
+        if depth >= TRUE_COLOR_DEPTH {
             Self::TrueColor
-        } else if depth >= 256 {
+        } else if depth >= COLORS_256_DEPTH {
             Self::Colors256
-        } else if depth >= 16 {
+        } else if depth >= COLORS_16_DEPTH {
             Self::Colors16
         } else {
             Self::None
@@ -1355,7 +1358,6 @@ fn strip_code_markers(s: &str) -> String {
 /// considering ANSI escape codes and inline code markers which don't contribute
 /// to visual width.
 fn calculate_min_column_width(rows: &[Vec<String>], col_index: usize) -> usize {
-    use unicode_width::UnicodeWidthStr;
 
     let mut max_word_len = 0;
     for row in rows {
@@ -1659,7 +1661,6 @@ impl LineWrapper {
     /// Uses `▐` character followed by 3 spaces for visual separation.
     /// The entire line gets a subtle background color.
     fn emit_blockquote_prefix(&mut self, depth: usize, bg: Color) {
-        use unicode_width::UnicodeWidthStr;
 
         self.blockquote_depth = depth;
         self.blockquote_bg = Some(bg);
@@ -1707,7 +1708,6 @@ impl LineWrapper {
 
     /// Emits a newline and the blockquote prefix if we're in a blockquote.
     fn emit_newline_with_prefix(&mut self) {
-        use unicode_width::UnicodeWidthStr;
         // Pad line to terminal width before newline (for uniform blockquote background)
         self.pad_to_width();
         self.output.push('\n');
@@ -1789,7 +1789,6 @@ impl LineWrapper {
 
     /// Emits a single word, wrapping if necessary.
     fn emit_word(&mut self, word: &str, style: Style, emit_italic: bool, in_strikethrough: bool, in_mark: bool) {
-        use unicode_width::UnicodeWidthStr;
 
         let word_width = UnicodeWidthStr::width(word);
 
@@ -1814,7 +1813,6 @@ impl LineWrapper {
     /// Emits a raw string without styling (for markers, bullets, etc.).
     /// Updates column position based on visual width.
     fn emit_raw(&mut self, text: &str) {
-        use unicode_width::UnicodeWidthStr;
         self.output.push_str(text);
         // Update column for non-newline content
         if let Some(last_line) = text.rsplit('\n').next() {
@@ -1829,7 +1827,6 @@ impl LineWrapper {
     /// Emits styled text for markers/prefixes (bullets, numbers).
     /// These are emitted directly without word-wrap logic.
     fn emit_styled_marker(&mut self, text: &str, style: Style, emit_italic: bool) {
-        use unicode_width::UnicodeWidthStr;
         // Note: markers don't use blockquote background (they have their own styling)
         self.output.push_str(&emit_prose_text(text, style, emit_italic, false, false, None));
         self.current_col += UnicodeWidthStr::width(text);
@@ -1843,8 +1840,6 @@ impl LineWrapper {
     ///
     /// Format: `ESC]8;;URL BEL <styled_text> ESC]8;; BEL`
     fn emit_styled_hyperlink(&mut self, text: &str, url: &str, style: Style, emit_italic: bool) {
-        use unicode_width::UnicodeWidthStr;
-
         // OSC8 hyperlink start: ESC ] 8 ; ; <url> BEL
         self.output.push_str("\x1b]8;;");
         self.output.push_str(url);
@@ -1862,8 +1857,6 @@ impl LineWrapper {
 
     /// Emits inline code with styling.
     fn emit_inline_code(&mut self, code: &str, style: Style) {
-        use unicode_width::UnicodeWidthStr;
-
         let code_width = UnicodeWidthStr::width(code);
 
         // Check if code fits on current line
@@ -1906,10 +1899,17 @@ impl LineWrapper {
     }
 }
 
-/// Computes a highlighted background color based on the theme background and color mode.
+/// Adjusts a background color based on color mode and RGB delta values.
 ///
-/// For dark mode, adds brightness to the theme background (capped at 235).
-/// For light mode, subtracts brightness from the theme background.
+/// For dark mode, adds brightness (capped at 235 to avoid white).
+/// For light mode, subtracts brightness.
+///
+/// ## Arguments
+///
+/// * `base` - Base color to adjust
+/// * `color_mode` - Dark or light mode
+/// * `dark_delta` - (r, g, b) amounts to add in dark mode
+/// * `light_delta` - (r, g, b) amounts to subtract in light mode
 ///
 /// ## Examples
 ///
@@ -1918,47 +1918,45 @@ impl LineWrapper {
 /// use syntect::highlighting::Color;
 ///
 /// let theme_bg = Color { r: 40, g: 40, b: 40, a: 255 };
-/// let highlight_bg = compute_highlight_bg(theme_bg, ColorMode::Dark);
+/// let adjusted = adjust_background(theme_bg, ColorMode::Dark, (30, 25, 0), (20, 15, 0));
 /// // Result: Color { r: 70, g: 65, b: 40, a: 255 }
 /// ```
-fn compute_highlight_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
+fn adjust_background(
+    base: Color,
+    color_mode: ColorMode,
+    dark_delta: (u8, u8, u8),
+    light_delta: (u8, u8, u8),
+) -> Color {
     match color_mode {
         ColorMode::Dark => Color {
-            r: theme_bg.r.saturating_add(30).min(235),
-            g: theme_bg.g.saturating_add(25).min(235),
-            b: theme_bg.b,
+            r: base.r.saturating_add(dark_delta.0).min(235),
+            g: base.g.saturating_add(dark_delta.1).min(235),
+            b: base.b.saturating_add(dark_delta.2).min(235),
             a: 255,
         },
         ColorMode::Light => Color {
-            r: theme_bg.r.saturating_sub(20),
-            g: theme_bg.g.saturating_sub(15),
-            b: theme_bg.b,
+            r: base.r.saturating_sub(light_delta.0),
+            g: base.g.saturating_sub(light_delta.1),
+            b: base.b.saturating_sub(light_delta.2),
             a: 255,
         },
     }
 }
 
+/// Computes a highlighted background color based on the theme background and color mode.
+///
+/// Uses warmer tones (more red/green) to create a visual highlight effect.
+#[inline]
+fn compute_highlight_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
+    adjust_background(theme_bg, color_mode, (30, 25, 0), (20, 15, 0))
+}
+
 /// Computes a subtle background color for blockquotes based on the theme background.
 ///
-/// For dark mode, adds a small amount of brightness to lift the blockquote off the page.
-/// For light mode, subtracts a small amount of brightness.
+/// Uses uniform brightness adjustment for subtle visual separation.
+#[inline]
 fn compute_blockquote_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
-    match color_mode {
-        ColorMode::Dark => Color {
-            // Lift blockquote slightly off dark background for visual separation
-            r: theme_bg.r.saturating_add(20),
-            g: theme_bg.g.saturating_add(20),
-            b: theme_bg.b.saturating_add(20),
-            a: 255,
-        },
-        ColorMode::Light => Color {
-            // Darken blockquote slightly against light background
-            r: theme_bg.r.saturating_sub(15),
-            g: theme_bg.g.saturating_sub(15),
-            b: theme_bg.b.saturating_sub(15),
-            a: 255,
-        },
-    }
+    adjust_background(theme_bg, color_mode, (20, 20, 20), (15, 15, 15))
 }
 
 /// Highlights code with syntax highlighting and optional line numbers.
@@ -4079,8 +4077,6 @@ fn main() {}
     /// This prevents mid-word breaks when the terminal is wide enough to fit the content.
     #[test]
     fn test_table_width_constraint_enforced() {
-        use unicode_width::UnicodeWidthStr;
-
         // Create a table with content that would exceed 50 chars per row
         let rows = vec![
             vec!["Field".to_string(), "Description".to_string(), "Example".to_string()],
@@ -4177,8 +4173,6 @@ fn main() {}
     /// Test table rendering with very narrow width (40 chars) to stress-test wrapping
     #[test]
     fn test_table_very_narrow_width() {
-        use unicode_width::UnicodeWidthStr;
-
         // Table from the bug report screenshot
         let rows = vec![
             vec!["Field".to_string(), "Description".to_string(), "Example".to_string()],
@@ -4271,8 +4265,6 @@ fn main() {}
     #[test]
     #[ignore] // Run with: cargo test -p shared --lib test_table_width_visual -- --ignored --nocapture
     fn test_table_width_visual() {
-        use unicode_width::UnicodeWidthStr;
-
         let rows = vec![
             vec!["Field".to_string(), "Description".to_string(), "Example".to_string()],
             vec!["tool.name".to_string(), "Tool being called".to_string(), "\"brave_search\"".to_string()],

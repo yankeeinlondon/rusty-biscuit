@@ -353,21 +353,10 @@ impl Link {
     pub fn to_browser(&self) -> String {
         let mut attrs = format!(r#"href="{}""#, html_escape(&self.link_to));
 
-        if let Some(class) = &self.class {
-            attrs.push_str(&format!(r#" class="{}""#, html_escape(class)));
-        }
-
-        if let Some(style) = &self.style {
-            attrs.push_str(&format!(r#" style="{}""#, html_escape(style)));
-        }
-
-        if let Some(target) = &self.target {
-            attrs.push_str(&format!(r#" target="{}""#, html_escape(target)));
-        }
-
-        if let Some(title) = &self.title {
-            attrs.push_str(&format!(r#" title="{}""#, html_escape(title)));
-        }
+        maybe_attr(&mut attrs, "class", &self.class);
+        maybe_attr(&mut attrs, "style", &self.style);
+        maybe_attr(&mut attrs, "target", &self.target);
+        maybe_attr(&mut attrs, "title", &self.title);
 
         if let Some(prompt) = &self.prompt {
             attrs.push_str(&format!(r#" data-prompt="{}""#, html_escape(prompt)));
@@ -533,6 +522,20 @@ fn html_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
+}
+
+/// Appends an HTML attribute to the builder if the value is Some.
+///
+/// ## Arguments
+///
+/// * `attrs` - String buffer to append to
+/// * `name` - Attribute name (e.g., "class", "style")
+/// * `value` - Optional attribute value
+#[inline]
+fn maybe_attr(attrs: &mut String, name: &str, value: &Option<String>) {
+    if let Some(v) = value {
+        attrs.push_str(&format!(r#" {}="{}""#, name, html_escape(v)));
+    }
 }
 
 /// Unescapes HTML entities back to their original characters.

@@ -32,12 +32,91 @@
 use reqwest::Client;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 use thiserror::Error;
 use tracing::{Span, debug, info, instrument, warn};
+
+// =============================================================================
+// HTML Extraction Helper
+// =============================================================================
+
+/// Helper for extracting content from parsed HTML documents.
+///
+/// Provides a consistent interface for selector-based extraction with
+/// fallback support, reducing code duplication in extraction methods.
+struct HtmlExtractor<'a> {
+    document: &'a Html,
+}
+
+impl<'a> HtmlExtractor<'a> {
+    /// Creates a new extractor for the given document.
+    fn new(document: &'a Html) -> Self {
+        Self { document }
+    }
+
+    /// Tries each selector in order and returns the first non-empty text match.
+    ///
+    /// ## Arguments
+    ///
+    /// * `selectors` - CSS selectors to try in priority order
+    ///
+    /// ## Returns
+    ///
+    /// The text content of the first matching element with non-empty text,
+    /// or `None` if no selector matches.
+    fn first_text(&self, selectors: &[&str]) -> Option<String> {
+        for selector_str in selectors {
+            if let Ok(selector) = Selector::parse(selector_str) {
+                if let Some(element) = self.document.select(&selector).next() {
+                    let content: String = element.text().collect::<Vec<_>>().join("\n");
+                    if !content.trim().is_empty() {
+                        return Some(content);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Returns an iterator over all elements matching the selector.
+    ///
+    /// Returns an empty iterator if the selector is invalid.
+    fn select_all(&self, selector_str: &str) -> impl Iterator<Item = ElementRef<'a>> {
+        Selector::parse(selector_str)
+            .ok()
+            .into_iter()
+            .flat_map(|sel| self.document.select(&sel).collect::<Vec<_>>())
+    }
+
+    /// Collects text from all elements matching the selector.
+    ///
+    /// ## Arguments
+    ///
+    /// * `selector` - CSS selector string
+    ///
+    /// ## Returns
+    ///
+    /// Vector of text content from each matching element (empty if none match).
+    fn all_text(&self, selector: &str) -> Vec<String> {
+        self.select_all(selector)
+            .map(|el| el.text().collect::<Vec<_>>().join(" "))
+            .filter(|s| !s.trim().is_empty())
+            .collect()
+    }
+
+    /// Extracts text with fallback to a default selector.
+    ///
+    /// Tries each selector in order, falling back to `fallback_selector`
+    /// if none match.
+    fn extract_with_fallback(&self, selectors: &[&str], fallback_selector: &str) -> String {
+        self.first_text(selectors).unwrap_or_else(|| {
+            self.first_text(&[fallback_selector]).unwrap_or_default()
+        })
+    }
+}
 
 /// Output format for scraped content.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
@@ -112,7 +191,7 @@ pub struct ScrapeArgs {
     /// The URL to scrape
     pub url: String,
 
-    /// Output format(s) - defaults to markdown
+    /// Output format(s) - defaults to empty (applied during processing)
     #[serde(default)]
     pub formats: Vec<OutputFormat>,
 
@@ -352,6 +431,7 @@ impl ScreenScrapeTool {
     /// Extract main content from HTML using common selectors.
     fn extract_main_content(html: &str) -> String {
         let document = Html::parse_document(html);
+        let extractor = HtmlExtractor::new(&document);
 
         // Try common main content selectors in order of preference
         let selectors = [
@@ -365,69 +445,38 @@ impl ScreenScrapeTool {
             ".entry-content",
         ];
 
-        for selector_str in selectors {
-            if let Ok(selector) = Selector::parse(selector_str)
-                && let Some(element) = document.select(&selector).next()
-            {
-                let content: String = element.text().collect::<Vec<_>>().join("\n");
-                if !content.trim().is_empty() {
-                    return content;
-                }
-            }
-        }
-
-        // Fallback to body content
-        if let Ok(selector) = Selector::parse("body")
-            && let Some(element) = document.select(&selector).next()
-        {
-            return element.text().collect::<Vec<_>>().join("\n");
-        }
-
-        html.to_string()
+        extractor
+            .first_text(&selectors)
+            .or_else(|| extractor.first_text(&["body"]))
+            .unwrap_or_else(|| html.to_string())
     }
 
     /// Convert HTML to Markdown.
     fn html_to_markdown(html: &str) -> String {
         let document = Html::parse_document(html);
+        let extractor = HtmlExtractor::new(&document);
         let mut markdown = String::new();
 
         // Extract headings
         for level in 1..=6 {
-            if let Ok(selector) = Selector::parse(&format!("h{}", level)) {
-                for element in document.select(&selector) {
-                    let text: String = element.text().collect::<Vec<_>>().join(" ");
-                    if !text.trim().is_empty() {
-                        markdown.push_str(&format!("{} {}\n\n", "#".repeat(level), text.trim()));
-                    }
-                }
+            for text in extractor.all_text(&format!("h{}", level)) {
+                markdown.push_str(&format!("{} {}\n\n", "#".repeat(level), text.trim()));
             }
         }
 
         // Extract paragraphs
-        if let Ok(selector) = Selector::parse("p") {
-            for element in document.select(&selector) {
-                let text: String = element.text().collect::<Vec<_>>().join(" ");
-                if !text.trim().is_empty() {
-                    markdown.push_str(&format!("{}\n\n", text.trim()));
-                }
-            }
+        for text in extractor.all_text("p") {
+            markdown.push_str(&format!("{}\n\n", text.trim()));
         }
 
         // Extract code blocks
-        if let Ok(selector) = Selector::parse("pre, code") {
-            for element in document.select(&selector) {
-                let text: String = element.text().collect::<Vec<_>>().join("\n");
-                if !text.trim().is_empty() {
-                    markdown.push_str(&format!("```\n{}\n```\n\n", text.trim()));
-                }
-            }
+        for text in extractor.all_text("pre, code") {
+            markdown.push_str(&format!("```\n{}\n```\n\n", text.trim()));
         }
 
-        // Extract lists
-        if let Ok(ul_selector) = Selector::parse("ul")
-            && let Ok(li_selector) = Selector::parse("li")
-        {
-            for ul in document.select(&ul_selector) {
+        // Extract unordered lists
+        if let Ok(li_selector) = Selector::parse("li") {
+            for ul in extractor.select_all("ul") {
                 for li in ul.select(&li_selector) {
                     let text: String = li.text().collect::<Vec<_>>().join(" ");
                     if !text.trim().is_empty() {
@@ -436,12 +485,9 @@ impl ScreenScrapeTool {
                 }
                 markdown.push('\n');
             }
-        }
 
-        if let Ok(ol_selector) = Selector::parse("ol")
-            && let Ok(li_selector) = Selector::parse("li")
-        {
-            for ol in document.select(&ol_selector) {
+            // Extract ordered lists
+            for ol in extractor.select_all("ol") {
                 for (i, li) in ol.select(&li_selector).enumerate() {
                     let text: String = li.text().collect::<Vec<_>>().join(" ");
                     if !text.trim().is_empty() {
@@ -458,13 +504,14 @@ impl ScreenScrapeTool {
     /// Extract all links from HTML.
     fn extract_links(html: &str) -> Vec<LinkInfo> {
         let document = Html::parse_document(html);
-        let mut links = Vec::new();
+        let extractor = HtmlExtractor::new(&document);
 
-        if let Ok(selector) = Selector::parse("a[href]") {
-            for element in document.select(&selector) {
-                if let Some(href) = element.value().attr("href") {
+        extractor
+            .select_all("a[href]")
+            .filter_map(|element| {
+                element.value().attr("href").map(|href| {
                     let text: String = element.text().collect::<Vec<_>>().join(" ");
-                    links.push(LinkInfo {
+                    LinkInfo {
                         url: href.to_string(),
                         text: if text.trim().is_empty() {
                             None
@@ -473,12 +520,10 @@ impl ScreenScrapeTool {
                         },
                         title: element.value().attr("title").map(String::from),
                         rel: element.value().attr("rel").map(String::from),
-                    });
-                }
-            }
-        }
-
-        links
+                    }
+                })
+            })
+            .collect()
     }
 
     /// Extract plain text from HTML.

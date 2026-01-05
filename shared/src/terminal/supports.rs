@@ -1,6 +1,22 @@
 use std::env;
 use termini::{NumberCapability, StringCapability, TermInfo};
 
+// =============================================================================
+// Color Depth Constants
+// =============================================================================
+
+/// 24-bit true color (16.7 million colors): 2^24
+pub const TRUE_COLOR_DEPTH: u32 = 16_777_216;
+
+/// 256-color mode depth
+pub const COLORS_256_DEPTH: u32 = 256;
+
+/// 16-color (basic ANSI) mode depth
+pub const COLORS_16_DEPTH: u32 = 16;
+
+/// 8-color (minimal) mode depth
+pub const COLORS_8_DEPTH: u32 = 8;
+
 /// Represents basic underline support capabilities.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnderlineSupport {
@@ -64,12 +80,12 @@ pub fn color_depth() -> u32 {
         let colorterm_lower = colorterm.to_lowercase();
         if colorterm_lower == "truecolor" || colorterm_lower == "24bit" {
             tracing::info!(
-                color_depth = 16_777_216,
+                color_depth = TRUE_COLOR_DEPTH,
                 source = "COLORTERM",
                 colorterm = %colorterm,
                 "Detected truecolor support from COLORTERM env var"
             );
-            return 16_777_216; // 2^24 colors
+            return TRUE_COLOR_DEPTH;
         }
     }
 

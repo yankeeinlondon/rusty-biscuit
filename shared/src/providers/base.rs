@@ -72,78 +72,155 @@ pub enum ApiAuthMethod {
 }
 
 
+/// Configuration for a single LLM provider.
+///
+/// Consolidates all provider-specific settings in one struct for easier
+/// maintenance and reduced hash lookups.
+#[derive(Debug, Clone)]
+pub struct ProviderConfig {
+    /// Environment variables that may contain the API key (first match wins)
+    pub env_vars: &'static [&'static str],
+    /// Authentication method for API requests
+    pub auth_method: ApiAuthMethod,
+    /// Base URL for the provider's API
+    pub base_url: &'static str,
+    /// Custom models endpoint (None = use standard /v1/models)
+    pub models_endpoint: Option<&'static str>,
+    /// Whether this is a local provider (no API key required)
+    pub is_local: bool,
+}
+
 lazy_static! {
-    /// A lookup table which provides a list of ENV variables in which the given provider's
-    /// API Key may be found.
-    static ref PROVIDER_ENV_VARIABLES: HashMap<Provider, Vec<&'static str>> = {
+    /// Unified configuration for all providers.
+    ///
+    /// Single source of truth for provider settings, replacing multiple
+    /// separate lookup tables.
+    pub static ref PROVIDER_CONFIGS: HashMap<Provider, ProviderConfig> = {
         let mut m = HashMap::new();
-        m.insert(Provider::Anthropic, vec!["ANTHROPIC_API_KEY"]);
-        m.insert(Provider::Deepseek, vec!["DEEPSEEK_API_KEY"]);
-        m.insert(Provider::Gemini, vec!["GEMINI_API_KEY", "GOOGLE_API_KEY"]);
-        m.insert(Provider::MoonshotAi, vec!["MOONSHOT_API_KEY", "MOONSHOT_AI_API_KEY"]);
-        m.insert(Provider::OpenAi, vec!["OPENAI_API_KEY"]);
-        m.insert(Provider::OpenRouter, vec!["OPEN_ROUTER_API_KEY", "OPENROUTER_API_KEY"]);
-        m.insert(Provider::Zai, vec!["ZAI_API_KEY", "Z_AI_API_KEY"]);
-        m.insert(Provider::ZenMux, vec!["ZENMUX_API_KEY", "ZEN_MUX_API_KEY"]);
+
+        m.insert(Provider::Anthropic, ProviderConfig {
+            env_vars: &["ANTHROPIC_API_KEY"],
+            auth_method: ApiAuthMethod::ApiKey("x-api-key".to_string()),
+            base_url: "https://api.anthropic.com",
+            models_endpoint: None,
+            is_local: false,
+        });
+
+        m.insert(Provider::Deepseek, ProviderConfig {
+            env_vars: &["DEEPSEEK_API_KEY"],
+            auth_method: ApiAuthMethod::BearerToken,
+            base_url: "https://api.deepseek.com",
+            models_endpoint: None,
+            is_local: false,
+        });
+
+        m.insert(Provider::Gemini, ProviderConfig {
+            env_vars: &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+            auth_method: ApiAuthMethod::BearerToken,
+            base_url: "https://generativelanguage.googleapis.com",
+            models_endpoint: Some("/v1beta/models"),
+            is_local: false,
+        });
+
+        m.insert(Provider::MoonshotAi, ProviderConfig {
+            env_vars: &["MOONSHOT_API_KEY", "MOONSHOT_AI_API_KEY"],
+            auth_method: ApiAuthMethod::BearerToken,
+            base_url: "https://api.moonshot.cn",
+            models_endpoint: None,
+            is_local: false,
+        });
+
+        m.insert(Provider::Ollama, ProviderConfig {
+            env_vars: &[],
+            auth_method: ApiAuthMethod::None,
+            base_url: "http://localhost:11434",
+            models_endpoint: None,
+            is_local: true,
+        });
+
+        m.insert(Provider::OpenAi, ProviderConfig {
+            env_vars: &["OPENAI_API_KEY"],
+            auth_method: ApiAuthMethod::BearerToken,
+            base_url: "https://api.openai.com",
+            models_endpoint: None,
+            is_local: false,
+        });
+
+        m.insert(Provider::OpenRouter, ProviderConfig {
+            env_vars: &["OPEN_ROUTER_API_KEY", "OPENROUTER_API_KEY"],
+            auth_method: ApiAuthMethod::BearerToken,
+            base_url: "https://openrouter.ai/api",
+            models_endpoint: None,
+            is_local: false,
+        });
+
+        m.insert(Provider::Zai, ProviderConfig {
+            env_vars: &["ZAI_API_KEY", "Z_AI_API_KEY"],
+            auth_method: ApiAuthMethod::BearerToken,
+            base_url: "https://api.z.ai/api/paas/v4",
+            models_endpoint: None,
+            is_local: false,
+        });
+
+        m.insert(Provider::ZenMux, ProviderConfig {
+            env_vars: &["ZENMUX_API_KEY", "ZEN_MUX_API_KEY"],
+            auth_method: ApiAuthMethod::None,
+            base_url: "https://zenmux.ai/api",
+            models_endpoint: None,
+            is_local: false,
+        });
 
         m
     };
 }
 
-lazy_static! {
-    /// A lookup table which provides the default authentication method for a given provider.
-    static ref PROVIDER_AUTH: HashMap<Provider, ApiAuthMethod> = {
-        let mut auth = HashMap::new();
+impl Provider {
+    /// Returns the configuration for this provider.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if the provider is not found in the configuration map.
+    /// This should never happen as all providers must have configuration.
+    pub fn config(&self) -> &'static ProviderConfig {
+        PROVIDER_CONFIGS.get(self).expect("All providers must have config")
+    }
 
-        auth.insert(Provider::Anthropic, ApiAuthMethod::ApiKey("x-api-key".to_string()));
-        auth.insert(Provider::Deepseek, ApiAuthMethod::BearerToken);
-        auth.insert(Provider::Gemini, ApiAuthMethod::BearerToken);
-        auth.insert(Provider::MoonshotAi, ApiAuthMethod::BearerToken);
-        auth.insert(Provider::Ollama, ApiAuthMethod::None);
-        auth.insert(Provider::OpenAi, ApiAuthMethod::BearerToken);
-        auth.insert(Provider::OpenRouter, ApiAuthMethod::BearerToken);
-        auth.insert(Provider::Zai, ApiAuthMethod::BearerToken);
-        auth.insert(Provider::ZenMux, ApiAuthMethod::None);
+    /// Returns the base URL for this provider's API.
+    pub fn base_url(&self) -> &'static str {
+        self.config().base_url
+    }
 
-        auth
-    };
+    /// Returns the models endpoint for this provider.
+    ///
+    /// Returns the custom endpoint if configured, otherwise "/v1/models".
+    pub fn models_endpoint(&self) -> &'static str {
+        self.config().models_endpoint.unwrap_or("/v1/models")
+    }
+
+    /// Returns whether this is a local provider (no API key required).
+    pub fn is_local(&self) -> bool {
+        self.config().is_local
+    }
 }
 
+// Legacy compatibility: Keep PROVIDER_BASE_URLS for existing code that uses it directly
 lazy_static! {
-    /// A list of providers who are "local" (versus a cloud provider)
-    static ref LOCAL_PROVIDERS: Vec<Provider> = {
-        let local_providers = vec![
-            Provider::Ollama
-        ];
-
-        local_providers
-    };
-}
-
-lazy_static! {
-    /// Base URLs for provider APIs (OpenAI-compatible endpoints)
+    /// Base URLs for provider APIs (OpenAI-compatible endpoints).
+    ///
+    /// Note: Prefer using `Provider::base_url()` method instead.
     pub static ref PROVIDER_BASE_URLS: HashMap<Provider, &'static str> = {
-        let mut urls = HashMap::new();
-        urls.insert(Provider::Anthropic, "https://api.anthropic.com");
-        urls.insert(Provider::Deepseek, "https://api.deepseek.com");
-        urls.insert(Provider::Gemini, "https://generativelanguage.googleapis.com");
-        urls.insert(Provider::MoonshotAi, "https://api.moonshot.cn");
-        urls.insert(Provider::Ollama, "http://localhost:11434");
-        urls.insert(Provider::OpenAi, "https://api.openai.com");
-        urls.insert(Provider::OpenRouter, "https://openrouter.ai/api");
-        urls.insert(Provider::Zai, "https://api.z.ai/api/paas/v4");
-        urls.insert(Provider::ZenMux, "https://zenmux.ai/api");
-        urls
+        PROVIDER_CONFIGS.iter().map(|(p, c)| (*p, c.base_url)).collect()
     };
 }
 
 lazy_static! {
-    /// Custom model endpoints for providers that don't use the standard /v1/models
+    /// Custom model endpoints for providers that don't use the standard /v1/models.
+    ///
+    /// Note: Prefer using `Provider::models_endpoint()` method instead.
     pub static ref PROVIDER_MODELS_ENDPOINT: HashMap<Provider, &'static str> = {
-        let mut endpoints = HashMap::new();
-        // Gemini uses v1beta API
-        endpoints.insert(Provider::Gemini, "/v1beta/models");
-        endpoints
+        PROVIDER_CONFIGS.iter()
+            .filter_map(|(p, c)| c.models_endpoint.map(|e| (*p, e)))
+            .collect()
     };
 }
 
@@ -241,18 +318,18 @@ pub struct ModelDefinition {
 /// Returns a tuple of (header_name, header_value).
 /// For providers with no authentication (like local Ollama), returns empty strings.
 pub fn build_auth_header(provider: &Provider, api_key: &str) -> (String, String) {
-    match PROVIDER_AUTH.get(provider) {
-        Some(ApiAuthMethod::BearerToken) => {
+    match &provider.config().auth_method {
+        ApiAuthMethod::BearerToken => {
             ("Authorization".to_string(), format!("Bearer {}", api_key))
         }
-        Some(ApiAuthMethod::ApiKey(header_name)) => {
+        ApiAuthMethod::ApiKey(header_name) => {
             (header_name.clone(), api_key.to_string())
         }
-        Some(ApiAuthMethod::QueryParam(_)) => {
+        ApiAuthMethod::QueryParam(_) => {
             // Query param auth handled separately in URL building
             ("".to_string(), "".to_string())
         }
-        Some(ApiAuthMethod::None) | None => {
+        ApiAuthMethod::None => {
             // For local providers or unknown auth, no header needed
             ("".to_string(), "".to_string())
         }
@@ -297,18 +374,15 @@ pub fn build_auth_header(provider: &Provider, api_key: &str) -> (String, String)
 /// ```
 #[tracing::instrument]
 pub fn has_provider_api_key(provider: &Provider) -> bool {
+    let config = provider.config();
+
     // Local providers don't require API keys
-    if LOCAL_PROVIDERS.contains(provider) {
+    if config.is_local {
         return false;
     }
 
-    // Look up the environment variable names for this provider
-    let Some(env_vars) = PROVIDER_ENV_VARIABLES.get(provider) else {
-        return false;
-    };
-
     // Check if ANY of the environment variables is set and non-empty
-    env_vars.iter().any(|var_name| {
+    config.env_vars.iter().any(|var_name| {
         std::env::var(var_name)
             .ok()
             .filter(|v| !v.trim().is_empty())
@@ -364,18 +438,15 @@ pub fn get_api_keys() -> BTreeMap<Provider, String> {
 
     // Iterate through all providers
     for provider in Provider::iter() {
+        let config = provider.config();
+
         // Skip local providers
-        if LOCAL_PROVIDERS.contains(&provider) {
+        if config.is_local {
             continue;
         }
 
-        // Get the list of environment variables for this provider
-        let Some(env_vars) = PROVIDER_ENV_VARIABLES.get(&provider) else {
-            continue;
-        };
-
         // Check each environment variable in priority order (first match wins)
-        for var_name in env_vars {
+        for var_name in config.env_vars {
             if let Some(api_key) = std::env::var(var_name)
                 .ok()
                 .filter(|v| !v.trim().is_empty())
