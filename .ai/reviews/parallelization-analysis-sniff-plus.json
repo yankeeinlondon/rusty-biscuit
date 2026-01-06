@@ -1,0 +1,93 @@
+[
+  {
+    "name": "Cross-phase dependency: Phase 4 depends on Phase 2 results",
+    "description": "Phase 4 (Monorepo Package Info) should reuse the per-package language detection from Phase 2 (Language Files), but the plan marks them as independent parallel phases. Phase 4 needs to call detect_languages() scoped to individual package directories, which is only meaningful after Phase 2 delivers the files enumeration.",
+    "plan_reference": "Parallel Group B - Phase 4",
+    "priority": "high",
+    "recommendation": "Keep phases parallel for independent FILE I/O (Phase 2 collects files, Phase 4 detects managers), but document that Phase 4's language detection implementation must follow Phase 2's pattern. Alternatively: move Phase 4 to run after Phase 2 completes if code reuse requires strict sequencing."
+  },
+  {
+    "name": "Undocumented filesystem contention in detect_filesystem()",
+    "description": "The main detect_filesystem() function in /sniff/lib/src/filesystem/mod.rs calls detect_languages(), detect_git(), detect_monorepo(), and detect_dependencies() sequentially. If Phases 1-4 run in parallel at library level, these functions would execute concurrently on the same filesystem. While reads are safe, this risks high disk I/O contention and could cause timeouts on slow systems. Current code processes sequentially.",
+    "plan_reference": "Parallel Groups A & B - filesystem modules",
+    "priority": "high",
+    "recommendation": "Document that library consumers (CLI, tests) must decide parallelization strategy. Either: (1) Keep library sequential and parallelize at CLI layer with tokio, OR (2) Add library-level async/parallel functions using rayon for CPU-bound operations and tokio for I/O. Current plan assumes library stays synchronous."
+  },
+  {
+    "name": "Missing concurrency control for shared git repository state",
+    "description": "Phase 3 (Git Status - dirty/untracked) and Phase 4 (Monorepo - per-package detection) both invoke git2::Repository::open() on the same repo root and potentially call git operations concurrently. The git2 crate is not thread-safe for simultaneous operations on the same repo object. However, if each phase opens its own Repository handle independently, this is safe (git2 handles readonly operations safely).",
+    "plan_reference": "Parallel Group B - Phase 3, Phase 4",
+    "priority": "medium",
+    "recommendation": "Verify that Phase 3 and Phase 4 each open independent Repository objects rather than sharing one. If they share, add synchronization (mutex) or redesign to serialize git operations. Current codebase pattern suggests independent opens, but test concurrently before shipping."
+  },
+  {
+    "name": "Phase 5 (GPU) uses optional wgpu dependency not yet added",
+    "description": "Plan specifies 'wgpu' for GPU detection, but current Cargo.toml uses hardware-query with gpu-all feature (optional). The wgpu crate is significantly heavier and may introduce platform-specific compilation issues. hardware-query is already integrated.",
+    "plan_reference": "Phase 5: GPU Detection",
+    "priority": "medium",
+    "recommendation": "Confirm whether to use hardware-query (existing, tested) or wgpu (new, more flexible). If using hardware-query, update plan docs. If using wgpu, add to dependencies with careful platform testing (especially on macOS where Metal binding differs from Linux/Windows)."
+  },
+  {
+    "name": "Phase 6 (SIMD) has architecture-specific code that may panic on unsupported platforms",
+    "description": "Phase 6 proposes using std::arch::is_x86_feature_detected!() macro on x86_64 and ARM NEON on aarch64. This macro panics at runtime if called on wrong architecture. Need explicit compile-time gating with #[cfg(target_arch = \"...\")] or runtime checks via cfg!() to avoid panics.",
+    "plan_reference": "Phase 6: SIMD Detection",
+    "priority": "high",
+    "recommendation": "Implement architecture detection with compile-time conditionals. Use #[cfg(target_arch = \"x86_64\")] for x86 features, #[cfg(target_arch = \"aarch64\")] for ARM NEON, and graceful fallback (empty struct) on unsupported architectures. Test cross-compilation."
+  },
+  {
+    "name": "Phase 1 (EditorConfig) requires new dependency ec4rs not in Cargo.toml",
+    "description": "Plan specifies ec4rs crate for EditorConfig parsing, but it's not listed in current Cargo.toml. This is a valid new dependency but needs to be added during Phase 1. Plan should verify ec4rs is actively maintained and handles all property types mentioned (indent_style, tab_width, charset, trim_trailing_whitespace, etc.).",
+    "plan_reference": "Phase 1: EditorConfig Support",
+    "priority": "medium",
+    "recommendation": "Add 'ec4rs' to sniff-lib/Cargo.toml dependencies during Phase 1. Verify it parses full EditorConfig spec and preserves multi-section structure. If ec4rs doesn't meet requirements, consider editorconfig or editorconfig-core-rs."
+  },
+  {
+    "name": "Phase 3 (Git dirty files) may have large memory impact on repos with many changes",
+    "description": "Plan requires storing FULL unified diffs for every dirty file in memory (git2::Diff). Large repos with 1000+ dirty files could consume significant memory. No pagination or streaming strategy mentioned.",
+    "plan_reference": "Phase 3: Git Dirty Files",
+    "priority": "medium",
+    "recommendation": "Add acceptance criterion: 'Test with large diffs (>10MB total). Consider streaming diffs to file rather than storing in memory, or add --max-diffs flag to limit collected diffs. Document memory implications in output struct docs.'"
+  },
+  {
+    "name": "Phase 7 (CLI include-only mode) interacts with existing skip logic in subtle ways",
+    "description": "Plan says 'When any include flag is used, ONLY those sections are output (skip flags ignored)'. Current SniffConfig in lib.rs has skip_* booleans. CLI layer must implement logic to convert include flags to skip flags. Logic: if --hardware is set and --network not set, set skip_network=true, skip_filesystem=true. This is complex and error-prone.",
+    "plan_reference": "Phase 7: CLI Flags",
+    "priority": "medium",
+    "recommendation": "Add acceptance criterion: 'Test matrix of flag combinations (--hardware, --network, --filesystem, --skip-hardware, etc.). Create unit tests in main.rs for flag logic.' Consider adding SniffConfig::include_only() builder method to encapsulate logic."
+  },
+  {
+    "name": "Missing parallel execution opportunity: detect_languages and detect_dependencies can run concurrently",
+    "description": "Both Phase 2 (languages) and the existing detect_dependencies() function walk the same directory tree separately. These are I/O-bound and could run concurrently with a single combined tree walk.",
+    "plan_reference": "Parallel Group A - Phase 2 & existing dependencies detection",
+    "priority": "low",
+    "recommendation": "Document as optimization opportunity for post-Phase 8. Merging detect_languages and detect_dependencies into one tree walk would reduce I/O by ~50% but adds complexity. Low priority since both are single passes."
+  },
+  {
+    "name": "No coordination documented for hardware module async safety in detect_with_config()",
+    "description": "Current detect_with_config() in lib.rs calls detect_hardware(), detect_network(), and detect_filesystem() sequentially. Phases 5-6 add GPU and SIMD detection inside detect_hardware(). No mention of whether these are CPU-safe (they are) or require serialization. Should clarify this for maintainers.",
+    "plan_reference": "Parallel Groups A & B - hardware modules",
+    "priority": "low",
+    "recommendation": "Add comment in lib.rs detect_with_config() explaining that hardware module operations (CPU, memory, GPU, SIMD detection) are all CPU-bound reads and safe for future parallelization with rayon or tokio::task::spawn_blocking."
+  },
+  {
+    "name": "Phase 2 (Language files enumeration) O(n) complexity risk with very large repos",
+    "description": "Phase 2 adds files: Vec<PathBuf> to LanguageStats. Current detect_languages() already stops at MAX_FILES=10,000. Storing file paths for each language will multiply memory usage by language count (Rust+Python+JavaScript repo = 3x memory). No batching or iterator pattern for large datasets.",
+    "plan_reference": "Phase 2: Language Files Property",
+    "priority": "low",
+    "recommendation": "Add acceptance criterion: 'Test with repo >10K files. Document memory implications (approximately 1KB per file path in JSON). Consider adding --no-file-enumeration flag for large repos.'"
+  },
+  {
+    "name": "Phase 3: Untracked files could reveal sensitive information",
+    "description": "Phase 3 (untracked) enumerates all untracked files. In repos with .gitignore rules that exclude secrets, this could expose credential files if .gitignore is misconfigured. No documentation or filtering mentioned.",
+    "plan_reference": "Phase 3: Untracked Files",
+    "priority": "low",
+    "recommendation": "Add acceptance criterion: 'Clarify that untracked output respects .gitignore (git2 enumerates untracked after filtering). Document that sensitive file discovery is user's responsibility.' Consider adding --skip-untracked flag for security."
+  },
+  {
+    "name": "Phases 1, 2, 5 should be sequential within filesystem module, not parallel",
+    "description": "Plan lists Phases 1, 2, 5 as 'Parallel Group A'. However, Phase 1 (EditorConfig) and Phase 2 (Languages) both operate on filesystem tree and should be in same detection pass. Phase 5 (GPU) is hardware-only and truly independent. Grouping is misleading.",
+    "plan_reference": "Parallel Group A structure",
+    "priority": "high",
+    "recommendation": "Revise grouping: Phases 1 & 2 should be documented as related (both filesystem tree walks, but independent implementations). Phase 5 is correctly independent. Update execution strategy diagram to show Phase 1|2 as a logical group, Phase 5 parallel, Phase 3|4|6 as second group."
+  }
+]
