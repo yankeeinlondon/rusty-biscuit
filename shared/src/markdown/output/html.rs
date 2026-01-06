@@ -333,6 +333,12 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     if has_mermaid {
         output.push_str(r#"<script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.registerIconPacks([
+    { name: 'fa7-brands', loader: () => fetch('https://unpkg.com/@iconify-json/fa7-brands@1/icons.json').then(r => r.json()) },
+    { name: 'lucide', loader: () => fetch('https://unpkg.com/@iconify-json/lucide@1/icons.json').then(r => r.json()) },
+    { name: 'carbon', loader: () => fetch('https://unpkg.com/@iconify-json/carbon@1/icons.json').then(r => r.json()) },
+    { name: 'system-uicons', loader: () => fetch('https://unpkg.com/@iconify-json/system-uicons@1/icons.json').then(r => r.json()) }
+  ]);
   mermaid.initialize({ startOnLoad: true });
 </script>
 "#);
@@ -1085,5 +1091,34 @@ fn main() {}
         };
         let html = as_html(&md, options).unwrap();
         assert!(!html.contains("mermaid.initialize"), "Should not include mermaid script when no diagrams");
+    }
+
+    #[test]
+    fn test_mermaid_has_icon_pack_registration() {
+        // Verify icon packs are registered before mermaid.initialize()
+        let content = r#"```mermaid
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let options = HtmlOptions {
+            mermaid_mode: MermaidMode::Image,
+            ..Default::default()
+        };
+        let html = as_html(&md, options).unwrap();
+
+        // Verify registerIconPacks is present
+        assert!(html.contains("mermaid.registerIconPacks"), "Should include registerIconPacks call");
+
+        // Verify all 4 icon packs are registered
+        assert!(html.contains("@iconify-json/fa7-brands"), "Should register fa7-brands pack");
+        assert!(html.contains("@iconify-json/lucide"), "Should register lucide pack");
+        assert!(html.contains("@iconify-json/carbon"), "Should register carbon pack");
+        assert!(html.contains("@iconify-json/system-uicons"), "Should register system-uicons pack");
+
+        // Verify registerIconPacks comes before initialize
+        let register_pos = html.find("registerIconPacks").expect("registerIconPacks should exist");
+        let initialize_pos = html.find("mermaid.initialize").expect("initialize should exist");
+        assert!(register_pos < initialize_pos, "registerIconPacks should come before initialize");
     }
 }

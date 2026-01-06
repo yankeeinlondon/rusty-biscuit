@@ -78,10 +78,6 @@ supports-hyperlinks = "3.2.0"
 # Hashing (for Mermaid diagram caching)
 xxhash-rust = { version = "0.8", features = ["xxh64"] }
 
-# Mermaid terminal rendering (Phase 5)
-base64 = "0.22"
-resvg = "0.45"
-
 [dev-dependencies]
 tokio = { version = "1.48", features = ["full", "test-util"] }
 tracing-test = "0.2"

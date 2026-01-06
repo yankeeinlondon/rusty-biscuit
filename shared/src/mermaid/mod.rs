@@ -9,7 +9,7 @@
 //! - [`theme`] - Mermaid theme color schemes and JSON parsing
 //! - [`hash`] - XXH64 hashing utility for diagram caching
 //! - [`render_html`] - HTML rendering with accessibility features
-//! - [`render_terminal`] - Terminal rendering via mermaid.ink service
+//! - [`render_terminal`] - Terminal rendering via local mmdc CLI
 
 pub mod hash;
 pub mod render_html;
@@ -292,6 +292,12 @@ impl Mermaid {
             r#"{css_vars}
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.registerIconPacks([
+    {{ name: 'fa7-brands', loader: () => fetch('https://unpkg.com/@iconify-json/fa7-brands@1/icons.json').then(r => r.json()) }},
+    {{ name: 'lucide', loader: () => fetch('https://unpkg.com/@iconify-json/lucide@1/icons.json').then(r => r.json()) }},
+    {{ name: 'carbon', loader: () => fetch('https://unpkg.com/@iconify-json/carbon@1/icons.json').then(r => r.json()) }},
+    {{ name: 'system-uicons', loader: () => fetch('https://unpkg.com/@iconify-json/system-uicons@1/icons.json').then(r => r.json()) }}
+  ]);
   mermaid.initialize({{ startOnLoad: true }});
 </script>"#
         );
@@ -314,37 +320,45 @@ impl Mermaid {
         MermaidHtml::new(head, body)
     }
 
-    /// Renders the diagram to the terminal using mermaid.ink service.
+    /// Renders the diagram to the terminal using the local mmdc CLI.
     ///
-    /// This method fetches an SVG from mermaid.ink, converts it to PNG via resvg,
-    /// and displays it in the terminal using viuer. On error, it falls back to
+    /// This method executes the `mmdc` CLI tool to render the diagram as a PNG,
+    /// then displays it in the terminal using viuer. On error, it falls back to
     /// printing the diagram as a code block.
+    ///
+    /// ## Icon Pack Support
+    ///
+    /// This method enables icon packs for diagrams:
+    /// - `@iconify-json/fa7-brands` - Font Awesome 7 brand icons
+    /// - `@iconify-json/lucide` - Lucide icons
+    /// - `@iconify-json/carbon` - Carbon Design icons
+    /// - `@iconify-json/system-uicons` - System UI icons
     ///
     /// ## Examples
     ///
     /// ```rust,no_run
     /// use shared::mermaid::Mermaid;
     ///
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let diagram = Mermaid::new("flowchart LR\n    A --> B");
-    /// diagram.render_for_terminal().await?;
-    /// # Ok(())
-    /// # }
+    /// fn example() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let diagram = Mermaid::new("flowchart LR\n    A --> B");
+    ///     diagram.render_for_terminal()?;
+    ///     Ok(())
+    /// }
     /// ```
     ///
     /// ## Errors
     ///
     /// Returns `MermaidRenderError` if:
-    /// - Diagram is too large (> 2KB when base64-encoded)
-    /// - Network request to mermaid.ink fails
-    /// - SVG parsing or PNG rendering fails
+    /// - mmdc CLI is not installed (install with `npm install -g @mermaid-js/mermaid-cli`)
+    /// - Diagram is too large (> 10KB)
+    /// - mmdc execution fails (invalid syntax, etc.)
     /// - Terminal doesn't support image rendering
     ///
     /// ## Fallback Behavior
     ///
     /// On any error, the diagram is printed as a fenced code block instead.
-    pub async fn render_for_terminal(&self) -> Result<(), MermaidRenderError> {
-        match render_terminal::render_for_terminal(&self.instructions).await {
+    pub fn render_for_terminal(&self) -> Result<(), MermaidRenderError> {
+        match render_terminal::render_for_terminal(&self.instructions) {
             Ok(()) => Ok(()),
             Err(e) => {
                 tracing::warn!(error = %e, "Terminal rendering failed, falling back to code block");

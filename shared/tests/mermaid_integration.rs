@@ -328,3 +328,123 @@ fn test_default_creates_flowchart() {
     assert!(diagram.instructions().contains("Start"));
     assert!(diagram.instructions().contains("Decision"));
 }
+
+// Icon Pack Integration Tests (Phase 4)
+
+/// Test HTML output includes icon pack registration.
+#[test]
+fn test_html_has_icon_pack_registration() {
+    let content = load_fixture("mermaid/valid/simple_flowchart.mmd");
+    let diagram = Mermaid::from(content.as_str());
+    let html = diagram.render_for_html();
+
+    // Verify registerIconPacks is present
+    assert!(
+        html.head.contains("registerIconPacks"),
+        "HTML head should contain registerIconPacks call"
+    );
+
+    // Verify all 4 icon packs are registered
+    assert!(
+        html.head.contains("@iconify-json/fa7-brands"),
+        "Should register fa7-brands icon pack"
+    );
+    assert!(
+        html.head.contains("@iconify-json/lucide"),
+        "Should register lucide icon pack"
+    );
+    assert!(
+        html.head.contains("@iconify-json/carbon"),
+        "Should register carbon icon pack"
+    );
+    assert!(
+        html.head.contains("@iconify-json/system-uicons"),
+        "Should register system-uicons icon pack"
+    );
+
+    // Verify registerIconPacks comes BEFORE initialize
+    let register_pos = html.head.find("registerIconPacks").expect("registerIconPacks should exist");
+    let initialize_pos = html.head.find("initialize").expect("initialize should exist");
+    assert!(
+        register_pos < initialize_pos,
+        "registerIconPacks must be called before initialize"
+    );
+}
+
+/// Test fixture containing icons loads correctly.
+#[test]
+fn test_fixture_with_icons() {
+    let content = load_fixture("mermaid/valid/with_icons.mmd");
+    let diagram = Mermaid::from(content.as_str());
+    let html = diagram.render_for_html();
+
+    // Verify the icon syntax is preserved in the HTML body
+    assert!(
+        html.body.contains("fa7-brands"),
+        "Should preserve fa7-brands icon reference"
+    );
+    assert!(
+        html.body.contains("lucide"),
+        "Should preserve lucide icon reference"
+    );
+    assert!(
+        html.body.contains("carbon"),
+        "Should preserve carbon icon reference"
+    );
+    assert!(
+        html.body.contains("system-uicons"),
+        "Should preserve system-uicons icon reference"
+    );
+}
+
+/// Test MmdcNotFound error message contains installation instructions.
+#[test]
+fn test_mmdc_not_found_error_message() {
+    use shared::mermaid::MermaidRenderError;
+
+    let error = MermaidRenderError::MmdcNotFound;
+    let message = error.to_string();
+
+    assert!(
+        message.contains("npm install -g @mermaid-js/mermaid-cli"),
+        "Error message should contain installation instructions: {}",
+        message
+    );
+}
+
+/// Test MmdcExecutionFailed error includes exit code and stderr.
+#[test]
+fn test_mmdc_execution_failed_error() {
+    use shared::mermaid::MermaidRenderError;
+
+    let error = MermaidRenderError::MmdcExecutionFailed {
+        exit_code: 1,
+        stderr: "Parse error at line 1".to_string(),
+    };
+    let message = error.to_string();
+
+    assert!(
+        message.contains("exit code 1"),
+        "Error should contain exit code"
+    );
+    assert!(
+        message.contains("Parse error at line 1"),
+        "Error should contain stderr"
+    );
+}
+
+/// Test render_for_terminal is synchronous (no async).
+/// This verifies the API migration from async to sync.
+#[test]
+fn test_render_for_terminal_is_sync() {
+    // This test verifies compilation succeeds with sync signature.
+    // The function should NOT require .await or tokio runtime.
+    let diagram = Mermaid::new("flowchart LR\n    A --> B");
+
+    // render_for_terminal() returns Result directly, not a Future
+    // If this compiles, the sync migration was successful.
+    let _result: Result<(), shared::mermaid::MermaidRenderError> = diagram.render_for_terminal();
+
+    // Note: We don't check the actual result because mmdc may not be installed
+    // in the test environment. The test verifies the API is sync.
+}

@@ -740,22 +740,13 @@ pub fn write_terminal<W: std::io::Write>(
                             writer.flush().ok();
                             wrapper = LineWrapper::new(terminal_width as usize);
 
-                            // Render mermaid diagram as image (blocking on async)
+                            // Render mermaid diagram as image using mmdc CLI
                             let diagram = crate::mermaid::Mermaid::new(&code_buffer);
 
-                            // Create a runtime for the async call
-                            let render_succeeded = match tokio::runtime::Runtime::new() {
-                                Ok(rt) => {
-                                    match rt.block_on(diagram.render_for_terminal()) {
-                                        Ok(()) => true,
-                                        Err(e) => {
-                                            tracing::warn!(error = %e, "Mermaid image rendering failed");
-                                            false
-                                        }
-                                    }
-                                }
+                            let render_succeeded = match diagram.render_for_terminal() {
+                                Ok(()) => true,
                                 Err(e) => {
-                                    tracing::warn!(error = %e, "Failed to create tokio runtime for mermaid");
+                                    tracing::warn!(error = %e, "Mermaid image rendering failed");
                                     false
                                 }
                             };
