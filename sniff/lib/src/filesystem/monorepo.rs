@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use crate::{Result, SniffError};
+use super::languages::detect_languages;
 
 /// Supported monorepo tools and package managers
 #[non_exhaustive]
@@ -44,6 +45,12 @@ pub struct PackageLocation {
     pub name: String,
     /// Path to the package
     pub path: PathBuf,
+    /// The primary programming language detected in this package
+    pub primary_language: Option<String>,
+    /// All programming languages detected in this package
+    pub languages: Vec<String>,
+    /// Detected dependency managers in this package (e.g., "cargo", "npm", "pnpm")
+    pub detected_managers: Vec<String>,
 }
 
 /// Detect monorepo configuration in the given directory.
@@ -251,6 +258,77 @@ fn make_namespaced_name(path: &Path, root: &Path) -> String {
         })
 }
 
+/// Detects programming languages in a package directory.
+///
+/// Uses the `detect_languages` function scoped to the package directory
+/// to identify the primary language and all languages present.
+///
+/// ## Returns
+///
+/// A tuple of (primary_language, all_languages) where:
+/// - `primary_language` is the most common programming language (excluding markup/config)
+/// - `all_languages` is a list of all detected programming languages sorted by frequency
+fn detect_package_languages(path: &Path) -> (Option<String>, Vec<String>) {
+    match detect_languages(path) {
+        Ok(breakdown) => {
+            let languages: Vec<String> = breakdown
+                .languages
+                .iter()
+                .map(|s| s.language.clone())
+                .collect();
+            (breakdown.primary, languages)
+        }
+        Err(_) => (None, Vec::new()),
+    }
+}
+
+/// Detects dependency managers present in a package directory.
+///
+/// Checks for the presence of various package manager configuration files
+/// to determine which dependency managers are used in the package.
+///
+/// ## Detected Managers
+///
+/// - `cargo` - Rust (Cargo.toml)
+/// - `npm` - Node.js with npm (package.json without pnpm-lock.yaml or yarn.lock)
+/// - `pnpm` - Node.js with pnpm (pnpm-lock.yaml)
+/// - `yarn` - Node.js with Yarn (yarn.lock)
+/// - `pip` - Python (requirements.txt or pyproject.toml)
+/// - `go` - Go (go.mod)
+fn detect_package_managers(path: &Path) -> Vec<String> {
+    let mut managers = Vec::new();
+
+    // Rust: Cargo.toml
+    if path.join("Cargo.toml").exists() {
+        managers.push("cargo".to_string());
+    }
+
+    // Node.js package managers
+    let has_package_json = path.join("package.json").exists();
+    let has_pnpm_lock = path.join("pnpm-lock.yaml").exists();
+    let has_yarn_lock = path.join("yarn.lock").exists();
+
+    if has_pnpm_lock {
+        managers.push("pnpm".to_string());
+    } else if has_yarn_lock {
+        managers.push("yarn".to_string());
+    } else if has_package_json {
+        managers.push("npm".to_string());
+    }
+
+    // Python: requirements.txt or pyproject.toml
+    if path.join("requirements.txt").exists() || path.join("pyproject.toml").exists() {
+        managers.push("pip".to_string());
+    }
+
+    // Go: go.mod
+    if path.join("go.mod").exists() {
+        managers.push("go".to_string());
+    }
+
+    managers
+}
+
 fn expand_glob_patterns(root: &Path, patterns: &[&str]) -> Vec<PackageLocation> {
     let mut packages = Vec::new();
 
@@ -266,7 +344,15 @@ fn expand_glob_patterns(root: &Path, patterns: &[&str]) -> Vec<PackageLocation> 
                         if entry.path().is_dir() {
                             let path = entry.path();
                             let name = make_namespaced_name(&path, root);
-                            packages.push(PackageLocation { name, path });
+                            let (primary_language, languages) = detect_package_languages(&path);
+                            let detected_managers = detect_package_managers(&path);
+                            packages.push(PackageLocation {
+                                name,
+                                path,
+                                primary_language,
+                                languages,
+                                detected_managers,
+                            });
                         }
                     }
                 }
@@ -276,7 +362,15 @@ fn expand_glob_patterns(root: &Path, patterns: &[&str]) -> Vec<PackageLocation> 
             let path = root.join(pattern);
             if path.exists() {
                 let name = make_namespaced_name(&path, root);
-                packages.push(PackageLocation { name, path });
+                let (primary_language, languages) = detect_package_languages(&path);
+                let detected_managers = detect_package_managers(&path);
+                packages.push(PackageLocation {
+                    name,
+                    path,
+                    primary_language,
+                    languages,
+                    detected_managers,
+                });
             }
         }
     }
@@ -392,5 +486,166 @@ mod tests {
         let result = detect_monorepo(dir.path()).unwrap();
         assert!(result.is_some());
         assert_eq!(result.unwrap().tool, MonorepoTool::Lerna);
+    }
+
+    #[test]
+    fn test_detect_package_managers_cargo() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
+
+        let managers = detect_package_managers(dir.path());
+        assert_eq!(managers, vec!["cargo"]);
+    }
+
+    #[test]
+    fn test_detect_package_managers_npm() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("package.json"), "{}").unwrap();
+
+        let managers = detect_package_managers(dir.path());
+        assert_eq!(managers, vec!["npm"]);
+    }
+
+    #[test]
+    fn test_detect_package_managers_pnpm() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("package.json"), "{}").unwrap();
+        fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+
+        let managers = detect_package_managers(dir.path());
+        // pnpm takes precedence over npm when pnpm-lock.yaml exists
+        assert_eq!(managers, vec!["pnpm"]);
+    }
+
+    #[test]
+    fn test_detect_package_managers_yarn() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("package.json"), "{}").unwrap();
+        fs::write(dir.path().join("yarn.lock"), "").unwrap();
+
+        let managers = detect_package_managers(dir.path());
+        // yarn takes precedence over npm when yarn.lock exists
+        assert_eq!(managers, vec!["yarn"]);
+    }
+
+    #[test]
+    fn test_detect_package_managers_pip_requirements() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("requirements.txt"), "requests==2.31.0").unwrap();
+
+        let managers = detect_package_managers(dir.path());
+        assert_eq!(managers, vec!["pip"]);
+    }
+
+    #[test]
+    fn test_detect_package_managers_pip_pyproject() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("pyproject.toml"), "[project]\nname = \"test\"").unwrap();
+
+        let managers = detect_package_managers(dir.path());
+        assert_eq!(managers, vec!["pip"]);
+    }
+
+    #[test]
+    fn test_detect_package_managers_go() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("go.mod"), "module example.com/test").unwrap();
+
+        let managers = detect_package_managers(dir.path());
+        assert_eq!(managers, vec!["go"]);
+    }
+
+    #[test]
+    fn test_detect_package_managers_multiple() {
+        let dir = TempDir::new().unwrap();
+        // A package with both Rust and Node.js
+        fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
+        fs::write(dir.path().join("package.json"), "{}").unwrap();
+
+        let managers = detect_package_managers(dir.path());
+        assert_eq!(managers, vec!["cargo", "npm"]);
+    }
+
+    #[test]
+    fn test_detect_package_managers_empty() {
+        let dir = TempDir::new().unwrap();
+
+        let managers = detect_package_managers(dir.path());
+        assert!(managers.is_empty());
+    }
+
+    #[test]
+    fn test_detect_package_languages_rust() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.path().join("lib.rs"), "pub fn foo() {}").unwrap();
+
+        let (primary, languages) = detect_package_languages(dir.path());
+        assert_eq!(primary, Some("Rust".to_string()));
+        assert!(languages.contains(&"Rust".to_string()));
+    }
+
+    #[test]
+    fn test_detect_package_languages_javascript() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("index.js"), "console.log('hello')").unwrap();
+
+        let (primary, languages) = detect_package_languages(dir.path());
+        assert_eq!(primary, Some("JavaScript".to_string()));
+        assert!(languages.contains(&"JavaScript".to_string()));
+    }
+
+    #[test]
+    fn test_detect_package_languages_empty() {
+        let dir = TempDir::new().unwrap();
+
+        let (primary, languages) = detect_package_languages(dir.path());
+        assert!(primary.is_none());
+        assert!(languages.is_empty());
+    }
+
+    #[test]
+    fn test_cargo_workspace_with_languages_and_managers() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[workspace]\nmembers = [\"rust-pkg\", \"node-pkg\"]\n",
+        )
+        .unwrap();
+
+        // Create a Rust package
+        let rust_pkg = dir.path().join("rust-pkg");
+        fs::create_dir(&rust_pkg).unwrap();
+        fs::write(rust_pkg.join("Cargo.toml"), "[package]").unwrap();
+        fs::write(rust_pkg.join("main.rs"), "fn main() {}").unwrap();
+
+        // Create a Node.js package
+        let node_pkg = dir.path().join("node-pkg");
+        fs::create_dir(&node_pkg).unwrap();
+        fs::write(node_pkg.join("package.json"), "{}").unwrap();
+        fs::write(node_pkg.join("index.js"), "console.log('hi')").unwrap();
+
+        let result = detect_monorepo(dir.path()).unwrap();
+        assert!(result.is_some());
+        let info = result.unwrap();
+        assert_eq!(info.packages.len(), 2);
+
+        // Find the rust package
+        let rust_package = info
+            .packages
+            .iter()
+            .find(|p| p.name == "rust-pkg")
+            .expect("rust-pkg should be found");
+        assert_eq!(rust_package.primary_language, Some("Rust".to_string()));
+        assert!(rust_package.detected_managers.contains(&"cargo".to_string()));
+
+        // Find the node package
+        let node_package = info
+            .packages
+            .iter()
+            .find(|p| p.name == "node-pkg")
+            .expect("node-pkg should be found");
+        assert_eq!(node_package.primary_language, Some("JavaScript".to_string()));
+        assert!(node_package.detected_managers.contains(&"npm".to_string()));
     }
 }

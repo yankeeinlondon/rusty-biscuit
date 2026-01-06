@@ -1,7 +1,7 @@
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use crate::Result;
 
 /// Maximum files to scan before early termination
@@ -30,6 +30,8 @@ pub struct LanguageStats {
     pub file_count: usize,
     /// Percentage of total files (0.0 to 100.0)
     pub percentage: f64,
+    /// List of files detected for this language (paths relative to scanned root)
+    pub files: Vec<PathBuf>,
 }
 
 /// Non-programming languages that should not be considered as "primary".
@@ -97,7 +99,7 @@ fn is_programming_language(lang: &str) -> bool {
 /// println!("Total files: {}", breakdown.total_files);
 /// ```
 pub fn detect_languages(root: &Path) -> Result<LanguageBreakdown> {
-    let mut language_counts: HashMap<String, usize> = HashMap::new();
+    let mut language_files: HashMap<String, Vec<PathBuf>> = HashMap::new();
     let mut total_files = 0;
 
     // Use the `ignore` crate which respects .gitignore files
@@ -116,13 +118,20 @@ pub fn detect_languages(root: &Path) -> Result<LanguageBreakdown> {
     {
         total_files += 1;
         if let Ok(Some(detection)) = hyperpolyglot::detect(entry.path()) {
-            *language_counts
+            // Store path relative to the scanned root
+            let relative_path = entry
+                .path()
+                .strip_prefix(root)
+                .unwrap_or(entry.path())
+                .to_path_buf();
+            language_files
                 .entry(detection.language().to_string())
-                .or_insert(0) += 1;
+                .or_default()
+                .push(relative_path);
         }
     }
 
-    let languages = calculate_stats(&language_counts, total_files);
+    let languages = calculate_stats(&language_files, total_files);
 
     // Primary language must be a programming language, not markup/config
     let primary = languages
@@ -151,21 +160,31 @@ fn is_excluded_dir(entry: &ignore::DirEntry) -> bool {
     )
 }
 
-/// Calculates language statistics from raw counts.
+/// Calculates language statistics from file lists.
 ///
-/// Converts a HashMap of language counts into a sorted vector of LanguageStats,
+/// Converts a HashMap of language file lists into a sorted vector of LanguageStats,
 /// computing percentages and sorting by file count in descending order.
-fn calculate_stats(counts: &HashMap<String, usize>, total: usize) -> Vec<LanguageStats> {
-    let mut stats: Vec<_> = counts
+/// Files within each language are sorted for consistent output.
+fn calculate_stats(
+    language_files: &HashMap<String, Vec<PathBuf>>,
+    total: usize,
+) -> Vec<LanguageStats> {
+    let mut stats: Vec<_> = language_files
         .iter()
-        .map(|(lang, &count)| LanguageStats {
-            language: lang.clone(),
-            file_count: count,
-            percentage: if total > 0 {
-                (count as f64 / total as f64) * 100.0
-            } else {
-                0.0
-            },
+        .map(|(lang, files)| {
+            let count = files.len();
+            let mut sorted_files = files.clone();
+            sorted_files.sort();
+            LanguageStats {
+                language: lang.clone(),
+                file_count: count,
+                percentage: if total > 0 {
+                    (count as f64 / total as f64) * 100.0
+                } else {
+                    0.0
+                },
+                files: sorted_files,
+            }
         })
         .collect();
 
@@ -239,21 +258,29 @@ mod tests {
 
     #[test]
     fn test_percentage_calculation() {
-        let mut counts = HashMap::new();
-        counts.insert("Rust".to_string(), 7);
-        counts.insert("JavaScript".to_string(), 3);
+        let mut language_files = HashMap::new();
+        language_files.insert(
+            "Rust".to_string(),
+            (0..7).map(|i| PathBuf::from(format!("file{}.rs", i))).collect(),
+        );
+        language_files.insert(
+            "JavaScript".to_string(),
+            (0..3).map(|i| PathBuf::from(format!("file{}.js", i))).collect(),
+        );
 
-        let stats = calculate_stats(&counts, 10);
+        let stats = calculate_stats(&language_files, 10);
 
         assert_eq!(stats.len(), 2);
         // Should be sorted by count (Rust first)
         assert_eq!(stats[0].language, "Rust");
         assert_eq!(stats[0].file_count, 7);
         assert!((stats[0].percentage - 70.0).abs() < 0.01);
+        assert_eq!(stats[0].files.len(), 7);
 
         assert_eq!(stats[1].language, "JavaScript");
         assert_eq!(stats[1].file_count, 3);
         assert!((stats[1].percentage - 30.0).abs() < 0.01);
+        assert_eq!(stats[1].files.len(), 3);
     }
 
     #[test]
@@ -311,5 +338,51 @@ mod tests {
         let result = detect_languages(dir.path()).unwrap();
         // Should only count main.rs, not the file in generated/
         assert_eq!(result.total_files, 1);
+    }
+
+    #[test]
+    fn test_files_collected_per_language() {
+        let dir = TempDir::new().unwrap();
+
+        // Create a subdirectory
+        fs::create_dir(dir.path().join("src")).unwrap();
+
+        // Create Rust files
+        fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.path().join("src/lib.rs"), "pub fn foo() {}").unwrap();
+
+        // Create a JavaScript file
+        fs::write(dir.path().join("index.js"), "console.log('hi')").unwrap();
+
+        let result = detect_languages(dir.path()).unwrap();
+
+        // Find Rust stats
+        let rust_stats = result
+            .languages
+            .iter()
+            .find(|s| s.language == "Rust")
+            .expect("Rust should be detected");
+
+        // Verify Rust files are collected
+        assert_eq!(rust_stats.file_count, 2);
+        assert_eq!(rust_stats.files.len(), 2);
+
+        // Paths should be relative and sorted
+        assert!(rust_stats.files.contains(&PathBuf::from("main.rs")));
+        assert!(rust_stats.files.contains(&PathBuf::from("src/lib.rs")));
+
+        // Verify files are sorted
+        assert!(rust_stats.files[0] < rust_stats.files[1]);
+
+        // Find JavaScript stats
+        let js_stats = result
+            .languages
+            .iter()
+            .find(|s| s.language == "JavaScript")
+            .expect("JavaScript should be detected");
+
+        assert_eq!(js_stats.file_count, 1);
+        assert_eq!(js_stats.files.len(), 1);
+        assert_eq!(js_stats.files[0], PathBuf::from("index.js"));
     }
 }

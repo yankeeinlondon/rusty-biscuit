@@ -4,18 +4,20 @@ use sysinfo::{CpuRefreshKind, DiskKind, Disks, MemoryRefreshKind, RefreshKind, S
 use crate::Result;
 
 mod cpu;
+mod gpu;
 mod memory;
 mod os;
 mod storage;
 
-pub use cpu::CpuInfo;
+pub use cpu::{detect_simd, CpuInfo, SimdCapabilities};
+pub use gpu::{detect_gpus, GpuDeviceType, GpuInfo};
 pub use memory::MemoryInfo;
 pub use os::OsInfo;
 pub use storage::{StorageInfo, StorageKind};
 
 /// Complete hardware information.
 ///
-/// Aggregates operating system, CPU, memory, and storage information
+/// Aggregates operating system, CPU, memory, storage, and GPU information
 /// detected from the current system.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HardwareInfo {
@@ -27,12 +29,14 @@ pub struct HardwareInfo {
     pub memory: MemoryInfo,
     /// Storage devices (disks)
     pub storage: Vec<StorageInfo>,
+    /// GPU devices
+    pub gpus: Vec<GpuInfo>,
 }
 
 /// Detects hardware information from the current system.
 ///
 /// This function gathers operating system details, CPU specifications,
-/// memory statistics, and storage information using the sysinfo crate.
+/// memory statistics, storage information, and GPU devices.
 ///
 /// ## Examples
 ///
@@ -43,6 +47,7 @@ pub struct HardwareInfo {
 /// println!("OS: {} {}", hw.os.name, hw.os.version);
 /// println!("CPU: {} ({} cores)", hw.cpu.brand, hw.cpu.logical_cores);
 /// println!("Memory: {} GB total", hw.memory.total_bytes / (1024 * 1024 * 1024));
+/// println!("GPUs: {}", hw.gpus.len());
 /// ```
 ///
 /// ## Errors
@@ -80,6 +85,7 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
             .unwrap_or_default(),
         logical_cores: sys.cpus().len(),
         physical_cores: System::physical_core_count(),
+        simd: detect_simd(),
     };
 
     let memory = MemoryInfo {
@@ -106,11 +112,14 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
         })
         .collect();
 
+    let gpus = detect_gpus();
+
     Ok(HardwareInfo {
         os,
         cpu,
         memory,
         storage,
+        gpus,
     })
 }
 

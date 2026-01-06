@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
+ec4rs = "1"
 getifaddrs = "0.6.0"
 git2 = "0.20.3"
 hyperpolyglot = "0.1.7"
@@ -17,14 +18,8 @@ thiserror = "2.0"
 toml = "0.8"
 walkdir = "2.5"
 
-[dependencies.hardware-query]
-version = "0.2.1"
-features = ["gpu-all"]
-optional = true
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = "0.30"
 
 [dev-dependencies]
 tempfile = "3"
-
-[features]
-default = []
-gpu = ["hardware-query"]

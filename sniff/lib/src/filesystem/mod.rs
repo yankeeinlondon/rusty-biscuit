@@ -6,11 +6,13 @@ pub mod languages;
 pub mod git;
 pub mod monorepo;
 pub mod dependencies;
+pub mod formatting;
 
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
 pub use git::{GitInfo, RepoStatus, RemoteInfo, HostingProvider, CommitInfo, detect_git};
 pub use monorepo::{MonorepoInfo, MonorepoTool, PackageLocation, detect_monorepo};
 pub use dependencies::{PackageManager, DependencyReport, ManifestLocation, detect_dependencies};
+pub use formatting::{FormattingConfig, EditorConfigSection, detect_formatting};
 
 /// Complete filesystem analysis for a directory.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -23,6 +25,8 @@ pub struct FilesystemInfo {
     pub monorepo: Option<MonorepoInfo>,
     /// Dependency analysis
     pub dependencies: Option<DependencyReport>,
+    /// EditorConfig formatting configuration
+    pub formatting: Option<FormattingConfig>,
 }
 
 /// Detect all filesystem information for a directory.
@@ -31,11 +35,13 @@ pub fn detect_filesystem(root: &Path) -> Result<FilesystemInfo> {
     let git = detect_git(root)?;
     let monorepo = detect_monorepo(root)?;
     let dependencies = detect_dependencies(root).ok();
+    let formatting = detect_formatting(root).ok().flatten();
 
     Ok(FilesystemInfo {
         languages,
         git,
         monorepo,
         dependencies,
+        formatting,
     })
 }
