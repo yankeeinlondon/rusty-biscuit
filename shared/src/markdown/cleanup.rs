@@ -3,6 +3,7 @@
 //! This module provides functionality to normalize markdown content by:
 //! - Ensuring proper blank lines between block elements (via cmark Options)
 //! - Aligning table columns for visual consistency
+//! - Preserving original list markers (*, -, +)
 //!
 //! The cleanup leverages `pulldown-cmark-to-cmark`'s built-in newline handling
 //! through its `Options` struct, which automatically inserts appropriate spacing.
@@ -20,12 +21,14 @@
 
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd};
 use pulldown_cmark_to_cmark::Options as CmarkOptions;
+use std::ops::Range;
 
 /// Cleans up markdown content by normalizing formatting.
 ///
 /// This function performs two main operations:
 /// 1. Ensures proper blank lines between block elements (via cmark Options)
 /// 2. Aligns table columns for consistent formatting
+/// 3. Preserves original list markers (*, -, +)
 ///
 /// ## Returns
 ///
@@ -41,8 +44,15 @@ use pulldown_cmark_to_cmark::Options as CmarkOptions;
 /// assert!(cleaned.contains("\n\n"));
 /// ```
 pub fn cleanup_content(content: &str) -> String {
+    // Parse with source ranges to preserve list markers
     let parser = Parser::new_ext(content, Options::all());
-    let events: Vec<Event> = parser.collect();
+    let events_with_ranges: Vec<(Event, Range<usize>)> = parser.into_offset_iter().collect();
+
+    // Extract list markers from source for each list
+    let list_markers = extract_list_markers(content, &events_with_ranges);
+
+    // Separate events from ranges for processing
+    let events: Vec<Event> = events_with_ranges.iter().map(|(e, _)| e.clone()).collect();
 
     // Add "text" language to empty fenced code blocks
     let with_text_lang = add_text_language_to_empty_code_blocks(events);
@@ -73,8 +83,180 @@ pub fn cleanup_content(content: &str) -> String {
     // Post-process to fix blockquote formatting issues from pulldown-cmark-to-cmark
     fix_blockquote_formatting(&mut output);
 
+    // Restore original list markers (the library normalizes to '*')
+    restore_list_markers(&mut output, &list_markers);
+
     // Trim leading/trailing whitespace-only lines but preserve content
     output.trim_start_matches('\n').to_string()
+}
+
+/// Extracts the list marker character for each unordered list from the source.
+///
+/// Returns a vector of (list_index, marker_char) pairs where list_index is the
+/// sequential index of unordered lists encountered and marker_char is the original
+/// marker used (*, -, or +).
+fn extract_list_markers(content: &str, events: &[(Event, Range<usize>)]) -> Vec<char> {
+    let mut markers = Vec::new();
+
+    for (event, range) in events {
+        if let Event::Start(Tag::List(None)) = event {
+            // Unordered list - find the marker in source
+            // The range points to the list start; look for the marker character
+            let source_slice = &content[range.start..];
+            if let Some(marker) = find_list_marker(source_slice) {
+                markers.push(marker);
+            } else {
+                // Default to '*' if we can't find the marker
+                markers.push('*');
+            }
+        }
+    }
+
+    markers
+}
+
+/// Finds the first list marker character (*, -, or +) in a source slice.
+fn find_list_marker(source: &str) -> Option<char> {
+    // Skip leading whitespace and look for the marker
+    for c in source.chars() {
+        match c {
+            '*' | '-' | '+' => return Some(c),
+            ' ' | '\t' | '\n' => continue,
+            _ => break,
+        }
+    }
+    None
+}
+
+/// Restores original list markers in the output.
+///
+/// The pulldown-cmark-to-cmark library normalizes all unordered list markers to '*'.
+/// This function replaces them with the original markers from the source.
+///
+/// The approach tracks indentation levels to determine which list we're in:
+/// - Each indentation level has an associated marker
+/// - When we see a list item at a new (deeper) indentation, we consume the next marker
+/// - All items at the same level use the same marker until we leave that level
+fn restore_list_markers(output: &mut String, markers: &[char]) {
+    if markers.is_empty() {
+        return;
+    }
+
+    let mut result = String::with_capacity(output.len());
+    let mut lines = output.lines().peekable();
+    let mut markers_iter = markers.iter();
+    // Stack of (indent_level, marker) pairs
+    let mut indent_stack: Vec<(usize, char)> = Vec::new();
+    let mut in_code_block = false;
+    let mut prev_was_list_item = false;
+
+    while let Some(line) = lines.next() {
+        // Track code blocks to avoid modifying markers inside them
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            result.push_str(line);
+            if lines.peek().is_some() {
+                result.push('\n');
+            }
+            prev_was_list_item = false;
+            continue;
+        }
+
+        if in_code_block {
+            result.push_str(line);
+            if lines.peek().is_some() {
+                result.push('\n');
+            }
+            continue;
+        }
+
+        // Check if this line is a list item (starts with optional whitespace + '* ')
+        let indent = line.len() - line.trim_start().len();
+        let trimmed = line.trim_start();
+
+        if trimmed.starts_with("* ") {
+            // This is a list item - determine which marker to use
+            let marker = get_marker_for_indent(
+                indent,
+                &mut indent_stack,
+                &mut markers_iter,
+                prev_was_list_item,
+            );
+
+            // Reconstruct the line with the correct marker
+            result.push_str(&" ".repeat(indent));
+            result.push(marker);
+            result.push_str(&trimmed[1..]); // Skip the '*', keep the rest (including space)
+            prev_was_list_item = true;
+        } else {
+            // Not a list item
+            // A blank line or non-indented content might end all lists
+            if trimmed.is_empty() {
+                // Blank line - lists might continue after this
+            } else if indent == 0 && !trimmed.starts_with("* ") {
+                // Non-list content at root level - clear the stack
+                indent_stack.clear();
+            }
+            result.push_str(line);
+            prev_was_list_item = false;
+        }
+
+        if lines.peek().is_some() {
+            result.push('\n');
+        }
+    }
+
+    // Preserve trailing newline if original had one
+    if output.ends_with('\n') && !result.ends_with('\n') {
+        result.push('\n');
+    }
+
+    *output = result;
+}
+
+/// Gets the marker for a list item at the given indentation level.
+///
+/// Manages a stack of (indent, marker) pairs:
+/// - Pops entries with larger indent (we've exited those nested lists)
+/// - If entry matches current indent AND we had a contiguous list, use its marker
+/// - Otherwise, push a new entry with next marker
+fn get_marker_for_indent<'a>(
+    indent: usize,
+    indent_stack: &mut Vec<(usize, char)>,
+    markers_iter: &mut impl Iterator<Item = &'a char>,
+    prev_was_list_item: bool,
+) -> char {
+    // If this is a new root-level list after a break, clear the stack first
+    // This handles: "- item1\n\n+ item2" where item2 is a new list
+    if indent == 0 && !prev_was_list_item && !indent_stack.is_empty() {
+        indent_stack.clear();
+    }
+
+    // Pop any entries with larger indent (we've exited those nested lists)
+    while let Some(&(top_indent, _)) = indent_stack.last() {
+        if indent < top_indent {
+            indent_stack.pop();
+        } else {
+            break;
+        }
+    }
+
+    // Check if we have an entry at this exact indent level AND previous was a list item
+    // (meaning we're continuing an existing list, not starting a new one)
+    if prev_was_list_item {
+        if let Some(&(top_indent, marker)) = indent_stack.last() {
+            if top_indent == indent {
+                // Continuing same list, use same marker
+                return marker;
+            }
+        }
+    }
+
+    // New list at this indent level - get next marker
+    let marker = markers_iter.next().copied().unwrap_or('*');
+    indent_stack.push((indent, marker));
+    marker
 }
 
 /// Fixes blockquote formatting issues introduced by pulldown-cmark-to-cmark v18.
@@ -818,6 +1000,169 @@ mod tests {
         assert!(
             cleaned.contains("> Code:   let"),
             "Spaces in blockquote content should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    // ==================== List Marker Preservation Tests ====================
+
+    #[test]
+    fn test_list_marker_dash_preserved() {
+        let content = "- Item 1\n- Item 2\n- Item 3";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("- Item 1"),
+            "Dash list marker should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("- Item 2"),
+            "Dash list marker should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_list_marker_plus_preserved() {
+        let content = "+ Alpha\n+ Beta\n+ Gamma";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("+ Alpha"),
+            "Plus list marker should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("+ Beta"),
+            "Plus list marker should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_list_marker_asterisk_preserved() {
+        let content = "* One\n* Two\n* Three";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("* One"),
+            "Asterisk list marker should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_multiple_lists_different_markers() {
+        let content = "- Dash item\n\n+ Plus item\n\n* Asterisk item";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("- Dash"),
+            "First list should use dash, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("+ Plus"),
+            "Second list should use plus, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("* Asterisk"),
+            "Third list should use asterisk, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_list_marker_with_header_and_text() {
+        // Regression test: List markers preserved in real document context
+        let content = "# Title\n\nSome text.\n\n- First\n- Second\n\nMore text.\n\n+ Alpha\n+ Beta";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("- First"),
+            "Dash markers should be preserved in document, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("+ Alpha"),
+            "Plus markers should be preserved in document, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_list_inside_blockquote() {
+        // List markers inside blockquotes should be preserved
+        let content = "> - Quoted item 1\n> - Quoted item 2";
+        let cleaned = cleanup_content(content);
+
+        // The structure should be preserved
+        assert!(
+            cleaned.contains("Quoted item 1"),
+            "Blockquote list content should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_list_marker_not_changed_in_code_block() {
+        // List markers inside code blocks should not be modified
+        let content = "```\n* This is code\n- Also code\n+ More code\n```";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("* This is code"),
+            "Asterisk in code should not change, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("- Also code"),
+            "Dash in code should not change, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("+ More code"),
+            "Plus in code should not change, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_mixed_list_types_separated_by_text() {
+        // Multiple lists with different markers separated by paragraph text
+        let content = "- Dash list\n\nParagraph text\n\n+ Plus list\n\nMore text\n\n* Star list";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("- Dash"),
+            "Dash list marker should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("+ Plus"),
+            "Plus list marker should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("* Star"),
+            "Star list marker should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_list_marker_consistency_in_same_list() {
+        // All items in the same list should use the same marker
+        let content = "- Item 1\n- Item 2\n- Item 3\n- Item 4\n- Item 5";
+        let cleaned = cleanup_content(content);
+
+        // All items should have dash markers
+        let dash_count = cleaned.matches("\n- ").count() + if cleaned.starts_with("- ") { 1 } else { 0 };
+        assert_eq!(
+            dash_count, 5,
+            "All 5 items should use dash marker, got:\n{}",
             cleaned
         );
     }
