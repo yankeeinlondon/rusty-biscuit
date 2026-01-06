@@ -71,11 +71,6 @@ struct Cli {
     #[arg(long)]
     mermaid: bool,
 
-    /// Display mermaid diagrams as text (code blocks) instead of images.
-    /// Useful for terminals that don't support inline images.
-    #[arg(long)]
-    mermaid_alt: bool,
-
     /// Increase verbosity (-v INFO, -vv DEBUG, -vvv TRACE, -vvvv TRACE with file/line)
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
     verbose: u8,
@@ -199,11 +194,7 @@ fn main() -> Result<()> {
         options.color_mode = color_mode;
         // For HTML output, default to interactive mermaid diagrams
         // (browsers can render them natively via mermaid.js)
-        options.mermaid_mode = if cli.mermaid_alt {
-            MermaidMode::Text
-        } else {
-            MermaidMode::Image
-        };
+        options.mermaid_mode = MermaidMode::Image;
 
         let html = md.as_html(options).context("Failed to convert to HTML")?;
         println!("{}", html);
@@ -216,11 +207,7 @@ fn main() -> Result<()> {
         options.code_theme = code_theme;
         options.color_mode = color_mode;
         // For HTML output, default to interactive mermaid diagrams
-        options.mermaid_mode = if cli.mermaid_alt {
-            MermaidMode::Text
-        } else {
-            MermaidMode::Image
-        };
+        options.mermaid_mode = MermaidMode::Image;
 
         let html = md.as_html(options).context("Failed to convert to HTML")?;
         let temp_path = std::env::temp_dir().join("md-preview.html");
@@ -245,8 +232,6 @@ fn main() -> Result<()> {
     options.render_images = !cli.no_images;
     options.mermaid_mode = if cli.mermaid {
         MermaidMode::Image
-    } else if cli.mermaid_alt {
-        MermaidMode::Text
     } else {
         MermaidMode::Off
     };
