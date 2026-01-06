@@ -100,3 +100,82 @@ fn test_double_verbose_flag() {
         .assert()
         .success();
 }
+
+// === Include-only mode tests ===
+
+#[test]
+fn test_hardware_include_only_flag() {
+    // --hardware should output only hardware section
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .arg("--hardware")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("=== Hardware ==="))
+        .stdout(predicate::str::contains("=== Network ===").not())
+        .stdout(predicate::str::contains("=== Filesystem ===").not());
+}
+
+#[test]
+fn test_network_include_only_flag() {
+    // --network should output only network section
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .arg("--network")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("=== Network ==="))
+        .stdout(predicate::str::contains("=== Hardware ===").not())
+        .stdout(predicate::str::contains("=== Filesystem ===").not());
+}
+
+#[test]
+fn test_filesystem_include_only_flag() {
+    // --filesystem should output only filesystem section
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .arg("--filesystem")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("=== Filesystem ==="))
+        .stdout(predicate::str::contains("=== Hardware ===").not())
+        .stdout(predicate::str::contains("=== Network ===").not());
+}
+
+#[test]
+fn test_combined_include_flags() {
+    // --hardware --network should output both sections, skip filesystem
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .args(["--hardware", "--network"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("=== Hardware ==="))
+        .stdout(predicate::str::contains("=== Network ==="))
+        .stdout(predicate::str::contains("=== Filesystem ===").not());
+}
+
+#[test]
+fn test_include_mode_ignores_skip_flags() {
+    // In include-only mode, skip flags should be ignored
+    // --hardware --skip-network should still output only hardware (skip ignored)
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .args(["--hardware", "--skip-network"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("=== Hardware ==="))
+        .stdout(predicate::str::contains("=== Network ===").not());
+}
+
+#[test]
+fn test_include_mode_json_output() {
+    // Include-only mode should work with JSON output
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .args(["--hardware", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"hardware\""))
+        .stdout(predicate::str::contains("\"interfaces\": []")); // network skipped
+}
