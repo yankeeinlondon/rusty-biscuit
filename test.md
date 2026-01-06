@@ -77,7 +77,7 @@ The **strikethrough** feature -- introduced in GFM -- uses `~~` around a block o
 
 ## Markdown Highlighting
 
-Unlike the strikethrough functionality, the **highlight** feature for Markdown lives as a less formal spec but it is supported in popular apps like Obsidian and Typora. It is also being considered for [**CommonMark**](https://commonmark.org "style:'text: red'").
+Unlike the strikethrough functionality, the **highlight** feature for Markdown lives as a less formal spec but it is supported in popular apps like Obsidian and Typora. It is also being considered for [**CommonMark**](https://commonmark.org "style='color: green'").
 
 - this emerging standard uses the character sequence `==` to wrap text and the wrapped text is then given a different background color to clearly ==separate it from== the rest of the text.
 
@@ -118,3 +118,8 @@ flowchart LR
     C -->|Two| E[iPhone]
     C -->|Three| F[fa:fa-car Car]
 ```
+
+- how cool is that?
+- notice the icon? Shebang!
+
+
