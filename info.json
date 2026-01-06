@@ -16,15 +16,15 @@
     },
     "memory": {
       "total_bytes": 137438953472,
-      "available_bytes": 16716578816,
-      "used_bytes": 89884868608
+      "available_bytes": 8695742464,
+      "used_bytes": 90146832384
     },
     "storage": [
       {
         "name": "Macintosh HD",
         "mount_point": "/",
         "total_bytes": 3996329328640,
-        "available_bytes": 506262759104,
+        "available_bytes": 487938152128,
         "file_system": "apfs",
         "kind": "Ssd",
         "is_removable": false
@@ -33,7 +33,7 @@
         "name": "Macintosh HD",
         "mount_point": "/System/Volumes/Data",
         "total_bytes": 3996329328640,
-        "available_bytes": 506262857408,
+        "available_bytes": 487938152128,
         "file_system": "apfs",
         "kind": "Ssd",
         "is_removable": false
@@ -42,7 +42,7 @@
         "name": "coding",
         "mount_point": "/Volumes/coding",
         "total_bytes": 3996329328640,
-        "available_bytes": 506262857408,
+        "available_bytes": 487938152128,
         "file_system": "apfs",
         "kind": "Ssd",
         "is_removable": false
@@ -60,7 +60,7 @@
         "name": "Big Labowski",
         "mount_point": "/Volumes/Big Labowski",
         "total_bytes": 6000764780544,
-        "available_bytes": 809459879936,
+        "available_bytes": 809455853568,
         "file_system": "apfs",
         "kind": "Unknown",
         "is_removable": true
@@ -127,7 +127,7 @@
         "mac_address": null,
         "ipv4_addresses": [],
         "ipv6_addresses": [
-          "fe80::74ba:7fff:fe6f:776f"
+          "fe80::60ae:60ff:fef3:15d8"
         ],
         "flags": {
           "is_up": true,
@@ -270,7 +270,7 @@
         "mac_address": null,
         "ipv4_addresses": [],
         "ipv6_addresses": [
-          "fe80::74ba:7fff:fe6f:776f"
+          "fe80::60ae:60ff:fef3:15d8"
         ],
         "flags": {
           "is_up": true,
@@ -449,67 +449,67 @@
       "languages": [
         {
           "language": "Rust",
-          "file_count": 111,
-          "percentage": 44.047619047619044
+          "file_count": 117,
+          "percentage": 43.333333333333336
         },
         {
           "language": "Markdown",
-          "file_count": 97,
-          "percentage": 38.492063492063494
+          "file_count": 102,
+          "percentage": 37.77777777777778
         },
         {
           "language": "TOML",
           "file_count": 15,
-          "percentage": 5.952380952380952
+          "percentage": 5.555555555555555
+        },
+        {
+          "language": "JSON",
+          "file_count": 5,
+          "percentage": 1.8518518518518516
+        },
+        {
+          "language": "HTML",
+          "file_count": 2,
+          "percentage": 0.7407407407407408
+        },
+        {
+          "language": "SVG",
+          "file_count": 2,
+          "percentage": 0.7407407407407408
         },
         {
           "language": "XML",
           "file_count": 2,
-          "percentage": 0.7936507936507936
-        },
-        {
-          "language": "HTML",
-          "file_count": 1,
-          "percentage": 0.3968253968253968
-        },
-        {
-          "language": "JSON",
-          "file_count": 1,
-          "percentage": 0.3968253968253968
+          "percentage": 0.7407407407407408
         },
         {
           "language": "Text",
           "file_count": 1,
-          "percentage": 0.3968253968253968
-        },
-        {
-          "language": "SVG",
-          "file_count": 1,
-          "percentage": 0.3968253968253968
+          "percentage": 0.3703703703703704
         },
         {
           "language": "Vue",
           "file_count": 1,
-          "percentage": 0.3968253968253968
+          "percentage": 0.3703703703703704
         }
       ],
       "primary": "Rust",
-      "total_files": 252
+      "total_files": 270
     },
     "git": {
       "repo_root": "/Volumes/coding/personal/dockhand/",
       "current_branch": "main",
       "head_commit": {
-        "sha": "6c61650ddac4768192bd819e6d881ac41fdfc8d0",
-        "message": "feat(shared): add mermaid diagram theming and rendering module\n\nImplement comprehensive Mermaid diagram support with:\n- MermaidTheme struct with 40+ color properties and JSON parsing\n- Static light/dark/neutral themes with WCAG 2.1 AA compliance\n- Mermaid struct with builder pattern for diagram configuration\n- XXH64 content hashing for diagram caching\n- HTML rendering with mermaid.js CDN, CSS variables, and ARIA attributes\n- Terminal rendering via mermaid.ink service with resvg PNG conversion\n- CLI flags (--mermaid, --mermaid-alt) for md binary\n- 90 tests (66 unit, 24 integration) with insta snapshots\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>",
+        "sha": "f21b86caa53dece7c19c945971abe0aa3d1aa278",
+        "message": "refactor(shared): fix DRY violations and improve code organization\n\nAddress recommendations from code review (20260104):\n\n- Add AnsiBuilder utility for composable ANSI escape sequences\n- Consolidate 5 lazy_static provider tables into unified ProviderConfig\n- Add HtmlExtractor helper to reduce HTML extraction duplication\n- Add maybe_attr helper for Link attribute building\n- Move unicode_width import to module level (remove 7 redundant imports)\n- Create generic adjust_background function for color utilities\n- Add named constants for terminal color depth detection\n- Include code review document for reference\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>",
         "author": "Ken Snyder",
-        "timestamp": "2026-01-04T04:23:27Z"
+        "timestamp": "2026-01-05T19:58:35Z"
       },
       "status": {
         "is_dirty": true,
         "staged_count": 0,
-        "unstaged_count": 16,
-        "untracked_count": 3
+        "unstaged_count": 13,
+        "untracked_count": 2
       },
       "remotes": []
     },
