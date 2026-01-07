@@ -3,6 +3,7 @@ use std::hash::Hash;
 use std::{collections::HashMap, fs, path::Path};
 
 use crate::primitives::runnable::Runnable;
+use crate::primitives::state::PipelineState;
 use crate::{rigging::models::model_capability::ModelCapability, utils::datetime::Epoch};
 
 /// Errors that can occur when creating a Prompt from input data.
@@ -339,15 +340,38 @@ impl<V: Serialize + DeserializeOwned + Hash + Eq> TryFrom<serde_json::Value> for
     }
 }
 
-impl<V: Serialize + Hash + Eq> Runnable<V> for Prompt<V> {
+impl<V> Runnable for Prompt<V>
+where
+    V: Serialize + Hash + Eq + Send + Sync + Clone + 'static,
+{
+    /// The output type is `String` representing the LLM's text response.
+    ///
+    /// For structured responses, use the `structured_response` field to define
+    /// a schema and parse the response accordingly.
+    type Output = String;
+
     /// Executing a `Prompt` will:
     ///
     /// 1. Identify the concrete `ProviderModel` to use
     /// 2. Call the LLM model with the prompt; providing tools
     ///    a system prompt, and structured output instructions
     ///    if they were added.
-    fn execute(&self) -> V {
-        todo!()
+    fn execute(&self, _state: &mut PipelineState) -> Self::Output {
+        todo!("LLM execution not yet implemented")
+    }
+
+    fn execute_readonly(&self, _state: &PipelineState) -> Self::Output {
+        // Prompts can execute in read-only mode since they don't need to write state
+        todo!("LLM execution not yet implemented")
+    }
+
+    fn name(&self) -> &str {
+        "Prompt"
+    }
+
+    fn supports_readonly(&self) -> bool {
+        // Prompts can run in parallel since they just call external LLMs
+        true
     }
 }
 
