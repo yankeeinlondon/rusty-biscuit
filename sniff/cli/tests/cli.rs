@@ -52,32 +52,35 @@ fn test_base_dir_flag() {
 
 #[test]
 fn test_skip_hardware_flag() {
+    // Skipped sections are omitted from JSON output entirely
     Command::cargo_bin("sniff")
         .unwrap()
         .args(["--skip-hardware", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"name\": \"\""));
+        .stdout(predicate::str::contains("\"hardware\"").not());
 }
 
 #[test]
 fn test_skip_network_flag() {
+    // Skipped sections are omitted from JSON output entirely
     Command::cargo_bin("sniff")
         .unwrap()
         .args(["--skip-network", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"interfaces\": []"));
+        .stdout(predicate::str::contains("\"network\"").not());
 }
 
 #[test]
 fn test_skip_filesystem_flag() {
+    // Skipped sections are omitted from JSON output entirely
     Command::cargo_bin("sniff")
         .unwrap()
         .args(["--skip-filesystem", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"filesystem\": null"));
+        .stdout(predicate::str::contains("\"filesystem\"").not());
 }
 
 #[test]
@@ -171,11 +174,75 @@ fn test_include_mode_ignores_skip_flags() {
 #[test]
 fn test_include_mode_json_output() {
     // Include-only mode should work with JSON output
+    // Skipped sections are omitted entirely
     Command::cargo_bin("sniff")
         .unwrap()
         .args(["--hardware", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"hardware\""))
-        .stdout(predicate::str::contains("\"interfaces\": []")); // network skipped
+        .stdout(predicate::str::contains("\"network\"").not()); // network skipped
+}
+
+// === Regression tests for JSON output filtering ===
+// These tests ensure skipped sections are completely absent from JSON output,
+// not just empty. Bug: --hardware flag was outputting empty network/filesystem data.
+
+#[test]
+fn test_hardware_only_json_excludes_all_other_sections() {
+    // Regression test: --hardware should output ONLY hardware in JSON
+    // Bug: Previously output `"network": { "interfaces": [], ... }` and `"filesystem": null`
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .args(["--hardware", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"hardware\""))
+        .stdout(predicate::str::contains("\"network\"").not())
+        .stdout(predicate::str::contains("\"filesystem\"").not())
+        .stdout(predicate::str::contains("\"interfaces\"").not())
+        .stdout(predicate::str::contains("\"permission_denied\"").not());
+}
+
+#[test]
+fn test_network_only_json_excludes_all_other_sections() {
+    // Regression test: --network should output ONLY network in JSON
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .args(["--network", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"network\""))
+        .stdout(predicate::str::contains("\"hardware\"").not())
+        .stdout(predicate::str::contains("\"filesystem\"").not())
+        .stdout(predicate::str::contains("\"os\"").not())
+        .stdout(predicate::str::contains("\"cpu\"").not());
+}
+
+#[test]
+fn test_filesystem_only_json_excludes_all_other_sections() {
+    // Regression test: --filesystem should output ONLY filesystem in JSON
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .args(["--filesystem", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"filesystem\""))
+        .stdout(predicate::str::contains("\"hardware\"").not())
+        .stdout(predicate::str::contains("\"network\"").not())
+        .stdout(predicate::str::contains("\"interfaces\"").not())
+        .stdout(predicate::str::contains("\"os\"").not());
+}
+
+#[test]
+fn test_hardware_network_json_excludes_filesystem() {
+    // Regression test: --hardware --network should exclude filesystem
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .args(["--hardware", "--network", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"hardware\""))
+        .stdout(predicate::str::contains("\"network\""))
+        .stdout(predicate::str::contains("\"filesystem\"").not());
 }

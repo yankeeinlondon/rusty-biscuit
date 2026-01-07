@@ -14,11 +14,15 @@ pub use filesystem::FilesystemInfo;
 /// Complete system detection result.
 ///
 /// Contains hardware, network, and filesystem information gathered
-/// by the sniff library.
+/// by the sniff library. All fields are optional to allow partial
+/// detection when using `--hardware`, `--network`, or `--filesystem` flags.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SniffResult {
-    pub hardware: HardwareInfo,
-    pub network: NetworkInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hardware: Option<HardwareInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network: Option<NetworkInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub filesystem: Option<FilesystemInfo>,
 }
 
@@ -98,7 +102,9 @@ impl SniffConfig {
 /// use sniff_lib::detect;
 ///
 /// let result = detect().unwrap();
-/// println!("OS: {}", result.hardware.os.name);
+/// if let Some(hw) = result.hardware {
+///     println!("OS: {}", hw.os.name);
+/// }
 /// ```
 pub fn detect() -> Result<SniffResult> {
     detect_with_config(SniffConfig::default())
@@ -120,17 +126,17 @@ pub fn detect() -> Result<SniffResult> {
 /// ```
 pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
     let hardware = if config.skip_hardware {
-        HardwareInfo::default()
+        None
     } else if config.include_cpu_usage {
-        hardware::detect_hardware_with_usage()?
+        Some(hardware::detect_hardware_with_usage()?)
     } else {
-        hardware::detect_hardware()?
+        Some(hardware::detect_hardware()?)
     };
 
     let network = if config.skip_network {
-        NetworkInfo::default()
+        None
     } else {
-        network::detect_network()?
+        Some(network::detect_network()?)
     };
 
     let filesystem = if config.skip_filesystem {
@@ -156,17 +162,17 @@ mod tests {
     }
 
     #[test]
-    fn test_skip_hardware_returns_default() {
+    fn test_skip_hardware_returns_none() {
         let config = SniffConfig::new().skip_hardware();
         let result = detect_with_config(config).unwrap();
-        assert!(result.hardware.os.name.is_empty());
+        assert!(result.hardware.is_none());
     }
 
     #[test]
-    fn test_skip_network_returns_default() {
+    fn test_skip_network_returns_none() {
         let config = SniffConfig::new().skip_network();
         let result = detect_with_config(config).unwrap();
-        assert!(result.network.interfaces.is_empty());
+        assert!(result.network.is_none());
     }
 
     #[test]

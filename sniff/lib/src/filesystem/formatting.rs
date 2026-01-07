@@ -126,26 +126,22 @@ pub fn detect_formatting(root: &Path) -> Result<Option<FormattingConfig>> {
     Ok(Some(config))
 }
 
-/// Searches for `.editorconfig` in the given directory and its parents.
-fn find_editorconfig(start: &Path) -> Option<PathBuf> {
-    let mut current = if start.is_file() {
-        start.parent()?.to_path_buf()
+/// Searches for `.editorconfig` in the given directory only.
+///
+/// Unlike standard EditorConfig behavior (which traverses parent directories),
+/// this function only checks the specified root directory. This is appropriate
+/// for repository analysis where we want to report only on configs within the
+/// repo, not configs from parent directories outside the repo.
+fn find_editorconfig(root: &Path) -> Option<PathBuf> {
+    let dir = if root.is_file() {
+        root.parent()?
     } else {
-        start.to_path_buf()
+        root
     };
 
-    loop {
-        let config_path = current.join(".editorconfig");
-        if config_path.exists() {
-            return Some(config_path);
-        }
-
-        match current.parent() {
-            Some(parent) if parent != current => {
-                current = parent.to_path_buf();
-            }
-            _ => break,
-        }
+    let config_path = dir.join(".editorconfig");
+    if config_path.exists() {
+        return Some(config_path);
     }
 
     None
@@ -536,11 +532,15 @@ indent_size = 2
     }
 
     #[test]
-    fn test_find_editorconfig_in_parent() {
+    fn test_does_not_search_parent_directories() {
+        // Regression test: formatting detection should only look in the specified
+        // directory, not traverse to parent directories. This prevents reporting
+        // on .editorconfig files outside the repository root.
         let parent = TempDir::new().unwrap();
         let child = parent.path().join("subdir");
         fs::create_dir(&child).unwrap();
 
+        // Put .editorconfig in parent, not in child
         let editorconfig_path = parent.path().join(".editorconfig");
         fs::write(
             &editorconfig_path,
@@ -553,15 +553,30 @@ indent_style = tab
         )
         .unwrap();
 
+        // When searching from child directory, should NOT find parent's config
         let result = detect_formatting(&child).unwrap();
+        assert!(result.is_none(), "Should not find .editorconfig in parent directory");
+    }
+
+    #[test]
+    fn test_finds_editorconfig_in_same_directory() {
+        let dir = TempDir::new().unwrap();
+        let editorconfig_path = dir.path().join(".editorconfig");
+        fs::write(
+            &editorconfig_path,
+            r#"
+root = true
+
+[*]
+indent_style = tab
+"#,
+        )
+        .unwrap();
+
+        let result = detect_formatting(dir.path()).unwrap();
         assert!(result.is_some());
 
         let config = result.unwrap();
-        // Canonicalize both paths to handle /private/var vs /var on macOS
-        assert_eq!(
-            config.config_path.canonicalize().unwrap(),
-            editorconfig_path.canonicalize().unwrap()
-        );
         assert_eq!(config.sections[0].indent_style, Some("tab".to_string()));
     }
 

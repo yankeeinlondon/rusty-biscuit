@@ -10,7 +10,7 @@ mod os;
 mod storage;
 
 pub use cpu::{detect_simd, CpuInfo, SimdCapabilities};
-pub use gpu::{detect_gpus, GpuDeviceType, GpuInfo};
+pub use gpu::{detect_gpus, GpuCapabilities, GpuDeviceType, GpuInfo};
 pub use memory::MemoryInfo;
 pub use os::OsInfo;
 pub use storage::{StorageInfo, StorageKind};

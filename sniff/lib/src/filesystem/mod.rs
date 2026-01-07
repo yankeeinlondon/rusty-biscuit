@@ -11,7 +11,7 @@ pub mod formatting;
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
 pub use git::{GitInfo, RepoStatus, RemoteInfo, HostingProvider, CommitInfo, detect_git};
 pub use monorepo::{MonorepoInfo, MonorepoTool, PackageLocation, detect_monorepo};
-pub use dependencies::{PackageManager, DependencyReport, ManifestLocation, detect_dependencies};
+pub use dependencies::{PackageManager, DependencyReport, ManifestLocation, DependencyEntry, DependencyKind, PackageDependencies, detect_dependencies};
 pub use formatting::{FormattingConfig, EditorConfigSection, detect_formatting};
 
 /// Complete filesystem analysis for a directory.

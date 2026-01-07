@@ -53,55 +53,54 @@ pub fn print_text(result: &SniffResult, verbose: u8, include_only_mode: bool) {
         .and_then(|fs| fs.git.as_ref())
         .map(|git| git.repo_root.as_path());
 
-    // Determine which sections have content
-    let has_hardware = !result.hardware.os.name.is_empty();
-    let has_network = !result.network.interfaces.is_empty() || result.network.permission_denied;
-    let has_filesystem = result.filesystem.is_some();
-
-    // Print hardware section if available
-    if has_hardware {
-        print_hardware_section(result, verbose, repo_root);
+    // Print hardware section if present
+    if let Some(ref hardware) = result.hardware {
+        print_hardware_section(hardware, verbose, repo_root);
     }
 
-    // Print network section if available
-    if has_network {
-        print_network_section(result);
+    // Print network section if present
+    if let Some(ref network) = result.network {
+        print_network_section(network);
     }
 
-    // Print filesystem section if available
-    if has_filesystem {
-        print_filesystem_section(result, verbose, repo_root);
+    // Print filesystem section if present
+    if let Some(ref filesystem) = result.filesystem {
+        print_filesystem_section(filesystem, verbose, repo_root);
     }
 }
 
-fn print_hardware_section(result: &SniffResult, verbose: u8, repo_root: Option<&Path>) {
+fn print_hardware_section(
+    hardware: &sniff_lib::HardwareInfo,
+    verbose: u8,
+    repo_root: Option<&Path>,
+) {
     println!("=== Hardware ===");
 
     // Prefer long_version if available, otherwise fall back to name + version
-    if let Some(ref long_ver) = result.hardware.os.long_version {
+    if let Some(ref long_ver) = hardware.os.long_version {
         println!("OS: {}", long_ver);
     } else {
-        println!("OS: {} {}", result.hardware.os.name, result.hardware.os.version);
+        println!("OS: {} {}", hardware.os.name, hardware.os.version);
     }
-    if let Some(ref distro) = result.hardware.os.distribution {
+    if let Some(ref distro) = hardware.os.distribution {
         println!("Distribution: {}", distro);
     }
-    println!("Kernel: {}", result.hardware.os.kernel);
-    println!("Architecture: {}", result.hardware.os.arch);
-    println!("Hostname: {}", result.hardware.os.hostname);
+    println!("Kernel: {}", hardware.os.kernel);
+    println!("Architecture: {}", hardware.os.arch);
+    println!("Hostname: {}", hardware.os.hostname);
     println!();
 
     println!(
         "CPU: {} ({} logical cores)",
-        result.hardware.cpu.brand, result.hardware.cpu.logical_cores
+        hardware.cpu.brand, hardware.cpu.logical_cores
     );
-    if let Some(physical) = result.hardware.cpu.physical_cores {
+    if let Some(physical) = hardware.cpu.physical_cores {
         println!("Physical cores: {}", physical);
     }
 
     // Print SIMD capabilities at verbose level 1+
     if verbose > 0 {
-        let simd = &result.hardware.cpu.simd;
+        let simd = &hardware.cpu.simd;
         let mut caps = Vec::new();
         if simd.avx512f {
             caps.push("AVX-512");
@@ -126,18 +125,18 @@ fn print_hardware_section(result: &SniffResult, verbose: u8, repo_root: Option<&
     println!();
 
     println!("Memory:");
-    println!("  Total: {}", format_bytes(result.hardware.memory.total_bytes));
+    println!("  Total: {}", format_bytes(hardware.memory.total_bytes));
     println!(
         "  Available: {}",
-        format_bytes(result.hardware.memory.available_bytes)
+        format_bytes(hardware.memory.available_bytes)
     );
-    println!("  Used: {}", format_bytes(result.hardware.memory.used_bytes));
+    println!("  Used: {}", format_bytes(hardware.memory.used_bytes));
     println!();
 
     // Print GPU info if available
-    if !result.hardware.gpus.is_empty() {
+    if !hardware.gpus.is_empty() {
         println!("GPUs:");
-        for gpu in &result.hardware.gpus {
+        for gpu in &hardware.gpus {
             let vendor_str = gpu.vendor.as_deref().unwrap_or("Unknown");
             println!("  {} ({}, {})", gpu.name, vendor_str, gpu.backend);
             if verbose > 0 {
@@ -145,13 +144,45 @@ fn print_hardware_section(result: &SniffResult, verbose: u8, repo_root: Option<&
                     println!("    Memory: {}", format_bytes(mem));
                 }
                 println!("    Type: {:?}", gpu.device_type);
+                if let Some(ref family) = gpu.metal_family {
+                    println!("    Metal Family: {}", family);
+                }
+                if gpu.is_headless {
+                    println!("    Headless: yes");
+                }
+                if gpu.is_removable {
+                    println!("    Removable: yes (eGPU)");
+                }
+            }
+            if verbose > 1 {
+                // Show capabilities at -vv
+                let caps = &gpu.capabilities;
+                let mut cap_list = Vec::new();
+                if caps.raytracing {
+                    cap_list.push("Raytracing");
+                }
+                if caps.mesh_shaders {
+                    cap_list.push("Mesh Shaders");
+                }
+                if caps.unified_memory {
+                    cap_list.push("Unified Memory");
+                }
+                if caps.dynamic_libraries {
+                    cap_list.push("Dynamic Libraries");
+                }
+                if !cap_list.is_empty() {
+                    println!("    Capabilities: {}", cap_list.join(", "));
+                }
+                if let Some(max_buf) = gpu.max_buffer_bytes {
+                    println!("    Max Buffer: {}", format_bytes(max_buf));
+                }
             }
         }
         println!();
     }
 
     println!("Storage:");
-    for disk in &result.hardware.storage {
+    for disk in &hardware.storage {
         let mount_str = relative_path(&disk.mount_point, repo_root);
         let kind_str = match disk.kind {
             sniff_lib::hardware::StorageKind::Ssd => "SSD",
@@ -174,16 +205,16 @@ fn print_hardware_section(result: &SniffResult, verbose: u8, repo_root: Option<&
     println!();
 }
 
-fn print_network_section(result: &SniffResult) {
+fn print_network_section(network: &sniff_lib::NetworkInfo) {
     println!("=== Network ===");
-    if result.network.permission_denied {
+    if network.permission_denied {
         println!("Permission denied - unable to enumerate interfaces");
     } else {
-        if let Some(ref primary) = result.network.primary_interface {
+        if let Some(ref primary) = network.primary_interface {
             println!("Primary interface: {}", primary);
         }
-        println!("Interfaces: {}", result.network.interfaces.len());
-        for iface in &result.network.interfaces {
+        println!("Interfaces: {}", network.interfaces.len());
+        for iface in &network.interfaces {
             let status = if iface.flags.is_up { "UP" } else { "DOWN" };
             let loopback = if iface.flags.is_loopback {
                 " (loopback)"
@@ -202,12 +233,11 @@ fn print_network_section(result: &SniffResult) {
     println!();
 }
 
-fn print_filesystem_section(result: &SniffResult, verbose: u8, repo_root: Option<&Path>) {
-    let fs = match &result.filesystem {
-        Some(fs) => fs,
-        None => return,
-    };
-
+fn print_filesystem_section(
+    fs: &sniff_lib::FilesystemInfo,
+    verbose: u8,
+    repo_root: Option<&Path>,
+) {
     println!("=== Filesystem ===");
 
     // Print EditorConfig formatting info at verbose level 2+
