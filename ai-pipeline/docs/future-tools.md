@@ -1,0 +1,40 @@
+# Future Tools
+
+- `LintCodeBlock` -- FUTURE
+    - Uses TreeHugger and Ta libraries to lint code blocks
+        - TreeHugger used for non Typescript languages
+        - Ta used for Typescript languages
+- `ValidateShellScript` -- FUTURE
+    - Uses TreeHugger to check the code block as being a valid when viewed as a:
+        - `bash` script,
+        - `zsh` script
+    - Produces a list of scripts which will:
+        - work in both `bash` and `zsh`
+        - work in one or the other
+        - work in neither
+- `Person` - FUTURE
+    - combines the knowledge accumulated from `person` based research
+    - optionally also one or more user's full contacts listings from GMAIL
+    - optionally also knows about meetings found in Google Calendar which relate to a person
+- `InterpolateFrontmatter` - FUTURE
+    - Look for all `{{ ${variable} }}` based content where:
+        - **variable** is any frontmatter property in the Markdown passed in (or an optional key/value JSON string which will be merged into the frontmatter)
+- `MarkdownFindReplace` - FUTURE
+    - you passing in both Frontmatter and a key-value dictionary
+    - you may optionally pass a set of valid SCOPES (default is to only search and replace in the body of the markdown, not code blocks, not )
+- `FindNotes` - FUTURE
+- `SentimentAnalysis` - FUTURE
+    - uses LLM's to determine sentiment analysis
+- `AsPdf` - FUTURE
+    - converts Markdown to PDF format
+- `FromPdf` - FUTURE
+    - converts a PDF into a markdown document
+- `AsCsv` - FUTURE
+    - converts Excel or Google Sheet spreadsheets to CSV
+    - you can specify the tab or named range
+- `ToCsv` - FUTURE
+    - converts CSV data into a new Google Sheet or Excel Spreadsheet
+
+- `CleanMarkdown`
+    - Cleans up Markdown content to make sure it's CommonMark + GFM compliant
+    - Leverages the Markdown struct in the shared library of this monorepo
