@@ -354,18 +354,12 @@ impl Mermaid {
     /// - mmdc execution fails (invalid syntax, etc.)
     /// - Terminal doesn't support image rendering
     ///
-    /// ## Fallback Behavior
+    /// ## Error Handling
     ///
-    /// On any error, the diagram is printed as a fenced code block instead.
+    /// Returns an error if rendering fails. The caller is responsible for
+    /// handling the fallback (e.g., rendering as a syntax-highlighted code block).
     pub fn render_for_terminal(&self) -> Result<(), MermaidRenderError> {
-        match render_terminal::render_for_terminal(&self.instructions) {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                tracing::warn!(error = %e, "Terminal rendering failed, falling back to code block");
-                render_terminal::render_fallback_code_block(&self.instructions);
-                Err(e)
-            }
-        }
+        render_terminal::render_for_terminal(&self.instructions)
     }
 }
 

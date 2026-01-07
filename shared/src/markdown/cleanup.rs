@@ -244,13 +244,12 @@ fn get_marker_for_indent<'a>(
 
     // Check if we have an entry at this exact indent level AND previous was a list item
     // (meaning we're continuing an existing list, not starting a new one)
-    if prev_was_list_item {
-        if let Some(&(top_indent, marker)) = indent_stack.last() {
-            if top_indent == indent {
-                // Continuing same list, use same marker
-                return marker;
-            }
-        }
+    if prev_was_list_item
+        && let Some(&(top_indent, marker)) = indent_stack.last()
+        && top_indent == indent
+    {
+        // Continuing same list, use same marker
+        return marker;
     }
 
     // New list at this indent level - get next marker
@@ -282,14 +281,12 @@ fn fix_blockquote_formatting(output: &mut String) {
             && trimmed.contains('>')
             && !trimmed.is_empty();
 
-        if is_empty_blockquote {
-            // Check if next line is also a blockquote (continuation)
-            if let Some(next_line) = lines.peek() {
-                if next_line.trim_start().starts_with('>') {
-                    // Skip this empty blockquote line
-                    continue;
-                }
-            }
+        if is_empty_blockquote
+            && let Some(next_line) = lines.peek()
+            && next_line.trim_start().starts_with('>')
+        {
+            // Skip this empty blockquote line (next line continues the blockquote)
+            continue;
         }
 
         result.push_str(&fixed_line);
@@ -368,12 +365,12 @@ fn add_text_language_to_empty_code_blocks(events: Vec<Event<'_>>) -> Vec<Event<'
     events
         .into_iter()
         .map(|event| {
-            if let Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(ref info))) = event {
-                if info.is_empty() {
-                    return Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(CowStr::from(
-                        "text",
-                    ))));
-                }
+            if let Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(ref info))) = event
+                && info.is_empty()
+            {
+                return Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(CowStr::from(
+                    "text",
+                ))));
             }
             event
         })

@@ -192,11 +192,9 @@ where
         }
 
         // If we ended with an unclosed mark, convert Start(Mark) back to literal "=="
-        if in_mark {
-            if let Some(start_idx) = last_start_idx {
-                segments[start_idx] =
-                    InlineEvent::Standard(Event::Text(CowStr::from("==".to_string())));
-            }
+        if in_mark && let Some(start_idx) = last_start_idx {
+            segments[start_idx] =
+                InlineEvent::Standard(Event::Text(CowStr::from("==".to_string())));
         }
 
         self.pending = segments;

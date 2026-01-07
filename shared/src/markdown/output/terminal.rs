@@ -715,27 +715,21 @@ pub fn write_terminal<W: std::io::Write>(
                             );
                             wrapper.push_with_newlines(&header);
                             wrapper.newline();
-                            // Render as fenced code block (fallback format)
-                            let fallback = crate::mermaid::render_terminal::fallback_code_block(&code_buffer);
-                            wrapper.push_with_newlines(&fallback);
+                            // Render with syntax highlighting (same as regular code blocks)
+                            let highlighted = highlight_code(
+                                &code_buffer,
+                                "mermaid",
+                                &code_highlighter,
+                                &options,
+                                &meta,
+                                options.color_mode,
+                            )?;
+                            wrapper.push_with_newlines(&highlighted);
                             wrapper.push_with_newlines("\n\n");
                         }
                         MermaidMode::Image => {
-                            // Image mode: only show title header if title is present
-                            // (the rendered diagram makes "mermaid" label redundant)
-                            if let Some(title) = &meta.title {
-                                let header = format_header_row(
-                                    Some(title.as_str()),
-                                    "", // No language label for rendered images
-                                    bg_color,
-                                    options.color_mode,
-                                    terminal_width,
-                                );
-                                wrapper.push_with_newlines(&header);
-                                wrapper.newline();
-                            }
-
                             // Flush output before viuer prints to stdout
+                            // (don't emit header yet - we'll emit after knowing if rendering succeeds)
                             write!(writer, "{}", wrapper.output()).ok();
                             writer.flush().ok();
                             wrapper = LineWrapper::new(terminal_width as usize);
@@ -751,14 +745,44 @@ pub fn write_terminal<W: std::io::Write>(
                                 }
                             };
 
-                            // If rendering failed, show fallback in the output stream
-                            if !render_succeeded {
-                                let fallback = crate::mermaid::render_terminal::fallback_code_block(&code_buffer);
-                                wrapper.push_with_newlines(&fallback);
-                                wrapper.push_with_newlines("\n\n");
-                            } else {
+                            if render_succeeded {
+                                // Image rendered successfully - emit title-only header after the image
+                                // (the rendered diagram makes "mermaid" label redundant)
+                                if let Some(title) = &meta.title {
+                                    let header = format_header_row(
+                                        Some(title.as_str()),
+                                        "", // No language label for rendered images
+                                        bg_color,
+                                        options.color_mode,
+                                        terminal_width,
+                                    );
+                                    wrapper.push_with_newlines(&header);
+                                }
                                 // viuer already prints a newline, just add one more for spacing
                                 wrapper.push_with_newlines("\n");
+                            } else {
+                                // Rendering failed - show fallback with syntax highlighting
+                                // Emit header row with title and "mermaid" label
+                                let header = format_header_row(
+                                    meta.title.as_deref(),
+                                    "mermaid",
+                                    bg_color,
+                                    options.color_mode,
+                                    terminal_width,
+                                );
+                                wrapper.push_with_newlines(&header);
+                                wrapper.newline();
+                                // Render with syntax highlighting (same as regular code blocks)
+                                let highlighted = highlight_code(
+                                    &code_buffer,
+                                    "mermaid",
+                                    &code_highlighter,
+                                    &options,
+                                    &meta,
+                                    options.color_mode,
+                                )?;
+                                wrapper.push_with_newlines(&highlighted);
+                                wrapper.push_with_newlines("\n\n");
                             }
                         }
                         MermaidMode::Off => unreachable!(),
@@ -1684,16 +1708,16 @@ impl LineWrapper {
     ///
     /// Called before newlines in blockquotes to ensure uniform background width.
     fn pad_to_width(&mut self) {
-        if let Some(bg) = self.blockquote_bg {
-            if self.current_col < self.max_width {
-                let padding = self.max_width - self.current_col;
-                let spaces = " ".repeat(padding);
-                self.output.push_str(&format!(
-                    "\x1b[48;2;{};{};{}m{}\x1b[0m",
-                    bg.r, bg.g, bg.b, spaces
-                ));
-                self.current_col = self.max_width;
-            }
+        if let Some(bg) = self.blockquote_bg
+            && self.current_col < self.max_width
+        {
+            let padding = self.max_width - self.current_col;
+            let spaces = " ".repeat(padding);
+            self.output.push_str(&format!(
+                "\x1b[48;2;{};{};{}m{}\x1b[0m",
+                bg.r, bg.g, bg.b, spaces
+            ));
+            self.current_col = self.max_width;
         }
     }
 
@@ -1735,10 +1759,9 @@ impl LineWrapper {
     fn emit_styled(&mut self, text: &str, style: Style, emit_italic: bool, in_strikethrough: bool, in_mark: bool) {
         // Split into segments, preserving whitespace
         // We iterate over whitespace-separated words, handling spaces between them
-        let mut chars = text.chars().peekable();
         let mut current_word = String::new();
 
-        while let Some(ch) = chars.next() {
+        for ch in text.chars() {
             if ch.is_whitespace() {
                 // Emit accumulated word first
                 if !current_word.is_empty() {
@@ -5951,6 +5974,86 @@ flowchart LR
             plain.contains("mermaid"),
             "Mermaid block without title should still have 'mermaid' label, got: {:?}",
             plain
+        );
+    }
+
+    #[test]
+    fn test_mermaid_text_mode_no_raw_markdown_fences() {
+        // Regression test for bug: mermaid fallback was outputting raw markdown
+        // syntax (```mermaid...```) instead of syntax-highlighted code
+        let content = r#"```mermaid title="Test"
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.mermaid_mode = MermaidMode::Text;
+
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Should NOT contain raw markdown fence markers
+        assert!(
+            !plain.contains("```mermaid"),
+            "Text mode should NOT output raw ```mermaid fence, got:\n{}",
+            plain
+        );
+        assert!(
+            !plain.contains("```"),
+            "Text mode should NOT output any raw ``` fence markers, got:\n{}",
+            plain
+        );
+    }
+
+    #[test]
+    fn test_mermaid_text_mode_has_ansi_styling() {
+        // Regression test for bug: mermaid fallback had no styling (no background color)
+        let content = r#"```mermaid
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.mermaid_mode = MermaidMode::Text;
+
+        let output = for_terminal(&md, options).unwrap();
+
+        // Should contain ANSI escape codes for background color (48;2 = RGB background)
+        assert!(
+            output.contains("\x1b[48;2;"),
+            "Text mode should have ANSI background color styling, got:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_mermaid_text_mode_no_title_duplication() {
+        // Regression test for bug: title was appearing twice in mermaid fallback
+        let content = r#"```mermaid title="My Title"
+flowchart LR
+    A --> B
+```"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.mermaid_mode = MermaidMode::Text;
+
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Count occurrences of "My Title" - should be exactly 1
+        let title_count = plain.matches("My Title").count();
+        assert_eq!(
+            title_count, 1,
+            "Title 'My Title' should appear exactly once, found {} times in:\n{}",
+            title_count, plain
+        );
+
+        // Count occurrences of "mermaid" - should be exactly 1
+        let mermaid_count = plain.matches("mermaid").count();
+        assert_eq!(
+            mermaid_count, 1,
+            "'mermaid' label should appear exactly once, found {} times in:\n{}",
+            mermaid_count, plain
         );
     }
 

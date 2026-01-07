@@ -24,11 +24,11 @@ pub enum Todo {
 
 impl Todo {
   pub fn get_icon_state(&self) -> TodoState {
-    match self {
-      &Todo::NoProgress => TodoState("\u{2610}", "\u{f096}"),
-      &Todo::InProgress => TodoState("\u{25A3}", "\u{f0c8}"),
-      &Todo::Completed => TodoState("\u{2611}","\u{f046}"),
-      &Todo::Cancelled => TodoState("\u{2612}","\u{f057}")
+    match *self {
+      Todo::NoProgress => TodoState("\u{2610}", "\u{f096}"),
+      Todo::InProgress => TodoState("\u{25A3}", "\u{f0c8}"),
+      Todo::Completed => TodoState("\u{2611}","\u{f046}"),
+      Todo::Cancelled => TodoState("\u{2612}","\u{f057}")
     }
   }
 }

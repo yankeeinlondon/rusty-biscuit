@@ -69,12 +69,12 @@ impl<'a> HtmlExtractor<'a> {
     /// or `None` if no selector matches.
     fn first_text(&self, selectors: &[&str]) -> Option<String> {
         for selector_str in selectors {
-            if let Ok(selector) = Selector::parse(selector_str) {
-                if let Some(element) = self.document.select(&selector).next() {
-                    let content: String = element.text().collect::<Vec<_>>().join("\n");
-                    if !content.trim().is_empty() {
-                        return Some(content);
-                    }
+            if let Ok(selector) = Selector::parse(selector_str)
+                && let Some(element) = self.document.select(&selector).next()
+            {
+                let content: String = element.text().collect::<Vec<_>>().join("\n");
+                if !content.trim().is_empty() {
+                    return Some(content);
                 }
             }
         }
@@ -111,6 +111,7 @@ impl<'a> HtmlExtractor<'a> {
     ///
     /// Tries each selector in order, falling back to `fallback_selector`
     /// if none match.
+    #[allow(dead_code)]
     fn extract_with_fallback(&self, selectors: &[&str], fallback_selector: &str) -> String {
         self.first_text(selectors).unwrap_or_else(|| {
             self.first_text(&[fallback_selector]).unwrap_or_default()

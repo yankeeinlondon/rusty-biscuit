@@ -173,7 +173,7 @@ impl Default for Volume {
 ///     .with_volume(0.8)
 ///     .with_language(Language::English);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VoiceConfig {
     /// Language preference for voice selection.
     pub language: Language,
@@ -183,17 +183,6 @@ pub struct VoiceConfig {
     pub gender: Gender,
     /// Volume level for TTS output.
     pub volume: Volume,
-}
-
-impl Default for VoiceConfig {
-    fn default() -> Self {
-        Self {
-            language: Language::default(),
-            voice_stack: Vec::new(),
-            gender: Gender::default(),
-            volume: Volume::default(),
-        }
-    }
 }
 
 impl VoiceConfig {
@@ -546,15 +535,15 @@ fn select_voice(tts: &mut Tts, config: &VoiceConfig) -> Result<(), TtsError> {
     let lang_prefix = config.language.code_prefix();
 
     // Step 2: Try language + gender filtering with quality preference
-    if config.gender != Gender::Any {
-        if let Some(voice) = find_best_voice(&voices, lang_prefix, config.gender) {
-            return tts.set_voice(voice).map_err(|e| TtsError::VoiceSelectionFailed {
-                reason: format!(
-                    "Failed to set {:?} voice for language '{}': {}",
-                    config.gender, lang_prefix, e
-                ),
-            });
-        }
+    if config.gender != Gender::Any
+        && let Some(voice) = find_best_voice(&voices, lang_prefix, config.gender)
+    {
+        return tts.set_voice(voice).map_err(|e| TtsError::VoiceSelectionFailed {
+            reason: format!(
+                "Failed to set {:?} voice for language '{}': {}",
+                config.gender, lang_prefix, e
+            ),
+        });
     }
 
     // Step 3: Fall back to language filtering only (any gender) with quality preference
