@@ -1,0 +1,36 @@
+# Markdown TOC, Delta, and Re-leveling
+
+- This plan involves work in the Shared Library (`./shared`) package
+- And minor enhancements in the `md` CLI (`./md`) to expose this new capability built into the `Markdown` struct
+
+
+Save plan to `.ai/plans/2026-0107. Markdown-TOC.md`
+
+
+## Preamble
+
+Currently we have provided a utility function for the **xxHash** function in @shared/src/mermaid/hash.rs this is the wrong location for it. It should service the Mermaid functionality but it is much more general purpose and will used more widely (include Markdown files in the next sections).
+
+- Move the implementation from it's current location to @shared/src/hashing/xx_hash.rs and rename the function to `xx_hash()`.
+    - Make sure that all tests are still passing
+    - Make sure all callers within the shared library are referencing the new symbol location
+
+
+## Table of Contents
+
+The `Markdown` struct will have a method `toc()` attached to its public interface which will return a Table of Contents. This TOC will provide both headings and hash values and the structure should look something like:
+
+```rust
+
+pub struct MarkdownToc {
+  /// The title is defined by the frontmatter property
+  /// if it's set. If it is NOT set and there is a single
+  /// H1 line on the page then the title will take on
+  /// that value.
+  title: String;
+
+  page_hash:
+
+}
+
+```
