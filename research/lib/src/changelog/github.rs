@@ -186,14 +186,12 @@ pub async fn fetch_github_releases(
     }
 
     // Check rate limit headers
-    if let Some(remaining) = response.headers().get("X-RateLimit-Remaining") {
-        if let Ok(remaining_str) = remaining.to_str() {
-            if let Ok(remaining_count) = remaining_str.parse::<u32>() {
-                if remaining_count == 0 {
-                    return Err(ChangelogError::RateLimitExceeded);
-                }
-            }
-        }
+    if let Some(remaining) = response.headers().get("X-RateLimit-Remaining")
+        && let Ok(remaining_str) = remaining.to_str()
+        && let Ok(remaining_count) = remaining_str.parse::<u32>()
+        && remaining_count == 0
+    {
+        return Err(ChangelogError::RateLimitExceeded);
     }
 
     // Handle error responses
@@ -242,17 +240,18 @@ pub async fn fetch_github_releases(
         version_info.add_source(ChangelogSource::GitHubRelease);
 
         // Parse release date
-        if let Some(published_at) = release.published_at {
-            if let Ok(date) = super::types::parse_flexible_date(&published_at) {
-                version_info.release_date = Some(date);
-            }
+        if let Some(published_at) = release.published_at
+            && let Ok(date) = super::types::parse_flexible_date(&published_at)
+        {
+            version_info.release_date = Some(date);
         }
 
         // Add summary from release name
-        if let Some(name) = release.name {
-            if !name.is_empty() && name != release.tag_name {
-                version_info.summary = Some(name);
-            }
+        if let Some(name) = release.name
+            && !name.is_empty()
+            && name != release.tag_name
+        {
+            version_info.summary = Some(name);
         }
 
         // Parse release body for breaking changes and features
@@ -300,15 +299,15 @@ fn parse_release_body(body: &str, version_info: &mut VersionInfo) {
         }
 
         // Parse list items in current section
-        if let Some(section) = current_section {
-            if let Some(item) = trimmed.strip_prefix('-').or_else(|| trimmed.strip_prefix('*')) {
-                let item = item.trim();
-                if !item.is_empty() {
-                    match section {
-                        "breaking" => version_info.breaking_changes.push(item.to_string()),
-                        "features" => version_info.new_features.push(item.to_string()),
-                        _ => {}
-                    }
+        if let Some(section) = current_section
+            && let Some(item) = trimmed.strip_prefix('-').or_else(|| trimmed.strip_prefix('*'))
+        {
+            let item = item.trim();
+            if !item.is_empty() {
+                match section {
+                    "breaking" => version_info.breaking_changes.push(item.to_string()),
+                    "features" => version_info.new_features.push(item.to_string()),
+                    _ => {}
                 }
             }
         }

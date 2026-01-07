@@ -370,10 +370,10 @@ pub fn parse_conventional_changelog(content: &str) -> Vec<VersionInfo> {
                 ver.add_source(ChangelogSource::ChangelogFile);
 
                 // Try to parse date if present
-                if let Some(date) = date_str {
-                    if let Ok(parsed_date) = super::types::parse_flexible_date(date) {
-                        ver.release_date = Some(parsed_date);
-                    }
+                if let Some(date) = date_str
+                    && let Ok(parsed_date) = super::types::parse_flexible_date(date)
+                {
+                    ver.release_date = Some(parsed_date);
                 }
 
                 current_version = Some(ver);
@@ -456,10 +456,10 @@ pub fn parse_generic_changelog(content: &str) -> Vec<VersionInfo> {
                 ver.add_source(ChangelogSource::ChangelogFile);
 
                 // Try to find a date in the same line
-                if let Some(date_match) = date_re.find(trimmed) {
-                    if let Ok(date) = super::types::parse_flexible_date(date_match.as_str()) {
-                        ver.release_date = Some(date);
-                    }
+                if let Some(date_match) = date_re.find(trimmed)
+                    && let Ok(date) = super::types::parse_flexible_date(date_match.as_str())
+                {
+                    ver.release_date = Some(date);
                 }
 
                 versions.push(ver);

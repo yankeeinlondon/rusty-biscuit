@@ -104,19 +104,19 @@ pub async fn aggregate_version_history(
     let mut sources_used: Vec<ChangelogSource> = Vec::new();
 
     // GitHub Releases
-    if let Ok(github_versions) = github_result {
-        if !github_versions.is_empty() {
-            all_versions.push(github_versions);
-            sources_used.push(ChangelogSource::GitHubRelease);
-        }
+    if let Ok(github_versions) = github_result
+        && !github_versions.is_empty()
+    {
+        all_versions.push(github_versions);
+        sources_used.push(ChangelogSource::GitHubRelease);
     }
 
     // Registry Versions
-    if let Ok(registry_versions) = registry_result {
-        if !registry_versions.is_empty() {
-            all_versions.push(registry_versions);
-            sources_used.push(ChangelogSource::RegistryVersion);
-        }
+    if let Ok(registry_versions) = registry_result
+        && !registry_versions.is_empty()
+    {
+        all_versions.push(registry_versions);
+        sources_used.push(ChangelogSource::RegistryVersion);
     }
 
     // Changelog File

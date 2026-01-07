@@ -295,12 +295,11 @@ pub async fn fetch_pypi_versions(
             let mut version_info = VersionInfo::from_version_str(&version).ok()?;
 
             // Use the upload time from the first release artifact if available
-            if let Some(first_release) = releases.first() {
-                if let Some(ref upload_time) = first_release.upload_time_iso_8601 {
-                    if let Ok(date) = DateTime::parse_from_rfc3339(upload_time) {
-                        version_info.release_date = Some(date.with_timezone(&Utc));
-                    }
-                }
+            if let Some(first_release) = releases.first()
+                && let Some(ref upload_time) = first_release.upload_time_iso_8601
+                && let Ok(date) = DateTime::parse_from_rfc3339(upload_time)
+            {
+                version_info.release_date = Some(date.with_timezone(&Utc));
             }
 
             Some(version_info)

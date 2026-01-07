@@ -396,20 +396,20 @@ impl ResearchMetadata {
 
         // Populate when_to_use from SKILL.md frontmatter if missing
         let mut needs_save = version == 0; // Always save after v0 migration
-        if v1.when_to_use.is_none() {
-            if let Some(when_to_use) = Self::extract_when_to_use_from_skill(output_dir).await {
-                v1.when_to_use = Some(when_to_use);
-                v1.updated_at = Utc::now();
-                needs_save = true;
-                tracing::info!("✓ Extracted when_to_use from SKILL.md frontmatter");
-            }
+        if v1.when_to_use.is_none()
+            && let Some(when_to_use) = Self::extract_when_to_use_from_skill(output_dir).await
+        {
+            v1.when_to_use = Some(when_to_use);
+            v1.updated_at = Utc::now();
+            needs_save = true;
+            tracing::info!("✓ Extracted when_to_use from SKILL.md frontmatter");
         }
 
         // Save if we made any changes
-        if needs_save {
-            if let Err(e) = v1.save(output_dir).await {
-                tracing::warn!("Failed to save migrated metadata: {}", e);
-            }
+        if needs_save
+            && let Err(e) = v1.save(output_dir).await
+        {
+            tracing::warn!("Failed to save migrated metadata: {}", e);
         }
 
         Some(v1)
@@ -2574,12 +2574,11 @@ pub async fn list(
 ///
 /// This is a quick check using JSON parsing to avoid loading the full metadata.
 fn check_has_when_to_use(metadata_path: &std::path::Path) -> bool {
-    if let Ok(content) = std::fs::read_to_string(metadata_path) {
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) {
-            if let Some(when_to_use) = value.get("when_to_use") {
-                return when_to_use.is_string() && !when_to_use.as_str().unwrap_or("").is_empty();
-            }
-        }
+    if let Ok(content) = std::fs::read_to_string(metadata_path)
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(&content)
+        && let Some(when_to_use) = value.get("when_to_use")
+    {
+        return when_to_use.is_string() && !when_to_use.as_str().unwrap_or("").is_empty();
     }
     false
 }
@@ -2678,7 +2677,7 @@ pub async fn list_with_migrate(
                                         } else {
                                             "invalid SKILL.md frontmatter"
                                         };
-                                        println!("  ⚠️  {}: {} ({})", name, "needs when_to_use", reason);
+                                        println!("  ⚠️  {}: needs when_to_use ({})", name, reason);
                                         needs_manual_fix.push(name);
                                     } else {
                                         already_complete += 1;
@@ -3969,11 +3968,11 @@ pub async fn research_api(
     let start_time = std::time::Instant::now();
 
     // Check for existing metadata
-    if !force_recreation {
-        if let Some(_existing_metadata) = ResearchMetadata::load(&output_dir).await {
-            println!("Found existing API research for '{}'", api_name);
-            // TODO: Implement incremental mode for API research
-        }
+    if !force_recreation
+        && let Some(_existing_metadata) = ResearchMetadata::load(&output_dir).await
+    {
+        println!("Found existing API research for '{}'", api_name);
+        // TODO: Implement incremental mode for API research
     }
 
     // Create initial metadata with Api kind

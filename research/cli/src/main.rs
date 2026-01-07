@@ -142,13 +142,12 @@ fn show_topic(topic: &str) -> Result<(), Box<dyn std::error::Error>> {
     for entry in glob::glob(&pattern)? {
         let path = entry?;
         // Get parent (should be the topic directory)
-        if let Some(parent) = path.parent() {
-            if let Some(name) = parent.file_name() {
-                if name.to_string_lossy() == topic {
-                    open::that(&path)?;
-                    return Ok(());
-                }
-            }
+        if let Some(parent) = path.parent()
+            && let Some(name) = parent.file_name()
+            && name.to_string_lossy() == topic
+        {
+            open::that(&path)?;
+            return Ok(());
         }
     }
 

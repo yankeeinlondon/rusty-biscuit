@@ -10,6 +10,7 @@
 
 use crate::list::types::TopicInfo;
 use owo_colors::OwoColorize;
+use shared::render::Link;
 use std::sync::OnceLock;
 
 /// Formats a list of topics as pretty-printed JSON.
@@ -155,14 +156,19 @@ fn format_main_line(topic: &TopicInfo, hide_type_badge: bool, verbose: bool) -> 
     // Bullet prefix (no formatting)
     parts.push("- ".to_string());
 
-    // Topic name with color-coded formatting
-    let formatted_name = if topic.has_critical_issues() {
+    // Topic name with color-coded formatting, linked to deep_dive.md
+    let styled_name = if topic.has_critical_issues() {
         topic.name.bold().red().to_string()
     } else if topic.has_minor_issues_only() {
         topic.name.bold().truecolor(255, 165, 0).to_string() // Orange
     } else {
         topic.name.bold().to_string()
     };
+
+    // Create clickable link to deep_dive.md
+    let deep_dive_path = topic.location.join("deep_dive.md");
+    let link_url = format!("file://{}", deep_dive_path.display());
+    let formatted_name = Link::new(styled_name, link_url).to_terminal();
     parts.push(formatted_name);
 
     // Type badge (unless hidden)

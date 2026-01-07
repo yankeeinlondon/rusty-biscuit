@@ -90,17 +90,17 @@ impl Metadata {
     /// Extract language from either v0 library_info or v1 details.
     fn language(&self) -> Option<String> {
         // Try v0 field first
-        if let Some(ref lib_info) = self.library_info {
-            if let Some(ref lang) = lib_info.language {
-                return Some(lang.clone());
-            }
+        if let Some(ref lib_info) = self.library_info
+            && let Some(ref lang) = lib_info.language
+        {
+            return Some(lang.clone());
         }
 
         // Try v1 field
-        if let Some(ResearchDetails::Library(ref lib_details)) = self.details {
-            if let Some(ref lang) = lib_details.language {
-                return Some(lang.clone());
-            }
+        if let Some(ResearchDetails::Library(ref lib_details)) = self.details
+            && let Some(ref lang) = lib_details.language
+        {
+            return Some(lang.clone());
         }
 
         None
