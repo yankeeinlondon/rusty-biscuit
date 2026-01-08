@@ -7,6 +7,7 @@
 //!
 //! - [`api`] - OpenAI-compatible API utilities for model discovery
 //! - [`codegen`] - Safe code injection with AST-based manipulation
+//! - [`hashing`] - Fast (xxHash) and secure (BLAKE3) content hashing
 //! - [`markdown`] - Markdown document manipulation with frontmatter support (Phase 3)
 //! - [`mermaid`] - Mermaid diagram theming and rendering
 //! - [`model`] - Centralized model selection with fallback stacking (Phase 3 - in progress)
@@ -18,6 +19,7 @@
 
 pub mod api;
 pub mod codegen;
+pub mod hashing;
 pub mod markdown;
 pub mod mermaid;
 pub mod model;

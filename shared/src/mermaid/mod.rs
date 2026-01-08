@@ -7,11 +7,9 @@
 //! ## Modules
 //!
 //! - [`theme`] - Mermaid theme color schemes and JSON parsing
-//! - [`hash`] - XXH64 hashing utility for diagram caching
 //! - [`render_html`] - HTML rendering with accessibility features
 //! - [`render_terminal`] - Terminal rendering via local mmdc CLI
 
-pub mod hash;
 pub mod render_html;
 pub mod render_terminal;
 pub mod theme;
@@ -157,7 +155,7 @@ impl Mermaid {
     /// let hash = diagram.hash();
     /// ```
     pub fn hash(&self) -> u64 {
-        hash::compute_hash(&self.instructions)
+        crate::hashing::xx_hash_normalized(&self.instructions)
     }
 
     /// Returns the raw instructions.

@@ -75,8 +75,9 @@ unicode-width = "0.2.2"
 textwrap = "0.16"
 supports-hyperlinks = "3.2.0"
 
-# Hashing (for Mermaid diagram caching)
+# Hashing (for Mermaid diagram caching and markdown TOC)
 xxhash-rust = { version = "0.8", features = ["xxh64"] }
+blake3 = "1.5"
 
 [dev-dependencies]
 tokio = { version = "1.48", features = ["full", "test-util"] }
