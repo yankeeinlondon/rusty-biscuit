@@ -74,6 +74,7 @@ html-escape = "0.2"
 unicode-width = "0.2.2"
 textwrap = "0.16"
 supports-hyperlinks = "3.2.0"
+similar = { version = "2.6", features = ["inline"] }
 
 # Hashing (for Mermaid diagram caching and markdown TOC)
 xxhash-rust = { version = "0.8", features = ["xxh64"] }

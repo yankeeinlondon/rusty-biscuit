@@ -218,7 +218,7 @@ fn main() -> Result<()> {
         if cli.json {
             println!("{}", serde_json::to_string_pretty(&delta)?);
         } else {
-            print_delta(&delta, cli.verbose > 0);
+            print_delta(&delta, cli.verbose > 0, &md, &other_md);
         }
         return Ok(());
     }
@@ -411,7 +411,7 @@ fn print_toc_node<W: Write>(
         writeln!(
             out,
             "{}{}{} ({:016x})",
-            prefix, connector, node.title, node.own_content_hash_normalized
+            prefix, connector, node.title, node.prelude_hash_normalized()
         )
         .ok();
     } else {
@@ -486,7 +486,7 @@ fn format_code_block_change(lang: &str, section_path: &str, description: &str) -
 }
 
 /// Prints the delta comparison results.
-fn print_delta(delta: &MarkdownDelta, verbose: bool) {
+fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, updated: &Markdown) {
     let stdout = io::stdout();
     let mut handle = stdout.lock();
 
@@ -723,5 +723,49 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool) {
             stats.original_section_count, stats.new_section_count, stats.sections_unchanged
         )
         .ok();
+        writeln!(handle).ok();
+
+        // Visual diff output
+        use shared::markdown::delta::visual::{render_visual_diff, VisualDiffOptions};
+
+        let options = VisualDiffOptions::default();
+
+        // Frontmatter visual diff (if changed)
+        if delta.frontmatter_changed && !delta.frontmatter_formatting_only {
+            let fm_orig = serde_yaml::to_string(original.frontmatter().as_map()).unwrap_or_default();
+            let fm_upd = serde_yaml::to_string(updated.frontmatter().as_map()).unwrap_or_default();
+
+            if !fm_orig.is_empty() || !fm_upd.is_empty() {
+                writeln!(handle, "{BOLD}Frontmatter Visual Diff:{RESET}").ok();
+                writeln!(
+                    handle,
+                    "{}",
+                    render_visual_diff(&fm_orig, &fm_upd, "original", "updated", &options)
+                )
+                .ok();
+            }
+        }
+
+        // Content body visual diff (if has content changes)
+        let has_content_changes = !delta.added.is_empty()
+            || !delta.removed.is_empty()
+            || !delta.modified.is_empty()
+            || delta.preamble_changed;
+
+        if has_content_changes {
+            writeln!(handle, "{BOLD}Content Visual Diff:{RESET}").ok();
+            writeln!(
+                handle,
+                "{}",
+                render_visual_diff(
+                    original.content(),
+                    updated.content(),
+                    "original",
+                    "updated",
+                    &options
+                )
+            )
+            .ok();
+        }
     }
 }

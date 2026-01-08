@@ -25,6 +25,7 @@
 //! ```
 
 mod types;
+pub mod visual;
 
 pub use types::{
     BrokenLink, ChangeAction, CodeBlockChange, ContentChange, DeltaStatistics, DocumentChange,
@@ -162,11 +163,11 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
     delta.statistics.original_section_count = original_headings.len();
     delta.statistics.new_section_count = updated_headings.len();
 
-    // Build indexes for matching
+    // Build indexes for matching (using prelude hash for content comparison)
     let mut original_by_content: HashMap<u64, Vec<(Vec<String>, &MarkdownTocNode)>> = HashMap::new();
     for (path, node) in &original_headings {
         original_by_content
-            .entry(node.own_content_hash)
+            .entry(node.prelude_hash())
             .or_default()
             .push((path.clone(), *node));
     }
@@ -174,7 +175,7 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
     let mut updated_by_content: HashMap<u64, Vec<(Vec<String>, &MarkdownTocNode)>> = HashMap::new();
     for (path, node) in &updated_headings {
         updated_by_content
-            .entry(node.own_content_hash)
+            .entry(node.prelude_hash())
             .or_default()
             .push((path.clone(), *node));
     }
@@ -190,7 +191,7 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
                 continue;
             }
 
-            if orig_path == upd_path && orig_node.own_content_hash == upd_node.own_content_hash {
+            if orig_path == upd_path && orig_node.prelude_hash() == upd_node.prelude_hash() {
                 // Perfect match - unchanged
                 matched_original.insert(i);
                 matched_updated.insert(j);
@@ -211,14 +212,14 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
                 continue;
             }
 
-            if orig_node.own_content_hash == upd_node.own_content_hash
-                && orig_node.own_content_hash != 0
+            if orig_node.prelude_hash() == upd_node.prelude_hash()
+                && orig_node.prelude_hash() != 0
             {
                 // Same content, different path = moved
                 let level_delta = upd_node.level as i8 - orig_node.level as i8;
 
                 delta.moved.push(MovedSection::new(
-                    orig_node.own_content_hash,
+                    orig_node.prelude_hash(),
                     orig_path.clone(),
                     upd_path.clone(),
                     level_delta,
@@ -250,8 +251,8 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
                 // Compare alphanumeric content only to detect formatting-only changes
                 // This catches: whitespace, table padding, separator dashes, emphasis markers
                 // Also strip code fence lines since code blocks are compared separately
-                let orig_content = orig_node.own_content.as_deref().unwrap_or("");
-                let upd_content = upd_node.own_content.as_deref().unwrap_or("");
+                let orig_content = orig_node.prelude_content().unwrap_or("");
+                let upd_content = upd_node.prelude_content().unwrap_or("");
 
                 let orig_content_hash =
                     crate::hashing::xx_hash_alphanumeric(&strip_code_fences(orig_content));
@@ -306,7 +307,7 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
     // Remaining unmatched original = removed
     for (i, (path, node)) in original_headings.iter().enumerate() {
         if !matched_original.contains(&i) {
-            let content_len = node.own_content.as_ref().map(|c| c.len()).unwrap_or(0);
+            let content_len = node.prelude.as_ref().map(|p| p.content.len()).unwrap_or(0);
             delta.statistics.bytes_removed += content_len;
 
             delta.removed.push(ContentChange::removed(
@@ -322,7 +323,7 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
     // Remaining unmatched updated = added
     for (j, (path, node)) in updated_headings.iter().enumerate() {
         if !matched_updated.contains(&j) {
-            let content_len = node.own_content.as_ref().map(|c| c.len()).unwrap_or(0);
+            let content_len = node.prelude.as_ref().map(|p| p.content.len()).unwrap_or(0);
             delta.statistics.bytes_added += content_len;
 
             delta.added.push(ContentChange::added(
