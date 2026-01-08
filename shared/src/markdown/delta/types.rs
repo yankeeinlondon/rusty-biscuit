@@ -421,11 +421,20 @@ pub struct DeltaStatistics {
     /// Total bytes in new document (excluding frontmatter).
     pub new_bytes: usize,
 
-    /// Estimated bytes changed (added + removed).
+    /// Net change in document size (can be negative conceptually, stored as abs).
     pub bytes_changed: usize,
 
+    /// Total bytes in added sections.
+    pub bytes_added: usize,
+
+    /// Total bytes in removed sections.
+    pub bytes_removed: usize,
+
+    /// Total bytes modified within existing sections (edit distance).
+    pub bytes_modified: usize,
+
     /// Ratio of content that changed (0.0 - 1.0).
-    /// Calculated as: bytes_changed / max(original_bytes, new_bytes)
+    /// Calculated as: (bytes_added + bytes_removed + bytes_modified) / max(original_bytes, new_bytes)
     pub content_change_ratio: f32,
 
     // ─────────────────────────────────────────────────────────────
@@ -473,8 +482,11 @@ pub struct DeltaStatistics {
     /// Code blocks removed.
     pub code_blocks_removed: usize,
 
-    /// Code blocks modified.
+    /// Code blocks modified (content changed).
     pub code_blocks_modified: usize,
+
+    /// Code blocks with language tag changed (but content unchanged).
+    pub code_blocks_language_changed: usize,
 
     // ─────────────────────────────────────────────────────────────
     // Link Metrics
@@ -518,21 +530,34 @@ pub enum DocumentChange {
 impl DocumentChange {
     /// Determine the change classification from statistics.
     pub fn from_statistics(stats: &DeltaStatistics) -> Self {
-        // Check for no changes first
+        // Check if there are any code block changes (language or content)
+        let has_code_block_changes = stats.code_blocks_added > 0
+            || stats.code_blocks_removed > 0
+            || stats.code_blocks_modified > 0
+            || stats.code_blocks_language_changed > 0;
+
+        // Check for whitespace-only changes first (before NoChange)
+        // This catches documents where only blank lines or spacing changed
+        // But NOT if there are code block changes (those aren't whitespace)
+        if stats.content_only_changes == 0
+            && stats.structural_changes == 0
+            && stats.sections_added == 0
+            && stats.sections_removed == 0
+            && stats.whitespace_only_changes > 0
+            && !has_code_block_changes
+        {
+            return DocumentChange::WhitespaceOnly;
+        }
+
+        // Check for no changes at all
         if stats.content_change_ratio == 0.0
             && stats.sections_added == 0
             && stats.sections_removed == 0
             && stats.sections_moved == 0
+            && stats.whitespace_only_changes == 0
+            && !has_code_block_changes
         {
             return DocumentChange::NoChange;
-        }
-
-        // Check for whitespace-only
-        if stats.content_only_changes == 0
-            && stats.structural_changes == 0
-            && stats.whitespace_only_changes > 0
-        {
-            return DocumentChange::WhitespaceOnly;
         }
 
         // Check for structural-only

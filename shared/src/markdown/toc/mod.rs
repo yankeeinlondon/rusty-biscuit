@@ -71,6 +71,8 @@ struct HeadingInfo {
 /// Information about a code block extracted during parsing.
 struct CodeBlockExtract {
     language: Option<String>,
+    /// Full info string from fence (e.g., "mermaid title=\"foo\"")
+    info_string: String,
     content: String,
     start_line: usize,
     end_line: usize,
@@ -95,7 +97,8 @@ fn extract_elements(
     let mut internal_links = Vec::new();
 
     let mut current_heading: Option<(HeadingLevel, String, usize)> = None;
-    let mut current_code_block: Option<(Option<String>, String, usize)> = None;
+    // (language, info_string, content, start_line)
+    let mut current_code_block: Option<(Option<String>, String, String, usize)> = None;
     let mut current_link: Option<(String, String, usize)> = None;
     let mut in_link = false;
     let mut link_text = String::new();
@@ -123,7 +126,7 @@ fn extract_elements(
                 if let Some((_, ref mut title, _)) = current_heading {
                     title.push_str(&text);
                 }
-                if let Some((_, ref mut code_content, _)) = current_code_block {
+                if let Some((_, _, ref mut code_content, _)) = current_code_block {
                     code_content.push_str(&text);
                 }
                 if in_link {
@@ -131,24 +134,29 @@ fn extract_elements(
                 }
             }
             Event::Start(Tag::CodeBlock(kind)) => {
-                let lang = match kind {
+                let (lang, info_string) = match kind {
                     pulldown_cmark::CodeBlockKind::Fenced(info) => {
+                        let info_str = info.to_string();
                         let lang_str = info.split_whitespace().next().unwrap_or("");
-                        if lang_str.is_empty() {
+                        let lang = if lang_str.is_empty() {
                             None
                         } else {
                             Some(lang_str.to_string())
-                        }
+                        };
+                        (lang, info_str)
                     }
-                    pulldown_cmark::CodeBlockKind::Indented => None,
+                    pulldown_cmark::CodeBlockKind::Indented => (None, String::new()),
                 };
-                current_code_block = Some((lang, String::new(), line_number));
+                current_code_block = Some((lang, info_string, String::new(), line_number));
             }
             Event::End(TagEnd::CodeBlock) => {
-                if let Some((language, code_content, start_line)) = current_code_block.take() {
+                if let Some((language, info_string, code_content, start_line)) =
+                    current_code_block.take()
+                {
                     let end_line = line_number;
                     code_blocks.push(CodeBlockExtract {
                         language,
+                        info_string,
                         content: code_content,
                         start_line,
                         end_line,
@@ -353,6 +361,7 @@ impl From<&Markdown> for MarkdownToc {
             let section_path = get_section_path(&toc.structure, cb.start_line);
             toc.code_blocks.push(CodeBlockInfo::new(
                 cb.language,
+                cb.info_string,
                 cb.content,
                 (cb.start_line, cb.end_line),
                 section_path,

@@ -247,13 +247,30 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
 
             if orig_path == upd_path {
                 // Same path, different content = modified
-                let is_whitespace_only =
-                    orig_node.own_content_hash_trimmed == upd_node.own_content_hash_trimmed;
+                // Compare alphanumeric content only to detect formatting-only changes
+                // This catches: whitespace, table padding, separator dashes, emphasis markers
+                // Also strip code fence lines since code blocks are compared separately
+                let orig_content = orig_node.own_content.as_deref().unwrap_or("");
+                let upd_content = upd_node.own_content.as_deref().unwrap_or("");
+
+                let orig_content_hash =
+                    crate::hashing::xx_hash_alphanumeric(&strip_code_fences(orig_content));
+                let upd_content_hash =
+                    crate::hashing::xx_hash_alphanumeric(&strip_code_fences(upd_content));
+                let is_whitespace_only = orig_content_hash == upd_content_hash;
 
                 let action = if is_whitespace_only {
                     ChangeAction::WhitespaceOnly
                 } else {
                     ChangeAction::ContentModified
+                };
+                let edit_distance = levenshtein_distance(orig_content, upd_content);
+
+                // Generate a meaningful description
+                let description = if is_whitespace_only {
+                    describe_whitespace_change(orig_content, upd_content)
+                } else {
+                    describe_content_change(orig_content, upd_content, &orig_node.title)
                 };
 
                 delta.modified.push(ContentChange::new(
@@ -264,16 +281,13 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
                     Some(upd_node.level),
                     Some(orig_node.line_range.0),
                     Some(upd_node.line_range.0),
-                    format!(
-                        "{} section '{}'",
-                        if is_whitespace_only {
-                            "Whitespace changes in"
-                        } else {
-                            "Modified content in"
-                        },
-                        orig_node.title
-                    ),
+                    description,
                 ));
+
+                // Track byte-level changes (only for non-whitespace changes)
+                if !is_whitespace_only {
+                    delta.statistics.bytes_modified += edit_distance;
+                }
 
                 matched_original.insert(i);
                 matched_updated.insert(j);
@@ -292,6 +306,9 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
     // Remaining unmatched original = removed
     for (i, (path, node)) in original_headings.iter().enumerate() {
         if !matched_original.contains(&i) {
+            let content_len = node.own_content.as_ref().map(|c| c.len()).unwrap_or(0);
+            delta.statistics.bytes_removed += content_len;
+
             delta.removed.push(ContentChange::removed(
                 path.clone(),
                 node.level,
@@ -305,6 +322,9 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
     // Remaining unmatched updated = added
     for (j, (path, node)) in updated_headings.iter().enumerate() {
         if !matched_updated.contains(&j) {
+            let content_len = node.own_content.as_ref().map(|c| c.len()).unwrap_or(0);
+            delta.statistics.bytes_added += content_len;
+
             delta.added.push(ContentChange::added(
                 path.clone(),
                 node.level,
@@ -316,55 +336,355 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
     }
 }
 
+/// Describes changes between two code block info strings.
+///
+/// Parses the info strings to identify specific property changes rather than
+/// showing the full strings.
+fn describe_info_string_change(old_info: &str, new_info: &str) -> String {
+    let (old_lang, old_props) = parse_info_string(old_info);
+    let (new_lang, new_props) = parse_info_string(new_info);
+
+    let lang = new_lang.unwrap_or("plain text");
+
+    // Check if language changed
+    if old_lang != new_lang {
+        let old = old_lang.unwrap_or("none");
+        let new = new_lang.unwrap_or("none");
+        return format!("Language: {} → {}", old, new);
+    }
+
+    // Find changed properties
+    let mut changes = Vec::new();
+
+    // Check for modified or removed properties
+    for (key, old_val) in &old_props {
+        match new_props.get(key) {
+            Some(new_val) if new_val != old_val => {
+                changes.push(format!("'{}': \"{}\" → \"{}\"", key, old_val, new_val));
+            }
+            None => {
+                changes.push(format!("'{}' removed", key));
+            }
+            _ => {}
+        }
+    }
+
+    // Check for added properties
+    for (key, new_val) in &new_props {
+        if !old_props.contains_key(key) {
+            changes.push(format!("'{}' added: \"{}\"", key, new_val));
+        }
+    }
+
+    if changes.is_empty() {
+        // Fallback if we couldn't parse the difference
+        format!("Info changed")
+    } else if changes.len() == 1 {
+        format!("{} ({})", lang, changes[0])
+    } else {
+        format!("{} ({} properties changed)", lang, changes.len())
+    }
+}
+
+/// Parses a code block info string into language and properties.
+///
+/// Format: `language key="value" key2="value2"` or `language key=value`
+fn parse_info_string(info: &str) -> (Option<&str>, HashMap<String, String>) {
+    let mut props = HashMap::new();
+    let info = info.trim();
+
+    if info.is_empty() {
+        return (None, props);
+    }
+
+    let mut parts = info.splitn(2, char::is_whitespace);
+    let lang = parts.next().filter(|s| !s.is_empty());
+    let rest = parts.next().unwrap_or("");
+
+    // Parse key="value" or key=value patterns
+    let mut chars = rest.chars().peekable();
+    while chars.peek().is_some() {
+        // Skip whitespace
+        while chars.peek().map(|c| c.is_whitespace()).unwrap_or(false) {
+            chars.next();
+        }
+
+        // Read key
+        let key: String = chars
+            .by_ref()
+            .take_while(|&c| c != '=' && !c.is_whitespace())
+            .collect();
+
+        if key.is_empty() {
+            break;
+        }
+
+        // Check for =
+        if chars.peek() == Some(&'=') {
+            chars.next(); // consume '='
+
+            // Read value (possibly quoted)
+            let value = if chars.peek() == Some(&'"') {
+                chars.next(); // consume opening quote
+                let v: String = chars.by_ref().take_while(|&c| c != '"').collect();
+                v
+            } else {
+                chars
+                    .by_ref()
+                    .take_while(|&c| !c.is_whitespace())
+                    .collect()
+            };
+
+            props.insert(key, value);
+        }
+    }
+
+    (lang, props)
+}
+
+/// Strips code fence lines from content for comparison.
+///
+/// Removes lines that start with ``` (code block delimiters) since
+/// code blocks are compared separately. This prevents language tag
+/// changes from being double-counted as section content changes.
+fn strip_code_fences(content: &str) -> String {
+    content
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("```"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Describes whitespace changes between two content strings.
+fn describe_whitespace_change(original: &str, updated: &str) -> String {
+    let orig_lines: Vec<&str> = original.lines().collect();
+    let upd_lines: Vec<&str> = updated.lines().collect();
+
+    let orig_blank = orig_lines.iter().filter(|l| l.trim().is_empty()).count();
+    let upd_blank = upd_lines.iter().filter(|l| l.trim().is_empty()).count();
+
+    if orig_blank != upd_blank {
+        let diff = upd_blank as i32 - orig_blank as i32;
+        if diff > 0 {
+            return format!("Added {} blank line{}", diff, if diff > 1 { "s" } else { "" });
+        } else {
+            return format!(
+                "Removed {} blank line{}",
+                -diff,
+                if -diff > 1 { "s" } else { "" }
+            );
+        }
+    }
+
+    // Check for trailing whitespace changes
+    let orig_trailing: usize = orig_lines
+        .iter()
+        .map(|l| l.len() - l.trim_end().len())
+        .sum();
+    let upd_trailing: usize = upd_lines
+        .iter()
+        .map(|l| l.len() - l.trim_end().len())
+        .sum();
+
+    if orig_trailing != upd_trailing {
+        return "Trailing whitespace changes".to_string();
+    }
+
+    // Check for indentation changes
+    let orig_indent: usize = orig_lines
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .sum();
+    let upd_indent: usize = upd_lines
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .sum();
+
+    if orig_indent != upd_indent {
+        return "Indentation changes".to_string();
+    }
+
+    "Whitespace formatting changes".to_string()
+}
+
+/// Describes content changes between two strings.
+fn describe_content_change(original: &str, updated: &str, title: &str) -> String {
+    let orig_len = original.len();
+    let upd_len = updated.len();
+    let char_diff = upd_len as i32 - orig_len as i32;
+
+    // Count non-blank lines (actual content lines)
+    let orig_content_lines = original.lines().filter(|l| !l.trim().is_empty()).count();
+    let upd_content_lines = updated.lines().filter(|l| !l.trim().is_empty()).count();
+    let content_line_diff = upd_content_lines as i32 - orig_content_lines as i32;
+
+    // Describe based on what changed
+    if content_line_diff != 0 {
+        // Content lines added or removed
+        let sign = if content_line_diff > 0 { "+" } else { "" };
+        format!(
+            "{}: {}{} content line{}",
+            title,
+            sign,
+            content_line_diff,
+            if content_line_diff.abs() > 1 { "s" } else { "" }
+        )
+    } else if char_diff != 0 {
+        // Same content line count, but characters changed (reformatting, word changes)
+        let sign = if char_diff > 0 { "+" } else { "" };
+        format!("{}: {}{} chars", title, sign, char_diff)
+    } else {
+        // Same size but different content (word substitutions)
+        format!("{}: text edited", title)
+    }
+}
+
 /// Compares code blocks between two documents.
+///
+/// Matches code blocks by parent section path and position, then compares
+/// both language and content to report accurate changes.
 fn compare_code_blocks(
     original_toc: &MarkdownToc,
     updated_toc: &MarkdownToc,
     delta: &mut MarkdownDelta,
 ) {
-    let mut original_by_hash: HashMap<u64, &crate::markdown::toc::CodeBlockInfo> = HashMap::new();
+    // Group code blocks by parent section path (ignoring language for matching)
+    let mut original_by_section: HashMap<Vec<String>, Vec<&crate::markdown::toc::CodeBlockInfo>> =
+        HashMap::new();
     for cb in &original_toc.code_blocks {
-        original_by_hash.insert(cb.content_hash, cb);
+        original_by_section
+            .entry(cb.parent_section_path.clone())
+            .or_default()
+            .push(cb);
     }
 
-    let mut updated_by_hash: HashMap<u64, &crate::markdown::toc::CodeBlockInfo> = HashMap::new();
+    let mut updated_by_section: HashMap<Vec<String>, Vec<&crate::markdown::toc::CodeBlockInfo>> =
+        HashMap::new();
     for cb in &updated_toc.code_blocks {
-        updated_by_hash.insert(cb.content_hash, cb);
+        updated_by_section
+            .entry(cb.parent_section_path.clone())
+            .or_default()
+            .push(cb);
     }
 
-    // Find added code blocks
-    for cb in &updated_toc.code_blocks {
-        if !original_by_hash.contains_key(&cb.content_hash) {
-            delta.code_block_changes.push(CodeBlockChange::new(
-                ChangeAction::Added,
-                cb.language.clone(),
-                cb.parent_section_path.clone(),
-                None,
-                Some(cb.line_range.0),
-                format!(
-                    "Added {} code block",
-                    cb.language.as_deref().unwrap_or("plain text")
-                ),
-            ));
-            delta.statistics.code_blocks_added += 1;
+    // Track which blocks have been matched
+    let mut matched_original: HashSet<(Vec<String>, usize)> = HashSet::new();
+    let mut matched_updated: HashSet<(Vec<String>, usize)> = HashSet::new();
+
+    // Match blocks by section and position
+    for (section, orig_blocks) in &original_by_section {
+        if let Some(upd_blocks) = updated_by_section.get(section) {
+            // Match blocks in order within each section
+            for (i, orig_cb) in orig_blocks.iter().enumerate() {
+                if let Some(upd_cb) = upd_blocks.get(i) {
+                    matched_original.insert((section.clone(), i));
+                    matched_updated.insert((section.clone(), i));
+
+                    // Compare info string (includes language + metadata) and content
+                    let info_changed = orig_cb.info_string != upd_cb.info_string;
+                    let content_changed =
+                        orig_cb.content_hash_trimmed != upd_cb.content_hash_trimmed;
+
+                    if info_changed || content_changed {
+                        let description = if content_changed && info_changed {
+                            // Both changed
+                            format!(
+                                "Modified code block ({})",
+                                upd_cb.language.as_deref().unwrap_or("plain text")
+                            )
+                        } else if content_changed {
+                            // Only content changed
+                            format!(
+                                "Modified {} code block",
+                                orig_cb.language.as_deref().unwrap_or("plain text")
+                            )
+                        } else {
+                            // Only info string changed - provide detailed diff
+                            describe_info_string_change(
+                                &orig_cb.info_string,
+                                &upd_cb.info_string,
+                            )
+                        };
+
+                        let action = if content_changed {
+                            ChangeAction::ContentModified
+                        } else {
+                            ChangeAction::Renamed // Info string change only
+                        };
+
+                        delta.code_block_changes.push(CodeBlockChange::new(
+                            action,
+                            upd_cb.language.clone(),
+                            orig_cb.parent_section_path.clone(),
+                            Some(orig_cb.line_range.0),
+                            Some(upd_cb.line_range.0),
+                            description,
+                        ));
+
+                        if content_changed {
+                            delta.statistics.code_blocks_modified += 1;
+                            // Track byte-level changes for content modifications
+                            let edit_dist =
+                                levenshtein_distance(&orig_cb.content, &upd_cb.content);
+                            delta.statistics.bytes_modified += edit_dist;
+                        }
+                        if info_changed && !content_changed {
+                            delta.statistics.code_blocks_language_changed += 1;
+                            // Info string change counts as a modification
+                            let edit_dist = levenshtein_distance(
+                                &orig_cb.info_string,
+                                &upd_cb.info_string,
+                            );
+                            delta.statistics.bytes_modified += edit_dist.max(1);
+                        }
+                    }
+                    // else: completely unchanged, don't report
+                }
+            }
         }
     }
 
-    // Find removed code blocks
-    for cb in &original_toc.code_blocks {
-        if !updated_by_hash.contains_key(&cb.content_hash) {
-            delta.code_block_changes.push(CodeBlockChange::new(
-                ChangeAction::Removed,
-                cb.language.clone(),
-                cb.parent_section_path.clone(),
-                Some(cb.line_range.0),
-                None,
-                format!(
-                    "Removed {} code block",
-                    cb.language.as_deref().unwrap_or("plain text")
-                ),
-            ));
-            delta.statistics.code_blocks_removed += 1;
+    // Find unmatched original blocks (removed)
+    for (section, blocks) in &original_by_section {
+        for (i, cb) in blocks.iter().enumerate() {
+            if !matched_original.contains(&(section.clone(), i)) {
+                delta.code_block_changes.push(CodeBlockChange::new(
+                    ChangeAction::Removed,
+                    cb.language.clone(),
+                    cb.parent_section_path.clone(),
+                    Some(cb.line_range.0),
+                    None,
+                    format!(
+                        "Removed {} code block",
+                        cb.language.as_deref().unwrap_or("plain text")
+                    ),
+                ));
+                delta.statistics.code_blocks_removed += 1;
+                delta.statistics.bytes_removed += cb.content.len();
+            }
+        }
+    }
+
+    // Find unmatched updated blocks (added)
+    for (section, blocks) in &updated_by_section {
+        for (i, cb) in blocks.iter().enumerate() {
+            if !matched_updated.contains(&(section.clone(), i)) {
+                delta.code_block_changes.push(CodeBlockChange::new(
+                    ChangeAction::Added,
+                    cb.language.clone(),
+                    cb.parent_section_path.clone(),
+                    None,
+                    Some(cb.line_range.0),
+                    format!(
+                        "Added {} code block",
+                        cb.language.as_deref().unwrap_or("plain text")
+                    ),
+                ));
+                delta.statistics.code_blocks_added += 1;
+                delta.statistics.bytes_added += cb.content.len();
+            }
         }
     }
 }
@@ -459,20 +779,18 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
 fn calculate_statistics(delta: &mut MarkdownDelta) {
     let stats = &mut delta.statistics;
 
-    // Calculate bytes changed (rough estimate)
-    stats.bytes_changed = (stats.original_bytes as i64 - stats.new_bytes as i64).unsigned_abs() as usize;
+    // Calculate net bytes changed
+    stats.bytes_changed =
+        (stats.original_bytes as i64 - stats.new_bytes as i64).unsigned_abs() as usize;
 
-    // Calculate content change ratio
-    let max_bytes = stats.original_bytes.max(stats.new_bytes);
-    if max_bytes > 0 {
-        // Factor in section changes
-        let section_change_impact =
-            stats.sections_added + stats.sections_removed + stats.sections_modified;
-        let total_sections = stats.original_section_count.max(stats.new_section_count);
-
-        if total_sections > 0 {
-            stats.content_change_ratio = section_change_impact as f32 / total_sections as f32;
-        }
+    // Calculate content change ratio based on actual byte changes
+    // This is more accurate than counting sections as binary changed/unchanged
+    let total_bytes = stats.original_bytes.max(stats.new_bytes);
+    if total_bytes > 0 {
+        let total_change = stats.bytes_added + stats.bytes_removed + stats.bytes_modified;
+        stats.content_change_ratio = total_change as f32 / total_bytes as f32;
+        // Cap at 1.0 (can exceed if there are many edits)
+        stats.content_change_ratio = stats.content_change_ratio.min(1.0);
     }
 
     // Calculate structural changes

@@ -55,6 +55,11 @@ pub struct MarkdownTocNode {
     /// An xxHash of `own_content` after trimming whitespace.
     pub own_content_hash_trimmed: u64,
 
+    /// An xxHash of `own_content` after removing all blank lines.
+    /// More robust than trimmed for detecting whitespace-only changes
+    /// when blank lines are added/removed within content.
+    pub own_content_hash_normalized: u64,
+
     // ─────────────────────────────────────────────────────────────
     // Subtree Hashes (for quick "has anything changed?" checks)
     // ─────────────────────────────────────────────────────────────
@@ -98,6 +103,7 @@ impl MarkdownTocNode {
             own_content: None,
             own_content_hash: 0,
             own_content_hash_trimmed: 0,
+            own_content_hash_normalized: 0,
             subtree_hash: 0,
             subtree_hash_trimmed: 0,
             children: Vec::new(),
@@ -106,14 +112,18 @@ impl MarkdownTocNode {
 
     /// Sets the own content for this node and computes its hash.
     pub fn set_own_content(&mut self, content: Option<String>) {
-        use crate::hashing::{xx_hash, xx_hash_trimmed};
+        use crate::hashing::{xx_hash, xx_hash_semantic, xx_hash_trimmed};
 
         if let Some(ref c) = content {
             self.own_content_hash = xx_hash(c);
             self.own_content_hash_trimmed = xx_hash_trimmed(c);
+            // Use semantic hash for whitespace-insensitive comparison
+            // (removes blank lines AND trims each line)
+            self.own_content_hash_normalized = xx_hash_semantic(c);
         } else {
             self.own_content_hash = 0;
             self.own_content_hash_trimmed = 0;
+            self.own_content_hash_normalized = 0;
         }
         self.own_content = content;
     }
@@ -166,11 +176,18 @@ pub struct CodeBlockInfo {
     /// The language identifier (e.g., "rust", "javascript"), if specified.
     pub language: Option<String>,
 
+    /// The full info string from the fence (e.g., "mermaid title=\"foo\"").
+    /// Includes language and any metadata attributes.
+    pub info_string: String,
+
     /// The raw content of the code block (excluding fence markers).
     pub content: String,
 
     /// An xxHash of the code block content.
     pub content_hash: u64,
+
+    /// An xxHash of the code block content after trimming whitespace.
+    pub content_hash_trimmed: u64,
 
     /// Line number range [start_line, end_line) (1-indexed).
     pub line_range: (usize, usize),
@@ -183,18 +200,22 @@ impl CodeBlockInfo {
     /// Creates a new code block info.
     pub fn new(
         language: Option<String>,
+        info_string: String,
         content: String,
         line_range: (usize, usize),
         parent_section_path: Vec<String>,
     ) -> Self {
-        use crate::hashing::xx_hash;
+        use crate::hashing::{xx_hash, xx_hash_trimmed};
 
         let content_hash = xx_hash(&content);
+        let content_hash_trimmed = xx_hash_trimmed(&content);
 
         Self {
             language,
+            info_string,
             content,
             content_hash,
+            content_hash_trimmed,
             line_range,
             parent_section_path,
         }
@@ -459,12 +480,14 @@ mod tests {
     fn test_code_block_info() {
         let info = CodeBlockInfo::new(
             Some("rust".to_string()),
+            "rust".to_string(),
             "fn main() {}".to_string(),
             (1, 3),
             vec!["Introduction".to_string()],
         );
 
         assert_eq!(info.language, Some("rust".to_string()));
+        assert_eq!(info.info_string, "rust");
         assert!(info.content_hash > 0);
     }
 
