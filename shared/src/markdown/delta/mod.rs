@@ -344,7 +344,7 @@ fn describe_info_string_change(old_info: &str, new_info: &str) -> String {
     let (old_lang, old_props) = parse_info_string(old_info);
     let (new_lang, new_props) = parse_info_string(new_info);
 
-    let lang = new_lang.unwrap_or("plain text");
+    let _lang = new_lang.unwrap_or("plain text");
 
     // Check if language changed
     if old_lang != new_lang {
@@ -378,11 +378,11 @@ fn describe_info_string_change(old_info: &str, new_info: &str) -> String {
 
     if changes.is_empty() {
         // Fallback if we couldn't parse the difference
-        format!("Info changed")
+        "Info changed".to_string()
     } else if changes.len() == 1 {
-        format!("{} ({})", lang, changes[0])
+        changes[0].clone()
     } else {
-        format!("{} ({} properties changed)", lang, changes.len())
+        format!("{} properties changed", changes.len())
     }
 }
 
@@ -401,41 +401,43 @@ fn parse_info_string(info: &str) -> (Option<&str>, HashMap<String, String>) {
     let lang = parts.next().filter(|s| !s.is_empty());
     let rest = parts.next().unwrap_or("");
 
-    // Parse key="value" or key=value patterns
-    let mut chars = rest.chars().peekable();
-    while chars.peek().is_some() {
-        // Skip whitespace
-        while chars.peek().map(|c| c.is_whitespace()).unwrap_or(false) {
-            chars.next();
-        }
+    // Parse key="value" or key=value patterns using regex-like manual parsing
+    let mut remaining = rest.trim();
+    while !remaining.is_empty() {
+        // Find key (up to '=')
+        if let Some(eq_pos) = remaining.find('=') {
+            let key = remaining[..eq_pos].trim();
+            remaining = &remaining[eq_pos + 1..];
 
-        // Read key
-        let key: String = chars
-            .by_ref()
-            .take_while(|&c| c != '=' && !c.is_whitespace())
-            .collect();
-
-        if key.is_empty() {
-            break;
-        }
-
-        // Check for =
-        if chars.peek() == Some(&'=') {
-            chars.next(); // consume '='
-
-            // Read value (possibly quoted)
-            let value = if chars.peek() == Some(&'"') {
-                chars.next(); // consume opening quote
-                let v: String = chars.by_ref().take_while(|&c| c != '"').collect();
-                v
+            // Read value
+            let value = if remaining.starts_with('"') {
+                // Quoted value
+                remaining = &remaining[1..]; // skip opening quote
+                if let Some(end_quote) = remaining.find('"') {
+                    let v = &remaining[..end_quote];
+                    remaining = &remaining[end_quote + 1..].trim_start();
+                    v.to_string()
+                } else {
+                    // No closing quote, take rest
+                    let v = remaining.to_string();
+                    remaining = "";
+                    v
+                }
             } else {
-                chars
-                    .by_ref()
-                    .take_while(|&c| !c.is_whitespace())
-                    .collect()
+                // Unquoted value (until whitespace)
+                let end = remaining
+                    .find(char::is_whitespace)
+                    .unwrap_or(remaining.len());
+                let v = &remaining[..end];
+                remaining = remaining[end..].trim_start();
+                v.to_string()
             };
 
-            props.insert(key, value);
+            if !key.is_empty() {
+                props.insert(key.to_string(), value);
+            }
+        } else {
+            break;
         }
     }
 
@@ -456,24 +458,23 @@ fn strip_code_fences(content: &str) -> String {
 }
 
 /// Describes whitespace changes between two content strings.
+///
+/// Returns a comma-separated list of all detected whitespace change types:
+/// - blank lines (added/removed)
+/// - trailing space
+/// - interior space (indentation/inline spacing)
 fn describe_whitespace_change(original: &str, updated: &str) -> String {
     let orig_lines: Vec<&str> = original.lines().collect();
     let upd_lines: Vec<&str> = updated.lines().collect();
 
+    let mut changes = Vec::new();
+
+    // Check for blank line changes
     let orig_blank = orig_lines.iter().filter(|l| l.trim().is_empty()).count();
     let upd_blank = upd_lines.iter().filter(|l| l.trim().is_empty()).count();
 
     if orig_blank != upd_blank {
-        let diff = upd_blank as i32 - orig_blank as i32;
-        if diff > 0 {
-            return format!("Added {} blank line{}", diff, if diff > 1 { "s" } else { "" });
-        } else {
-            return format!(
-                "Removed {} blank line{}",
-                -diff,
-                if -diff > 1 { "s" } else { "" }
-            );
-        }
+        changes.push("blank lines".to_string());
     }
 
     // Check for trailing whitespace changes
@@ -487,10 +488,11 @@ fn describe_whitespace_change(original: &str, updated: &str) -> String {
         .sum();
 
     if orig_trailing != upd_trailing {
-        return "Trailing whitespace changes".to_string();
+        changes.push("trailing space".to_string());
     }
 
-    // Check for indentation changes
+    // Check for interior space changes (indentation or inline spacing)
+    // This includes leading whitespace and spaces between words
     let orig_indent: usize = orig_lines
         .iter()
         .filter(|l| !l.trim().is_empty())
@@ -502,11 +504,28 @@ fn describe_whitespace_change(original: &str, updated: &str) -> String {
         .map(|l| l.len() - l.trim_start().len())
         .sum();
 
-    if orig_indent != upd_indent {
-        return "Indentation changes".to_string();
+    // Also check for inline spacing changes (spaces within the trimmed content)
+    let orig_interior: usize = orig_lines
+        .iter()
+        .map(|l| l.trim().chars().filter(|c| c.is_whitespace()).count())
+        .sum();
+    let upd_interior: usize = upd_lines
+        .iter()
+        .map(|l| l.trim().chars().filter(|c| c.is_whitespace()).count())
+        .sum();
+
+    if orig_indent != upd_indent || orig_interior != upd_interior {
+        changes.push("interior space".to_string());
     }
 
-    "Whitespace formatting changes".to_string()
+    if changes.is_empty() {
+        // Fallback: alphanumeric content identical but something changed.
+        // This catches punctuation/markup changes like _ vs * for emphasis,
+        // or table padding differences like |---| vs |-----|
+        "punctuation/markup".to_string()
+    } else {
+        changes.join(", ")
+    }
 }
 
 /// Describes content changes between two strings.

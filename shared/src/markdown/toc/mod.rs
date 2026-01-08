@@ -275,6 +275,22 @@ fn build_hierarchy(
         }
     }
 
+    // Update parent line_range to encompass children
+    // This is needed so get_section_path can correctly find which section contains
+    // a given line (e.g., for code blocks)
+    fn update_line_ranges(node: &mut MarkdownTocNode) {
+        for child in &mut node.children {
+            update_line_ranges(child);
+        }
+        if let Some(last_child) = node.children.last() {
+            // Extend parent's line_range to include all children
+            node.line_range.1 = node.line_range.1.max(last_child.line_range.1);
+        }
+    }
+    for node in &mut result {
+        update_line_ranges(node);
+    }
+
     // Compute subtree hashes
     for node in &mut result {
         node.compute_subtree_hash();

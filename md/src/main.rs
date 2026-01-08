@@ -430,6 +430,61 @@ fn print_toc_node<W: Write>(
 // Delta Output
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ANSI escape codes
+const INVERSE: &str = "\x1b[7m";
+const BOLD: &str = "\x1b[1m";
+const ITALIC: &str = "\x1b[3m";
+const RESET: &str = "\x1b[0m";
+
+/// Formats a code block change with ANSI styling.
+///
+/// Format: `{inverse}lang{reset} code block in {bold}section{reset} {description}`
+fn format_code_block_change(lang: &str, section_path: &str, description: &str) -> String {
+    // Parse the description to determine change type and format accordingly
+    if let Some(rest) = description.strip_prefix("Language: ") {
+        // Language change: "Language: none → text"
+        format!(
+            "{INVERSE}{lang}{RESET} code block in {BOLD}{section_path}{RESET} \
+             changed its {BOLD}language{RESET} setting: {rest}"
+        )
+    } else if let Some(rest) = description.strip_prefix("'") {
+        // Property change: "'title': \"old\" → \"new\"" -> "title property: \"old\" → \"new\""
+        if let Some((prop_name, value_part)) = rest.split_once("':") {
+            format!(
+                "{INVERSE}{lang}{RESET} code block in {BOLD}{section_path}{RESET} \
+                 changed its {BOLD}{prop_name}{RESET} property:{value_part}"
+            )
+        } else {
+            // Fallback if parsing fails
+            format!(
+                "{INVERSE}{lang}{RESET} code block in {BOLD}{section_path}{RESET} \
+                 changed: {description}"
+            )
+        }
+    } else if description.starts_with("Modified") {
+        // Content modified
+        format!(
+            "{INVERSE}{lang}{RESET} code block in {BOLD}{section_path}{RESET} \
+             was {BOLD}modified{RESET}"
+        )
+    } else if description.starts_with("Added") {
+        // Added code block
+        format!(
+            "{INVERSE}{lang}{RESET} code block added in {BOLD}{section_path}{RESET}"
+        )
+    } else if description.starts_with("Removed") {
+        // Removed code block
+        format!(
+            "{INVERSE}{lang}{RESET} code block removed from {BOLD}{section_path}{RESET}"
+        )
+    } else {
+        // Fallback for other descriptions
+        format!(
+            "{INVERSE}{lang}{RESET} code block in {BOLD}{section_path}{RESET}: {description}"
+        )
+    }
+}
+
 /// Prints the delta comparison results.
 fn print_delta(delta: &MarkdownDelta, verbose: bool) {
     let stdout = io::stdout();
@@ -584,7 +639,19 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool) {
         writeln!(handle, "Code blocks:").ok();
         for change in &delta.code_block_changes {
             let lang = change.language.as_deref().unwrap_or("plain");
-            writeln!(handle, "  - {} ({})", lang, change.description).ok();
+            // Skip H1 in section path (start from index 1 if it exists)
+            let section_path = if change.section_path.len() > 1 {
+                change.section_path[1..].join(" > ")
+            } else if !change.section_path.is_empty() {
+                change.section_path[0].clone()
+            } else {
+                String::from("(preamble)")
+            };
+
+            // Format with ANSI styling based on change type
+            // inverse=\x1b[7m, bold=\x1b[1m, italic=\x1b[3m, reset=\x1b[0m
+            let formatted = format_code_block_change(lang, &section_path, &change.description);
+            writeln!(handle, "  - {}", formatted).ok();
         }
         writeln!(handle).ok();
     }
@@ -617,12 +684,22 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool) {
     if !whitespace_changes.is_empty() {
         writeln!(handle, "Whitespace only ({}):", whitespace_changes.len()).ok();
         for change in &whitespace_changes {
+            // Skip H1 in section path (start from index 1 if it exists)
             let path_str = change
                 .original_path
                 .as_ref()
-                .map(|p| p.join(" > "))
+                .map(|p| {
+                    if p.len() > 1 {
+                        p[1..].join(" > ")
+                    } else if !p.is_empty() {
+                        p[0].clone()
+                    } else {
+                        String::from("(preamble)")
+                    }
+                })
                 .unwrap_or_default();
-            writeln!(handle, "  - {}", path_str).ok();
+            // description contains the whitespace type(s) - show in italics
+            writeln!(handle, "  - {}: {ITALIC}{}{RESET}", path_str, change.description).ok();
         }
         // Dim italic note after the list
         writeln!(handle).ok();
