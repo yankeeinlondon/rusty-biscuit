@@ -6,10 +6,15 @@
 //! - 12    │ removed line
 //! +    13 │ added line
 //! ```
+//!
+//! Long lines are word-wrapped to fit within the available content width,
+//! with continuation lines showing empty line numbers and maintaining
+//! the appropriate styling.
 
 use super::diff::{DiffLine, InlineSpan};
 use super::VisualDiffOptions;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use textwrap::{wrap, Options as WrapOptions};
+use unicode_width::UnicodeWidthStr;
 
 // ANSI escape codes
 const RESET: &str = "\x1b[0m";
@@ -73,39 +78,50 @@ pub fn render(
                 line_no_new,
                 content,
             } => {
-                output.push_str(&format_context_line(
+                let lines = format_context_line(
                     *line_no_old,
                     *line_no_new,
                     content,
                     content_width,
-                ));
+                );
+                for formatted_line in lines {
+                    output.push_str(&formatted_line);
+                    output.push('\n');
+                }
             }
             DiffLine::Removed {
                 line_no,
                 content,
                 inline_changes,
             } => {
-                output.push_str(&format_removed_line(
+                let lines = format_removed_line(
                     *line_no,
                     content,
                     inline_changes,
                     content_width,
-                ));
+                );
+                for formatted_line in lines {
+                    output.push_str(&formatted_line);
+                    output.push('\n');
+                }
             }
             DiffLine::Added {
                 line_no,
                 content,
                 inline_changes,
             } => {
-                output.push_str(&format_added_line(
+                let lines = format_added_line(
                     *line_no,
                     content,
                     inline_changes,
                     content_width,
-                ));
+                );
+                for formatted_line in lines {
+                    output.push_str(&formatted_line);
+                    output.push('\n');
+                }
             }
         }
-        output.push('\n');
     }
 
     output
@@ -143,49 +159,100 @@ fn filter_with_context(diff: &[DiffLine], context_lines: usize) -> std::collecti
     visible
 }
 
-/// Format a context line.
+/// Format a context line, returning multiple lines if wrapping is needed.
 fn format_context_line(
     line_no_old: usize,
     line_no_new: usize,
     content: &str,
     max_width: usize,
-) -> String {
-    let truncated = truncate_to_width(content, max_width);
-    format!(
-        "  {DIM}{:>4} {:>4}{RESET} {DIM}│{RESET} {}",
-        line_no_old, line_no_new, truncated
-    )
+) -> Vec<String> {
+    let wrapped = wrap_to_width(content, max_width);
+    let mut lines = Vec::with_capacity(wrapped.len());
+
+    for (idx, line_content) in wrapped.iter().enumerate() {
+        if idx == 0 {
+            // First line shows line numbers
+            lines.push(format!(
+                "  {DIM}{:>4} {:>4}{RESET} {DIM}│{RESET} {}",
+                line_no_old, line_no_new, line_content
+            ));
+        } else {
+            // Continuation lines have empty line number area
+            lines.push(format!(
+                "  {DIM}          {RESET} {DIM}│{RESET} {}",
+                line_content
+            ));
+        }
+    }
+
+    lines
 }
 
-/// Format a removed line.
+/// Format a removed line, returning multiple lines if wrapping is needed.
 fn format_removed_line(
     line_no: usize,
     content: &str,
     inline_changes: &[InlineSpan],
     max_width: usize,
-) -> String {
-    let formatted_content = format_with_inline_changes(content, inline_changes, max_width, true);
-    format!(
-        "{FG_RED}-{RESET} {BG_REMOVED}{:>4}{RESET}      {DIM}│{RESET} {}",
-        line_no, formatted_content
-    )
+) -> Vec<String> {
+    let wrapped = wrap_to_width(content, max_width);
+    let mut lines = Vec::with_capacity(wrapped.len());
+
+    for (idx, line_content) in wrapped.iter().enumerate() {
+        if idx == 0 {
+            // First line shows line number and inline changes
+            let formatted_content = format_with_inline_changes(line_content, inline_changes, max_width, true);
+            lines.push(format!(
+                "{FG_RED}-{RESET} {BG_REMOVED}{:>4}{RESET}      {DIM}│{RESET} {}",
+                line_no, formatted_content
+            ));
+        } else {
+            // Continuation lines
+            lines.push(format!(
+                "{FG_RED} {RESET} {BG_REMOVED}    {RESET}      {DIM}│{RESET} {}",
+                line_content
+            ));
+        }
+    }
+
+    lines
 }
 
-/// Format an added line.
+/// Format an added line, returning multiple lines if wrapping is needed.
 fn format_added_line(
     line_no: usize,
     content: &str,
     inline_changes: &[InlineSpan],
     max_width: usize,
-) -> String {
-    let formatted_content = format_with_inline_changes(content, inline_changes, max_width, false);
-    format!(
-        "{FG_GREEN}+{RESET}      {BG_ADDED}{:>4}{RESET} {DIM}│{RESET} {}",
-        line_no, formatted_content
-    )
+) -> Vec<String> {
+    let wrapped = wrap_to_width(content, max_width);
+    let mut lines = Vec::with_capacity(wrapped.len());
+
+    for (idx, line_content) in wrapped.iter().enumerate() {
+        if idx == 0 {
+            // First line shows line number and inline changes
+            let formatted_content = format_with_inline_changes(line_content, inline_changes, max_width, false);
+            lines.push(format!(
+                "{FG_GREEN}+{RESET}      {BG_ADDED}{:>4}{RESET} {DIM}│{RESET} {}",
+                line_no, formatted_content
+            ));
+        } else {
+            // Continuation lines
+            lines.push(format!(
+                "{FG_GREEN} {RESET}      {BG_ADDED}    {RESET} {DIM}│{RESET} {}",
+                line_content
+            ));
+        }
+    }
+
+    lines
 }
 
 /// Format content with inline change highlighting.
+///
+/// This function formats a single wrapped line with inline change spans.
+/// Spans are byte offsets in the original content, so we map them to the
+/// current line segment.
 fn format_with_inline_changes(
     content: &str,
     spans: &[InlineSpan],
@@ -193,7 +260,8 @@ fn format_with_inline_changes(
     is_removed: bool,
 ) -> String {
     if spans.is_empty() {
-        return truncate_to_width(content, max_width);
+        // No spans - just return the content (already wrapped by caller)
+        return content.to_string();
     }
 
     let bg_emphasis = if is_removed {
@@ -202,69 +270,85 @@ fn format_with_inline_changes(
         BG_CHANGED_ADD
     };
 
+    let content_len = content.len();
     let mut result = String::new();
     let mut visual_width = 0;
+    let mut byte_pos = 0;
 
+    // Process spans that fall within this line segment
     for span in spans {
-        if visual_width >= max_width {
+        if visual_width >= max_width || byte_pos >= content_len {
             break;
         }
 
-        let span_content = if span.end <= content.len() {
-            &content[span.start..span.end]
-        } else if span.start < content.len() {
-            &content[span.start..]
-        } else {
+        // Calculate how much of this span falls within this line
+        let span_start_in_line = span.start.max(byte_pos);
+        let span_end_in_line = span.end.min(content_len);
+
+        if span_start_in_line >= span_end_in_line {
             continue;
-        };
-
-        let remaining_width = max_width.saturating_sub(visual_width);
-        let truncated_span = truncate_to_width(span_content, remaining_width);
-        let span_visual_width = truncated_span.width();
-
-        if span.emphasized {
-            result.push_str(&format!(
-                "{}{BOLD}{UNDERLINE}{}{RESET}",
-                bg_emphasis, truncated_span
-            ));
-        } else {
-            result.push_str(&truncated_span);
         }
 
-        visual_width += span_visual_width;
+        // Add any content before this span (gap)
+        if span_start_in_line > byte_pos && span_start_in_line <= content_len {
+            let gap_content = &content[byte_pos..span_start_in_line];
+            result.push_str(gap_content);
+            visual_width += gap_content.width();
+        }
+
+        // Add the span content
+        if span_start_in_line < content_len {
+            let span_content = &content[span_start_in_line..span_end_in_line];
+
+            if span.emphasized {
+                result.push_str(&format!(
+                    "{}{BOLD}{UNDERLINE}{}{RESET}",
+                    bg_emphasis, span_content
+                ));
+            } else {
+                result.push_str(span_content);
+            }
+            visual_width += span_content.width();
+        }
+
+        byte_pos = span_end_in_line;
+    }
+
+    // Add any remaining content after all spans
+    if byte_pos < content_len {
+        let remaining = &content[byte_pos..];
+        result.push_str(remaining);
     }
 
     result
 }
 
-/// Truncate a string to fit within a visual width.
-fn truncate_to_width(s: &str, max_width: usize) -> String {
-    // First check if the string fits entirely
-    if s.width() <= max_width {
-        return s.to_string();
+/// Wrap a string to fit within a visual width, returning multiple lines if needed.
+///
+/// Uses textwrap for intelligent word breaking. Each returned line is guaranteed
+/// to fit within `max_width` display columns.
+fn wrap_to_width(s: &str, max_width: usize) -> Vec<String> {
+    if s.is_empty() {
+        return vec![String::new()];
     }
 
-    // Need to truncate - reserve space for ellipsis
-    let ellipsis_width = 1;
-    let target_width = max_width.saturating_sub(ellipsis_width);
-
-    let mut result = String::new();
-    let mut current_width = 0;
-
-    for ch in s.chars() {
-        let char_width = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if current_width + char_width > target_width {
-            break;
-        }
-        result.push(ch);
-        current_width += char_width;
+    // Handle edge case of very narrow width
+    if max_width == 0 {
+        return vec![String::new()];
     }
 
-    if max_width > 0 {
-        result.push('…');
-    }
+    // Configure textwrap options for proper word wrapping
+    let options = WrapOptions::new(max_width)
+        .break_words(true); // Break long words if needed
 
-    result
+    let wrapped: Vec<String> = wrap(s, options).into_iter().map(|cow| cow.into_owned()).collect();
+
+    // Ensure we always return at least one line
+    if wrapped.is_empty() {
+        vec![String::new()]
+    } else {
+        wrapped
+    }
 }
 
 #[cfg(test)]
@@ -272,36 +356,94 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_format_context_line() {
-        let line = format_context_line(10, 11, "Hello World", 50);
-        assert!(line.contains("10"));
-        assert!(line.contains("11"));
-        assert!(line.contains("Hello World"));
-        assert!(line.contains("│"));
+    fn test_wrap_to_width_short() {
+        let result = wrap_to_width("Hello", 10);
+        assert_eq!(result, vec!["Hello"]);
     }
 
     #[test]
-    fn test_format_removed_line() {
+    fn test_wrap_to_width_long() {
+        let result = wrap_to_width("Hello World", 5);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "Hello");
+        assert_eq!(result[1], "World");
+    }
+
+    #[test]
+    fn test_format_context_line_short() {
+        let lines = format_context_line(10, 11, "Hello World", 50);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("10"));
+        assert!(lines[0].contains("11"));
+        assert!(lines[0].contains("Hello World"));
+        assert!(lines[0].contains("│"));
+    }
+
+    #[test]
+    fn test_format_context_line_wraps() {
+        // Regression test: long lines should wrap instead of truncate
+        let long_content = "This is a very long context line that should wrap";
+        let lines = format_context_line(10, 11, long_content, 15);
+
+        // Should produce multiple visual lines
+        assert!(lines.len() > 1, "Long content should wrap to multiple lines");
+
+        // First line should show line numbers
+        assert!(lines[0].contains("10"));
+        assert!(lines[0].contains("11"));
+
+        // All lines should contain the separator
+        for line in &lines {
+            assert!(line.contains("│"));
+        }
+    }
+
+    #[test]
+    fn test_format_removed_line_short() {
         let spans = vec![InlineSpan {
             start: 0,
             end: 5,
             emphasized: true,
         }];
-        let line = format_removed_line(10, "Hello", &spans, 50);
-        assert!(line.contains("-"));
-        assert!(line.contains("10"));
+        let lines = format_removed_line(10, "Hello", &spans, 50);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("-"));
+        assert!(lines[0].contains("10"));
     }
 
     #[test]
-    fn test_format_added_line() {
+    fn test_format_removed_line_wraps() {
+        // Regression test: long removed lines should wrap
+        let long_content = "This is a very long removed line that should wrap properly";
+        let lines = format_removed_line(42, long_content, &[], 20);
+
+        assert!(lines.len() > 1, "Long removed line should wrap");
+        assert!(lines[0].contains("42"));
+        assert!(lines[0].contains("-"));
+    }
+
+    #[test]
+    fn test_format_added_line_short() {
         let spans = vec![InlineSpan {
             start: 0,
             end: 5,
             emphasized: true,
         }];
-        let line = format_added_line(10, "Hello", &spans, 50);
-        assert!(line.contains("+"));
-        assert!(line.contains("10"));
+        let lines = format_added_line(10, "Hello", &spans, 50);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("+"));
+        assert!(lines[0].contains("10"));
+    }
+
+    #[test]
+    fn test_format_added_line_wraps() {
+        // Regression test: long added lines should wrap
+        let long_content = "This is a very long added line that should wrap properly";
+        let lines = format_added_line(42, long_content, &[], 20);
+
+        assert!(lines.len() > 1, "Long added line should wrap");
+        assert!(lines[0].contains("42"));
+        assert!(lines[0].contains("+"));
     }
 
     #[test]
@@ -355,5 +497,40 @@ mod tests {
         // Should have header
         assert!(output.contains("a.md"));
         assert!(output.contains("b.md"));
+    }
+
+    #[test]
+    fn test_render_long_lines_wrap() {
+        // Regression test: ensure long lines in full render wrap properly
+        let diff = vec![
+            DiffLine::Context {
+                line_no_old: 1,
+                line_no_new: 1,
+                content: "Short line".to_string(),
+            },
+            DiffLine::Removed {
+                line_no: 2,
+                content: "This is a very long removed line that exceeds the available width and must wrap to multiple lines for proper display".to_string(),
+                inline_changes: vec![],
+            },
+            DiffLine::Added {
+                line_no: 2,
+                content: "This is another very long added line that also exceeds the width and needs wrapping".to_string(),
+                inline_changes: vec![],
+            },
+        ];
+
+        // Use a narrow width to force wrapping (unified mode is for narrow terminals)
+        let options = VisualDiffOptions::with_width(60);
+        let output = render(&diff, "old.md", "new.md", &options);
+
+        // Count newlines - should be more than just 4 (header + 3 diff lines)
+        // because long lines wrap
+        let newline_count = output.chars().filter(|c| *c == '\n').count();
+        assert!(
+            newline_count > 4,
+            "Long lines should wrap, producing more output lines. Got {} lines",
+            newline_count
+        );
     }
 }
