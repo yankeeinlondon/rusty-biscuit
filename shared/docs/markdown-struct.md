@@ -70,10 +70,22 @@ Each node in the TOC represents a heading with:
 - `slug: String` - URL-safe anchor slug
 - `source_span: (usize, usize)` - Byte offset range
 - `line_range: (usize, usize)` - Line number range (1-indexed)
-- `own_content: Option<String>` - Section content (excluding children)
-- `own_content_hash: u64` / `own_content_hash_trimmed: u64`
+- `prelude: Option<PreludeNode>` - Content before first child heading (see below)
 - `subtree_hash: u64` / `subtree_hash_trimmed: u64` - Hash including all descendants
 - `children: Vec<MarkdownTocNode>` - Child headings
+
+### PreludeNode
+
+The prelude is the content that appears between a heading and its first child heading. Unlike heading sections, a prelude has no title and cannot have children.
+
+- `content: String` - The text content
+- `content_hash: u64` - xxHash of content
+- `content_hash_trimmed: u64` - xxHash after trimming whitespace
+- `content_hash_normalized: u64` - xxHash after removing blank lines (whitespace-insensitive)
+- `source_span: (usize, usize)` - Byte offset range
+- `line_range: (usize, usize)` - Line number range (1-indexed)
+
+This separation allows precise change detection: "H2 changed because its prelude was modified" vs "H2 changed because a child H3 was modified".
 
 ### Usage Example
 

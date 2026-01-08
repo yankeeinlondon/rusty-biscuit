@@ -20,7 +20,7 @@
 
 mod types;
 
-pub use types::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
+pub use types::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode, PreludeNode};
 
 use crate::hashing::{xx_hash, xx_hash_trimmed};
 use crate::markdown::Markdown;
@@ -228,19 +228,22 @@ fn build_hierarchy(
             (start_line, end_line),
         );
 
-        // Extract own content (from after heading line to next heading or children)
+        // Extract prelude content (from after heading line to next heading)
         let section_content = &content[start_byte..end_byte];
-        let own_content = if let Some(newline_pos) = section_content.find('\n') {
-            let after_heading = &section_content[newline_pos + 1..];
-            if after_heading.trim().is_empty() {
-                None
-            } else {
-                Some(after_heading.to_string())
-            }
-        } else {
-            None
-        };
-        node.set_own_content(own_content);
+        if let Some(newline_pos) = section_content.find('\n') {
+            let prelude_start_byte = start_byte + newline_pos + 1;
+            let prelude_content = &section_content[newline_pos + 1..];
+
+            // Calculate prelude line range
+            let prelude_start_line = start_line + 1; // Line after heading
+            let prelude_end_line = end_line;
+
+            node.set_prelude(
+                Some(prelude_content.to_string()),
+                (prelude_start_byte, end_byte),
+                (prelude_start_line, prelude_end_line),
+            );
+        }
 
         nodes_with_ranges.push((node, start_byte, end_byte));
     }

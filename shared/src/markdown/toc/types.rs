@@ -39,26 +39,18 @@ pub struct MarkdownTocNode {
     pub line_range: (usize, usize),
 
     // ─────────────────────────────────────────────────────────────
-    // Own Content (this section only, excluding children)
+    // Prelude (content before first child heading)
     // ─────────────────────────────────────────────────────────────
-    /// The textual content of THIS section only.
-    /// Spans from after the heading line to either:
+    /// The prelude content of this section (text before first child heading).
+    ///
+    /// The prelude spans from after the heading line to either:
     /// - The first child heading, OR
     /// - The next sibling/parent heading, OR
     /// - End of document
-    /// Does NOT include child section content.
-    pub own_content: Option<String>,
-
-    /// An xxHash of `own_content`.
-    pub own_content_hash: u64,
-
-    /// An xxHash of `own_content` after trimming whitespace.
-    pub own_content_hash_trimmed: u64,
-
-    /// An xxHash of `own_content` after removing all blank lines.
-    /// More robust than trimmed for detecting whitespace-only changes
-    /// when blank lines are added/removed within content.
-    pub own_content_hash_normalized: u64,
+    ///
+    /// Does NOT include child section content. Can be None if there's no
+    /// content between the heading and its first child/sibling.
+    pub prelude: Option<PreludeNode>,
 
     // ─────────────────────────────────────────────────────────────
     // Subtree Hashes (for quick "has anything changed?" checks)
@@ -100,45 +92,58 @@ impl MarkdownTocNode {
             slug,
             source_span,
             line_range,
-            own_content: None,
-            own_content_hash: 0,
-            own_content_hash_trimmed: 0,
-            own_content_hash_normalized: 0,
+            prelude: None,
             subtree_hash: 0,
             subtree_hash_trimmed: 0,
             children: Vec::new(),
         }
     }
 
-    /// Sets the own content for this node and computes its hash.
-    pub fn set_own_content(&mut self, content: Option<String>) {
-        use crate::hashing::{xx_hash, xx_hash_semantic, xx_hash_trimmed};
-
-        if let Some(ref c) = content {
-            self.own_content_hash = xx_hash(c);
-            self.own_content_hash_trimmed = xx_hash_trimmed(c);
-            // Use semantic hash for whitespace-insensitive comparison
-            // (removes blank lines AND trims each line)
-            self.own_content_hash_normalized = xx_hash_semantic(c);
-        } else {
-            self.own_content_hash = 0;
-            self.own_content_hash_trimmed = 0;
-            self.own_content_hash_normalized = 0;
-        }
-        self.own_content = content;
+    /// Sets the prelude for this node.
+    ///
+    /// The prelude is the content between the heading and the first child heading.
+    /// Pass the content string and its location information.
+    pub fn set_prelude(
+        &mut self,
+        content: Option<String>,
+        source_span: (usize, usize),
+        line_range: (usize, usize),
+    ) {
+        self.prelude = content
+            .filter(|c| !c.trim().is_empty())
+            .map(|c| PreludeNode::new(c, source_span, line_range));
     }
 
-    /// Computes the subtree hash by combining own content with all children.
+    /// Returns the prelude content as a string slice, if present.
+    pub fn prelude_content(&self) -> Option<&str> {
+        self.prelude.as_ref().map(|p| p.content.as_str())
+    }
+
+    /// Returns the prelude content hash, or 0 if no prelude.
+    pub fn prelude_hash(&self) -> u64 {
+        self.prelude.as_ref().map_or(0, |p| p.content_hash)
+    }
+
+    /// Returns the prelude normalized hash (whitespace-insensitive), or 0 if no prelude.
+    pub fn prelude_hash_normalized(&self) -> u64 {
+        self.prelude.as_ref().map_or(0, |p| p.content_hash_normalized)
+    }
+
+    /// Computes the subtree hash by combining prelude content with all children.
     pub fn compute_subtree_hash(&mut self) {
         use crate::hashing::{xx_hash, xx_hash_trimmed};
 
-        // Build combined content for subtree
-        let mut combined = self.own_content.clone().unwrap_or_default();
+        // Build combined content for subtree: prelude + all child subtrees
+        let mut combined = self
+            .prelude
+            .as_ref()
+            .map_or(String::new(), |p| p.content.clone());
 
         for child in &mut self.children {
             child.compute_subtree_hash();
-            if let Some(ref content) = child.own_content {
-                combined.push_str(content);
+            // Include child's prelude
+            if let Some(ref prelude) = child.prelude {
+                combined.push_str(&prelude.content);
             }
         }
 
@@ -167,6 +172,63 @@ impl MarkdownTocNode {
             }
         }
         None
+    }
+}
+
+/// The prelude content within a section (text before the first child heading).
+///
+/// A prelude is the content that appears between a heading and its first child heading
+/// (or the next sibling/parent heading if there are no children). Unlike heading sections,
+/// a prelude:
+/// 1. Has no title (anonymous content)
+/// 2. Cannot have children (always a leaf node)
+///
+/// This allows precise change detection: "H2 changed because its prelude was modified"
+/// vs "H2 changed because a child H3 was modified".
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PreludeNode {
+    /// The text content of this prelude.
+    pub content: String,
+
+    /// An xxHash of the prelude content.
+    pub content_hash: u64,
+
+    /// An xxHash of the content after trimming whitespace.
+    pub content_hash_trimmed: u64,
+
+    /// An xxHash of the content after removing all blank lines.
+    /// More robust for detecting whitespace-only changes.
+    pub content_hash_normalized: u64,
+
+    /// Byte offset range in the source document [start, end).
+    pub source_span: (usize, usize),
+
+    /// Line number range [start_line, end_line) (1-indexed).
+    pub line_range: (usize, usize),
+}
+
+impl PreludeNode {
+    /// Creates a new prelude node from content and location info.
+    pub fn new(content: String, source_span: (usize, usize), line_range: (usize, usize)) -> Self {
+        use crate::hashing::{xx_hash, xx_hash_semantic, xx_hash_trimmed};
+
+        let content_hash = xx_hash(&content);
+        let content_hash_trimmed = xx_hash_trimmed(&content);
+        let content_hash_normalized = xx_hash_semantic(&content);
+
+        Self {
+            content,
+            content_hash,
+            content_hash_trimmed,
+            content_hash_normalized,
+            source_span,
+            line_range,
+        }
+    }
+
+    /// Returns true if this prelude has no meaningful content.
+    pub fn is_empty(&self) -> bool {
+        self.content.trim().is_empty()
     }
 }
 
@@ -446,12 +508,36 @@ mod tests {
     }
 
     #[test]
-    fn test_toc_node_set_own_content() {
-        let mut node = MarkdownTocNode::new(2, "Test".to_string(), "test".to_string(), (0, 100), (1, 10));
+    fn test_toc_node_set_prelude() {
+        let mut node =
+            MarkdownTocNode::new(2, "Test".to_string(), "test".to_string(), (0, 100), (1, 10));
 
-        node.set_own_content(Some("Hello world".to_string()));
-        assert_eq!(node.own_content, Some("Hello world".to_string()));
-        assert!(node.own_content_hash > 0);
+        node.set_prelude(Some("Hello world".to_string()), (10, 21), (2, 3));
+        assert!(node.prelude.is_some());
+        let prelude = node.prelude.as_ref().unwrap();
+        assert_eq!(prelude.content, "Hello world");
+        assert!(prelude.content_hash > 0);
+        assert_eq!(prelude.source_span, (10, 21));
+        assert_eq!(prelude.line_range, (2, 3));
+    }
+
+    #[test]
+    fn test_toc_node_set_prelude_empty() {
+        let mut node =
+            MarkdownTocNode::new(2, "Test".to_string(), "test".to_string(), (0, 100), (1, 10));
+
+        // Empty or whitespace-only content should result in None
+        node.set_prelude(Some("   \n  ".to_string()), (10, 17), (2, 3));
+        assert!(node.prelude.is_none());
+    }
+
+    #[test]
+    fn test_prelude_node_is_empty() {
+        let prelude = PreludeNode::new("  content  ".to_string(), (0, 11), (1, 1));
+        assert!(!prelude.is_empty());
+
+        let empty_prelude = PreludeNode::new("   ".to_string(), (0, 3), (1, 1));
+        assert!(empty_prelude.is_empty());
     }
 
     #[test]
