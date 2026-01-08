@@ -4,15 +4,15 @@ use shared::markdown::highlighting::{
     detect_code_theme, detect_color_mode, detect_prose_theme, ColorMode, ThemePair,
 };
 use shared::markdown::output::{HtmlOptions, MermaidMode, TerminalOptions, write_terminal};
-use shared::markdown::Markdown;
-use std::io::{self, Read};
+use shared::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser)]
 #[command(name = "md", about = "Markdown Awesome Tool", version)]
 #[command(group = ArgGroup::new("output-mode")
-    .args(["html", "show_html", "ast", "clean", "clean_save"])
+    .args(["html", "show_html", "ast", "clean", "clean_save", "toc", "delta"])
     .multiple(false))]
 struct Cli {
     /// Input file path (reads from stdin if not provided, use "-" for explicit stdin)
@@ -49,6 +49,18 @@ struct Cli {
     /// Output MDAST JSON
     #[arg(long, group = "output-mode")]
     ast: bool,
+
+    /// Show table of contents as a tree structure
+    #[arg(long, group = "output-mode")]
+    toc: bool,
+
+    /// Compare with another markdown file and show differences
+    #[arg(long, group = "output-mode", value_name = "FILE")]
+    delta: Option<PathBuf>,
+
+    /// Output as JSON (for --toc and --delta modes)
+    #[arg(long)]
+    json: bool,
 
     /// Merge JSON into frontmatter (JSON wins on conflicts)
     #[arg(long, value_name = "JSON")]
@@ -187,6 +199,30 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Handle --toc mode
+    if cli.toc {
+        let toc = md.toc();
+        if cli.json {
+            println!("{}", serde_json::to_string_pretty(&toc)?);
+        } else {
+            print_toc_tree(&toc, cli.verbose > 0);
+        }
+        return Ok(());
+    }
+
+    // Handle --delta mode
+    if let Some(ref other_path) = cli.delta {
+        let other_md = Markdown::try_from(other_path.as_path())
+            .wrap_err_with(|| format!("Failed to read comparison file: {:?}", other_path))?;
+        let delta = md.delta(&other_md);
+        if cli.json {
+            println!("{}", serde_json::to_string_pretty(&delta)?);
+        } else {
+            print_delta(&delta, cli.verbose > 0);
+        }
+        return Ok(());
+    }
+
     if cli.html {
         let mut options = HtmlOptions::default();
         options.prose_theme = prose_theme;
@@ -297,4 +333,313 @@ fn list_themes() {
     }
     println!("\nUse --theme <name> to set prose theme");
     println!("Use --code-theme <name> to override code theme");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOC Tree Output
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Prints the table of contents as a text-based tree.
+fn print_toc_tree(toc: &MarkdownToc, verbose: bool) {
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+
+    // Print title if available
+    if let Some(ref title) = toc.title {
+        writeln!(handle, "📄 {}", title).ok();
+        if verbose {
+            writeln!(
+                handle,
+                "   Page hash: {:016x} (trimmed: {:016x})",
+                toc.page_hash, toc.page_hash_trimmed
+            )
+            .ok();
+        }
+        writeln!(handle).ok();
+    }
+
+    // Print the tree structure
+    for (i, node) in toc.structure.iter().enumerate() {
+        let is_last = i == toc.structure.len() - 1;
+        print_toc_node(&mut handle, node, "", is_last, verbose);
+    }
+
+    // Print summary
+    writeln!(handle).ok();
+    writeln!(
+        handle,
+        "Total: {} heading{}",
+        toc.heading_count(),
+        if toc.heading_count() == 1 { "" } else { "s" }
+    )
+    .ok();
+
+    if !toc.code_blocks.is_empty() {
+        writeln!(handle, "Code blocks: {}", toc.code_blocks.len()).ok();
+    }
+
+    if !toc.internal_links.is_empty() {
+        let broken_count = toc.broken_links().len();
+        if broken_count > 0 {
+            writeln!(
+                handle,
+                "Internal links: {} ({} broken)",
+                toc.internal_links.len(),
+                broken_count
+            )
+            .ok();
+        } else {
+            writeln!(handle, "Internal links: {}", toc.internal_links.len()).ok();
+        }
+    }
+}
+
+/// Recursively prints a TOC node with tree characters.
+fn print_toc_node<W: Write>(
+    out: &mut W,
+    node: &MarkdownTocNode,
+    prefix: &str,
+    is_last: bool,
+    verbose: bool,
+) {
+    // Tree connector characters
+    let connector = if is_last { "└── " } else { "├── " };
+    let child_prefix = if is_last { "    " } else { "│   " };
+
+    if verbose {
+        // Show hash or hash pair (for trimmed hashes)
+        let hash_display = if node.title_hash == node.title_hash_trimmed {
+            format!("({:016x})", node.title_hash)
+        } else {
+            format!(
+                "({:016x} / {:016x})",
+                node.title_hash, node.title_hash_trimmed
+            )
+        };
+        writeln!(out, "{}{}{} {}", prefix, connector, node.title, hash_display).ok();
+    } else {
+        writeln!(out, "{}{}{}", prefix, connector, node.title).ok();
+    }
+
+    // Print children
+    let new_prefix = format!("{}{}", prefix, child_prefix);
+    for (i, child) in node.children.iter().enumerate() {
+        let child_is_last = i == node.children.len() - 1;
+        print_toc_node(out, child, &new_prefix, child_is_last, verbose);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Delta Output
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Prints the delta comparison results.
+fn print_delta(delta: &MarkdownDelta, verbose: bool) {
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+
+    // Print classification header
+    let classification_symbol = match delta.classification {
+        shared::markdown::DocumentChange::NoChange => "✓",
+        shared::markdown::DocumentChange::WhitespaceOnly => "~",
+        shared::markdown::DocumentChange::FrontmatterOnly => "◈",
+        shared::markdown::DocumentChange::FrontmatterAndWhitespace => "◈",
+        shared::markdown::DocumentChange::StructuralOnly => "⊕",
+        shared::markdown::DocumentChange::ContentMinor => "△",
+        shared::markdown::DocumentChange::ContentModerate => "◐",
+        shared::markdown::DocumentChange::ContentMajor => "◉",
+        shared::markdown::DocumentChange::Rewritten => "★",
+    };
+
+    writeln!(
+        handle,
+        "{} {:?} ({:.1}% changed)",
+        classification_symbol,
+        delta.classification,
+        delta.statistics.content_change_ratio * 100.0
+    )
+    .ok();
+    writeln!(handle).ok();
+
+    // Print frontmatter changes
+    if delta.frontmatter_changed {
+        writeln!(handle, "Frontmatter:").ok();
+        if delta.frontmatter_formatting_only {
+            writeln!(handle, "  (formatting changes only)").ok();
+        } else {
+            for change in &delta.frontmatter_changes {
+                let symbol = match change.action {
+                    shared::markdown::ChangeAction::PropertyAdded => "+",
+                    shared::markdown::ChangeAction::PropertyRemoved => "-",
+                    shared::markdown::ChangeAction::PropertyUpdated => "~",
+                    _ => "?",
+                };
+                writeln!(handle, "  {} {}: {}", symbol, change.key, change.description).ok();
+            }
+        }
+        writeln!(handle).ok();
+    }
+
+    // Print preamble changes
+    if delta.preamble_changed {
+        if delta.preamble_whitespace_only {
+            writeln!(handle, "Preamble: whitespace changes only").ok();
+        } else {
+            writeln!(handle, "Preamble: modified").ok();
+        }
+        writeln!(handle).ok();
+    }
+
+    // Print added sections
+    if !delta.added.is_empty() {
+        writeln!(handle, "Added ({}):", delta.added.len()).ok();
+        for change in &delta.added {
+            let path_str = change
+                .new_path
+                .as_ref()
+                .map(|p| p.join(" > "))
+                .unwrap_or_default();
+            if verbose {
+                writeln!(
+                    handle,
+                    "  + {} (line {})",
+                    path_str,
+                    change.new_line.unwrap_or(0)
+                )
+                .ok();
+            } else {
+                writeln!(handle, "  + {}", path_str).ok();
+            }
+        }
+        writeln!(handle).ok();
+    }
+
+    // Print removed sections
+    if !delta.removed.is_empty() {
+        writeln!(handle, "Removed ({}):", delta.removed.len()).ok();
+        for change in &delta.removed {
+            let path_str = change
+                .original_path
+                .as_ref()
+                .map(|p| p.join(" > "))
+                .unwrap_or_default();
+            if verbose {
+                writeln!(
+                    handle,
+                    "  - {} (was line {})",
+                    path_str,
+                    change.original_line.unwrap_or(0)
+                )
+                .ok();
+            } else {
+                writeln!(handle, "  - {}", path_str).ok();
+            }
+        }
+        writeln!(handle).ok();
+    }
+
+    // Print modified sections
+    if !delta.modified.is_empty() {
+        writeln!(handle, "Modified ({}):", delta.modified.len()).ok();
+        for change in &delta.modified {
+            let path_str = change
+                .original_path
+                .as_ref()
+                .map(|p| p.join(" > "))
+                .unwrap_or_default();
+            let change_type = match change.action {
+                shared::markdown::ChangeAction::WhitespaceOnly => " (whitespace)",
+                _ => "",
+            };
+            if verbose {
+                writeln!(
+                    handle,
+                    "  ~ {}{} (line {} → {})",
+                    path_str,
+                    change_type,
+                    change.original_line.unwrap_or(0),
+                    change.new_line.unwrap_or(0)
+                )
+                .ok();
+            } else {
+                writeln!(handle, "  ~ {}{}", path_str, change_type).ok();
+            }
+        }
+        writeln!(handle).ok();
+    }
+
+    // Print moved sections
+    if !delta.moved.is_empty() {
+        writeln!(handle, "Moved ({}):", delta.moved.len()).ok();
+        for moved in &delta.moved {
+            let from = moved.original_path.join(" > ");
+            let to = moved.new_path.join(" > ");
+            let level_change = if moved.level_delta < 0 {
+                format!(" (promoted by {})", -moved.level_delta)
+            } else if moved.level_delta > 0 {
+                format!(" (demoted by {})", moved.level_delta)
+            } else {
+                String::new()
+            };
+            writeln!(handle, "  ↷ {} → {}{}", from, to, level_change).ok();
+        }
+        writeln!(handle).ok();
+    }
+
+    // Print code block changes
+    if !delta.code_block_changes.is_empty() && verbose {
+        writeln!(handle, "Code blocks:").ok();
+        for change in &delta.code_block_changes {
+            let symbol = match change.action {
+                shared::markdown::ChangeAction::Added => "+",
+                shared::markdown::ChangeAction::Removed => "-",
+                _ => "~",
+            };
+            let lang = change.language.as_deref().unwrap_or("plain");
+            writeln!(handle, "  {} {} ({})", symbol, lang, change.description).ok();
+        }
+        writeln!(handle).ok();
+    }
+
+    // Print broken links
+    if !delta.broken_links.is_empty() {
+        writeln!(handle, "⚠ Broken links ({}):", delta.broken_links.len()).ok();
+        for link in &delta.broken_links {
+            write!(
+                handle,
+                "  ✗ #{} at line {}",
+                link.target_slug, link.line_number
+            )
+            .ok();
+            if let Some(ref suggestion) = link.suggested_replacement {
+                writeln!(
+                    handle,
+                    " → did you mean #{}?",
+                    suggestion
+                )
+                .ok();
+            } else {
+                writeln!(handle).ok();
+            }
+        }
+        writeln!(handle).ok();
+    }
+
+    // Print summary statistics if verbose
+    if verbose {
+        let stats = &delta.statistics;
+        writeln!(handle, "Statistics:").ok();
+        writeln!(
+            handle,
+            "  Bytes: {} → {} ({} changed)",
+            stats.original_bytes, stats.new_bytes, stats.bytes_changed
+        )
+        .ok();
+        writeln!(
+            handle,
+            "  Sections: {} → {} ({} unchanged)",
+            stats.original_section_count, stats.new_section_count, stats.sections_unchanged
+        )
+        .ok();
+    }
 }
