@@ -47,7 +47,10 @@ pub mod xx_hash;
 
 // Re-export commonly used functions at module level
 pub use blake3::{blake3_hash, blake3_hash_bytes, blake3_hash_trimmed};
-pub use xx_hash::{xx_hash, xx_hash_bytes, xx_hash_normalized, xx_hash_trimmed};
+pub use xx_hash::{
+    xx_hash, xx_hash_alphanumeric, xx_hash_bytes, xx_hash_content_only, xx_hash_normalized,
+    xx_hash_semantic, xx_hash_trimmed,
+};
 
 // Re-export argon2id types and functions
 pub use argon2id::{

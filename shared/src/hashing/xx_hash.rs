@@ -99,6 +99,104 @@ pub fn xx_hash_normalized(data: &str) -> u64 {
     xxh64(normalized.as_bytes(), 0)
 }
 
+/// Computes XXH64 hash ignoring all whitespace differences.
+///
+/// This function provides the most aggressive normalization:
+/// - Removes blank lines
+/// - Trims leading/trailing whitespace from each line
+/// - Joins with single newlines
+///
+/// Use this for detecting if content is semantically identical despite
+/// formatting differences (indentation, trailing spaces, blank lines).
+///
+/// ## Examples
+///
+/// ```rust
+/// use shared::hashing::xx_hash_semantic;
+///
+/// // Different indentation
+/// assert_eq!(
+///     xx_hash_semantic("  - item1\n  - item2"),
+///     xx_hash_semantic("- item1\n- item2")
+/// );
+///
+/// // Different blank lines and trailing spaces
+/// assert_eq!(
+///     xx_hash_semantic("line1  \n\nline2  "),
+///     xx_hash_semantic("line1\nline2")
+/// );
+/// ```
+pub fn xx_hash_semantic(data: &str) -> u64 {
+    let normalized: String = data
+        .lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    xxh64(normalized.as_bytes(), 0)
+}
+
+/// Computes XXH64 hash of the input with ALL whitespace removed.
+///
+/// This is the most aggressive normalization - removes every whitespace
+/// character from the input. Use this to detect if two strings have
+/// identical non-whitespace content (e.g., table padding, code indentation).
+///
+/// ## Examples
+///
+/// ```rust
+/// use shared::hashing::xx_hash_content_only;
+///
+/// // Table with different padding
+/// assert_eq!(
+///     xx_hash_content_only("| Title | Price |"),
+///     xx_hash_content_only("| Title                 | Price |")
+/// );
+///
+/// // Code with different indentation
+/// assert_eq!(
+///     xx_hash_content_only("    fn foo() {}"),
+///     xx_hash_content_only("fn foo() {}")
+/// );
+/// ```
+pub fn xx_hash_content_only(data: &str) -> u64 {
+    let content: String = data.chars().filter(|c| !c.is_whitespace()).collect();
+    xxh64(content.as_bytes(), 0)
+}
+
+/// Computes XXH64 hash of only alphanumeric content.
+///
+/// This removes all whitespace AND punctuation/formatting characters,
+/// keeping only letters and numbers. Use this to detect if two strings
+/// have the same "semantic" content despite formatting differences.
+///
+/// Particularly useful for:
+/// - Markdown tables (ignores padding AND separator dashes)
+/// - Lists (ignores markers like `-`, `*`, `1.`)
+/// - Emphasis changes (`_text_` vs `*text*`)
+///
+/// ## Examples
+///
+/// ```rust
+/// use shared::hashing::xx_hash_alphanumeric;
+///
+/// // Table separators with different dash counts
+/// assert_eq!(
+///     xx_hash_alphanumeric("| --- | ----: |"),
+///     xx_hash_alphanumeric("|----|------:|")
+/// );
+///
+/// // Same text with different emphasis markers
+/// assert_eq!(
+///     xx_hash_alphanumeric("_hello_ world"),
+///     xx_hash_alphanumeric("*hello* world")
+/// );
+/// ```
+pub fn xx_hash_alphanumeric(data: &str) -> u64 {
+    let content: String = data.chars().filter(|c| c.is_alphanumeric()).collect();
+    xxh64(content.as_bytes(), 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,5 +255,46 @@ mod tests {
     fn test_xx_hash_normalized_empty_string() {
         let hash = xx_hash_normalized("");
         assert_eq!(hash, xx_hash_normalized("   \n\n  ")); // All blank = empty
+    }
+
+    #[test]
+    fn test_xx_hash_semantic_ignores_indentation() {
+        assert_eq!(
+            xx_hash_semantic("  - item1\n  - item2"),
+            xx_hash_semantic("- item1\n- item2")
+        );
+    }
+
+    #[test]
+    fn test_xx_hash_semantic_ignores_trailing_spaces() {
+        assert_eq!(
+            xx_hash_semantic("line1  \nline2  "),
+            xx_hash_semantic("line1\nline2")
+        );
+    }
+
+    #[test]
+    fn test_xx_hash_semantic_ignores_blank_lines() {
+        assert_eq!(
+            xx_hash_semantic("line1\n\n\nline2"),
+            xx_hash_semantic("line1\nline2")
+        );
+    }
+
+    #[test]
+    fn test_xx_hash_semantic_combined() {
+        // All whitespace variations should produce the same hash
+        let formatted = "  - item1  \n\n  - item2\n\n";
+        let clean = "- item1\n- item2";
+        assert_eq!(xx_hash_semantic(formatted), xx_hash_semantic(clean));
+    }
+
+    #[test]
+    fn test_xx_hash_semantic_detects_content_changes() {
+        // But actual content changes should be detected
+        assert_ne!(
+            xx_hash_semantic("- item1\n- item2"),
+            xx_hash_semantic("- item1\n- item3")
+        );
     }
 }
