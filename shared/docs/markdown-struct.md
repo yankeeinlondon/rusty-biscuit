@@ -7,7 +7,7 @@ struct Markdown {
 }
 ```
 
-- this struct must implement the `From` trait for 
+- this struct must implement the `From` trait for
     - actual markdown content (`String` or `&str`)
 - this struct must implement the `TryFrom` trait for
     - a file path reference or file URI (e.g., `file::`) to a markdown file (`String` or `&str`)
@@ -31,10 +31,277 @@ This struct should implement a `cleanup` method which will cleanup the markdown 
 
 - `fm_merge_with<T>(obj: T)`
     - merges the document's markdown with an external dictionary of key/values
-    - the external set has _precedence_ and will override what the document started with 
+    - the external set has _precedence_ and will override what the document started with
 - `fm_defaults<T>(obj: T)`
     - merges the document's markdown with an external dictionary of key/values
     - the document's key/values are given _precedence_ in the merge process; allowing the external dictionary to only _add_ new key/values but not change the document's original key/value pairings
+
+## Table of Contents (TOC)
+
+The `Markdown` struct provides a `toc()` method that extracts a structured Table of Contents from the document.
+
+### MarkdownToc
+
+```rust
+let md: Markdown = content.into();
+let toc = md.toc();
+
+// Access document structure
+assert_eq!(toc.heading_count(), 5);
+assert_eq!(toc.root_level(), Some(HeadingLevel::H1));
+```
+
+The `MarkdownToc` struct provides:
+
+- **Document Identity**: Title, page hash, frontmatter hash
+- **Preamble**: Content before the first heading with hashes
+- **Structure**: Hierarchical `Vec<MarkdownTocNode>` representing heading tree
+- **Code Blocks**: `Vec<CodeBlockInfo>` for all fenced code blocks
+- **Internal Links**: `Vec<InternalLinkInfo>` for anchor references
+- **Slug Index**: `HashMap<String, Vec<(SectionPath, usize)>>` for quick lookup
+
+### MarkdownTocNode
+
+Each node in the TOC represents a heading with:
+
+- `level: u8` - Heading level (1-6)
+- `title: String` - Heading text
+- `title_hash: u64` / `title_hash_trimmed: u64` - xxHash of title
+- `slug: String` - URL-safe anchor slug
+- `source_span: (usize, usize)` - Byte offset range
+- `line_range: (usize, usize)` - Line number range (1-indexed)
+- `own_content: Option<String>` - Section content (excluding children)
+- `own_content_hash: u64` / `own_content_hash_trimmed: u64`
+- `subtree_hash: u64` / `subtree_hash_trimmed: u64` - Hash including all descendants
+- `children: Vec<MarkdownTocNode>` - Child headings
+
+### Usage Example
+
+```rust
+use shared::markdown::Markdown;
+
+let content = r#"
+# Introduction
+
+Welcome to the guide.
+
+## Getting Started
+
+First steps here.
+
+### Prerequisites
+
+What you need.
+"#;
+
+let md: Markdown = content.into();
+let toc = md.toc();
+
+// Quick checks
+assert_eq!(toc.heading_count(), 3);
+assert_eq!(toc.root_level(), Some(HeadingLevel::H1));
+assert_eq!(toc.title, Some("Introduction".to_string()));
+
+// Find by slug
+if let Some(node) = toc.find_by_slug("getting-started") {
+    println!("Found: {}", node.title);
+}
+
+// Check for broken links
+if toc.has_broken_links() {
+    for link in toc.broken_links() {
+        println!("Broken link: #{}", link.target_slug);
+    }
+}
+```
+
+## Document Delta
+
+The `Markdown` struct provides a `delta()` method for comparing two documents.
+
+### MarkdownDelta
+
+```rust
+let original: Markdown = "# Hello\n\nWorld".into();
+let updated: Markdown = "# Hello\n\nUniverse".into();
+
+let delta = original.delta(&updated);
+
+if delta.is_unchanged() {
+    println!("No changes");
+} else {
+    println!("{}", delta.summary());
+}
+```
+
+The `MarkdownDelta` struct provides:
+
+- **Classification**: `DocumentChange` enum (NoChange, WhitespaceOnly, ContentMinor, Rewritten, etc.)
+- **Statistics**: `DeltaStatistics` with metrics like `sections_added`, `content_change_ratio`
+- **Frontmatter Changes**: `Vec<FrontmatterChange>` for property-level changes
+- **Content Changes**: `added`, `removed`, `modified` vectors of `ContentChange`
+- **Moved Sections**: `Vec<MovedSection>` for sections that relocated
+- **Code Block Changes**: `Vec<CodeBlockChange>`
+- **Broken Links**: `Vec<BrokenLink>` with optional suggested replacements
+
+### ChangeAction Enum
+
+```rust
+pub enum ChangeAction {
+    // Structural
+    Added, Removed, Renamed, Promoted, Demoted, Reordered,
+    MovedSameLevel, MovedDifferentLevel,
+
+    // Content
+    ContentModified, WhitespaceOnly,
+
+    // Frontmatter
+    PropertyAdded, PropertyRemoved, PropertyUpdated, PropertyReordered,
+}
+```
+
+### DocumentChange Classification
+
+```rust
+pub enum DocumentChange {
+    NoChange,           // All hashes match
+    WhitespaceOnly,     // Trimmed hashes match
+    FrontmatterOnly,    // Body unchanged
+    StructuralOnly,     // Content unchanged, sections moved
+    ContentMinor,       // < 10% changed
+    ContentModerate,    // 10-40% changed
+    ContentMajor,       // 40-80% changed
+    Rewritten,          // > 80% changed
+}
+```
+
+### Usage Example
+
+```rust
+use shared::markdown::Markdown;
+
+let v1: Markdown = std::fs::read_to_string("doc_v1.md")?.into();
+let v2: Markdown = std::fs::read_to_string("doc_v2.md")?.into();
+
+let delta = v1.delta(&v2);
+
+// Summary
+println!("{}", delta.summary());
+// Output: "ContentModerate: 2 added, 1 removed, 3 modified, 0 moved (25.0% changed)"
+
+// Iterate changes
+for change in &delta.added {
+    println!("+ Added: {:?}", change.new_path);
+}
+
+for change in &delta.removed {
+    println!("- Removed: {:?}", change.original_path);
+}
+
+// Check broken links
+if delta.has_broken_links() {
+    for link in &delta.broken_links {
+        println!("Warning: Link [{}](#{}) would break", link.link_text, link.target_slug);
+        if let Some(suggestion) = &link.suggested_replacement {
+            println!("  Suggestion: #{}", suggestion);
+        }
+    }
+}
+```
+
+## Structure Validation and Normalization
+
+The `Markdown` struct provides methods for validating and normalizing heading structure.
+
+### HeadingLevel
+
+Type-safe representation of heading levels (H1-H6):
+
+```rust
+use shared::markdown::HeadingLevel;
+
+let h2 = HeadingLevel::H2;
+assert_eq!(h2.as_u8(), 2);
+assert_eq!(h2.hash_count(), 2);  // Number of # characters
+
+let h3 = h2.deeper().unwrap();   // H2 -> H3
+let h1 = h2.shallower().unwrap(); // H2 -> H1
+
+assert_eq!(h1.delta_to(h3), 2);  // H1 to H3 = +2 levels
+```
+
+### validate_structure()
+
+Validates heading hierarchy and returns issues:
+
+```rust
+let doc: Markdown = "## Intro\n### Details\n## Conclusion".into();
+let validation = doc.validate_structure();
+
+assert!(validation.is_well_formed());
+assert_eq!(validation.root_level, Some(HeadingLevel::H2));
+assert_eq!(validation.heading_count, 3);
+```
+
+#### StructureIssueKind
+
+```rust
+pub enum StructureIssueKind {
+    HierarchyViolation,  // Heading shallower than root (e.g., H2 in H3-rooted doc)
+    SkippedLevel,        // Jump like H2 -> H4
+    MultipleH1,          // More than one H1
+    NoHeadings,          // Document has no headings
+    LevelOverflow,       // Re-leveling would exceed H6
+}
+```
+
+### normalize()
+
+Adjusts all heading levels to a target root:
+
+```rust
+// Promote H3-rooted document to H1
+let doc: Markdown = "### Intro\n#### Details".into();
+let (normalized, report) = doc.normalize(Some(HeadingLevel::H1))?;
+
+assert!(normalized.content().starts_with("# Intro"));
+assert_eq!(report.level_adjustment, -2);  // Promoted by 2 levels
+```
+
+### normalize_mut()
+
+In-place normalization:
+
+```rust
+let mut doc: Markdown = "### Intro\n#### Details".into();
+let report = doc.normalize_mut(Some(HeadingLevel::H1))?;
+
+assert!(doc.content().starts_with("# Intro"));
+assert!(report.has_changes());
+```
+
+### relevel()
+
+Simple uniform level shift:
+
+```rust
+// Demote H1-rooted document to H2 (for embedding as subsection)
+let doc: Markdown = "# Main\n## Sub\n### Detail".into();
+let (releveled, adjustment) = doc.relevel(HeadingLevel::H2)?;
+
+assert!(releveled.content().starts_with("## Main"));
+assert_eq!(adjustment, 1);  // Demoted by 1 level
+```
+
+### NormalizationError
+
+```rust
+pub enum NormalizationError {
+    NoHeadings,
+    LevelOverflow { target, affected_count, deepest_title, would_become },
+    ValidationFailed(String),
+}
+```
 
 ## Output Formats
 
@@ -115,4 +382,36 @@ The discussion up to now for code highlighting has been focused on highlighting 
 
 - [Highlighting the Prose](./md/highlighting-the-prose.md)
 
+## Hashing Utilities
 
+The shared library provides hashing utilities used by the TOC and Delta features.
+
+### xxHash (Fast, Non-Cryptographic)
+
+```rust
+use shared::hashing::{xx_hash, xx_hash_trimmed, xx_hash_normalized};
+
+let hash = xx_hash("content");
+
+// Trimmed hash ignores leading/trailing whitespace
+assert_eq!(xx_hash_trimmed("  hello  "), xx_hash_trimmed("hello"));
+
+// Normalized hash ignores blank lines
+let with_blanks = "line1\n\nline2";
+let without_blanks = "line1\nline2";
+assert_eq!(xx_hash_normalized(with_blanks), xx_hash_normalized(without_blanks));
+```
+
+### BLAKE3 (Cryptographically Secure)
+
+```rust
+use shared::hashing::{blake3_hash, blake3_hash_bytes};
+
+let hash = blake3_hash("content");        // Returns hex string (64 chars)
+let bytes = blake3_hash_bytes(b"content"); // Returns [u8; 32]
+```
+
+### When to Use Which
+
+- **xxHash**: Fast, non-cryptographic. Use for change detection, cache keys, deduplication.
+- **BLAKE3**: Cryptographically secure. Use for integrity verification, secure fingerprinting.
