@@ -78,6 +78,8 @@ supports-hyperlinks = "3.2.0"
 # Hashing (for Mermaid diagram caching and markdown TOC)
 xxhash-rust = { version = "0.8", features = ["xxh64"] }
 blake3 = "1.5"
+argon2 = { version = "0.5", features = ["rand"] }
+rand = "0.8"
 
 [dev-dependencies]
 tokio = { version = "1.48", features = ["full", "test-util"] }
