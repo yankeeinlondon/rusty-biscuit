@@ -240,7 +240,7 @@ pub async fn get_all_provider_models() -> Result<HashMap<Provider, Vec<String>>,
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+
     use wiremock::{MockServer, Mock, ResponseTemplate};
     use wiremock::matchers::{method, path, header};
 

@@ -21,19 +21,23 @@ api/
 ### Design Principles
 
 **1. DRY (Don't Repeat Yourself):**
+
 - Eliminates duplicate HTTP request code from `base.rs` and `discovery.rs`
 - Single source of truth for OpenAI-compatible API interactions
 
 **2. Type Safety:**
+
 - Uses `ProviderModel` enum instead of raw strings
 - Compile-time guarantees for provider/model combinations
 
 **3. Instrumentation:**
+
 - All public functions use `#[tracing::instrument]`
 - Follows OpenTelemetry semantic conventions
 - API keys never logged (always use `skip(api_key)`)
 
 **4. Error Handling:**
+
 - Rich error types from `providers::discovery::ProviderError`
 - No `unwrap()` or `expect()` in production code
 - Proper Result propagation
@@ -59,6 +63,7 @@ pub async fn get_all_provider_models() -> Result<Vec<String>, ProviderError>
 ```
 
 **Features:**
+
 - Parallel fetching with `futures::stream`
 - Retry logic with exponential backoff (via `providers::retry`)
 - Rate limiting handling (429 responses)
@@ -66,6 +71,7 @@ pub async fn get_all_provider_models() -> Result<Vec<String>, ProviderError>
 - Timeout enforcement (30 seconds)
 
 **Supported Providers:**
+
 - Anthropic (`/v1/models`)
 - Deepseek (`/v1/models`)
 - Gemini (`/v1/models`)
@@ -76,6 +82,7 @@ pub async fn get_all_provider_models() -> Result<Vec<String>, ProviderError>
 - ZAI (`/v1/models`)
 
 **Skipped Providers:**
+
 - ZenMux (no `/v1/models` endpoint support)
 
 ### types.rs
@@ -92,6 +99,7 @@ pub struct ProviderModelList {
 ```
 
 **Shared Types:**
+
 - `OpenAIModelsResponse` - Defined in `providers::types`, used here
 - `ProviderModel` - Defined in `providers::types`, type-safe model enum
 
@@ -146,12 +154,14 @@ async fn safe_fetch(api_key: &str) -> Result<Vec<String>, ProviderError> {
 The API module works closely with the provider system:
 
 **Dependencies:**
+
 - `providers::base` - Provider enum, base URLs, auth headers
 - `providers::types` - Shared types (OpenAIModelsResponse, ProviderModel)
 - `providers::discovery` - Error types, retry logic
 - `providers::retry` - Exponential backoff with jitter
 
 **Flow:**
+
 ```
 1. User calls get_all_provider_models()
 2. Module checks for API keys (providers::base::has_provider_api_key)
@@ -167,23 +177,27 @@ The API module works closely with the provider system:
 All functions emit structured tracing events:
 
 **Spans:**
+
 ```rust
 #[tracing::instrument(skip(api_key))]
 pub async fn get_provider_models_from_api(...)
 ```
 
 **Events:**
+
 - `debug!` - URL construction, request building
 - `info!` - Successful fetches, model counts
 - `warn!` - Skipped providers, missing API keys
 
 **Fields (OpenTelemetry):**
+
 - `provider` - Provider name
 - `http.url` - Request URL (redacted API keys)
 - `http.status_code` - Response status
 - `model_count` - Number of models fetched
 
 **Security:**
+
 - API keys NEVER logged (always use `skip(api_key)`)
 - Sensitive headers redacted in debug output
 
@@ -216,6 +230,7 @@ pub enum ProviderError {
 ## Testing
 
 **Test Coverage:**
+
 - Single provider fetching
 - Parallel multi-provider fetching
 - Error handling (rate limits, auth failures, timeouts)
@@ -223,6 +238,7 @@ pub enum ProviderError {
 - Retry logic
 
 **Running Tests:**
+
 ```bash
 # All API module tests
 cargo test -p shared --lib api
@@ -235,6 +251,7 @@ cargo test -p shared --lib api -- --nocapture
 ```
 
 **Test Strategy:**
+
 - Uses `wiremock` for HTTP mocking
 - Tests both success and failure cases
 - Verifies tracing instrumentation
@@ -242,15 +259,18 @@ cargo test -p shared --lib api -- --nocapture
 ## Performance Considerations
 
 **Parallel Fetching:**
+
 - Uses `futures::stream::StreamExt` for concurrent requests
 - Default concurrency: 8 providers in parallel
 - Each request has 30-second timeout
 
 **Caching:**
+
 - API module does NOT cache (caching handled by `providers::cache`)
 - Allows fresh data when cache expires
 
 **Rate Limiting:**
+
 - Respects `Retry-After` headers
 - Exponential backoff with jitter (via `providers::retry`)
 - Plans: free (1/sec), base (20/sec), pro (50/sec)
@@ -260,11 +280,13 @@ cargo test -p shared --lib api -- --nocapture
 This module was created during the provider/model refactoring to address code duplication identified in the code review (`.ai/code-reviews/20251230.provider-base-implementation.md`).
 
 **Before (duplicated code):**
+
 - `providers/base.rs` had inline HTTP request code
 - `providers/discovery.rs` had duplicate HTTP request code
 - `OpenAIModelsResponse` defined in both files
 
 **After (centralized):**
+
 - `api/openai_compat.rs` contains single HTTP implementation
 - `providers/types.rs` has single `OpenAIModelsResponse` definition
 - Both `base.rs` and `discovery.rs` use `api` module
