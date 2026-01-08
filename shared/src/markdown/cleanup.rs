@@ -86,6 +86,15 @@ pub fn cleanup_content(content: &str) -> String {
     // Restore original list markers (the library normalizes to '*')
     restore_list_markers(&mut output, &list_markers);
 
+    // Fix nested list indentation (library uses 2-space, preserve original style)
+    let original_indent = detect_list_indentation(content);
+    if original_indent > 2 {
+        fix_list_indentation(&mut output, original_indent);
+    }
+
+    // Unescape unnecessarily escaped brackets (e.g., \[0%\] -> [0%])
+    unescape_brackets(&mut output);
+
     // Trim leading/trailing whitespace-only lines but preserve content
     output.trim_start_matches('\n').to_string()
 }
@@ -270,10 +279,37 @@ fn fix_blockquote_formatting(output: &mut String) {
     // Process line by line for clarity
     let mut result = String::with_capacity(output.len());
     let mut lines = output.lines().peekable();
+    let mut in_code_block = false;
 
     while let Some(line) = lines.next() {
-        // Fix the blockquote prefix: " > " -> "> " and ">  > " -> "> > "
-        let fixed_line = fix_blockquote_line(line);
+        // Track code blocks to avoid modifying content inside them
+        if line.trim_start().starts_with("```") {
+            in_code_block = !in_code_block;
+            result.push_str(line);
+            if lines.peek().is_some() {
+                result.push('\n');
+            }
+            continue;
+        }
+
+        // Don't process lines inside code blocks
+        if in_code_block {
+            result.push_str(line);
+            if lines.peek().is_some() {
+                result.push('\n');
+            }
+            continue;
+        }
+
+        // Only fix blockquote lines (those starting with optional space + ">")
+        let is_blockquote_line = line.starts_with('>')
+            || (line.starts_with(' ') && line.trim_start().starts_with('>'));
+
+        let fixed_line = if is_blockquote_line {
+            fix_blockquote_line(line)
+        } else {
+            line.to_string()
+        };
 
         // Check if this is an empty blockquote line (just "> " or nested like "> > ")
         let trimmed = fixed_line.trim_end();
@@ -355,6 +391,240 @@ fn fix_blockquote_line(line: &str) -> String {
     }
 
     result
+}
+
+/// Detects the list indentation style used in the source content.
+///
+/// Scans for nested list items and returns the number of spaces used for indentation.
+/// Returns 2 if no nested lists are found or indentation can't be determined.
+fn detect_list_indentation(content: &str) -> usize {
+    let mut in_code_block = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+
+        // Skip code blocks
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            continue;
+        }
+        if in_code_block {
+            continue;
+        }
+
+        // Look for indented list items
+        let indent = line.len() - trimmed.len();
+        if indent > 0 && (trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ")) {
+            // Found a nested list item - return its indentation
+            return indent;
+        }
+
+        // Also check for numbered lists
+        if indent > 0 {
+            let mut chars = trimmed.chars().peekable();
+            let mut is_numbered = false;
+            while let Some(c) = chars.next() {
+                if c.is_ascii_digit() {
+                    continue;
+                } else if (c == '.' || c == ')') && chars.peek() == Some(&' ') {
+                    is_numbered = true;
+                    break;
+                } else {
+                    break;
+                }
+            }
+            if is_numbered {
+                return indent;
+            }
+        }
+    }
+
+    // Default to 2 if no nested lists found
+    2
+}
+
+/// Fixes list indentation in the output to match the original style.
+///
+/// `pulldown-cmark-to-cmark` uses 2-space indentation by default. This function
+/// converts it to the specified indentation size (e.g., 4 spaces).
+fn fix_list_indentation(output: &mut String, target_indent: usize) {
+    if target_indent == 2 {
+        return; // Already correct
+    }
+
+    let mut result = String::with_capacity(output.len());
+    let mut lines = output.lines().peekable();
+    let mut in_code_block = false;
+
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+
+        // Track code blocks
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            result.push_str(line);
+            if lines.peek().is_some() {
+                result.push('\n');
+            }
+            continue;
+        }
+
+        // Don't process code block content
+        if in_code_block {
+            result.push_str(line);
+            if lines.peek().is_some() {
+                result.push('\n');
+            }
+            continue;
+        }
+
+        // Check if this is a list item
+        let is_list_item = trimmed.starts_with("- ")
+            || trimmed.starts_with("* ")
+            || trimmed.starts_with("+ ")
+            || is_ordered_list_start(trimmed);
+
+        if is_list_item {
+            let current_indent = line.len() - trimmed.len();
+            if current_indent > 0 {
+                // Calculate nesting level (assuming 2-space input)
+                let nesting_level = current_indent / 2;
+                // Apply target indentation
+                let new_indent = nesting_level * target_indent;
+                result.push_str(&" ".repeat(new_indent));
+                result.push_str(trimmed);
+            } else {
+                result.push_str(line);
+            }
+        } else {
+            // For non-list content that's indented (like continuation text),
+            // apply the same scaling
+            let current_indent = line.len() - trimmed.len();
+            if current_indent > 0 && current_indent % 2 == 0 {
+                let nesting_level = current_indent / 2;
+                let new_indent = nesting_level * target_indent;
+                result.push_str(&" ".repeat(new_indent));
+                result.push_str(trimmed);
+            } else {
+                result.push_str(line);
+            }
+        }
+
+        if lines.peek().is_some() {
+            result.push('\n');
+        }
+    }
+
+    // Preserve trailing newline
+    if output.ends_with('\n') && !result.ends_with('\n') {
+        result.push('\n');
+    }
+
+    *output = result;
+}
+
+/// Checks if a line starts with an ordered list marker (e.g., "1. " or "1) ").
+fn is_ordered_list_start(line: &str) -> bool {
+    let mut chars = line.chars().peekable();
+    let mut has_digit = false;
+
+    while let Some(c) = chars.next() {
+        if c.is_ascii_digit() {
+            has_digit = true;
+        } else if has_digit && (c == '.' || c == ')') {
+            return chars.peek() == Some(&' ');
+        } else {
+            return false;
+        }
+    }
+    false
+}
+
+/// Unescapes unnecessarily escaped brackets in the output.
+///
+/// `pulldown-cmark-to-cmark` escapes `[` and `]` characters that could potentially
+/// be interpreted as link syntax. This function unescapes patterns like `\[0%\]`
+/// that are clearly not links (no `](` following them).
+fn unescape_brackets(output: &mut String) {
+    // Only process if there are escaped brackets
+    if !output.contains("\\[") {
+        return;
+    }
+
+    let mut result = String::with_capacity(output.len());
+    let mut chars = output.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.peek() {
+                Some('[') => {
+                    // Look ahead to see if this could be a link
+                    // Pattern: \[...\] or \[...](...)
+                    // We want to unescape standalone \[...\] that aren't links
+                    chars.next(); // consume '['
+
+                    // Collect until we find \] or ]( or end
+                    let mut bracket_content = String::new();
+                    let mut found_close = false;
+
+                    while let Some(&next) = chars.peek() {
+                        if next == '\\' {
+                            chars.next();
+                            if chars.peek() == Some(&']') {
+                                chars.next();
+                                found_close = true;
+                                break;
+                            } else {
+                                bracket_content.push('\\');
+                            }
+                        } else if next == ']' {
+                            chars.next();
+                            found_close = true;
+                            // Check if followed by ( - would make this a link
+                            if chars.peek() == Some(&'(') {
+                                // This is actually a link, restore and keep escape
+                                result.push_str("\\[");
+                                result.push_str(&bracket_content);
+                                result.push(']');
+                                break;
+                            }
+                            break;
+                        } else if next == '\n' {
+                            // Line break - not a link, but stop searching
+                            break;
+                        } else {
+                            bracket_content.push(chars.next().unwrap());
+                        }
+                    }
+
+                    if found_close {
+                        // Unescape: output [content] instead of \[content\]
+                        result.push('[');
+                        result.push_str(&bracket_content);
+                        result.push(']');
+                    } else {
+                        // Didn't find proper close, restore original
+                        result.push_str("\\[");
+                        result.push_str(&bracket_content);
+                        // Restore chars iterator - actually we can't easily do this
+                        // Just continue from where we are
+                    }
+                }
+                Some(']') => {
+                    // Standalone escaped ] - keep as is (shouldn't happen often)
+                    result.push('\\');
+                    result.push(chars.next().unwrap());
+                }
+                _ => {
+                    result.push(c);
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    *output = result;
 }
 
 /// Adds "text" language to fenced code blocks with no language specified.
@@ -706,6 +976,33 @@ mod tests {
         let cleaned = cleanup_content(content);
         assert!(cleaned.contains("fn main()"));
         assert!(cleaned.contains("println!"));
+    }
+
+    #[test]
+    fn test_cleanup_preserves_code_block_indentation() {
+        // Regression test: indentation inside code blocks must be preserved
+        let content = "```ts title=\"Greet Function\"\nfunction greet() {\n    console.log(\"hi\")\n}\n```";
+        let cleaned = cleanup_content(content);
+
+        // The 4-space indentation before console.log must be preserved
+        assert!(
+            cleaned.contains("    console.log"),
+            "Indentation inside code block should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_preserves_code_block_indentation_simple() {
+        // Test without attributes - just language
+        let content = "```ts\nfunction greet() {\n    console.log(\"hi\")\n}\n```";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("    console.log"),
+            "Indentation inside simple code block should be preserved, got:\n{}",
+            cleaned
+        );
     }
 
     // ==================== Regression Tests ====================
@@ -1160,6 +1457,128 @@ mod tests {
         assert_eq!(
             dash_count, 5,
             "All 5 items should use dash marker, got:\n{}",
+            cleaned
+        );
+    }
+
+    // ==================== List Indentation Tests ====================
+
+    #[test]
+    fn test_nested_list_preserves_4_space_indentation() {
+        // Regression test: 4-space indentation should be preserved
+        let content = "- Level 1\n    - Level 2\n        - Level 3";
+        let cleaned = cleanup_content(content);
+
+        // Should have 4-space indentation for nested items
+        assert!(
+            cleaned.contains("\n    - Level 2"),
+            "4-space indentation should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("\n        - Level 3"),
+            "8-space indentation should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_nested_list_preserves_2_space_indentation() {
+        // 2-space indentation should remain as-is
+        let content = "- Level 1\n  - Level 2\n    - Level 3";
+        let cleaned = cleanup_content(content);
+
+        // Should have 2-space indentation
+        assert!(
+            cleaned.contains("\n  - Level 2"),
+            "2-space indentation should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_nested_list_in_todo_list() {
+        // Regression test for nested TODO list items
+        let content = "- [x] Task 1\n- Progress\n    - [ ] Sub-task 1\n    - [ ] Sub-task 2";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("\n    - [ ] Sub-task 1"),
+            "Nested TODO items should preserve 4-space indentation, got:\n{}",
+            cleaned
+        );
+    }
+
+    // ==================== Bracket Escaping Tests ====================
+
+    #[test]
+    fn test_bracket_not_escaped_progress_indicator() {
+        // Regression test: progress indicators should not be escaped
+        let content = "- [0%] started\n- [25%] progress\n- [50%] halfway\n- [75%] almost\n- [100%] done";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("[0%]"),
+            "Progress indicator [0%] should not be escaped, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("\\[0%\\]"),
+            "Progress indicator should not be escaped, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("[25%]"),
+            "Progress indicator [25%] should not be escaped, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_bracket_not_escaped_bang_indicator() {
+        // Regression test: [!] blocked indicator should not be escaped
+        let content = "- [!] blocked task";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("[!]"),
+            "Blocked indicator [!] should not be escaped, got:\n{}",
+            cleaned
+        );
+        assert!(
+            !cleaned.contains("\\[!\\]"),
+            "Blocked indicator should not be escaped, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_bracket_preserved_in_actual_links() {
+        // Actual links should still work
+        let content = "Check out [this link](https://example.com)";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("[this link](https://example.com)"),
+            "Links should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_task_list_checkboxes_not_escaped() {
+        // Task list checkboxes should never be escaped
+        let content = "- [x] done\n- [ ] pending";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("[x]"),
+            "Checkbox [x] should not be escaped, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("[ ]"),
+            "Checkbox [ ] should not be escaped, got:\n{}",
             cleaned
         );
     }
