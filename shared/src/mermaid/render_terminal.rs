@@ -3,7 +3,16 @@
 //! This module provides functionality to render Mermaid diagrams in the terminal
 //! by executing the `mmdc` CLI tool locally and displaying the output with viuer.
 //! Falls back to code block rendering on error.
+//!
+//! ## CLI Detection
+//!
+//! The module uses a fallback chain for finding the Mermaid CLI:
+//! 1. **Direct `mmdc`**: If `mmdc` is in PATH, use it directly
+//! 2. **npx fallback**: If `mmdc` is not found but `npx` is available, use `npx mmdc`
+//!    with a warning to stderr explaining the temporary installation
+//! 3. **Error**: If neither is available, return an error asking the user to install npm
 
+use std::io::Write;
 use std::process::Command;
 use tempfile::Builder;
 use thiserror::Error;
@@ -14,12 +23,25 @@ use thiserror::Error;
 /// Most Mermaid diagrams are well under this size.
 const MAX_DIAGRAM_SIZE: usize = 10_000;
 
+/// Checks if a command exists in the system PATH.
+fn command_exists(cmd: &str) -> bool {
+    Command::new("which")
+        .arg(cmd)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// Errors that can occur during terminal rendering of Mermaid diagrams.
 #[derive(Error, Debug)]
 pub enum MermaidRenderError {
-    /// mmdc CLI not found in PATH.
+    /// mmdc CLI not found in PATH (and npx fallback not used).
     #[error("mmdc CLI not found. Install with: npm install -g @mermaid-js/mermaid-cli")]
     MmdcNotFound,
+
+    /// npm/npx not found - cannot render mermaid diagrams.
+    #[error("npm not found. Install Node.js and npm to render Mermaid diagrams in the terminal")]
+    NpmNotFound,
 
     /// mmdc execution failed.
     #[error("mmdc execution failed (exit code {exit_code}): {stderr}")]
@@ -118,9 +140,38 @@ pub fn render_for_terminal(instructions: &str) -> Result<(), MermaidRenderError>
         "Prepared file paths for mmdc"
     );
 
-    // 3. Build and execute mmdc command
-    tracing::info!("Executing mmdc CLI");
-    let output = Command::new("mmdc")
+    // 3. Determine how to run mmdc (direct or via npx)
+    let use_npx = if command_exists("mmdc") {
+        tracing::debug!("Found mmdc in PATH, using directly");
+        false
+    } else if command_exists("npx") {
+        tracing::info!("mmdc not found, falling back to npx");
+        // Print warning to stderr about temporary installation
+        let _ = writeln!(
+            std::io::stderr(),
+            "- Mermaid diagrams require mmdc to render to the terminal\n\
+             - You do not have the Mermaid CLI installed, using npx to install temporarily\n\
+             - To install permanently: npm install -g @mermaid-js/mermaid-cli"
+        );
+        true
+    } else {
+        tracing::error!("Neither mmdc nor npx found in PATH");
+        return Err(MermaidRenderError::NpmNotFound);
+    };
+
+    // 4. Build and execute mmdc command
+    // Note: The npm package is @mermaid-js/mermaid-cli but the binary is mmdc.
+    // When using npx, we use -p to specify the package and then the binary name.
+    tracing::info!(use_npx, "Executing mmdc CLI");
+    let mut cmd = if use_npx {
+        let mut c = Command::new("npx");
+        c.args(["-p", "@mermaid-js/mermaid-cli", "mmdc"]);
+        c
+    } else {
+        Command::new("mmdc")
+    };
+
+    let output = cmd
         .args(["-i", input_file.path().to_str().unwrap()])
         .args(["-o", output_path.to_str().unwrap()])
         .args(["--theme", "dark"])
@@ -133,12 +184,17 @@ pub fn render_for_terminal(instructions: &str) -> Result<(), MermaidRenderError>
         ])
         .output();
 
-    // 4. Handle errors
+    // 5. Handle errors
     let output = match output {
         Ok(o) => o,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            tracing::error!("mmdc CLI not found in PATH");
-            return Err(MermaidRenderError::MmdcNotFound);
+            // This shouldn't happen since we checked above, but handle it anyway
+            tracing::error!("Command not found despite prior check");
+            return Err(if use_npx {
+                MermaidRenderError::NpmNotFound
+            } else {
+                MermaidRenderError::MmdcNotFound
+            });
         }
         Err(e) => {
             tracing::error!(error = %e, "Failed to execute mmdc");
@@ -167,7 +223,7 @@ pub fn render_for_terminal(instructions: &str) -> Result<(), MermaidRenderError>
         "mmdc execution succeeded"
     );
 
-    // 5. Display with viuer
+    // 6. Display with viuer
     let config = viuer::Config {
         absolute_offset: false,
         ..Default::default()
@@ -283,6 +339,26 @@ mod tests {
     fn test_error_display_display_error() {
         let error = MermaidRenderError::DisplayError("display failed".to_string());
         assert_eq!(error.to_string(), "Failed to display image: display failed");
+    }
+
+    #[test]
+    fn test_error_display_npm_not_found() {
+        let error = MermaidRenderError::NpmNotFound;
+        assert_eq!(
+            error.to_string(),
+            "npm not found. Install Node.js and npm to render Mermaid diagrams in the terminal"
+        );
+    }
+
+    #[test]
+    fn test_command_exists_with_common_command() {
+        // 'which' should exist on all Unix systems
+        assert!(command_exists("which"));
+    }
+
+    #[test]
+    fn test_command_exists_with_nonexistent_command() {
+        assert!(!command_exists("this_command_definitely_does_not_exist_xyz123"));
     }
 
     #[test]

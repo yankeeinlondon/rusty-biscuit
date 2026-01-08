@@ -39,4 +39,19 @@ The terminal, by default, does _not_ render mermaid diagram but instead is shown
 - Display the output PNG image using `viuer` in the terminal
 - Clean up all temporary files
 
+### CLI Detection
+
+The module uses a fallback chain for finding the Mermaid CLI:
+
+1. **Direct `mmdc`**: If `mmdc` is installed globally and available in PATH, use it directly
+2. **npx fallback**: If `mmdc` is not found but `npx` is available, use `npx -p @mermaid-js/mermaid-cli mmdc` to temporarily install and run the CLI. A warning is printed to stderr:
+
+   ```txt
+   - Mermaid diagrams require mmdc to render to the terminal
+   - You do not have the Mermaid CLI installed, using npx to install temporarily
+   - To install permanently: npm install -g @mermaid-js/mermaid-cli
+   ```
+
+3. **Error**: If neither `mmdc` nor `npx` is available, an error is returned asking the user to install Node.js and npm
+
 > When terminal rendering fails or is not supported (e.g., the terminal doesn't support Kitty graphics or the `mmdc` CLI is not installed), we fall back to displaying the diagram as a standard fenced code block with the `mermaid` language identifier. This ensures the diagram content remains visible even when graphical rendering is unavailable.
