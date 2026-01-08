@@ -29,13 +29,25 @@
 
 mod frontmatter;
 mod types;
-pub mod highlighting;
 pub mod cleanup;
+pub mod delta;
 pub mod dsl;
+pub mod highlighting;
 pub mod inline;
+pub mod normalize;
 pub mod output;
+pub mod toc;
 
+pub use delta::{
+    BrokenLink, ChangeAction, CodeBlockChange, ContentChange, DeltaStatistics, DocumentChange,
+    FrontmatterChange, MarkdownDelta, MovedSection, SectionId, SectionPath,
+};
 pub use frontmatter::{Frontmatter, MergeStrategy};
+pub use normalize::{
+    HeadingAdjustment, HeadingLevel, NormalizationError, NormalizationReport, StructureIssue,
+    StructureIssueKind, StructureValidation, ViolationCorrection,
+};
+pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
 
 use std::path::Path;
@@ -224,6 +236,194 @@ impl Markdown {
     /// Returns an error if theme loading fails or highlighting encounters issues.
     pub fn as_html(&self, options: output::HtmlOptions) -> MarkdownResult<String> {
         output::as_html(self, options)
+    }
+
+    /// Extracts a Table of Contents from the markdown document.
+    ///
+    /// Returns a `MarkdownToc` struct containing:
+    /// - Hierarchical heading structure with hashes
+    /// - Code block information
+    /// - Internal link tracking
+    /// - Document metadata (title, preamble)
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use shared::markdown::Markdown;
+    ///
+    /// let content = "# Introduction\n\nWelcome.\n\n## Getting Started\n\nFirst steps.";
+    /// let md: Markdown = content.into();
+    /// let toc = md.toc();
+    ///
+    /// assert_eq!(toc.heading_count(), 2);
+    /// assert_eq!(toc.root_level(), Some(1));
+    /// assert_eq!(toc.title, Some("Introduction".to_string()));
+    /// ```
+    pub fn toc(&self) -> MarkdownToc {
+        MarkdownToc::from(self)
+    }
+
+    /// Compares this document with another and returns a detailed delta analysis.
+    ///
+    /// Returns a `MarkdownDelta` struct containing:
+    /// - High-level change classification
+    /// - Statistics about additions, removals, modifications
+    /// - Frontmatter changes
+    /// - Section movements
+    /// - Broken link detection
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use shared::markdown::Markdown;
+    ///
+    /// let original: Markdown = "# Hello\n\nWorld".into();
+    /// let updated: Markdown = "# Hello\n\nUniverse".into();
+    ///
+    /// let delta = original.delta(&updated);
+    ///
+    /// if delta.is_unchanged() {
+    ///     println!("No changes detected");
+    /// } else {
+    ///     println!("{}", delta.summary());
+    /// }
+    /// ```
+    pub fn delta(&self, other: &Markdown) -> MarkdownDelta {
+        delta::compute_delta(self, other)
+    }
+
+    /// Validates the document's heading structure.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use shared::markdown::Markdown;
+    /// use shared::markdown::HeadingLevel;
+    ///
+    /// let doc: Markdown = "## Intro\n### Details\n## Conclusion".into();
+    /// let validation = doc.validate_structure();
+    ///
+    /// assert!(validation.is_well_formed());
+    /// assert_eq!(validation.root_level, Some(HeadingLevel::H2));
+    /// assert_eq!(validation.heading_count, 3);
+    /// ```
+    pub fn validate_structure(&self) -> StructureValidation {
+        normalize::validate_structure(&self.content)
+    }
+
+    /// Normalizes the document's heading levels.
+    ///
+    /// ## Parameters
+    ///
+    /// - `target`: The desired root level. If `None`, uses the current root level
+    ///   (effectively just fixing hierarchy violations without changing depth).
+    ///
+    /// ## Behavior
+    ///
+    /// 1. **Level Adjustment**: All headings are shifted so the root level matches
+    ///    the target. For example, normalizing an H3-rooted document to H1 promotes
+    ///    all headings by 2 levels.
+    ///
+    /// 2. **Hierarchy Violation Correction**: If any heading appears at a level
+    ///    shallower than the document's root, it is demoted to match the root level,
+    ///    and its children are adjusted proportionally.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of the normalized `Markdown` document and a `NormalizationReport`
+    /// describing all changes made.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if:
+    /// - The document has no headings (nothing to normalize)
+    /// - Re-leveling would push headings beyond H6
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use shared::markdown::{Markdown, HeadingLevel};
+    ///
+    /// // Promote an H3-rooted document to H1
+    /// let doc: Markdown = "### Intro\n#### Details".into();
+    /// let (normalized, report) = doc.normalize(Some(HeadingLevel::H1)).unwrap();
+    ///
+    /// assert!(normalized.content().starts_with("# Intro"));
+    /// assert_eq!(report.level_adjustment, -2); // Promoted by 2 levels
+    /// ```
+    pub fn normalize(
+        &self,
+        target: Option<HeadingLevel>,
+    ) -> Result<(Markdown, NormalizationReport), NormalizationError> {
+        let (new_content, report) = normalize::normalize(&self.content, target)?;
+        let new_md = Markdown::with_frontmatter(self.frontmatter.clone(), new_content);
+        Ok((new_md, report))
+    }
+
+    /// Normalizes the document in place, returning only the report.
+    ///
+    /// This is a convenience method that modifies `self` instead of returning
+    /// a new `Markdown` instance.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use shared::markdown::{Markdown, HeadingLevel};
+    ///
+    /// let mut doc: Markdown = "### Intro\n#### Details".into();
+    /// let report = doc.normalize_mut(Some(HeadingLevel::H1)).unwrap();
+    ///
+    /// assert!(doc.content().starts_with("# Intro"));
+    /// assert!(report.has_changes());
+    /// ```
+    pub fn normalize_mut(
+        &mut self,
+        target: Option<HeadingLevel>,
+    ) -> Result<NormalizationReport, NormalizationError> {
+        let (new_content, report) = normalize::normalize(&self.content, target)?;
+        self.content = new_content;
+        Ok(report)
+    }
+
+    /// Re-levels the document to a specific target level.
+    ///
+    /// This is a simpler operation than `normalize()` - it only shifts all
+    /// heading levels uniformly without correcting hierarchy violations.
+    ///
+    /// ## Parameters
+    ///
+    /// - `target`: The desired root level for the document.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of the re-leveled `Markdown` document and the level adjustment
+    /// that was applied (positive = demoted, negative = promoted).
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if:
+    /// - The document has no headings
+    /// - Re-leveling would push headings beyond H6
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use shared::markdown::{Markdown, HeadingLevel};
+    ///
+    /// // Demote an H1-rooted document to H2 (for embedding as a subsection)
+    /// let doc: Markdown = "# Main\n## Sub\n### Detail".into();
+    /// let (releveled, adjustment) = doc.relevel(HeadingLevel::H2).unwrap();
+    ///
+    /// assert!(releveled.content().starts_with("## Main"));
+    /// assert_eq!(adjustment, 1); // Demoted by 1 level
+    /// ```
+    pub fn relevel(
+        &self,
+        target: HeadingLevel,
+    ) -> Result<(Markdown, i8), NormalizationError> {
+        let (new_content, adjustment) = normalize::relevel(&self.content, target)?;
+        let new_md = Markdown::with_frontmatter(self.frontmatter.clone(), new_content);
+        Ok((new_md, adjustment))
     }
 }
 
