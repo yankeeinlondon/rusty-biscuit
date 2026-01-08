@@ -1,11 +1,13 @@
 //! Type definitions for Markdown document delta comparison.
 
+use serde::Serialize;
+
 /// Path to a section in the document hierarchy.
 /// Example: ["Getting Started", "Installation", "Linux"]
 pub type SectionPath = Vec<String>;
 
 /// Unique identifier for a section, handling duplicate titles.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct SectionId {
     /// Path to the section (heading titles from root to this node).
     pub path: SectionPath,
@@ -30,7 +32,7 @@ impl SectionId {
 }
 
 /// The type of change detected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ChangeAction {
     // ─────────────────────────────────────────────────────────────
     // Structural Changes
@@ -86,7 +88,7 @@ pub enum ChangeAction {
 }
 
 /// A change to a frontmatter property.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FrontmatterChange {
     /// The type of change.
     pub action: ChangeAction,
@@ -157,7 +159,7 @@ impl FrontmatterChange {
 }
 
 /// A change to document content (sections, preamble).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ContentChange {
     /// The type of change.
     pub action: ChangeAction,
@@ -268,7 +270,7 @@ impl ContentChange {
 }
 
 /// A section that moved without content changes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MovedSection {
     /// The content hash (unchanged between documents).
     pub content_hash: u64,
@@ -326,7 +328,7 @@ impl MovedSection {
 }
 
 /// A link that would break due to heading changes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BrokenLink {
     /// The target slug that no longer exists.
     pub target_slug: String,
@@ -365,7 +367,7 @@ impl BrokenLink {
 }
 
 /// A change to a code block.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CodeBlockChange {
     /// The type of change.
     pub action: ChangeAction,
@@ -408,7 +410,7 @@ impl CodeBlockChange {
 }
 
 /// Statistics about changes between two documents.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct DeltaStatistics {
     // ─────────────────────────────────────────────────────────────
     // Content Metrics
@@ -482,7 +484,7 @@ pub struct DeltaStatistics {
 }
 
 /// High-level classification of document changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum DocumentChange {
     /// No changes detected (all hashes match).
     NoChange,
@@ -549,7 +551,7 @@ impl DocumentChange {
 }
 
 /// Complete analysis of changes between two Markdown documents.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MarkdownDelta {
     // ─────────────────────────────────────────────────────────────
     // Summary

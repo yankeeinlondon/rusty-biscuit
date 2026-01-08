@@ -1,5 +1,6 @@
 //! Type definitions for Markdown Table of Contents.
 
+use serde::Serialize;
 use std::collections::HashMap;
 
 /// A node in the Table of Contents for a Markdown page.
@@ -7,7 +8,7 @@ use std::collections::HashMap;
 /// Each node represents a heading and its associated content, forming
 /// a hierarchical tree structure that mirrors the document's heading
 /// organization.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MarkdownTocNode {
     /// The level of the heading node (1-6).
     pub level: u8,
@@ -160,7 +161,7 @@ impl MarkdownTocNode {
 }
 
 /// Information about a fenced code block in the document.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CodeBlockInfo {
     /// The language identifier (e.g., "rust", "javascript"), if specified.
     pub language: Option<String>,
@@ -201,7 +202,7 @@ impl CodeBlockInfo {
 }
 
 /// Information about an internal link (anchor reference) in the document.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InternalLinkInfo {
     /// The target anchor (e.g., "my-heading" from `[text](#my-heading)`).
     pub target_slug: String,
@@ -239,7 +240,7 @@ impl InternalLinkInfo {
 }
 
 /// Table of Contents for a Markdown document.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MarkdownToc {
     // ─────────────────────────────────────────────────────────────
     // Document Identity
