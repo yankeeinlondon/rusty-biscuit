@@ -407,16 +407,13 @@ fn print_toc_node<W: Write>(
     let child_prefix = if is_last { "    " } else { "│   " };
 
     if verbose {
-        // Show hash or hash pair (for trimmed hashes)
-        let hash_display = if node.title_hash == node.title_hash_trimmed {
-            format!("({:016x})", node.title_hash)
-        } else {
-            format!(
-                "({:016x} / {:016x})",
-                node.title_hash, node.title_hash_trimmed
-            )
-        };
-        writeln!(out, "{}{}{} {}", prefix, connector, node.title, hash_display).ok();
+        // Show semantic content hash (used for whitespace-insensitive comparison)
+        writeln!(
+            out,
+            "{}{}{} ({:016x})",
+            prefix, connector, node.title, node.own_content_hash_normalized
+        )
+        .ok();
     } else {
         writeln!(out, "{}{}{}", prefix, connector, node.title).ok();
     }
@@ -438,24 +435,29 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool) {
     let stdout = io::stdout();
     let mut handle = stdout.lock();
 
+    // Blank line before output for visual separation
+    writeln!(handle).ok();
+
     // Print classification header
-    let classification_symbol = match delta.classification {
-        shared::markdown::DocumentChange::NoChange => "✓",
-        shared::markdown::DocumentChange::WhitespaceOnly => "~",
-        shared::markdown::DocumentChange::FrontmatterOnly => "◈",
-        shared::markdown::DocumentChange::FrontmatterAndWhitespace => "◈",
-        shared::markdown::DocumentChange::StructuralOnly => "⊕",
-        shared::markdown::DocumentChange::ContentMinor => "△",
-        shared::markdown::DocumentChange::ContentModerate => "◐",
-        shared::markdown::DocumentChange::ContentMajor => "◉",
-        shared::markdown::DocumentChange::Rewritten => "★",
+    let (classification_symbol, classification_name) = match delta.classification {
+        shared::markdown::DocumentChange::NoChange => ("✓", "No changes"),
+        shared::markdown::DocumentChange::WhitespaceOnly => ("~", "Whitespace changes only"),
+        shared::markdown::DocumentChange::FrontmatterOnly => ("◈", "Frontmatter only"),
+        shared::markdown::DocumentChange::FrontmatterAndWhitespace => {
+            ("◈", "Frontmatter and whitespace")
+        }
+        shared::markdown::DocumentChange::StructuralOnly => ("⊕", "Structural only"),
+        shared::markdown::DocumentChange::ContentMinor => ("△", "Minor changes"),
+        shared::markdown::DocumentChange::ContentModerate => ("◐", "Moderate changes"),
+        shared::markdown::DocumentChange::ContentMajor => ("◉", "Major changes"),
+        shared::markdown::DocumentChange::Rewritten => ("★", "Rewritten"),
     };
 
     writeln!(
         handle,
-        "{} {:?} ({:.1}% changed)",
+        "{} {} ({:.1}% changed)",
         classification_symbol,
-        delta.classification,
+        classification_name,
         delta.statistics.content_change_ratio * 100.0
     )
     .ok();
@@ -538,32 +540,23 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool) {
         writeln!(handle).ok();
     }
 
-    // Print modified sections
-    if !delta.modified.is_empty() {
-        writeln!(handle, "Modified ({}):", delta.modified.len()).ok();
-        for change in &delta.modified {
-            let path_str = change
-                .original_path
-                .as_ref()
-                .map(|p| p.join(" > "))
-                .unwrap_or_default();
-            let change_type = match change.action {
-                shared::markdown::ChangeAction::WhitespaceOnly => " (whitespace)",
-                _ => "",
-            };
-            if verbose {
-                writeln!(
-                    handle,
-                    "  ~ {}{} (line {} → {})",
-                    path_str,
-                    change_type,
-                    change.original_line.unwrap_or(0),
-                    change.new_line.unwrap_or(0)
-                )
-                .ok();
-            } else {
-                writeln!(handle, "  ~ {}{}", path_str, change_type).ok();
-            }
+    // Separate content changes from whitespace-only changes
+    let content_changes: Vec<_> = delta
+        .modified
+        .iter()
+        .filter(|c| !matches!(c.action, shared::markdown::ChangeAction::WhitespaceOnly))
+        .collect();
+    let whitespace_changes: Vec<_> = delta
+        .modified
+        .iter()
+        .filter(|c| matches!(c.action, shared::markdown::ChangeAction::WhitespaceOnly))
+        .collect();
+
+    // Print content modifications (the important ones)
+    if !content_changes.is_empty() {
+        writeln!(handle, "Modified ({}):", content_changes.len()).ok();
+        for change in &content_changes {
+            writeln!(handle, "  - {}", change.description).ok();
         }
         writeln!(handle).ok();
     }
@@ -586,17 +579,12 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool) {
         writeln!(handle).ok();
     }
 
-    // Print code block changes
-    if !delta.code_block_changes.is_empty() && verbose {
+    // Print code block changes (always show, not just verbose)
+    if !delta.code_block_changes.is_empty() {
         writeln!(handle, "Code blocks:").ok();
         for change in &delta.code_block_changes {
-            let symbol = match change.action {
-                shared::markdown::ChangeAction::Added => "+",
-                shared::markdown::ChangeAction::Removed => "-",
-                _ => "~",
-            };
             let lang = change.language.as_deref().unwrap_or("plain");
-            writeln!(handle, "  {} {} ({})", symbol, lang, change.description).ok();
+            writeln!(handle, "  - {} ({})", lang, change.description).ok();
         }
         writeln!(handle).ok();
     }
@@ -622,6 +610,23 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool) {
                 writeln!(handle).ok();
             }
         }
+        writeln!(handle).ok();
+    }
+
+    // Print whitespace-only changes at the end (less important)
+    if !whitespace_changes.is_empty() {
+        writeln!(handle, "Whitespace only ({}):", whitespace_changes.len()).ok();
+        for change in &whitespace_changes {
+            let path_str = change
+                .original_path
+                .as_ref()
+                .map(|p| p.join(" > "))
+                .unwrap_or_default();
+            writeln!(handle, "  - {}", path_str).ok();
+        }
+        // Dim italic note after the list
+        writeln!(handle).ok();
+        writeln!(handle, "  \x1b[2m\x1b[3mwhitespace only changes have no visual effect when rendered\x1b[0m").ok();
         writeln!(handle).ok();
     }
 
