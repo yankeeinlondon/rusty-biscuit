@@ -45,6 +45,8 @@ pub mod argon2id;
 pub mod blake3;
 pub mod xx_hash;
 
+use std::collections::HashMap;
+
 // Re-export commonly used functions at module level
 pub use blake3::{blake3_hash, blake3_hash_bytes, blake3_hash_trimmed};
 pub use xx_hash::{
@@ -54,7 +56,50 @@ pub use xx_hash::{
 
 // Re-export argon2id types and functions
 pub use argon2id::{
-    hash_password, hash_password_with_params, hash_password_with_salt, verify_password,
     Argon2idError, DEFAULT_MEMORY_COST_KIB, DEFAULT_OUTPUT_LEN, DEFAULT_PARALLELISM,
-    DEFAULT_TIME_COST,
+    DEFAULT_TIME_COST, hash_password, hash_password_with_params, hash_password_with_salt,
+    verify_password,
 };
+
+
+/// The **HashVariant** enumeration let's you express
+/// characteristics about the content you're hashing
+/// which you want to remove from being a factor in the
+/// hash which is being created.
+///
+/// The **HashVariant** is currently used in the **xx_hash_variant**
+/// function and may be added to the cryptographic `blake3` implementation
+/// at some future point.
+pub enum HashVariant {
+    /// Trims the whitespace at the beginning and end of the
+    /// content block being hashed.
+    BlockTrimming,
+    /// Removes all blank lines in the content block being hashed.
+    BlankLine,
+    /// Removes the leading whitespace on every line
+    LeadingWhitespace,
+    /// Removes the trailing whitespace on every line
+    TrailingWhitespace,
+    /// Removes all _extra_ interior whitespace; this means that
+    /// whitespace in the interior of a line's content is removed
+    /// after the first space.
+    InteriorWhitespace,
+    /// Allows the caller to specify a dictionary of FROM -> TO content.
+    ///
+    /// #### Example:
+    ///
+    /// ```rust
+    /// let hash_strategy = HashVariant::ReplacementMap(
+    ///     HashMap::new()
+    ///       .insert("’".to_string(), "'")
+    /// );
+    /// ```
+    ///
+    /// In this example we have created a HashVariant, which when used
+    /// with a hash function like `xx_hash_variant` will convert the
+    /// smart quote `’` to a normal single quote `'` character.
+    ReplacementMap(HashMap<String,String>),
+    /// Drop characters from the document before creating the
+    /// hash.
+    DropChars(Vec<char>)
+}

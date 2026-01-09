@@ -22,6 +22,8 @@
 
 use xxhash_rust::xxh64::xxh64;
 
+use crate::hashing::HashVariant;
+
 /// Computes XXH64 hash of the input string.
 ///
 /// This is a direct hash of the input bytes with no preprocessing.
@@ -195,6 +197,20 @@ pub fn xx_hash_content_only(data: &str) -> u64 {
 pub fn xx_hash_alphanumeric(data: &str) -> u64 {
     let content: String = data.chars().filter(|c| c.is_alphanumeric()).collect();
     xxh64(content.as_bytes(), 0)
+}
+
+/// Produces an xxHash of a _mutated_ version of the content/data passed in.
+///
+/// - the caller is expected to provide one or more `HashVariant` enum variants
+/// - each variant has a deterministic approach to mutating the input content
+/// - these variants allow you to produce stronger hashes for content types
+///   who have understood grammars which can be leveraged to avoid a hash which
+///   produces "false positives"
+pub fn xx_hash_variant(
+    data: &str,
+    variants: Vec<HashVariant>
+) -> u64 {
+    todo!()
 }
 
 #[cfg(test)]

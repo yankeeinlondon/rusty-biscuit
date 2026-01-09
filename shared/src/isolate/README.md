@@ -133,6 +133,7 @@ The `html_isolate` function always returns `Cow::Owned` strings because the `scr
 ### Markdown Parser
 
 Uses `pulldown_cmark` with these options enabled:
+
 - `ENABLE_GFM` - GitHub Flavored Markdown extensions
 - `ENABLE_TABLES` - Table support
 - `ENABLE_FOOTNOTES` - Footnote support
@@ -140,6 +141,7 @@ Uses `pulldown_cmark` with these options enabled:
 ### HTML Parser
 
 Uses `scraper` (built on `html5ever`) which provides:
+
 - Full HTML5 compliance
 - CSS selector support
 - Robust handling of malformed HTML
