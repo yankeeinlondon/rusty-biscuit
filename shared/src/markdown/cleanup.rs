@@ -139,6 +139,11 @@ fn extract_emphasis_markers(content: &str, events: &[(Event, Range<usize>)]) -> 
 /// The restoration handles nested emphasis (e.g., `***text***` which is strong+emphasis)
 /// by consuming multiple markers based on their char_count until the total characters
 /// consumed matches the consecutive marker group in the output.
+///
+/// IMPORTANT: This function distinguishes between:
+/// - Emphasis asterisks: `*text*` or `**text**` (adjacent to word characters)
+/// - List marker asterisks: `* ` at start of line (followed by space)
+/// List markers are NOT treated as emphasis and are passed through unchanged.
 fn restore_emphasis_markers(output: &mut String, markers: &[EmphasisMarker], target_style: Option<EmphasisStyle>) {
     // If a target style is specified, we're standardizing - nothing to restore
     if target_style.is_some() {
@@ -152,6 +157,7 @@ fn restore_emphasis_markers(output: &mut String, markers: &[EmphasisMarker], tar
     let mut result = String::with_capacity(output.len());
     let mut marker_iter = markers.iter().peekable();
     let mut in_code_block = false;
+    let mut at_line_start = true; // Track if we're at the start of a line (after optional whitespace)
     let mut chars = output.chars().peekable();
 
     while let Some(c) = chars.next() {
@@ -166,11 +172,30 @@ fn restore_emphasis_markers(output: &mut String, markers: &[EmphasisMarker], tar
                 in_code_block = !in_code_block;
             }
             result.push_str(&backticks);
+            at_line_start = false;
             continue;
         }
 
         if in_code_block {
             result.push(c);
+            if c == '\n' {
+                at_line_start = true;
+            }
+            continue;
+        }
+
+        // Track line starts for list marker detection
+        if c == '\n' {
+            result.push(c);
+            at_line_start = true;
+            continue;
+        }
+
+        // Whitespace at line start doesn't change at_line_start status
+        // (nested list items have leading whitespace before the marker)
+        if c == ' ' || c == '\t' {
+            result.push(c);
+            // at_line_start stays the same
             continue;
         }
 
@@ -186,26 +211,37 @@ fn restore_emphasis_markers(output: &mut String, markers: &[EmphasisMarker], tar
                 output_marker_count += 1;
             }
 
-            // Consume markers from our iterator until we've matched the output count
-            // Each marker has a char_count (1 for emphasis, 2 for strong)
-            let mut chars_consumed = 0;
-            while chars_consumed < output_marker_count {
-                if let Some(original) = marker_iter.next() {
-                    let marker_token = original.style.token();
-                    for _ in 0..original.char_count {
-                        result.push(marker_token);
+            // Check if this is a list marker: at line start AND followed by space
+            // List markers are `* ` (single asterisk + space) at line start
+            let is_list_marker = at_line_start && output_marker_count == 1 && chars.peek() == Some(&' ');
+
+            if is_list_marker {
+                // This is a list marker, not emphasis - pass through unchanged
+                result.push('*');
+            } else {
+                // This is emphasis - consume markers from our iterator
+                // Each marker has a char_count (1 for emphasis, 2 for strong)
+                let mut chars_consumed = 0;
+                while chars_consumed < output_marker_count {
+                    if let Some(original) = marker_iter.next() {
+                        let marker_token = original.style.token();
+                        for _ in 0..original.char_count {
+                            result.push(marker_token);
+                        }
+                        chars_consumed += original.char_count;
+                    } else {
+                        // No more markers to restore, output remaining as asterisks
+                        for _ in chars_consumed..output_marker_count {
+                            result.push('*');
+                        }
+                        break;
                     }
-                    chars_consumed += original.char_count;
-                } else {
-                    // No more markers to restore, output remaining as asterisks
-                    for _ in chars_consumed..output_marker_count {
-                        result.push('*');
-                    }
-                    break;
                 }
             }
+            at_line_start = false;
         } else {
             result.push(c);
+            at_line_start = false;
         }
     }
 
@@ -2072,6 +2108,77 @@ mod tests {
         assert!(
             cleaned.contains("_second_"),
             "Second underscore emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_regression_list_marker_not_confused_with_emphasis() {
+        // Regression test: asterisk list markers should NOT be treated as emphasis markers
+        // Previously, `* list item with _emphasis_` was incorrectly converted to
+        // `_ list item with _emphasis*` because the list marker `*` consumed an emphasis marker
+        let content = "* list item with _emphasis_";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.starts_with("* "),
+            "List marker should remain as asterisk, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("_emphasis_"),
+            "Emphasis should be preserved as underscore, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_regression_nested_list_markers_not_confused_with_emphasis() {
+        // Regression test: nested list markers should not be confused with emphasis
+        let content = "* outer _emphasized_\n  * inner _also emphasized_";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("* outer"),
+            "Outer list marker should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("* inner") || cleaned.contains("  * inner"),
+            "Inner list marker should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("_emphasized_"),
+            "Outer emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("_also emphasized_"),
+            "Inner emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_regression_multiple_list_types_with_emphasis() {
+        // Regression test: different list markers with emphasis in same document
+        let content = "- dash with _em1_\n* asterisk with _em2_\n+ plus with _em3_";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("- dash with _em1_"),
+            "Dash list with emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("* asterisk with _em2_"),
+            "Asterisk list with emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("+ plus with _em3_"),
+            "Plus list with emphasis should be preserved, got:\n{}",
             cleaned
         );
     }
