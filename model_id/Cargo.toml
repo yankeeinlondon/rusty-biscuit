@@ -1,7 +1,15 @@
 [package]
 name = "model_id"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[lib]
+proc-macro = true
 
 [dependencies]
-syn = "2.0.114"
+syn = { version = "2.0", features = ["derive", "parsing", "full"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+
+[dev-dependencies]
+trybuild = "1.0"

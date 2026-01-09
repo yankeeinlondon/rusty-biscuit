@@ -1,0 +1,5 @@
+error: ModelId can only be derived for enums
+ --> tests/fail/not_enum.rs:4:12
+  |
+4 | pub struct NotAnEnum {
+  |            ^^^^^^^^^

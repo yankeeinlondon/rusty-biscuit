@@ -1,0 +1,5 @@
+error: expected string literal
+ --> tests/fail/bad_attribute.rs:5:16
+  |
+5 |     #[model_id(not_a_string)]
+  |                ^^^^^^^^^^^^
