@@ -23,6 +23,195 @@ use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd}
 use pulldown_cmark_to_cmark::Options as CmarkOptions;
 use std::ops::Range;
 
+/// Returns parser options suitable for cleanup operations.
+///
+/// Enables all extensions EXCEPT `ENABLE_SMART_PUNCTUATION` to preserve
+/// original quote characters (`"` and `'`) without converting them to
+/// typographic "smart quotes" (`"`, `"`, `'`, `'`).
+fn cleanup_parser_options() -> Options {
+    Options::all() - Options::ENABLE_SMART_PUNCTUATION
+}
+
+/// Emphasis style used for italics in markdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmphasisStyle {
+    /// Use asterisk for emphasis: `*text*` for italics, `**text**` for bold
+    Asterisk,
+    /// Use underscore for emphasis: `_text_` for italics, `__text__` for bold
+    Underscore,
+}
+
+impl EmphasisStyle {
+    /// Returns the emphasis token character for this style.
+    pub fn token(&self) -> char {
+        match self {
+            EmphasisStyle::Asterisk => '*',
+            EmphasisStyle::Underscore => '_',
+        }
+    }
+
+    /// Returns the strong (bold) token string for this style.
+    pub fn strong_token(&self) -> &'static str {
+        match self {
+            EmphasisStyle::Asterisk => "**",
+            EmphasisStyle::Underscore => "__",
+        }
+    }
+}
+
+/// Gets the preferred emphasis style from the `PREFER_ITALICS` environment variable.
+///
+/// Valid values are `*` (asterisk) or `_` / `__` (underscore). Returns `None` if
+/// the variable is not set or has an invalid value.
+fn get_preferred_emphasis_style() -> Option<EmphasisStyle> {
+    std::env::var("PREFER_ITALICS").ok().and_then(|v| match v.trim() {
+        "*" => Some(EmphasisStyle::Asterisk),
+        "_" | "__" => Some(EmphasisStyle::Underscore),
+        _ => None,
+    })
+}
+
+/// Represents a recorded emphasis/strong marker from the source.
+#[derive(Debug, Clone, Copy)]
+struct EmphasisMarker {
+    /// The style used in the source (asterisk or underscore)
+    style: EmphasisStyle,
+    /// Number of characters used (1 for emphasis, 2 for strong)
+    char_count: usize,
+}
+
+/// Extracts emphasis and strong markers from the source in order of appearance.
+///
+/// Returns a vector of markers for each emphasis/strong tag (both start and end),
+/// indicating which style was used.
+fn extract_emphasis_markers(content: &str, events: &[(Event, Range<usize>)]) -> Vec<EmphasisMarker> {
+    let mut markers = Vec::new();
+    // Stack to track start markers so we can determine end marker styles and char counts
+    let mut style_stack: Vec<(EmphasisStyle, usize)> = Vec::new();
+
+    for (event, range) in events {
+        match event {
+            Event::Start(Tag::Emphasis) => {
+                // Emphasis uses 1 character (* or _)
+                let style = if range.start < content.len() {
+                    match content[range.start..].chars().next() {
+                        Some('*') => EmphasisStyle::Asterisk,
+                        Some('_') => EmphasisStyle::Underscore,
+                        _ => EmphasisStyle::Asterisk,
+                    }
+                } else {
+                    EmphasisStyle::Asterisk
+                };
+                markers.push(EmphasisMarker { style, char_count: 1 });
+                style_stack.push((style, 1));
+            }
+            Event::Start(Tag::Strong) => {
+                // Strong uses 2 characters (** or __)
+                let style = if range.start < content.len() {
+                    match content[range.start..].chars().next() {
+                        Some('*') => EmphasisStyle::Asterisk,
+                        Some('_') => EmphasisStyle::Underscore,
+                        _ => EmphasisStyle::Asterisk,
+                    }
+                } else {
+                    EmphasisStyle::Asterisk
+                };
+                markers.push(EmphasisMarker { style, char_count: 2 });
+                style_stack.push((style, 2));
+            }
+            Event::End(TagEnd::Emphasis) | Event::End(TagEnd::Strong) => {
+                // Use the style and char_count from the matching start marker
+                let (style, char_count) = style_stack.pop().unwrap_or((EmphasisStyle::Asterisk, 1));
+                markers.push(EmphasisMarker { style, char_count });
+            }
+            _ => {}
+        }
+    }
+
+    markers
+}
+
+/// Restores original emphasis markers in the output.
+///
+/// The `pulldown-cmark-to-cmark` library normalizes all emphasis to a single style.
+/// This function restores the original markers from the source when not standardizing.
+///
+/// The restoration handles nested emphasis (e.g., `***text***` which is strong+emphasis)
+/// by consuming multiple markers based on their char_count until the total characters
+/// consumed matches the consecutive marker group in the output.
+fn restore_emphasis_markers(output: &mut String, markers: &[EmphasisMarker], target_style: Option<EmphasisStyle>) {
+    // If a target style is specified, we're standardizing - nothing to restore
+    if target_style.is_some() {
+        return;
+    }
+
+    if markers.is_empty() {
+        return;
+    }
+
+    let mut result = String::with_capacity(output.len());
+    let mut marker_iter = markers.iter().peekable();
+    let mut in_code_block = false;
+    let mut chars = output.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        // Track code blocks to avoid modifying emphasis inside them
+        if c == '`' {
+            // Check for triple backtick (code fence)
+            let mut backticks = String::from("`");
+            while chars.peek() == Some(&'`') {
+                backticks.push(chars.next().unwrap());
+            }
+            if backticks.len() >= 3 {
+                in_code_block = !in_code_block;
+            }
+            result.push_str(&backticks);
+            continue;
+        }
+
+        if in_code_block {
+            result.push(c);
+            continue;
+        }
+
+        // Check for emphasis/strong markers in output
+        // IMPORTANT: cmark normalizes all emphasis to the emphasis_token we specify (asterisk).
+        // Literal underscores in text (like word_with_underscores) are preserved as-is.
+        // So we ONLY look for asterisks here - underscores in output are literal text.
+        if c == '*' {
+            // Count consecutive asterisks in output
+            let mut output_marker_count = 1;
+            while chars.peek() == Some(&'*') {
+                chars.next();
+                output_marker_count += 1;
+            }
+
+            // Consume markers from our iterator until we've matched the output count
+            // Each marker has a char_count (1 for emphasis, 2 for strong)
+            let mut chars_consumed = 0;
+            while chars_consumed < output_marker_count {
+                if let Some(original) = marker_iter.next() {
+                    let marker_token = original.style.token();
+                    for _ in 0..original.char_count {
+                        result.push(marker_token);
+                    }
+                    chars_consumed += original.char_count;
+                } else {
+                    // No more markers to restore, output remaining as asterisks
+                    for _ in chars_consumed..output_marker_count {
+                        result.push('*');
+                    }
+                    break;
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    *output = result;
+}
+
 /// Cleans up markdown content by normalizing formatting.
 ///
 /// This function performs two main operations:
@@ -44,12 +233,21 @@ use std::ops::Range;
 /// assert!(cleaned.contains("\n\n"));
 /// ```
 pub fn cleanup_content(content: &str) -> String {
-    // Parse with source ranges to preserve list markers
-    let parser = Parser::new_ext(content, Options::all());
+    // Parse with source ranges to preserve list markers and emphasis styles
+    // Use custom options that exclude ENABLE_SMART_PUNCTUATION to preserve original quotes
+    let parser = Parser::new_ext(content, cleanup_parser_options());
     let events_with_ranges: Vec<(Event, Range<usize>)> = parser.into_offset_iter().collect();
 
     // Extract list markers from source for each list
     let list_markers = extract_list_markers(content, &events_with_ranges);
+
+    // Extract emphasis markers to preserve original styles when not standardizing
+    let emphasis_markers = extract_emphasis_markers(content, &events_with_ranges);
+
+    // Determine emphasis style:
+    // 1. If PREFER_ITALICS env var is set, use that style (standardize all emphasis)
+    // 2. Otherwise, preserve original markers (no standardization)
+    let preferred_style = get_preferred_emphasis_style();
 
     // Separate events from ranges for processing
     let events: Vec<Event> = events_with_ranges.iter().map(|(e, _)| e.clone()).collect();
@@ -66,8 +264,15 @@ pub fn cleanup_content(content: &str) -> String {
     // cmark handles blank line insertion via its Options - defaults are correct:
     // newlines_after_headline: 2, newlines_after_paragraph: 2, etc.
     // Override code_block_token_count: default is 4, but standard markdown uses 3
+    //
+    // For emphasis:
+    // - If PREFER_ITALICS is set, standardize to that style
+    // - Otherwise, use asterisk as default (will be post-processed to restore original)
+    let target_style = preferred_style.unwrap_or(EmphasisStyle::Asterisk);
     let options = CmarkOptions {
         code_block_token_count: 3,
+        emphasis_token: target_style.token(),
+        strong_token: target_style.strong_token(),
         ..Default::default()
     };
 
@@ -85,6 +290,9 @@ pub fn cleanup_content(content: &str) -> String {
 
     // Restore original list markers (the library normalizes to '*')
     restore_list_markers(&mut output, &list_markers);
+
+    // Restore original emphasis markers if not standardizing via PREFER_ITALICS
+    restore_emphasis_markers(&mut output, &emphasis_markers, preferred_style);
 
     // Fix nested list indentation (library uses 2-space, preserve original style)
     let original_indent = detect_list_indentation(content);
@@ -1579,6 +1787,291 @@ mod tests {
         assert!(
             cleaned.contains("[ ]"),
             "Checkbox [ ] should not be escaped, got:\n{}",
+            cleaned
+        );
+    }
+
+    // ==================== Smart Quotes Tests (Regression) ====================
+
+    #[test]
+    fn test_cleanup_preserves_straight_double_quotes() {
+        // Regression test: Normal quotes should NOT be converted to smart quotes
+        let content = r#"He said "hello" and "goodbye"."#;
+        let cleaned = cleanup_content(content);
+
+        // Should contain straight quotes (ASCII 0x22)
+        assert!(
+            cleaned.contains('"'),
+            "Straight double quotes should be preserved, got:\n{}",
+            cleaned
+        );
+        // Should NOT contain smart quotes (U+201C and U+201D - left and right double quotes)
+        assert!(
+            !cleaned.contains('\u{201C}') && !cleaned.contains('\u{201D}'),
+            "Should not contain smart/curly quotes, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_preserves_straight_single_quotes() {
+        // Regression test: Single quotes/apostrophes should NOT be converted
+        let content = "It's a test and 'quoted text' here.";
+        let cleaned = cleanup_content(content);
+
+        // Should contain straight single quote (ASCII 0x27)
+        assert!(
+            cleaned.contains("'"),
+            "Straight single quotes should be preserved, got:\n{}",
+            cleaned
+        );
+        // Should NOT contain smart single quotes (U+2018 and U+2019)
+        assert!(
+            !cleaned.contains('\u{2018}') && !cleaned.contains('\u{2019}'),
+            "Should not contain smart/curly single quotes, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_preserves_quotes_in_code() {
+        // Quotes inside code blocks should definitely be preserved
+        let content = "```\nlet s = \"hello\";\n```";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("\"hello\""),
+            "Quotes in code should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    // ==================== Emphasis/Italics Tests (Regression) ====================
+
+    #[test]
+    fn test_cleanup_preserves_asterisk_emphasis() {
+        // Regression test: *asterisk* emphasis should NOT be converted to _underscore_
+        let content = "This has *asterisk italics* here.";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("*asterisk italics*"),
+            "Asterisk emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_preserves_underscore_emphasis() {
+        // Regression test: _underscore_ emphasis should NOT be converted to *asterisk*
+        let content = "This has _underscore italics_ here.";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("_underscore italics_"),
+            "Underscore emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_preserves_mixed_emphasis_styles() {
+        // Both asterisk and underscore styles should be preserved in the same document
+        let content = "Mix of *asterisk* and _underscore_ emphasis.";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("*asterisk*"),
+            "Asterisk emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("_underscore_"),
+            "Underscore emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_preserves_asterisk_strong() {
+        // **bold** should be preserved
+        let content = "This has **asterisk bold** here.";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("**asterisk bold**"),
+            "Asterisk strong should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_preserves_underscore_strong() {
+        // __bold__ should be preserved
+        let content = "This has __underscore bold__ here.";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("__underscore bold__"),
+            "Underscore strong should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_preserves_mixed_strong_styles() {
+        // Both asterisk and underscore bold should be preserved
+        let content = "Mix of **asterisk bold** and __underscore bold__ text.";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("**asterisk bold**"),
+            "Asterisk strong should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("__underscore bold__"),
+            "Underscore strong should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_preserves_nested_emphasis() {
+        // Nested emphasis should preserve styles
+        let content = "This has **bold with _nested italics_** here.";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("**"),
+            "Bold markers should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("_nested italics_"),
+            "Nested underscore emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_cleanup_emphasis_in_code_blocks_unchanged() {
+        // Emphasis markers inside code blocks should NOT be modified
+        let content = "```\n*not* _emphasis_ **here**\n```";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("*not*"),
+            "Emphasis markers in code should be unchanged, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("_emphasis_"),
+            "Underscore in code should be unchanged, got:\n{}",
+            cleaned
+        );
+    }
+
+    // ==================== Regression Tests for Emphasis Restoration ====================
+
+    #[test]
+    fn test_regression_nested_emphasis_preserves_original_styles() {
+        // Regression test: nested emphasis like **_text_** should preserve both styles
+        // Previously, ***text*** was incorrectly output as ***text___ or similar
+        let content = "**_nested_** test";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("**_nested_**"),
+            "Nested emphasis should preserve both styles (** and _), got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_regression_literal_underscores_not_converted() {
+        // Regression test: literal underscores in words like word_with_underscores
+        // should NOT be converted to asterisks or modified in any way
+        let content = "Testing word_with_underscores here.";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("word_with_underscores"),
+            "Literal underscores in words should not be modified, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_regression_emphasis_and_literal_underscores_combined() {
+        // Regression test: combination of emphasis and literal underscores
+        // The underscore emphasis should be preserved AND the literal underscores
+        // in word_with_underscores should remain unchanged
+        let content = "Testing _emphasis_ inside a word_with_underscores and **_nested_** styles.";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("_emphasis_"),
+            "Underscore emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("word_with_underscores"),
+            "Literal underscores should not be modified, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("**_nested_**"),
+            "Nested emphasis should preserve styles, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_regression_triple_emphasis_markers() {
+        // Regression test: ***text*** (strong + emphasis) should correctly restore styles
+        let content = "***both bold and italic***";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("***both bold and italic***"),
+            "Triple emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_regression_mixed_nested_emphasis() {
+        // Regression test: mixed nested styles like __*text*__
+        let content = "__*mixed nesting*__";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("__*mixed nesting*__"),
+            "Mixed nested emphasis should preserve styles, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_regression_multiple_emphasis_with_underscores_in_text() {
+        // Regression test: multiple emphasis with underscores in regular text
+        let content = "_first_ and snake_case_name and _second_";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("_first_"),
+            "First underscore emphasis should be preserved, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("snake_case_name"),
+            "Literal underscores in snake_case should not be modified, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("_second_"),
+            "Second underscore emphasis should be preserved, got:\n{}",
             cleaned
         );
     }
