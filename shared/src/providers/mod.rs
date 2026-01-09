@@ -38,6 +38,7 @@ pub mod retry;
 pub mod types;
 pub mod base;
 pub mod zai;
+pub mod zenmux;
 
 // Re-export main types and functions
 pub use curated::{get_curated_models, LAST_UPDATED, PROVIDER_COUNT};

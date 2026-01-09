@@ -24,14 +24,29 @@
 //! ## Examples
 //!
 //! ```rust
-//! use shared::hashing::{xx_hash, xx_hash_trimmed, blake3_hash};
+//! use shared::hashing::{xx_hash, xx_hash_variant, blake3_hash, HashVariant};
 //! use shared::hashing::argon2id::{hash_password, verify_password};
 //!
 //! // Fast hash for change detection
 //! let hash = xx_hash("content");
 //!
-//! // Trimmed hash ignores surrounding whitespace
-//! assert_eq!(xx_hash_trimmed("  hello  "), xx_hash_trimmed("hello"));
+//! // Hash with normalization using HashVariant
+//! // BlockTrimming removes leading/trailing whitespace
+//! assert_eq!(
+//!     xx_hash_variant("  hello  ", vec![HashVariant::BlockTrimming]),
+//!     xx_hash("hello")
+//! );
+//!
+//! // Combine multiple variants for semantic comparison
+//! // (ignores whitespace differences)
+//! let semantic_hash = xx_hash_variant(
+//!     "  content  \n\n  more  ",
+//!     vec![
+//!         HashVariant::LeadingWhitespace,
+//!         HashVariant::TrailingWhitespace,
+//!         HashVariant::BlankLine,
+//!     ],
+//! );
 //!
 //! // Secure hash for integrity
 //! let secure_hash = blake3_hash("content");
@@ -49,10 +64,7 @@ use std::collections::HashMap;
 
 // Re-export commonly used functions at module level
 pub use blake3::{blake3_hash, blake3_hash_bytes, blake3_hash_trimmed};
-pub use xx_hash::{
-    xx_hash, xx_hash_alphanumeric, xx_hash_bytes, xx_hash_content_only, xx_hash_normalized,
-    xx_hash_semantic, xx_hash_trimmed,
-};
+pub use xx_hash::{xx_hash, xx_hash_bytes, xx_hash_variant};
 
 // Re-export argon2id types and functions
 pub use argon2id::{
@@ -70,6 +82,7 @@ pub use argon2id::{
 /// The **HashVariant** is currently used in the **xx_hash_variant**
 /// function and may be added to the cryptographic `blake3` implementation
 /// at some future point.
+#[derive(Clone)]
 pub enum HashVariant {
     /// Trims the whitespace at the beginning and end of the
     /// content block being hashed.
@@ -86,19 +99,22 @@ pub enum HashVariant {
     InteriorWhitespace,
     /// Allows the caller to specify a dictionary of FROM -> TO content.
     ///
-    /// #### Example:
+    /// ## Example
     ///
     /// ```rust
-    /// let hash_strategy = HashVariant::ReplacementMap(
-    ///     HashMap::new()
-    ///       .insert("’".to_string(), "'")
-    /// );
+    /// use std::collections::HashMap;
+    /// use shared::hashing::HashVariant;
+    ///
+    /// let mut replacements = HashMap::new();
+    /// replacements.insert("\u{2019}".to_string(), "'".to_string());
+    ///
+    /// let hash_strategy = HashVariant::ReplacementMap(replacements);
     /// ```
     ///
-    /// In this example we have created a HashVariant, which when used
-    /// with a hash function like `xx_hash_variant` will convert the
-    /// smart quote `’` to a normal single quote `'` character.
-    ReplacementMap(HashMap<String,String>),
+    /// In this example we have created a HashVariant which, when used
+    /// with `xx_hash_variant`, will convert the smart quote `'` (U+2019)
+    /// to a normal single quote `'` character.
+    ReplacementMap(HashMap<String, String>),
     /// Drop characters from the document before creating the
     /// hash.
     DropChars(Vec<char>)

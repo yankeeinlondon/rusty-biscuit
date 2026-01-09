@@ -79,10 +79,10 @@ impl MarkdownTocNode {
         source_span: (usize, usize),
         line_range: (usize, usize),
     ) -> Self {
-        use crate::hashing::{xx_hash, xx_hash_trimmed};
+        use crate::hashing::{xx_hash, xx_hash_variant, HashVariant};
 
         let title_hash = xx_hash(&title);
-        let title_hash_trimmed = xx_hash_trimmed(&title);
+        let title_hash_trimmed = xx_hash_variant(&title, vec![HashVariant::BlockTrimming]);
 
         Self {
             level,
@@ -131,7 +131,7 @@ impl MarkdownTocNode {
 
     /// Computes the subtree hash by combining prelude content with all children.
     pub fn compute_subtree_hash(&mut self) {
-        use crate::hashing::{xx_hash, xx_hash_trimmed};
+        use crate::hashing::{xx_hash, xx_hash_variant, HashVariant};
 
         // Build combined content for subtree: prelude + all child subtrees
         let mut combined = self
@@ -148,7 +148,7 @@ impl MarkdownTocNode {
         }
 
         self.subtree_hash = xx_hash(&combined);
-        self.subtree_hash_trimmed = xx_hash_trimmed(&combined);
+        self.subtree_hash_trimmed = xx_hash_variant(&combined, vec![HashVariant::BlockTrimming]);
     }
 
     /// Returns the path to this node (list of ancestor titles including this one).
@@ -210,11 +210,19 @@ pub struct PreludeNode {
 impl PreludeNode {
     /// Creates a new prelude node from content and location info.
     pub fn new(content: String, source_span: (usize, usize), line_range: (usize, usize)) -> Self {
-        use crate::hashing::{xx_hash, xx_hash_semantic, xx_hash_trimmed};
+        use crate::hashing::{xx_hash, xx_hash_variant, HashVariant};
 
         let content_hash = xx_hash(&content);
-        let content_hash_trimmed = xx_hash_trimmed(&content);
-        let content_hash_normalized = xx_hash_semantic(&content);
+        let content_hash_trimmed = xx_hash_variant(&content, vec![HashVariant::BlockTrimming]);
+        // Semantic hash: ignores leading/trailing whitespace per line and blank lines
+        let content_hash_normalized = xx_hash_variant(
+            &content,
+            vec![
+                HashVariant::LeadingWhitespace,
+                HashVariant::TrailingWhitespace,
+                HashVariant::BlankLine,
+            ],
+        );
 
         Self {
             content,
@@ -267,10 +275,10 @@ impl CodeBlockInfo {
         line_range: (usize, usize),
         parent_section_path: Vec<String>,
     ) -> Self {
-        use crate::hashing::{xx_hash, xx_hash_trimmed};
+        use crate::hashing::{xx_hash, xx_hash_variant, HashVariant};
 
         let content_hash = xx_hash(&content);
-        let content_hash_trimmed = xx_hash_trimmed(&content);
+        let content_hash_trimmed = xx_hash_variant(&content, vec![HashVariant::BlockTrimming]);
 
         Self {
             language,

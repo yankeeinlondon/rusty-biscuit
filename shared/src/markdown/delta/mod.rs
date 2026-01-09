@@ -248,16 +248,23 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
 
             if orig_path == upd_path {
                 // Same path, different content = modified
-                // Compare alphanumeric content only to detect formatting-only changes
-                // This catches: whitespace, table padding, separator dashes, emphasis markers
+                // Compare content with whitespace normalized to detect formatting-only changes
+                // This catches: leading/trailing whitespace, blank lines, indentation
                 // Also strip code fence lines since code blocks are compared separately
                 let orig_content = orig_node.prelude_content().unwrap_or("");
                 let upd_content = upd_node.prelude_content().unwrap_or("");
 
+                // Use semantic hashing to compare content ignoring whitespace differences
+                use crate::hashing::{xx_hash_variant, HashVariant};
+                let semantic_variants = vec![
+                    HashVariant::LeadingWhitespace,
+                    HashVariant::TrailingWhitespace,
+                    HashVariant::BlankLine,
+                ];
                 let orig_content_hash =
-                    crate::hashing::xx_hash_alphanumeric(&strip_code_fences(orig_content));
+                    xx_hash_variant(&strip_code_fences(orig_content), semantic_variants.clone());
                 let upd_content_hash =
-                    crate::hashing::xx_hash_alphanumeric(&strip_code_fences(upd_content));
+                    xx_hash_variant(&strip_code_fences(upd_content), semantic_variants);
                 let is_whitespace_only = orig_content_hash == upd_content_hash;
 
                 let action = if is_whitespace_only {

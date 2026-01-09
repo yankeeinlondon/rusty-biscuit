@@ -22,7 +22,7 @@ mod types;
 
 pub use types::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode, PreludeNode};
 
-use crate::hashing::{xx_hash, xx_hash_trimmed};
+use crate::hashing::{xx_hash, xx_hash_variant, HashVariant};
 use crate::markdown::Markdown;
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
 
@@ -311,7 +311,7 @@ impl From<&Markdown> for MarkdownToc {
 
         // Compute page hashes
         toc.page_hash = xx_hash(content);
-        toc.page_hash_trimmed = xx_hash_trimmed(content);
+        toc.page_hash_trimmed = xx_hash_variant(content, vec![HashVariant::BlockTrimming]);
 
         // Compute frontmatter hashes
         if !frontmatter.is_empty() {
@@ -334,7 +334,7 @@ impl From<&Markdown> for MarkdownToc {
         // Set preamble
         toc.preamble = preamble.clone();
         toc.preamble_hash = xx_hash(&preamble);
-        toc.preamble_hash_trimmed = xx_hash_trimmed(&preamble);
+        toc.preamble_hash_trimmed = xx_hash_variant(&preamble, vec![HashVariant::BlockTrimming]);
 
         // Determine title
         toc.title = frontmatter
