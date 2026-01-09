@@ -16,3 +16,4 @@ strum = { version = "0.27.2", features = ["derive", "strum_macros"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 futures = "0.3.31"
+model_id = { path = "../../model_id" }

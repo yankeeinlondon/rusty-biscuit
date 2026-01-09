@@ -56,6 +56,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "lazy_static",
+ "model_id",
  "reqwest",
  "rig-core 0.28.0",
  "serde",
@@ -2851,6 +2852,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "model_id"
+version = "0.1.0"
+dependencies = [
+ "syn",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.7.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5041,9 +5049,9 @@ checksum = "e396b6523b11ccb83120b115a0b7366de372751aa6edf19844dfb13a6af97e91"
 
 [[package]]
 name = "syn"
-version = "2.0.111"
+version = "2.0.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "390cc9a294ab71bdb1aa2e99d13be9c753cd2d7bd6560c77118597410c4d2e87"
+checksum = "d4d107df263a3013ef9b1879b0df87d706ff80f65a86ea879bd9c31f9b307c2a"
 dependencies = [
  "proc-macro2",
  "quote",
