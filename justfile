@@ -97,3 +97,16 @@ research *args="":
     echo "---------------------------------"
     cd research/cli 2>/dev/null
     cargo run {{args}}
+
+# generate provider model enums from APIs
+gen-models *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ""
+    echo -e "{{BOLD}}Gen Models{{RESET}} (latest debug build)"
+    echo "---------------------------------"
+    cargo run -p ai-pipeline-gen -- {{args}}
+
+# generate models for a specific provider
+gen-models-for provider:
+    cargo run -p ai-pipeline-gen -- --providers {{provider}}

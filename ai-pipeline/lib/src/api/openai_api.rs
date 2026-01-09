@@ -1,17 +1,116 @@
 //! OpenAI-compatible API utilities
 //!
 //! This module provides functions for fetching models from OpenAI-compatible provider APIs.
-//! Created during Phase 1 of the provider refactoring (2025-12-30).
-//!
 //! All major LLM providers expose a `/v1/models` endpoint that follows the OpenAI API
 //! specification, allowing us to query available models uniformly across providers.
 
 use std::collections::HashMap;
+use std::env;
+
 use futures::stream::{self, StreamExt};
 use reqwest::Client;
+use serde::Deserialize;
 use tracing::{debug, info, warn};
 
+use crate::api::auth::ApiAuthMethod;
+use crate::rigging::providers::provider_errors::ProviderError;
+use crate::rigging::providers::providers::Provider;
 
+/// Maximum response size in bytes (10 MB)
+const MAX_RESPONSE_SIZE: usize = 10 * 1024 * 1024;
+
+/// Maximum number of retries for transient failures
+const MAX_RETRIES: u32 = 3;
+
+/// Base delay between retries in milliseconds
+const RETRY_BASE_DELAY_MS: u64 = 1000;
+
+/// Response from OpenAI-compatible /v1/models endpoint
+#[derive(Debug, Deserialize)]
+pub struct OpenAIModelsResponse {
+    pub data: Vec<OpenAIModel>,
+}
+
+/// Single model entry from OpenAI-compatible API
+#[derive(Debug, Deserialize)]
+pub struct OpenAIModel {
+    pub id: String,
+}
+
+/// Build the authentication header for a provider
+fn build_auth_header(provider: &Provider, api_key: &str) -> (String, String) {
+    match &provider.config().auth_method {
+        ApiAuthMethod::BearerToken => {
+            ("Authorization".to_string(), format!("Bearer {}", api_key))
+        }
+        ApiAuthMethod::ApiKey(header) => (header.clone(), api_key.to_string()),
+        ApiAuthMethod::QueryParam(_) => (String::new(), String::new()),
+        ApiAuthMethod::None => (String::new(), String::new()),
+    }
+}
+
+/// Fetch with retry logic for transient failures
+async fn fetch_with_retry<F, Fut, T, E>(
+    mut operation: F,
+    provider_name: &str,
+) -> Result<T, E>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+    E: std::fmt::Display,
+{
+    let mut last_error = None;
+
+    for attempt in 0..MAX_RETRIES {
+        match operation().await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                let delay = RETRY_BASE_DELAY_MS * 2u64.pow(attempt);
+                warn!(
+                    "Attempt {} failed for {}: {}. Retrying in {}ms",
+                    attempt + 1,
+                    provider_name,
+                    e,
+                    delay
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                last_error = Some(e);
+            }
+        }
+    }
+
+    Err(last_error.unwrap())
+}
+
+/// Get API keys from environment for all providers that have them configured.
+///
+/// Returns a HashMap mapping Provider to API key string.
+pub fn get_api_keys() -> HashMap<Provider, String> {
+    use strum::IntoEnumIterator;
+
+    let mut keys = HashMap::new();
+
+    for provider in Provider::iter() {
+        let config = provider.config();
+
+        // Skip local providers
+        if config.is_local {
+            continue;
+        }
+
+        // Try each env var for this provider
+        for env_var in config.env_vars {
+            if let Ok(key) = env::var(env_var) {
+                if !key.is_empty() {
+                    keys.insert(provider, key);
+                    break;
+                }
+            }
+        }
+    }
+
+    keys
+}
 
 /// Fetch models from a single provider's OpenAI-compatible API
 ///
@@ -33,44 +132,14 @@ use tracing::{debug, info, warn};
 /// - `ProviderError::AuthenticationFailed` - 401/403 response
 /// - `ProviderError::Timeout` - Request exceeded timeout
 /// - `ProviderError::ResponseTooLarge` - Response size exceeds limit
-///
-/// ## Notes
-///
-/// - Providers without configured base URLs are skipped
-/// - Uses retry logic with exponential backoff for transient failures
-///
-/// ## Examples
-///
-/// ```no_run
-/// use shared::api::openai_compat::get_provider_models_from_api;
-/// use shared::providers::base::Provider;
-///
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let models = get_provider_models_from_api(
-///         Provider::OpenAi,
-///         "sk-..."
-///     ).await?;
-///     println!("OpenAI models: {:?}", models);
-///     Ok(())
-/// }
-/// ```
 #[tracing::instrument(skip(api_key))]
 pub async fn get_provider_models_from_api(
     provider: Provider,
     api_key: &str,
 ) -> Result<Vec<String>, ProviderError> {
-    // Get base URL
-    let Some(base_url) = PROVIDER_BASE_URLS.get(&provider) else {
-        warn!("No base URL configured for {:?}", provider);
-        return Ok(vec![]);
-    };
-
-    // Get endpoint (default to /v1/models)
-    let endpoint = PROVIDER_MODELS_ENDPOINT
-        .get(&provider)
-        .copied()
-        .unwrap_or("/v1/models");
+    let config = provider.config();
+    let base_url = config.base_url;
+    let endpoint = config.models_endpoint.unwrap_or("/v1/models");
 
     let url = format!("{}{}", base_url, endpoint);
     let provider_name = format!("{:?}", provider).to_lowercase();
@@ -112,23 +181,20 @@ pub async fn get_provider_models_from_api(
     }
 
     // Check response size
-    if let Some(content_length) = response.content_length()
-        && content_length as usize > MAX_RESPONSE_SIZE {
+    if let Some(content_length) = response.content_length() {
+        if content_length as usize > MAX_RESPONSE_SIZE {
             return Err(ProviderError::ResponseTooLarge {
                 provider: provider_name.clone(),
                 size: content_length as usize,
             });
         }
+    }
 
     // Parse response
     let data: OpenAIModelsResponse = response.json().await?;
 
     // Extract model IDs (unprefixed)
-    let models: Vec<String> = data
-        .data
-        .into_iter()
-        .map(|model| model.id)
-        .collect();
+    let models: Vec<String> = data.data.into_iter().map(|model| model.id).collect();
 
     info!("Fetched {} models from {}", models.len(), provider_name);
 
@@ -148,32 +214,8 @@ pub async fn get_provider_models_from_api(
 ///
 /// Returns `ProviderError::NoProvidersAvailable` if no API keys are configured.
 /// Individual provider failures are logged but don't fail the entire operation.
-///
-/// ## Notes
-///
-/// - Local providers (Ollama) included if accessible
-/// - Providers without API keys are skipped (logged at DEBUG level)
-/// - Individual provider failures logged but don't fail entire operation
-/// - Parallel execution limited to 8 concurrent requests
-/// - Each provider request has staggered start time (100ms intervals)
-///
-/// ## Examples
-///
-/// ```no_run
-/// use shared::api::openai_compat::get_all_provider_models;
-///
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let all_models = get_all_provider_models().await?;
-///     for (provider, models) in &all_models {
-///         println!("{:?}: {} models", provider, models.len());
-///     }
-///     Ok(())
-/// }
-/// ```
 #[tracing::instrument]
 pub async fn get_all_provider_models() -> Result<HashMap<Provider, Vec<String>>, ProviderError> {
-    use crate::providers::base::get_api_keys;
     use std::time::Duration;
 
     let api_keys = get_api_keys();
@@ -210,10 +252,11 @@ pub async fn get_all_provider_models() -> Result<HashMap<Provider, Vec<String>>,
         .collect();
 
     // Execute in parallel with buffer_unordered(8) to limit concurrent requests
-    let results: Vec<(Provider, Result<Vec<String>, ProviderError>)> = stream::iter(provider_futures)
-        .buffer_unordered(8)
-        .collect()
-        .await;
+    let results: Vec<(Provider, Result<Vec<String>, ProviderError>)> =
+        stream::iter(provider_futures)
+            .buffer_unordered(8)
+            .collect()
+            .await;
 
     // Collect successful results and log errors
     let mut all_models = HashMap::new();
@@ -229,125 +272,36 @@ pub async fn get_all_provider_models() -> Result<HashMap<Provider, Vec<String>>,
         }
     }
 
-    info!("Successfully fetched models from {} providers", all_models.len());
+    info!(
+        "Successfully fetched models from {} providers",
+        all_models.len()
+    );
 
     Ok(all_models)
 }
 
 #[cfg(test)]
 mod tests {
-    use wiremock::{MockServer, Mock, ResponseTemplate};
-    use wiremock::matchers::{method, path, header};
+    use super::*;
 
-    #[tokio::test]
-    async fn test_get_provider_models_from_api_success() {
-        // Start mock server
-        let mock_server = MockServer::start().await;
-
-        // Mock successful response
-        Mock::given(method("GET"))
-            .and(path("/v1/models"))
-            .and(header("Authorization", "Bearer test-key"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "data": [
-                    {"id": "gpt-4o"},
-                    {"id": "gpt-4o-mini"}
-                ]
-            })))
-            .mount(&mock_server)
-            .await;
-
-        // Note: This test would need PROVIDER_BASE_URLS to be mockable
-        // For now, we verify the structure is correct
-        // In a real implementation, we'd use dependency injection for the base URL
+    #[test]
+    fn test_build_auth_header_bearer() {
+        let (name, value) = build_auth_header(&Provider::OpenAi, "test-key");
+        assert_eq!(name, "Authorization");
+        assert_eq!(value, "Bearer test-key");
     }
 
-    #[tokio::test]
-    async fn test_get_provider_models_from_api_authentication_failed() {
-        // Start mock server
-        let mock_server = MockServer::start().await;
-
-        // Mock 401 response
-        Mock::given(method("GET"))
-            .and(path("/v1/models"))
-            .respond_with(ResponseTemplate::new(401))
-            .mount(&mock_server)
-            .await;
-
-        // Note: This test demonstrates the structure
-        // Actual testing would require mockable PROVIDER_BASE_URLS
+    #[test]
+    fn test_build_auth_header_api_key() {
+        let (name, value) = build_auth_header(&Provider::Anthropic, "test-key");
+        assert_eq!(name, "x-api-key");
+        assert_eq!(value, "test-key");
     }
 
-    #[tokio::test]
-    async fn test_get_provider_models_from_api_rate_limit() {
-        // Start mock server
-        let mock_server = MockServer::start().await;
-
-        // Mock 429 response
-        Mock::given(method("GET"))
-            .and(path("/v1/models"))
-            .respond_with(ResponseTemplate::new(429))
-            .mount(&mock_server)
-            .await;
-
-        // Note: This test demonstrates the structure
-        // Actual testing would require mockable PROVIDER_BASE_URLS
-    }
-
-    #[tokio::test]
-    async fn test_get_provider_models_from_api_response_too_large() {
-        // Start mock server
-        let mock_server = MockServer::start().await;
-
-        // Create a very large response
-        let large_data: Vec<_> = (0..10000)
-            .map(|i| serde_json::json!({"id": format!("model-{}", i)}))
-            .collect();
-
-        Mock::given(method("GET"))
-            .and(path("/v1/models"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({
-                        "data": large_data
-                    }))
-            )
-            .mount(&mock_server)
-            .await;
-
-        // Note: This test demonstrates the structure
-        // Actual testing would require mockable PROVIDER_BASE_URLS
-    }
-
-    #[tokio::test]
-    async fn test_get_provider_models_from_api_empty_list() {
-        // Start mock server
-        let mock_server = MockServer::start().await;
-
-        // Mock empty model list
-        Mock::given(method("GET"))
-            .and(path("/v1/models"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "data": []
-            })))
-            .mount(&mock_server)
-            .await;
-
-        // Note: This test demonstrates the structure
-        // Actual testing would require mockable PROVIDER_BASE_URLS
-    }
-
-    #[tokio::test]
-    async fn test_get_all_provider_models_no_api_keys() {
-        // This test would need to temporarily clear environment variables
-        // For now, we document the expected behavior
-        // If no API keys: returns Ok(HashMap::new())
-    }
-
-    #[tokio::test]
-    async fn test_get_all_provider_models_parallel_execution() {
-        // This test would verify that buffer_unordered(8) doesn't deadlock
-        // and that staggered start times work correctly
-        // Implementation would require mockable provider APIs
+    #[test]
+    fn test_build_auth_header_none() {
+        let (name, value) = build_auth_header(&Provider::Ollama, "");
+        assert!(name.is_empty());
+        assert!(value.is_empty());
     }
 }

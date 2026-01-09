@@ -162,6 +162,38 @@ lazy_static! {
             is_local: false,
         });
 
+        m.insert(Provider::Groq, ProviderConfig {
+            env_vars: &["GROQ_API_KEY"],
+            auth_method: ApiAuthMethod::BearerToken,
+            base_url: "https://api.groq.com/openai",
+            models_endpoint: None,
+            is_local: false,
+        });
+
+        m.insert(Provider::Mistral, ProviderConfig {
+            env_vars: &["MISTRAL_API_KEY"],
+            auth_method: ApiAuthMethod::BearerToken,
+            base_url: "https://api.mistral.ai",
+            models_endpoint: None,
+            is_local: false,
+        });
+
+        m.insert(Provider::HuggingFace, ProviderConfig {
+            env_vars: &["HF_TOKEN", "HUGGINGFACE_TOKEN", "HUGGING_FACE_TOKEN"],
+            auth_method: ApiAuthMethod::BearerToken,
+            base_url: "https://huggingface.co/api",
+            models_endpoint: Some("/models"),
+            is_local: false,
+        });
+
+        m.insert(Provider::Mira, ProviderConfig {
+            env_vars: &["MIRA_API_KEY"],
+            auth_method: ApiAuthMethod::BearerToken,
+            base_url: "https://api.mira.network",
+            models_endpoint: None,
+            is_local: false,
+        });
+
         m
     };
 }

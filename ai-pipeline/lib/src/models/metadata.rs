@@ -1,4 +1,4 @@
-
+use serde_json::Value;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct ModelArchitecture {

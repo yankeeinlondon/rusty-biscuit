@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+use super::providers::Provider;
 
 #[derive(Debug, Error)]
 pub enum ProviderError {
@@ -17,9 +18,6 @@ pub enum ProviderError {
 
     #[error("Timeout waiting for {provider}")]
     Timeout { provider: String },
-
-    #[error("Cache error: {0}")]
-    CacheError(#[from] super::cache::CacheError),
 
     #[error("Response too large from {provider}: {size} bytes")]
     ResponseTooLarge { provider: String, size: usize },

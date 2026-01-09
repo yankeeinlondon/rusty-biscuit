@@ -1,41 +1,3 @@
-/// Options controlling which identifier to use as the "wire id" source.
-#[derive(Debug, Clone, Copy)]
-pub struct VariantNameOptions {
-    /// If true and `canonical_slug` is present, prefer it over `id`.
-    pub prefer_canonical_slug: bool,
-}
-
-impl Default for VariantNameOptions {
-    fn default() -> Self {
-        Self {
-            prefer_canonical_slug: true,
-        }
-    }
-}
-
-/// Generate the enum variant name for a model definition.
-///
-/// Encoding rules:
-/// - Aggregator ids: "provider/model" -> "Provider___Model"
-/// (delimiter: `___`)
-/// - Within provider/model text:
-///     '-' => `__`
-///     '.' => `_`
-/// - Alphanumeric runs become PascalCase segments.
-/// - Any other non-alphanumeric separator is treated like '-' (encoded as `__`).
-///
-/// Notes:
-/// - If the resulting identifier would start with a digit, we prefix it with `M`.
-pub fn enum_variant_name_for_model(def: &ModelDefinition, opts: VariantNameOptions) -> String {
-    let wire_id: &str = if opts.prefer_canonical_slug {
-        def.canonical_slug.as_deref().unwrap_or(&def.id)
-    } else {
-        &def.id
-    };
-
-    enum_variant_name_from_wire_id(wire_id)
-}
-
 /// Generate the enum variant name directly from a wire id.
 /// - If `wire_id` contains '/', it's treated as aggregator "provider/model".
 /// - Otherwise it's treated as a primary provider model id.
@@ -70,7 +32,7 @@ fn encode_pascal_with_separators(input: &str) -> String {
     let mut tok = String::new();
 
     // Flush current token into output in PascalCase form.
-    let mut flush_tok = |out: &mut String, tok: &mut String| {
+    let flush_tok = |out: &mut String, tok: &mut String| {
         if tok.is_empty() {
             return;
         }
@@ -82,7 +44,7 @@ fn encode_pascal_with_separators(input: &str) -> String {
     // '-' => "__"
     // '.' => "_"
     // other => "__" (treated as '-')
-    let mut push_sep = |out: &mut String, sep: char| match sep {
+    let push_sep = |out: &mut String, sep: char| match sep {
         '-' => out.push_str("__"),
         '.' => out.push('_'),
         _ => out.push_str("__"),

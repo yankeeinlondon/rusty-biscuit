@@ -70,6 +70,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai-pipeline-gen"
+version = "0.1.0"
+dependencies = [
+ "ai-pipeline",
+ "chrono",
+ "clap 4.5.54",
+ "strum 0.27.2",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "aligned"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

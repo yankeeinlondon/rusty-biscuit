@@ -4,7 +4,7 @@ use std::{collections::HashMap, fs, path::Path};
 
 use crate::primitives::runnable::Runnable;
 use crate::primitives::state::PipelineState;
-use crate::{rigging::models::model_capability::ModelCapability, utils::datetime::Epoch};
+use crate::{models::model_capability::ModelCapability, utils::datetime::Epoch};
 
 /// Errors that can occur when creating a Prompt from input data.
 #[derive(Debug, Clone, PartialEq, Eq)]
