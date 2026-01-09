@@ -71,181 +71,93 @@ fn get_preferred_emphasis_style() -> Option<EmphasisStyle> {
     })
 }
 
-/// Represents a recorded emphasis/strong marker from the source.
-#[derive(Debug, Clone, Copy)]
-struct EmphasisMarker {
-    /// The style used in the source (asterisk or underscore)
-    style: EmphasisStyle,
-    /// Number of characters used (1 for emphasis, 2 for strong)
-    char_count: usize,
-}
+// Placeholder characters for emphasis markers (private use area - won't be escaped by cmark)
+const UNDERSCORE_EMPHASIS_PLACEHOLDER: char = '\u{E000}';
+const UNDERSCORE_STRONG_PLACEHOLDER: &str = "\u{E000}\u{E000}";
+const ASTERISK_EMPHASIS_PLACEHOLDER: char = '\u{E001}';
+const ASTERISK_STRONG_PLACEHOLDER: &str = "\u{E001}\u{E001}";
 
-/// Extracts emphasis and strong markers from the source in order of appearance.
+/// Transforms emphasis/strong events into literal text events to preserve original markers.
 ///
-/// Returns a vector of markers for each emphasis/strong tag (both start and end),
-/// indicating which style was used.
-fn extract_emphasis_markers(content: &str, events: &[(Event, Range<usize>)]) -> Vec<EmphasisMarker> {
-    let mut markers = Vec::new();
-    // Stack to track start markers so we can determine end marker styles and char counts
-    let mut style_stack: Vec<(EmphasisStyle, usize)> = Vec::new();
+/// Instead of letting cmark normalize all emphasis to a single style, this function
+/// replaces Start/End emphasis events with Text events containing placeholder characters.
+/// After cmark renders, these placeholders are replaced with the actual markers.
+///
+/// We use Unicode private use area characters as placeholders because cmark won't escape them.
+fn preserve_original_emphasis<'a>(
+    content: &str,
+    events_with_ranges: &[(Event<'a>, Range<usize>)],
+) -> Vec<Event<'a>> {
+    let mut result = Vec::with_capacity(events_with_ranges.len());
 
-    for (event, range) in events {
+    // Stack to track the markers for matching end tags
+    // true = underscore style, false = asterisk style
+    let mut style_stack: Vec<bool> = Vec::new();
+
+    for (event, range) in events_with_ranges {
         match event {
             Event::Start(Tag::Emphasis) => {
-                // Emphasis uses 1 character (* or _)
-                let style = if range.start < content.len() {
-                    match content[range.start..].chars().next() {
-                        Some('*') => EmphasisStyle::Asterisk,
-                        Some('_') => EmphasisStyle::Underscore,
-                        _ => EmphasisStyle::Asterisk,
-                    }
+                // Check if original used underscore
+                let is_underscore = range.start < content.len()
+                    && content[range.start..].chars().next() == Some('_');
+                style_stack.push(is_underscore);
+
+                let placeholder = if is_underscore {
+                    UNDERSCORE_EMPHASIS_PLACEHOLDER
                 } else {
-                    EmphasisStyle::Asterisk
+                    ASTERISK_EMPHASIS_PLACEHOLDER
                 };
-                markers.push(EmphasisMarker { style, char_count: 1 });
-                style_stack.push((style, 1));
+                result.push(Event::Text(CowStr::from(placeholder.to_string())));
             }
             Event::Start(Tag::Strong) => {
-                // Strong uses 2 characters (** or __)
-                let style = if range.start < content.len() {
-                    match content[range.start..].chars().next() {
-                        Some('*') => EmphasisStyle::Asterisk,
-                        Some('_') => EmphasisStyle::Underscore,
-                        _ => EmphasisStyle::Asterisk,
-                    }
+                // Check if original used underscore
+                let is_underscore = range.start < content.len()
+                    && content[range.start..].chars().next() == Some('_');
+                style_stack.push(is_underscore);
+
+                let placeholder = if is_underscore {
+                    UNDERSCORE_STRONG_PLACEHOLDER
                 } else {
-                    EmphasisStyle::Asterisk
+                    ASTERISK_STRONG_PLACEHOLDER
                 };
-                markers.push(EmphasisMarker { style, char_count: 2 });
-                style_stack.push((style, 2));
+                result.push(Event::Text(CowStr::from(placeholder)));
             }
-            Event::End(TagEnd::Emphasis) | Event::End(TagEnd::Strong) => {
-                // Use the style and char_count from the matching start marker
-                let (style, char_count) = style_stack.pop().unwrap_or((EmphasisStyle::Asterisk, 1));
-                markers.push(EmphasisMarker { style, char_count });
+            Event::End(TagEnd::Emphasis) => {
+                let is_underscore = style_stack.pop().unwrap_or(false);
+                let placeholder = if is_underscore {
+                    UNDERSCORE_EMPHASIS_PLACEHOLDER
+                } else {
+                    ASTERISK_EMPHASIS_PLACEHOLDER
+                };
+                result.push(Event::Text(CowStr::from(placeholder.to_string())));
             }
-            _ => {}
+            Event::End(TagEnd::Strong) => {
+                let is_underscore = style_stack.pop().unwrap_or(false);
+                let placeholder = if is_underscore {
+                    UNDERSCORE_STRONG_PLACEHOLDER
+                } else {
+                    ASTERISK_STRONG_PLACEHOLDER
+                };
+                result.push(Event::Text(CowStr::from(placeholder)));
+            }
+            _ => {
+                // Pass through all other events unchanged
+                result.push(event.clone());
+            }
         }
     }
 
-    markers
+    result
 }
 
-/// Restores original emphasis markers in the output.
-///
-/// The `pulldown-cmark-to-cmark` library normalizes all emphasis to a single style.
-/// This function restores the original markers from the source when not standardizing.
-///
-/// The restoration handles nested emphasis (e.g., `***text***` which is strong+emphasis)
-/// by consuming multiple markers based on their char_count until the total characters
-/// consumed matches the consecutive marker group in the output.
-///
-/// IMPORTANT: This function distinguishes between:
-/// - Emphasis asterisks: `*text*` or `**text**` (adjacent to word characters)
-/// - List marker asterisks: `* ` at start of line (followed by space)
-/// List markers are NOT treated as emphasis and are passed through unchanged.
-fn restore_emphasis_markers(output: &mut String, markers: &[EmphasisMarker], target_style: Option<EmphasisStyle>) {
-    // If a target style is specified, we're standardizing - nothing to restore
-    if target_style.is_some() {
-        return;
-    }
-
-    if markers.is_empty() {
-        return;
-    }
-
-    let mut result = String::with_capacity(output.len());
-    let mut marker_iter = markers.iter().peekable();
-    let mut in_code_block = false;
-    let mut at_line_start = true; // Track if we're at the start of a line (after optional whitespace)
-    let mut chars = output.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        // Track code blocks to avoid modifying emphasis inside them
-        if c == '`' {
-            // Check for triple backtick (code fence)
-            let mut backticks = String::from("`");
-            while chars.peek() == Some(&'`') {
-                backticks.push(chars.next().unwrap());
-            }
-            if backticks.len() >= 3 {
-                in_code_block = !in_code_block;
-            }
-            result.push_str(&backticks);
-            at_line_start = false;
-            continue;
-        }
-
-        if in_code_block {
-            result.push(c);
-            if c == '\n' {
-                at_line_start = true;
-            }
-            continue;
-        }
-
-        // Track line starts for list marker detection
-        if c == '\n' {
-            result.push(c);
-            at_line_start = true;
-            continue;
-        }
-
-        // Whitespace at line start doesn't change at_line_start status
-        // (nested list items have leading whitespace before the marker)
-        if c == ' ' || c == '\t' {
-            result.push(c);
-            // at_line_start stays the same
-            continue;
-        }
-
-        // Check for emphasis/strong markers in output
-        // IMPORTANT: cmark normalizes all emphasis to the emphasis_token we specify (asterisk).
-        // Literal underscores in text (like word_with_underscores) are preserved as-is.
-        // So we ONLY look for asterisks here - underscores in output are literal text.
-        if c == '*' {
-            // Count consecutive asterisks in output
-            let mut output_marker_count = 1;
-            while chars.peek() == Some(&'*') {
-                chars.next();
-                output_marker_count += 1;
-            }
-
-            // Check if this is a list marker: at line start AND followed by space
-            // List markers are `* ` (single asterisk + space) at line start
-            let is_list_marker = at_line_start && output_marker_count == 1 && chars.peek() == Some(&' ');
-
-            if is_list_marker {
-                // This is a list marker, not emphasis - pass through unchanged
-                result.push('*');
-            } else {
-                // This is emphasis - consume markers from our iterator
-                // Each marker has a char_count (1 for emphasis, 2 for strong)
-                let mut chars_consumed = 0;
-                while chars_consumed < output_marker_count {
-                    if let Some(original) = marker_iter.next() {
-                        let marker_token = original.style.token();
-                        for _ in 0..original.char_count {
-                            result.push(marker_token);
-                        }
-                        chars_consumed += original.char_count;
-                    } else {
-                        // No more markers to restore, output remaining as asterisks
-                        for _ in chars_consumed..output_marker_count {
-                            result.push('*');
-                        }
-                        break;
-                    }
-                }
-            }
-            at_line_start = false;
-        } else {
-            result.push(c);
-            at_line_start = false;
-        }
-    }
-
-    *output = result;
+/// Replaces emphasis placeholders with actual markers.
+fn restore_emphasis_placeholders(output: &mut String) {
+    // Replace double placeholders first (strong) to avoid partial matches
+    *output = output.replace(UNDERSCORE_STRONG_PLACEHOLDER, "__");
+    *output = output.replace(ASTERISK_STRONG_PLACEHOLDER, "**");
+    // Then replace single placeholders (emphasis)
+    *output = output.replace(UNDERSCORE_EMPHASIS_PLACEHOLDER, "_");
+    *output = output.replace(ASTERISK_EMPHASIS_PLACEHOLDER, "*");
 }
 
 /// Cleans up markdown content by normalizing formatting.
@@ -277,16 +189,19 @@ pub fn cleanup_content(content: &str) -> String {
     // Extract list markers from source for each list
     let list_markers = extract_list_markers(content, &events_with_ranges);
 
-    // Extract emphasis markers to preserve original styles when not standardizing
-    let emphasis_markers = extract_emphasis_markers(content, &events_with_ranges);
-
     // Determine emphasis style:
     // 1. If PREFER_ITALICS env var is set, use that style (standardize all emphasis)
     // 2. Otherwise, preserve original markers (no standardization)
     let preferred_style = get_preferred_emphasis_style();
 
-    // Separate events from ranges for processing
-    let events: Vec<Event> = events_with_ranges.iter().map(|(e, _)| e.clone()).collect();
+    // Transform events: if not standardizing, replace emphasis/strong events with
+    // literal text events containing the original markers. This prevents cmark from
+    // normalizing them.
+    let events: Vec<Event> = if preferred_style.is_none() {
+        preserve_original_emphasis(content, &events_with_ranges)
+    } else {
+        events_with_ranges.iter().map(|(e, _)| e.clone()).collect()
+    };
 
     // Add "text" language to empty fenced code blocks
     let with_text_lang = add_text_language_to_empty_code_blocks(events);
@@ -300,10 +215,6 @@ pub fn cleanup_content(content: &str) -> String {
     // cmark handles blank line insertion via its Options - defaults are correct:
     // newlines_after_headline: 2, newlines_after_paragraph: 2, etc.
     // Override code_block_token_count: default is 4, but standard markdown uses 3
-    //
-    // For emphasis:
-    // - If PREFER_ITALICS is set, standardize to that style
-    // - Otherwise, use asterisk as default (will be post-processed to restore original)
     let target_style = preferred_style.unwrap_or(EmphasisStyle::Asterisk);
     let options = CmarkOptions {
         code_block_token_count: 3,
@@ -321,14 +232,16 @@ pub fn cleanup_content(content: &str) -> String {
         return content.to_string();
     }
 
+    // Restore underscore emphasis markers (replace placeholders with actual underscores)
+    if preferred_style.is_none() {
+        restore_emphasis_placeholders(&mut output);
+    }
+
     // Post-process to fix blockquote formatting issues from pulldown-cmark-to-cmark
     fix_blockquote_formatting(&mut output);
 
     // Restore original list markers (the library normalizes to '*')
     restore_list_markers(&mut output, &list_markers);
-
-    // Restore original emphasis markers if not standardizing via PREFER_ITALICS
-    restore_emphasis_markers(&mut output, &emphasis_markers, preferred_style);
 
     // Fix nested list indentation (library uses 2-space, preserve original style)
     let original_indent = detect_list_indentation(content);
