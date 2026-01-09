@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use strum::EnumIter;
 use lazy_static::lazy_static;
+use strum::EnumIter;
 
 use crate::api::auth::ApiAuthMethod;
 
@@ -20,7 +20,7 @@ pub enum Provider {
     OpenRouter,
     Xai,
     Zai,
-    ZenMux
+    ZenMux,
 }
 
 impl Provider {
@@ -31,7 +31,9 @@ impl Provider {
     /// Panics if the provider is not found in the configuration map.
     /// This should never happen as all providers must have configuration.
     pub fn config(&self) -> &'static ProviderConfig {
-        PROVIDER_CONFIG.get(self).expect("All providers must have config")
+        PROVIDER_CONFIG
+            .get(self)
+            .expect("All providers must have config")
     }
 
     /// Returns the base URL for this provider's API.
@@ -135,6 +137,15 @@ lazy_static! {
             is_local: false,
         });
 
+        m.insert(Provider::Xai, ProviderConfig {
+            env_vars: &["XAI_API_KEY", "X_AI_API_KEY"],
+            auth_method: ApiAuthMethod::BearerToken,
+            base_url: "https://api.x.ai/v1",
+            models_endpoint: None,
+            is_local: false,
+        });
+
+
         m.insert(Provider::Zai, ProviderConfig {
             env_vars: &["ZAI_API_KEY", "Z_AI_API_KEY"],
             auth_method: ApiAuthMethod::BearerToken,
@@ -154,4 +165,3 @@ lazy_static! {
         m
     };
 }
-

@@ -7,3 +7,5 @@ pub mod xai;
 pub mod zai;
 pub mod zenmux;
 pub mod moonshot;
+
+pub mod build;

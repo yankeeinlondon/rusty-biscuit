@@ -1,7 +1,7 @@
 use model_id::ModelId;
 
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, strum::AsRefStr, ModelId)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
 pub enum ProviderModelZai {
     glm_4_6v__Flash__Free,
     glm_4_5__Air,
