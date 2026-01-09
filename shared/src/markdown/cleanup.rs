@@ -84,9 +84,14 @@ const ASTERISK_STRONG_PLACEHOLDER: &str = "\u{E001}\u{E001}";
 /// After cmark renders, these placeholders are replaced with the actual markers.
 ///
 /// We use Unicode private use area characters as placeholders because cmark won't escape them.
+///
+/// ## Parameters
+/// - `standardize_emphasis`: If Some, all emphasis (italics) will use this style.
+///   Strong (bold) is NEVER standardized - it always preserves the original style.
 fn preserve_original_emphasis<'a>(
     content: &str,
     events_with_ranges: &[(Event<'a>, Range<usize>)],
+    standardize_emphasis: Option<EmphasisStyle>,
 ) -> Vec<Event<'a>> {
     let mut result = Vec::with_capacity(events_with_ranges.len());
 
@@ -97,9 +102,13 @@ fn preserve_original_emphasis<'a>(
     for (event, range) in events_with_ranges {
         match event {
             Event::Start(Tag::Emphasis) => {
-                // Check if original used underscore
-                let is_underscore = range.start < content.len()
-                    && content[range.start..].chars().next() == Some('_');
+                // Determine emphasis style: use standardized if specified, otherwise original
+                let is_underscore = if let Some(style) = standardize_emphasis {
+                    style == EmphasisStyle::Underscore
+                } else {
+                    range.start < content.len()
+                        && content[range.start..].chars().next() == Some('_')
+                };
                 style_stack.push(is_underscore);
 
                 let placeholder = if is_underscore {
@@ -110,7 +119,7 @@ fn preserve_original_emphasis<'a>(
                 result.push(Event::Text(CowStr::from(placeholder.to_string())));
             }
             Event::Start(Tag::Strong) => {
-                // Check if original used underscore
+                // Strong (bold) ALWAYS preserves original style - never standardized
                 let is_underscore = range.start < content.len()
                     && content[range.start..].chars().next() == Some('_');
                 style_stack.push(is_underscore);
@@ -160,6 +169,71 @@ fn restore_emphasis_placeholders(output: &mut String) {
     *output = output.replace(ASTERISK_EMPHASIS_PLACEHOLDER, "*");
 }
 
+/// Unescapes underscores and asterisks that cmark escaped in plain text.
+///
+/// cmark escapes `_` to `\_` and `*` to `\*` when they appear in text that could
+/// potentially be interpreted as emphasis markers. However, since we handle all
+/// emphasis via placeholders, these escapes are unnecessary.
+///
+/// This function removes the escape backslashes, but only outside of code blocks/spans.
+fn unescape_emphasis_chars(output: &mut String) {
+    // Only process if there are escaped characters
+    if !output.contains("\\_") && !output.contains("\\*") {
+        return;
+    }
+
+    let mut result = String::with_capacity(output.len());
+    let mut chars = output.chars().peekable();
+    let mut in_code_block = false;
+    let mut in_inline_code = false;
+
+    while let Some(c) = chars.next() {
+        // Track code blocks
+        if c == '`' {
+            let mut backtick_count = 1;
+            while chars.peek() == Some(&'`') {
+                chars.next();
+                backtick_count += 1;
+            }
+
+            if backtick_count >= 3 {
+                in_code_block = !in_code_block;
+            } else if !in_code_block {
+                // Toggle inline code (simplified - doesn't handle all edge cases)
+                in_inline_code = !in_inline_code;
+            }
+
+            for _ in 0..backtick_count {
+                result.push('`');
+            }
+            continue;
+        }
+
+        // Don't unescape inside code
+        if in_code_block || in_inline_code {
+            result.push(c);
+            continue;
+        }
+
+        // Unescape \_ and \*
+        if c == '\\' {
+            match chars.peek() {
+                Some('_') | Some('*') => {
+                    // Skip the backslash, push the unescaped character
+                    result.push(chars.next().unwrap());
+                }
+                _ => {
+                    result.push(c);
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    *output = result;
+}
+
 /// Cleans up markdown content by normalizing formatting.
 ///
 /// This function performs two main operations:
@@ -192,16 +266,13 @@ pub fn cleanup_content(content: &str) -> String {
     // Determine emphasis style:
     // 1. If PREFER_ITALICS env var is set, use that style (standardize all emphasis)
     // 2. Otherwise, preserve original markers (no standardization)
+    // Note: PREFER_ITALICS only affects emphasis (italics), NOT strong (bold)
     let preferred_style = get_preferred_emphasis_style();
 
-    // Transform events: if not standardizing, replace emphasis/strong events with
-    // literal text events containing the original markers. This prevents cmark from
-    // normalizing them.
-    let events: Vec<Event> = if preferred_style.is_none() {
-        preserve_original_emphasis(content, &events_with_ranges)
-    } else {
-        events_with_ranges.iter().map(|(e, _)| e.clone()).collect()
-    };
+    // Transform events: replace emphasis/strong events with placeholder characters.
+    // This prevents cmark from normalizing them or escaping literal underscores/asterisks.
+    // If preferred_style is set, emphasis will be standardized; strong always preserves original.
+    let events: Vec<Event> = preserve_original_emphasis(content, &events_with_ranges, preferred_style);
 
     // Add "text" language to empty fenced code blocks
     let with_text_lang = add_text_language_to_empty_code_blocks(events);
@@ -215,11 +286,9 @@ pub fn cleanup_content(content: &str) -> String {
     // cmark handles blank line insertion via its Options - defaults are correct:
     // newlines_after_headline: 2, newlines_after_paragraph: 2, etc.
     // Override code_block_token_count: default is 4, but standard markdown uses 3
-    let target_style = preferred_style.unwrap_or(EmphasisStyle::Asterisk);
+    // Note: emphasis_token/strong_token don't matter since we use placeholders
     let options = CmarkOptions {
         code_block_token_count: 3,
-        emphasis_token: target_style.token(),
-        strong_token: target_style.strong_token(),
         ..Default::default()
     };
 
@@ -232,10 +301,12 @@ pub fn cleanup_content(content: &str) -> String {
         return content.to_string();
     }
 
-    // Restore underscore emphasis markers (replace placeholders with actual underscores)
-    if preferred_style.is_none() {
-        restore_emphasis_placeholders(&mut output);
-    }
+    // Restore emphasis/strong markers (replace placeholders with actual characters)
+    restore_emphasis_placeholders(&mut output);
+
+    // Unescape underscores/asterisks that cmark escaped in plain text
+    // (e.g., '_' becomes '\_' which should be '_')
+    unescape_emphasis_chars(&mut output);
 
     // Post-process to fix blockquote formatting issues from pulldown-cmark-to-cmark
     fix_blockquote_formatting(&mut output);
