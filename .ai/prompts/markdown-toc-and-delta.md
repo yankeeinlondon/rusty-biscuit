@@ -837,6 +837,7 @@ The `Markdown` struct will provide functions for validating document structure a
 ### Document Structure Concepts
 
 **Well-Formed Document**: A markdown document where heading levels form a proper hierarchy:
+
 - A "complete" document has a single H1 as the root, with all other headings nested beneath it
 - A "fragment" document starts at a higher level (H2-H6) but maintains consistent hierarchy from that root level
 
