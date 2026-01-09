@@ -1155,10 +1155,10 @@ impl ProviderModel {
                 .collect();
 
             // Use codegen module to inject variants
-            let types_rs_path = std::env::current_dir()
-                .ok()
-                .and_then(|p| p.join("shared/src/providers/types.rs").canonicalize().ok())
-                .unwrap_or_else(|| std::path::PathBuf::from("shared/src/providers/types.rs"));
+            // Use CARGO_MANIFEST_DIR to get absolute path at compile time
+            // This ensures the path works regardless of where the binary is run from
+            let types_rs_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("src/providers/types.rs");
 
             let variant_count = crate::codegen::inject_enum_variants(
                 "ProviderModel",

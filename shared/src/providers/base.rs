@@ -39,15 +39,14 @@
 //! println!("Found {} providers configured", api_keys.len());
 //! ```
 
-use std::collections::{HashMap, BTreeMap};
+use crate::providers::discovery::ProviderError;
 use lazy_static::lazy_static;
 use serde_json::Value;
-use url::Url;
-use strum_macros::EnumIter;
+use std::collections::{BTreeMap, HashMap};
 use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 use tracing::{info, warn};
-use crate::providers::discovery::ProviderError;
-
+use url::Url;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, EnumIter, PartialOrd, Ord)]
 pub enum Provider {
@@ -59,7 +58,7 @@ pub enum Provider {
     OpenAi,
     OpenRouter,
     Zai,
-    ZenMux
+    ZenMux,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
@@ -68,9 +67,8 @@ pub enum ApiAuthMethod {
     ApiKey(String),
     /// API key passed as query parameter (e.g., Gemini uses `?key=API_KEY`)
     QueryParam(String),
-    None
+    None,
 }
-
 
 /// Configuration for a single LLM provider.
 ///
@@ -182,7 +180,9 @@ impl Provider {
     /// Panics if the provider is not found in the configuration map.
     /// This should never happen as all providers must have configuration.
     pub fn config(&self) -> &'static ProviderConfig {
-        PROVIDER_CONFIGS.get(self).expect("All providers must have config")
+        PROVIDER_CONFIGS
+            .get(self)
+            .expect("All providers must have config")
     }
 
     /// Returns the base URL for this provider's API.
@@ -232,7 +232,7 @@ pub struct ModelArchitecture {
     input_modalities: Vec<String>,
     output_modalities: Vec<String>,
     tokenizer: String,
-    instruct_type: Option<String> 
+    instruct_type: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
@@ -245,21 +245,21 @@ pub struct ModelPricing {
     request: NumericString,
     image: NumericString,
     web_search: NumericString,
-    internal_reasoning: NumericString
+    internal_reasoning: NumericString,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct ModelTopProvider {
     context_length: u32,
     max_completion_tokens: u32,
-    is_moderated: bool 
+    is_moderated: bool,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ModelDefaultParameters {
     temperature: Option<f32>,
     top_p: Option<f32>,
-    frequency_penalty: Option<Value>
+    frequency_penalty: Option<Value>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -269,11 +269,10 @@ pub struct ModelPermission {
     object: String,
     organization: String,
     group: String,
-    is_blocking: bool
+    is_blocking: bool,
 }
 
-
-/// The shape of a provider's model when returned from the 
+/// The shape of a provider's model when returned from the
 /// OpenAI API `/models` endpoint.
 #[derive(Debug, PartialEq, Clone)]
 pub struct ModelDefinition {
@@ -310,7 +309,7 @@ pub struct ModelDefinition {
     object: String,
     created: u32,
     owned_by: String,
-    display_name: Option<String>
+    display_name: Option<String>,
 }
 
 /// Builds the authentication header for a provider's API request
@@ -319,12 +318,8 @@ pub struct ModelDefinition {
 /// For providers with no authentication (like local Ollama), returns empty strings.
 pub fn build_auth_header(provider: &Provider, api_key: &str) -> (String, String) {
     match &provider.config().auth_method {
-        ApiAuthMethod::BearerToken => {
-            ("Authorization".to_string(), format!("Bearer {}", api_key))
-        }
-        ApiAuthMethod::ApiKey(header_name) => {
-            (header_name.clone(), api_key.to_string())
-        }
+        ApiAuthMethod::BearerToken => ("Authorization".to_string(), format!("Bearer {}", api_key)),
+        ApiAuthMethod::ApiKey(header_name) => (header_name.clone(), api_key.to_string()),
         ApiAuthMethod::QueryParam(_) => {
             // Query param auth handled separately in URL building
             ("".to_string(), "".to_string())
@@ -617,7 +612,9 @@ pub async fn get_provider_models() -> Result<Vec<String>, ProviderError> {
 /// - This function never panics; it returns errors for invalid input
 /// - Unicode characters in model names are URL-encoded automatically
 /// - The function is idempotent for simple model names (no prefix/suffix)
-pub fn artificial_analysis_url(model: &str) -> Result<Url, crate::providers::discovery::ProviderError> {
+pub fn artificial_analysis_url(
+    model: &str,
+) -> Result<Url, crate::providers::discovery::ProviderError> {
     use crate::providers::discovery::ProviderError;
 
     // Handle empty input
@@ -640,9 +637,7 @@ pub fn artificial_analysis_url(model: &str) -> Result<Url, crate::providers::dis
         .unwrap_or(model_name);
 
     // Strip -preview suffix
-    let model_name = model_name
-        .strip_suffix("-preview")
-        .unwrap_or(model_name);
+    let model_name = model_name.strip_suffix("-preview").unwrap_or(model_name);
 
     // Construct URL
     let url_str = format!("https://artificialanalysis.ai/models/{}", model_name);
@@ -676,8 +671,8 @@ pub fn artificial_analysis_url(model: &str) -> Result<Url, crate::providers::dis
 
 #[cfg(test)]
 mod test_helpers {
-    use std::env;
     use std::collections::HashMap;
+    use std::env;
 
     /// RAII-based environment variable setter that automatically restores
     /// the original value (or removes the variable) when dropped.
@@ -719,9 +714,7 @@ mod test_helpers {
 
         /// Sets multiple environment variables at once.
         pub fn new_multi(vars: HashMap<&str, &str>) -> Vec<Self> {
-            vars.into_iter()
-                .map(|(k, v)| Self::new(k, v))
-                .collect()
+            vars.into_iter().map(|(k, v)| Self::new(k, v)).collect()
         }
     }
 
@@ -775,8 +768,8 @@ mod test_helpers {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::test_helpers::ScopedEnv;
+    use super::*;
 
     #[test]
     #[serial_test::serial]
@@ -852,9 +845,18 @@ mod tests {
         let api_keys = get_api_keys();
 
         assert_eq!(api_keys.len(), 3);
-        assert_eq!(api_keys.get(&Provider::OpenAi), Some(&"openai-key".to_string()));
-        assert_eq!(api_keys.get(&Provider::Anthropic), Some(&"anthropic-key".to_string()));
-        assert_eq!(api_keys.get(&Provider::Gemini), Some(&"gemini-key".to_string()));
+        assert_eq!(
+            api_keys.get(&Provider::OpenAi),
+            Some(&"openai-key".to_string())
+        );
+        assert_eq!(
+            api_keys.get(&Provider::Anthropic),
+            Some(&"anthropic-key".to_string())
+        );
+        assert_eq!(
+            api_keys.get(&Provider::Gemini),
+            Some(&"gemini-key".to_string())
+        );
     }
 
     #[test]
@@ -932,7 +934,10 @@ mod tests {
         let result = artificial_analysis_url("claude-opus-4.5-20250929-preview");
         assert!(result.is_ok());
         let url = result.unwrap();
-        assert_eq!(url.as_str(), "https://artificialanalysis.ai/models/claude-opus-4.5-20250929");
+        assert_eq!(
+            url.as_str(),
+            "https://artificialanalysis.ai/models/claude-opus-4.5-20250929"
+        );
     }
 
     #[test]
@@ -968,7 +973,10 @@ mod tests {
         let result = artificial_analysis_url("model-名前");
         assert!(result.is_ok());
         let url = result.unwrap();
-        assert_eq!(url.as_str(), "https://artificialanalysis.ai/models/model-%E5%90%8D%E5%89%8D");
+        assert_eq!(
+            url.as_str(),
+            "https://artificialanalysis.ai/models/model-%E5%90%8D%E5%89%8D"
+        );
     }
 
     #[test]
@@ -977,7 +985,10 @@ mod tests {
         assert!(result.is_ok());
         let url = result.unwrap();
         // Should only strip the first slash, keeping "subprovider/gpt-4o"
-        assert_eq!(url.as_str(), "https://artificialanalysis.ai/models/subprovider/gpt-4o");
+        assert_eq!(
+            url.as_str(),
+            "https://artificialanalysis.ai/models/subprovider/gpt-4o"
+        );
     }
 
     // ========================================================================
@@ -1031,8 +1042,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_provider_models_single_provider_with_mock() {
-        use wiremock::{MockServer, Mock, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         // Start mock server
         let mock_server = MockServer::start().await;
@@ -1087,8 +1098,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_provider_models_malformed_json_response() {
-        use wiremock::{MockServer, Mock, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         // Start mock server
         let mock_server = MockServer::start().await;
@@ -1111,8 +1122,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_provider_models_empty_model_list() {
-        use wiremock::{MockServer, Mock, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         // Start mock server
         let mock_server = MockServer::start().await;
@@ -1133,8 +1144,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_provider_models_response_size_limit() {
-        use wiremock::{MockServer, Mock, ResponseTemplate};
         use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
 
         // Start mock server
         let mock_server = MockServer::start().await;
@@ -1144,9 +1155,11 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/v1/models"))
-            .respond_with(ResponseTemplate::new(200)
-                .set_body_string(large_body)
-                .insert_header("content-length", "11534336"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(large_body)
+                    .insert_header("content-length", "11534336"),
+            )
             .mount(&mock_server)
             .await;
 
@@ -1173,7 +1186,10 @@ mod tests {
         // Step 2: Verify get_api_keys() finds the key
         let api_keys = get_api_keys();
         assert!(api_keys.contains_key(&Provider::OpenAi));
-        assert_eq!(api_keys.get(&Provider::OpenAi), Some(&"test-key-123".to_string()));
+        assert_eq!(
+            api_keys.get(&Provider::OpenAi),
+            Some(&"test-key-123".to_string())
+        );
 
         // Step 3: Test get_provider_models() (will fail to connect but structure is correct)
         // In a real integration, we'd mock the HTTP server, but this verifies the workflow
@@ -1226,3 +1242,5 @@ mod tests {
         }
     }
 }
+
+

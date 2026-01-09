@@ -11,7 +11,7 @@ use futures::stream::{self, StreamExt};
 use reqwest::Client;
 use tracing::{debug, info, warn};
 
-use crate::providers::base::{Provider, PROVIDER_BASE_URLS, PROVIDER_MODELS_ENDPOINT, build_auth_header};
+use crate::providers::base::{Provider, build_auth_header};
 use crate::providers::constants::*;
 use crate::providers::discovery::ProviderError;
 use crate::providers::retry::fetch_with_retry;
@@ -64,18 +64,9 @@ pub async fn get_provider_models_from_api(
     provider: Provider,
     api_key: &str,
 ) -> Result<Vec<String>, ProviderError> {
-    // Get base URL
-    let Some(base_url) = PROVIDER_BASE_URLS.get(&provider) else {
-        warn!("No base URL configured for {:?}", provider);
-        return Ok(vec![]);
-    };
-
-    // Get endpoint (default to /v1/models)
-    let endpoint = PROVIDER_MODELS_ENDPOINT
-        .get(&provider)
-        .copied()
-        .unwrap_or("/v1/models");
-
+    // Get base URL and endpoint from provider config
+    let base_url = provider.base_url();
+    let endpoint = provider.models_endpoint();
     let url = format!("{}{}", base_url, endpoint);
     let provider_name = format!("{:?}", provider).to_lowercase();
 

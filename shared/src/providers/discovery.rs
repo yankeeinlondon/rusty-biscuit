@@ -53,6 +53,12 @@ pub enum ProviderError {
 
     #[error("Code generation failed: {details}")]
     CodegenFailed { details: String },
+
+    #[error("Failed to build client for {provider}: {reason}")]
+    ClientBuildFailed { provider: String, reason: String },
+
+    #[error("Missing API key for {provider} (set one of: {env_vars:?})")]
+    MissingApiKey { provider: String, env_vars: Vec<String> },
 }
 
 // OpenAI types now imported from super::types (Phase 0 refactoring)
