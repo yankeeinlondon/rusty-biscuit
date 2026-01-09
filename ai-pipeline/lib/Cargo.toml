@@ -1,5 +1,5 @@
 [package]
-name = "lib"
+name = "ai-pipeline"
 version = "0.1.0"
 edition = "2024"
 
@@ -12,3 +12,7 @@ serde_yaml = "0.9.34"
 thiserror = "2.0.17"
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "tracing"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+strum = { version = "0.27.2", features = ["derive", "strum_macros"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+futures = "0.3.31"

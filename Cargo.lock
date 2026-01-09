@@ -51,6 +51,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai-pipeline"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "lazy_static",
+ "reqwest",
+ "rig-core 0.28.0",
+ "serde",
+ "serde_json",
+ "serde_yaml 0.9.34+deprecated",
+ "strum 0.27.2",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "aligned"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2491,20 +2509,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 
 [[package]]
-name = "lib"
-version = "0.1.0"
-dependencies = [
- "lazy_static",
- "reqwest",
- "rig-core 0.28.0",
- "serde",
- "serde_json",
- "serde_yaml 0.9.34+deprecated",
- "thiserror 2.0.17",
- "tokio",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.178"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4728,8 +4732,8 @@ dependencies = [
  "serde_yaml 0.9.34+deprecated",
  "serial_test",
  "similar",
- "strum",
- "strum_macros",
+ "strum 0.26.3",
+ "strum_macros 0.26.4",
  "supports-hyperlinks",
  "syn",
  "syntect",
@@ -4986,7 +4990,16 @@ version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
 dependencies = [
- "strum_macros",
+ "strum_macros 0.26.4",
+]
+
+[[package]]
+name = "strum"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+dependencies = [
+ "strum_macros 0.27.2",
 ]
 
 [[package]]
@@ -4999,6 +5012,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustversion",
+ "syn",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
  "syn",
 ]
 
