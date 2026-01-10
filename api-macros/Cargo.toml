@@ -1,0 +1,20 @@
+[package]
+name = "api-macros"
+version = "0.1.0"
+edition = "2021"
+license = "Parity-7.0.0"
+description = "Procedural macros for REST API definition and code generation"
+repository = "https://github.com/yankeeinlondon/dockhand"
+readme = "README.md"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+prettyplease = "0.2"
+
+[dev-dependencies]
+trybuild = "1.0"

@@ -1,0 +1,5 @@
+error: unknown auth method: `invalid_method`. Expected one of: bearer, header_key, query_param, none
+ --> tests/ui/fail/invalid_auth_method.rs:7:14
+  |
+7 | #[api(auth = invalid_method)]
+  |              ^^^^^^^^^^^^^^
