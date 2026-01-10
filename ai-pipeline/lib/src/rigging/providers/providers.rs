@@ -12,7 +12,6 @@ pub enum Provider {
     Gemini,
     Groq,
     HuggingFace,
-    Mira,
     Mistral,
     MoonshotAi,
     Ollama,
@@ -183,14 +182,6 @@ lazy_static! {
             auth_method: ApiAuthMethod::BearerToken,
             base_url: "https://huggingface.co/api",
             models_endpoint: Some("/models"),
-            is_local: false,
-        });
-
-        m.insert(Provider::Mira, ProviderConfig {
-            env_vars: &["MIRA_API_KEY"],
-            auth_method: ApiAuthMethod::BearerToken,
-            base_url: "https://api.mira.network",
-            models_endpoint: None,
             is_local: false,
         });
 
