@@ -157,7 +157,7 @@ pub struct Prompt<V: Serialize + Hash + Eq> {
     pub prefer_multi_modal_model: bool,
     pub structured_response: Option<HashMap<String, V>>,
 
-    ///
+    /// Indicates whether this prompt contains external resources.
     pub has_external_resources: bool,
     /// whether URI based resources were all available
     /// at the check.

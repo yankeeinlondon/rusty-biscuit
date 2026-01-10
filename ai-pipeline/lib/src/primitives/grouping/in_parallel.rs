@@ -44,7 +44,7 @@ where
     }
 
     /// Creates a new parallel executor from an iterator.
-    pub fn from_iter(iter: impl IntoIterator<Item = R>) -> Self {
+    pub fn collect_from(iter: impl IntoIterator<Item = R>) -> Self {
         Self {
             tasks: iter.into_iter().collect(),
         }
@@ -131,7 +131,7 @@ impl<R: Runnable> ParallelBuilder<R> {
 
     /// Adds a task to the parallel group.
     #[must_use]
-    pub fn add(mut self, task: R) -> Self {
+    pub fn with(mut self, task: R) -> Self {
         self.tasks.push(task);
         self
     }
@@ -233,8 +233,8 @@ mod tests {
     #[test]
     fn test_parallel_builder() {
         let parallel = ParallelBuilder::new()
-            .add(MultiplyStep { value: 1 })
-            .add(MultiplyStep { value: 2 })
+            .with(MultiplyStep { value: 1 })
+            .with(MultiplyStep { value: 2 })
             .build();
 
         assert_eq!(parallel.len(), 2);
@@ -253,7 +253,7 @@ mod tests {
     #[test]
     fn test_from_iter() {
         let values = vec![1, 2, 3];
-        let parallel = InParallel::from_iter(values.into_iter().map(|v| MultiplyStep { value: v }));
+        let parallel = InParallel::collect_from(values.into_iter().map(|v| MultiplyStep { value: v }));
 
         assert_eq!(parallel.len(), 3);
     }

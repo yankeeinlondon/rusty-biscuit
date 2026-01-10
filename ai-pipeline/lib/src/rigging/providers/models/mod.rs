@@ -1,3 +1,4 @@
+use crate::models::model_metadata::{ModelMetadata, Modality};
 use crate::rigging::providers::models::{
     anthropic::ProviderModelAnthropic,
     deepseek::ProviderModelDeepseek,
@@ -25,6 +26,7 @@ pub mod zai;
 pub mod zenmux;
 
 pub mod build;
+mod metadata_generated;
 
 /// Aggregated enumeration of all provider models.
 ///
@@ -76,6 +78,64 @@ impl ProviderModel {
             Self::ZenMux(m) => m.model_id(),
         }
     }
+
+    /// Returns metadata for this model if available.
+    ///
+    /// Metadata is fetched from the Parsera LLM Specs API at build time
+    /// and includes context window, modalities, and capabilities.
+    #[must_use]
+    pub fn metadata(&self) -> Option<&'static ModelMetadata> {
+        metadata_generated::MODEL_METADATA.get(self.model_id())
+    }
+
+    /// Returns the context window size if known.
+    ///
+    /// The context window is the maximum number of tokens the model can
+    /// process in a single request (input + output).
+    #[must_use]
+    pub fn context_window(&self) -> Option<u32> {
+        self.metadata().and_then(|m| m.context_window)
+    }
+
+    /// Returns the maximum output tokens if known.
+    ///
+    /// This is the maximum number of tokens the model can generate
+    /// in a single response.
+    #[must_use]
+    pub fn max_output_tokens(&self) -> Option<u32> {
+        self.metadata().and_then(|m| m.max_output_tokens)
+    }
+
+    /// Returns true if this model supports the given input modality.
+    ///
+    /// Returns false if the model's modalities are unknown.
+    #[must_use]
+    pub fn supports_input(&self, modality: Modality) -> bool {
+        self.metadata()
+            .map(|m| m.supports_input(modality))
+            .unwrap_or(false)
+    }
+
+    /// Returns true if this model supports the given output modality.
+    ///
+    /// Returns false if the model's modalities are unknown.
+    #[must_use]
+    pub fn supports_output(&self, modality: Modality) -> bool {
+        self.metadata()
+            .map(|m| m.supports_output(modality))
+            .unwrap_or(false)
+    }
+
+    /// Returns true if this model has the specified capability.
+    ///
+    /// Common capabilities include "function_calling", "structured_output",
+    /// "vision", etc.
+    #[must_use]
+    pub fn has_capability(&self, capability: &str) -> bool {
+        self.metadata()
+            .map(|m| m.has_capability(capability))
+            .unwrap_or(false)
+    }
 }
 
 #[cfg(test)]
@@ -116,5 +176,20 @@ mod tests {
         let _xai = ProviderModel::Xai(ProviderModelXai::Grok__3);
         let _zai = ProviderModel::Zai(ProviderModelZai::Glm__4_7);
         let _zenmux = ProviderModel::ZenMux(ProviderModelZenMux::Bespoke("test".to_string()));
+    }
+
+    /// Test metadata accessor methods return None for unknown models.
+    ///
+    /// With the empty placeholder metadata file, all models should return None.
+    #[test]
+    fn test_metadata_accessors_return_none_for_unknown() {
+        let model = ProviderModel::OpenAi(ProviderModelOpenAi::Bespoke("unknown-model".to_string()));
+
+        assert!(model.metadata().is_none());
+        assert!(model.context_window().is_none());
+        assert!(model.max_output_tokens().is_none());
+        assert!(!model.supports_input(Modality::Text));
+        assert!(!model.supports_output(Modality::Text));
+        assert!(!model.has_capability("function_calling"));
     }
 }

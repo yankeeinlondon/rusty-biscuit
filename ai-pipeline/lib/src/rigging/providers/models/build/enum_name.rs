@@ -113,12 +113,8 @@ fn collapse_runs(mut s: String) -> String {
     }
     s = s.replace(NS_SENTINEL, "___");
 
-    // Collapse consecutive dots encoding "__" / "_" patterns is inherently unambiguous,
-    // but you may wish to reduce multiple "_" to a single "_" for readability in dot encoding.
-    while s.contains("__") && s.contains("___") {
-        // nothing to do; this loop is just to show we intentionally preserve "___"
-        break;
-    }
+    // Note: we intentionally preserve "___" for namespace separation
+    // while "__" represents hyphen encoding. These patterns are unambiguous.
 
     s
 }

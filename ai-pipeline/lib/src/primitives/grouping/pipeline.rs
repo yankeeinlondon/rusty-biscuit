@@ -72,7 +72,7 @@ where
 /// const RESULT: StateKey<String> = StateKey::new("result");
 ///
 /// let pipeline = Pipeline::new()
-///     .add(FirstStep)
+///     .with(FirstStep)
 ///     .add_with_output(SecondStep, RESULT);
 ///
 /// pipeline.validate().expect("validation failed");
@@ -103,7 +103,7 @@ impl Pipeline {
     ///
     /// The step is executed but its return value is not stored in state.
     #[must_use]
-    pub fn add<R>(mut self, runnable: R) -> Self
+    pub fn with<R>(mut self, runnable: R) -> Self
     where
         R: Runnable + 'static,
         R::Output: Clone,
@@ -397,8 +397,8 @@ mod tests {
     #[test]
     fn test_error_accumulation() {
         let pipeline = Pipeline::new()
-            .add(FailingStep { fatal: false })
-            .add(FailingStep { fatal: false });
+            .with(FailingStep { fatal: false })
+            .with(FailingStep { fatal: false });
 
         let state = pipeline.run();
 
@@ -410,8 +410,8 @@ mod tests {
     #[test]
     fn test_fatal_error_stops_execution() {
         let pipeline = Pipeline::new()
-            .add(FailingStep { fatal: true })
-            .add(FailingStep { fatal: false });
+            .with(FailingStep { fatal: true })
+            .with(FailingStep { fatal: false });
 
         let state = pipeline.run();
 

@@ -2,6 +2,7 @@
 name = "ai-pipeline"
 version = "0.1.0"
 edition = "2021"
+license = "Parity-7.0.0"
 
 [dependencies]
 lazy_static = "1.5.0"
@@ -17,3 +18,4 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 futures = "0.3.31"
 model_id = { path = "../../model_id" }
+url= "2.5"

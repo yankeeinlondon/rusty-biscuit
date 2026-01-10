@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use super::providers::Provider;
+use super::Provider;
 
 #[derive(Debug, Error)]
 pub enum ProviderError {

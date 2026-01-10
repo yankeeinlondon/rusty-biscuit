@@ -6,16 +6,16 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields, LitStr};
 ///
 /// Encoding rules:
 /// - Aggregator delimiter: `___`
-///     Provider___ModelEncoded  ->  "provider/model"
+///   Provider___ModelEncoded  ->  "provider/model"
 /// - Model encoding:
-///     `__` -> '-'
-///     `_`  -> '.'
+///   `__` -> '-'
+///   `_`  -> '.'
 /// - Primary (no `___`):
-///     ModelEncoded -> "model"
+///   ModelEncoded -> "model"
 /// - Variant override:
-///     #[model_id("...")]
+///   #[model_id("...")]
 /// - Safety hatch:
-///     Bespoke(String) -> s.as_str()
+///   Bespoke(String) -> s.as_str()
 ///
 /// ## Generated Code
 ///
@@ -169,7 +169,8 @@ fn normalize_provider(s: &str) -> String {
 /// Decode the model name according to:
 /// - `__` -> '-'
 /// - `_`  -> '.'
-/// plus lowercase.
+///
+/// Plus lowercase.
 fn decode_model(s: &str) -> String {
     let s = s.trim_matches('_');
     let mut out = String::with_capacity(s.len());

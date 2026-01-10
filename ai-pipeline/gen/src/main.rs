@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -5,13 +6,17 @@ use strum::IntoEnumIterator;
 use tracing::{info, warn, Level};
 
 use ai_pipeline::api::openai_api::{get_api_keys, get_provider_models_from_api};
-use ai_pipeline::rigging::providers::providers::Provider;
+use ai_pipeline::rigging::providers::Provider;
 
 mod errors;
 mod generator;
+mod metadata_generator;
+mod parsera;
 
 use errors::GeneratorError;
 use generator::ModelEnumGenerator;
+use metadata_generator::MetadataGenerator;
+use parsera::{fetch_parsera_specs_with_retry, find_parsera_metadata, ParseraModel};
 
 #[derive(Parser)]
 #[command(name = "gen-models")]
@@ -85,13 +90,21 @@ fn provider_to_filename(provider: Provider) -> String {
     format!("{:?}", provider).to_lowercase()
 }
 
+/// Result of processing a single provider.
+struct ProviderResult {
+    /// Number of models generated.
+    model_count: usize,
+    /// Model IDs for metadata collection.
+    model_ids: Vec<String>,
+}
+
 /// Process a single provider.
 async fn process_single_provider(
     provider: Provider,
     api_key: &str,
     output_dir: &std::path::Path,
     dry_run: bool,
-) -> Result<usize, GeneratorError> {
+) -> Result<ProviderResult, GeneratorError> {
     // Fetch models from API
     let models = get_provider_models_from_api(provider, api_key)
         .await
@@ -106,6 +119,9 @@ async fn process_single_provider(
             reason: "No models returned from API".to_string(),
         });
     }
+
+    // Collect model IDs for metadata
+    let model_ids: Vec<String> = models.clone();
 
     // Generate code
     let provider_name = format!("{:?}", provider);
@@ -129,7 +145,16 @@ async fn process_single_provider(
         info!("Wrote {} models to {}", model_count, output_path.display());
     }
 
-    Ok(model_count)
+    Ok(ProviderResult {
+        model_count,
+        model_ids,
+    })
+}
+
+/// Result of processing all providers.
+struct ProcessingResult {
+    summary: GenerationSummary,
+    all_model_ids: Vec<String>,
 }
 
 /// Process all providers.
@@ -138,8 +163,9 @@ async fn process_providers(
     api_keys: &std::collections::HashMap<Provider, String>,
     output_dir: &std::path::Path,
     dry_run: bool,
-) -> GenerationSummary {
+) -> ProcessingResult {
     let mut summary = GenerationSummary::default();
+    let mut all_model_ids = Vec::new();
 
     for provider in providers {
         // Check if we have an API key
@@ -155,9 +181,10 @@ async fn process_providers(
         }
 
         match process_single_provider(provider, api_key, output_dir, dry_run).await {
-            Ok(count) => {
-                info!("Generated {} models for {:?}", count, provider);
-                summary.succeeded.push((provider, count));
+            Ok(result) => {
+                info!("Generated {} models for {:?}", result.model_count, provider);
+                summary.succeeded.push((provider, result.model_count));
+                all_model_ids.extend(result.model_ids);
             }
             Err(e) => {
                 warn!("Skipping {:?}: {}", provider, e);
@@ -166,7 +193,10 @@ async fn process_providers(
         }
     }
 
-    summary
+    ProcessingResult {
+        summary,
+        all_model_ids,
+    }
 }
 
 /// Parse provider list from comma-separated string.
@@ -196,6 +226,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_max_level(level)
         .with_target(false)
         .init();
+
+    // Fetch Parsera specs once at startup (graceful degradation on failure)
+    info!("Fetching model specs from Parsera API...");
+    let parsera_index: HashMap<String, ParseraModel> = fetch_parsera_specs_with_retry().await;
+    if parsera_index.is_empty() {
+        warn!("Parsera API unavailable - metadata will be empty");
+    } else {
+        info!("Loaded {} model specs from Parsera", parsera_index.len());
+    }
 
     // Get all available API keys
     let api_keys = get_api_keys();
@@ -227,9 +266,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Process providers
-    let summary = process_providers(providers, &api_keys, &cli.output, cli.dry_run).await;
+    let result = process_providers(providers, &api_keys, &cli.output, cli.dry_run).await;
 
-    summary.print();
+    // Generate metadata lookup table
+    let mut metadata_gen = MetadataGenerator::new();
+    let mut matched_count = 0;
+
+    for model_id in &result.all_model_ids {
+        let parsera_data = find_parsera_metadata(model_id, &parsera_index);
+        if parsera_data.is_some() {
+            matched_count += 1;
+        }
+        metadata_gen.register(model_id.clone(), parsera_data.cloned());
+    }
+
+    info!(
+        "Matched {}/{} models with Parsera metadata",
+        matched_count,
+        result.all_model_ids.len()
+    );
+
+    // Write metadata file
+    if !cli.dry_run {
+        let metadata_code = metadata_gen.generate();
+        let metadata_path = cli.output.join("metadata_generated.rs");
+        write_atomic(&metadata_path, &metadata_code)?;
+        info!("Wrote metadata to {}", metadata_path.display());
+    } else {
+        println!("\n--- Metadata ({} entries) ---", matched_count);
+        println!("{}", metadata_gen.generate());
+    }
+
+    result.summary.print();
 
     Ok(())
 }

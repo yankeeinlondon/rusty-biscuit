@@ -5,11 +5,7 @@
 ///
 /// Concatenation is achieved using the following logic:
 ///
-/// 1. Normalize to `Markdown` struct
-///
-///     - "Documents" can come in as a proper `Markdown` struct
-///     or as a as a string variant (`String` or `&str`) but the
-///     first step will be to convert them all into
-pub struct SmartConcat {
-
-}
+/// 1. Normalize to `Markdown` struct - "Documents" can come in as a proper
+///    `Markdown` struct or as a string variant (`String` or `&str`) but the
+///    first step will be to convert them all into the `Markdown` type.
+pub struct SmartConcat {}
