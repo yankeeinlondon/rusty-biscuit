@@ -28,13 +28,24 @@ const RETRY_BASE_DELAY_MS: u64 = 1000;
 /// Response from OpenAI-compatible /v1/models endpoint
 #[derive(Debug, Deserialize)]
 pub struct OpenAIModelsResponse {
+    #[serde(default)]
     pub data: Vec<OpenAIModel>,
+    /// Gemini uses "models" instead of "data"
+    #[serde(default)]
+    pub models: Vec<GeminiModel>,
 }
 
 /// Single model entry from OpenAI-compatible API
 #[derive(Debug, Deserialize)]
 pub struct OpenAIModel {
     pub id: String,
+}
+
+/// Single model entry from Gemini API
+#[derive(Debug, Deserialize)]
+pub struct GeminiModel {
+    /// Gemini uses "name" like "models/gemini-1.5-flash"
+    pub name: String,
 }
 
 /// Build the authentication header for a provider
@@ -141,12 +152,20 @@ pub async fn get_provider_models_from_api(
     let base_url = config.base_url;
     let endpoint = config.models_endpoint.unwrap_or("/v1/models");
 
-    let url = format!("{}{}", base_url, endpoint);
+    // Build URL with query param auth if needed
+    let url = match &config.auth_method {
+        ApiAuthMethod::QueryParam(param_name) => {
+            format!("{}{}?{}={}", base_url, endpoint, param_name, api_key)
+        }
+        _ => format!("{}{}", base_url, endpoint),
+    };
+
     let provider_name = format!("{:?}", provider).to_lowercase();
 
-    debug!("Fetching models from {} at {}", provider_name, url);
+    debug!("Fetching models from {} at {}", provider_name,
+           url.split('?').next().unwrap_or(&url)); // Don't log API key
 
-    // Build auth header
+    // Build auth header (empty for QueryParam auth)
     let (header_name, header_value) = build_auth_header(&provider, api_key);
 
     // Create HTTP client and make request
@@ -167,7 +186,7 @@ pub async fn get_provider_models_from_api(
     let response = request.send().await?;
 
     // Check for authentication failure
-    if response.status().as_u16() == 401 {
+    if response.status().as_u16() == 401 || response.status().as_u16() == 403 {
         return Err(ProviderError::AuthenticationFailed {
             provider: provider_name.clone(),
         });
@@ -193,8 +212,24 @@ pub async fn get_provider_models_from_api(
     // Parse response
     let data: OpenAIModelsResponse = response.json().await?;
 
-    // Extract model IDs (unprefixed)
-    let models: Vec<String> = data.data.into_iter().map(|model| model.id).collect();
+    // Extract model IDs - handle both OpenAI format (data) and Gemini format (models)
+    let models: Vec<String> = if !data.data.is_empty() {
+        data.data.into_iter().map(|model| model.id).collect()
+    } else if !data.models.is_empty() {
+        // Gemini returns "models/gemini-1.5-flash" - extract just the model name
+        data.models
+            .into_iter()
+            .map(|model| {
+                model
+                    .name
+                    .strip_prefix("models/")
+                    .unwrap_or(&model.name)
+                    .to_string()
+            })
+            .collect()
+    } else {
+        vec![]
+    };
 
     info!("Fetched {} models from {}", models.len(), provider_name);
 

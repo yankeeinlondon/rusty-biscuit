@@ -99,7 +99,7 @@ lazy_static! {
 
         m.insert(Provider::Gemini, ProviderConfig {
             env_vars: &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
-            auth_method: ApiAuthMethod::BearerToken,
+            auth_method: ApiAuthMethod::QueryParam("key".to_string()),
             base_url: "https://generativelanguage.googleapis.com",
             models_endpoint: Some("/v1beta/models"),
             is_local: false,
@@ -108,8 +108,8 @@ lazy_static! {
         m.insert(Provider::MoonshotAi, ProviderConfig {
             env_vars: &["MOONSHOT_API_KEY", "MOONSHOT_AI_API_KEY"],
             auth_method: ApiAuthMethod::BearerToken,
-            base_url: "https://api.moonshot.cn",
-            models_endpoint: None,
+            base_url: "https://api.moonshot.ai/v1",  // Also works: api.moonshot.cn/v1
+            models_endpoint: Some("/models"),  // base_url already has /v1
             is_local: false,
         });
 
@@ -141,7 +141,7 @@ lazy_static! {
             env_vars: &["XAI_API_KEY", "X_AI_API_KEY"],
             auth_method: ApiAuthMethod::BearerToken,
             base_url: "https://api.x.ai/v1",
-            models_endpoint: None,
+            models_endpoint: Some("/models"),  // base_url already has /v1
             is_local: false,
         });
 
@@ -149,8 +149,8 @@ lazy_static! {
         m.insert(Provider::Zai, ProviderConfig {
             env_vars: &["ZAI_API_KEY", "Z_AI_API_KEY"],
             auth_method: ApiAuthMethod::BearerToken,
-            base_url: "https://api.z.ai/api/paas/v4",
-            models_endpoint: None,
+            base_url: "https://open.bigmodel.cn/api/paas/v4",  // ZhipuAI's actual domain
+            models_endpoint: Some("/models"),  // base_url already has /v4
             is_local: false,
         });
 
