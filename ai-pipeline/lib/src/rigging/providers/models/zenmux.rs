@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-10T01:34:03.403191+00:00
+//! Generated: 2026-01-10T02:01:44.385412+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: ZenMux
 //!
@@ -57,8 +57,6 @@ pub enum ProviderModelZenMux {
     Google___Gemini__2_5__Pro,
     /// Model: `google/gemini-3-flash-preview`
     Google___Gemini__3__Flash__Preview,
-    /// Model: `google/gemini-3-flash-preview-free`
-    Google___Gemini__3__Flash__Preview__Free,
     /// Model: `google/gemini-3-pro-preview`
     Google___Gemini__3__Pro__Preview,
     /// Model: `google/gemma-3-12b-it`

@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-10T01:34:01.196184+00:00
+//! Generated: 2026-01-10T02:01:41.654237+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: MoonshotAi
 //!
