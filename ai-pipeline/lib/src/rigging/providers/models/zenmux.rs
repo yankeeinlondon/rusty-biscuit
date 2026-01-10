@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-10T02:01:44.385412+00:00
+//! Generated: 2026-01-10T02:15:42.504583+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: ZenMux
 //!
@@ -8,6 +8,7 @@
 
 use model_id::ModelId;
 
+/// Models provided by [ZenMux](<https://zenmux.ai>).
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
 pub enum ProviderModelZenMux {

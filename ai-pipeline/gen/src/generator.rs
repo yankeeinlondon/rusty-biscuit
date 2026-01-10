@@ -1,6 +1,78 @@
 use ai_pipeline::rigging::providers::models::build::enum_name::enum_variant_name_from_wire_id;
 use std::collections::HashSet;
 
+use std::borrow::Cow;
+
+/// Provider metadata for documentation generation.
+struct ProviderMeta<'a> {
+    /// User-facing name for documentation
+    display_name: Cow<'a, str>,
+    /// Provider's website URL
+    url: &'static str,
+}
+
+/// Returns provider metadata for documentation purposes.
+fn provider_meta(provider_name: &str) -> ProviderMeta<'_> {
+    match provider_name {
+        "Anthropic" => ProviderMeta {
+            display_name: Cow::Borrowed("Anthropic"),
+            url: "https://anthropic.com",
+        },
+        "Deepseek" => ProviderMeta {
+            display_name: Cow::Borrowed("DeepSeek"),
+            url: "https://deepseek.com",
+        },
+        "Gemini" => ProviderMeta {
+            display_name: Cow::Borrowed("Google Gemini"),
+            url: "https://ai.google.dev",
+        },
+        "Groq" => ProviderMeta {
+            display_name: Cow::Borrowed("Groq"),
+            url: "https://groq.com",
+        },
+        "HuggingFace" => ProviderMeta {
+            display_name: Cow::Borrowed("Hugging Face"),
+            url: "https://huggingface.co",
+        },
+        "Mistral" => ProviderMeta {
+            display_name: Cow::Borrowed("Mistral AI"),
+            url: "https://mistral.ai",
+        },
+        "MoonshotAi" => ProviderMeta {
+            display_name: Cow::Borrowed("Moonshot AI (Kimi)"),
+            url: "https://moonshot.ai",
+        },
+        "Ollama" => ProviderMeta {
+            display_name: Cow::Borrowed("Ollama"),
+            url: "https://ollama.ai",
+        },
+        "OpenAi" => ProviderMeta {
+            display_name: Cow::Borrowed("OpenAI"),
+            url: "https://openai.com",
+        },
+        "OpenRouter" => ProviderMeta {
+            display_name: Cow::Borrowed("OpenRouter"),
+            url: "https://openrouter.ai",
+        },
+        "Xai" => ProviderMeta {
+            display_name: Cow::Borrowed("xAI"),
+            url: "https://x.ai",
+        },
+        "Zai" => ProviderMeta {
+            display_name: Cow::Borrowed("Zhipu AI (Z.ai)"),
+            url: "https://zhipuai.cn",
+        },
+        "ZenMux" => ProviderMeta {
+            display_name: Cow::Borrowed("ZenMux"),
+            url: "https://zenmux.ai",
+        },
+        _ => ProviderMeta {
+            display_name: Cow::Owned(provider_name.to_string()),
+            url: "#",
+        },
+    }
+}
+
 /// Generator for provider model enum files.
 pub struct ModelEnumGenerator {
     provider_name: String,
@@ -26,6 +98,7 @@ impl ModelEnumGenerator {
     pub fn generate(&self) -> String {
         let enum_name = format!("ProviderModel{}", self.provider_name);
         let variants = self.generate_variants();
+        let meta = provider_meta(&self.provider_name);
 
         format!(
             r#"//! Auto-generated provider model enum
@@ -38,6 +111,7 @@ impl ModelEnumGenerator {
 
 use model_id::ModelId;
 
+/// Models provided by [{display_name}](<{url}>).
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
 pub enum {enum_name} {{
@@ -49,6 +123,8 @@ pub enum {enum_name} {{
             timestamp = chrono::Utc::now().to_rfc3339(),
             version = env!("CARGO_PKG_VERSION"),
             provider = self.provider_name,
+            display_name = meta.display_name,
+            url = meta.url,
             enum_name = enum_name,
             variants = variants,
         )
@@ -118,5 +194,49 @@ mod tests {
 
         assert!(a_pos < m_pos);
         assert!(m_pos < z_pos);
+    }
+
+    /// Regression test: Generated enums must include provider documentation.
+    ///
+    /// Verifies that:
+    /// 1. Known providers get a doc comment with display name and URL
+    /// 2. Unknown providers get a fallback doc comment
+    #[test]
+    fn test_enum_has_provider_doc_comment() {
+        // Test known provider
+        let generator = ModelEnumGenerator::new(
+            "OpenAi".to_string(),
+            vec!["gpt-4o".to_string()],
+        );
+        let code = generator.generate();
+
+        assert!(
+            code.contains("/// Models provided by [OpenAI](<https://openai.com>)."),
+            "Generated code should have provider doc comment with display name and URL"
+        );
+
+        // Test another known provider
+        let generator = ModelEnumGenerator::new(
+            "Anthropic".to_string(),
+            vec!["claude-3".to_string()],
+        );
+        let code = generator.generate();
+
+        assert!(
+            code.contains("/// Models provided by [Anthropic](<https://anthropic.com>)."),
+            "Generated code should have Anthropic doc comment"
+        );
+
+        // Test unknown provider falls back gracefully
+        let generator = ModelEnumGenerator::new(
+            "UnknownProvider".to_string(),
+            vec!["model-x".to_string()],
+        );
+        let code = generator.generate();
+
+        assert!(
+            code.contains("/// Models provided by [UnknownProvider](<#>)."),
+            "Unknown providers should use provider name with # URL"
+        );
     }
 }

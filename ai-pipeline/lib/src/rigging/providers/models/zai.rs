@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-10T02:01:43.434116+00:00
+//! Generated: 2026-01-10T02:15:41.367081+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: Zai
 //!
@@ -8,6 +8,7 @@
 
 use model_id::ModelId;
 
+/// Models provided by [Zhipu AI (Z.ai)](<https://zhipuai.cn>).
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
 pub enum ProviderModelZai {

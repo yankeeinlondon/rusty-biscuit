@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-10T02:01:41.654237+00:00
+//! Generated: 2026-01-10T02:15:39.825326+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: MoonshotAi
 //!
@@ -8,6 +8,7 @@
 
 use model_id::ModelId;
 
+/// Models provided by [Moonshot AI (Kimi)](<https://moonshot.ai>).
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
 pub enum ProviderModelMoonshotAi {

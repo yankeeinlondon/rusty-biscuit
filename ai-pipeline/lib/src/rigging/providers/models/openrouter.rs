@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-10T02:01:42.368413+00:00
+//! Generated: 2026-01-10T02:15:40.328898+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: OpenRouter
 //!
@@ -8,6 +8,7 @@
 
 use model_id::ModelId;
 
+/// Models provided by [OpenRouter](<https://openrouter.ai>).
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
 pub enum ProviderModelOpenRouter {
