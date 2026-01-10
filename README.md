@@ -1,6 +1,7 @@
-# Dockhand
+# Rusty Biscuit
+<img src="./assets/biscuit-and-crab.png" style="position: fixed; max-width: 30%; height: 150px; right: 0; top: 0; opacity: 0.75"></img>
 
-> A monorepo for AI-powered research and automation tools
+> A monorepo for AI-powered research and automation tools (_named after a great dog and written in a great language_)
 
 ## Architecture
 

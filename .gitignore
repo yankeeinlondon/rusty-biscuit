@@ -60,3 +60,4 @@ trace/*
 **/.ai/code-reviews/archived
 **/.ai/prompts/archived
 **/target/*
+*.afphoto~lock*
