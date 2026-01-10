@@ -1,9 +1,37 @@
 # Rusty Biscuit
 <img src="./assets/biscuit-and-crab.png" style="position: fixed; max-width: 30%; height: 150px; right: 0; top: 0; opacity: 0.75"></img>
 
-> A monorepo for AI-powered research and automation tools (_named after a great dog and written in a great language_)
+> A monorepo for AI-powered research and automation tools
 
-## Architecture
+- All libraries, CLI's, and TUI's are written in Rust.
+- Many CLI/TUI's are published to `npm` as well as `cargo`
+
+## Packages
+
+This monorepo hosts the following packages:
+
+### Shared Libraries
+
+1. **biscuit** [`./shared`]
+
+    Provides utility functions and a highly capable markdown pipelining engine.
+
+2. **schematic** [`./api`]
+
+    Builds type-strong API's to be consumed by other libraries/apps.
+
+3. **ai-pipeline** [`./ai-pipeline`]
+
+    Provides a set of AI pipeline primitives for Agent composition while re-exporting some `rig` primitives to allow lower level interaction as well.
+
+
+### Applications
+
+1. **researcher** [`./research`]
+2. **md** CLI [`./md`]
+3. **observer** TUI [`./observer`]
+4. **notable** [`./notable`]
+5. **so-you-say** CLI [`so-you-say`]
 
 This monorepo is organized into **areas**, each containing related modules:
 
