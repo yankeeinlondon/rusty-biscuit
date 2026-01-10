@@ -26,7 +26,8 @@ use pulldown_cmark_to_cmark::cmark;
 use reqwest::Client as HttpClient;
 use rig::agent::{Agent, CancelSignal, PromptHook};
 use rig::client::{CompletionClient, ProviderClient};
-use rig::completion::{AssistantContent, CompletionModel, Message, Prompt};
+use rig::completion::{AssistantContent, CompletionModel, Message, Prompt, PromptError};
+use rig::message::{ToolResultContent, UserContent};
 use rig::providers::{gemini, openai};
 use serde::{Deserialize, Serialize};
 use shared::providers::zai;
@@ -1281,6 +1282,35 @@ pub fn tools_available() -> bool {
     std::env::var("BRAVE_API_KEY").is_ok()
 }
 
+/// Extracts text content from tool results in a chat history.
+///
+/// This function iterates through all messages in the chat history and extracts
+/// the text content from any `ToolResult` entries. This is useful for recovering
+/// gathered information when a `MaxDepthError` occurs during an agentic loop.
+///
+/// ## Returns
+///
+/// A vector of strings, each containing the text from a tool result.
+fn extract_tool_results_from_history(chat_history: &[Message]) -> Vec<String> {
+    let mut results = Vec::new();
+
+    for message in chat_history {
+        if let Message::User { content } = message {
+            for user_content in content.iter() {
+                if let UserContent::ToolResult(tool_result) = user_content {
+                    for result_content in tool_result.content.iter() {
+                        if let ToolResultContent::Text(text) = result_content {
+                            results.push(text.text.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    results
+}
+
 /// Run a prompt task using an agent with tools, printing progress as it completes.
 ///
 /// This function is used for Phase 1 prompts that benefit from web search
@@ -1377,6 +1407,139 @@ where
                         completed, total, name, e, elapsed
                     );
                     None
+                }
+            }
+        }
+        Err(PromptError::MaxDepthError {
+            chat_history,
+            max_depth,
+            ..
+        }) => {
+            // The agent hit the maximum tool call limit without producing a final response.
+            // This typically happens when researching obscure topics with limited online information.
+            // We'll attempt to recover by extracting gathered tool results and synthesizing them.
+            info!(
+                task = name,
+                max_depth = max_depth,
+                "MaxDepthError: attempting recovery by synthesizing gathered tool results"
+            );
+            println!(
+                "  [{}] Max tool calls reached, synthesizing gathered results...",
+                name
+            );
+
+            // Extract all tool results from the chat history
+            let tool_results = extract_tool_results_from_history(&chat_history);
+
+            if tool_results.is_empty() {
+                // No tool results gathered, can't recover
+                warn!(
+                    task = name,
+                    elapsed_secs = elapsed,
+                    "MaxDepthError recovery failed: no tool results found in chat history"
+                );
+                eprintln!(
+                    "  [{}/{}] ✗ {} failed: max tool calls with no results ({:.1}s)",
+                    completed, total, name, elapsed
+                );
+                None
+            } else {
+                // Build a synthesis prompt with the gathered tool results
+                let gathered_context = tool_results.join("\n\n---\n\n");
+                let synthesis_prompt = format!(
+                    "Based on the following research results gathered from web searches and page scraping, \
+                    please synthesize a comprehensive response to the original request.\n\n\
+                    If the information is limited or inconclusive, acknowledge that and provide \
+                    whatever relevant information was found.\n\n\
+                    # Research Results\n\n{}\n\n# Original Request\n\n{}",
+                    gathered_context, prompt
+                );
+
+                // Use the underlying model directly (bypassing tools) for final synthesis
+                let mut request_builder = agent.model.completion_request(&synthesis_prompt);
+
+                // Add preamble if the agent had one
+                if let Some(preamble) = &agent.preamble {
+                    request_builder = request_builder.preamble(preamble.clone());
+                }
+
+                let synthesis_result = request_builder.send().await;
+
+                match synthesis_result {
+                    Ok(response) => {
+                        // Extract text from the response
+                        let content: String = response
+                            .choice
+                            .iter()
+                            .filter_map(|c| {
+                                if let AssistantContent::Text(text) = c {
+                                    Some(text.text.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+
+                        let metrics = PromptMetrics {
+                            input_tokens: 0,
+                            output_tokens: 0,
+                            total_tokens: 0,
+                            elapsed_secs: start_time.elapsed().as_secs_f32(),
+                        };
+
+                        let normalized = normalize_markdown(&content);
+
+                        let path = output_dir.join(filename);
+                        match fs::write(&path, &normalized).await {
+                            Ok(_) => {
+                                let final_elapsed = start_time.elapsed().as_secs_f32();
+                                info!(
+                                    task = name,
+                                    elapsed_secs = final_elapsed,
+                                    content_len = normalized.len(),
+                                    "Task completed via MaxDepthError recovery"
+                                );
+                                println!(
+                                    "  [{}/{}] ✓ {} (recovered, {:.1}s)",
+                                    completed, total, name, final_elapsed
+                                );
+                                Some(metrics)
+                            }
+                            Err(e) => {
+                                warn!(
+                                    task = name,
+                                    error = %e,
+                                    "Failed to write recovered output file"
+                                );
+                                eprintln!(
+                                    "  [{}/{}] ✗ {} write failed: {} ({:.1}s)",
+                                    completed,
+                                    total,
+                                    name,
+                                    e,
+                                    start_time.elapsed().as_secs_f32()
+                                );
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            task = name,
+                            error = %e,
+                            "MaxDepthError recovery synthesis failed"
+                        );
+                        eprintln!(
+                            "  [{}/{}] ✗ {} recovery failed: {} ({:.1}s)",
+                            completed,
+                            total,
+                            name,
+                            e,
+                            start_time.elapsed().as_secs_f32()
+                        );
+                        None
+                    }
                 }
             }
         }
@@ -4723,6 +4886,184 @@ Content with spaces in separator."#;
                 Some(val) => std::env::set_var("BRAVE_API_KEY", val),
                 None => std::env::remove_var("BRAVE_API_KEY"),
             }
+        }
+    }
+
+    // ===========================================
+    // Tests for extract_tool_results_from_history
+    // Regression tests for MaxDepthError recovery
+    // ===========================================
+
+    mod extract_tool_results_tests {
+        use super::*;
+        use rig::message::{Text, ToolResult, ToolResultContent};
+        use rig::OneOrMany;
+
+        #[test]
+        fn test_extract_empty_history() {
+            let history: Vec<Message> = vec![];
+            let results = extract_tool_results_from_history(&history);
+            assert!(results.is_empty());
+        }
+
+        #[test]
+        fn test_extract_history_with_no_tool_results() {
+            let history = vec![
+                Message::User {
+                    content: OneOrMany::one(UserContent::Text(Text {
+                        text: "Hello, please help me research.".to_string(),
+                    })),
+                },
+                Message::Assistant {
+                    id: None,
+                    content: OneOrMany::one(AssistantContent::Text(Text {
+                        text: "Sure, I will help.".to_string(),
+                    })),
+                },
+            ];
+
+            let results = extract_tool_results_from_history(&history);
+            assert!(results.is_empty());
+        }
+
+        #[test]
+        fn test_extract_single_tool_result() {
+            let tool_content = "Search results: Found information about the library.";
+            let history = vec![Message::User {
+                content: OneOrMany::one(UserContent::ToolResult(ToolResult {
+                    id: "tool_123".to_string(),
+                    call_id: None,
+                    content: OneOrMany::one(ToolResultContent::Text(Text {
+                        text: tool_content.to_string(),
+                    })),
+                })),
+            }];
+
+            let results = extract_tool_results_from_history(&history);
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0], tool_content);
+        }
+
+        #[test]
+        fn test_extract_multiple_tool_results() {
+            // Simulates a typical MaxDepthError scenario where multiple search/scrape
+            // operations were performed but the agent never produced a final answer.
+            let search_result = "Web search: colored-text crate is a Rust library for terminal colors.";
+            let scrape_result = "Page content: The colored_text crate provides...";
+            let another_search = "Web search: No integration partners found for colored-text.";
+
+            let history = vec![
+                // Initial user prompt
+                Message::User {
+                    content: OneOrMany::one(UserContent::Text(Text {
+                        text: "Find integration partners for colored-text".to_string(),
+                    })),
+                },
+                // Agent called search tool
+                Message::Assistant {
+                    id: None,
+                    content: OneOrMany::one(AssistantContent::ToolCall(
+                        rig::message::ToolCall::new(
+                            "call_1".to_string(),
+                            rig::message::ToolFunction::new(
+                                "brave_search".to_string(),
+                                serde_json::json!({"query": "colored-text rust crate"}),
+                            ),
+                        ),
+                    )),
+                },
+                // Search result returned
+                Message::User {
+                    content: OneOrMany::one(UserContent::ToolResult(ToolResult {
+                        id: "call_1".to_string(),
+                        call_id: None,
+                        content: OneOrMany::one(ToolResultContent::Text(Text {
+                            text: search_result.to_string(),
+                        })),
+                    })),
+                },
+                // Agent called scrape tool
+                Message::Assistant {
+                    id: None,
+                    content: OneOrMany::one(AssistantContent::ToolCall(
+                        rig::message::ToolCall::new(
+                            "call_2".to_string(),
+                            rig::message::ToolFunction::new(
+                                "screen_scrape".to_string(),
+                                serde_json::json!({"url": "https://crates.io/crates/colored_text"}),
+                            ),
+                        ),
+                    )),
+                },
+                // Scrape result returned
+                Message::User {
+                    content: OneOrMany::one(UserContent::ToolResult(ToolResult {
+                        id: "call_2".to_string(),
+                        call_id: None,
+                        content: OneOrMany::one(ToolResultContent::Text(Text {
+                            text: scrape_result.to_string(),
+                        })),
+                    })),
+                },
+                // Agent called another search
+                Message::Assistant {
+                    id: None,
+                    content: OneOrMany::one(AssistantContent::ToolCall(
+                        rig::message::ToolCall::new(
+                            "call_3".to_string(),
+                            rig::message::ToolFunction::new(
+                                "brave_search".to_string(),
+                                serde_json::json!({"query": "colored-text integration partners"}),
+                            ),
+                        ),
+                    )),
+                },
+                // Third tool result
+                Message::User {
+                    content: OneOrMany::one(UserContent::ToolResult(ToolResult {
+                        id: "call_3".to_string(),
+                        call_id: None,
+                        content: OneOrMany::one(ToolResultContent::Text(Text {
+                            text: another_search.to_string(),
+                        })),
+                    })),
+                },
+            ];
+
+            let results = extract_tool_results_from_history(&history);
+            assert_eq!(results.len(), 3);
+            assert_eq!(results[0], search_result);
+            assert_eq!(results[1], scrape_result);
+            assert_eq!(results[2], another_search);
+        }
+
+        #[test]
+        fn test_extract_handles_multiple_content_in_tool_result() {
+            // Some tool results might contain multiple text entries
+            let history = vec![Message::User {
+                content: OneOrMany::many(vec![
+                    UserContent::ToolResult(ToolResult {
+                        id: "call_1".to_string(),
+                        call_id: None,
+                        content: OneOrMany::one(ToolResultContent::Text(Text {
+                            text: "First result".to_string(),
+                        })),
+                    }),
+                    UserContent::ToolResult(ToolResult {
+                        id: "call_2".to_string(),
+                        call_id: None,
+                        content: OneOrMany::one(ToolResultContent::Text(Text {
+                            text: "Second result".to_string(),
+                        })),
+                    }),
+                ])
+                .expect("multiple items"),
+            }];
+
+            let results = extract_tool_results_from_history(&history);
+            assert_eq!(results.len(), 2);
+            assert_eq!(results[0], "First result");
+            assert_eq!(results[1], "Second result");
         }
     }
 }
