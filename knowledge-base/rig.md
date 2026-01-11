@@ -1036,7 +1036,7 @@ For API providers that offer OpenAI-compatible endpoints (like DeepSeek), you ca
 [package]
 name = "my-openai-provider"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 rig = "0.1.0"
