@@ -109,4 +109,8 @@ gen-models *args="":
 
 # generate models for a specific provider
 gen-models-for provider:
-    cargo run -p ai-pipeline-gen -- --providers {{provider}}
+    @cargo run -p ai-pipeline-gen -- --providers {{provider}}
+
+# show the Documentation for crates.io for the Darkmatter package
+darkmatter-docs:
+    @cargo clean --doc && cargo doc --no-deps -p darkmatter --lib --open

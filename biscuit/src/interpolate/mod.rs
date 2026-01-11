@@ -6,10 +6,10 @@
 //!
 //! ## Modules
 //!
-//! - [`interpolate`] - Simple string find/replace
-//! - [`interpolate_regex`] - Regex-based find/replace with capture groups
-//! - [`md_interpolate`] - Markdown-aware content replacement (preserves structure)
-//! - [`html_interpolate`] - HTML-aware content replacement (preserves structure)
+//! - [`interpolate()`] - Simple string find/replace
+//! - [`interpolate_regex()`] - Regex-based find/replace with capture groups
+//! - [`md_interpolate()`] - Markdown-aware content replacement (preserves structure)
+//! - [`html_interpolate()`] - HTML-aware content replacement (preserves structure)
 //!
 //! ## Examples
 //!

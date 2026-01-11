@@ -1,5 +1,6 @@
-use clap::{ArgGroup, Parser};
+use clap::Parser;
 use color_eyre::eyre::{eyre, Context, Result};
+use darkmatter::Cli;
 use shared::markdown::highlighting::{
     detect_code_theme, detect_color_mode, detect_prose_theme, ColorMode, ThemePair,
 };
@@ -8,90 +9,6 @@ use shared::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
-
-#[derive(Parser)]
-#[command(name = "md", about = "Markdown Awesome Tool", version)]
-#[command(group = ArgGroup::new("output-mode")
-    .args(["html", "show_html", "ast", "clean", "clean_save", "toc", "delta"])
-    .multiple(false))]
-struct Cli {
-    /// Input file path (reads from stdin if not provided, use "-" for explicit stdin)
-    input: Option<PathBuf>,
-
-    /// Theme for prose content (kebab-case name)
-    #[arg(long, value_parser = parse_theme_name)]
-    theme: Option<ThemePair>,
-
-    /// Theme for code blocks (overrides derived theme)
-    #[arg(long, value_parser = parse_theme_name)]
-    code_theme: Option<ThemePair>,
-
-    /// List available themes
-    #[arg(long)]
-    list_themes: bool,
-
-    /// Clean up markdown formatting (output to stdout)
-    #[arg(long, group = "output-mode")]
-    clean: bool,
-
-    /// Clean up and save back to file
-    #[arg(long, group = "output-mode")]
-    clean_save: bool,
-
-    /// Output as HTML
-    #[arg(long, group = "output-mode")]
-    html: bool,
-
-    /// Generate HTML and open in browser
-    #[arg(long, group = "output-mode")]
-    show_html: bool,
-
-    /// Output MDAST JSON
-    #[arg(long, group = "output-mode")]
-    ast: bool,
-
-    /// Show table of contents as a tree structure
-    #[arg(long, group = "output-mode")]
-    toc: bool,
-
-    /// Compare with another markdown file and show differences
-    #[arg(long, group = "output-mode", value_name = "FILE")]
-    delta: Option<PathBuf>,
-
-    /// Output as JSON (for --toc and --delta modes)
-    #[arg(long)]
-    json: bool,
-
-    /// Merge JSON into frontmatter (JSON wins on conflicts)
-    #[arg(long, value_name = "JSON")]
-    fm_merge_with: Option<String>,
-
-    /// Set default frontmatter values (document wins on conflicts)
-    #[arg(long, value_name = "JSON")]
-    fm_defaults: Option<String>,
-
-    /// Include line numbers in code blocks
-    #[arg(long)]
-    line_numbers: bool,
-
-    /// Disable image rendering (show placeholders instead)
-    #[arg(long)]
-    no_images: bool,
-
-    /// Render mermaid diagrams to terminal as images.
-    /// Falls back to code blocks if terminal doesn't support images.
-    #[arg(long)]
-    mermaid: bool,
-
-    /// Increase verbosity (-v INFO, -vv DEBUG, -vvv TRACE, -vvvv TRACE with file/line)
-    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
-    verbose: u8,
-}
-
-/// Parses a theme name string into ThemePair.
-fn parse_theme_name(s: &str) -> Result<ThemePair, String> {
-    ThemePair::try_from(s).map_err(|e| e.to_string())
-}
 
 /// Initialize tracing subscriber based on verbosity level.
 ///

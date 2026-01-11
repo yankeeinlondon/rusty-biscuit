@@ -43,7 +43,7 @@ lint *args="":
     @echo "Linting md CLI"
     @echo "----------------------"
     @echo ""
-    @cargo clippy 
+    @cargo clippy
 
 # install the `research` binary into the executable path
 install:
@@ -53,3 +53,6 @@ install:
 # run the debug release of the Research CLI
 cli *args="":
     @cargo run -p md -- {{args}}
+
+docs:
+  @cargo clean --doc && cargo doc --no-deps --lib

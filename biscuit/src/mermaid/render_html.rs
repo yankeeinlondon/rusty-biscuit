@@ -20,9 +20,9 @@
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct MermaidHtml {
-    /// Content for the <head> section (scripts, styles)
+    /// Content for the `<head>` section (scripts, styles)
     pub head: String,
-    /// Content for the <body> section (diagram container)
+    /// Content for the `<body>` section (diagram container)
     pub body: String,
 }
 

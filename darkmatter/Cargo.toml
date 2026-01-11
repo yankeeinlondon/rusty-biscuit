@@ -4,6 +4,14 @@ description = "A themed markdown renderer for both console (escape-codes) and th
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
+readme = "README.md"
+repository = "https://github.com/yankeeinlondon/dockhand"
+keywords = ["markdown", "terminal", "cli", "syntax-highlighting", "themes"]
+categories = ["command-line-utilities", "text-processing"]
+
+[lib]
+name = "darkmatter"
+path = "src/lib.rs"
 
 [[bin]]
 name = "md"
