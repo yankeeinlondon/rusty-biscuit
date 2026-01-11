@@ -184,8 +184,8 @@ mod tests {
 
     #[test]
     fn test_empty_generator() {
-        let gen = MetadataGenerator::new();
-        let code = gen.generate();
+        let generator = MetadataGenerator::new();
+        let code = generator.generate();
 
         assert!(code.contains("MODEL_METADATA"));
         assert!(code.contains("HashMap::with_capacity(0)"));
@@ -193,9 +193,9 @@ mod tests {
 
     #[test]
     fn test_single_entry() {
-        let mut gen = MetadataGenerator::new();
+        let mut generator = MetadataGenerator::new();
 
-        gen.register(
+        generator.register(
             "gpt-4o".to_string(),
             Some(ParseraModel {
                 id: "gpt-4o".to_string(),
@@ -215,7 +215,7 @@ mod tests {
             }),
         );
 
-        let code = gen.generate();
+        let code = generator.generate();
 
         assert!(code.contains("\"gpt-4o\""));
         assert!(code.contains("display_name: Some(\"GPT-4o\".to_string())"));
@@ -227,10 +227,10 @@ mod tests {
 
     #[test]
     fn test_entry_without_metadata() {
-        let mut gen = MetadataGenerator::new();
-        gen.register("unknown-model".to_string(), None);
+        let mut generator = MetadataGenerator::new();
+        generator.register("unknown-model".to_string(), None);
 
-        let code = gen.generate();
+        let code = generator.generate();
 
         // Entry with None should not appear in the lookup table
         assert!(!code.contains("\"unknown-model\""));
