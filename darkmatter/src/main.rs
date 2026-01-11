@@ -116,13 +116,21 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Handle --toc mode
-    if cli.toc {
+    // Handle --toc and --toc-filename modes
+    if cli.toc || cli.toc_filename {
         let toc = md.toc();
         if cli.json {
             println!("{}", serde_json::to_string_pretty(&toc)?);
         } else {
-            print_toc_tree(&toc, cli.verbose > 0);
+            // Extract filename if --toc-filename is used
+            let filename = if cli.toc_filename {
+                cli.input.as_ref().and_then(|p| {
+                    p.file_name().map(|f| f.to_string_lossy().into_owned())
+                })
+            } else {
+                None
+            };
+            print_toc_tree(&toc, cli.verbose > 0, filename.as_deref());
         }
         return Ok(());
     }
@@ -257,56 +265,70 @@ fn list_themes() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Prints the table of contents as a text-based tree.
-fn print_toc_tree(toc: &MarkdownToc, verbose: bool) {
+///
+/// If `filename` is provided, it will be displayed in bold after the document icon.
+fn print_toc_tree(toc: &MarkdownToc, verbose: bool, filename: Option<&str>) {
     let stdout = io::stdout();
-    let mut handle = stdout.lock();
+    let stderr = io::stderr();
+    let mut out = stdout.lock();
+    let mut err = stderr.lock();
 
-    // Print title if available
-    if let Some(ref title) = toc.title {
-        writeln!(handle, "📄 {}", title).ok();
+    // Breathing room: blank line to stderr before TOC
+    writeln!(err).ok();
+
+    // Print document icon, optionally with filename in bold
+    if toc.title.is_some() {
+        if let Some(name) = filename {
+            writeln!(out, "📄 {BOLD}{name}{RESET}").ok();
+        } else {
+            writeln!(out, "📄").ok();
+        }
         if verbose {
             writeln!(
-                handle,
+                err,
                 "   Page hash: {:016x} (trimmed: {:016x})",
                 toc.page_hash, toc.page_hash_trimmed
             )
             .ok();
         }
-        writeln!(handle).ok();
     }
 
     // Print the tree structure
     for (i, node) in toc.structure.iter().enumerate() {
         let is_last = i == toc.structure.len() - 1;
-        print_toc_node(&mut handle, node, "", is_last, verbose);
+        print_toc_node(&mut out, node, "", is_last, verbose);
     }
 
-    // Print summary
-    writeln!(handle).ok();
-    writeln!(
-        handle,
-        "Total: {} heading{}",
-        toc.heading_count(),
-        if toc.heading_count() == 1 { "" } else { "s" }
-    )
-    .ok();
+    // Breathing room: blank line to stderr after TOC
+    writeln!(err).ok();
 
-    if !toc.code_blocks.is_empty() {
-        writeln!(handle, "Code blocks: {}", toc.code_blocks.len()).ok();
-    }
+    // Print summary only in verbose mode, to stderr
+    if verbose {
+        writeln!(
+            err,
+            "Total: {} heading{}",
+            toc.heading_count(),
+            if toc.heading_count() == 1 { "" } else { "s" }
+        )
+        .ok();
 
-    if !toc.internal_links.is_empty() {
-        let broken_count = toc.broken_links().len();
-        if broken_count > 0 {
-            writeln!(
-                handle,
-                "Internal links: {} ({} broken)",
-                toc.internal_links.len(),
-                broken_count
-            )
-            .ok();
-        } else {
-            writeln!(handle, "Internal links: {}", toc.internal_links.len()).ok();
+        if !toc.code_blocks.is_empty() {
+            writeln!(err, "Code blocks: {}", toc.code_blocks.len()).ok();
+        }
+
+        if !toc.internal_links.is_empty() {
+            let broken_count = toc.broken_links().len();
+            if broken_count > 0 {
+                writeln!(
+                    err,
+                    "Internal links: {} ({} broken)",
+                    toc.internal_links.len(),
+                    broken_count
+                )
+                .ok();
+            } else {
+                writeln!(err, "Internal links: {}", toc.internal_links.len()).ok();
+            }
         }
     }
 }

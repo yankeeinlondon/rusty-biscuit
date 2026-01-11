@@ -16,7 +16,7 @@ WHITE := '\033[37m'
 
 default:
     @echo
-    @echo "md CLI"
+    @echo "Darkmatter CLI"
     @echo "------------------------------------"
     @echo ""
     @just --list | grep -v 'default'
@@ -25,34 +25,34 @@ default:
 # build research modules (cli, lib)
 build *args="":
     @echo ""
-    @echo "Build md CLI"
+    @echo "Build Darkmatter CLI"
     @echo "--------------------"
     @echo ""
-    @cargo build -p md {{args}}
+    @cargo build -p darkmatter {{args}}
 
 # run tests across research modules
 test *args="":
     @echo ""
-    @echo "Testing md CLI"
+    @echo "Testing Darkmatter CLI"
     @echo "----------------------"
     @echo ""
-    @cargo test -p md {{args}}
+    @cargo test -p darkmatter {{args}}
 
 lint *args="":
     @echo ""
-    @echo "Linting md CLI"
+    @echo "Linting darkmatter CLI"
     @echo "----------------------"
     @echo ""
     @cargo clippy
 
 # install the `research` binary into the executable path
-install:
-    @cargo build --release -p md
-    @cargo install --path "." --locked
+install *args:
+    @cargo build --release -p darkmatter
+    @cargo install --path "." --locked {{args}}
 
 # run the debug release of the Research CLI
 cli *args="":
-    @cargo run -p md -- {{args}}
+    @cargo run -p darkmatter -- {{args}}
 
 docs:
   @cargo clean --doc && cargo doc --no-deps --lib

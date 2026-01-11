@@ -1,7 +1,7 @@
 [package]
 name = "api-macros"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "AGPL-3.0-only"
 description = "Procedural macros for REST API definition and code generation"
 repository = "https://github.com/yankeeinlondon/dockhand"

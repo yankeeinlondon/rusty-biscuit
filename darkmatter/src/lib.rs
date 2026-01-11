@@ -51,7 +51,8 @@
 //!
 //! # Show table of contents
 //! md README.md --toc
-//! md README.md --toc --json  # JSON format
+//! md README.md --toc-filename  # Include filename in header
+//! md README.md --toc --json    # JSON format
 //! ```
 //!
 //! ### Markdown cleanup
@@ -146,7 +147,7 @@ mod cli {
     #[derive(Parser)]
     #[command(name = "md", about = "Markdown Awesome Tool", version)]
     #[command(group = ArgGroup::new("output-mode")
-        .args(["html", "show_html", "ast", "clean", "clean_save", "toc", "delta"])
+        .args(["html", "show_html", "ast", "clean", "clean_save", "toc", "toc_filename", "delta"])
         .multiple(false))]
     pub struct Cli {
         /// Input file path (reads from stdin if not provided, use "-" for explicit stdin)
@@ -187,6 +188,10 @@ mod cli {
         /// Show table of contents as a tree structure
         #[arg(long, group = "output-mode")]
         pub toc: bool,
+
+        /// Show table of contents with filename in header
+        #[arg(long, group = "output-mode")]
+        pub toc_filename: bool,
 
         /// Compare with another markdown file and show differences
         #[arg(long, group = "output-mode", value_name = "FILE")]

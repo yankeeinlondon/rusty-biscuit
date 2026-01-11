@@ -85,8 +85,7 @@ md *args="":
     echo ""
     echo -e "{{BOLD}}Darkmatter CLI{{RESET}} (latest debug build)"
     echo -e "----------------------------------------------------"
-    cd darkmatter 2>/dev/null
-    cargo run {{args}}
+    cargo run -p darkmatter --bin md -- {{args}}
 
 # executes the latest Research CLI code in debug mode
 research *args="":
@@ -95,8 +94,7 @@ research *args="":
     echo ""
     echo -e "{{BOLD}}Research CLI{{RESET}} (latest debug build)"
     echo "----------------------------------------------"
-    cd research/cli 2>/dev/null
-    cargo run {{args}}
+    cargo run -p research-cli -- {{args}}
 
 # generate provider model enums from APIs
 gen-models *args="":
