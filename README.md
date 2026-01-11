@@ -16,11 +16,11 @@ This monorepo hosts the following packages:
 
     Provides utility functions and a highly capable markdown pipelining engine.
 
-2. **schematic** [`./api`]
+2. **schematic** [[`./schematic`](./schematic/README.md)]
 
-    Builds type-strong API's to be consumed by other libraries/apps.
+    Builds type-strong enumerations for API's and data types to be consumed by other libraries/apps.
 
-3. **ai-pipeline** [`./ai-pipeline`]
+3. **ai-pipeline** [[`./ai-pipeline`](./ai-pipeline/README.md)]
 
     Provides a set of AI pipeline primitives for Agent composition while re-exporting some `rig` primitives to allow lower level interaction as well.
 

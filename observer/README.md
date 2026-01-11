@@ -1,4 +1,6 @@
-# Watch TODOs
+# Observer TUI
+
+<img src="../assets/observer.png" style="position: fixed; max-width: 30%; height: 150px; right: 0; top: 0; opacity: 0.75"></img>
 
 The Watch TODO's package is a simple TUI application which will read in a Markdown file, extract any TODO's (GFM format) which reside in the file and then present these TODO's inside of a TODO Window and then actively changes the states of these TODO's when state changes.
 

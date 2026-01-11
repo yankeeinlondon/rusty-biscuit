@@ -195,26 +195,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
-name = "api"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "quick-xml",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yaml 0.9.34+deprecated",
- "strum 0.26.3",
- "thiserror 2.0.17",
- "tokio",
- "tracing",
- "tracing-test",
- "url",
- "utoipa",
- "wiremock",
-]
-
-[[package]]
 name = "api-macros"
 version = "0.1.0"
 dependencies = [
@@ -4530,6 +4510,26 @@ dependencies = [
  "quote",
  "serde_derive_internals",
  "syn",
+]
+
+[[package]]
+name = "schematic"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "quick-xml",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml 0.9.34+deprecated",
+ "strum 0.26.3",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "tracing-test",
+ "url",
+ "utoipa",
+ "wiremock",
 ]
 
 [[package]]

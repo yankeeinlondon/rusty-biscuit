@@ -1,6 +1,11 @@
-# Shared Library
+# Biscuit
+<img src="../assets/biscuit.png" style="position: fixed; max-width: 30%; height: 150px; right: 0; top: 0; opacity: 0.75"></img>
 
-The `shared` library provides common utilities used across multiple areas of the Dockhand monorepo. It includes provider management, LLM agent tools, code generation utilities, and text-to-speech functionality.
+A shared library which includes:
+
+- TTS
+- Markdown Pipelining
+- AI Pipelining
 
 ## Modules
 
