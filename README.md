@@ -12,7 +12,7 @@ This monorepo hosts the following packages:
 
 ### Shared Libraries
 
-1. **biscuit** [`./shared`]
+1. **biscuit** [[`./biscuit`](./biscuit/README.md)]
 
     Provides utility functions and a highly capable markdown pipelining engine.
 
@@ -27,7 +27,7 @@ This monorepo hosts the following packages:
 
 ### Applications
 
-1. **researcher** [`./research`]
+1. **researcher** [[`./research`](./research/README.md)]
 
     A **CLI** which facilitates the research process and is able to produce content rich "deep dives" and tree-based `skills` for Claude Code and Opencode.
 
@@ -40,7 +40,7 @@ This monorepo hosts the following packages:
     research link
     ```
 
-2. **md** CLI [`./md`]
+2. **md** CLI [[`./md`](./md/README.md)]
 
     A Markdown renderer which renders to both the terminal(escape codes) and browser (HTML).
 
@@ -55,7 +55,7 @@ This monorepo hosts the following packages:
     md doc.md --ast
     ```
 
-3. **observer** TUI [`./observer`]
+3. **observer** TUI [[`./observer`](./observer/README.md)]
 
     A TUI which helps you to observe state changes in the terminal.
 
@@ -66,7 +66,7 @@ This monorepo hosts the following packages:
     observe <file>
     ```
 
-4. **notable** [`./notable`]
+4. **notable** [[`./notable`](./notable/README.md)]
 
     A CLI (and lib) which interacts with an Obsidian vault.
 
@@ -79,7 +79,7 @@ This monorepo hosts the following packages:
     note --prompt "what are the top news stories today?"
     ```
 
-5. **so-you-say** CLI [`./so-you-say`]
+5. **so-you-say** CLI [[`./so-you-say`](./so-you-say/README.md)]
 
     A simple TTS CLI which leverages TTS features on the host or in the cloud.
 

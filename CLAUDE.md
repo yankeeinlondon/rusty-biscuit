@@ -18,7 +18,7 @@ dockhand/
 ├── research/          # AI-powered library research tools
 │   ├── cli/          # Binary: `research`
 │   └── lib/          # Core research library
-├── shared/           # Common utilities (providers, tools, TTS, codegen)
+├── biscuit/          # Common utilities (providers, tools, TTS, codegen)
 ├── so-you-say/       # Binary: `speak` (TTS CLI)
 └── tui/              # Future: ratatui-based interactive chat
 ```
@@ -76,7 +76,7 @@ Provider support includes: Anthropic, Deepseek, Gemini, MoonshotAI, Ollama (loca
 
 #### 3. Agent Tools (rig-core integration)
 
-The `shared/tools` module provides rig-core compatible agent tools:
+The `biscuit/tools` module provides rig-core compatible agent tools:
 
 - **BraveSearchTool**: Web search with plan-based rate limiting (free: 1/sec, base: 20/sec, pro: 50/sec)
 - **ScreenScrapeTool**: Web scraping with multiple output formats (Markdown, HTML, PlainText, JSON, Links)
@@ -85,7 +85,7 @@ Both tools include comprehensive tracing instrumentation with OpenTelemetry sema
 
 #### 4. Safe Code Injection (Codegen)
 
-The `shared/codegen` module provides AST-based code manipulation:
+The `biscuit/codegen` module provides AST-based code manipulation:
 
 - Uses `syn` for parsing and `prettyplease` for formatting
 - Validates injection points before modification
@@ -132,7 +132,7 @@ just build
 
 # Build specific area
 just -f research/justfile build
-just -f shared/justfile build
+just -f biscuit/justfile build
 just -f so-you-say/justfile build
 
 # Build specific package
@@ -150,7 +150,7 @@ just test
 
 # Test specific area
 just -f research/justfile test
-just -f shared/justfile test
+just -f biscuit/justfile test
 just -f so-you-say/justfile test
 
 # Test specific package with additional args
@@ -323,7 +323,7 @@ For complete dependency information, see `docs/dependencies.md`.
 ### Test Isolation
 
 - Environment variable tests use `#[serial_test::serial]` to prevent race conditions
-- The `ScopedEnv` test helper (in `shared/src/providers/base.rs`) provides RAII-based cleanup
+- The `ScopedEnv` test helper (in `biscuit/src/providers/base.rs`) provides RAII-based cleanup
 
 ### Tracing
 

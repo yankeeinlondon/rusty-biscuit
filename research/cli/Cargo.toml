@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }
 research-lib = { path = "../lib" }
-shared = { path = "../../shared" }
+shared = { path = "../../biscuit" }
 dirs = "5.0"
 dotenvy = "0.15.7"
 glob = "0.3"
