@@ -7,7 +7,7 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 
-use crate::parse::{EndpointConfig, HttpMethod, RequestFormat, ResponseFormat};
+use crate::parse::{ApiConfig, AuthMethod, EndpointConfig, HttpMethod, ResponseFormat};
 
 /// Generates the identifier for a response format type.
 ///
@@ -44,6 +44,7 @@ pub fn http_method_ident(method: HttpMethod) -> Ident {
 /// ```ignore
 /// let path = format!("/users/{}/posts/{}", id, post_id);
 /// ```
+#[allow(dead_code)]
 pub fn path_substitution(path: &str, params: &[String]) -> TokenStream {
     if params.is_empty() {
         let path_lit = path;
@@ -69,6 +70,7 @@ pub fn path_substitution(path: &str, params: &[String]) -> TokenStream {
 /// Generates an endpoint static definition.
 ///
 /// This creates a static `Endpoint` struct for compile-time endpoint information.
+#[allow(dead_code)]
 pub fn endpoint_static(
     name: &Ident,
     config: &EndpointConfig,
@@ -92,6 +94,7 @@ pub fn endpoint_static(
 /// Formats generated code using prettyplease.
 ///
 /// This ensures the generated code is readable and well-formatted.
+#[allow(dead_code)]
 pub fn format_tokens(tokens: TokenStream) -> String {
     let file = syn::parse_file(&tokens.to_string());
     match file {
@@ -124,6 +127,99 @@ pub fn to_snake_case(s: &str) -> String {
 /// Generates a SCREAMING_SNAKE_CASE identifier from a string.
 pub fn to_screaming_snake_case(s: &str) -> String {
     to_snake_case(s).to_uppercase()
+}
+
+/// Generates the API client struct implementation.
+///
+/// This creates a struct with a `client: api::ApiClient` field and
+/// a `new()` constructor that accepts an API key.
+///
+/// ## Examples
+///
+/// ```ignore
+/// #[derive(RestApi)]
+/// #[api(base_url = "https://api.example.com", auth = bearer)]
+/// pub struct ExampleApi;
+/// ```
+///
+/// Generates:
+///
+/// ```ignore
+/// pub struct ExampleApi {
+///     client: api::ApiClient,
+/// }
+///
+/// impl ExampleApi {
+///     pub fn new(api_key: impl Into<String>) -> Result<Self, api::ApiError> {
+///         let base_url = url::Url::parse("https://api.example.com")
+///             .map_err(|e| api::ConfigError::InvalidUrl(e))?;
+///
+///         let client = api::ApiClient::builder(base_url)
+///             .auth(api::ApiAuthMethod::BearerToken, api_key)
+///             .build()?;
+///
+///         Ok(Self { client })
+///     }
+///
+///     pub fn base_url(&self) -> &url::Url {
+///         self.client.base_url()
+///     }
+/// }
+/// ```
+pub fn generate_api_client(name: &Ident, config: &ApiConfig) -> TokenStream {
+    let base_url = config.base_url.as_ref().expect("base_url validated");
+    let auth_method = generate_auth_method(&config.auth);
+
+    // Decide whether to accept an api_key parameter based on auth method
+    let (new_params, auth_setup) = if matches!(config.auth, Some(AuthMethod::None) | None) {
+        // No auth - no api_key parameter needed
+        (quote! {}, quote! {
+            let client = api::ApiClient::builder(base_url)
+                .build()?;
+        })
+    } else {
+        // Auth required - accept api_key parameter
+        (quote! { api_key: impl Into<String> }, quote! {
+            let client = api::ApiClient::builder(base_url)
+                .auth(#auth_method, api_key)
+                .build()?;
+        })
+    };
+
+    quote! {
+        impl #name {
+            /// Creates a new API client.
+            #[allow(dead_code)]
+            pub fn new(#new_params) -> Result<Self, api::ApiError> {
+                let base_url = url::Url::parse(#base_url)
+                    .map_err(api::ConfigError::InvalidUrl)?;
+
+                #auth_setup
+
+                Ok(Self { client })
+            }
+
+            /// Returns the base URL for this API.
+            #[allow(dead_code)]
+            pub fn base_url(&self) -> &url::Url {
+                self.client.base_url()
+            }
+        }
+    }
+}
+
+/// Generates the authentication method enum variant.
+fn generate_auth_method(auth: &Option<AuthMethod>) -> TokenStream {
+    match auth {
+        Some(AuthMethod::Bearer) => quote! { api::ApiAuthMethod::BearerToken },
+        Some(AuthMethod::HeaderKey) => quote! {
+            api::ApiAuthMethod::ApiKey("X-API-Key".to_string())
+        },
+        Some(AuthMethod::QueryParam) => quote! {
+            api::ApiAuthMethod::QueryParam("key".to_string())
+        },
+        Some(AuthMethod::None) | None => quote! { api::ApiAuthMethod::None },
+    }
 }
 
 #[cfg(test)]

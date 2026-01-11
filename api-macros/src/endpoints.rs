@@ -3,10 +3,14 @@
 //! This module handles parsing impl blocks with endpoint method definitions
 //! and generates the actual HTTP client method implementations.
 
-use proc_macro2::TokenStream;
-use quote::quote;
-use syn::{parse2, Error, ImplItem, ItemImpl, Result};
+use proc_macro2::{Span, TokenStream};
+use quote::{quote, format_ident};
+use syn::{
+    parse2, Error, FnArg, ImplItem, ImplItemFn, ItemImpl, Pat, PatType, Result, ReturnType, Type,
+    TypePath,
+};
 
+use crate::codegen::{http_method_ident, response_format_type, to_screaming_snake_case};
 use crate::parse::{EndpointConfig, EndpointsInput};
 
 /// Main implementation for the `#[endpoints]` attribute macro.
@@ -23,22 +27,202 @@ fn endpoints_inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream> 
     let _api_type = &input.api_type;
 
     // Parse the impl block
-    let impl_block: ItemImpl = parse2(item.clone())?;
+    let mut impl_block: ItemImpl = parse2(item)?;
 
-    // For now, just validate endpoints and return the original impl block
-    // Full implementation will be added in Phase 5
+    // Transform endpoint methods
+    let mut transformed_items = Vec::new();
+
     for item in &impl_block.items {
-        if let ImplItem::Fn(method) = item {
-            if let Some(_config) = EndpointConfig::from_attrs(&method.attrs)? {
-                // Endpoint found and validated
-                // Full code generation will be implemented in Phase 5
+        match item {
+            ImplItem::Fn(method) => {
+                if let Some(config) = EndpointConfig::from_attrs(&method.attrs)? {
+                    // Transform this method into an endpoint implementation
+                    let transformed = transform_endpoint_method(method, &config)?;
+                    transformed_items.push(ImplItem::Fn(transformed));
+                } else {
+                    // Not an endpoint - keep as-is
+                    transformed_items.push(item.clone());
+                }
+            }
+            _ => {
+                // Keep non-function items as-is
+                transformed_items.push(item.clone());
             }
         }
     }
 
-    // Return the original impl block unchanged for now
-    // Phase 5 will transform this into actual endpoint implementations
-    Ok(item)
+    // Replace the items in the impl block
+    impl_block.items = transformed_items;
+
+    Ok(quote! { #impl_block })
+}
+
+/// Transforms an endpoint method signature into a full implementation.
+///
+/// Takes a method like:
+/// ```ignore
+/// #[endpoint(method = Get, path = "/users/{id}")]
+/// #[response(json)]
+/// pub async fn get_user(&self, id: String) -> Result<User, ApiError>;
+/// ```
+///
+/// And generates:
+/// ```ignore
+/// pub async fn get_user(&self, id: String) -> Result<User, api::ApiError> {
+///     static ENDPOINT_GET_USER: api::Endpoint<api::response::JsonFormat<User>> =
+///         api::Endpoint::builder()
+///             .id("get_user")
+///             .method(api::RestMethod::Get)
+///             .path("/users/{id}")
+///             .build();
+///
+///     self.client.execute_with_params(&ENDPOINT_GET_USER, &[("id", &id)]).await
+/// }
+/// ```
+fn transform_endpoint_method(
+    method: &ImplItemFn,
+    config: &EndpointConfig,
+) -> Result<ImplItemFn> {
+    let method_name = &method.sig.ident;
+    let _vis = &method.vis;
+    let asyncness = &method.sig.asyncness;
+    let inputs = &method.sig.inputs;
+    let output = &method.sig.output;
+
+    // Ensure the method is async
+    if asyncness.is_none() {
+        return Err(Error::new_spanned(
+            &method.sig,
+            "endpoint methods must be async",
+        ));
+    }
+
+    // Extract the response type from Result<T, ApiError>
+    let response_type = extract_response_type(output)?;
+
+    // Generate static endpoint constant name
+    let endpoint_const_name = format_ident!("ENDPOINT_{}", to_screaming_snake_case(&method_name.to_string()));
+
+    // Generate the endpoint builder
+    let http_method = http_method_ident(config.method);
+    let path = &config.path;
+    let format_type = response_format_type(config.response_format, &response_type);
+
+    let endpoint_def = quote! {
+        static #endpoint_const_name: api::Endpoint<#format_type> = {
+            match api::Endpoint::builder()
+                .id(stringify!(#method_name))
+                .method(api::RestMethod::#http_method)
+                .path(#path)
+                .build()
+            {
+                endpoint => endpoint,
+            }
+        };
+    };
+
+    // Extract path parameters from the config
+    let path_params = config.path_params();
+
+    // Extract method parameters (skip &self)
+    let _method_params: Vec<&PatType> = inputs
+        .iter()
+        .filter_map(|arg| {
+            if let FnArg::Typed(pat_type) = arg {
+                // Skip self parameter
+                if let Pat::Ident(ident) = &*pat_type.pat {
+                    if ident.ident != "self" {
+                        return Some(pat_type);
+                    }
+                }
+            }
+            None
+        })
+        .collect();
+
+    // Generate the client call
+    let client_call = if path_params.is_empty() {
+        // No path parameters - use simple execute
+        quote! {
+            self.client.execute(&#endpoint_const_name).await
+        }
+    } else {
+        // Has path parameters - build params array
+        let param_pairs: Vec<TokenStream> = path_params
+            .iter()
+            .map(|param_name| {
+                // Find the matching method parameter
+                let param_ident = format_ident!("{}", param_name);
+
+                // Convert to &str for the tuple
+                quote! { (#param_name, #param_ident.as_ref()) }
+            })
+            .collect();
+
+        quote! {
+            self.client.execute_with_params(&#endpoint_const_name, &[#(#param_pairs),*]).await
+        }
+    };
+
+    // Build the complete method body
+    let body = quote! {
+        {
+            #endpoint_def
+            #client_call
+        }
+    };
+
+    // Create the transformed method
+    let mut transformed = method.clone();
+
+    // Remove the endpoint and response attributes (keep doc comments)
+    transformed.attrs.retain(|attr| {
+        !attr.path().is_ident("endpoint")
+            && !attr.path().is_ident("response")
+            && !attr.path().is_ident("request")
+    });
+
+    // Replace the body
+    transformed.block = syn::parse2(body)?;
+
+    // Ensure return type uses api::ApiError
+    transformed.sig.output = output.clone();
+
+    Ok(transformed)
+}
+
+/// Extracts the response type T from Result<T, ApiError>.
+fn extract_response_type(output: &ReturnType) -> Result<TokenStream> {
+    match output {
+        ReturnType::Default => {
+            Err(Error::new(
+                Span::call_site(),
+                "endpoint methods must return Result<T, ApiError>",
+            ))
+        }
+        ReturnType::Type(_, ty) => {
+            // Expecting Type::Path with Result<T, ApiError>
+            if let Type::Path(TypePath { path, .. }) = &**ty {
+                if let Some(segment) = path.segments.last() {
+                    if segment.ident == "Result" {
+                        // Extract the first generic argument (the T in Result<T, E>)
+                        if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                            if let Some(syn::GenericArgument::Type(response_ty)) =
+                                args.args.first()
+                            {
+                                return Ok(quote! { #response_ty });
+                            }
+                        }
+                    }
+                }
+            }
+
+            Err(Error::new_spanned(
+                ty,
+                "endpoint methods must return Result<T, ApiError>",
+            ))
+        }
+    }
 }
 
 #[cfg(test)]

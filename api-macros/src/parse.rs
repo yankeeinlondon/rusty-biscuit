@@ -3,12 +3,11 @@
 //! This module contains the data structures and parsing logic for
 //! extracting API configuration from macro attributes.
 
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::Span;
 use syn::{
     parse::{Parse, ParseStream},
-    punctuated::Punctuated,
     spanned::Spanned,
-    Attribute, Error, Expr, ExprLit, Ident, Lit, Meta, MetaNameValue, Result, Token,
+    Attribute, Error, Ident, Result, Token,
 };
 
 /// Parsed API-level configuration from `#[api(...)]` attributes.
@@ -146,6 +145,7 @@ impl HttpMethod {
     }
 
     /// Returns true if this method typically has a request body.
+    #[allow(dead_code)]
     pub fn has_body(&self) -> bool {
         matches!(self, HttpMethod::Post | HttpMethod::Put | HttpMethod::Patch)
     }
@@ -223,8 +223,10 @@ pub struct EndpointConfig {
     /// Response format
     pub response_format: ResponseFormat,
     /// Request body format (if applicable)
+    #[allow(dead_code)]
     pub request_format: Option<RequestFormat>,
     /// Span for error reporting
+    #[allow(dead_code)]
     pub span: Span,
 }
 
