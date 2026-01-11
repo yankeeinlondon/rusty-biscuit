@@ -1,0 +1,115 @@
+# release-plz configuration for dockhand monorepo
+# Documentation: https://release-plz.dev/docs/config
+
+[workspace]
+# PR configuration
+pr_draft = true
+pr_labels = ["release", "automated"]
+
+# Git release configuration
+git_release_enable = true
+git_release_draft = false
+git_tag_enable = true
+git_tag_name = "{{ package }}-v{{ version }}"
+
+# No crates.io publishing
+publish = false
+semver_check = true
+changelog_update = true
+
+[changelog]
+header = """# Changelog
+
+All notable changes to this project will be documented in this file.
+
+"""
+body = """
+{% if version -%}
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+## [Unreleased]
+{% endif -%}
+
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | upper_first | trim }}
+{%- endfor %}
+{% endfor %}
+"""
+trim = true
+sort_commits = "newest"
+
+commit_parsers = [
+    { message = "^feat", group = "Features" },
+    { message = "^fix", group = "Bug Fixes" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Refactoring" },
+    { message = "^test", group = "Testing" },
+    { message = "^chore\\(release\\)", skip = true },
+    { message = "^chore\\(deps\\)", group = "Dependencies" },
+    { message = "^chore", group = "Miscellaneous" },
+]
+
+# Package-specific changelog paths
+[[package]]
+name = "darkmatter"
+changelog_path = "darkmatter/CHANGELOG.md"
+
+[[package]]
+name = "shared"
+changelog_path = "biscuit/CHANGELOG.md"
+
+[[package]]
+name = "research-cli"
+changelog_path = "research/cli/CHANGELOG.md"
+
+[[package]]
+name = "research-lib"
+changelog_path = "research/lib/CHANGELOG.md"
+
+[[package]]
+name = "so-you-say"
+changelog_path = "so-you-say/CHANGELOG.md"
+
+[[package]]
+name = "sniff-cli"
+changelog_path = "sniff/cli/CHANGELOG.md"
+
+[[package]]
+name = "sniff-lib"
+changelog_path = "sniff/lib/CHANGELOG.md"
+
+[[package]]
+name = "ai-pipeline"
+changelog_path = "ai-pipeline/lib/CHANGELOG.md"
+
+[[package]]
+name = "ai-pipeline-gen"
+changelog_path = "ai-pipeline/gen/CHANGELOG.md"
+
+[[package]]
+name = "model_id"
+changelog_path = "model_id/CHANGELOG.md"
+
+[[package]]
+name = "api-macros"
+changelog_path = "api-macros/CHANGELOG.md"
+
+[[package]]
+name = "schematic"
+changelog_path = "schematic/CHANGELOG.md"
+
+# Placeholder packages - exclude from releases
+[[package]]
+name = "tui"
+release = false
+
+[[package]]
+name = "tabby"
+release = false
+
+[[package]]
+name = "ui"
+release = false

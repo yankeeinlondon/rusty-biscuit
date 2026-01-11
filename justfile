@@ -112,3 +112,15 @@ gen-models-for provider:
 # show the Documentation for crates.io for the Darkmatter package
 darkmatter-docs:
     @cargo clean --doc && cargo doc --no-deps -p darkmatter --lib --open
+
+# check what release-plz would do (dry run)
+release-check:
+    @release-plz update --dry-run
+
+# generate/update changelogs locally (without releasing)
+release-update:
+    @release-plz update
+
+# install release-plz CLI locally
+install-release-plz:
+    @cargo install release-plz --locked
