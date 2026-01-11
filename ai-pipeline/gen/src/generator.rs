@@ -114,6 +114,10 @@ use model_id::ModelId;
 /// Models provided by [{display_name}](<{url}>).
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
+#[model_id_metadata(
+    lookup = "super::metadata_generated::MODEL_METADATA",
+    returns = "crate::models::model_metadata::ModelMetadata"
+)]
 pub enum {enum_name} {{
 {variants}
     /// Custom model ID not in the predefined list.

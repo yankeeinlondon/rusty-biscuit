@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-10T02:15:38.860552+00:00
+//! Generated: 2026-01-11T20:35:17.785357+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: Anthropic
 //!
@@ -11,6 +11,10 @@ use model_id::ModelId;
 /// Models provided by [Anthropic](<https://anthropic.com>).
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
+#[model_id_metadata(
+    lookup = "super::metadata_generated::MODEL_METADATA",
+    returns = "crate::models::model_metadata::ModelMetadata"
+)]
 pub enum ProviderModelAnthropic {
     /// Model: `claude-3-5-haiku-20241022`
     Claude__3__5__Haiku__20241022,

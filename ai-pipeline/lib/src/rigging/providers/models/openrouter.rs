@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-10T02:15:40.328898+00:00
+//! Generated: 2026-01-11T20:35:19.535745+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: OpenRouter
 //!
@@ -11,6 +11,10 @@ use model_id::ModelId;
 /// Models provided by [OpenRouter](<https://openrouter.ai>).
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
+#[model_id_metadata(
+    lookup = "super::metadata_generated::MODEL_METADATA",
+    returns = "crate::models::model_metadata::ModelMetadata"
+)]
 pub enum ProviderModelOpenRouter {
     /// Model: `ai21/jamba-large-1.7`
     Ai21___Jamba__Large__1_7,
@@ -26,8 +30,8 @@ pub enum ProviderModelOpenRouter {
     Alfredpros___Codellama__7b__Instruct__Solidity,
     /// Model: `alibaba/tongyi-deepresearch-30b-a3b`
     Alibaba___Tongyi__Deepresearch__30b__A3b,
-    /// Model: `allenai/molmo-2-8b`
-    Allenai___Molmo__2__8b,
+    /// Model: `allenai/molmo-2-8b:free`
+    Allenai___Molmo__2__8b__Free,
     /// Model: `allenai/olmo-2-0325-32b-instruct`
     Allenai___Olmo__2__0325__32b__Instruct,
     /// Model: `allenai/olmo-3-32b-think`

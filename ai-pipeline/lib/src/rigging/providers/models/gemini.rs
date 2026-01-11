@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-10T02:15:39.465372+00:00
+//! Generated: 2026-01-11T20:35:18.410405+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: Gemini
 //!
@@ -11,6 +11,10 @@ use model_id::ModelId;
 /// Models provided by [Google Gemini](<https://ai.google.dev>).
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
+#[model_id_metadata(
+    lookup = "super::metadata_generated::MODEL_METADATA",
+    returns = "crate::models::model_metadata::ModelMetadata"
+)]
 pub enum ProviderModelGemini {
     /// Model: `aqa`
     Aqa,

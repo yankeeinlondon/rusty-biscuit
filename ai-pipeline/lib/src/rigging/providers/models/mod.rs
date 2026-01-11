@@ -192,4 +192,41 @@ mod tests {
         assert!(!model.supports_output(Modality::Text));
         assert!(!model.has_capability("function_calling"));
     }
+
+    /// Test that individual provider model enums have direct metadata() access.
+    ///
+    /// The `#[model_id_metadata]` attribute on provider enums generates a
+    /// `metadata()` method that looks up in the static MODEL_METADATA table.
+    #[test]
+    fn test_individual_provider_model_metadata() {
+        // Test Gemini - a model with known metadata
+        let gemini = ProviderModelGemini::Gemini__2_0__Flash;
+        let meta = gemini.metadata();
+        assert!(meta.is_some(), "Gemini 2.0 Flash should have metadata");
+
+        let meta = meta.unwrap();
+        assert!(meta.context_window.is_some());
+        assert!(meta.context_window.unwrap() > 0);
+
+        // Test DeepSeek
+        let deepseek = ProviderModelDeepseek::Deepseek__Chat;
+        let meta = deepseek.metadata();
+        assert!(meta.is_some(), "DeepSeek Chat should have metadata");
+    }
+
+    /// Test that Bespoke variants return None for metadata on individual enums.
+    #[test]
+    fn test_individual_provider_model_bespoke_no_metadata() {
+        let bespoke = ProviderModelOpenAi::Bespoke("custom-model-xyz".to_string());
+        assert!(
+            bespoke.metadata().is_none(),
+            "Bespoke models should not have metadata"
+        );
+
+        let bespoke_gemini = ProviderModelGemini::Bespoke("my-custom-gemini".to_string());
+        assert!(
+            bespoke_gemini.metadata().is_none(),
+            "Bespoke models should not have metadata"
+        );
+    }
 }

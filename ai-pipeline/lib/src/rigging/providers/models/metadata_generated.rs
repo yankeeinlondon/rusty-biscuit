@@ -11,5 +11,330 @@ use crate::models::model_metadata::{ModelMetadata, ModelModalities, Modality};
 
 /// Static lookup table mapping model IDs to their metadata.
 pub static MODEL_METADATA: LazyLock<HashMap<&'static str, ModelMetadata>> = LazyLock::new(|| {
-    HashMap::with_capacity(0)
+    let mut m = HashMap::with_capacity(481);
+    m.insert("deepseek-chat", ModelMetadata {
+        display_name: Some("deepseek-chat".to_string()),
+        family: Some("deepseek-chat".to_string()),
+        context_window: Some(128000),
+        max_output_tokens: Some(8000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("deepseek-reasoner", ModelMetadata {
+        display_name: Some("deepseek-reasoner".to_string()),
+        family: Some("deepseek-reasoner".to_string()),
+        context_window: Some(128000),
+        max_output_tokens: Some(64000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gemini-2.0-flash", ModelMetadata {
+        display_name: Some("Gemini 2.0 Flash".to_string()),
+        family: Some("gemini-2.0-flash".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(8192),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gemini-2.0-flash-001", ModelMetadata {
+        display_name: Some("Gemini 2.0 Flash".to_string()),
+        family: Some("gemini-2.0-flash".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(8192),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gemini-2.0-flash-exp", ModelMetadata {
+        display_name: Some("Gemini 2.0 Flash".to_string()),
+        family: Some("gemini-2.0-flash".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(8192),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gemini-2.0-flash-lite", ModelMetadata {
+        display_name: Some("Gemini 2.0 Flash-Lite".to_string()),
+        family: Some("gemini-2.0-flash-lite".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(8192),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gemini-2.0-flash-lite-001", ModelMetadata {
+        display_name: Some("Gemini 2.0 Flash-Lite".to_string()),
+        family: Some("gemini-2.0-flash-lite".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(8192),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gemini-2.5-flash", ModelMetadata {
+        display_name: Some("Gemini 2.5 Flash".to_string()),
+        family: Some("gemini-2.5-flash".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gemini-2.5-flash-lite", ModelMetadata {
+        display_name: Some("Gemini 2.5 Flash-Lite".to_string()),
+        family: Some("gemini-2.5-flash-lite".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gemini-2.5-flash-lite-preview-09-2025", ModelMetadata {
+        display_name: Some("Gemini 2.5 Flash-Lite".to_string()),
+        family: Some("gemini-2.5-flash-lite".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gemini-2.5-flash-preview-09-2025", ModelMetadata {
+        display_name: Some("Gemini 2.5 Flash".to_string()),
+        family: Some("gemini-2.5-flash".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gemini-2.5-pro", ModelMetadata {
+        display_name: Some("Gemini 2.5 Pro".to_string()),
+        family: Some("gemini-2.5-pro".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gemini-3-flash-preview", ModelMetadata {
+        display_name: Some("Gemini 3 Flash".to_string()),
+        family: Some("gemini-3-flash".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gemini-3-pro-preview", ModelMetadata {
+        display_name: Some("Gemini 3 Pro".to_string()),
+        family: Some("gemini-3-pro".to_string()),
+        context_window: Some(1048576),
+        max_output_tokens: Some(65536),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Audio, Modality::Image, Modality::Text],
+            output: vec![Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gpt-3.5-turbo", ModelMetadata {
+        display_name: Some("GPT-3.5 Turbo".to_string()),
+        family: Some("gpt-3.5-turbo".to_string()),
+        context_window: Some(16385),
+        max_output_tokens: Some(4096),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+        ],
+    });
+    m.insert("gpt-5.1-codex", ModelMetadata {
+        display_name: Some("GPT-5.1 Codex".to_string()),
+        family: Some("gpt-5.1-codex".to_string()),
+        context_window: Some(400000),
+        max_output_tokens: Some(128000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gpt-5.2", ModelMetadata {
+        display_name: Some("GPT-5.2".to_string()),
+        family: Some("gpt-5.2".to_string()),
+        context_window: Some(400000),
+        max_output_tokens: Some(128000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("gpt-5.2-chat-latest", ModelMetadata {
+        display_name: Some("GPT-5.2 Chat".to_string()),
+        family: Some("gpt-5.2-chat-latest".to_string()),
+        context_window: Some(128000),
+        max_output_tokens: Some(16384),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("o3", ModelMetadata {
+        display_name: Some("o3".to_string()),
+        family: Some("o3".to_string()),
+        context_window: Some(200000),
+        max_output_tokens: Some(100000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("o3-mini", ModelMetadata {
+        display_name: Some("o3-mini".to_string()),
+        family: Some("o3-mini".to_string()),
+        context_window: Some(200000),
+        max_output_tokens: Some(100000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("o3-mini-2025-01-31", ModelMetadata {
+        display_name: Some("o3-mini".to_string()),
+        family: Some("o3-mini".to_string()),
+        context_window: Some(200000),
+        max_output_tokens: Some(100000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m.insert("o4-mini", ModelMetadata {
+        display_name: Some("o4-mini".to_string()),
+        family: Some("o4-mini".to_string()),
+        context_window: Some(200000),
+        max_output_tokens: Some(100000),
+        modalities: Some(ModelModalities {
+            input: vec![Modality::Image, Modality::Text],
+            output: vec![Modality::Embeddings, Modality::Text],
+        }),
+        capabilities: vec![
+            "batch".to_string(),
+            "function_calling".to_string(),
+            "structured_output".to_string(),
+        ],
+    });
+    m
 });

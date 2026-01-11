@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-01-10T02:15:40.201930+00:00
+//! Generated: 2026-01-11T20:35:19.183608+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: OpenAi
 //!
@@ -11,6 +11,10 @@ use model_id::ModelId;
 /// Models provided by [OpenAI](<https://openai.com>).
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
+#[model_id_metadata(
+    lookup = "super::metadata_generated::MODEL_METADATA",
+    returns = "crate::models::model_metadata::ModelMetadata"
+)]
 pub enum ProviderModelOpenAi {
     /// Model: `gpt-3.5-turbo`
     Gpt__3_5__Turbo,
