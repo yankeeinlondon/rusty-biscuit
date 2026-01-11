@@ -125,13 +125,12 @@ fn compare_frontmatter(original: &Markdown, updated: &Markdown, delta: &mut Mark
         let original_value = original_fm.get(*key);
         let updated_value = updated_fm.get(*key);
 
-        if original_value != updated_value {
-            if let (Some(ov), Some(uv)) = (original_value, updated_value) {
+        if original_value != updated_value
+            && let (Some(ov), Some(uv)) = (original_value, updated_value) {
                 delta
                     .frontmatter_changes
                     .push(FrontmatterChange::updated((*key).clone(), ov.clone(), uv.clone()));
             }
-        }
     }
 
     delta.frontmatter_changed = !delta.frontmatter_changes.is_empty();
@@ -423,7 +422,7 @@ fn parse_info_string(info: &str) -> (Option<&str>, HashMap<String, String>) {
                 remaining = &remaining[1..]; // skip opening quote
                 if let Some(end_quote) = remaining.find('"') {
                     let v = &remaining[..end_quote];
-                    remaining = &remaining[end_quote + 1..].trim_start();
+                    remaining = remaining[end_quote + 1..].trim_start();
                     v.to_string()
                 } else {
                     // No closing quote, take rest
@@ -757,11 +756,10 @@ fn find_similar_slug(
         let max_len = target.len().max(slug.len());
         let similarity = 1.0 - (distance as f32 / max_len as f32);
 
-        if similarity > 0.5 {
-            if best_match.is_none() || similarity > best_match.as_ref().unwrap().1 {
+        if similarity > 0.5
+            && (best_match.is_none() || similarity > best_match.as_ref().unwrap().1) {
                 best_match = Some((slug.clone(), similarity));
             }
-        }
     }
 
     best_match
@@ -783,11 +781,11 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
 
     let mut dp = vec![vec![0; n + 1]; m + 1];
 
-    for i in 0..=m {
-        dp[i][0] = i;
+    for (i, row) in dp.iter_mut().enumerate() {
+        row[0] = i;
     }
-    for j in 0..=n {
-        dp[0][j] = j;
+    for (j, cell) in dp[0].iter_mut().enumerate() {
+        *cell = j;
     }
 
     for i in 1..=m {
