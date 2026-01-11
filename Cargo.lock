@@ -1112,6 +1112,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "darkmatter"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "atty",
+ "clap 4.5.54",
+ "color-eyre",
+ "open",
+ "predicates",
+ "serde_json",
+ "serde_yaml 0.9.34+deprecated",
+ "shared",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "darling"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2761,24 +2779,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ea1f30cedd69f0a2954655f7188c6a834246d2bcf1e315e2ac40c4b24dc9519"
 dependencies = [
  "cfg-if",
-]
-
-[[package]]
-name = "md"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "atty",
- "clap 4.5.54",
- "color-eyre",
- "open",
- "predicates",
- "serde_json",
- "serde_yaml 0.9.34+deprecated",
- "shared",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

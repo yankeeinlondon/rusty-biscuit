@@ -2,7 +2,7 @@ set dotenv-load
 set positional-arguments
 
 # List of areas in this monorepo
-areas := "biscuit research so-you-say md sniff"
+areas := "biscuit research so-you-say darkmatter sniff"
 
 BOLD := '\033[1m'
 RESET := '\033[0m'
@@ -83,8 +83,8 @@ md *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     echo ""
-    echo -e "{{BOLD}}MD CLI{{RESET}} (latest debug build)"
-    echo -e "--------------------------------------------"
+    echo -e "{{BOLD}}Darkmatter CLI{{RESET}} (latest debug build)"
+    echo -e "----------------------------------------------------"
     cd md 2>/dev/null
     cargo run {{args}}
 
