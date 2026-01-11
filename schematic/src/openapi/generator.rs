@@ -388,11 +388,10 @@ impl OpenApiGenerator {
 
         // Build components (security schemes)
         let components = self.build_components();
-        if let serde_json::Value::Object(obj) = &components {
-            if !obj.is_empty() {
+        if let serde_json::Value::Object(obj) = &components
+            && !obj.is_empty() {
                 spec["components"] = components;
             }
-        }
 
         // Add global security if present
         if !self.global_security.is_empty() {

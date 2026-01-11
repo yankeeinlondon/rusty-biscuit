@@ -321,19 +321,17 @@ fn get_repo_status(repo: &Repository) -> Result<RepoStatus> {
 
         if status.is_index_new() || status.is_index_modified() || status.is_index_deleted() {
             staged += 1;
-            if let Some(ref p) = path {
-                if !dirty_paths.contains(p) {
+            if let Some(ref p) = path
+                && !dirty_paths.contains(p) {
                     dirty_paths.push(p.clone());
                 }
-            }
         }
         if status.is_wt_modified() || status.is_wt_deleted() {
             unstaged += 1;
-            if let Some(ref p) = path {
-                if !dirty_paths.contains(p) {
+            if let Some(ref p) = path
+                && !dirty_paths.contains(p) {
                     dirty_paths.push(p.clone());
                 }
-            }
         }
         if status.is_wt_new() {
             untracked_count += 1;

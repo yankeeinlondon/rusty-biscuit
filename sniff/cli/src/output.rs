@@ -36,11 +36,10 @@ fn format_number(n: usize) -> String {
 
 /// Convert absolute path to relative path from repo root
 fn relative_path(path: &Path, repo_root: Option<&Path>) -> String {
-    if let Some(root) = repo_root {
-        if let Ok(rel) = path.strip_prefix(root) {
+    if let Some(root) = repo_root
+        && let Ok(rel) = path.strip_prefix(root) {
             return rel.display().to_string();
         }
-    }
     path.display().to_string()
 }
 
@@ -241,8 +240,8 @@ fn print_filesystem_section(
     println!("=== Filesystem ===");
 
     // Print EditorConfig formatting info at verbose level 2+
-    if verbose > 1 {
-        if let Some(ref formatting) = fs.formatting {
+    if verbose > 1
+        && let Some(ref formatting) = fs.formatting {
             println!("EditorConfig: {}", formatting.config_path.display());
             for section in &formatting.sections {
                 println!("  [{}]", section.pattern);
@@ -255,7 +254,6 @@ fn print_filesystem_section(
             }
             println!();
         }
-    }
 
     if let Some(ref langs) = fs.languages {
         println!(
@@ -384,8 +382,8 @@ fn print_filesystem_section(
         }
     }
 
-    if let Some(ref deps) = fs.dependencies {
-        if !deps.detected_managers.is_empty() {
+    if let Some(ref deps) = fs.dependencies
+        && !deps.detected_managers.is_empty() {
             println!("Package Managers:");
             for pm in &deps.detected_managers {
                 println!("  {:?} ({})", pm, pm.primary_language());
@@ -397,7 +395,6 @@ fn print_filesystem_section(
                 }
             }
         }
-    }
 }
 
 pub fn print_json(result: &SniffResult) -> serde_json::Result<()> {

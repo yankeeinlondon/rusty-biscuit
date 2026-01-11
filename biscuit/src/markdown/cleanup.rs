@@ -108,7 +108,7 @@ fn preserve_original_emphasis<'a>(
                     style == EmphasisStyle::Underscore
                 } else {
                     range.start < content.len()
-                        && content[range.start..].chars().next() == Some('_')
+                        && content[range.start..].starts_with('_')
                 };
                 style_stack.push(is_underscore);
 
@@ -122,7 +122,7 @@ fn preserve_original_emphasis<'a>(
             Event::Start(Tag::Strong) => {
                 // Strong (bold) ALWAYS preserves original style - never standardized
                 let is_underscore = range.start < content.len()
-                    && content[range.start..].chars().next() == Some('_');
+                    && content[range.start..].starts_with('_');
                 style_stack.push(is_underscore);
 
                 let placeholder = if is_underscore {

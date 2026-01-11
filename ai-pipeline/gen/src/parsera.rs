@@ -154,24 +154,22 @@ pub fn find_parsera_metadata<'a>(
 
     // 2. Strip date suffix (YYYYMMDD pattern at end)
     let stripped = strip_date_suffix(model_id);
-    if stripped != model_id {
-        if let Some(model) = index.get(stripped) {
+    if stripped != model_id
+        && let Some(model) = index.get(stripped) {
             debug!(
                 "Matched {} via date-stripped ID: {}",
                 model_id, stripped
             );
             return Some(model);
         }
-    }
 
     // 3. Match via family field
     for model in index.values() {
-        if let Some(family) = &model.family {
-            if family == model_id || family == stripped {
+        if let Some(family) = &model.family
+            && (family == model_id || family == stripped) {
                 debug!("Matched {} via family: {}", model_id, family);
                 return Some(model);
             }
-        }
     }
 
     None

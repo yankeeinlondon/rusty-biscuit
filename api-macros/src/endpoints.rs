@@ -130,11 +130,10 @@ fn transform_endpoint_method(
         .filter_map(|arg| {
             if let FnArg::Typed(pat_type) = arg {
                 // Skip self parameter
-                if let Pat::Ident(ident) = &*pat_type.pat {
-                    if ident.ident != "self" {
+                if let Pat::Ident(ident) = &*pat_type.pat
+                    && ident.ident != "self" {
                         return Some(pat_type);
                     }
-                }
             }
             None
         })
@@ -202,20 +201,17 @@ fn extract_response_type(output: &ReturnType) -> Result<TokenStream> {
         }
         ReturnType::Type(_, ty) => {
             // Expecting Type::Path with Result<T, ApiError>
-            if let Type::Path(TypePath { path, .. }) = &**ty {
-                if let Some(segment) = path.segments.last() {
-                    if segment.ident == "Result" {
+            if let Type::Path(TypePath { path, .. }) = &**ty
+                && let Some(segment) = path.segments.last()
+                    && segment.ident == "Result" {
                         // Extract the first generic argument (the T in Result<T, E>)
-                        if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                            if let Some(syn::GenericArgument::Type(response_ty)) =
+                        if let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+                            && let Some(syn::GenericArgument::Type(response_ty)) =
                                 args.args.first()
                             {
                                 return Ok(quote! { #response_ty });
                             }
-                        }
                     }
-                }
-            }
 
             Err(Error::new_spanned(
                 ty,

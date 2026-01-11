@@ -36,11 +36,10 @@ fn generate_slug(text: &str) -> String {
     for c in text.chars() {
         if c.is_alphanumeric() {
             slug.push(c.to_ascii_lowercase());
-        } else if c.is_whitespace() || c == '-' || c == '_' {
-            if !slug.ends_with('-') {
+        } else if (c.is_whitespace() || c == '-' || c == '_')
+            && !slug.ends_with('-') {
                 slug.push('-');
             }
-        }
     }
 
     // Trim leading/trailing hyphens

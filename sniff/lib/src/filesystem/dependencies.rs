@@ -175,11 +175,10 @@ pub fn detect_dependencies(root: &Path) -> Result<DependencyReport> {
         .into_iter()
         .filter_entry(|e| {
             // Skip excluded directories
-            if e.file_type().is_dir() {
-                if let Some(name) = e.file_name().to_str() {
+            if e.file_type().is_dir()
+                && let Some(name) = e.file_name().to_str() {
                     return !EXCLUDED_DIRS.contains(&name);
                 }
-            }
             true
         })
         .filter_map(|e| e.ok())
@@ -299,11 +298,10 @@ pub fn detect_dependencies(root: &Path) -> Result<DependencyReport> {
     let lockfile_versions = parse_cargo_lockfile(root);
     let mut packages = Vec::new();
     for manifest in &manifests {
-        if manifest.manager == PackageManager::Cargo {
-            if let Some(pkg_deps) = parse_cargo_toml(root, &manifest.path, &lockfile_versions) {
+        if manifest.manager == PackageManager::Cargo
+            && let Some(pkg_deps) = parse_cargo_toml(root, &manifest.path, &lockfile_versions) {
                 packages.push(pkg_deps);
             }
-        }
     }
 
     Ok(DependencyReport {
