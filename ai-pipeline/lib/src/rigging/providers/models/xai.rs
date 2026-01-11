@@ -10,6 +10,10 @@ use model_id::ModelId;
 
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
+#[model_id_metadata(
+    lookup = "super::metadata_generated::MODEL_METADATA",
+    returns = "crate::models::model_metadata::ModelMetadata"
+)]
 pub enum ProviderModelXai {
     /// Model: `grok-2-image-1212`
     Grok__2__Image__1212,

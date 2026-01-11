@@ -81,11 +81,24 @@ impl ProviderModel {
 
     /// Returns metadata for this model if available.
     ///
+    /// Delegates to the underlying provider-specific enum's `metadata()` method.
     /// Metadata is fetched from the Parsera LLM Specs API at build time
     /// and includes context window, modalities, and capabilities.
     #[must_use]
     pub fn metadata(&self) -> Option<&'static ModelMetadata> {
-        metadata_generated::MODEL_METADATA.get(self.model_id())
+        match self {
+            Self::Anthropic(m) => m.metadata(),
+            Self::Deepseek(m) => m.metadata(),
+            Self::Gemini(m) => m.metadata(),
+            Self::Groq(m) => m.metadata(),
+            Self::Mistral(m) => m.metadata(),
+            Self::MoonshotAi(m) => m.metadata(),
+            Self::OpenAi(m) => m.metadata(),
+            Self::OpenRouter(m) => m.metadata(),
+            Self::Xai(m) => m.metadata(),
+            Self::Zai(m) => m.metadata(),
+            Self::ZenMux(m) => m.metadata(),
+        }
     }
 
     /// Returns the context window size if known.

@@ -10,6 +10,10 @@ use model_id::ModelId;
 
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
+#[model_id_metadata(
+    lookup = "super::metadata_generated::MODEL_METADATA",
+    returns = "crate::models::model_metadata::ModelMetadata"
+)]
 pub enum ProviderModelMistral {
     /// Model: `codestral-2411-rc5`
     Codestral__2411__Rc5,
