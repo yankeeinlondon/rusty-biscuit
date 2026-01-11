@@ -23,10 +23,33 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields, LitStr};
 /// - `model_id(&self) -> &str` - Returns the wire-format model ID
 /// - `FromStr` implementation - Parses wire IDs back to variants
 /// - `ALL: &'static [Self]` - Array of all unit variants (excludes Bespoke)
-#[proc_macro_derive(ModelId, attributes(model_id))]
+///
+/// ## Optional Metadata Lookup
+///
+/// Add a `#[model_id_metadata(...)]` attribute to generate a `metadata()` method:
+///
+/// ```ignore
+/// #[derive(ModelId)]
+/// #[model_id_metadata(
+///     lookup = "super::metadata_generated::MODEL_METADATA",
+///     returns = "crate::models::model_metadata::ModelMetadata"
+/// )]
+/// pub enum ProviderModelOpenAi { ... }
+/// ```
+///
+/// This generates:
+/// ```ignore
+/// pub fn metadata(&self) -> Option<&'static ModelMetadata> {
+///     MODEL_METADATA.get(self.model_id())
+/// }
+/// ```
+#[proc_macro_derive(ModelId, attributes(model_id, model_id_metadata))]
 pub fn derive_model_id(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let enum_ident = input.ident;
+    let enum_ident = input.ident.clone();
+
+    // Parse optional metadata lookup configuration from #[model_id_metadata(...)]
+    let metadata_config = parse_metadata_config(&input);
 
     let data_enum = match input.data {
         Data::Enum(e) => e,
@@ -102,6 +125,26 @@ pub fn derive_model_id(input: TokenStream) -> TokenStream {
         }
     };
 
+    // Generate optional metadata method if configured
+    let metadata_method = if let Some(config) = metadata_config {
+        let lookup_path: syn::Path = syn::parse_str(&config.lookup_path)
+            .expect("invalid lookup path in model_id_metadata");
+        let returns_path: syn::Path = syn::parse_str(&config.returns_type)
+            .expect("invalid returns type in model_id_metadata");
+
+        quote! {
+            /// Returns metadata for this model if available.
+            ///
+            /// Metadata includes context window, modalities, and capabilities.
+            #[must_use]
+            pub fn metadata(&self) -> Option<&'static #returns_path> {
+                #lookup_path.get(self.model_id())
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     let expanded = quote! {
         /// Error returned when parsing an unknown model ID.
         #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,6 +181,8 @@ pub fn derive_model_id(input: TokenStream) -> TokenStream {
                     #(#model_id_arms,)*
                 }
             }
+
+            #metadata_method
         }
 
         impl std::str::FromStr for #enum_ident {
@@ -204,4 +249,52 @@ fn decode_model(s: &str) -> String {
     }
 
     out
+}
+
+/// Configuration for optional metadata lookup generation.
+struct MetadataConfig {
+    /// Path to the lookup table (e.g., "super::metadata_generated::MODEL_METADATA")
+    lookup_path: String,
+    /// Return type path (e.g., "crate::models::model_metadata::ModelMetadata")
+    returns_type: String,
+}
+
+/// Parses the `#[model_id_metadata(lookup = "...", returns = "...")]` attribute.
+fn parse_metadata_config(input: &DeriveInput) -> Option<MetadataConfig> {
+    for attr in &input.attrs {
+        if !attr.path().is_ident("model_id_metadata") {
+            continue;
+        }
+
+        let mut lookup_path: Option<String> = None;
+        let mut returns_type: Option<String> = None;
+
+        let result = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("lookup") {
+                let value: LitStr = meta.value()?.parse()?;
+                lookup_path = Some(value.value());
+                Ok(())
+            } else if meta.path.is_ident("returns") {
+                let value: LitStr = meta.value()?.parse()?;
+                returns_type = Some(value.value());
+                Ok(())
+            } else {
+                Err(meta.error("expected `lookup` or `returns`"))
+            }
+        });
+
+        if let Err(e) = result {
+            panic!("failed to parse model_id_metadata: {}", e);
+        }
+
+        let lookup_path = lookup_path.expect("model_id_metadata requires `lookup = \"...\"`");
+        let returns_type = returns_type.expect("model_id_metadata requires `returns = \"...\"`");
+
+        return Some(MetadataConfig {
+            lookup_path,
+            returns_type,
+        });
+    }
+
+    None
 }
