@@ -87,17 +87,19 @@ This monorepo hosts the following packages:
     # TTS
     so-you-say "hello world"
     # TTS with specific gender voice
-    so-you-say "hello world" --gender male | female
+    so-you-say "hello world" --gender male
     ```
 
 ## More Details
 
-For more functional/usage details on any of the packages in this monorepo refer to the `README.md` files in their directory.
+For more functional/usage details on any of the packages in this monorepo refer to the `README.md` files in their respective directories.
 
-> **Note:** if you're a developer and looking for even more detailed documentation or context, then look for `README.md` files within folders of the source tree. These files will provide information about their respective module or source sub-tree.
+> **Note:** if you're a developer and looking for more detailed documentation or context, then look for `README.md` files within folders of the source tree. These files will provide information about their respective module or source sub-tree.
 
 ## License
 
-All packages in this repo are provided under the AGPL-3.0 open source license.
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0-or-later).
 
+You are free to use, modify, and redistribute this software under the terms of that license. See the [`LICENSE`](./LICENSE) file for full details.
 
+> **Note:** If you run this software as a service, you must provide a link to the source code of the running version.

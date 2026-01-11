@@ -1,4 +1,7 @@
 # Research
+<img src="../assets/research.png" style="position: fixed; max-width: 30%; height: 150px; right: 0; top: 0; opacity: 0.75"></img>
+
+> a library and CLI application to aid and abet you in doing research for your own edification or for your favorite AI agent
 
 ## Modules for Research
 
