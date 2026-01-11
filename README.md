@@ -40,7 +40,7 @@ This monorepo hosts the following packages:
     research link
     ```
 
-2. **md** CLI [[`./md`](./md/README.md)]
+2. **darkmatter** CLI [[`./darkmatter`](./darkmatter/README.md)]
 
     A Markdown renderer which renders to both the terminal(escape codes) and browser (HTML).
 

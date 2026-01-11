@@ -2,7 +2,7 @@ set dotenv-load
 set positional-arguments
 
 # List of areas in this monorepo
-areas := "biscuit research so-you-say darkmatter sniff"
+areas := "biscuit ai-pipeline research so-you-say darkmatter sniff"
 
 BOLD := '\033[1m'
 RESET := '\033[0m'
@@ -78,14 +78,14 @@ install:
         fi
     done
 
-# executes the latest MD CLI code in debug mode
+# executes the latest Darkmatter CLI code in debug mode
 md *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     echo ""
     echo -e "{{BOLD}}Darkmatter CLI{{RESET}} (latest debug build)"
     echo -e "----------------------------------------------------"
-    cd md 2>/dev/null
+    cd darkmatter 2>/dev/null
     cargo run {{args}}
 
 # executes the latest Research CLI code in debug mode
@@ -94,7 +94,7 @@ research *args="":
     set -euo pipefail
     echo ""
     echo -e "{{BOLD}}Research CLI{{RESET}} (latest debug build)"
-    echo "---------------------------------"
+    echo "----------------------------------------------"
     cd research/cli 2>/dev/null
     cargo run {{args}}
 
