@@ -2060,24 +2060,24 @@ fn highlight_code(
             bg_color
         };
 
-        // Add line number gutter if enabled
-        if line_number_width > 0 {
-            // Gray color for line numbers: \x1b[38;2;128;128;128m
-            output.push_str(&format!(
-                "\x1b[38;2;128;128;128m{:>width$} │\x1b[0m ",
-                line_number,
-                width = line_number_width
-            ));
-        }
-
-        // Set background color for the line
+        // Set background color for the line (applies to gutter and content)
         output.push_str(&format!(
             "\x1b[48;2;{};{};{}m",
             line_bg.r, line_bg.g, line_bg.b
         ));
 
-        // Add left padding (1 character)
-        output.push(' ');
+        // Add line number gutter if enabled (with background already set)
+        if line_number_width > 0 {
+            // Gray foreground for line numbers, background already set above
+            output.push_str(&format!(
+                "\x1b[38;2;128;128;128m{:>width$} │ ",
+                line_number,
+                width = line_number_width
+            ));
+        } else {
+            // Add left padding (1 character) when no line numbers
+            output.push(' ');
+        }
 
         // Highlight the line and get styled ranges
         let ranges = hl
@@ -2864,6 +2864,64 @@ fn main() {}
             separator_count, 10,
             "Should have 10 line number separators for 10 lines of code"
         );
+    }
+
+    /// Regression test: Line number gutter must have background color.
+    ///
+    /// Previously, the line numbers, separator, and trailing space were rendered
+    /// without a background color, causing a visual inconsistency where only
+    /// the code content had the theme's background color.
+    #[test]
+    fn test_line_numbers_have_background_color() {
+        let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
+        let mut options = TerminalOptions::default();
+        options.include_line_numbers = true;
+        let meta = crate::markdown::dsl::CodeBlockMeta::default();
+
+        let code = "let x = 1;";
+        let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+
+        // Get expected background color from theme
+        let theme = highlighter.theme();
+        let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+        let bg_escape = format!("\x1b[48;2;{};{};{}m", bg_color.r, bg_color.g, bg_color.b);
+
+        // Find where the line number gutter starts (after top padding)
+        // The gutter should appear after a background color escape sequence
+        // Pattern: [bg color][gray fg][number] │ [code]
+        let gutter_pattern = format!(
+            "{}\x1b[38;2;128;128;128m",
+            bg_escape
+        );
+
+        assert!(
+            output.contains(&gutter_pattern),
+            "Line number gutter should have background color set before foreground.\n\
+             Expected to find: {:?}\n\
+             Output: {:?}",
+            gutter_pattern,
+            output
+        );
+
+        // Verify there's no reset (\x1b[0m) between the gutter and code content
+        // that would clear the background color
+        let lines: Vec<&str> = output.lines().collect();
+        for line in &lines {
+            if line.contains("│") {
+                // The line should NOT have a pattern like: [number]│\x1b[0m (reset after separator)
+                // followed by the background being set again
+                assert!(
+                    !line.contains("│\x1b[0m"),
+                    "Gutter separator should not be followed by reset.\n\
+                     This would cause the space after the separator to lack background color.\n\
+                     Line: {:?}",
+                    line
+                );
+            }
+        }
     }
 
     #[test]
