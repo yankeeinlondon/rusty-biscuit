@@ -22,6 +22,7 @@
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd};
 use pulldown_cmark_to_cmark::Options as CmarkOptions;
 use std::ops::Range;
+use unicode_width::UnicodeWidthStr;
 
 /// Returns parser options suitable for cleanup operations.
 ///
@@ -913,30 +914,128 @@ fn align_tables_in_stream(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
     result
 }
 
+/// Calculates the rendered width of table cell content.
+///
+/// This struct tracks nested formatting elements (links, emphasis, strong) and
+/// calculates the actual visual width of the rendered markdown output.
+struct CellWidthCalculator {
+    /// Current accumulated width
+    width: usize,
+    /// Stack of active formatting contexts with their overhead
+    /// (start_overhead, end_overhead, url_width for links)
+    format_stack: Vec<FormatContext>,
+}
+
+/// Represents an active formatting context within a table cell.
+#[derive(Debug, Clone)]
+enum FormatContext {
+    /// Emphasis: *text* or _text_ - adds 2 chars total
+    Emphasis,
+    /// Strong: **text** or __text__ - adds 4 chars total
+    Strong,
+    /// Link: [text](url) - adds 4 chars + url length
+    Link { url_width: usize },
+}
+
+impl CellWidthCalculator {
+    fn new() -> Self {
+        Self {
+            width: 0,
+            format_stack: Vec::new(),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.width = 0;
+        self.format_stack.clear();
+    }
+
+    fn add_text(&mut self, text: &str) {
+        self.width += UnicodeWidthStr::width(text);
+    }
+
+    fn add_code(&mut self, code: &str) {
+        // Code spans render with backticks: `code`
+        self.width += UnicodeWidthStr::width(code) + 2;
+    }
+
+    fn start_emphasis(&mut self) {
+        // Opening marker: * or _
+        self.width += 1;
+        self.format_stack.push(FormatContext::Emphasis);
+    }
+
+    fn end_emphasis(&mut self) {
+        // Closing marker: * or _
+        self.width += 1;
+        self.format_stack.pop();
+    }
+
+    fn start_strong(&mut self) {
+        // Opening marker: ** or __
+        self.width += 2;
+        self.format_stack.push(FormatContext::Strong);
+    }
+
+    fn end_strong(&mut self) {
+        // Closing marker: ** or __
+        self.width += 2;
+        self.format_stack.pop();
+    }
+
+    fn start_link(&mut self, url: &str) {
+        // Opening bracket: [
+        self.width += 1;
+        self.format_stack.push(FormatContext::Link {
+            url_width: UnicodeWidthStr::width(url),
+        });
+    }
+
+    fn end_link(&mut self) {
+        // Closing: ](url)
+        if let Some(FormatContext::Link { url_width }) = self.format_stack.pop() {
+            // "](" + url + ")"
+            self.width += 2 + url_width + 1;
+        }
+    }
+
+    fn total_width(&self) -> usize {
+        self.width
+    }
+}
+
 /// Processes a single table's events to align columns.
 ///
 /// This function analyzes all table cells to determine the maximum width
 /// for each column and then pads cells accordingly. It preserves the original
 /// event structure (keeping Code events as Code, not merging into Text) and
 /// adds spacing around cell content for readability: `| content |`
+///
+/// Width calculation accounts for:
+/// - Unicode display width (not just character count)
+/// - Link syntax: `[text](url)` adds brackets and URL
+/// - Emphasis: `*text*` or `_text_` adds 2 characters
+/// - Strong: `**text**` or `__text__` adds 4 characters
+/// - Code spans: `` `code` `` adds 2 backticks
 fn process_single_table(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
     // Pass 1: Measure column widths (visual width of rendered content)
     let mut col_widths: Vec<usize> = Vec::new();
     let mut current_col = 0;
     let mut in_cell = false;
-    let mut cell_text_len = 0;
+    let mut calc = CellWidthCalculator::new();
 
     for ev in &events {
         match ev {
             Event::Start(Tag::TableCell) => {
                 in_cell = true;
-                cell_text_len = 0;
+                calc.reset();
             }
             Event::End(TagEnd::TableCell) => {
+                let cell_width = calc.total_width();
                 if col_widths.len() <= current_col {
-                    col_widths.push(cell_text_len);
+                    col_widths.push(cell_width);
                 } else {
-                    col_widths[current_col] = col_widths[current_col].max(cell_text_len);
+                    col_widths[current_col] = col_widths[current_col].max(cell_width);
                 }
                 current_col += 1;
                 in_cell = false;
@@ -945,11 +1044,28 @@ fn process_single_table(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
                 current_col = 0;
             }
             Event::Text(t) if in_cell => {
-                cell_text_len += t.chars().count();
+                calc.add_text(t);
             }
             Event::Code(t) if in_cell => {
-                // Code spans render with backticks: `code`
-                cell_text_len += t.chars().count() + 2;
+                calc.add_code(t);
+            }
+            Event::Start(Tag::Emphasis) if in_cell => {
+                calc.start_emphasis();
+            }
+            Event::End(TagEnd::Emphasis) if in_cell => {
+                calc.end_emphasis();
+            }
+            Event::Start(Tag::Strong) if in_cell => {
+                calc.start_strong();
+            }
+            Event::End(TagEnd::Strong) if in_cell => {
+                calc.end_strong();
+            }
+            Event::Start(Tag::Link { dest_url, .. }) if in_cell => {
+                calc.start_link(dest_url);
+            }
+            Event::End(TagEnd::Link) if in_cell => {
+                calc.end_link();
             }
             _ => {}
         }
@@ -959,13 +1075,13 @@ fn process_single_table(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
     let mut result = Vec::with_capacity(events.len() + col_widths.len() * 2);
     let mut current_col = 0;
     let mut in_cell = false;
-    let mut cell_content_len = 0;
+    let mut calc = CellWidthCalculator::new();
 
     for ev in events {
         match &ev {
             Event::Start(Tag::TableCell) => {
                 in_cell = true;
-                cell_content_len = 0;
+                calc.reset();
                 result.push(ev);
                 // Add leading space for readability: "|content" -> "| content"
                 result.push(Event::Text(CowStr::from(" ")));
@@ -973,7 +1089,8 @@ fn process_single_table(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
             Event::End(TagEnd::TableCell) => {
                 // Add trailing padding to align columns, plus one space before |
                 let target_width = col_widths.get(current_col).copied().unwrap_or(0);
-                let padding_needed = target_width.saturating_sub(cell_content_len);
+                let cell_width = calc.total_width();
+                let padding_needed = target_width.saturating_sub(cell_width);
                 // Add padding + trailing space: "content|" -> "content |"
                 let padding = " ".repeat(padding_needed + 1);
                 result.push(Event::Text(CowStr::from(padding)));
@@ -986,11 +1103,35 @@ fn process_single_table(events: Vec<Event<'_>>) -> Vec<Event<'_>> {
                 result.push(ev);
             }
             Event::Text(t) if in_cell => {
-                cell_content_len += t.chars().count();
+                calc.add_text(t);
                 result.push(ev);
             }
             Event::Code(t) if in_cell => {
-                cell_content_len += t.chars().count() + 2;
+                calc.add_code(t);
+                result.push(ev);
+            }
+            Event::Start(Tag::Emphasis) if in_cell => {
+                calc.start_emphasis();
+                result.push(ev);
+            }
+            Event::End(TagEnd::Emphasis) if in_cell => {
+                calc.end_emphasis();
+                result.push(ev);
+            }
+            Event::Start(Tag::Strong) if in_cell => {
+                calc.start_strong();
+                result.push(ev);
+            }
+            Event::End(TagEnd::Strong) if in_cell => {
+                calc.end_strong();
+                result.push(ev);
+            }
+            Event::Start(Tag::Link { dest_url, .. }) if in_cell => {
+                calc.start_link(dest_url);
+                result.push(ev);
+            }
+            Event::End(TagEnd::Link) if in_cell => {
+                calc.end_link();
                 result.push(ev);
             }
             _ => {
@@ -1310,6 +1451,131 @@ mod tests {
             "Code spans should not have escaped backticks, got:\n{}",
             cleaned
         );
+    }
+
+    /// Regression test: Table columns with links must be properly aligned.
+    ///
+    /// Previously, the table alignment code measured link text width (e.g., "no-color.org")
+    /// but the rendered markdown output includes the full link syntax `[text](url)`,
+    /// causing misaligned columns.
+    #[test]
+    fn test_table_alignment_with_links() {
+        let content = "| Variable | Description |\n|----------|-------------|\n| `THEME` | Default theme |\n| `NO_COLOR` | Disable colors ([no-color.org](https://no-color.org)) |";
+        let cleaned = cleanup_content(content);
+
+        // All rows should have the same number of pipe characters
+        let lines: Vec<&str> = cleaned.lines().collect();
+        assert!(lines.len() >= 3, "Should have at least 3 lines (header, separator, data)");
+
+        // Each data row should end with " |" (space before closing pipe)
+        for line in &lines[2..] {
+            assert!(
+                line.ends_with(" |"),
+                "Table row should end with ' |' for proper alignment, got:\n{}",
+                line
+            );
+        }
+
+        // The link should be preserved
+        assert!(
+            cleaned.contains("[no-color.org](https://no-color.org)"),
+            "Link should be preserved in table, got:\n{}",
+            cleaned
+        );
+    }
+
+    /// Regression test: Table columns with emphasis must be properly aligned.
+    ///
+    /// Previously, emphasis markers (*text* or _text_) weren't counted in the width
+    /// calculation, causing misaligned columns.
+    #[test]
+    fn test_table_alignment_with_emphasis() {
+        let content = "| Option | Description |\n|--------|-------------|\n| `--mermaid` | *Terminal only*. Renders diagrams |\n| `--html` | Output HTML |";
+        let cleaned = cleanup_content(content);
+
+        // Each data row should end with " |"
+        let lines: Vec<&str> = cleaned.lines().collect();
+        for line in &lines[2..] {
+            assert!(
+                line.ends_with(" |"),
+                "Table row should end with ' |' for proper alignment, got:\n{}",
+                line
+            );
+        }
+
+        // Emphasis should be preserved
+        assert!(
+            cleaned.contains("*Terminal only*"),
+            "Emphasis should be preserved in table, got:\n{}",
+            cleaned
+        );
+    }
+
+    /// Regression test: Table columns with bold text must be properly aligned.
+    #[test]
+    fn test_table_alignment_with_strong() {
+        let content = "| Name | Description |\n|------|-------------|\n| Test | **Bold text** here |\n| A | Short |";
+        let cleaned = cleanup_content(content);
+
+        // Each data row should end with " |"
+        let lines: Vec<&str> = cleaned.lines().collect();
+        for line in &lines[2..] {
+            assert!(
+                line.ends_with(" |"),
+                "Table row should end with ' |' for proper alignment, got:\n{}",
+                line
+            );
+        }
+
+        // Bold should be preserved
+        assert!(
+            cleaned.contains("**Bold text**"),
+            "Bold should be preserved in table, got:\n{}",
+            cleaned
+        );
+    }
+
+    /// Regression test: Table columns with mixed formatting must be properly aligned.
+    #[test]
+    fn test_table_alignment_with_mixed_formatting() {
+        let content = "| Column | Content |\n|--------|-------------|\n| A | `code` with *emphasis* and [link](url) |\n| B | Plain text |";
+        let cleaned = cleanup_content(content);
+
+        // Each data row should end with " |"
+        let lines: Vec<&str> = cleaned.lines().collect();
+        for line in &lines[2..] {
+            assert!(
+                line.ends_with(" |"),
+                "Table row should end with ' |' for proper alignment, got:\n{}",
+                line
+            );
+        }
+
+        // All formatting should be preserved
+        assert!(cleaned.contains("`code`"), "Code should be preserved");
+        assert!(cleaned.contains("*emphasis*"), "Emphasis should be preserved");
+        assert!(cleaned.contains("[link](url)"), "Link should be preserved");
+    }
+
+    /// Regression test: Verify table alignment uses unicode width, not char count.
+    #[test]
+    fn test_table_alignment_unicode_width() {
+        // East Asian characters have display width of 2
+        let content = "| Name | Greeting |\n|------|----------|\n| 你好 | Hello |\n| A | World |";
+        let cleaned = cleanup_content(content);
+
+        // Each data row should end with " |"
+        let lines: Vec<&str> = cleaned.lines().collect();
+        for line in &lines[2..] {
+            assert!(
+                line.ends_with(" |"),
+                "Table row should end with ' |' for proper alignment, got:\n{}",
+                line
+            );
+        }
+
+        // Content should be preserved
+        assert!(cleaned.contains("你好"), "CJK characters should be preserved");
     }
 
     #[test]
