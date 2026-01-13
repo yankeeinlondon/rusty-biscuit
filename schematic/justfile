@@ -1,0 +1,79 @@
+set dotenv-load
+set positional-arguments
+
+default:
+    @echo
+    @echo "Schematic - REST API Code Generator"
+    @echo "------------------------------------"
+    @echo ""
+    @just --list | grep -v 'default'
+    @echo
+
+# build schematic packages (define, gen)
+build *args="":
+    @echo ""
+    @echo "Build Schematic Packages"
+    @echo "------------------------"
+    @echo ""
+    @cargo build -p schematic-define -p schematic-gen {{args}}
+
+# run tests for schematic packages
+test *args="":
+    @echo ""
+    @echo "Testing Schematic Packages"
+    @echo "--------------------------"
+    @echo ""
+    @cargo test -p schematic-define -p schematic-gen {{args}}
+
+# run clippy on schematic packages
+lint:
+    @echo ""
+    @echo "Linting Schematic Packages"
+    @echo "--------------------------"
+    @echo ""
+    @cargo clippy -p schematic-define -- -D warnings
+    @cargo clippy -p schematic-gen -- -D warnings
+
+# generate OpenAI API client code (dry-run preview)
+generate-dry-run:
+    @echo ""
+    @echo "Generating Code (Dry Run)"
+    @echo "-------------------------"
+    @echo ""
+    @cargo run -p schematic-gen -- --api openai --dry-run
+
+# generate OpenAI API client code to schematic/schema
+generate:
+    @echo ""
+    @echo "Generating OpenAI API Client"
+    @echo "----------------------------"
+    @echo ""
+    @cargo run -p schematic-gen -- --api openai --output schematic/schema/src -v
+
+# clean generated schema code
+clean-generated:
+    @echo ""
+    @echo "Cleaning Generated Code"
+    @echo "-----------------------"
+    @echo ""
+    @rm -rf schematic/schema/src
+    @rm -f schematic/schema/Cargo.toml
+    @echo "Cleaned schematic/schema/"
+
+# full workflow: generate and verify compilation
+full: generate
+    @echo ""
+    @echo "Verifying Generated Code"
+    @echo "------------------------"
+    @echo ""
+    @cargo check --manifest-path schematic/schema/Cargo.toml
+    @echo ""
+    @echo "Generation complete and verified!"
+
+# run slow E2E tests (compiles generated code)
+test-e2e:
+    @echo ""
+    @echo "Running E2E Tests"
+    @echo "-----------------"
+    @echo ""
+    @cargo test -p schematic-gen --test e2e_generation -- --ignored
