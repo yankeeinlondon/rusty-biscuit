@@ -14,23 +14,23 @@ This monorepo hosts the following packages:
 ### Shared Libraries
 
 1. **biscuit** [\[`./biscuit`]\[[`./biscuit`][[`./biscuit`](./biscuit/README.md)\]
-   
+
    Provides utility functions and a highly capable markdown pipelining engine.
 
 1. **schematic** [\[`./schematic`]\[[`./schematic`][[`./schematic`](./schematic/README.md)\]
-   
+
    Builds type-strong enumerations for API's and data types to be consumed by other libraries/apps.
 
 1. **ai-pipeline** [\[`./ai-pipeline`]\[[`./ai-pipeline`][[`./ai-pipeline`](./ai-pipeline/README.md)\]
-   
+
    Provides a set of AI pipeline primitives for Agent composition while re-exporting some `rig` primitives to allow lower level interaction as well.
 
 ### Applications
 
 1. **researcher** [\[`./research`]\[[`./research`][[`./research`](./research/README.md)\]
-   
+
    A **CLI** which facilitates the research process and is able to produce content rich "deep dives" and tree-based `skills` for Claude Code and Opencode.
-   
+
    ```sh
    # do research
    research library chalk
@@ -41,9 +41,9 @@ This monorepo hosts the following packages:
    ```
 
 1. **darkmatter** CLI [\[`./darkmatter`]\[[`./darkmatter`][[`./darkmatter`](./darkmatter/README.md)\]
-   
+
    A Markdown renderer which renders to both the terminal(escape codes) and browser (HTML).
-   
+
    ```sh
    # render markdown to the terminal with auto-light/dark theming
    md doc.md
@@ -56,9 +56,9 @@ This monorepo hosts the following packages:
    ```
 
 1. **observer** TUI [\[`./observer`]\[[`./observer`][[`./observer`](./observer/README.md)\]
-   
+
    A TUI which helps you to observe state changes in the terminal.
-   
+
    ```sh
    # observes changes in status/progress when pointed to either a
    # markdown file (with TODO's in it) or a JSON file which is structured
@@ -67,9 +67,9 @@ This monorepo hosts the following packages:
    ```
 
 1. **notable** [\[`./notable`]\[[`./notable`][[`./notable`](./notable/README.md)\]
-   
+
    A CLI (and lib) which interacts with an Obsidian vault.
-   
+
    ```sh
    # Add a note to your vault, with specified tags
    note #foo #bar hello world
@@ -80,9 +80,9 @@ This monorepo hosts the following packages:
    ```
 
 1. **so-you-say** CLI [\[`./so-you-say`]\[[`./so-you-say`][[`./so-you-say`](./so-you-say/README.md)\]
-   
+
    A simple TTS CLI which leverages TTS features on the host or in the cloud.
-   
+
    ```sh
    # TTS
    so-you-say "hello world"
@@ -103,3 +103,4 @@ This project is licensed under the GNU Affero General Public License v3.0 (AGPL-
 You are free to use, modify, and redistribute this software under the terms of that license. See the [`LICENSE`](./LICENSE) file for full details.
 
 > **Note:** If you run this software as a service, you must provide a link to the source code of the running version.
+

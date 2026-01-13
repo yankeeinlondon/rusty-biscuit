@@ -39,33 +39,35 @@ research list [OPTIONS] [FILTER]...
 #### Arguments
 
 - `[FILTER]...` - Glob patterns to filter topics (e.g., "foo", "foo*", "bar")
-  - Patterns are case-sensitive
-  - Multiple patterns use OR logic (matches any pattern)
-  - Example: `research list "clap*" "serde*"` matches topics starting with "clap" or "serde"
+    - Patterns are case-sensitive
+    - Multiple patterns use OR logic (matches any pattern)
+    - Example: `research list "clap*" "serde*"` matches topics starting with "clap" or "serde"
 
 #### Options
 
 - `-t, --type <TYPE>` - Filter by research type (repeatable)
-  - Types are case-insensitive
-  - Multiple types use OR logic (matches any type)
-  - Example: `research list -t library -t framework`
+    - Types are case-insensitive
+    - Multiple types use OR logic (matches any type)
+    - Example: `research list -t library -t framework`
 
 - `--json` - Output as JSON instead of terminal format
-  - Useful for scripting and integration with other tools
+    - Useful for scripting and integration with other tools
 
 - `-v, --verbose...` - Increase verbosity (-v, -vv, -vvv)
-  - Controls logging output level
+    - Controls logging output level
 
 - `-h, --help` - Print help
 
 #### Examples
 
 **List all topics:**
+
 ```bash
 research list
 ```
 
 **Filter by pattern:**
+
 ```bash
 # List all topics starting with "serde"
 research list "serde*"
@@ -75,6 +77,7 @@ research list "*parser*"
 ```
 
 **Filter by type:**
+
 ```bash
 # List only libraries
 research list -t library
@@ -84,12 +87,14 @@ research list -t library -t framework
 ```
 
 **Combine filters:**
+
 ```bash
 # List all libraries starting with "clap"
 research list -t library "clap*"
 ```
 
 **JSON output:**
+
 ```bash
 # Get JSON output for scripting
 research list --json
@@ -114,6 +119,7 @@ research list -t library "serde*" --json
 ```
 
 Topics are color-coded based on status:
+
 - **RED + BOLD**: Missing output files or metadata.json (critical issues)
 - **ORANGE + BOLD**: Missing underlying documents only (minor issues)
 - **BOLD**: All files present (no issues)
