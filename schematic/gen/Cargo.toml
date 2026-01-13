@@ -1,0 +1,27 @@
+[package]
+name = "schematic-gen"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Code generator for schematic REST API definitions"
+
+[lib]
+name = "schematic_gen"
+path = "src/lib.rs"
+
+[[bin]]
+name = "schematic-gen"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+thiserror = "2.0"
+schematic-define = { path = "../define" }
+syn = { version = "2.0", features = ["full", "parsing"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+prettyplease = "0.2"
+
+[dev-dependencies]
+tempfile = "3.15"
+toml = "0.8"
