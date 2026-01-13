@@ -72,6 +72,15 @@ pub fn generate_error_type() -> TokenStream {
             /// Failed to serialize request body to JSON.
             #[error("Failed to serialize request body: {0}")]
             SerializationError(String),
+
+            /// Missing authentication credentials.
+            ///
+            /// None of the configured environment variables contained a value.
+            #[error("Missing credentials: none of the following environment variables are set: {env_vars:?}")]
+            MissingCredential {
+                /// The environment variable names that were checked.
+                env_vars: Vec<String>,
+            },
         }
     }
 }
@@ -106,6 +115,10 @@ mod tests {
         assert!(
             code.contains("SerializationError("),
             "Missing SerializationError variant"
+        );
+        assert!(
+            code.contains("MissingCredential {"),
+            "Missing MissingCredential variant"
         );
     }
 

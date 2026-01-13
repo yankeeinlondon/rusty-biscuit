@@ -143,6 +143,9 @@ fn generate_code_for_various_api_configurations() {
             base_url: "https://api.simple.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            env_auth: vec![],
+            env_username: None,
+            env_password: None,
             endpoints: vec![Endpoint {
                 id: "GetRoot".to_string(),
                 method: RestMethod::Get,
@@ -159,6 +162,9 @@ fn generate_code_for_various_api_configurations() {
             base_url: "https://api.methods.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            env_auth: vec![],
+            env_username: None,
+            env_password: None,
             endpoints: vec![
                 Endpoint {
                     id: "Get".to_string(),
@@ -208,10 +214,10 @@ fn generate_code_for_various_api_configurations() {
             description: "API with nested path parameters".to_string(),
             base_url: "https://api.nested.com".to_string(),
             docs_url: None,
-            auth: AuthStrategy::BearerToken {
-                env_var: "NESTED_API_KEY".to_string(),
-                header: None,
-            },
+            auth: AuthStrategy::BearerToken { header: None },
+            env_auth: vec!["NESTED_API_KEY".to_string()],
+            env_username: None,
+            env_password: None,
             endpoints: vec![
                 Endpoint {
                     id: "GetItem".to_string(),

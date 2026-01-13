@@ -122,10 +122,10 @@ fn generate_body_field(endpoint: &Endpoint) -> TokenStream {
 fn generate_derives(has_body: bool) -> TokenStream {
     if has_body {
         // With body, we don't derive Default (we implement it manually)
-        quote! { #[derive(Debug, Clone)] }
+        quote! { #[derive(Debug, Clone, Serialize, Deserialize)] }
     } else {
         // Without body, we can derive Default
-        quote! { #[derive(Debug, Clone, Default)] }
+        quote! { #[derive(Debug, Clone, Default, Serialize, Deserialize)] }
     }
 }
 
@@ -163,7 +163,11 @@ fn generate_into_parts(endpoint: &Endpoint, path_params: &[&str], method_str: &s
     let has_body = endpoint.request.is_some();
 
     let body_expr = if has_body {
-        quote! { serde_json::to_string(&self.body).ok() }
+        quote! {
+            Some(serde_json::to_string(&self.body).map_err(|e| {
+                SchematicError::SerializationError(e.to_string())
+            })?)
+        }
     } else {
         quote! { None }
     };
@@ -177,9 +181,14 @@ fn generate_into_parts(endpoint: &Endpoint, path_params: &[&str], method_str: &s
         /// - HTTP method as a static string (e.g., "GET", "POST")
         /// - Fully substituted path string
         /// - Optional JSON body string
-        pub fn into_parts(self) -> (&'static str, String, Option<String>) {
+        ///
+        /// ## Errors
+        ///
+        /// Returns `SchematicError::SerializationError` if the request body
+        /// fails to serialize to JSON.
+        pub fn into_parts(self) -> Result<(&'static str, String, Option<String>), SchematicError> {
             #path_format
-            (#method_str, path, #body_expr)
+            Ok((#method_str, path, #body_expr))
         }
     }
 }
@@ -260,11 +269,12 @@ mod tests {
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         assert!(code.contains("pub struct ListModelsRequest"));
-        assert!(code.contains("#[derive(Debug, Clone, Default)]"));
-        assert!(code.contains("fn into_parts(self)"));
+        assert!(code.contains("#[derive(Debug, Clone, Default, Serialize, Deserialize)]"));
+        assert!(code.contains("into_parts"));
+        assert!(code.contains("Result<"));
+        assert!(code.contains("SchematicError"));
         assert!(code.contains(r#""GET""#));
         assert!(code.contains(r#""/models".to_string()"#));
-        assert!(code.contains("None"));
     }
 
     #[test]
@@ -311,11 +321,13 @@ mod tests {
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         assert!(code.contains("pub struct CreateCompletionRequest"));
-        assert!(code.contains("#[derive(Debug, Clone)]"));
+        assert!(code.contains("#[derive(Debug, Clone, Serialize, Deserialize)]"));
         assert!(code.contains("pub body: CreateCompletionRequest"));
         assert!(code.contains("impl Default for CreateCompletionRequest"));
         assert!(code.contains(r#""POST""#));
-        assert!(code.contains("serde_json::to_string(&self.body).ok()"));
+        assert!(code.contains("serde_json::to_string(&self.body)"));
+        assert!(code.contains(".map_err"));
+        assert!(code.contains("SerializationError"));
     }
 
     #[test]

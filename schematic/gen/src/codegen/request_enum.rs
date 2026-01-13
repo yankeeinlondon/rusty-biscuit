@@ -140,6 +140,9 @@ mod tests {
             base_url: "https://api.example.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            env_auth: vec![],
+            env_username: None,
+            env_password: None,
             endpoints,
         }
     }

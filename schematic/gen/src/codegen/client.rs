@@ -48,7 +48,7 @@ pub fn generate_request_method(api: &RestApi) -> TokenStream {
     let struct_name = format_ident!("{}", api.name);
     let request_enum = format_ident!("{}Request", api.name);
 
-    let auth_setup = generate_auth_setup(&api.auth);
+    let auth_setup = generate_auth_setup(api);
 
     quote! {
         impl #struct_name {
@@ -68,7 +68,7 @@ pub fn generate_request_method(api: &RestApi) -> TokenStream {
                 request: impl Into<#request_enum>,
             ) -> Result<T, SchematicError> {
                 let request = request.into();
-                let (method, path, body) = request.into_parts();
+                let (method, path, body) = request.into_parts()?;
                 let url = format!("{}{}", self.base_url, path);
 
                 let mut req_builder = match method {
@@ -107,39 +107,52 @@ pub fn generate_request_method(api: &RestApi) -> TokenStream {
     }
 }
 
-/// Generates auth setup code based on the AuthStrategy.
+/// Generates auth setup code based on the AuthStrategy and RestApi credentials.
 ///
 /// Returns the appropriate TokenStream for setting up authentication
-/// headers on the request builder.
-fn generate_auth_setup(auth: &AuthStrategy) -> TokenStream {
-    match auth {
+/// headers on the request builder. Returns an error if required credentials
+/// are missing.
+fn generate_auth_setup(api: &RestApi) -> TokenStream {
+    match &api.auth {
         AuthStrategy::None => quote! {},
-        AuthStrategy::BearerToken { env_var, header } => {
+        AuthStrategy::BearerToken { header } => {
             let header_name = header.as_deref().unwrap_or("Authorization");
+            let env_vars = &api.env_auth;
             quote! {
-                if let Ok(token) = std::env::var(#env_var) {
-                    req_builder = req_builder.header(#header_name, format!("Bearer {}", token));
-                }
+                let token = [#(#env_vars),*]
+                    .iter()
+                    .find_map(|var| std::env::var(var).ok())
+                    .ok_or_else(|| SchematicError::MissingCredential {
+                        env_vars: vec![#(#env_vars.to_string()),*],
+                    })?;
+                req_builder = req_builder.header(#header_name, format!("Bearer {}", token));
             }
         }
-        AuthStrategy::ApiKey { env_var, header } => {
+        AuthStrategy::ApiKey { header } => {
+            let env_vars = &api.env_auth;
             quote! {
-                if let Ok(key) = std::env::var(#env_var) {
-                    req_builder = req_builder.header(#header, key);
-                }
+                let key = [#(#env_vars),*]
+                    .iter()
+                    .find_map(|var| std::env::var(var).ok())
+                    .ok_or_else(|| SchematicError::MissingCredential {
+                        env_vars: vec![#(#env_vars.to_string()),*],
+                    })?;
+                req_builder = req_builder.header(#header, key);
             }
         }
-        AuthStrategy::Basic {
-            username_env,
-            password_env,
-        } => {
+        AuthStrategy::Basic => {
+            let username_env = api.env_username.as_deref().unwrap_or("USERNAME");
+            let password_env = api.env_password.as_deref().unwrap_or("PASSWORD");
             quote! {
-                if let (Ok(username), Ok(password)) = (
-                    std::env::var(#username_env),
-                    std::env::var(#password_env)
-                ) {
-                    req_builder = req_builder.basic_auth(username, Some(password));
-                }
+                let username = std::env::var(#username_env)
+                    .map_err(|_| SchematicError::MissingCredential {
+                        env_vars: vec![#username_env.to_string()],
+                    })?;
+                let password = std::env::var(#password_env)
+                    .map_err(|_| SchematicError::MissingCredential {
+                        env_vars: vec![#password_env.to_string()],
+                    })?;
+                req_builder = req_builder.basic_auth(username, Some(password));
             }
         }
     }
@@ -151,13 +164,37 @@ mod tests {
     use crate::codegen::request_structs::{format_generated_code, validate_generated_code};
     use schematic_define::{ApiResponse, Endpoint, RestMethod};
 
-    fn make_api(name: &str, auth: AuthStrategy) -> RestApi {
+    fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
         RestApi {
             name: name.to_string(),
             description: format!("{} API", name),
             base_url: "https://api.example.com".to_string(),
             docs_url: None,
             auth,
+            env_auth,
+            env_username: None,
+            env_password: None,
+            endpoints: vec![Endpoint {
+                id: "ListItems".to_string(),
+                method: RestMethod::Get,
+                path: "/items".to_string(),
+                description: "List items".to_string(),
+                request: None,
+                response: ApiResponse::json_type("ListItemsResponse"),
+            }],
+        }
+    }
+
+    fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> RestApi {
+        RestApi {
+            name: name.to_string(),
+            description: format!("{} API", name),
+            base_url: "https://api.example.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::Basic,
+            env_auth: vec![],
+            env_username: Some(username_env.to_string()),
+            env_password: Some(password_env.to_string()),
             endpoints: vec![Endpoint {
                 id: "ListItems".to_string(),
                 method: RestMethod::Get,
@@ -171,7 +208,7 @@ mod tests {
 
     #[test]
     fn generate_request_method_no_auth() {
-        let api = make_api("NoAuth", AuthStrategy::None);
+        let api = make_api("NoAuth", AuthStrategy::None, vec![]);
         let tokens = generate_request_method(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
@@ -183,7 +220,7 @@ mod tests {
 
         // Check request handling
         assert!(code.contains("let request = request.into()"));
-        assert!(code.contains("let (method, path, body) = request.into_parts()"));
+        assert!(code.contains("let (method, path, body) = request.into_parts()?"));
         assert!(code.contains("format!(\"{}{}\", self.base_url, path)"));
 
         // Check HTTP method matching
@@ -212,17 +249,16 @@ mod tests {
     fn generate_request_method_bearer_token_default_header() {
         let api = make_api(
             "Bearer",
-            AuthStrategy::BearerToken {
-                env_var: "API_TOKEN".to_string(),
-                header: None,
-            },
+            AuthStrategy::BearerToken { header: None },
+            vec!["API_TOKEN".to_string()],
         );
         let tokens = generate_request_method(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Check bearer token auth setup
-        assert!(code.contains(r#"std::env::var("API_TOKEN")"#));
+        assert!(code.contains("API_TOKEN"));
         assert!(code.contains(r#"header("Authorization", format!("Bearer {}", token))"#));
+        assert!(code.contains("MissingCredential"));
     }
 
     #[test]
@@ -230,15 +266,15 @@ mod tests {
         let api = make_api(
             "CustomBearer",
             AuthStrategy::BearerToken {
-                env_var: "MY_TOKEN".to_string(),
                 header: Some("X-Auth-Token".to_string()),
             },
+            vec!["MY_TOKEN".to_string()],
         );
         let tokens = generate_request_method(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Check custom header is used
-        assert!(code.contains(r#"std::env::var("MY_TOKEN")"#));
+        assert!(code.contains("MY_TOKEN"));
         assert!(code.contains(r#"header("X-Auth-Token", format!("Bearer {}", token))"#));
     }
 
@@ -247,80 +283,82 @@ mod tests {
         let api = make_api(
             "ApiKey",
             AuthStrategy::ApiKey {
-                env_var: "X_API_KEY".to_string(),
                 header: "X-API-Key".to_string(),
             },
+            vec!["X_API_KEY".to_string()],
         );
         let tokens = generate_request_method(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Check API key auth setup
-        assert!(code.contains(r#"std::env::var("X_API_KEY")"#));
+        assert!(code.contains("X_API_KEY"));
         assert!(code.contains(r#"header("X-API-Key", key)"#));
+        assert!(code.contains("MissingCredential"));
     }
 
     #[test]
     fn generate_request_method_basic_auth() {
-        let api = make_api(
-            "BasicAuth",
-            AuthStrategy::Basic {
-                username_env: "API_USER".to_string(),
-                password_env: "API_PASS".to_string(),
-            },
-        );
+        let api = make_basic_auth_api("BasicAuth", "API_USER", "API_PASS");
         let tokens = generate_request_method(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Check basic auth setup
-        assert!(code.contains(r#"std::env::var("API_USER")"#));
-        assert!(code.contains(r#"std::env::var("API_PASS")"#));
+        assert!(code.contains("API_USER"));
+        assert!(code.contains("API_PASS"));
         assert!(code.contains("basic_auth(username, Some(password))"));
+        assert!(code.contains("MissingCredential"));
     }
 
     #[test]
     fn generate_request_method_validates_syntax() {
-        let api = make_api("Validated", AuthStrategy::None);
+        let api = make_api("Validated", AuthStrategy::None, vec![]);
         let tokens = generate_request_method(&api);
         assert!(validate_generated_code(&tokens).is_ok());
     }
 
     #[test]
     fn generate_request_method_all_auth_strategies_validate() {
-        let auth_strategies = [
-            AuthStrategy::None,
+        // Test no auth
+        let api = make_api("Test", AuthStrategy::None, vec![]);
+        assert!(validate_generated_code(&generate_request_method(&api)).is_ok());
+
+        // Test bearer token
+        let api = make_api(
+            "Test",
+            AuthStrategy::BearerToken { header: None },
+            vec!["TOKEN".to_string()],
+        );
+        assert!(validate_generated_code(&generate_request_method(&api)).is_ok());
+
+        // Test bearer token with custom header
+        let api = make_api(
+            "Test",
             AuthStrategy::BearerToken {
-                env_var: "TOKEN".to_string(),
-                header: None,
-            },
-            AuthStrategy::BearerToken {
-                env_var: "TOKEN".to_string(),
                 header: Some("Custom-Header".to_string()),
             },
+            vec!["TOKEN".to_string()],
+        );
+        assert!(validate_generated_code(&generate_request_method(&api)).is_ok());
+
+        // Test API key
+        let api = make_api(
+            "Test",
             AuthStrategy::ApiKey {
-                env_var: "KEY".to_string(),
                 header: "X-Key".to_string(),
             },
-            AuthStrategy::Basic {
-                username_env: "USER".to_string(),
-                password_env: "PASS".to_string(),
-            },
-        ];
+            vec!["KEY".to_string()],
+        );
+        assert!(validate_generated_code(&generate_request_method(&api)).is_ok());
 
-        for auth in auth_strategies {
-            let api = make_api("Test", auth);
-            let tokens = generate_request_method(&api);
-            assert!(
-                validate_generated_code(&tokens).is_ok(),
-                "Auth strategy {:?} should produce valid code",
-                api.auth
-            );
-        }
+        // Test basic auth
+        let api = make_basic_auth_api("Test", "USER", "PASS");
+        assert!(validate_generated_code(&generate_request_method(&api)).is_ok());
     }
 
     #[test]
     fn generate_auth_setup_none() {
-        let auth = AuthStrategy::None;
-        let tokens = generate_auth_setup(&auth);
+        let api = make_api("Test", AuthStrategy::None, vec![]);
+        let tokens = generate_auth_setup(&api);
         let code = tokens.to_string();
 
         // Should produce empty code
@@ -329,11 +367,12 @@ mod tests {
 
     #[test]
     fn generate_auth_setup_bearer_preserves_env_var_name() {
-        let auth = AuthStrategy::BearerToken {
-            env_var: "MY_SPECIAL_TOKEN".to_string(),
-            header: None,
-        };
-        let tokens = generate_auth_setup(&auth);
+        let api = make_api(
+            "Test",
+            AuthStrategy::BearerToken { header: None },
+            vec!["MY_SPECIAL_TOKEN".to_string()],
+        );
+        let tokens = generate_auth_setup(&api);
         let code = tokens.to_string();
 
         assert!(code.contains("MY_SPECIAL_TOKEN"));
@@ -341,11 +380,14 @@ mod tests {
 
     #[test]
     fn generate_auth_setup_api_key_preserves_header_name() {
-        let auth = AuthStrategy::ApiKey {
-            env_var: "KEY".to_string(),
-            header: "X-Custom-Header".to_string(),
-        };
-        let tokens = generate_auth_setup(&auth);
+        let api = make_api(
+            "Test",
+            AuthStrategy::ApiKey {
+                header: "X-Custom-Header".to_string(),
+            },
+            vec!["KEY".to_string()],
+        );
+        let tokens = generate_auth_setup(&api);
         let code = tokens.to_string();
 
         assert!(code.contains("X-Custom-Header"));
@@ -353,7 +395,7 @@ mod tests {
 
     #[test]
     fn generate_request_method_doc_comments() {
-        let api = make_api("Documented", AuthStrategy::None);
+        let api = make_api("Documented", AuthStrategy::None, vec![]);
         let tokens = generate_request_method(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
@@ -364,7 +406,7 @@ mod tests {
 
     #[test]
     fn generate_request_method_no_unwrap_in_error_path() {
-        let api = make_api("SafeError", AuthStrategy::None);
+        let api = make_api("SafeError", AuthStrategy::None, vec![]);
         let tokens = generate_request_method(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 

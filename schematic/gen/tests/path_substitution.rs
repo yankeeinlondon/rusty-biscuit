@@ -198,10 +198,15 @@ fn path_param_with_body_has_both_fields() {
         code
     );
 
-    // Verify body serialization
+    // Verify body serialization (now with error handling)
     assert!(
-        code.contains("serde_json::to_string(&self.body).ok()"),
+        code.contains("serde_json::to_string(&self.body)"),
         "Should serialize body\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        code.contains("SerializationError"),
+        "Should handle serialization errors\nGenerated code:\n{}",
         code
     );
 }

@@ -68,10 +68,10 @@ pub fn define_openai_api() -> RestApi {
         description: "OpenAI REST API for model management".to_string(),
         base_url: "https://api.openai.com/v1".to_string(),
         docs_url: Some("https://platform.openai.com/docs/api-reference".to_string()),
-        auth: AuthStrategy::BearerToken {
-            env_var: "OPENAI_API_KEY".to_string(),
-            header: None,
-        },
+        auth: AuthStrategy::BearerToken { header: None },
+        env_auth: vec!["OPENAI_API_KEY".to_string()],
+        env_username: None,
+        env_password: None,
         endpoints: vec![
             Endpoint {
                 id: "ListModels".to_string(),
@@ -119,12 +119,12 @@ mod tests {
         let api = define_openai_api();
 
         match &api.auth {
-            AuthStrategy::BearerToken { env_var, header } => {
-                assert_eq!(env_var, "OPENAI_API_KEY");
+            AuthStrategy::BearerToken { header } => {
                 assert!(header.is_none());
             }
             _ => panic!("Expected BearerToken auth strategy"),
         }
+        assert_eq!(api.env_auth, vec!["OPENAI_API_KEY"]);
     }
 
     #[test]

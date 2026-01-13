@@ -1,16 +1,18 @@
 //! Authentication strategies for REST APIs.
 //!
 //! This module defines the supported authentication methods for API clients.
-//! Each strategy specifies how credentials are obtained (via environment
-//! variables) and how they're applied to HTTP requests.
+//! Each strategy specifies how credentials are applied to HTTP requests.
+//! The actual credential source (environment variables) is configured on
+//! the [`RestApi`](crate::RestApi) struct.
 
 use serde::{Deserialize, Serialize};
 
 /// Authentication strategy for an API.
 ///
-/// Defines how authentication credentials are obtained and applied to
-/// HTTP requests. All credentials are read from environment variables
-/// to avoid hardcoding secrets in code.
+/// Defines how authentication credentials are applied to HTTP requests.
+/// The credential sources (environment variables) are specified on the
+/// [`RestApi`](crate::RestApi) struct via `env_auth`, `env_username`,
+/// and `env_password` fields.
 ///
 /// ## Examples
 ///
@@ -28,9 +30,9 @@ use serde::{Deserialize, Serialize};
 /// use schematic_define::AuthStrategy;
 ///
 /// let auth = AuthStrategy::BearerToken {
-///     env_var: "OPENAI_API_KEY".to_string(),
 ///     header: None, // Uses default "Authorization" header
 /// };
+/// // Credential env vars are set on RestApi::env_auth
 /// ```
 ///
 /// API key in custom header:
@@ -39,9 +41,9 @@ use serde::{Deserialize, Serialize};
 /// use schematic_define::AuthStrategy;
 ///
 /// let auth = AuthStrategy::ApiKey {
-///     env_var: "MY_API_KEY".to_string(),
 ///     header: "X-API-Key".to_string(),
 /// };
+/// // Credential env vars are set on RestApi::env_auth
 /// ```
 ///
 /// Basic authentication:
@@ -49,12 +51,10 @@ use serde::{Deserialize, Serialize};
 /// ```
 /// use schematic_define::AuthStrategy;
 ///
-/// let auth = AuthStrategy::Basic {
-///     username_env: "SERVICE_USER".to_string(),
-///     password_env: "SERVICE_PASSWORD".to_string(),
-/// };
+/// let auth = AuthStrategy::Basic;
+/// // Credential env vars are set on RestApi::env_username and env_password
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AuthStrategy {
     /// No authentication required.
     ///
@@ -66,9 +66,10 @@ pub enum AuthStrategy {
     ///
     /// The most common authentication method for modern REST APIs.
     /// Generates: `Authorization: Bearer <token>`
+    ///
+    /// The token is read from environment variables specified in
+    /// `RestApi::env_auth`. Multiple env vars can be specified as a fallback chain.
     BearerToken {
-        /// Environment variable name containing the token (e.g., "OPENAI_API_KEY").
-        env_var: String,
         /// Optional header name override.
         ///
         /// Default is "Authorization". Some APIs use custom headers like
@@ -80,9 +81,10 @@ pub enum AuthStrategy {
     ///
     /// Common for APIs that use a simple key without the "Bearer" prefix.
     /// Generates: `<header>: <key>`
+    ///
+    /// The key is read from environment variables specified in
+    /// `RestApi::env_auth`. Multiple env vars can be specified as a fallback chain.
     ApiKey {
-        /// Environment variable name containing the key.
-        env_var: String,
         /// Header name (e.g., "X-API-Key", "Api-Key").
         header: String,
     },
@@ -91,10 +93,8 @@ pub enum AuthStrategy {
     ///
     /// Uses HTTP Basic Authentication with base64-encoded credentials.
     /// Generates: `Authorization: Basic <base64(username:password)>`
-    Basic {
-        /// Environment variable for username.
-        username_env: String,
-        /// Environment variable for password.
-        password_env: String,
-    },
+    ///
+    /// Username and password are read from environment variables specified in
+    /// `RestApi::env_username` and `RestApi::env_password`.
+    Basic,
 }

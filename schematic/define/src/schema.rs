@@ -77,7 +77,7 @@ impl<T> SchemaObject for T where T: Serialize + DeserializeOwned + Debug + Clone
 /// let schema = Schema::with_path("Model", "crate::types");
 /// assert_eq!(schema.full_path(), "crate::types::Model");
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Schema {
     /// The Rust type name (e.g., "ListModelsResponse").
     pub type_name: String,

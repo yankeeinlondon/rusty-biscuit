@@ -156,7 +156,7 @@ pub fn write_atomic(path: &Path, content: &str) -> Result<(), GeneratorError> {
     }
 
     // Write to temp file first
-    let temp_path = path.with_extension("rs.tmp");
+    let temp_path = path.with_extension("tmp");
     fs::write(&temp_path, content).map_err(|e| GeneratorError::WriteError {
         path: temp_path.display().to_string(),
         source: e,
@@ -233,6 +233,9 @@ mod tests {
             base_url: "https://api.test.com/v1".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            env_auth: vec![],
+            env_username: None,
+            env_password: None,
             endpoints: vec![Endpoint {
                 id: "ListItems".to_string(),
                 method: RestMethod::Get,
@@ -250,10 +253,10 @@ mod tests {
             description: "OpenAI REST API".to_string(),
             base_url: "https://api.openai.com/v1".to_string(),
             docs_url: Some("https://platform.openai.com/docs".to_string()),
-            auth: AuthStrategy::BearerToken {
-                env_var: "OPENAI_API_KEY".to_string(),
-                header: None,
-            },
+            auth: AuthStrategy::BearerToken { header: None },
+            env_auth: vec!["OPENAI_API_KEY".to_string()],
+            env_username: None,
+            env_password: None,
             endpoints: vec![
                 Endpoint {
                     id: "ListModels".to_string(),
@@ -469,7 +472,7 @@ mod tests {
         write_atomic(&file_path, "// Content").unwrap();
 
         // Check no .tmp file exists
-        let temp_path = file_path.with_extension("rs.tmp");
+        let temp_path = file_path.with_extension("tmp");
         assert!(!temp_path.exists());
     }
 
@@ -560,29 +563,41 @@ mod tests {
 
     #[test]
     fn full_pipeline_with_all_auth_strategies() {
-        let auth_strategies = [
-            AuthStrategy::None,
-            AuthStrategy::BearerToken {
-                env_var: "TOKEN".to_string(),
-                header: None,
-            },
-            AuthStrategy::ApiKey {
-                env_var: "KEY".to_string(),
-                header: "X-API-Key".to_string(),
-            },
-            AuthStrategy::Basic {
-                username_env: "USER".to_string(),
-                password_env: "PASS".to_string(),
-            },
+        // Test configurations: (auth, env_auth, env_username, env_password)
+        let test_cases: Vec<(AuthStrategy, Vec<String>, Option<String>, Option<String>)> = vec![
+            (AuthStrategy::None, vec![], None, None),
+            (
+                AuthStrategy::BearerToken { header: None },
+                vec!["TOKEN".to_string()],
+                None,
+                None,
+            ),
+            (
+                AuthStrategy::ApiKey {
+                    header: "X-API-Key".to_string(),
+                },
+                vec!["KEY".to_string()],
+                None,
+                None,
+            ),
+            (
+                AuthStrategy::Basic,
+                vec![],
+                Some("USER".to_string()),
+                Some("PASS".to_string()),
+            ),
         ];
 
-        for auth in auth_strategies {
+        for (auth, env_auth, env_username, env_password) in test_cases {
             let api = RestApi {
                 name: "TestApi".to_string(),
                 description: "Test".to_string(),
                 base_url: "https://test.com".to_string(),
                 docs_url: None,
-                auth,
+                auth: auth.clone(),
+                env_auth,
+                env_username,
+                env_password,
                 endpoints: vec![Endpoint {
                     id: "Test".to_string(),
                     method: RestMethod::Get,
@@ -595,11 +610,7 @@ mod tests {
 
             let temp_dir = TempDir::new().unwrap();
             let result = generate_and_write(&api, temp_dir.path(), false);
-            assert!(
-                result.is_ok(),
-                "Failed for auth strategy: {:?}",
-                api.auth
-            );
+            assert!(result.is_ok(), "Failed for auth strategy: {:?}", auth);
         }
     }
 
@@ -634,6 +645,9 @@ mod tests {
             base_url: "https://test.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            env_auth: vec![],
+            env_username: None,
+            env_password: None,
             endpoints,
         };
 
@@ -660,6 +674,9 @@ mod tests {
             base_url: "https://empty.com".to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            env_auth: vec![],
+            env_username: None,
+            env_password: None,
             endpoints: vec![],
         };
 

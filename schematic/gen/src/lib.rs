@@ -66,3 +66,6 @@ pub mod codegen;
 pub mod errors;
 pub mod output;
 pub mod parser;
+
+#[cfg(test)]
+pub mod test_utils;

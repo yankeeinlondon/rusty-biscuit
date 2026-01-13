@@ -87,6 +87,9 @@ pub enum RestMethod {
 ///     base_url: "https://api.example.com/v1".to_string(),
 ///     docs_url: None,
 ///     auth: AuthStrategy::None,
+///     env_auth: vec![],
+///     env_username: None,
+///     env_password: None,
 ///     endpoints: vec![
 ///         Endpoint {
 ///             id: "GetHealth".to_string(),
@@ -102,7 +105,7 @@ pub enum RestMethod {
 /// assert_eq!(api.name, "SimpleApi");
 /// assert_eq!(api.endpoints.len(), 1);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestApi {
     /// Unique identifier for this API (used for generated struct/enum names).
     ///
@@ -119,6 +122,22 @@ pub struct RestApi {
     pub docs_url: Option<String>,
     /// Authentication strategy for this API.
     pub auth: AuthStrategy,
+    /// Environment variable names for authentication credentials.
+    ///
+    /// For `BearerToken` and `ApiKey` auth strategies, this is a fallback chain.
+    /// The first env var that is set will be used. If none are set, the request
+    /// will fail with a `MissingCredential` error.
+    ///
+    /// Example: `vec!["OPENAI_API_KEY".to_string(), "OPENAI_KEY".to_string()]`
+    pub env_auth: Vec<String>,
+    /// Environment variable for Basic auth username.
+    ///
+    /// Only used when `auth` is `AuthStrategy::Basic`.
+    pub env_username: Option<String>,
+    /// Environment variable for Basic auth password.
+    ///
+    /// Only used when `auth` is `AuthStrategy::Basic`.
+    pub env_password: Option<String>,
     /// All endpoints defined for this API.
     pub endpoints: Vec<Endpoint>,
 }
@@ -168,7 +187,7 @@ pub struct RestApi {
 ///
 /// assert!(endpoint.request.is_some());
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
     /// Identifier for this endpoint (becomes the enum variant and struct name).
     ///

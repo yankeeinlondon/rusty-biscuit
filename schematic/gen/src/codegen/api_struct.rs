@@ -13,6 +13,8 @@ use schematic_define::RestApi;
 /// - `BASE_URL` constant containing the API's base URL
 /// - `new()` constructor using the default base URL
 /// - `with_base_url()` constructor for custom base URLs
+/// - `with_client()` constructor for custom reqwest clients
+/// - `with_client_and_base_url()` constructor for both custom client and URL
 /// - `Default` trait implementation
 ///
 /// ## Examples
@@ -87,6 +89,44 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     base_url: base_url.into(),
                 }
             }
+
+            /// Creates a new API client with a pre-configured reqwest client.
+            ///
+            /// Use this when you need custom timeouts, connection pools, or middleware.
+            ///
+            /// ## Examples
+            ///
+            /// ```ignore
+            /// let custom_client = reqwest::Client::builder()
+            ///     .timeout(std::time::Duration::from_secs(60))
+            ///     .build()
+            ///     .unwrap();
+            /// let api = Api::with_client(custom_client);
+            /// ```
+            pub fn with_client(client: reqwest::Client) -> Self {
+                Self {
+                    client,
+                    base_url: Self::BASE_URL.to_string(),
+                }
+            }
+
+            /// Creates a new API client with a pre-configured reqwest client and custom base URL.
+            ///
+            /// ## Examples
+            ///
+            /// ```ignore
+            /// let custom_client = reqwest::Client::builder()
+            ///     .timeout(std::time::Duration::from_secs(60))
+            ///     .build()
+            ///     .unwrap();
+            /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
+            /// ```
+            pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
+                Self {
+                    client,
+                    base_url: base_url.into(),
+                }
+            }
         }
 
         impl Default for #struct_name {
@@ -110,6 +150,9 @@ mod tests {
             base_url: base_url.to_string(),
             docs_url: None,
             auth: AuthStrategy::None,
+            env_auth: vec![],
+            env_username: None,
+            env_password: None,
             endpoints: vec![],
         }
     }
@@ -197,5 +240,28 @@ mod tests {
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         assert!(code.contains("https://api.example.com:8443/v2/beta"));
+    }
+
+    #[test]
+    fn generate_api_struct_has_with_client_constructor() {
+        let api = make_api("TestApi", "https://api.test.com", "Test API");
+        let tokens = generate_api_struct(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Check with_client() constructor
+        assert!(code.contains("pub fn with_client(client: reqwest::Client) -> Self"));
+        assert!(code.contains("Self::BASE_URL.to_string()"));
+    }
+
+    #[test]
+    fn generate_api_struct_has_with_client_and_base_url_constructor() {
+        let api = make_api("TestApi", "https://api.test.com", "Test API");
+        let tokens = generate_api_struct(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Check with_client_and_base_url() constructor
+        assert!(code.contains("pub fn with_client_and_base_url"));
+        assert!(code.contains("client: reqwest::Client"));
+        assert!(code.contains("base_url: impl Into<String>"));
     }
 }

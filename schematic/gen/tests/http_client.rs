@@ -17,13 +17,16 @@ fn format_tokens(tokens: &TokenStream) -> String {
 }
 
 /// Creates a test API with the given auth strategy.
-fn make_api(name: &str, auth: AuthStrategy) -> RestApi {
+fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
     RestApi {
         name: name.to_string(),
         description: format!("{} API", name),
         base_url: "https://api.example.com/v1".to_string(),
         docs_url: None,
         auth,
+        env_auth,
+        env_username: None,
+        env_password: None,
         endpoints: vec![
             Endpoint {
                 id: "GetItems".to_string(),
@@ -45,13 +48,37 @@ fn make_api(name: &str, auth: AuthStrategy) -> RestApi {
     }
 }
 
+/// Creates a test API with basic auth.
+fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> RestApi {
+    RestApi {
+        name: name.to_string(),
+        description: format!("{} API", name),
+        base_url: "https://api.example.com/v1".to_string(),
+        docs_url: None,
+        auth: AuthStrategy::Basic,
+        env_auth: vec![],
+        env_username: Some(username_env.to_string()),
+        env_password: Some(password_env.to_string()),
+        endpoints: vec![
+            Endpoint {
+                id: "GetItems".to_string(),
+                method: RestMethod::Get,
+                path: "/items".to_string(),
+                description: "Get items".to_string(),
+                request: None,
+                response: ApiResponse::json_type("ItemsResponse"),
+            },
+        ],
+    }
+}
+
 // =============================================================================
 // HTTP method matching tests
 // =============================================================================
 
 #[test]
 fn client_matches_get_method() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -64,7 +91,7 @@ fn client_matches_get_method() {
 
 #[test]
 fn client_matches_post_method() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -77,7 +104,7 @@ fn client_matches_post_method() {
 
 #[test]
 fn client_matches_put_method() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -90,7 +117,7 @@ fn client_matches_put_method() {
 
 #[test]
 fn client_matches_patch_method() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -103,7 +130,7 @@ fn client_matches_patch_method() {
 
 #[test]
 fn client_matches_delete_method() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -116,7 +143,7 @@ fn client_matches_delete_method() {
 
 #[test]
 fn client_matches_head_method() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -129,7 +156,7 @@ fn client_matches_head_method() {
 
 #[test]
 fn client_matches_options_method() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -142,7 +169,7 @@ fn client_matches_options_method() {
 
 #[test]
 fn client_handles_unsupported_method() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -159,7 +186,7 @@ fn client_handles_unsupported_method() {
 
 #[test]
 fn no_auth_generates_no_auth_code() {
-    let api = make_api("NoAuthApi", AuthStrategy::None);
+    let api = make_api("NoAuthApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -177,18 +204,16 @@ fn no_auth_generates_no_auth_code() {
 fn bearer_token_sets_authorization_header() {
     let api = make_api(
         "BearerApi",
-        AuthStrategy::BearerToken {
-            env_var: "BEARER_TOKEN".to_string(),
-            header: None,
-        },
+        AuthStrategy::BearerToken { header: None },
+        vec!["BEARER_TOKEN".to_string()],
     );
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
-    // Should read from env var
+    // Should contain env var name
     assert!(
-        code.contains(r#"std::env::var("BEARER_TOKEN")"#),
-        "Should read BEARER_TOKEN env var\nGenerated code:\n{}",
+        code.contains("BEARER_TOKEN"),
+        "Should reference BEARER_TOKEN env var\nGenerated code:\n{}",
         code
     );
 
@@ -205,9 +230,9 @@ fn bearer_token_with_custom_header() {
     let api = make_api(
         "CustomBearerApi",
         AuthStrategy::BearerToken {
-            env_var: "MY_TOKEN".to_string(),
             header: Some("X-Custom-Auth".to_string()),
         },
+        vec!["MY_TOKEN".to_string()],
     );
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
@@ -225,17 +250,17 @@ fn api_key_sets_custom_header() {
     let api = make_api(
         "ApiKeyApi",
         AuthStrategy::ApiKey {
-            env_var: "API_SECRET".to_string(),
             header: "X-API-Key".to_string(),
         },
+        vec!["API_SECRET".to_string()],
     );
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
-    // Should read from env var
+    // Should contain env var name
     assert!(
-        code.contains(r#"std::env::var("API_SECRET")"#),
-        "Should read API_SECRET env var\nGenerated code:\n{}",
+        code.contains("API_SECRET"),
+        "Should reference API_SECRET env var\nGenerated code:\n{}",
         code
     );
 
@@ -249,25 +274,19 @@ fn api_key_sets_custom_header() {
 
 #[test]
 fn basic_auth_uses_reqwest_basic_auth() {
-    let api = make_api(
-        "BasicAuthApi",
-        AuthStrategy::Basic {
-            username_env: "API_USER".to_string(),
-            password_env: "API_PASS".to_string(),
-        },
-    );
+    let api = make_basic_auth_api("BasicAuthApi", "API_USER", "API_PASS");
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
-    // Should read both env vars
+    // Should contain env var names
     assert!(
-        code.contains(r#"std::env::var("API_USER")"#),
-        "Should read API_USER env var\nGenerated code:\n{}",
+        code.contains("API_USER"),
+        "Should reference API_USER env var\nGenerated code:\n{}",
         code
     );
     assert!(
-        code.contains(r#"std::env::var("API_PASS")"#),
-        "Should read API_PASS env var\nGenerated code:\n{}",
+        code.contains("API_PASS"),
+        "Should reference API_PASS env var\nGenerated code:\n{}",
         code
     );
 
@@ -285,7 +304,7 @@ fn basic_auth_uses_reqwest_basic_auth() {
 
 #[test]
 fn client_adds_content_type_for_body() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -298,7 +317,7 @@ fn client_adds_content_type_for_body() {
 
 #[test]
 fn client_adds_body_when_present() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -320,7 +339,7 @@ fn client_adds_body_when_present() {
 
 #[test]
 fn client_checks_response_status() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -333,7 +352,7 @@ fn client_checks_response_status() {
 
 #[test]
 fn client_deserializes_json_response() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -346,7 +365,7 @@ fn client_deserializes_json_response() {
 
 #[test]
 fn client_handles_api_error() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -369,7 +388,7 @@ fn client_handles_api_error() {
 
 #[test]
 fn client_constructs_url_from_base_and_path() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -386,7 +405,7 @@ fn client_constructs_url_from_base_and_path() {
 
 #[test]
 fn api_struct_has_client_field() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -399,7 +418,7 @@ fn api_struct_has_client_field() {
 
 #[test]
 fn api_struct_has_base_url_field() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -412,7 +431,7 @@ fn api_struct_has_base_url_field() {
 
 #[test]
 fn api_struct_has_new_constructor() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -429,7 +448,7 @@ fn api_struct_has_new_constructor() {
 
 #[test]
 fn request_enum_has_variants_for_all_endpoints() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
@@ -452,7 +471,7 @@ fn request_enum_has_variants_for_all_endpoints() {
 
 #[test]
 fn request_enum_has_into_parts_method() {
-    let api = make_api("TestApi", AuthStrategy::None);
+    let api = make_api("TestApi", AuthStrategy::None, vec![]);
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 

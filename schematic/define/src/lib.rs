@@ -25,10 +25,10 @@
 //!     description: "OpenAI API".to_string(),
 //!     base_url: "https://api.openai.com/v1".to_string(),
 //!     docs_url: Some("https://platform.openai.com/docs/api-reference".to_string()),
-//!     auth: AuthStrategy::BearerToken {
-//!         env_var: "OPENAI_API_KEY".to_string(),
-//!         header: None,
-//!     },
+//!     auth: AuthStrategy::BearerToken { header: None },
+//!     env_auth: vec!["OPENAI_API_KEY".to_string()],
+//!     env_username: None,
+//!     env_password: None,
 //!     endpoints: vec![
 //!         Endpoint {
 //!             id: "ListModels".to_string(),
