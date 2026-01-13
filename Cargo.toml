@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["ai-pipeline/gen", "ai-pipeline/lib", "api-macros", "biscuit", "darkmatter", "model_id", "research/cli", "research/lib", "schematic", "sniff/cli", "sniff/lib", "so-you-say", "tabby", "tabby/ui", "tui"]
+members = ["ai-pipeline/gen", "ai-pipeline/lib", "api-macros", "biscuit", "darkmatter", "model_id", "research/cli", "research/lib", "schematic/define", "schematic/gen", "sniff/cli", "sniff/lib", "so-you-say", "tabby", "tabby/ui", "tui"]
