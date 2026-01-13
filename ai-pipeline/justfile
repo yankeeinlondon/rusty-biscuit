@@ -29,7 +29,7 @@ build *args="":
     @echo "AI Pipeline Lib + Gen"
     @echo "--------------------_"
     @echo ""
-    @cargo build -p ai-pipeline-lib {{args}}
+    @cargo build -p ai-pipeline {{args}}
     @cargo build -p ai-pipeline-gen {{args}}
 
 # run tests across research modules
@@ -38,7 +38,7 @@ test *args="":
     @echo "Testing AI Pipeline"
     @echo "-------------------"
     @echo ""
-    @cargo test -p ai-pipeline-lib {{args}}
+    @cargo test -p ai-pipeline {{args}}
     @cargo test -p ai-pipeline-gen {{args}}
 
 lint *args="":
