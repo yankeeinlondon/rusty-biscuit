@@ -1,5 +1,6 @@
 ---
 description: Sub-agent specialized for Rust development, testing, and DevOps with expertise in the Rust ecosystem
+model: claude-opus-4-5-20251101
 ---
 
 # Rust Developer Sub-Agent

@@ -1,3 +1,9 @@
+---
+description: Sub-agent specialized for Rust testing and DevOps with expertise in the Rust ecosystem
+model: claude-opus-4-5-20251101
+---
+
+
 # Tester Sub-Agent Quick Reference (Rust)
 
 Quick copy-paste templates for invoking the tester sub-agent for Rust projects.
@@ -50,17 +56,21 @@ Task({
     description: "Create unit tests for config parser",
     model: "claude-sonnet-4-5-20250929",
     prompt: `You are the tester sub-agent. Your task is to create comprehensive tests for a Rust feature.
+})
+```
 
 ## Context
 Read and follow the instructions in: agents/tester-agent.md
 Activate the rust-testing skill for Rust testing patterns and best practices.
 
 ## Input Information
+
 - **Feature Log File:** .ai/features/2025-11-13.config-parser
 - **Test Scope:** src/config/*.rs and tests/config_*.rs
 - **Feature Summary:** Add TOML configuration parsing with validation, default values, and environment variable overrides.
 
 ## Your Task
+
 1. Read the feature log file at the path specified above
 2. Activate the rust-testing skill
 3. Follow the complete workflow documented in agents/tester-agent.md
@@ -71,6 +81,7 @@ Activate the rust-testing skill for Rust testing patterns and best practices.
 6. Return a concise summary (see tester-agent.md for format)
 
 ## Rust Testing Conventions
+
 - Use \`#[test]\` attribute for test functions
 - Use \`#[cfg(test)]\` to conditionally compile test modules
 - Use \`use super::*;\` to access private functions in unit tests
@@ -80,6 +91,7 @@ Activate the rust-testing skill for Rust testing patterns and best practices.
 
 Execute the workflow now and report back with your summary.`
 })
+
 ```
 
 ## Example: Bug Fix Tests
@@ -130,17 +142,21 @@ Task({
     description: "Create tests for serialization enhancement",
     model: "claude-sonnet-4-5-20250929",
     prompt: `You are the tester sub-agent. Your task is to create comprehensive tests for a Rust enhancement.
+})
+```
 
 ## Context
 Read and follow the instructions in: agents/tester-agent.md
 Activate the rust-testing skill for Rust testing patterns and best practices.
 
 ## Input Information
+
 - **Feature Log File:** .ai/features/2025-11-13.serialization-enhancement
 - **Test Scope:** src/serde/*.rs and tests/serde_*.rs
 - **Feature Summary:** Enhance serialization to support custom formats with streaming and zero-copy deserialization.
 
 ## Your Task
+
 1. Read the feature log file at the path specified above
 2. Activate the rust-testing skill
 3. Follow the complete workflow documented in agents/tester-agent.md
@@ -152,14 +168,12 @@ Activate the rust-testing skill for Rust testing patterns and best practices.
 6. Return a concise summary (see tester-agent.md for format)
 
 ## Rust Testing Conventions
+
 - Use \`#[test]\` attribute for test functions
 - Use proptest for property-based testing (roundtrip: serialize then deserialize equals original)
 - Use \`#[cfg(test)]\` to conditionally compile test modules
 - Consider snapshot tests with insta for complex output verification
 
-Execute the workflow now and report back with your summary.`
-})
-```
 
 ## Parameters to Customize
 
@@ -251,6 +265,7 @@ cargo nextest list                    # List all tests
 ### Sub-Agent Returns Questions
 
 If the sub-agent asks for clarification:
+
 1. Answer the questions
 2. Re-invoke with additional context
 3. The feature log maintains state
@@ -258,6 +273,7 @@ If the sub-agent asks for clarification:
 ### Sub-Agent Reports Errors
 
 If the sub-agent encounters errors:
+
 1. Check the feature log file exists and is readable
 2. Verify `Cargo.toml` has test dependencies
 3. Ensure the crate compiles: `cargo check`
@@ -266,6 +282,7 @@ If the sub-agent encounters errors:
 ### Tests Don't Compile
 
 Common issues:
+
 1. Missing `use super::*;` in test module
 2. Missing `#[cfg(test)]` on test module
 3. Test dependencies not in `[dev-dependencies]`
@@ -274,6 +291,7 @@ Common issues:
 ### Need to Modify Tests
 
 If you need to adjust the tests created:
+
 1. You can make small edits directly
 2. For major changes, re-invoke the sub-agent with updated feature log
 3. The sub-agent can iterate based on feedback
