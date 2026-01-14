@@ -71,7 +71,6 @@ pub fn define_openai_api() -> RestApi {
         auth: AuthStrategy::BearerToken { header: None },
         env_auth: vec!["OPENAI_API_KEY".to_string()],
         env_username: None,
-        env_password: None,
         endpoints: vec![
             Endpoint {
                 id: "ListModels".to_string(),

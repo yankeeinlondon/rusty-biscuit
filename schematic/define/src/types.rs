@@ -89,7 +89,6 @@ pub enum RestMethod {
 ///     auth: AuthStrategy::None,
 ///     env_auth: vec![],
 ///     env_username: None,
-///     env_password: None,
 ///     endpoints: vec![
 ///         Endpoint {
 ///             id: "GetHealth".to_string(),
@@ -132,12 +131,9 @@ pub struct RestApi {
     pub env_auth: Vec<String>,
     /// Environment variable for Basic auth username.
     ///
-    /// Only used when `auth` is `AuthStrategy::Basic`.
+    /// Only used when `auth` is `AuthStrategy::Basic`. The password is read
+    /// from the first element of `env_auth` (i.e., `env_auth[0]`).
     pub env_username: Option<String>,
-    /// Environment variable for Basic auth password.
-    ///
-    /// Only used when `auth` is `AuthStrategy::Basic`.
-    pub env_password: Option<String>,
     /// All endpoints defined for this API.
     pub endpoints: Vec<Endpoint>,
 }

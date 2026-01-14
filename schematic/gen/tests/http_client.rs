@@ -26,7 +26,6 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
         auth,
         env_auth,
         env_username: None,
-        env_password: None,
         endpoints: vec![
             Endpoint {
                 id: "GetItems".to_string(),
@@ -49,6 +48,7 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
 }
 
 /// Creates a test API with basic auth.
+/// Password comes from env_auth[0].
 fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> RestApi {
     RestApi {
         name: name.to_string(),
@@ -56,9 +56,8 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
         base_url: "https://api.example.com/v1".to_string(),
         docs_url: None,
         auth: AuthStrategy::Basic,
-        env_auth: vec![],
+        env_auth: vec![password_env.to_string()], // Password from env_auth[0]
         env_username: Some(username_env.to_string()),
-        env_password: Some(password_env.to_string()),
         endpoints: vec![
             Endpoint {
                 id: "GetItems".to_string(),
@@ -201,7 +200,7 @@ fn no_auth_generates_no_auth_code() {
 }
 
 #[test]
-fn bearer_token_sets_authorization_header() {
+fn bearer_token_uses_runtime_auth_matching() {
     let api = make_api(
         "BearerApi",
         AuthStrategy::BearerToken { header: None },
@@ -210,17 +209,31 @@ fn bearer_token_sets_authorization_header() {
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
-    // Should contain env var name
+    // Should store env var in struct init
     assert!(
         code.contains("BEARER_TOKEN"),
-        "Should reference BEARER_TOKEN env var\nGenerated code:\n{}",
+        "Should reference BEARER_TOKEN env var in struct init\nGenerated code:\n{}",
         code
     );
 
-    // Should set Authorization header with Bearer prefix
+    // Should use runtime match for auth
     assert!(
-        code.contains(r#"header("Authorization", format!("Bearer {}", token))"#),
-        "Should set Authorization header with Bearer prefix\nGenerated code:\n{}",
+        code.contains("match &self.auth_strategy"),
+        "Should use runtime auth matching\nGenerated code:\n{}",
+        code
+    );
+
+    // Should handle BearerToken variant
+    assert!(
+        code.contains("schematic_define::AuthStrategy::BearerToken"),
+        "Should handle BearerToken variant\nGenerated code:\n{}",
+        code
+    );
+
+    // Should format Bearer token at runtime
+    assert!(
+        code.contains(r#"format!("Bearer {}", token)"#),
+        "Should format Bearer prefix\nGenerated code:\n{}",
         code
     );
 }
@@ -237,16 +250,23 @@ fn bearer_token_with_custom_header() {
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
-    // Should use custom header name
+    // Should store custom header in auth_strategy init
     assert!(
-        code.contains(r#"header("X-Custom-Auth", format!("Bearer {}", token))"#),
-        "Should use custom header name\nGenerated code:\n{}",
+        code.contains("X-Custom-Auth"),
+        "Should include custom header in auth_strategy init\nGenerated code:\n{}",
+        code
+    );
+
+    // Runtime handling extracts header via header.as_deref()
+    assert!(
+        code.contains("header.as_deref()"),
+        "Should use header.as_deref() for runtime extraction\nGenerated code:\n{}",
         code
     );
 }
 
 #[test]
-fn api_key_sets_custom_header() {
+fn api_key_uses_runtime_auth_matching() {
     let api = make_api(
         "ApiKeyApi",
         AuthStrategy::ApiKey {
@@ -257,17 +277,31 @@ fn api_key_sets_custom_header() {
     let tokens = assemble_api_code(&api);
     let code = format_tokens(&tokens);
 
-    // Should contain env var name
+    // Should store env var in struct init
     assert!(
         code.contains("API_SECRET"),
-        "Should reference API_SECRET env var\nGenerated code:\n{}",
+        "Should reference API_SECRET env var in struct init\nGenerated code:\n{}",
         code
     );
 
-    // Should set custom header with key directly (no Bearer prefix)
+    // Should store header name in auth_strategy init
     assert!(
-        code.contains(r#"header("X-API-Key", key)"#),
-        "Should set X-API-Key header\nGenerated code:\n{}",
+        code.contains("X-API-Key"),
+        "Should include header name in auth_strategy\nGenerated code:\n{}",
+        code
+    );
+
+    // Should handle ApiKey variant at runtime
+    assert!(
+        code.contains("schematic_define::AuthStrategy::ApiKey"),
+        "Should handle ApiKey variant\nGenerated code:\n{}",
+        code
+    );
+
+    // Runtime uses header.as_str() for header name
+    assert!(
+        code.contains("header.as_str()"),
+        "Should use header.as_str() at runtime\nGenerated code:\n{}",
         code
     );
 }

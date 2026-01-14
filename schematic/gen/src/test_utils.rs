@@ -23,8 +23,7 @@ pub fn make_api(name: &str, base_url: &str, auth: AuthStrategy, env_auth: Vec<St
         auth,
         env_auth,
         env_username: None,
-        env_password: None,
-        endpoints: vec![],
+                endpoints: vec![],
     }
 }
 
@@ -43,8 +42,7 @@ pub fn make_api_with_endpoint(
         auth,
         env_auth,
         env_username: None,
-        env_password: None,
-        endpoints: vec![endpoint],
+                endpoints: vec![endpoint],
     }
 }
 
@@ -82,8 +80,7 @@ pub fn make_simple_api() -> RestApi {
         auth: AuthStrategy::None,
         env_auth: vec![],
         env_username: None,
-        env_password: None,
-        endpoints: vec![Endpoint {
+                endpoints: vec![Endpoint {
             id: "ListItems".to_string(),
             method: RestMethod::Get,
             path: "/items".to_string(),
@@ -109,8 +106,7 @@ pub fn make_complex_api() -> RestApi {
         auth: AuthStrategy::BearerToken { header: None },
         env_auth: vec!["OPENAI_API_KEY".to_string()],
         env_username: None,
-        env_password: None,
-        endpoints: vec![
+                endpoints: vec![
             Endpoint {
                 id: "ListModels".to_string(),
                 method: RestMethod::Get,

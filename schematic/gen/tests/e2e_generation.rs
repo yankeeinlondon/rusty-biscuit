@@ -107,6 +107,7 @@ fn generated_files_exist_and_have_expected_structure() {
     assert!(cargo_content.contains("reqwest"));
     assert!(cargo_content.contains("serde"));
     assert!(cargo_content.contains("tokio"));
+    assert!(cargo_content.contains("schematic-define")); // For AuthStrategy and UpdateStrategy
 
     // Verify lib.rs content
     let lib_content = std::fs::read_to_string(src_dir.join("lib.rs"))
@@ -145,8 +146,7 @@ fn generate_code_for_various_api_configurations() {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
-            env_password: None,
-            endpoints: vec![Endpoint {
+                        endpoints: vec![Endpoint {
                 id: "GetRoot".to_string(),
                 method: RestMethod::Get,
                 path: "/".to_string(),
@@ -164,8 +164,7 @@ fn generate_code_for_various_api_configurations() {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
-            env_password: None,
-            endpoints: vec![
+                        endpoints: vec![
                 Endpoint {
                     id: "Get".to_string(),
                     method: RestMethod::Get,
@@ -217,8 +216,7 @@ fn generate_code_for_various_api_configurations() {
             auth: AuthStrategy::BearerToken { header: None },
             env_auth: vec!["NESTED_API_KEY".to_string()],
             env_username: None,
-            env_password: None,
-            endpoints: vec![
+                        endpoints: vec![
                 Endpoint {
                     id: "GetItem".to_string(),
                     method: RestMethod::Get,

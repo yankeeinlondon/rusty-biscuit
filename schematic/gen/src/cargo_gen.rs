@@ -23,6 +23,7 @@ description = "Generated REST API client code from schematic definitions"
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+schematic-define = { version = "0.1.0", path = "../define" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
@@ -206,6 +207,22 @@ mod tests {
         let features = tokio.get("features").unwrap().as_array().unwrap();
         assert!(features.iter().any(|f| f.as_str() == Some("rt")));
         assert!(features.iter().any(|f| f.as_str() == Some("macros")));
+    }
+
+    #[test]
+    fn generate_cargo_toml_includes_schematic_define() {
+        let content = generate_cargo_toml();
+        let parsed: toml::Table = toml::from_str(&content).unwrap();
+
+        let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
+        assert!(
+            deps.contains_key("schematic-define"),
+            "schematic-define dependency is required for AuthStrategy and UpdateStrategy types"
+        );
+
+        // Verify schematic-define has path dependency
+        let schematic_define = deps.get("schematic-define").unwrap().as_table().unwrap();
+        assert!(schematic_define.contains_key("path"), "schematic-define should use path dependency");
     }
 
     #[test]

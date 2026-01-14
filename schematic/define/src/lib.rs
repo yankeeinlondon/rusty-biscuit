@@ -10,6 +10,7 @@
 //! - [`Endpoint`] - A single API endpoint with method, path, and schemas
 //! - [`RestMethod`] - HTTP methods (GET, POST, PUT, etc.)
 //! - [`AuthStrategy`] - Authentication strategies (Bearer, API Key, Basic, None)
+//! - [`UpdateStrategy`] - Strategy for updating auth in API variants (NoChange, ChangeTo)
 //! - [`ApiResponse`] - Response type definitions (JSON, Text, Binary, Empty)
 //! - [`Schema`] - Type information for request/response bodies
 //!
@@ -28,7 +29,6 @@
 //!     auth: AuthStrategy::BearerToken { header: None },
 //!     env_auth: vec!["OPENAI_API_KEY".to_string()],
 //!     env_username: None,
-//!     env_password: None,
 //!     endpoints: vec![
 //!         Endpoint {
 //!             id: "ListModels".to_string(),
@@ -63,7 +63,7 @@ pub mod schema;
 pub mod types;
 
 // Re-export main types at crate root
-pub use auth::AuthStrategy;
+pub use auth::{AuthStrategy, UpdateStrategy};
 pub use response::ApiResponse;
 pub use schema::{Schema, SchemaObject};
 pub use types::{Endpoint, RestApi, RestMethod};

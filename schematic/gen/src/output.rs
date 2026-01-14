@@ -235,7 +235,6 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
-            env_password: None,
             endpoints: vec![Endpoint {
                 id: "ListItems".to_string(),
                 method: RestMethod::Get,
@@ -256,7 +255,6 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             env_auth: vec!["OPENAI_API_KEY".to_string()],
             env_username: None,
-            env_password: None,
             endpoints: vec![
                 Endpoint {
                     id: "ListModels".to_string(),
@@ -563,13 +561,13 @@ mod tests {
 
     #[test]
     fn full_pipeline_with_all_auth_strategies() {
-        // Test configurations: (auth, env_auth, env_username, env_password)
-        let test_cases: Vec<(AuthStrategy, Vec<String>, Option<String>, Option<String>)> = vec![
-            (AuthStrategy::None, vec![], None, None),
+        // Test configurations: (auth, env_auth, env_username)
+        // For BasicAuth, password comes from env_auth[0]
+        let test_cases: Vec<(AuthStrategy, Vec<String>, Option<String>)> = vec![
+            (AuthStrategy::None, vec![], None),
             (
                 AuthStrategy::BearerToken { header: None },
                 vec!["TOKEN".to_string()],
-                None,
                 None,
             ),
             (
@@ -578,17 +576,15 @@ mod tests {
                 },
                 vec!["KEY".to_string()],
                 None,
-                None,
             ),
             (
                 AuthStrategy::Basic,
-                vec![],
+                vec!["PASS".to_string()], // Password from env_auth[0]
                 Some("USER".to_string()),
-                Some("PASS".to_string()),
             ),
         ];
 
-        for (auth, env_auth, env_username, env_password) in test_cases {
+        for (auth, env_auth, env_username) in test_cases {
             let api = RestApi {
                 name: "TestApi".to_string(),
                 description: "Test".to_string(),
@@ -597,7 +593,6 @@ mod tests {
                 auth: auth.clone(),
                 env_auth,
                 env_username,
-                env_password,
                 endpoints: vec![Endpoint {
                     id: "Test".to_string(),
                     method: RestMethod::Get,
@@ -647,7 +642,6 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
-            env_password: None,
             endpoints,
         };
 
@@ -676,7 +670,6 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
-            env_password: None,
             endpoints: vec![],
         };
 
