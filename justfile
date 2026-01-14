@@ -124,3 +124,6 @@ release-update:
 # install release-plz CLI locally
 install-release-plz:
     @cargo install release-plz --locked
+
+sniff *args="":
+    @cargo run -p sniff-cli *args=""

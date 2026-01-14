@@ -48,10 +48,7 @@ lint *args="":
     @echo ""
     @cargo clippy -p ./lib/Cargo.toml {{args}}
 
-# install the `research` binary into the executable path
-install *args:
-    @cargo build --release -p darkmatter
-    @cargo install --path "." --locked {{args}}
+
 
 # run the debug release of the Research CLI
 cli *args="":
