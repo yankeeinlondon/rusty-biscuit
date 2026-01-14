@@ -15,7 +15,7 @@ This library intends to provide strong AI/LLM pipelining capabilities to callers
 
     A code generator module which will generate enumerations for all of the providers we provide support for in the `ai-pipeline` package.
 
-    When run, the enumerations will be placed in the `./lib` package to be used. The _primary_ user of these enumerations is the `ProviderModel` enumeration (`lib/src/rigging/models/mod.rs`)
+    When run, the enumerations will be placed in the `./lib` package to be used. The _primary_ user of these enumerations is the `ProviderModel` enumeration (`lib/src/rigging/models/mod.rs`) which wraps all of the individual provider's models into a single enumeration which provides access to all models across all
 
 3. AI Pipeliner TUI Components [`./tui`] - FUTURE
 
