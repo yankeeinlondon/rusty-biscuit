@@ -23,6 +23,42 @@ Plan Executor (Main Thread)
     └── [Sub-agents based on phase ownership]
 ```
 
+## CRITICAL: TODO Management Rules
+
+**TodoWrite is MANDATORY for plan execution.** This enables progress visibility and allows resuming incomplete plans.
+
+### Rule 1: Initialize TODOs Before Execution
+Before launching any phases, create a TODO item for EACH phase:
+```
+TodoWrite([
+  { content: "Phase 1: [Name]", status: "pending", activeForm: "Preparing Phase 1: [Name]" },
+  { content: "Phase 2: [Name]", status: "pending", activeForm: "Preparing Phase 2: [Name]" },
+  ...
+])
+```
+
+### Rule 2: Update IMMEDIATELY on State Change
+- **Starting a phase:** Mark as `in_progress` BEFORE spawning the orchestrator
+- **Phase completes:** Mark as `completed` IMMEDIATELY after TaskOutput confirms success
+- **Phase fails/blocks:** Keep as `in_progress` and add a new TODO for the blocker
+
+### Rule 3: One In-Progress Phase Per Parallel Group
+When running phases in parallel, ALL phases in that group should be `in_progress`.
+When ANY phase in a group completes, mark it `completed` IMMEDIATELY - don't wait for others.
+
+### Rule 4: Resume Reconstruction
+When resuming a plan with existing checkpoints:
+1. Read the checkpoint section from the plan file
+2. Reconstruct TodoWrite state: completed phases → `completed`, failed phase → `in_progress`, remaining → `pending`
+3. Resume execution from the failed/incomplete phase
+
+### Why This Matters
+- Users see real-time progress during long executions
+- Interrupted plans can be resumed without re-doing completed work
+- Progress is visible even if context is lost
+
+---
+
 ## Prerequisites
 
 Before starting:
@@ -212,7 +248,27 @@ If any pre-flight check fails, report to the user and ask whether to proceed or 
    - Note parallelization groups
    - Identify dependencies between phases
 
-5. **Create execution log:**
+5. **Check for existing checkpoints (Resume Detection):**
+   ```bash
+   grep -A 30 "## Execution Checkpoints" .ai/plans/[plan-file].md
+   ```
+   If checkpoints exist, this is a RESUME - follow the "Resuming from Checkpoint" section.
+
+6. **Initialize TodoWrite with ALL phases (MANDATORY):**
+
+   ```typescript
+   TodoWrite({
+     todos: [
+       { content: "Phase 1: [Name]", status: "pending", activeForm: "Preparing Phase 1: [Name]" },
+       { content: "Phase 2: [Name]", status: "pending", activeForm: "Preparing Phase 2: [Name]" },
+       // ... one entry for each phase
+     ]
+   })
+   ```
+
+   **This must happen BEFORE any phases are launched.** It establishes the baseline for tracking.
+
+7. **Create execution log:**
    - Path: `.ai/logs/YYYY-MM-DD.plan-execution-log.md`
    - Document plan name, phases, and execution strategy
 
@@ -242,6 +298,25 @@ Review the plan's parallelization section and create an execution order:
 ## Step 3: Launch Phase Orchestrators
 
 For each execution group, spawn orchestrator agents. Use `run_in_background: true` for parallel execution.
+
+### CRITICAL: Update TodoWrite BEFORE Launching
+
+**Before spawning ANY orchestrators for a group, mark ALL phases in that group as `in_progress`:**
+
+```typescript
+// FIRST: Update TodoWrite
+TodoWrite({
+  todos: [
+    { content: "Phase 1: [Name]", status: "in_progress", activeForm: "Executing Phase 1: [Name]" },
+    { content: "Phase 2: [Name]", status: "in_progress", activeForm: "Executing Phase 2: [Name]" },
+    { content: "Phase 3: [Name]", status: "pending", activeForm: "Waiting for Phase 3" },
+  ]
+})
+
+// THEN: Launch orchestrators
+Task({ /* Phase 1 Orchestrator */ })
+Task({ /* Phase 2 Orchestrator */ })
+```
 
 ### Orchestrator Agent Template
 
@@ -726,24 +801,76 @@ Task({ /* Phase 2 Orchestrator */ run_in_background: true })
 
 As the Plan Executor, your job is to:
 
-### 4.1 Track Phase Progress
+### 4.1 Track Phase Progress (CRITICAL)
 
-Use TodoWrite to track overall progress:
+**TodoWrite updates must happen IMMEDIATELY at each state transition.**
 
-```markdown
-- [ ] Phase 1: [Name] - [Owner] - Status: Running
-- [ ] Phase 2: [Name] - [Owner] - Status: Running
-- [ ] Phase 3: [Name] - [Owner] - Status: Waiting (depends on 1, 2)
+**Before launching Group A phases:**
+```typescript
+// Mark all Group A phases as in_progress BEFORE spawning
+TodoWrite({
+  todos: [
+    { content: "Phase 1: [Name]", status: "in_progress", activeForm: "Executing Phase 1: [Name]" },
+    { content: "Phase 2: [Name]", status: "in_progress", activeForm: "Executing Phase 2: [Name]" },
+    { content: "Phase 3: [Name]", status: "pending", activeForm: "Waiting for Phase 3: [Name]" },
+  ]
+})
 ```
 
-### 4.2 Collect Results
+**IMMEDIATELY after TaskOutput returns success for Phase 1:**
+```typescript
+// Don't wait for Phase 2 - update NOW
+TodoWrite({
+  todos: [
+    { content: "Phase 1: [Name]", status: "completed", activeForm: "Completed Phase 1: [Name]" },
+    { content: "Phase 2: [Name]", status: "in_progress", activeForm: "Executing Phase 2: [Name]" },
+    { content: "Phase 3: [Name]", status: "pending", activeForm: "Waiting for Phase 3: [Name]" },
+  ]
+})
+```
 
-Use TaskOutput to gather results from background orchestrators:
+**Why immediate updates matter:**
+- If execution is interrupted, the TODO state shows exactly where you stopped
+- Users can see real-time progress, not just final results
+- Resuming a plan requires accurate state to skip completed work
+
+### 4.2 Collect Results and Update TODOs
+
+Use TaskOutput to gather results from background orchestrators.
+
+**CRITICAL: Update TodoWrite IMMEDIATELY after each TaskOutput returns success:**
 
 ```typescript
-TaskOutput({ task_id: "phase-1-orchestrator-id", block: true })
-TaskOutput({ task_id: "phase-2-orchestrator-id", block: true })
+// Wait for Phase 1
+const phase1Result = TaskOutput({ task_id: "phase-1-orchestrator-id", block: true })
+
+// IMMEDIATELY mark Phase 1 complete (don't wait for Phase 2)
+if (phase1Result.status === "COMPLETE") {
+  TodoWrite({
+    todos: [
+      { content: "Phase 1: [Name]", status: "completed", activeForm: "Phase 1 complete" },
+      { content: "Phase 2: [Name]", status: "in_progress", activeForm: "Executing Phase 2" },
+      { content: "Phase 3: [Name]", status: "pending", activeForm: "Waiting for Phase 3" },
+    ]
+  })
+}
+
+// Wait for Phase 2
+const phase2Result = TaskOutput({ task_id: "phase-2-orchestrator-id", block: true })
+
+// IMMEDIATELY mark Phase 2 complete
+if (phase2Result.status === "COMPLETE") {
+  TodoWrite({
+    todos: [
+      { content: "Phase 1: [Name]", status: "completed", activeForm: "Phase 1 complete" },
+      { content: "Phase 2: [Name]", status: "completed", activeForm: "Phase 2 complete" },
+      { content: "Phase 3: [Name]", status: "pending", activeForm: "Waiting for Phase 3" },
+    ]
+  })
+}
 ```
+
+**Do NOT batch updates.** Each phase gets its own TodoWrite call immediately upon completion.
 
 ### 4.3 Update Execution Log
 
@@ -896,20 +1023,37 @@ Provide a comprehensive summary:
 
 Use this checklist to track your progress:
 
+### Setup Phase
 - [ ] Plan file identified and loaded
 - [ ] **Phase types identified** (DESIGN vs IMPLEMENTATION for each phase)
+- [ ] **TodoWrite initialized with ALL phases as `pending`**
 - [ ] Execution log created
 - [ ] Parallelization strategy analyzed
 - [ ] Execution groups identified
+
+### If Resuming
+- [ ] **Checkpoints read from plan file**
+- [ ] **TodoWrite state reconstructed from checkpoints**
+
+### Execution Phase
+- [ ] **Group A phases marked `in_progress` in TodoWrite** (BEFORE launching)
 - [ ] Group A phases launched
+- [ ] **Each Group A phase marked `completed` IMMEDIATELY when done**
 - [ ] Group A phases completed (validated appropriately for phase type)
+- [ ] **Group B phases marked `in_progress` in TodoWrite** (BEFORE launching, if applicable)
 - [ ] Group B phases launched (if applicable)
+- [ ] **Each Group B phase marked `completed` IMMEDIATELY when done**
 - [ ] Group B phases completed (if applicable)
 - [ ] All phases completed
+
+### Validation Phase
 - [ ] **Full test suite run (if any implementation phases)**
 - [ ] **Design artifacts verified (if any design phases)**
 - [ ] Quality checks passed
+
+### Completion Phase
 - [ ] Plan status updated
+- [ ] **All TodoWrite items show `completed`**
 - [ ] Final report provided to user
 
 ---
@@ -1006,12 +1150,29 @@ When resuming a failed plan execution:
 
 2. **Identify the failed phase** and its last successful step
 
-3. **Resume execution** by:
+3. **RECONSTRUCT TODO STATE FROM CHECKPOINTS (CRITICAL):**
+
+   Before doing anything else, rebuild the TodoWrite state:
+   ```typescript
+   // Example: Phase 1 complete, Phase 2 failed, Phase 3 pending
+   TodoWrite({
+     todos: [
+       { content: "Phase 1: [Name]", status: "completed", activeForm: "Completed Phase 1" },
+       { content: "Phase 2: [Name]", status: "in_progress", activeForm: "Resuming Phase 2" },
+       { content: "Phase 3: [Name]", status: "pending", activeForm: "Waiting for Phase 3" },
+     ]
+   })
+   ```
+
+   This ensures the TODO display accurately reflects resumption state.
+
+4. **Resume execution** by:
    - Skipping completed phases (verify their artifacts exist)
    - Restarting the failed phase from its last successful step
    - Continuing with remaining phases
 
-4. **Update checkpoints** as each phase completes
+5. **Update checkpoints AND TodoWrite** as each phase completes
+   - Both must stay in sync for future resume capability
 
 ### Checkpoint Best Practices
 
@@ -1076,13 +1237,15 @@ Phase orchestrators must actively manage context to prevent overflow in large mu
 
 ## Tips for Success
 
-1. **Detect phase type** - Design phases need different validation than implementation phases
-2. **Design phases** - Validate design artifacts exist and compile (if code); tests NOT required
-3. **Implementation phases** - Require working code with passing tests
-4. **Status updates are critical** - Users need visibility into long-running operations
-5. **Launch parallel phases together** - Use a single message with multiple Task calls
-6. **Track everything** - Update todos and logs frequently
-7. **Handle failures gracefully** - Don't let one failure cascade unnecessarily
-8. **Validate incrementally** - Run appropriate validation after each phase (design or tests)
-9. **Keep context concise** - Sub-agents should return summaries, not full file contents
-10. **Use quality checks** - Run clippy and fmt regularly to catch issues early
+1. **TODO updates are NON-NEGOTIABLE** - Update TodoWrite IMMEDIATELY when any phase changes state
+2. **Detect phase type** - Design phases need different validation than implementation phases
+3. **Design phases** - Validate design artifacts exist and compile (if code); tests NOT required
+4. **Implementation phases** - Require working code with passing tests
+5. **Status updates are critical** - Users need visibility into long-running operations
+6. **Launch parallel phases together** - Use a single message with multiple Task calls
+7. **Track everything** - Update todos and logs frequently; TODO updates come FIRST
+8. **Handle failures gracefully** - Don't let one failure cascade unnecessarily
+9. **Validate incrementally** - Run appropriate validation after each phase (design or tests)
+10. **Keep context concise** - Sub-agents should return summaries, not full file contents
+11. **Use quality checks** - Run clippy and fmt regularly to catch issues early
+12. **Enable resume capability** - Checkpoints + TodoWrite state must stay in sync
