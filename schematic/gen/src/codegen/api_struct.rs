@@ -67,6 +67,9 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
         None => quote! { None },
     };
 
+    // Generate headers initialization
+    let headers_init = generate_headers_init(&api.headers);
+
     quote! {
         #[doc = #description]
         pub struct #struct_name {
@@ -78,6 +81,8 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
             auth_strategy: schematic_define::AuthStrategy,
             /// Environment variable for Basic auth username.
             env_username: Option<String>,
+            /// Default HTTP headers to include with every request.
+            headers: Vec<(String, String)>,
         }
 
         impl #struct_name {
@@ -92,6 +97,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     env_auth: vec![#(#env_auth.to_string()),*],
                     auth_strategy: #auth_strategy_init,
                     env_username: #env_username_init,
+                    headers: #headers_init,
                 }
             }
 
@@ -109,6 +115,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     env_auth: vec![#(#env_auth.to_string()),*],
                     auth_strategy: #auth_strategy_init,
                     env_username: #env_username_init,
+                    headers: #headers_init,
                 }
             }
 
@@ -132,6 +139,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     env_auth: vec![#(#env_auth.to_string()),*],
                     auth_strategy: #auth_strategy_init,
                     env_username: #env_username_init,
+                    headers: #headers_init,
                 }
             }
 
@@ -153,6 +161,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     env_auth: vec![#(#env_auth.to_string()),*],
                     auth_strategy: #auth_strategy_init,
                     env_username: #env_username_init,
+                    headers: #headers_init,
                 }
             }
 
@@ -210,6 +219,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     env_auth,
                     auth_strategy,
                     env_username: self.env_username.clone(),
+                    headers: self.headers.clone(),
                 }
             }
         }
@@ -237,6 +247,18 @@ fn generate_auth_strategy_init(auth: &AuthStrategy) -> TokenStream {
     }
 }
 
+/// Generates the initialization code for the headers Vec.
+fn generate_headers_init(headers: &[(String, String)]) -> TokenStream {
+    if headers.is_empty() {
+        quote! { vec![] }
+    } else {
+        let header_pairs = headers.iter().map(|(k, v)| {
+            quote! { (#k.to_string(), #v.to_string()) }
+        });
+        quote! { vec![#(#header_pairs),*] }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,6 +274,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            headers: vec![],
             endpoints: vec![],
         }
     }
@@ -377,6 +400,7 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             env_auth: vec!["BEARER_TOKEN".to_string()],
             env_username: None,
+            headers: vec![],
             endpoints: vec![],
         };
         let tokens = generate_api_struct(&api);
@@ -396,6 +420,7 @@ mod tests {
             auth: AuthStrategy::ApiKey { header: "X-API-Key".to_string() },
             env_auth: vec!["API_KEY".to_string()],
             env_username: None,
+            headers: vec![],
             endpoints: vec![],
         };
         let tokens = generate_api_struct(&api);
@@ -416,6 +441,7 @@ mod tests {
             auth: AuthStrategy::Basic,
             env_auth: vec!["BASIC_PASS".to_string()],
             env_username: Some("BASIC_USER".to_string()),
+            headers: vec![],
             endpoints: vec![],
         };
         let tokens = generate_api_struct(&api);
@@ -520,5 +546,73 @@ mod tests {
 
         // Should clone env_username
         assert!(code.contains("env_username: self.env_username.clone()"));
+    }
+
+    #[test]
+    fn generate_api_struct_has_headers_field() {
+        let api = make_api("TestApi", "https://api.test.com", "Test API");
+        let tokens = generate_api_struct(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should have headers field in struct
+        assert!(code.contains("headers: Vec<(String, String)>"));
+    }
+
+    #[test]
+    fn generate_api_struct_with_headers() {
+        let api = RestApi {
+            name: "HeaderApi".to_string(),
+            description: "API with headers".to_string(),
+            base_url: "https://api.headers.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::None,
+            env_auth: vec![],
+            env_username: None,
+            headers: vec![
+                ("X-Api-Version".to_string(), "2024-01".to_string()),
+                ("X-Custom-Header".to_string(), "custom-value".to_string()),
+            ],
+            endpoints: vec![],
+        };
+        let tokens = generate_api_struct(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should contain the header keys and values
+        assert!(code.contains("X-Api-Version"));
+        assert!(code.contains("2024-01"));
+        assert!(code.contains("X-Custom-Header"));
+        assert!(code.contains("custom-value"));
+    }
+
+    #[test]
+    fn generate_headers_init_empty() {
+        let headers: Vec<(String, String)> = vec![];
+        let tokens = generate_headers_init(&headers);
+        let code = tokens.to_string();
+        assert!(code.contains("vec !"));
+    }
+
+    #[test]
+    fn generate_headers_init_with_values() {
+        let headers = vec![
+            ("Header-One".to_string(), "value-one".to_string()),
+            ("Header-Two".to_string(), "value-two".to_string()),
+        ];
+        let tokens = generate_headers_init(&headers);
+        let code = tokens.to_string();
+        assert!(code.contains("Header-One"));
+        assert!(code.contains("value-one"));
+        assert!(code.contains("Header-Two"));
+        assert!(code.contains("value-two"));
+    }
+
+    #[test]
+    fn variant_method_clones_headers() {
+        let api = make_api("TestApi", "https://api.test.com", "Test API");
+        let tokens = generate_api_struct(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should clone headers
+        assert!(code.contains("headers: self.headers.clone()"));
     }
 }

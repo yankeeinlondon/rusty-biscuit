@@ -146,13 +146,15 @@ fn generate_code_for_various_api_configurations() {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
-                        endpoints: vec![Endpoint {
+            headers: vec![],
+            endpoints: vec![Endpoint {
                 id: "GetRoot".to_string(),
                 method: RestMethod::Get,
                 path: "/".to_string(),
                 description: "Get root".to_string(),
                 request: None,
                 response: ApiResponse::json_type("RootResponse"),
+                headers: vec![],
             }],
         },
         // API with all HTTP methods
@@ -164,7 +166,8 @@ fn generate_code_for_various_api_configurations() {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
-                        endpoints: vec![
+            headers: vec![],
+            endpoints: vec![
                 Endpoint {
                     id: "Get".to_string(),
                     method: RestMethod::Get,
@@ -172,6 +175,7 @@ fn generate_code_for_various_api_configurations() {
                     description: "GET".to_string(),
                     request: None,
                     response: ApiResponse::json_type("Response"),
+                    headers: vec![],
                 },
                 Endpoint {
                     id: "Post".to_string(),
@@ -180,6 +184,7 @@ fn generate_code_for_various_api_configurations() {
                     description: "POST".to_string(),
                     request: Some(Schema::new("CreateRequest")),
                     response: ApiResponse::json_type("Response"),
+                    headers: vec![],
                 },
                 Endpoint {
                     id: "Put".to_string(),
@@ -188,6 +193,7 @@ fn generate_code_for_various_api_configurations() {
                     description: "PUT".to_string(),
                     request: Some(Schema::new("UpdateRequest")),
                     response: ApiResponse::json_type("Response"),
+                    headers: vec![],
                 },
                 Endpoint {
                     id: "Patch".to_string(),
@@ -196,6 +202,7 @@ fn generate_code_for_various_api_configurations() {
                     description: "PATCH".to_string(),
                     request: Some(Schema::new("PatchRequest")),
                     response: ApiResponse::json_type("Response"),
+                    headers: vec![],
                 },
                 Endpoint {
                     id: "Delete".to_string(),
@@ -204,6 +211,7 @@ fn generate_code_for_various_api_configurations() {
                     description: "DELETE".to_string(),
                     request: None,
                     response: ApiResponse::json_type("Response"),
+                    headers: vec![],
                 },
             ],
         },
@@ -216,7 +224,8 @@ fn generate_code_for_various_api_configurations() {
             auth: AuthStrategy::BearerToken { header: None },
             env_auth: vec!["NESTED_API_KEY".to_string()],
             env_username: None,
-                        endpoints: vec![
+            headers: vec![],
+            endpoints: vec![
                 Endpoint {
                     id: "GetItem".to_string(),
                     method: RestMethod::Get,
@@ -224,6 +233,7 @@ fn generate_code_for_various_api_configurations() {
                     description: "Get deeply nested item".to_string(),
                     request: None,
                     response: ApiResponse::json_type("Item"),
+                    headers: vec![],
                 },
             ],
         },

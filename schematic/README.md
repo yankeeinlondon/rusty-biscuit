@@ -6,8 +6,11 @@ A two-crate code generator for producing strongly-typed Rust REST API clients fr
 
 ```
 schematic/
-├── define/    # Type definitions (RestApi, Endpoint, AuthStrategy, etc.)
-└── gen/       # Code generator (tokenization, validation, formatting)
+├── define/    # Type definitions to define a Schema, API, or both (RestApi,
+|             # Endpoint, AuthStrategy, etc.)
+└── gen/      # Binary Code generator (tokenization, validation, formatting)
+└── schema/   # generated API's and Schema's provided by Schematic and ready
+              # for consumption by callers
 ```
 
 ## Workflow

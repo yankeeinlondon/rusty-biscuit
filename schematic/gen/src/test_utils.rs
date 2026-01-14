@@ -23,7 +23,8 @@ pub fn make_api(name: &str, base_url: &str, auth: AuthStrategy, env_auth: Vec<St
         auth,
         env_auth,
         env_username: None,
-                endpoints: vec![],
+        headers: vec![],
+        endpoints: vec![],
     }
 }
 
@@ -42,7 +43,8 @@ pub fn make_api_with_endpoint(
         auth,
         env_auth,
         env_username: None,
-                endpoints: vec![endpoint],
+        headers: vec![],
+        endpoints: vec![endpoint],
     }
 }
 
@@ -67,6 +69,7 @@ pub fn make_endpoint(
         description: format!("Test endpoint for {}", id),
         request,
         response: ApiResponse::json_type("TestResponse"),
+        headers: vec![],
     }
 }
 
@@ -80,13 +83,15 @@ pub fn make_simple_api() -> RestApi {
         auth: AuthStrategy::None,
         env_auth: vec![],
         env_username: None,
-                endpoints: vec![Endpoint {
+        headers: vec![],
+        endpoints: vec![Endpoint {
             id: "ListItems".to_string(),
             method: RestMethod::Get,
             path: "/items".to_string(),
             description: "List all items".to_string(),
             request: None,
             response: ApiResponse::json_type("ListItemsResponse"),
+            headers: vec![],
         }],
     }
 }
@@ -106,7 +111,8 @@ pub fn make_complex_api() -> RestApi {
         auth: AuthStrategy::BearerToken { header: None },
         env_auth: vec!["OPENAI_API_KEY".to_string()],
         env_username: None,
-                endpoints: vec![
+        headers: vec![],
+        endpoints: vec![
             Endpoint {
                 id: "ListModels".to_string(),
                 method: RestMethod::Get,
@@ -114,6 +120,7 @@ pub fn make_complex_api() -> RestApi {
                 description: "Lists available models".to_string(),
                 request: None,
                 response: ApiResponse::json_type("ListModelsResponse"),
+                headers: vec![],
             },
             Endpoint {
                 id: "RetrieveModel".to_string(),
@@ -122,6 +129,7 @@ pub fn make_complex_api() -> RestApi {
                 description: "Retrieves a model".to_string(),
                 request: None,
                 response: ApiResponse::json_type("Model"),
+                headers: vec![],
             },
             Endpoint {
                 id: "CreateCompletion".to_string(),
@@ -130,6 +138,7 @@ pub fn make_complex_api() -> RestApi {
                 description: "Creates a completion".to_string(),
                 request: Some(Schema::new("CreateCompletionRequest")),
                 response: ApiResponse::json_type("Completion"),
+                headers: vec![],
             },
         ],
     }

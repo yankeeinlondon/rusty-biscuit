@@ -27,7 +27,7 @@ use schematic_define::RestApi;
 /// }
 ///
 /// impl OpenAiRequest {
-///     pub fn into_parts(self) -> (&'static str, String, Option<String>) {
+///     pub fn into_parts(self) -> Result<(&'static str, String, Option<String>, Vec<(String, String)>), SchematicError> {
 ///         match self {
 ///             Self::ListModels(req) => req.into_parts(),
 ///             Self::RetrieveModel(req) => req.into_parts(),
@@ -66,10 +66,15 @@ pub fn generate_request_enum(api: &RestApi) -> TokenStream {
         }
 
         impl #enum_name {
-            /// Converts the request into (method, path, body) parts.
+            /// Converts the request into (method, path, body, headers) parts.
             ///
             /// Delegates to the inner request struct's `into_parts()` method.
-            pub fn into_parts(self) -> (&'static str, String, Option<String>) {
+            ///
+            /// ## Errors
+            ///
+            /// Returns `SchematicError::SerializationError` if the request body
+            /// fails to serialize to JSON.
+            pub fn into_parts(self) -> Result<(&'static str, String, Option<String>, Vec<(String, String)>), SchematicError> {
                 match self {
                     #match_arms
                 }
@@ -142,6 +147,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            headers: vec![],
             endpoints,
         }
     }
@@ -154,6 +160,7 @@ mod tests {
             description: format!("{} endpoint", id),
             request,
             response: ApiResponse::json_type("TestResponse"),
+            headers: vec![],
         }
     }
 
@@ -172,7 +179,10 @@ mod tests {
         assert!(code.contains("ListItems(ListItemsRequest)"));
 
         // Check into_parts method
-        assert!(code.contains("fn into_parts(self)"));
+        assert!(code.contains("fn into_parts(self)") || code.contains("fn into_parts(\n"));
+        assert!(code.contains("Result<"));
+        assert!(code.contains("Vec<(String, String)>"));
+        assert!(code.contains("SchematicError"));
         assert!(code.contains("Self::ListItems(req) => req.into_parts()"));
 
         // Check From impl
@@ -288,6 +298,7 @@ mod tests {
                 description: "Retrieve a user by ID".to_string(),
                 request: None,
                 response: ApiResponse::json_type("User"),
+                headers: vec![],
             }],
         );
 
@@ -323,9 +334,12 @@ mod tests {
             from_count
         );
 
-        // Ensure no Vec or array patterns
-        assert!(!code.contains("Vec<"));
+        // Ensure no array patterns in From impls
         assert!(!code.contains("[impl"));
+
+        // Each From impl should be individual, not combined with Vec
+        assert!(code.contains("impl From<ARequest> for IndividualRequest"));
+        assert!(code.contains("impl From<BRequest> for IndividualRequest"));
     }
 
     #[test]

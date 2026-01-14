@@ -15,7 +15,7 @@ use crate::parser::extract_path_params;
 /// - String fields for each path parameter (e.g., `{model}` becomes `pub model: String`)
 /// - A `body` field if the endpoint has a request schema
 /// - `Default` trait implementation
-/// - `into_parts()` method that returns `(&'static str, String, Option<String>)`
+/// - `into_parts()` method that returns `(&'static str, String, Option<String>, Vec<(String, String)>)`
 ///
 /// ## Examples
 ///
@@ -27,6 +27,7 @@ use crate::parser::extract_path_params;
 ///     path: "/models/{model}",
 ///     method: RestMethod::Get,
 ///     request: None,
+///     headers: vec![],
 ///     ...
 /// }
 ///
@@ -37,9 +38,9 @@ use crate::parser::extract_path_params;
 /// }
 ///
 /// impl RetrieveModelRequest {
-///     pub fn into_parts(self) -> (&'static str, String, Option<String>) {
+///     pub fn into_parts(self) -> Result<(&'static str, String, Option<String>, Vec<(String, String)>), SchematicError> {
 ///         let path = format!("/models/{}", self.model);
-///         ("GET", path, None)
+///         Ok(("GET", path, None, vec![]))
 ///     }
 /// }
 /// ```
@@ -172,8 +173,11 @@ fn generate_into_parts(endpoint: &Endpoint, path_params: &[&str], method_str: &s
         quote! { None }
     };
 
+    // Generate headers initialization
+    let headers_init = generate_endpoint_headers_init(&endpoint.headers);
+
     quote! {
-        /// Converts the request into (method, path, body) parts.
+        /// Converts the request into (method, path, body, headers) parts.
         ///
         /// ## Returns
         ///
@@ -181,15 +185,28 @@ fn generate_into_parts(endpoint: &Endpoint, path_params: &[&str], method_str: &s
         /// - HTTP method as a static string (e.g., "GET", "POST")
         /// - Fully substituted path string
         /// - Optional JSON body string
+        /// - Endpoint-specific headers as key-value pairs
         ///
         /// ## Errors
         ///
         /// Returns `SchematicError::SerializationError` if the request body
         /// fails to serialize to JSON.
-        pub fn into_parts(self) -> Result<(&'static str, String, Option<String>), SchematicError> {
+        pub fn into_parts(self) -> Result<(&'static str, String, Option<String>, Vec<(String, String)>), SchematicError> {
             #path_format
-            Ok((#method_str, path, #body_expr))
+            Ok((#method_str, path, #body_expr, #headers_init))
         }
+    }
+}
+
+/// Generates the initialization code for endpoint-specific headers.
+fn generate_endpoint_headers_init(headers: &[(String, String)]) -> TokenStream {
+    if headers.is_empty() {
+        quote! { vec![] }
+    } else {
+        let header_pairs = headers.iter().map(|(k, v)| {
+            quote! { (#k.to_string(), #v.to_string()) }
+        });
+        quote! { vec![#(#header_pairs),*] }
     }
 }
 
@@ -258,6 +275,7 @@ mod tests {
             description: format!("Test endpoint for {}", id),
             request,
             response: ApiResponse::json_type("TestResponse"),
+            headers: vec![],
         }
     }
 

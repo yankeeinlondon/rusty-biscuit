@@ -68,7 +68,7 @@ pub fn generate_request_method(api: &RestApi) -> TokenStream {
                 request: impl Into<#request_enum>,
             ) -> Result<T, SchematicError> {
                 let request = request.into();
-                let (method, path, body) = request.into_parts()?;
+                let (method, path, body, endpoint_headers) = request.into_parts()?;
                 let url = format!("{}{}", self.base_url, path);
 
                 let mut req_builder = match method {
@@ -84,6 +84,13 @@ pub fn generate_request_method(api: &RestApi) -> TokenStream {
 
                 // Apply authentication
                 #auth_setup
+
+                // Merge API-level and endpoint-level headers
+                // Endpoint headers override API headers for matching keys (case-insensitive)
+                let merged_headers = Self::merge_headers(&self.headers, &endpoint_headers);
+                for (key, value) in merged_headers {
+                    req_builder = req_builder.header(key.as_str(), value.as_str());
+                }
 
                 // Add body if present
                 if let Some(body) = body {
@@ -102,6 +109,34 @@ pub fn generate_request_method(api: &RestApi) -> TokenStream {
 
                 let result = response.json::<T>().await?;
                 Ok(result)
+            }
+
+            /// Merges API-level and endpoint-level headers.
+            ///
+            /// Endpoint headers override API headers for matching keys (case-insensitive).
+            /// Returns a new Vec with the merged headers.
+            fn merge_headers(
+                api_headers: &[(String, String)],
+                endpoint_headers: &[(String, String)],
+            ) -> Vec<(String, String)> {
+                let mut result: Vec<(String, String)> = Vec::new();
+
+                // Add API headers that don't have endpoint overrides
+                for (api_key, api_value) in api_headers {
+                    let has_override = endpoint_headers
+                        .iter()
+                        .any(|(k, _)| k.eq_ignore_ascii_case(api_key));
+                    if !has_override {
+                        result.push((api_key.clone(), api_value.clone()));
+                    }
+                }
+
+                // Add all endpoint headers (they take precedence)
+                for (key, value) in endpoint_headers {
+                    result.push((key.clone(), value.clone()));
+                }
+
+                result
             }
         }
     }
@@ -172,6 +207,7 @@ mod tests {
             auth,
             env_auth,
             env_username: None,
+            headers: vec![],
             endpoints: vec![Endpoint {
                 id: "ListItems".to_string(),
                 method: RestMethod::Get,
@@ -179,6 +215,7 @@ mod tests {
                 description: "List items".to_string(),
                 request: None,
                 response: ApiResponse::json_type("ListItemsResponse"),
+                headers: vec![],
             }],
         }
     }
@@ -193,6 +230,7 @@ mod tests {
             auth: AuthStrategy::Basic,
             env_auth: vec![password_env.to_string()], // Password from env_auth[0]
             env_username: Some(username_env.to_string()),
+            headers: vec![],
             endpoints: vec![Endpoint {
                 id: "ListItems".to_string(),
                 method: RestMethod::Get,
@@ -200,6 +238,7 @@ mod tests {
                 description: "List items".to_string(),
                 request: None,
                 response: ApiResponse::json_type("ListItemsResponse"),
+                headers: vec![],
             }],
         }
     }
@@ -218,7 +257,7 @@ mod tests {
 
         // Check request handling
         assert!(code.contains("let request = request.into()"));
-        assert!(code.contains("let (method, path, body) = request.into_parts()?"));
+        assert!(code.contains("let (method, path, body, endpoint_headers) = request.into_parts()?"));
         assert!(code.contains("format!(\"{}{}\", self.base_url, path)"));
 
         // Check HTTP method matching
@@ -404,5 +443,30 @@ mod tests {
         let expect_count = code.matches(".expect(").count();
         assert_eq!(naked_unwrap_count, 0, "Should not have naked .unwrap() calls");
         assert_eq!(expect_count, 0, "Should not have .expect() calls");
+    }
+
+    #[test]
+    fn generate_request_method_applies_headers() {
+        let api = make_api("HeadersApi", AuthStrategy::None, vec![]);
+        let tokens = generate_request_method(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should call merge_headers and iterate to apply them
+        assert!(code.contains("merge_headers(&self.headers, &endpoint_headers)"));
+        assert!(code.contains("for (key, value) in merged_headers"));
+        assert!(code.contains("req_builder.header(key.as_str(), value.as_str())"));
+    }
+
+    #[test]
+    fn generate_request_method_has_merge_headers() {
+        let api = make_api("MergeApi", AuthStrategy::None, vec![]);
+        let tokens = generate_request_method(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should have merge_headers helper method
+        assert!(code.contains("fn merge_headers"));
+        assert!(code.contains("api_headers: &[(String, String)]"));
+        assert!(code.contains("endpoint_headers: &[(String, String)]"));
+        assert!(code.contains("eq_ignore_ascii_case"));
     }
 }

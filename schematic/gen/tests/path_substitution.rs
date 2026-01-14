@@ -28,6 +28,7 @@ fn single_path_param_struct_has_field() {
         description: "Get a user".to_string(),
         request: None,
         response: ApiResponse::json_type("User"),
+        headers: vec![],
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -48,6 +49,7 @@ fn single_path_param_into_parts_format_string() {
         description: "Get a user".to_string(),
         request: None,
         response: ApiResponse::json_type("User"),
+        headers: vec![],
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -76,6 +78,7 @@ fn multiple_path_params_struct_has_all_fields() {
         description: "Get a message".to_string(),
         request: None,
         response: ApiResponse::json_type("Message"),
+        headers: vec![],
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -95,6 +98,7 @@ fn multiple_path_params_into_parts_format_string() {
         description: "Get a message".to_string(),
         request: None,
         response: ApiResponse::json_type("Message"),
+        headers: vec![],
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -117,6 +121,7 @@ fn three_path_params_into_parts_format_string() {
         description: "Get issue comments".to_string(),
         request: None,
         response: ApiResponse::json_type("Comments"),
+        headers: vec![],
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -153,6 +158,7 @@ fn no_path_params_no_fields() {
         description: "List all items".to_string(),
         request: None,
         response: ApiResponse::json_type("ListResponse"),
+        headers: vec![],
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -182,6 +188,7 @@ fn path_param_with_body_has_both_fields() {
         description: "Update a thread".to_string(),
         request: Some(Schema::new("UpdateThreadBody")),
         response: ApiResponse::json_type("Thread"),
+        headers: vec![],
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -220,6 +227,7 @@ fn multiple_path_params_with_body() {
         description: "Create a comment".to_string(),
         request: Some(Schema::new("CreateCommentBody")),
         response: ApiResponse::json_type("Comment"),
+        headers: vec![],
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -267,6 +275,7 @@ fn all_http_methods_generate_correct_method_string() {
             description: "Test endpoint".to_string(),
             request: None,
             response: ApiResponse::json_type("Response"),
+            headers: vec![],
         };
 
         let tokens = generate_request_struct(&endpoint);
@@ -295,6 +304,7 @@ fn consecutive_path_params() {
         description: "Consecutive params".to_string(),
         request: None,
         response: ApiResponse::json_type("Response"),
+        headers: vec![],
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -319,6 +329,7 @@ fn path_param_at_start() {
         description: "Version-prefixed path".to_string(),
         request: None,
         response: ApiResponse::json_type("Response"),
+        headers: vec![],
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -341,6 +352,7 @@ fn underscore_in_param_name() {
         description: "Get user profile".to_string(),
         request: None,
         response: ApiResponse::json_type("Profile"),
+        headers: vec![],
     };
 
     let tokens = generate_request_struct(&endpoint);

@@ -70,7 +70,7 @@ pub enum RestMethod {
 
 /// A complete REST API definition.
 ///
-/// This struct captures all the information needed to generate a typed client
+/// This struct captures all the information needed to _generate_ a typed client
 /// for a REST API, including the base URL, authentication strategy, and all
 /// endpoint definitions.
 ///
@@ -89,6 +89,7 @@ pub enum RestMethod {
 ///     auth: AuthStrategy::None,
 ///     env_auth: vec![],
 ///     env_username: None,
+///     headers: vec![],
 ///     endpoints: vec![
 ///         Endpoint {
 ///             id: "GetHealth".to_string(),
@@ -97,6 +98,7 @@ pub enum RestMethod {
 ///             description: "Health check endpoint".to_string(),
 ///             request: None,
 ///             response: ApiResponse::json_type("HealthResponse"),
+///             headers: vec![],
 ///         },
 ///     ],
 /// };
@@ -134,6 +136,13 @@ pub struct RestApi {
     /// Only used when `auth` is `AuthStrategy::Basic`. The password is read
     /// from the first element of `env_auth` (i.e., `env_auth[0]`).
     pub env_username: Option<String>,
+    /// Default HTTP headers to include with every request.
+    ///
+    /// These headers are applied to all endpoints unless overridden by
+    /// endpoint-specific headers. Keys are case-insensitive for merging.
+    ///
+    /// Example: `vec![("X-Api-Version".to_string(), "2024-01".to_string())]`
+    pub headers: Vec<(String, String)>,
     /// All endpoints defined for this API.
     pub endpoints: Vec<Endpoint>,
 }
@@ -162,6 +171,7 @@ pub struct RestApi {
 ///     description: "Retrieve a user by ID".to_string(),
 ///     request: None,
 ///     response: ApiResponse::json_type("User"),
+///     headers: vec![],
 /// };
 ///
 /// assert!(endpoint.path.contains("{user_id}"));
@@ -179,6 +189,7 @@ pub struct RestApi {
 ///     description: "Create a new user".to_string(),
 ///     request: Some(Schema::new("CreateUserRequest")),
 ///     response: ApiResponse::json_type("User"),
+///     headers: vec![],
 /// };
 ///
 /// assert!(endpoint.request.is_some());
@@ -201,6 +212,16 @@ pub struct Endpoint {
     pub request: Option<Schema>,
     /// Expected response type for this endpoint.
     pub response: ApiResponse,
+    /// HTTP headers specific to this endpoint.
+    ///
+    /// These headers are merged with API-level headers, with endpoint headers
+    /// taking precedence for matching keys (case-insensitive comparison).
+    ///
+    /// Example for Anthropic beta endpoints:
+    /// ```ignore
+    /// headers: vec![("anthropic-beta".to_string(), "message-batches-2024-09-24".to_string())]
+    /// ```
+    pub headers: Vec<(String, String)>,
 }
 
 #[cfg(test)]

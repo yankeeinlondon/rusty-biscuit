@@ -235,6 +235,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            headers: vec![],
             endpoints: vec![Endpoint {
                 id: "ListItems".to_string(),
                 method: RestMethod::Get,
@@ -242,6 +243,7 @@ mod tests {
                 description: "List all items".to_string(),
                 request: None,
                 response: ApiResponse::json_type("ListItemsResponse"),
+                headers: vec![],
             }],
         }
     }
@@ -255,6 +257,7 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             env_auth: vec!["OPENAI_API_KEY".to_string()],
             env_username: None,
+            headers: vec![],
             endpoints: vec![
                 Endpoint {
                     id: "ListModels".to_string(),
@@ -263,6 +266,7 @@ mod tests {
                     description: "Lists available models".to_string(),
                     request: None,
                     response: ApiResponse::json_type("ListModelsResponse"),
+                    headers: vec![],
                 },
                 Endpoint {
                     id: "RetrieveModel".to_string(),
@@ -271,6 +275,7 @@ mod tests {
                     description: "Retrieves a model".to_string(),
                     request: None,
                     response: ApiResponse::json_type("Model"),
+                    headers: vec![],
                 },
                 Endpoint {
                     id: "CreateCompletion".to_string(),
@@ -279,6 +284,7 @@ mod tests {
                     description: "Creates a completion".to_string(),
                     request: Some(Schema::new("CreateCompletionRequest")),
                     response: ApiResponse::json_type("Completion"),
+                    headers: vec![],
                 },
             ],
         }
@@ -593,6 +599,7 @@ mod tests {
                 auth: auth.clone(),
                 env_auth,
                 env_username,
+                headers: vec![],
                 endpoints: vec![Endpoint {
                     id: "Test".to_string(),
                     method: RestMethod::Get,
@@ -600,6 +607,7 @@ mod tests {
                     description: "Test endpoint".to_string(),
                     request: None,
                     response: ApiResponse::json_type("TestResponse"),
+                    headers: vec![],
                 }],
             };
 
@@ -631,6 +639,7 @@ mod tests {
                 description: format!("{:?} endpoint", method),
                 request: None,
                 response: ApiResponse::json_type("Response"),
+                headers: vec![],
             })
             .collect();
 
@@ -642,6 +651,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            headers: vec![],
             endpoints,
         };
 
@@ -670,6 +680,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            headers: vec![],
             endpoints: vec![],
         };
 

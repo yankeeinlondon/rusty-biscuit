@@ -49,7 +49,7 @@ pub enum SchematicError {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
 impl ListModelsRequest {
-    /// Converts the request into (method, path, body) parts.
+    /// Converts the request into (method, path, body, headers) parts.
     ///
     /// ## Returns
     ///
@@ -57,6 +57,7 @@ impl ListModelsRequest {
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string
     /// - Optional JSON body string
+    /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
@@ -64,9 +65,12 @@ impl ListModelsRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(
         self,
-    ) -> Result<(&'static str, String, Option<String>), SchematicError> {
+    ) -> Result<
+        (&'static str, String, Option<String>, Vec<(String, String)>),
+        SchematicError,
+    > {
         let path = "/models".to_string();
-        Ok(("GET", path, None))
+        Ok(("GET", path, None, vec![]))
     }
 }
 ///Request for RetrieveModel endpoint.
@@ -76,7 +80,7 @@ pub struct RetrieveModelRequest {
     pub model: String,
 }
 impl RetrieveModelRequest {
-    /// Converts the request into (method, path, body) parts.
+    /// Converts the request into (method, path, body, headers) parts.
     ///
     /// ## Returns
     ///
@@ -84,6 +88,7 @@ impl RetrieveModelRequest {
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string
     /// - Optional JSON body string
+    /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
@@ -91,9 +96,12 @@ impl RetrieveModelRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(
         self,
-    ) -> Result<(&'static str, String, Option<String>), SchematicError> {
+    ) -> Result<
+        (&'static str, String, Option<String>, Vec<(String, String)>),
+        SchematicError,
+    > {
         let path = format!("/models/{}", self.model);
-        Ok(("GET", path, None))
+        Ok(("GET", path, None, vec![]))
     }
 }
 ///Request for DeleteModel endpoint.
@@ -103,7 +111,7 @@ pub struct DeleteModelRequest {
     pub model: String,
 }
 impl DeleteModelRequest {
-    /// Converts the request into (method, path, body) parts.
+    /// Converts the request into (method, path, body, headers) parts.
     ///
     /// ## Returns
     ///
@@ -111,6 +119,7 @@ impl DeleteModelRequest {
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string
     /// - Optional JSON body string
+    /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
@@ -118,9 +127,12 @@ impl DeleteModelRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(
         self,
-    ) -> Result<(&'static str, String, Option<String>), SchematicError> {
+    ) -> Result<
+        (&'static str, String, Option<String>, Vec<(String, String)>),
+        SchematicError,
+    > {
         let path = format!("/models/{}", self.model);
-        Ok(("DELETE", path, None))
+        Ok(("DELETE", path, None, vec![]))
     }
 }
 ///Request enum for OpenAI API.
@@ -135,10 +147,20 @@ pub enum OpenAIRequest {
     DeleteModel(DeleteModelRequest),
 }
 impl OpenAIRequest {
-    /// Converts the request into (method, path, body) parts.
+    /// Converts the request into (method, path, body, headers) parts.
     ///
     /// Delegates to the inner request struct's `into_parts()` method.
-    pub fn into_parts(self) -> (&'static str, String, Option<String>) {
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if the request body
+    /// fails to serialize to JSON.
+    pub fn into_parts(
+        self,
+    ) -> Result<
+        (&'static str, String, Option<String>, Vec<(String, String)>),
+        SchematicError,
+    > {
         match self {
             Self::ListModels(req) => req.into_parts(),
             Self::RetrieveModel(req) => req.into_parts(),
@@ -165,6 +187,14 @@ impl From<DeleteModelRequest> for OpenAIRequest {
 pub struct OpenAI {
     client: reqwest::Client,
     base_url: String,
+    /// Environment variable names for authentication credentials.
+    env_auth: Vec<String>,
+    /// Authentication strategy for this API client.
+    auth_strategy: schematic_define::AuthStrategy,
+    /// Environment variable for Basic auth username.
+    env_username: Option<String>,
+    /// Default HTTP headers to include with every request.
+    headers: Vec<(String, String)>,
 }
 impl OpenAI {
     /// Base URL for the API.
@@ -174,6 +204,12 @@ impl OpenAI {
         Self {
             client: reqwest::Client::new(),
             base_url: Self::BASE_URL.to_string(),
+            env_auth: vec!["OPENAI_API_KEY".to_string()],
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
+            env_username: None,
+            headers: vec![],
         }
     }
     /// Creates a new API client with a custom base URL.
@@ -187,6 +223,12 @@ impl OpenAI {
         Self {
             client: reqwest::Client::new(),
             base_url: base_url.into(),
+            env_auth: vec!["OPENAI_API_KEY".to_string()],
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
+            env_username: None,
+            headers: vec![],
         }
     }
     /// Creates a new API client with a pre-configured reqwest client.
@@ -206,6 +248,12 @@ impl OpenAI {
         Self {
             client,
             base_url: Self::BASE_URL.to_string(),
+            env_auth: vec!["OPENAI_API_KEY".to_string()],
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
+            env_username: None,
+            headers: vec![],
         }
     }
     /// Creates a new API client with a pre-configured reqwest client and custom base URL.
@@ -226,6 +274,69 @@ impl OpenAI {
         Self {
             client,
             base_url: base_url.into(),
+            env_auth: vec!["OPENAI_API_KEY".to_string()],
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
+            env_username: None,
+            headers: vec![],
+        }
+    }
+    /// Creates a variant of this API client with different configuration.
+    ///
+    /// This method clones the underlying HTTP client and allows customizing:
+    /// - Base URL (for proxies, mock servers, or different environments)
+    /// - Authentication credentials (different env var names)
+    /// - Authentication strategy (via `UpdateStrategy`)
+    ///
+    /// ## Arguments
+    ///
+    /// * `base_url` - New base URL for this variant
+    /// * `env_auth` - New environment variable names for credentials
+    /// * `strategy` - How to update the auth strategy:
+    ///   - `UpdateStrategy::NoChange` - Keep current auth strategy
+    ///   - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// use schematic_define::UpdateStrategy;
+    ///
+    /// let api = Api::new();
+    ///
+    /// // Create a variant pointing to a staging server
+    /// let staging = api.variant(
+    ///     "https://staging.api.com/v1",
+    ///     vec!["STAGING_API_KEY".to_string()],
+    ///     UpdateStrategy::NoChange,
+    /// );
+    ///
+    /// // Create a variant with different auth
+    /// let other = api.variant(
+    ///     "https://other.api.com/v1",
+    ///     vec!["OTHER_TOKEN".to_string()],
+    ///     UpdateStrategy::ChangeTo(schematic_define::AuthStrategy::ApiKey {
+    ///         header: "X-API-Key".to_string(),
+    ///     }),
+    /// );
+    /// ```
+    pub fn variant(
+        &self,
+        base_url: impl Into<String>,
+        env_auth: Vec<String>,
+        strategy: schematic_define::UpdateStrategy,
+    ) -> Self {
+        let auth_strategy = match strategy {
+            schematic_define::UpdateStrategy::NoChange => self.auth_strategy.clone(),
+            schematic_define::UpdateStrategy::ChangeTo(auth) => auth,
+        };
+        Self {
+            client: self.client.clone(),
+            base_url: base_url.into(),
+            env_auth,
+            auth_strategy,
+            env_username: self.env_username.clone(),
+            headers: self.headers.clone(),
         }
     }
 }
@@ -251,7 +362,7 @@ impl OpenAI {
         request: impl Into<OpenAIRequest>,
     ) -> Result<T, SchematicError> {
         let request = request.into();
-        let (method, path, body) = request.into_parts()?;
+        let (method, path, body, endpoint_headers) = request.into_parts()?;
         let url = format!("{}{}", self.base_url, path);
         let mut req_builder = match method {
             "GET" => self.client.get(&url),
@@ -263,13 +374,52 @@ impl OpenAI {
             "OPTIONS" => self.client.request(reqwest::Method::OPTIONS, &url),
             _ => return Err(SchematicError::UnsupportedMethod(method.to_string())),
         };
-        let token = ["OPENAI_API_KEY"]
-            .iter()
-            .find_map(|var| std::env::var(var).ok())
-            .ok_or_else(|| SchematicError::MissingCredential {
-                env_vars: vec!["OPENAI_API_KEY".to_string()],
-            })?;
-        req_builder = req_builder.header("Authorization", format!("Bearer {}", token));
+        match &self.auth_strategy {
+            schematic_define::AuthStrategy::None => {}
+            schematic_define::AuthStrategy::BearerToken { header } => {
+                let header_name = header.as_deref().unwrap_or("Authorization");
+                let token = self
+                    .env_auth
+                    .iter()
+                    .find_map(|var| std::env::var(var).ok())
+                    .ok_or_else(|| SchematicError::MissingCredential {
+                        env_vars: self.env_auth.clone(),
+                    })?;
+                req_builder = req_builder
+                    .header(header_name, format!("Bearer {}", token));
+            }
+            schematic_define::AuthStrategy::ApiKey { header } => {
+                let key = self
+                    .env_auth
+                    .iter()
+                    .find_map(|var| std::env::var(var).ok())
+                    .ok_or_else(|| SchematicError::MissingCredential {
+                        env_vars: self.env_auth.clone(),
+                    })?;
+                req_builder = req_builder.header(header.as_str(), key);
+            }
+            schematic_define::AuthStrategy::Basic => {
+                let username_env = self.env_username.as_deref().unwrap_or("USERNAME");
+                let password_env = self
+                    .env_auth
+                    .first()
+                    .map(String::as_str)
+                    .unwrap_or("PASSWORD");
+                let username = std::env::var(username_env)
+                    .map_err(|_| SchematicError::MissingCredential {
+                        env_vars: vec![username_env.to_string()],
+                    })?;
+                let password = std::env::var(password_env)
+                    .map_err(|_| SchematicError::MissingCredential {
+                        env_vars: vec![password_env.to_string()],
+                    })?;
+                req_builder = req_builder.basic_auth(username, Some(password));
+            }
+        }
+        let merged_headers = Self::merge_headers(&self.headers, &endpoint_headers);
+        for (key, value) in merged_headers {
+            req_builder = req_builder.header(key.as_str(), value.as_str());
+        }
         if let Some(body) = body {
             req_builder = req_builder
                 .header("Content-Type", "application/json")
@@ -287,5 +437,26 @@ impl OpenAI {
         let result = response.json::<T>().await?;
         Ok(result)
     }
+    /// Merges API-level and endpoint-level headers.
+    ///
+    /// Endpoint headers override API headers for matching keys (case-insensitive).
+    /// Returns a new Vec with the merged headers.
+    fn merge_headers(
+        api_headers: &[(String, String)],
+        endpoint_headers: &[(String, String)],
+    ) -> Vec<(String, String)> {
+        let mut result: Vec<(String, String)> = Vec::new();
+        for (api_key, api_value) in api_headers {
+            let has_override = endpoint_headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case(api_key));
+            if !has_override {
+                result.push((api_key.clone(), api_value.clone()));
+            }
+        }
+        for (key, value) in endpoint_headers {
+            result.push((key.clone(), value.clone()));
+        }
+        result
+    }
 }
-

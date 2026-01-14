@@ -48,7 +48,7 @@ generate:
     @echo "Generating OpenAI API Client"
     @echo "----------------------------"
     @echo ""
-    @cargo run -p schematic-gen -- --api openai --output schematic/schema/src -v
+    @cargo run -p schematic-gen -- --api openai --output schema/src -v
 
 # clean generated schema code
 clean-generated:
@@ -56,9 +56,9 @@ clean-generated:
     @echo "Cleaning Generated Code"
     @echo "-----------------------"
     @echo ""
-    @rm -rf schematic/schema/src
-    @rm -f schematic/schema/Cargo.toml
-    @echo "Cleaned schematic/schema/"
+    @rm -rf schema/src
+    @rm -f schema/Cargo.toml
+    @echo "Cleaned schema/"
 
 # full workflow: generate and verify compilation
 full: generate
@@ -66,7 +66,7 @@ full: generate
     @echo "Verifying Generated Code"
     @echo "------------------------"
     @echo ""
-    @cargo check --manifest-path schematic/schema/Cargo.toml
+    @cargo check --manifest-path schema/Cargo.toml
     @echo ""
     @echo "Generation complete and verified!"
 

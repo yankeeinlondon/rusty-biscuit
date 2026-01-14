@@ -29,6 +29,7 @@
 //!     auth: AuthStrategy::BearerToken { header: None },
 //!     env_auth: vec!["OPENAI_API_KEY".to_string()],
 //!     env_username: None,
+//!     headers: vec![],
 //!     endpoints: vec![
 //!         Endpoint {
 //!             id: "ListModels".to_string(),
@@ -37,6 +38,7 @@
 //!             description: "List available models".to_string(),
 //!             request: None,
 //!             response: ApiResponse::json_type("ListModelsResponse"),
+//!             headers: vec![],
 //!         },
 //!     ],
 //! };

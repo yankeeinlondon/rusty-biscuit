@@ -71,6 +71,7 @@ pub fn define_openai_api() -> RestApi {
         auth: AuthStrategy::BearerToken { header: None },
         env_auth: vec!["OPENAI_API_KEY".to_string()],
         env_username: None,
+        headers: vec![],
         endpoints: vec![
             Endpoint {
                 id: "ListModels".to_string(),
@@ -79,6 +80,7 @@ pub fn define_openai_api() -> RestApi {
                 description: "Lists the currently available models".to_string(),
                 request: None,
                 response: ApiResponse::json_type("ListModelsResponse"),
+                headers: vec![],
             },
             Endpoint {
                 id: "RetrieveModel".to_string(),
@@ -87,6 +89,7 @@ pub fn define_openai_api() -> RestApi {
                 description: "Retrieves a model instance".to_string(),
                 request: None,
                 response: ApiResponse::json_type("Model"),
+                headers: vec![],
             },
             Endpoint {
                 id: "DeleteModel".to_string(),
@@ -95,6 +98,7 @@ pub fn define_openai_api() -> RestApi {
                 description: "Delete a fine-tuned model".to_string(),
                 request: None,
                 response: ApiResponse::json_type("DeleteModelResponse"),
+                headers: vec![],
             },
         ],
     }
