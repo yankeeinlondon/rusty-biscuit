@@ -10,18 +10,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Monorepo Structure
 
-The repository is organized into **areas** (not packages), each with its own `justfile`:
+The repository is organized into the following packages:
 
-```
+> Note: each package should have a `justfile` to provide common devops operations like build, lint, install, etc.
+
+```txt
 dockhand/
-├── darkmatter/        # Binary: `md` (markdown terminal renderer)
-├── research/          # AI-powered library research tools
+├── ai-pipeline
+│   ├── cli/          # Binary: `research` (FUTURE)
+│   └── lib/          # Core research library
+│   └── service/      # Server to abstract AI pipelining functionality (FUTURE)
+├── biscuit/          # Common utilities (providers, tools, TTS, codegen)
+├── darkmatter/       # Binary: `md` (markdown terminal renderer)
+├── research/         # AI-powered library research tools
 │   ├── cli/          # Binary: `research`
 │   └── lib/          # Core research library
-├── biscuit/          # Common utilities (providers, tools, TTS, codegen)
+├── schematic/        # Schema generation for API's and other schema
+│   ├── define/        # Tooling to Schema definition
+│   └── gen/          # Generation code to take definition code -> schema code
+│   └── schema/       # Generated schemas
+├── sniff/
+│   ├── cli/          # Binary: `sniff`
+│   └── lib/          # Hardware, Network, OS, and package manager discovery
 ├── so-you-say/       # Binary: `speak` (TTS CLI)
 └── tui/              # Future: ratatui-based interactive chat
 ```
+
 
 ### Key Architectural Patterns
 
@@ -109,7 +123,7 @@ This repository has local Claude Code skills in `.claude/skills/`:
 
 When working in this repository, you **must** follow these workflows:
 
-1. **Skill Usage**: Always use the `rig` skill when working with LLM interactions. Evaluate which links to follow within the skill's `SKILL.md` entry point.
+1. **Skill Usage**: Always use the `rig` skill when working with LLM interactions. Evaluate which links to follow within the skill's `SKILL.md` entry point. Always use the `rust` skill.
 
 2. **Module-Specific Skills**:
    - Working in `tui/`? Use the `ratatui` skill
