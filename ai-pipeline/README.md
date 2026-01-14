@@ -11,15 +11,21 @@ This library intends to provide strong AI/LLM pipelining capabilities to callers
 
      > **Note:** this library leverages the `rig` crate and other crates in the **rig** ecosystem to help it provided consistent utility across underlying model providers. For more information on the integration see: [Rig Integration](./docs/rig-integration.md) document.
 
-2. AI Pipeliner TUI Components [`./tui`] - FUTURE
+2. Model Generator [`./gen`]
+
+    A code generator module which will generate enumerations for all of the providers we provide support for in the `ai-pipeline` package.
+
+    When run, the enumerations will be placed in the `./lib` package to be used. The _primary_ user of these enumerations is the `ProviderModel` enumeration (`lib/src/rigging/models/mod.rs`)
+
+3. AI Pipeliner TUI Components [`./tui`] - FUTURE
 
     A set of TUI components which can be used in CLI programs to provide richer Human in the Loop experiences.
 
-3. AI Pipeliner CLI [`./cli`] - FUTURE
+4. AI Pipeliner CLI [`./cli`] - FUTURE
 
      A really simple CLI interfaces which leverages the pipeliner library as well as the pipeliner TUI components for all the heavy lifting.
 
-4. AI Pipeliner Service [`./server`] - FUTURE
+5. AI Pipeliner Service [`./server`] - FUTURE
 
      A server which provides:
 
