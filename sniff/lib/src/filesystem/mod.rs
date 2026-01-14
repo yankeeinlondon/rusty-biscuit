@@ -9,7 +9,7 @@ pub mod dependencies;
 pub mod formatting;
 
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
-pub use git::{GitInfo, RepoStatus, RemoteInfo, HostingProvider, CommitInfo, detect_git};
+pub use git::{BehindStatus, GitInfo, RepoStatus, RemoteInfo, HostingProvider, CommitInfo, detect_git};
 pub use monorepo::{MonorepoInfo, MonorepoTool, PackageLocation, detect_monorepo};
 pub use dependencies::{PackageManager, DependencyReport, ManifestLocation, DependencyEntry, DependencyKind, PackageDependencies, detect_dependencies};
 pub use formatting::{FormattingConfig, EditorConfigSection, detect_formatting};
@@ -30,9 +30,9 @@ pub struct FilesystemInfo {
 }
 
 /// Detect all filesystem information for a directory.
-pub fn detect_filesystem(root: &Path) -> Result<FilesystemInfo> {
+pub fn detect_filesystem(root: &Path, deep: bool) -> Result<FilesystemInfo> {
     let languages = detect_languages(root).ok();
-    let git = detect_git(root)?;
+    let git = detect_git(root, deep)?;
     let monorepo = detect_monorepo(root)?;
     let dependencies = detect_dependencies(root).ok();
     let formatting = detect_formatting(root).ok().flatten();

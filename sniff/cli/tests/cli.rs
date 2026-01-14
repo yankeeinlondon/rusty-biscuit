@@ -246,3 +246,87 @@ fn test_hardware_network_json_excludes_filesystem() {
         .stdout(predicate::str::contains("\"network\""))
         .stdout(predicate::str::contains("\"filesystem\"").not());
 }
+
+// === Deep flag tests ===
+// Tests for the --deep flag which enables deep git inspection (remote operations)
+
+#[test]
+fn test_deep_flag_in_help() {
+    // Verify --deep flag appears in help output with appropriate description
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--deep"))
+        .stdout(predicate::str::contains("remote").or(predicate::str::contains("git")));
+}
+
+#[test]
+fn test_deep_flag_parses_correctly() {
+    // Verify --deep flag is properly parsed and command succeeds
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .args(["--deep", "--filesystem"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_deep_flag_with_json_output() {
+    // Verify --deep with JSON output produces valid JSON with git fields
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .args(["--deep", "--filesystem", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"filesystem\""))
+        .stdout(predicate::str::contains("\"recent\"")); // new commits array field
+}
+
+#[test]
+fn test_filesystem_json_contains_new_git_fields() {
+    // Verify JSON output contains the new git-related fields
+    // These fields should exist even without --deep flag
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .args(["--filesystem", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"recent\"")) // commits array
+        .stdout(predicate::str::contains("\"in_worktree\"")) // boolean flag
+        .stdout(predicate::str::contains("\"worktrees\"")); // worktrees object
+}
+
+#[test]
+fn test_deep_flag_does_not_affect_non_filesystem() {
+    // --deep flag should not break other sections
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .args(["--deep", "--hardware", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"hardware\""))
+        .stdout(predicate::str::contains("\"os\""));
+}
+
+#[test]
+fn test_verbose_with_deep_shows_git_info() {
+    // Verbose output with --deep should show git repository section
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .args(["--deep", "--filesystem", "-v"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Git Repository:").or(predicate::str::contains("git")));
+}
+
+#[test]
+fn test_deep_and_verbose_combined() {
+    // Both --deep and -vv should work together without errors
+    Command::cargo_bin("sniff")
+        .unwrap()
+        .args(["--deep", "--filesystem", "-vv"])
+        .assert()
+        .success();
+}

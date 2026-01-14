@@ -45,6 +45,10 @@ struct Cli {
     /// Include ONLY filesystem section (enables include-only mode)
     #[arg(long)]
     filesystem: bool,
+
+    /// Enable deep git inspection (queries remotes for branch info)
+    #[arg(long)]
+    deep: bool,
 }
 
 const AFTER_HELP: &str = "\
@@ -71,6 +75,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(base) = base_dir {
         config = config.base_dir(base);
+    }
+
+    if cli.deep {
+        config = config.deep(true);
     }
 
     // Check if we're in include-only mode (any include flag is set)

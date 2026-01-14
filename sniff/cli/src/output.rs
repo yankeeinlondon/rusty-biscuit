@@ -1,3 +1,4 @@
+use sniff_lib::filesystem::git::BehindStatus;
 use sniff_lib::SniffResult;
 use std::path::Path;
 
@@ -302,10 +303,25 @@ fn print_filesystem_section(
         if let Some(ref branch) = git.current_branch {
             println!("  Branch: {}", branch);
         }
-        if let Some(ref commit) = git.head_commit {
-            println!("  HEAD: {} ({})", &commit.sha[..8], commit.author);
-            println!("  Message: {}", commit.message.lines().next().unwrap_or(""));
+
+        // Show in_worktree indicator when true
+        if git.in_worktree {
+            println!("  In Worktree: yes");
         }
+
+        // Show HEAD commit (first recent commit)
+        if let Some(commit) = git.recent.first() {
+            println!("  HEAD: {} ({})", &commit.sha[..8], commit.author);
+            println!(
+                "  Message: {}",
+                commit.message.lines().next().unwrap_or("")
+            );
+            // Show which remotes have this commit (deep mode)
+            if let Some(ref remotes) = commit.remotes {
+                println!("    Synced to: {}", remotes.join(", "));
+            }
+        }
+
         let dirty = if git.status.is_dirty { "dirty" } else { "clean" };
         println!(
             "  Status: {} ({} staged, {} unstaged, {} untracked)",
@@ -314,6 +330,40 @@ fn print_filesystem_section(
             git.status.unstaged_count,
             git.status.untracked_count
         );
+
+        // Show is_behind status (deep mode only)
+        if let Some(ref behind) = git.status.is_behind {
+            match behind {
+                BehindStatus::NotBehind => println!("  Behind: no"),
+                BehindStatus::Behind(remotes) => {
+                    println!("  Behind: {}", remotes.join(", "));
+                }
+            }
+        }
+
+        // Show more recent commits at verbose level 1+
+        if verbose > 0 && git.recent.len() > 1 {
+            println!("  Recent commits:");
+            for commit in git.recent.iter().skip(1).take(5) {
+                let short_msg = commit.message.lines().next().unwrap_or("");
+                let truncated = if short_msg.len() > 50 {
+                    format!("{}...", &short_msg[..47])
+                } else {
+                    short_msg.to_string()
+                };
+                print!("    {} - {}", &commit.sha[..8], truncated);
+                // Show commit remotes at verbose level 2+ with deep
+                if verbose > 1
+                    && let Some(ref remotes) = commit.remotes
+                {
+                    print!(" [{}]", remotes.join(", "));
+                }
+                println!();
+            }
+            if git.recent.len() > 6 {
+                println!("    ... and {} more", git.recent.len() - 6);
+            }
+        }
 
         // Show dirty file details at verbose level 1+
         if verbose > 0 && !git.status.dirty.is_empty() {
@@ -348,8 +398,38 @@ fn print_filesystem_section(
             }
         }
 
+        // Show worktrees at verbose level 1+
+        if verbose > 0 && !git.worktrees.is_empty() {
+            println!("  Worktrees:");
+            for (branch, info) in &git.worktrees {
+                let dirty_indicator = if info.dirty { " (dirty)" } else { "" };
+                println!("    {} @ {}{}", branch, &info.sha[..8], dirty_indicator);
+                if verbose > 1 {
+                    println!("      Path: {}", info.filepath.display());
+                }
+            }
+        }
+
+        // Show remotes with enhanced branch info
         for remote in &git.remotes {
-            println!("  Remote {}: {:?}", remote.name, remote.provider);
+            print!("  Remote {}: {:?}", remote.name, remote.provider);
+            // Show branch count in deep mode
+            if let Some(ref branches) = remote.branches {
+                print!(" ({} branches)", branches.len());
+            }
+            println!();
+            // Show branches at verbose level 2+ with deep
+            if verbose > 1
+                && let Some(ref branches) = remote.branches
+            {
+                let show_count = 5.min(branches.len());
+                for branch in branches.iter().take(show_count) {
+                    println!("    - {}", branch);
+                }
+                if branches.len() > show_count {
+                    println!("    ... and {} more", branches.len() - show_count);
+                }
+            }
         }
     }
     println!();

@@ -125,5 +125,6 @@ release-update:
 install-release-plz:
     @cargo install release-plz --locked
 
+# run the latest debug build of the `sniff` CLI
 sniff *args="":
-    @cargo run -p sniff-cli *args=""
+    @cargo run -p sniff-cli -- {{args}}

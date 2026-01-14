@@ -46,6 +46,8 @@ pub struct SniffConfig {
     pub base_dir: Option<PathBuf>,
     /// Include CPU usage sampling (takes ~200ms)
     pub include_cpu_usage: bool,
+    /// Enable deep git inspection (network operations for remote info)
+    pub deep: bool,
     /// Skip hardware detection
     pub skip_hardware: bool,
     /// Skip network detection
@@ -69,6 +71,12 @@ impl SniffConfig {
     /// Enable CPU usage sampling.
     pub fn include_cpu_usage(mut self, include: bool) -> Self {
         self.include_cpu_usage = include;
+        self
+    }
+
+    /// Enable deep git inspection (fetches remote branch info, checks if behind).
+    pub fn deep(mut self, enable: bool) -> Self {
+        self.deep = enable;
         self
     }
 
@@ -145,7 +153,7 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
         let base = config.base_dir.unwrap_or_else(|| {
             std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
         });
-        Some(filesystem::detect_filesystem(&base)?)
+        Some(filesystem::detect_filesystem(&base, config.deep)?)
     };
 
     Ok(SniffResult { hardware, network, filesystem })
