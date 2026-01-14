@@ -1,0 +1,85 @@
+[
+  {
+    "severity": "CRITICAL",
+    "phase": "Phase 4: Endpoint Header Propagation",
+    "issue": "request_enum.rs return type mismatch",
+    "description": "The request_enum.rs into_parts() method (line 72) returns a plain tuple: `(&'static str, String, Option<String>)`, but it delegates to request_struct.into_parts() which returns `Result<...>`. This is a pre-existing compilation bug that must be fixed before adding headers support.",
+    "current_code": "pub fn into_parts(self) -> (&'static str, String, Option<String>) {\n    match self {\n        Self::ListModels(req) => req.into_parts(),  // ← Returns Result, not tuple!\n    }\n}",
+    "corrected_code": "pub fn into_parts(self) -> Result<(&'static str, String, Option<String>, Vec<(String, String)>), SchematicError> {\n    match self {\n        Self::ListModels(req) => req.into_parts(),\n    }\n}",
+    "file_path": "/Volumes/coding/personal/dockhand/schematic/gen/src/codegen/request_enum.rs",
+    "line_numbers": "69-76",
+    "blocking": true,
+    "fix_priority": 1
+  },
+  {
+    "severity": "CRITICAL",
+    "phase": "Phase 3: Code Generation for Headers",
+    "issue": "Missing struct field initialization for headers in api_struct.rs codegen",
+    "description": "The plan shows generated code with a headers field, but doesn't explicitly specify where/how to initialize it in the api_struct codegen. The generate_api_struct() function must be updated to:\n1. Add headers: Vec<(String, String)> field to struct\n2. Initialize headers in new(), with_base_url(), with_client() methods\n3. Extract headers from RestApi during code generation",
+    "current_code": "pub struct #struct_name {\n    client: reqwest::Client,\n    base_url: String,\n    env_auth: Vec<String>,\n    auth_strategy: schematic_define::AuthStrategy,\n    env_username: Option<String>,\n    // MISSING: headers field\n}",
+    "corrected_code": "pub struct #struct_name {\n    client: reqwest::Client,\n    base_url: String,\n    env_auth: Vec<String>,\n    auth_strategy: schematic_define::AuthStrategy,\n    env_username: Option<String>,\n    headers: Vec<(String, String)>,  // NEW\n}\n\n// In new() constructor:\npub fn new() -> Self {\n    Self {\n        // ... existing fields ...\n        headers: vec![#(#api_headers.clone()),*],  // NEW\n    }\n}",
+    "file_path": "/Volumes/coding/personal/dockhand/schematic/gen/src/codegen/api_struct.rs",
+    "line_numbers": "70-81, 88-96",
+    "blocking": true,
+    "fix_priority": 2
+  },
+  {
+    "severity": "CRITICAL",
+    "phase": "Phase 4: Endpoint Header Propagation",
+    "issue": "into_parts() signature incomplete - missing endpoint headers output",
+    "description": "The plan correctly identifies that into_parts() needs to return endpoint headers as the 4th element. However, the return signature must be wrapped in Result to match the pre-existing Result return type in request_structs.rs. Current code only returns (&'static str, String, Option<String>), but must return Result<(..., Vec<(String, String)>), SchematicError>.",
+    "current_code": "pub fn into_parts(self) -> Result<(&'static str, String, Option<String>), SchematicError> {\n    #path_format\n    Ok((#method_str, path, #body_expr))\n}",
+    "corrected_code": "pub fn into_parts(self) -> Result<(&'static str, String, Option<String>, Vec<(String, String)>), SchematicError> {\n    #path_format\n    let endpoint_headers = vec![#(#endpoint_headers.clone()),*];\n    Ok((#method_str, path, #body_expr, endpoint_headers))\n}",
+    "file_path": "/Volumes/coding/personal/dockhand/schematic/gen/src/codegen/request_structs.rs",
+    "line_numbers": "189-192",
+    "blocking": true,
+    "fix_priority": 3
+  },
+  {
+    "severity": "HIGH",
+    "phase": "Phase 3: Code Generation for Headers",
+    "issue": "Inefficient merge_headers() implementation",
+    "description": "The proposed merge_headers() uses a retain() + push pattern which is O(n²) for m endpoint headers applied to n API headers. For typical header counts this is fine, but the implementation could be optimized to O(n) with a single pass or HashMap approach.",
+    "current_code": "fn merge_headers(api: &[(String, String)], endpoint: &[(String, String)]) -> Vec<(String, String)> {\n    let mut result: Vec<(String, String)> = api.to_vec();\n    for (key, value) in endpoint {\n        result.retain(|(k, _)| k != key);  // ← O(n) per iteration\n        result.push((key.clone(), value.clone()));\n    }\n    result\n}",
+    "corrected_code": "fn merge_headers(api: &[(String, String)], endpoint: &[(String, String)]) -> Vec<(String, String)> {\n    let mut result = api.to_vec();\n    for (key, value) in endpoint {\n        if let Some(pos) = result.iter().position(|(k, _)| k == key) {\n            result[pos] = (key.clone(), value.clone());\n        } else {\n            result.push((key.clone(), value.clone()));\n        }\n    }\n    result\n}",
+    "file_path": "/Volumes/coding/personal/dockhand/schematic/gen/src/lib.rs",
+    "line_numbers": "TBD (new function)",
+    "blocking": false,
+    "fix_priority": 5
+  },
+  {
+    "severity": "MEDIUM",
+    "phase": "Phase 3: Code Generation for Headers",
+    "issue": "Client request method header merging not specified",
+    "description": "The plan shows that endpoint headers should override API headers at request time. The generate_request_method() function must be updated to merge headers before building the request. Plan shows the merge_headers() pattern but doesn't explicitly state where/how to call it in the request() method.",
+    "current_code": "// In client.rs request() method:\nlet mut req_builder = match method {\n    \"GET\" => self.client.get(&url),\n    // ...\n};\n// Apply authentication\n#auth_setup\n// Add body if present\nif let Some(body) = body { ... }",
+    "corrected_code": "// In client.rs request() method:\nlet (method, path, body, endpoint_headers) = request.into_parts()?;\nlet merged_headers = merge_headers(&self.headers, &endpoint_headers);\n\nlet mut req_builder = match method {\n    \"GET\" => self.client.get(&url),\n    // ...\n};\n\n// Apply merged headers\nfor (key, value) in merged_headers {\n    req_builder = req_builder.header(key, value);\n}\n\n// Apply authentication\n#auth_setup\n\n// Add body if present\nif let Some(body) = body { ... }",
+    "file_path": "/Volumes/coding/personal/dockhand/schematic/gen/src/codegen/client.rs",
+    "line_numbers": "74-93",
+    "blocking": true,
+    "fix_priority": 4
+  },
+  {
+    "severity": "MEDIUM",
+    "phase": "Phase 2: Header Type Definition",
+    "issue": "No documentation for header field semantics",
+    "description": "When adding headers: Vec<(String, String)> to RestApi and Endpoint, add rustdoc comments explaining:\n- Header precedence (endpoint > API)\n- Header validation expectations (user responsibility?)\n- Common use cases (e.g., Anthropic beta headers)\n- Performance implications",
+    "current_code": "pub struct RestApi {\n    // ... existing fields ...\n    pub headers: Vec<(String, String)>,\n}",
+    "corrected_code": "pub struct RestApi {\n    // ... existing fields ...\n    /// HTTP headers to include in all requests from this API client.\n    ///\n    /// These headers are merged with endpoint-specific headers at request time,\n    /// with endpoint headers taking precedence for duplicate keys.\n    ///\n    /// ## Examples\n    ///\n    /// Adding API-wide headers for authentication or versioning:\n    ///\n    /// ```\n    /// # use schematic_define::RestApi;\n    /// let headers = vec![\n    ///     (\"X-API-Version\".to_string(), \"2024-01-15\".to_string()),\n    /// ];\n    /// ```\n    pub headers: Vec<(String, String)>,\n}",
+    "file_path": "/Volumes/coding/personal/dockhand/schematic/define/src/types.rs",
+    "line_numbers": "108-139, 187-204",
+    "blocking": false,
+    "fix_priority": 6
+  },
+  {
+    "severity": "MEDIUM",
+    "phase": "Phase 1: Directory Restructuring",
+    "issue": "Path references verification needed",
+    "description": "While the plan correctly identifies file paths, a pre-flight check confirms all references are accurate. No syntax errors found, but deployment should verify paths resolve correctly in the build environment.",
+    "file_path": "/Volumes/coding/personal/dockhand/schematic/justfile",
+    "line_numbers": "51, 69",
+    "blocking": false,
+    "fix_priority": 7,
+    "verification": "PASSED - All paths match current directory structure"
+  }
+]

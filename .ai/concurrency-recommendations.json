@@ -1,0 +1,580 @@
+{
+  "analysis_date": "2026-01-13",
+  "repository": "dockhand",
+  "project": "Schematic REST API Code Generator - Header Implementation",
+  "parallelization_score": {
+    "current_plan": 2.5,
+    "optimized_plan": 6.5,
+    "scale": 10,
+    "explanation": "Current plan has 4 sequential phases with one blocking directory restructuring. Optimized plan defers restructuring and parallelizes codegen module updates."
+  },
+  "recommendations": [
+    {
+      "id": "PAR_001",
+      "title": "Split Phase 2-3: Type Definition vs Codegen Preparation",
+      "impact": {
+        "time_saved_minutes": 10,
+        "parallelism_percentage": 50,
+        "risk_level": "LOW",
+        "complexity": "LOW"
+      },
+      "execution_details": {
+        "phase_2": {
+          "task": "Add header fields to RestApi and Endpoint structs",
+          "duration_minutes": 12,
+          "location": "schematic/define/src/types.rs",
+          "blocking": false,
+          "subtasks": [
+            "Add RestApi.headers: HashMap<String, String>",
+            "Add Endpoint.headers: Option<HashMap<String, String>>",
+            "Add documentation and examples",
+            "Add unit tests"
+          ]
+        },
+        "phase_3_prep": {
+          "task": "Prepare codegen modules for header support (can start at 5min into Phase 2)",
+          "duration_minutes": 8,
+          "parallel_with": "Phase 2",
+          "locations": [
+            "schematic/gen/src/codegen/request_structs.rs - identify injection points",
+            "schematic/gen/src/codegen/client.rs - design header application logic",
+            "schematic/gen/src/codegen/api_struct.rs - optional enhancement design"
+          ],
+          "subtasks": [
+            "Review Endpoint struct to identify header field access patterns",
+            "Design generated struct fields for headers",
+            "Plan header injection in request builder method",
+            "Mock up optional API configuration interface"
+          ]
+        }
+      },
+      "critical_sync_point": {
+        "description": "Both RestApi.headers and Endpoint.headers MUST be defined before Phase 3 integration begins",
+        "validation_command": "cargo test -p schematic-define",
+        "blocking": true
+      }
+    },
+    {
+      "id": "PAR_002",
+      "title": "Defer Phase 1 Directory Restructuring to Post-Phase 5",
+      "impact": {
+        "time_saved_minutes": 5,
+        "parallelism_percentage": 100,
+        "risk_level": "LOW",
+        "complexity": "TRIVIAL"
+      },
+      "execution_details": {
+        "current_bottleneck": "Phase 1 blocks all subsequent work by requiring schematic/schematic/schema → schematic/schema move",
+        "optimization": "Directory structure is mechanical and doesn't affect logic. Defer until after Phase 5 testing passes.",
+        "phase_1_modified": {
+          "new_duration_minutes": 2,
+          "task": "Validate paths only (don't move files)",
+          "subtasks": [
+            "Confirm schematic/schematic/schema/Cargo.toml exists",
+            "Confirm schematic/define/ and schematic/gen/ paths resolve",
+            "Verify root Cargo.toml workspace members"
+          ]
+        },
+        "phase_1b_deferred": {
+          "duration_minutes": 15,
+          "execute_after": "Phase 5 integration tests pass",
+          "task": "Execute full directory restructuring",
+          "subtasks": [
+            "Create schematic/schema/ directory",
+            "Move schematic/schematic/schema/* contents",
+            "Update root Cargo.toml workspace member list",
+            "Update import paths in schematic/define and schematic/gen if needed",
+            "Verify cargo build passes"
+          ]
+        }
+      },
+      "rationale": "Separating mechanical restructuring from functional changes reduces risk and eliminates blocking operation during active development"
+    },
+    {
+      "id": "PAR_003",
+      "title": "Parallelize Codegen Module Updates (Team-Level Parallelism)",
+      "impact": {
+        "time_saved_minutes": 8,
+        "parallelism_percentage": 60,
+        "risk_level": "MEDIUM",
+        "complexity": "MEDIUM",
+        "team_size": "3 developers optimal"
+      },
+      "execution_details": {
+        "prerequisite": "Phase 2 must be complete (header fields defined)",
+        "approach": "Three developers work on independent modules in parallel",
+        "task_1": {
+          "owner": "Developer A",
+          "module": "schematic/gen/src/codegen/request_structs.rs",
+          "duration_minutes": 7,
+          "objective": "Extract header fields from Endpoint into generated request struct",
+          "work_items": [
+            "Modify generate_request_struct() to check endpoint.headers",
+            "Add header field generation logic: quote! { pub headers: Option<HashMap<String, String>> }",
+            "Update into_parts() method if headers affect request construction",
+            "Add test case in generate_request_struct tests"
+          ],
+          "deliverable": "PR with request_structs.rs changes"
+        },
+        "task_2": {
+          "owner": "Developer B",
+          "module": "schematic/gen/src/codegen/client.rs",
+          "duration_minutes": 9,
+          "objective": "Inject header application logic in request builder",
+          "work_items": [
+            "Modify generate_request_method() to apply headers",
+            "Add header injection in req_builder construction",
+            "Handle header inheritance: endpoint-level > request-level > api-level",
+            "Add error handling for header construction",
+            "Add test case in client.rs tests"
+          ],
+          "deliverable": "PR with client.rs changes",
+          "depends_on": "Task 1 (needs access to header field from request structs)"
+        },
+        "task_3": {
+          "owner": "Developer C (optional)",
+          "module": "schematic/gen/src/codegen/api_struct.rs",
+          "duration_minutes": 4,
+          "objective": "(Optional) Add header configuration interface to generated API struct",
+          "work_items": [
+            "Design optional with_default_headers() builder method",
+            "Add header field to API client struct if needed",
+            "Document usage in generated code comments"
+          ],
+          "deliverable": "PR with api_struct.rs enhancement (can be deferred if needed)",
+          "depends_on": "Task 2 (informational, design phase)"
+        }
+      },
+      "merge_strategy": {
+        "step_1": "Merge Task 1 (request_structs.rs) - validates field generation",
+        "step_2": "Merge Task 2 (client.rs) - validates field consumption and header injection",
+        "step_3": "Merge Task 3 (api_struct.rs) - optional enhancement",
+        "validation_after_each": "cargo build -p schematic-gen && cargo test -p schematic-gen"
+      },
+      "risk_mitigation": [
+        "High merge conflict probability: Multiple devs may edit codegen/mod.rs",
+        "Mitigation: Establish clear module ownership, verify exports in mod.rs only at merge time",
+        "Run full e2e_generation.rs test after each merge to catch breakage immediately",
+        "If conflicts arise: Sequential merge is acceptable (adds 5 min) if parallel execution fails"
+      ]
+    },
+    {
+      "id": "PAR_004",
+      "title": "Parallel Test Execution in Phase 5 (Integration Testing)",
+      "impact": {
+        "time_saved_minutes": 5,
+        "parallelism_percentage": 50,
+        "risk_level": "LOW",
+        "complexity": "TRIVIAL"
+      },
+      "execution_details": {
+        "current_approach": "Sequential test execution via cargo test",
+        "optimized_approach": "Concurrent test execution with thread pool",
+        "command": "cargo test --lib --test '*' -- --test-threads=4",
+        "rationale": "All tests use isolated temporary directories (tempfile) and wiremock for HTTP mocking. No shared state.",
+        "test_parallelism": {
+          "unit_tests": {
+            "location": "schematic/*/src/lib.rs tests",
+            "duration_sequential_seconds": 2,
+            "duration_parallel_seconds": 2,
+            "concurrency": "High (tests are tiny, <100ms each)"
+          },
+          "integration_tests": {
+            "e2e_generation.rs": {
+              "duration_seconds": 4,
+              "isolation": "tempfile-based output directories"
+            },
+            "http_client.rs": {
+              "duration_seconds": 3,
+              "isolation": "wiremock mocked HTTP endpoints"
+            },
+            "path_substitution.rs": {
+              "duration_seconds": 2,
+              "isolation": "no side effects"
+            }
+          },
+          "total_sequential": 11,
+          "total_parallel": 7,
+          "improvement": "36% faster"
+        },
+        "implementation": [
+          "No code changes required - use cargo's built-in parallel runner",
+          "Set --test-threads=4 based on available CPU cores",
+          "Monitor for flaky tests with: cargo test --lib -- --test-threads=4 --nocapture",
+          "Add new header propagation test to e2e_generation.rs"
+        ]
+      }
+    },
+    {
+      "id": "PAR_005",
+      "title": "CRITICAL SYNC POINT: RestApi + Endpoint Synchronization",
+      "impact": {
+        "risk_level": "CRITICAL",
+        "blocking": true,
+        "impacts_phase": [2, 3, 4, 5]
+      },
+      "critical_constraint": {
+        "description": "RestApi and Endpoint structs MUST both have header fields before Phase 3 begins",
+        "location": "schematic/define/src/types.rs (same file)",
+        "reason": "Code generators reference both structs. Type mismatch will cause codegen failures."
+      },
+      "implementation": {
+        "phase_2_approach": "NOT PARALLELIZABLE INTERNALLY",
+        "atomic_commit": {
+          "message": "feat(schematic): add header fields to RestApi and Endpoint",
+          "includes": [
+            "RestApi.headers: HashMap<String, String>",
+            "Endpoint.headers: Option<HashMap<String, String>>",
+            "Documentation with examples for both fields",
+            "Unit tests for both fields"
+          ],
+          "validation_before_merge": "cargo test -p schematic-define --lib",
+          "validation_before_phase_3": "cargo build -p schematic-define && cargo build -p schematic-gen"
+        }
+      },
+      "mitigation_checklist": [
+        "[ ] Add RestApi.headers field",
+        "[ ] Add Endpoint.headers field in SAME commit",
+        "[ ] Add documentation for both",
+        "[ ] Add tests for both",
+        "[ ] Verify cargo test passes before proceeding to Phase 3"
+      ]
+    },
+    {
+      "id": "PAR_006",
+      "title": "Atomic Commit Strategy for Build Integrity",
+      "impact": {
+        "improves": "Bisectability, rollback safety, CI/CD reliability",
+        "risk_reduction": "HIGH"
+      },
+      "recommended_commits": [
+        {
+          "commit": 1,
+          "message": "feat(schematic): add header fields to RestApi and Endpoint",
+          "scope": "define",
+          "includes": [
+            "RestApi.headers field",
+            "Endpoint.headers field",
+            "Field documentation",
+            "Unit tests"
+          ],
+          "validation": "cargo test -p schematic-define"
+        },
+        {
+          "commit": 2,
+          "message": "feat(schematic): implement header propagation in code generators",
+          "scope": "gen",
+          "includes": [
+            "request_structs.rs header field generation",
+            "client.rs header injection logic",
+            "api_struct.rs optional configuration (if included)",
+            "Integration tests"
+          ],
+          "validation": "cargo test -p schematic-gen"
+        },
+        {
+          "commit": 3,
+          "message": "feat(schematic): regenerate schema with header support",
+          "scope": "schema",
+          "includes": [
+            "Generated code in schematic/schematic/schema/"
+          ],
+          "validation": "cargo build -p schematic-schema"
+        },
+        {
+          "commit": 4,
+          "message": "test(schematic): add comprehensive header propagation tests",
+          "scope": "tests",
+          "includes": [
+            "e2e_generation.rs header test cases",
+            "Header inheritance scenarios",
+            "Error cases (missing headers, invalid values)"
+          ],
+          "validation": "cargo test --lib --test '*'"
+        },
+        {
+          "commit": 5,
+          "message": "refactor(schematic): restructure directory layout",
+          "scope": "workspace",
+          "includes": [
+            "Move schematic/schematic/schema → schematic/schema",
+            "Update workspace references",
+            "Update import paths"
+          ],
+          "validation": "cargo build --all && cargo test --all",
+          "timing": "After Phase 5 - POST IMPLEMENTATION"
+        }
+      ]
+    },
+    {
+      "id": "PAR_007",
+      "title": "Build Dependency Verification",
+      "impact": {
+        "prevents": "Circular dependency introduction, broken builds",
+        "risk_level": "MEDIUM"
+      },
+      "verification_steps": [
+        {
+          "phase": "After Phase 2",
+          "command": "cargo build -p schematic-define",
+          "expectation": "Success - no external dependencies to satisfy"
+        },
+        {
+          "phase": "After Phase 3a (request_structs.rs)",
+          "command": "cargo build -p schematic-gen",
+          "expectation": "Success - compiles with header field access"
+        },
+        {
+          "phase": "After Phase 3b (client.rs)",
+          "command": "cargo build -p schematic-gen",
+          "expectation": "Success - header injection logic compiles"
+        },
+        {
+          "phase": "Full workspace",
+          "command": "cargo metadata --format-version 1 | jq '.packages[] | select(.name | contains(\"schematic\")) | .dependencies'",
+          "expectation": "Zero circular dependencies between define and gen"
+        }
+      ]
+    },
+    {
+      "id": "PAR_008",
+      "title": "Optional Feature Flag for Header Support",
+      "impact": {
+        "prevents": "Breaking changes to generated code",
+        "complexity": "MEDIUM",
+        "value": "HIGH (for library stability)"
+      },
+      "implementation": {
+        "if_needed": "If header injection changes generated code structure significantly",
+        "location": "schematic/schematic/schema/Cargo.toml",
+        "feature_flag": "headers",
+        "conditional_code": "Generated code can conditionally emit header fields based on feature",
+        "benefit": "Allows consumers to opt-in to new functionality gradually"
+      },
+      "timing": "Optional enhancement - implement in Phase 3 or Phase 4 if breaking changes detected"
+    }
+  ],
+  "timeline_comparison": {
+    "current_sequential": {
+      "phase_1": { "duration_minutes": 10, "start": 0, "end": 10 },
+      "phase_2": { "duration_minutes": 15, "start": 10, "end": 25 },
+      "phase_3": { "duration_minutes": 20, "start": 25, "end": 45 },
+      "phase_4": { "duration_minutes": 15, "start": 45, "end": 60 },
+      "phase_5": { "duration_minutes": 20, "start": 60, "end": 80 },
+      "phase_6": { "duration_minutes": 10, "start": 80, "end": 90 },
+      "total_minutes": 90
+    },
+    "optimized_parallel": {
+      "phase_1_minimal": { "duration_minutes": 2, "start": 0, "end": 2 },
+      "phase_2_with_prep": { "duration_minutes": 12, "start": 2, "end": 14, "note": "Phase 3 prep starts at minute 5" },
+      "phase_3_prep": { "duration_minutes": 8, "start": 5, "end": 13, "parallel_with": "phase_2" },
+      "phase_3_integration": { "duration_minutes": 12, "start": 14, "end": 26 },
+      "phase_4": { "duration_minutes": 10, "start": 26, "end": 36 },
+      "phase_5_parallel": { "duration_minutes": 8, "start": 36, "end": 44, "note": "Tests run with --test-threads=4" },
+      "phase_6": { "duration_minutes": 8, "start": 44, "end": 52 },
+      "phase_1b_deferred": { "duration_minutes": 15, "start": 52, "end": 67, "note": "Post-implementation restructuring" },
+      "total_minutes": 67,
+      "improvement_percentage": 25.6
+    }
+  },
+  "execution_checklist": {
+    "pre_implementation": [
+      {
+        "item": "Review current test coverage for define and gen packages",
+        "command": "cargo test -p schematic-define -p schematic-gen -- --nocapture",
+        "status": "PENDING"
+      },
+      {
+        "item": "Verify no local uncommitted changes",
+        "command": "git status",
+        "status": "PENDING"
+      },
+      {
+        "item": "Create feature branch for header implementation",
+        "command": "git checkout -b feat/schematic-headers",
+        "status": "PENDING"
+      }
+    ],
+    "phase_2": [
+      {
+        "item": "Add header field to RestApi struct",
+        "location": "schematic/define/src/types.rs:108",
+        "status": "PENDING"
+      },
+      {
+        "item": "Add header field to Endpoint struct",
+        "location": "schematic/define/src/types.rs:187",
+        "status": "PENDING"
+      },
+      {
+        "item": "Add documentation with examples",
+        "status": "PENDING"
+      },
+      {
+        "item": "Add unit tests for both fields",
+        "status": "PENDING"
+      },
+      {
+        "item": "Validate: cargo test -p schematic-define",
+        "status": "PENDING"
+      }
+    ],
+    "phase_3": [
+      {
+        "item": "Update request_structs.rs header field generation",
+        "location": "schematic/gen/src/codegen/request_structs.rs:46",
+        "status": "PENDING"
+      },
+      {
+        "item": "Update client.rs header injection logic",
+        "location": "schematic/gen/src/codegen/client.rs:47",
+        "status": "PENDING"
+      },
+      {
+        "item": "Optional: Update api_struct.rs configuration interface",
+        "location": "schematic/gen/src/codegen/api_struct.rs",
+        "status": "PENDING"
+      },
+      {
+        "item": "Validate: cargo build -p schematic-gen",
+        "status": "PENDING"
+      }
+    ],
+    "phase_4": [
+      {
+        "item": "Update request enum to propagate headers",
+        "status": "PENDING"
+      },
+      {
+        "item": "Test header propagation flow",
+        "status": "PENDING"
+      }
+    ],
+    "phase_5": [
+      {
+        "item": "Run parallel tests: cargo test -- --test-threads=4",
+        "status": "PENDING"
+      },
+      {
+        "item": "Add header propagation test to e2e_generation.rs",
+        "status": "PENDING"
+      },
+      {
+        "item": "Verify generated code compiles and runs",
+        "status": "PENDING"
+      }
+    ],
+    "phase_6": [
+      {
+        "item": "Update README.md with header examples",
+        "status": "PENDING"
+      },
+      {
+        "item": "Update documentation",
+        "status": "PENDING"
+      }
+    ],
+    "phase_1b_post_implementation": [
+      {
+        "item": "Move schematic/schematic/schema → schematic/schema",
+        "status": "PENDING"
+      },
+      {
+        "item": "Update workspace references in Cargo.toml",
+        "status": "PENDING"
+      },
+      {
+        "item": "Verify cargo build --all",
+        "status": "PENDING"
+      }
+    ]
+  },
+  "dependencies_analysis": {
+    "schematic_define": {
+      "depends_on": [],
+      "provides": ["RestApi", "Endpoint", "AuthStrategy", "ApiResponse", "Schema"],
+      "impact_surface": "New header fields affect all downstream code generators"
+    },
+    "schematic_gen": {
+      "depends_on": ["schematic-define"],
+      "provides": ["code generation for API clients"],
+      "modules": {
+        "request_structs.rs": {
+          "reads_from": ["Endpoint struct"],
+          "generates": ["pub struct {Endpoint}Request"]
+        },
+        "client.rs": {
+          "reads_from": ["RestApi struct", "Endpoint struct"],
+          "generates": ["impl ApiStruct { pub async fn request() }"]
+        },
+        "api_struct.rs": {
+          "reads_from": ["RestApi struct"],
+          "generates": ["pub struct {ApiName}"]
+        }
+      }
+    },
+    "schematic_schema": {
+      "depends_on": [],
+      "generated_by": ["schematic-gen"],
+      "content": "Generated REST API client code (auto-regenerated)"
+    }
+  },
+  "risk_assessment": {
+    "overall_risk": "LOW with proper synchronization",
+    "risks": [
+      {
+        "id": "RISK_001",
+        "title": "Type Synchronization Failure",
+        "severity": "CRITICAL",
+        "probability": "MEDIUM if Phase 2 not atomic",
+        "mitigation": "Create single atomic commit for both RestApi and Endpoint header fields"
+      },
+      {
+        "id": "RISK_002",
+        "title": "Merge Conflicts in Parallel Codegen Updates",
+        "severity": "MEDIUM",
+        "probability": "MEDIUM if 3 devs edit codegen/mod.rs simultaneously",
+        "mitigation": "Establish clear module ownership, merge sequentially after parallel work completes"
+      },
+      {
+        "id": "RISK_003",
+        "title": "Circular Dependency Introduction",
+        "severity": "CRITICAL",
+        "probability": "LOW (good dependency isolation)",
+        "mitigation": "Verify cargo metadata after Phase 2 and Phase 3"
+      },
+      {
+        "id": "RISK_004",
+        "title": "Generated Code Incompatibility",
+        "severity": "MEDIUM",
+        "probability": "LOW",
+        "mitigation": "Run e2e_generation.rs tests after each codegen module merge"
+      },
+      {
+        "id": "RISK_005",
+        "title": "Deferred Directory Restructuring Forgotten",
+        "severity": "LOW",
+        "probability": "MEDIUM (human error)",
+        "mitigation": "Create explicit GitHub issue for Phase 1B, mark as post-Phase-5 blocker"
+      }
+    ]
+  },
+  "summary": {
+    "current_total_time_minutes": 90,
+    "optimized_total_time_minutes": 67,
+    "time_saved_minutes": 23,
+    "improvement_percentage": 25.6,
+    "key_optimizations": [
+      "Defer directory restructuring (Phase 1) to post-Phase 5: -5 min, eliminates blocking operation",
+      "Parallelize Phase 3 codegen module updates: -8 min, requires 3-developer coordination",
+      "Use parallel test execution in Phase 5: -5 min, no code changes needed",
+      "Overlap Phase 2 with Phase 3 prep work: -5 min, design work during type definition"
+    ],
+    "critical_success_factors": [
+      "Keep Phase 2 atomic: both header fields in single commit",
+      "Validate after each phase boundary with cargo build/test",
+      "Establish clear module ownership for parallel Phase 3 work",
+      "Mark Phase 1B directory restructuring as explicit post-Phase-5 task"
+    ]
+  }
+}
