@@ -94,10 +94,6 @@ name = "model_id"
 changelog_path = "model_id/CHANGELOG.md"
 
 [[package]]
-name = "api-macros"
-changelog_path = "api-macros/CHANGELOG.md"
-
-[[package]]
 name = "schematic"
 changelog_path = "schematic/CHANGELOG.md"
 
