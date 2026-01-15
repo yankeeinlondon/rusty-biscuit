@@ -6,7 +6,7 @@ use shared::markdown::highlighting::{
 };
 use shared::markdown::output::{HtmlOptions, MermaidMode, TerminalOptions, write_terminal};
 use shared::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -224,7 +224,7 @@ fn load_markdown(path: Option<&PathBuf>) -> Result<Markdown> {
         }
     } else {
         // No path provided - check if stdin has data
-        if atty::is(atty::Stream::Stdin) {
+        if io::stdin().is_terminal() {
             // Interactive terminal - no input available
             Err(eyre!("No input file provided. Use `md --help` for usage."))
         } else {

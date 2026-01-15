@@ -228,8 +228,8 @@ impl Theme {
             Theme::Nord => EmbeddedThemeName::Nord,
             Theme::Dracula => EmbeddedThemeName::Dracula,
             Theme::MonokaiExtended => EmbeddedThemeName::MonokaiExtended,
-            #[allow(deprecated)]
-            Theme::VisualStudioDark => EmbeddedThemeName::VisualStudioDarkPlus,
+            // Note: VisualStudioDarkPlus was removed in two-face 0.5.0, using OneHalfDark as alternative
+            Theme::VisualStudioDark => EmbeddedThemeName::OneHalfDark,
         }
     }
 }
