@@ -47,10 +47,8 @@ sniff -vv       # Level 2: even more details
 ```bash
 # Show only hardware section
 sniff --hardware
-
 # Show only filesystem section
 sniff --filesystem
-
 # Combine network and filesystem
 sniff --network --filesystem
 ```
@@ -60,10 +58,8 @@ sniff --network --filesystem
 ```bash
 # Skip hardware detection
 sniff --skip-hardware
-
 # Skip network detection
 sniff --skip-network
-
 # Skip filesystem detection
 sniff --skip-filesystem
 ```
@@ -84,13 +80,10 @@ sniff --os
 ```bash
 # Show only CPU information
 sniff --cpu
-
 # Show only GPU information
 sniff --gpu
-
 # Show only memory information
 sniff --memory
-
 # Show only storage information
 sniff --storage
 ```
@@ -100,10 +93,8 @@ sniff --storage
 ```bash
 # Show only git repository information
 sniff --git
-
 # Show only repository/monorepo structure
 sniff --repo
-
 # Show only language detection results
 sniff --language
 ```
@@ -123,6 +114,7 @@ sniff --git --deep -v
 ```
 
 Deep mode provides:
+
 - Remote branch lists for each git remote
 - Commit synchronization status across remotes
 - Detection of whether local branch is behind remote
@@ -236,8 +228,8 @@ The CLI binary provides:
 
 - **Argument Parsing**: Uses `clap` with derive API for clean, type-safe CLI definitions
 - **Output Filtering**: Two modes for controlling output:
-  - **Include-Only Mode**: Combine `--hardware`, `--network`, `--filesystem` flags
-  - **Filter Mode**: Mutually exclusive detail filters like `--cpu`, `--git`, `--repo`
+    - **Include-Only Mode**: Combine `--hardware`, `--network`, `--filesystem` flags
+    - **Filter Mode**: Mutually exclusive detail filters like `--cpu`, `--git`, `--repo`
 - **Text Rendering**: Multi-level verbosity with human-readable formatting
 - **JSON Serialization**: Full structured output for programmatic use
 - **Dependency Enrichment**: Async network queries to package registries in `--deep` mode
@@ -254,18 +246,21 @@ The CLI binary provides:
 The library provides modular detection across four domains:
 
 **OS Module:**
+
 - Distribution and version detection
 - Package manager discovery (apt, homebrew, pacman, etc.)
 - Locale and timezone information
 - NTP synchronization status
 
 **Hardware Module:**
+
 - CPU: Brand, core count, SIMD capabilities (AVX, SSE, NEON)
 - GPU: Metal/Vulkan backend detection, capabilities (raytracing, mesh shaders)
 - Memory: Total, available, and used bytes
 - Storage: Disk type (SSD/HDD), filesystem, mount points
 
 **Network Module:**
+
 - Interface enumeration with permission handling
 - IPv4 and IPv6 address collection
 - Interface flags (up/down, loopback)
@@ -307,6 +302,7 @@ Unified type system for package managers:
 - **`PackageManagerShape`**: Trait for dyn-compatible package operations
 
 **Registry System** (`package/registry.rs`):
+
 - Global static registry of available package managers
 - Runtime availability checking via PATH lookup
 - Network-backed version resolution
@@ -337,11 +333,13 @@ Text output supports three verbosity levels:
 ### Filter Mode vs Include-Only Mode
 
 **Include-Only Mode** (combinable):
+
 - Triggered by `--hardware`, `--network`, `--filesystem`
 - Multiple flags can be combined
 - Skip flags are ignored in this mode
 
 **Filter Mode** (mutually exclusive):
+
 - Triggered by detail-level flags like `--cpu`, `--git`, `--repo`
 - Only one filter flag allowed at a time
 - Shows only the specific subsection requested
@@ -356,6 +354,7 @@ With `--deep` mode, sniff enriches dependency information:
 4. Populates `latest_version` field in `DependencyEntry`
 
 Supports:
+
 - **Rust**: crates.io via API
 - **JavaScript/TypeScript**: npm registry
 - **Python**: PyPI JSON API
@@ -493,6 +492,7 @@ sniff --repo --deep --json | jq '.filesystem.repo.packages[].dependencies'
 ## Future Enhancements
 
 See `.ai/plans/2026-01-14.plan-for-sniff-package-roundout.md` for planned features:
+
 - Expanded dependency parsing (npm, pnpm, pip, go.mod)
 - Lockfile resolution for actual versions
 - Package registry abstraction layer

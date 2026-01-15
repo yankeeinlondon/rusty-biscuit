@@ -301,7 +301,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if cli.json {
-        output::print_json(&result)?;
+        output::print_json(&result, output_filter)?;
     } else {
         output::print_text(&result, cli.verbose, output_filter);
     }

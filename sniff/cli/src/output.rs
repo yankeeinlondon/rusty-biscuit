@@ -971,7 +971,97 @@ fn print_filesystem_section(fs: &sniff_lib::FilesystemInfo, verbose: u8, repo_ro
     }
 }
 
-pub fn print_json(result: &SniffResult) -> serde_json::Result<()> {
-    println!("{}", serde_json::to_string_pretty(result)?);
+/// Apply output filter to create a custom JSON value with only the requested fields.
+///
+/// This ensures that filter flags like --cpu, --gpu work consistently for both
+/// text and JSON output modes, and that filtered JSON only contains the relevant fields.
+///
+/// For subsection filters (--cpu, --gpu, --memory, --storage, --git, --repo, --language),
+/// the output is flattened to the top level without the parent container.
+fn apply_filter_to_json(result: &SniffResult, filter: OutputFilter) -> serde_json::Value {
+    use serde_json::{json, Value};
+
+    match filter {
+        OutputFilter::All => {
+            // No filtering - serialize everything
+            serde_json::to_value(result).unwrap_or(Value::Null)
+        }
+        OutputFilter::Os => {
+            json!({
+                "os": result.os
+            })
+        }
+        OutputFilter::Hardware => {
+            json!({
+                "hardware": result.hardware
+            })
+        }
+        OutputFilter::Filesystem => {
+            json!({
+                "filesystem": result.filesystem
+            })
+        }
+        OutputFilter::Cpu => {
+            // Flatten: return CPU data at top level
+            if let Some(ref hw) = result.hardware {
+                serde_json::to_value(&hw.cpu).unwrap_or(Value::Null)
+            } else {
+                json!({})
+            }
+        }
+        OutputFilter::Gpu => {
+            // Flatten: return GPU array at top level
+            if let Some(ref hw) = result.hardware {
+                serde_json::to_value(&hw.gpu).unwrap_or(Value::Null)
+            } else {
+                json!([])
+            }
+        }
+        OutputFilter::Memory => {
+            // Flatten: return memory data at top level
+            if let Some(ref hw) = result.hardware {
+                serde_json::to_value(&hw.memory).unwrap_or(Value::Null)
+            } else {
+                json!({})
+            }
+        }
+        OutputFilter::Storage => {
+            // Flatten: return storage array at top level
+            if let Some(ref hw) = result.hardware {
+                serde_json::to_value(&hw.storage).unwrap_or(Value::Null)
+            } else {
+                json!([])
+            }
+        }
+        OutputFilter::Git => {
+            // Flatten: return git data at top level
+            if let Some(ref fs) = result.filesystem {
+                serde_json::to_value(&fs.git).unwrap_or(Value::Null)
+            } else {
+                json!({})
+            }
+        }
+        OutputFilter::Repo => {
+            // Flatten: return repo data at top level
+            if let Some(ref fs) = result.filesystem {
+                serde_json::to_value(&fs.repo).unwrap_or(Value::Null)
+            } else {
+                json!({})
+            }
+        }
+        OutputFilter::Language => {
+            // Flatten: return languages data at top level
+            if let Some(ref fs) = result.filesystem {
+                serde_json::to_value(&fs.languages).unwrap_or(Value::Null)
+            } else {
+                json!({})
+            }
+        }
+    }
+}
+
+pub fn print_json(result: &SniffResult, filter: OutputFilter) -> serde_json::Result<()> {
+    let filtered_json = apply_filter_to_json(result, filter);
+    println!("{}", serde_json::to_string_pretty(&filtered_json)?);
     Ok(())
 }
