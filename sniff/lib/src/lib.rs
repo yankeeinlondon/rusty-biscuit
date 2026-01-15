@@ -7,17 +7,19 @@ pub mod hardware;
 pub mod network;
 
 pub use error::{Result, SniffError};
-pub use hardware::HardwareInfo;
+pub use hardware::{HardwareInfo, OsInfo};
 pub use network::NetworkInfo;
 pub use filesystem::FilesystemInfo;
 
 /// Complete system detection result.
 ///
-/// Contains hardware, network, and filesystem information gathered
+/// Contains OS, hardware, network, and filesystem information gathered
 /// by the sniff library. All fields are optional to allow partial
-/// detection when using `--hardware`, `--network`, or `--filesystem` flags.
+/// detection when using flags.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SniffResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os: Option<OsInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hardware: Option<HardwareInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,8 +112,8 @@ impl SniffConfig {
 /// use sniff_lib::detect;
 ///
 /// let result = detect().unwrap();
-/// if let Some(hw) = result.hardware {
-///     println!("OS: {}", hw.os.name);
+/// if let Some(os) = result.os {
+///     println!("OS: {}", os.name);
 /// }
 /// ```
 pub fn detect() -> Result<SniffResult> {
@@ -133,6 +135,9 @@ pub fn detect() -> Result<SniffResult> {
 /// let result = detect_with_config(config).unwrap();
 /// ```
 pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
+    // OS detection is always performed (not tied to hardware flag)
+    let os = Some(hardware::detect_os()?);
+
     let hardware = if config.skip_hardware {
         None
     } else if config.include_cpu_usage {
@@ -156,7 +161,7 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
         Some(filesystem::detect_filesystem(&base, config.deep)?)
     };
 
-    Ok(SniffResult { hardware, network, filesystem })
+    Ok(SniffResult { os, hardware, network, filesystem })
 }
 
 #[cfg(test)]

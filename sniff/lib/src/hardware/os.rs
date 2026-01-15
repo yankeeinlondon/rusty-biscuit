@@ -585,7 +585,7 @@ pub struct TimeInfo {
 /// Operating system information.
 ///
 /// Contains details about the operating system, kernel version,
-/// architecture, and hostname.
+/// architecture, hostname, package managers, locale, and timezone.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OsInfo {
     /// Operating system type classification
@@ -608,6 +608,12 @@ pub struct OsInfo {
     pub arch: String,
     /// System hostname
     pub hostname: String,
+    /// System package managers detected on the system
+    pub system_package_managers: Option<SystemPackageManagers>,
+    /// Locale and language settings
+    pub locale: Option<LocaleInfo>,
+    /// Timezone and time synchronization information
+    pub time: Option<TimeInfo>,
 }
 
 /// Runs a command with a timeout, returning stdout as a string if successful.
@@ -2798,6 +2804,9 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
             kernel: "6.5.0-generic".to_string(),
             arch: "x86_64".to_string(),
             hostname: "myhost".to_string(),
+            system_package_managers: None,
+            locale: None,
+            time: None,
         };
 
         let json = serde_json::to_string(&os_info).expect("serialization should succeed");

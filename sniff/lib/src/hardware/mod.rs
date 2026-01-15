@@ -26,12 +26,11 @@ pub use storage::{StorageInfo, StorageKind};
 
 /// Complete hardware information.
 ///
-/// Aggregates operating system, CPU, memory, storage, GPU information,
-/// package managers, locale, and timezone detected from the current system.
+/// Aggregates CPU, memory, storage, and GPU information detected
+/// from the current system. OS information is available separately
+/// via the top-level `os` field in `SniffResult`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HardwareInfo {
-    /// Operating system information
-    pub os: OsInfo,
     /// CPU information
     pub cpu: CpuInfo,
     /// Memory information
@@ -40,42 +39,29 @@ pub struct HardwareInfo {
     pub storage: Vec<StorageInfo>,
     /// GPU devices
     pub gpus: Vec<GpuInfo>,
-    /// System package managers detected on the system
-    pub system_package_managers: Option<SystemPackageManagers>,
-    /// Locale and language settings
-    pub locale: Option<LocaleInfo>,
-    /// Timezone and time synchronization information
-    pub time: Option<TimeInfo>,
 }
 
-/// Detects hardware information from the current system.
+/// Detects operating system information from the current system.
 ///
-/// This function gathers operating system details, CPU specifications,
-/// memory statistics, storage information, and GPU devices.
+/// This function gathers OS type, distribution details, package managers,
+/// locale, and timezone information.
 ///
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::hardware::detect_hardware;
+/// use sniff_lib::hardware::detect_os;
 ///
-/// let hw = detect_hardware().unwrap();
-/// println!("OS: {} {}", hw.os.name, hw.os.version);
-/// println!("CPU: {} ({} cores)", hw.cpu.brand, hw.cpu.logical_cores);
-/// println!("Memory: {} GB total", hw.memory.total_bytes / (1024 * 1024 * 1024));
-/// println!("GPUs: {}", hw.gpus.len());
+/// let os = detect_os().unwrap();
+/// println!("OS: {} {}", os.name, os.version);
+/// println!("Arch: {}", os.arch);
+/// println!("Hostname: {}", os.hostname);
 /// ```
 ///
 /// ## Errors
 ///
 /// Currently returns `Ok` in all cases, but future versions may return
 /// errors for system information gathering failures.
-pub fn detect_hardware() -> Result<HardwareInfo> {
-    let sys = System::new_with_specifics(
-        RefreshKind::nothing()
-            .with_cpu(CpuRefreshKind::everything())
-            .with_memory(MemoryRefreshKind::everything()),
-    );
-
+pub fn detect_os() -> Result<OsInfo> {
     // Helper to convert empty strings to None
     let non_empty = |s: String| if s.is_empty() { None } else { Some(s) };
 
@@ -84,7 +70,24 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
     // Extract linux family before moving linux_distro into OsInfo
     let linux_family = linux_distro.as_ref().map(|d| d.family);
 
-    let os = OsInfo {
+    // Detect system package managers based on OS type
+    let system_package_managers = match os_type {
+        OsType::Linux => Some(detect_linux_package_managers(linux_family)),
+        OsType::MacOS => Some(detect_macos_package_managers()),
+        OsType::Windows => Some(detect_windows_package_managers()),
+        OsType::FreeBSD | OsType::OpenBSD | OsType::NetBSD => {
+            Some(detect_bsd_package_managers(os_type))
+        }
+        OsType::IOS | OsType::Android | OsType::Other => None,
+    };
+
+    // Detect locale settings
+    let locale = Some(detect_locale());
+
+    // Detect timezone and time information
+    let time = Some(detect_timezone());
+
+    Ok(OsInfo {
         os_type,
         name: System::name().unwrap_or_default(),
         version: System::os_version().unwrap_or_default(),
@@ -101,7 +104,39 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
             }
         },
         hostname: System::host_name().unwrap_or_default(),
-    };
+        system_package_managers,
+        locale,
+        time,
+    })
+}
+
+/// Detects hardware information from the current system.
+///
+/// This function gathers CPU specifications, memory statistics,
+/// storage information, and GPU devices. For OS information,
+/// use `detect_os()` separately.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use sniff_lib::hardware::detect_hardware;
+///
+/// let hw = detect_hardware().unwrap();
+/// println!("CPU: {} ({} cores)", hw.cpu.brand, hw.cpu.logical_cores);
+/// println!("Memory: {} GB total", hw.memory.total_bytes / (1024 * 1024 * 1024));
+/// println!("GPUs: {}", hw.gpus.len());
+/// ```
+///
+/// ## Errors
+///
+/// Currently returns `Ok` in all cases, but future versions may return
+/// errors for system information gathering failures.
+pub fn detect_hardware() -> Result<HardwareInfo> {
+    let sys = System::new_with_specifics(
+        RefreshKind::nothing()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything()),
+    );
 
     let cpu = CpuInfo {
         brand: sys
@@ -140,32 +175,11 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
 
     let gpus = detect_gpus();
 
-    // Detect system package managers based on OS type
-    let system_package_managers = match os_type {
-        OsType::Linux => Some(detect_linux_package_managers(linux_family)),
-        OsType::MacOS => Some(detect_macos_package_managers()),
-        OsType::Windows => Some(detect_windows_package_managers()),
-        OsType::FreeBSD | OsType::OpenBSD | OsType::NetBSD => {
-            Some(detect_bsd_package_managers(os_type))
-        }
-        OsType::IOS | OsType::Android | OsType::Other => None,
-    };
-
-    // Detect locale settings
-    let locale = Some(detect_locale());
-
-    // Detect timezone and time information
-    let time = Some(detect_timezone());
-
     Ok(HardwareInfo {
-        os,
         cpu,
         memory,
         storage,
         gpus,
-        system_package_managers,
-        locale,
-        time,
     })
 }
 
@@ -198,8 +212,8 @@ mod tests {
     #[test]
     fn test_detect_hardware_returns_valid_info() {
         let info = detect_hardware().unwrap();
-        assert!(!info.os.name.is_empty());
-        assert!(!info.os.arch.is_empty());
+        assert!(info.cpu.logical_cores > 0);
+        assert!(info.memory.total_bytes > 0);
     }
 
     #[test]
@@ -225,10 +239,10 @@ mod tests {
 
     #[test]
     fn test_os_info_fields_populated() {
-        let info = detect_hardware().unwrap();
+        let os = detect_os().unwrap();
         // OS name should be non-empty (macOS, Linux, etc.)
-        assert!(!info.os.name.is_empty());
+        assert!(!os.name.is_empty());
         // Architecture should be known
-        assert!(!info.os.arch.is_empty());
+        assert!(!os.arch.is_empty());
     }
 }

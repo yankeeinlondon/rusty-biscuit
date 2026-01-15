@@ -54,6 +54,11 @@ pub fn print_text(result: &SniffResult, verbose: u8, include_only_mode: bool) {
         .and_then(|fs| fs.git.as_ref())
         .map(|git| git.repo_root.as_path());
 
+    // Print OS section if present
+    if let Some(ref os) = result.os {
+        print_os_section(os, verbose);
+    }
+
     // Print hardware section if present
     if let Some(ref hardware) = result.hardware {
         print_hardware_section(hardware, verbose, repo_root);
@@ -70,26 +75,136 @@ pub fn print_text(result: &SniffResult, verbose: u8, include_only_mode: bool) {
     }
 }
 
+fn print_os_section(os: &sniff_lib::OsInfo, verbose: u8) {
+    println!("=== OS ===");
+
+    // Prefer long_version if available, otherwise fall back to name + version
+    if let Some(ref long_ver) = os.long_version {
+        println!("Name: {}", long_ver);
+    } else {
+        println!("Name: {} {}", os.name, os.version);
+    }
+    if let Some(ref distro) = os.distribution {
+        println!("Distribution: {}", distro);
+    }
+    println!("Kernel: {}", os.kernel);
+    println!("Architecture: {}", os.arch);
+    println!("Hostname: {}", os.hostname);
+    println!();
+
+    // Print package managers section if detected
+    if let Some(ref pkg_managers) = os.system_package_managers
+        && !pkg_managers.managers.is_empty()
+    {
+        if verbose == 0 {
+            // Compact output at verbose level 0
+            let primary_str = pkg_managers
+                .primary
+                .as_ref()
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| "none".to_string());
+            println!(
+                "Package Managers: Primary: {} ({} detected)",
+                primary_str,
+                pkg_managers.managers.len()
+            );
+        } else {
+            // Detailed output at verbose level 1+
+            println!("Package Managers:");
+            if let Some(ref primary) = pkg_managers.primary {
+                println!("  Primary: {}", primary);
+            }
+            println!("  Detected:");
+            for pm in &pkg_managers.managers {
+                println!("    - {} ({})", pm.manager, pm.path);
+                // Show commands at verbose level 2+
+                if verbose > 1 {
+                    if let Some(ref list_cmd) = pm.commands.list {
+                        println!("      list: {}", list_cmd);
+                    }
+                    if let Some(ref update_cmd) = pm.commands.update {
+                        println!("      update: {}", update_cmd);
+                    }
+                    if let Some(ref upgrade_cmd) = pm.commands.upgrade {
+                        println!("      upgrade: {}", upgrade_cmd);
+                    }
+                    if let Some(ref search_cmd) = pm.commands.search {
+                        println!("      search: {}", search_cmd);
+                    }
+                }
+            }
+        }
+        println!();
+    }
+
+    // Print locale section if detected
+    if let Some(ref locale) = os.locale {
+        // Get the effective locale (LC_ALL overrides LANG)
+        let effective_locale = locale.lc_all.as_ref().or(locale.lang.as_ref());
+        if let Some(loc) = effective_locale {
+            let encoding_str = locale
+                .encoding
+                .as_ref()
+                .map(|e| format!(" ({})", e))
+                .unwrap_or_default();
+            println!("Locale: {}{}", loc, encoding_str);
+            println!();
+        }
+    }
+
+    // Print timezone section if detected
+    if let Some(ref time) = os.time {
+        // Format UTC offset as hours:minutes
+        let offset_hours = time.utc_offset_seconds / 3600;
+        let offset_minutes = (time.utc_offset_seconds.abs() % 3600) / 60;
+        let offset_sign = if time.utc_offset_seconds >= 0 {
+            "+"
+        } else {
+            "-"
+        };
+        let offset_str = format!(
+            "UTC{}{:02}:{:02}",
+            offset_sign,
+            offset_hours.abs(),
+            offset_minutes
+        );
+
+        // Build timezone display string
+        let tz_name = time.timezone.as_deref().unwrap_or("Unknown");
+        let abbr_str = time
+            .timezone_abbr
+            .as_deref()
+            .map(|a| format!(" ({}, {})", a, offset_str))
+            .unwrap_or_else(|| format!(" ({})", offset_str));
+
+        if verbose == 0 {
+            println!("Timezone: {}{}", tz_name, abbr_str);
+        } else {
+            println!("Timezone: {}{}", tz_name, abbr_str);
+
+            // Show NTP status
+            let ntp_str = match time.ntp_status {
+                NtpStatus::Synchronized => "synchronized",
+                NtpStatus::Unsynchronized => "not synchronized",
+                NtpStatus::Inactive => "inactive",
+                NtpStatus::Unknown => "unknown",
+            };
+            println!("  NTP: {}", ntp_str);
+
+            // Show DST status
+            let dst_str = if time.is_dst { "active" } else { "inactive" };
+            println!("  DST: {}", dst_str);
+        }
+        println!();
+    }
+}
+
 fn print_hardware_section(
     hardware: &sniff_lib::HardwareInfo,
     verbose: u8,
     repo_root: Option<&Path>,
 ) {
     println!("=== Hardware ===");
-
-    // Prefer long_version if available, otherwise fall back to name + version
-    if let Some(ref long_ver) = hardware.os.long_version {
-        println!("OS: {}", long_ver);
-    } else {
-        println!("OS: {} {}", hardware.os.name, hardware.os.version);
-    }
-    if let Some(ref distro) = hardware.os.distribution {
-        println!("Distribution: {}", distro);
-    }
-    println!("Kernel: {}", hardware.os.kernel);
-    println!("Architecture: {}", hardware.os.arch);
-    println!("Hostname: {}", hardware.os.hostname);
-    println!();
 
     println!(
         "CPU: {} ({} logical cores)",
@@ -204,112 +319,6 @@ fn print_hardware_section(
         }
     }
     println!();
-
-    // Print package managers section if detected
-    if let Some(ref pkg_managers) = hardware.system_package_managers
-        && !pkg_managers.managers.is_empty()
-    {
-        if verbose == 0 {
-            // Compact output at verbose level 0
-            let primary_str = pkg_managers
-                .primary
-                .as_ref()
-                .map(|p| p.to_string())
-                .unwrap_or_else(|| "none".to_string());
-            println!(
-                "Package Managers: Primary: {} ({} detected)",
-                primary_str,
-                pkg_managers.managers.len()
-            );
-        } else {
-            // Detailed output at verbose level 1+
-            println!("Package Managers:");
-            if let Some(ref primary) = pkg_managers.primary {
-                println!("  Primary: {}", primary);
-            }
-            println!("  Detected:");
-            for pm in &pkg_managers.managers {
-                println!("    - {} ({})", pm.manager, pm.path);
-                // Show commands at verbose level 2+
-                if verbose > 1 {
-                    if let Some(ref list_cmd) = pm.commands.list {
-                        println!("      list: {}", list_cmd);
-                    }
-                    if let Some(ref update_cmd) = pm.commands.update {
-                        println!("      update: {}", update_cmd);
-                    }
-                    if let Some(ref upgrade_cmd) = pm.commands.upgrade {
-                        println!("      upgrade: {}", upgrade_cmd);
-                    }
-                    if let Some(ref search_cmd) = pm.commands.search {
-                        println!("      search: {}", search_cmd);
-                    }
-                }
-            }
-        }
-        println!();
-    }
-
-    // Print locale section if detected
-    if let Some(ref locale) = hardware.locale {
-        // Get the effective locale (LC_ALL overrides LANG)
-        let effective_locale = locale.lc_all.as_ref().or(locale.lang.as_ref());
-        if let Some(loc) = effective_locale {
-            let encoding_str = locale
-                .encoding
-                .as_ref()
-                .map(|e| format!(" ({})", e))
-                .unwrap_or_default();
-            println!("Locale: {}{}", loc, encoding_str);
-            println!();
-        }
-    }
-
-    // Print timezone section if detected
-    if let Some(ref time) = hardware.time {
-        // Format UTC offset as hours:minutes
-        let offset_hours = time.utc_offset_seconds / 3600;
-        let offset_minutes = (time.utc_offset_seconds.abs() % 3600) / 60;
-        let offset_sign = if time.utc_offset_seconds >= 0 {
-            "+"
-        } else {
-            "-"
-        };
-        let offset_str = format!(
-            "UTC{}{:02}:{:02}",
-            offset_sign,
-            offset_hours.abs(),
-            offset_minutes
-        );
-
-        // Build timezone display string
-        let tz_name = time.timezone.as_deref().unwrap_or("Unknown");
-        let abbr_str = time
-            .timezone_abbr
-            .as_deref()
-            .map(|a| format!(" ({}, {})", a, offset_str))
-            .unwrap_or_else(|| format!(" ({})", offset_str));
-
-        if verbose == 0 {
-            println!("Timezone: {}{}", tz_name, abbr_str);
-        } else {
-            println!("Timezone: {}{}", tz_name, abbr_str);
-
-            // Show NTP status
-            let ntp_str = match time.ntp_status {
-                NtpStatus::Synchronized => "synchronized",
-                NtpStatus::Unsynchronized => "not synchronized",
-                NtpStatus::Inactive => "inactive",
-                NtpStatus::Unknown => "unknown",
-            };
-            println!("  NTP: {}", ntp_str);
-
-            // Show DST status
-            let dst_str = if time.is_dst { "active" } else { "inactive" };
-            println!("  DST: {}", dst_str);
-        }
-        println!();
-    }
 }
 
 fn print_network_section(network: &sniff_lib::NetworkInfo) {
