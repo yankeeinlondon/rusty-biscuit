@@ -99,6 +99,15 @@ pub fn apply_filters(
 
 /// Builds a case-insensitive glob matcher from a list of patterns.
 ///
+/// Patterns without glob metacharacters (`*`, `?`, `[`, `]`, `{`, `}`) are
+/// automatically wrapped in `*...*` to enable substring matching.
+///
+/// ## Examples
+///
+/// - `"wire"` → `"*wire*"` (matches any topic containing "wire")
+/// - `"wire*"` → `"wire*"` (matches topics starting with "wire")
+/// - `"*wire"` → `"*wire"` (matches topics ending with "wire")
+///
 /// # Arguments
 ///
 /// * `patterns` - The glob patterns to compile
@@ -114,7 +123,14 @@ fn build_glob_matcher(patterns: &[String]) -> Result<globset::GlobSet, FilterErr
     let mut builder = GlobSetBuilder::new();
 
     for pattern in patterns {
-        let glob = Glob::new(pattern).map_err(|e| FilterError::InvalidPattern {
+        // Auto-wrap patterns without glob metacharacters in *...*
+        let normalized_pattern = if has_glob_metacharacters(pattern) {
+            pattern.clone()
+        } else {
+            format!("*{}*", pattern)
+        };
+
+        let glob = Glob::new(&normalized_pattern).map_err(|e| FilterError::InvalidPattern {
             pattern: pattern.clone(),
             source: e,
         })?;
@@ -127,6 +143,13 @@ fn build_glob_matcher(patterns: &[String]) -> Result<globset::GlobSet, FilterErr
         pattern: "multiple patterns".to_string(),
         source: e,
     })
+}
+
+/// Checks if a pattern contains glob metacharacters.
+///
+/// Returns `true` if the pattern contains any of: `*`, `?`, `[`, `]`, `{`, `}`
+fn has_glob_metacharacters(pattern: &str) -> bool {
+    pattern.chars().any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
 }
 
 #[cfg(test)]
@@ -344,5 +367,73 @@ mod tests {
         let filtered =
             apply_filters(topics, &["foo*".to_string()], &["software".to_string()]).unwrap();
         assert_eq!(filtered.len(), 0);
+    }
+
+    // Regression tests for substring matching without wildcards (bug fix)
+    #[test]
+    fn test_substring_match_without_wildcards() {
+        // Regression test: `research list wire` should match topics containing "wire"
+        let topics = create_test_topics();
+        let filtered = apply_filters(topics, &["lib".to_string()], &[]).unwrap();
+        // Should match: foo-library, foobar-lib, rust-library (all contain "lib")
+        assert_eq!(filtered.len(), 3);
+        assert!(filtered.iter().any(|t| t.name == "foo-library"));
+        assert!(filtered.iter().any(|t| t.name == "foobar-lib"));
+        assert!(filtered.iter().any(|t| t.name == "rust-library"));
+    }
+
+    #[test]
+    fn test_substring_match_single_word() {
+        // Regression test: Plain word should match as substring
+        let topics = create_test_topics();
+        let filtered = apply_filters(topics, &["bar".to_string()], &[]).unwrap();
+        // Should match: bar-framework, foobar-lib (both contain "bar")
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().any(|t| t.name == "bar-framework"));
+        assert!(filtered.iter().any(|t| t.name == "foobar-lib"));
+    }
+
+    #[test]
+    fn test_explicit_wildcard_not_wrapped() {
+        // Ensure patterns with wildcards are NOT double-wrapped
+        let topics = create_test_topics();
+        let filtered = apply_filters(topics, &["foo*".to_string()], &[]).unwrap();
+        // Should match: foo-library, foobar-lib (starts with "foo")
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().any(|t| t.name == "foo-library"));
+        assert!(filtered.iter().any(|t| t.name == "foobar-lib"));
+    }
+
+    #[test]
+    fn test_suffix_wildcard_not_wrapped() {
+        // Ensure suffix wildcards work correctly
+        let topics = create_test_topics();
+        let filtered = apply_filters(topics, &["*framework".to_string()], &[]).unwrap();
+        // Should match: bar-framework (ends with "framework")
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "bar-framework");
+    }
+
+    #[test]
+    fn test_exact_match_with_wildcards_around() {
+        // User provides explicit wildcards for substring matching
+        let topics = create_test_topics();
+        let filtered = apply_filters(topics, &["*rust*".to_string()], &[]).unwrap();
+        // Should match: rust-library
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "rust-library");
+    }
+
+    #[test]
+    fn test_has_glob_metacharacters() {
+        // Test the helper function
+        assert!(!has_glob_metacharacters("wire"));
+        assert!(!has_glob_metacharacters("foo-bar"));
+        assert!(has_glob_metacharacters("wire*"));
+        assert!(has_glob_metacharacters("*wire"));
+        assert!(has_glob_metacharacters("wi?re"));
+        assert!(has_glob_metacharacters("[wire]"));
+        assert!(has_glob_metacharacters("{wire}"));
+        assert!(has_glob_metacharacters("wire[123]"));
     }
 }
