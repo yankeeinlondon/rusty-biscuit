@@ -25,6 +25,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Research a software library
+    #[command(alias = "lib")]
     Library {
         /// The library/topic to research (use "-" to read from stdin)
         #[arg(value_name = "TOPIC")]
