@@ -224,14 +224,7 @@ async fn fetch_with_timeout(client: &reqwest::Client, url: &str) -> Result<Strin
 /// ```
 /// use research_lib::changelog::discovery::parse_keep_a_changelog;
 ///
-/// let content = r#"
-/// # Changelog
-/// ## [1.0.0] - 2024-01-15
-/// ### Added
-/// - New feature
-/// ### Breaking
-/// - API change
-/// "#;
+/// let content = "# Changelog\n## [1.0.0] - 2024-01-15\n### Added\n- New feature\n### Breaking\n- API change\n";
 ///
 /// let versions = parse_keep_a_changelog(content);
 /// assert_eq!(versions.len(), 1);
@@ -323,14 +316,7 @@ pub fn parse_keep_a_changelog(content: &str) -> Vec<VersionInfo> {
 /// ```
 /// use research_lib::changelog::discovery::parse_conventional_changelog;
 ///
-/// let content = r#"
-/// # Changelog
-/// ## 1.0.0 (2024-01-15)
-/// ### ⚠ BREAKING CHANGES
-/// * API redesign
-/// ### Features
-/// * New feature
-/// "#;
+/// let content = "# Changelog\n## 1.0.0 (2024-01-15)\n### ⚠ BREAKING CHANGES\n* API redesign\n### Features\n* New feature\n";
 ///
 /// let versions = parse_conventional_changelog(content);
 /// assert_eq!(versions.len(), 1);
@@ -424,13 +410,7 @@ pub fn parse_conventional_changelog(content: &str) -> Vec<VersionInfo> {
 /// ```
 /// use research_lib::changelog::discovery::parse_generic_changelog;
 ///
-/// let content = r#"
-/// # Changelog
-/// ## Version 1.0.0 - Released 2024-01-15
-/// Some changes
-/// ## v0.9.0 (2024-01-01)
-/// More changes
-/// "#;
+/// let content = "# Changelog\n## Version 1.0.0 - Released 2024-01-15\nSome changes\n## v0.9.0 (2024-01-01)\nMore changes\n";
 ///
 /// let versions = parse_generic_changelog(content);
 /// assert!(versions.len() >= 2);

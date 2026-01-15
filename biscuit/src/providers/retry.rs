@@ -159,6 +159,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_with_retry_timeout() {
+        // Pause time to make the test instant instead of waiting 30 seconds
+        tokio::time::pause();
+
         let result = fetch_with_retry(
             || async {
                 tokio::time::sleep(Duration::from_secs(60)).await;
