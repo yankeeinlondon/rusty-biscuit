@@ -80,6 +80,60 @@ fn relative_path(path: &Path, repo_root: Option<&Path>) -> String {
     path.display().to_string()
 }
 
+/// Format SIMD capabilities into a comma-separated string.
+///
+/// Returns `None` if no capabilities are detected.
+/// Uses hierarchical display: shows highest AVX level (512 > AVX2 > AVX).
+fn format_simd_caps(simd: &sniff_lib::hardware::SimdCapabilities) -> Option<String> {
+    let mut caps = Vec::new();
+    // AVX hierarchy: show highest level only
+    if simd.avx512f {
+        caps.push("AVX-512");
+    } else if simd.avx2 {
+        caps.push("AVX2");
+    } else if simd.avx {
+        caps.push("AVX");
+    }
+    if simd.sse4_2 {
+        caps.push("SSE4.2");
+    }
+    if simd.fma {
+        caps.push("FMA");
+    }
+    if simd.neon {
+        caps.push("NEON");
+    }
+    if caps.is_empty() {
+        None
+    } else {
+        Some(caps.join(", "))
+    }
+}
+
+/// Format GPU capabilities into a comma-separated string.
+///
+/// Returns `None` if no capabilities are detected.
+fn format_gpu_caps(caps: &sniff_lib::hardware::GpuCapabilities) -> Option<String> {
+    let mut cap_list = Vec::new();
+    if caps.raytracing {
+        cap_list.push("Raytracing");
+    }
+    if caps.mesh_shaders {
+        cap_list.push("Mesh Shaders");
+    }
+    if caps.unified_memory {
+        cap_list.push("Unified Memory");
+    }
+    if caps.dynamic_libraries {
+        cap_list.push("Dynamic Libraries");
+    }
+    if cap_list.is_empty() {
+        None
+    } else {
+        Some(cap_list.join(", "))
+    }
+}
+
 /// Format uptime in seconds to a human-readable string
 fn format_uptime(seconds: u64) -> String {
     let days = seconds / 86400;
@@ -339,28 +393,10 @@ fn print_hardware_section(
     }
 
     // Print SIMD capabilities at verbose level 1+
-    if verbose > 0 {
-        let simd = &hardware.cpu.simd;
-        let mut caps = Vec::new();
-        if simd.avx512f {
-            caps.push("AVX-512");
-        } else if simd.avx2 {
-            caps.push("AVX2");
-        } else if simd.avx {
-            caps.push("AVX");
-        }
-        if simd.sse4_2 {
-            caps.push("SSE4.2");
-        }
-        if simd.fma {
-            caps.push("FMA");
-        }
-        if simd.neon {
-            caps.push("NEON");
-        }
-        if !caps.is_empty() {
-            println!("SIMD: {}", caps.join(", "));
-        }
+    if verbose > 0
+        && let Some(simd_str) = format_simd_caps(&hardware.cpu.simd)
+    {
+        println!("SIMD: {}", simd_str);
     }
     println!();
 
@@ -402,22 +438,8 @@ fn print_hardware_section(
             }
             if verbose > 1 {
                 // Show capabilities at -vv
-                let caps = &gpu.capabilities;
-                let mut cap_list = Vec::new();
-                if caps.raytracing {
-                    cap_list.push("Raytracing");
-                }
-                if caps.mesh_shaders {
-                    cap_list.push("Mesh Shaders");
-                }
-                if caps.unified_memory {
-                    cap_list.push("Unified Memory");
-                }
-                if caps.dynamic_libraries {
-                    cap_list.push("Dynamic Libraries");
-                }
-                if !cap_list.is_empty() {
-                    println!("    Capabilities: {}", cap_list.join(", "));
+                if let Some(caps_str) = format_gpu_caps(&gpu.capabilities) {
+                    println!("    Capabilities: {}", caps_str);
                 }
                 if let Some(max_buf) = gpu.max_buffer_bytes {
                     println!("    Max Buffer: {}", format_bytes(max_buf));
@@ -493,28 +515,10 @@ fn print_cpu_section(cpu: &sniff_lib::hardware::CpuInfo, verbose: u8) {
     }
 
     // Print SIMD capabilities at verbose level 1+
-    if verbose > 0 {
-        let simd = &cpu.simd;
-        let mut caps = Vec::new();
-        if simd.avx512f {
-            caps.push("AVX-512");
-        } else if simd.avx2 {
-            caps.push("AVX2");
-        } else if simd.avx {
-            caps.push("AVX");
-        }
-        if simd.sse4_2 {
-            caps.push("SSE4.2");
-        }
-        if simd.fma {
-            caps.push("FMA");
-        }
-        if simd.neon {
-            caps.push("NEON");
-        }
-        if !caps.is_empty() {
-            println!("SIMD: {}", caps.join(", "));
-        }
+    if verbose > 0
+        && let Some(simd_str) = format_simd_caps(&cpu.simd)
+    {
+        println!("SIMD: {}", simd_str);
     }
 
     println!();
@@ -544,22 +548,8 @@ fn print_gpu_section(gpus: &[sniff_lib::hardware::GpuInfo], verbose: u8) {
                 }
             }
             if verbose > 1 {
-                let caps = &gpu.capabilities;
-                let mut cap_list = Vec::new();
-                if caps.raytracing {
-                    cap_list.push("Raytracing");
-                }
-                if caps.mesh_shaders {
-                    cap_list.push("Mesh Shaders");
-                }
-                if caps.unified_memory {
-                    cap_list.push("Unified Memory");
-                }
-                if caps.dynamic_libraries {
-                    cap_list.push("Dynamic Libraries");
-                }
-                if !cap_list.is_empty() {
-                    println!("  Capabilities: {}", cap_list.join(", "));
+                if let Some(caps_str) = format_gpu_caps(&gpu.capabilities) {
+                    println!("  Capabilities: {}", caps_str);
                 }
                 if let Some(max_buf) = gpu.max_buffer_bytes {
                     println!("  Max Buffer: {}", format_bytes(max_buf));

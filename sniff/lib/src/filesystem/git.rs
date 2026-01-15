@@ -494,10 +494,8 @@ fn get_repo_status(repo: &Repository) -> Result<RepoStatus> {
         }
 
         // Add to dirty set if staged or unstaged (but not untracked)
-        if (is_staged || is_unstaged) && !is_untracked {
-            if let Some(p) = path {
-                dirty_set.insert(p);
-            }
+        if (is_staged || is_unstaged) && !is_untracked && let Some(p) = path {
+            dirty_set.insert(p);
         }
     }
 

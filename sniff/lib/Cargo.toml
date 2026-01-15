@@ -32,3 +32,4 @@ metal = "0.33"
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "macros"] }
+wiremock = "0.6"

@@ -14,6 +14,7 @@
 
 #[cfg(feature = "network")]
 use reqwest::Client;
+#[cfg(feature = "network")]
 use serde::Deserialize;
 
 use super::{BoxFuture, LanguagePackageManager, PackageManagerShape};
@@ -26,6 +27,7 @@ use crate::Result;
 // ============================================================================
 
 /// Response from crates.io API for a single crate.
+#[cfg(feature = "network")]
 #[derive(Debug, Deserialize)]
 struct CratesIoResponse {
     #[serde(rename = "crate")]
@@ -33,6 +35,7 @@ struct CratesIoResponse {
 }
 
 /// Crate information from crates.io.
+#[cfg(feature = "network")]
 #[derive(Debug, Deserialize)]
 struct CratesIoCrate {
     name: String,
@@ -44,7 +47,12 @@ struct CratesIoCrate {
 // npm Registry API Types
 // ============================================================================
 
+/// Default base URL for npm registry API.
+#[cfg(feature = "network")]
+const NPM_REGISTRY_BASE_URL: &str = "https://registry.npmjs.org";
+
 /// Response from npm registry API for a package.
+#[cfg(feature = "network")]
 #[derive(Debug, Deserialize)]
 struct NpmRegistryResponse {
     name: String,
@@ -54,6 +62,7 @@ struct NpmRegistryResponse {
 }
 
 /// Distribution tags from npm registry.
+#[cfg(feature = "network")]
 #[derive(Debug, Deserialize)]
 struct NpmDistTags {
     latest: Option<String>,
@@ -73,6 +82,10 @@ fn executable_exists(name: &str) -> bool {
 // Cargo Implementation (crates.io)
 // ============================================================================
 
+/// Default base URL for crates.io API.
+#[cfg(feature = "network")]
+const CRATES_IO_BASE_URL: &str = "https://crates.io/api/v1/crates";
+
 /// Network-enabled implementation for Cargo using crates.io API.
 ///
 /// Queries the crates.io API to fetch package information and latest versions.
@@ -80,14 +93,21 @@ fn executable_exists(name: &str) -> bool {
 /// ## API Endpoint
 ///
 /// `https://crates.io/api/v1/crates/{name}`
-#[derive(Debug, Clone, Default)]
+///
+/// ## Testing
+///
+/// Use [`CargoNetwork::with_base_url`] to override the base URL for testing
+/// with a mock server.
+#[derive(Debug, Clone)]
 pub struct CargoNetwork {
     #[cfg(feature = "network")]
     client: Option<Client>,
+    #[cfg(feature = "network")]
+    base_url: String,
 }
 
 impl CargoNetwork {
-    /// Creates a new CargoNetwork instance.
+    /// Creates a new CargoNetwork instance using the default crates.io API.
     #[cfg(feature = "network")]
     pub fn new() -> Self {
         Self {
@@ -98,12 +118,44 @@ impl CargoNetwork {
                     .ok(),
             )
             .flatten(),
+            base_url: CRATES_IO_BASE_URL.to_string(),
         }
+    }
+
+    /// Sets a custom base URL for the API.
+    ///
+    /// This is primarily useful for testing with a mock server.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// let cargo = CargoNetwork::new()
+    ///     .with_base_url("http://localhost:8080/api/v1/crates");
+    /// ```
+    #[cfg(feature = "network")]
+    #[must_use]
+    pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
+        self.base_url = url.into();
+        self
     }
 
     #[cfg(not(feature = "network"))]
     pub fn new() -> Self {
         Self {}
+    }
+}
+
+#[cfg(not(feature = "network"))]
+impl Default for CargoNetwork {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "network")]
+impl Default for CargoNetwork {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -120,12 +172,13 @@ impl PackageManagerShape for CargoNetwork {
         #[cfg(feature = "network")]
         {
             let name = name.to_string();
+            let base_url = self.base_url.clone();
             Box::pin(async move {
                 let Some(ref client) = self.client else {
                     return Ok(None);
                 };
 
-                let url = format!("https://crates.io/api/v1/crates/{name}");
+                let url = format!("{base_url}/{name}");
                 let response = client.get(&url).send().await;
 
                 match response {
@@ -156,12 +209,13 @@ impl PackageManagerShape for CargoNetwork {
         #[cfg(feature = "network")]
         {
             let name = name.to_string();
+            let base_url = self.base_url.clone();
             Box::pin(async move {
                 let Some(ref client) = self.client else {
                     return Ok(None);
                 };
 
-                let url = format!("https://crates.io/api/v1/crates/{name}");
+                let url = format!("{base_url}/{name}");
                 let response = client.get(&url).send().await;
 
                 match response {
@@ -198,14 +252,21 @@ impl PackageManagerShape for CargoNetwork {
 /// ## API Endpoint
 ///
 /// `https://registry.npmjs.org/{name}`
-#[derive(Debug, Clone, Default)]
+///
+/// ## Testing
+///
+/// Use [`NpmNetwork::with_base_url`] to override the base URL for testing
+/// with a mock server.
+#[derive(Debug, Clone)]
 pub struct NpmNetwork {
     #[cfg(feature = "network")]
     client: Option<Client>,
+    #[cfg(feature = "network")]
+    base_url: String,
 }
 
 impl NpmNetwork {
-    /// Creates a new NpmNetwork instance.
+    /// Creates a new NpmNetwork instance using the default npm registry.
     #[cfg(feature = "network")]
     pub fn new() -> Self {
         Self {
@@ -216,12 +277,44 @@ impl NpmNetwork {
                     .ok(),
             )
             .flatten(),
+            base_url: NPM_REGISTRY_BASE_URL.to_string(),
         }
+    }
+
+    /// Sets a custom base URL for the API.
+    ///
+    /// This is primarily useful for testing with a mock server.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// let npm = NpmNetwork::new()
+    ///     .with_base_url("http://localhost:8080");
+    /// ```
+    #[cfg(feature = "network")]
+    #[must_use]
+    pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
+        self.base_url = url.into();
+        self
     }
 
     #[cfg(not(feature = "network"))]
     pub fn new() -> Self {
         Self {}
+    }
+}
+
+#[cfg(not(feature = "network"))]
+impl Default for NpmNetwork {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "network")]
+impl Default for NpmNetwork {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -238,12 +331,13 @@ impl PackageManagerShape for NpmNetwork {
         #[cfg(feature = "network")]
         {
             let name = name.to_string();
+            let base_url = self.base_url.clone();
             Box::pin(async move {
                 let Some(ref client) = self.client else {
                     return Ok(None);
                 };
 
-                let url = format!("https://registry.npmjs.org/{name}");
+                let url = format!("{base_url}/{name}");
                 let response = client.get(&url).send().await;
 
                 match response {
@@ -280,12 +374,13 @@ impl PackageManagerShape for NpmNetwork {
         #[cfg(feature = "network")]
         {
             let name = name.to_string();
+            let base_url = self.base_url.clone();
             Box::pin(async move {
                 let Some(ref client) = self.client else {
                     return Ok(None);
                 };
 
-                let url = format!("https://registry.npmjs.org/{name}");
+                let url = format!("{base_url}/{name}");
                 let response = client.get(&url).send().await;
 
                 match response {
@@ -590,5 +685,461 @@ mod tests {
         let result = npm.find_package("this-package-definitely-does-not-exist-xyz123").await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
+    }
+}
+
+// ============================================================================
+// Wiremock-based Unit Tests
+// ============================================================================
+
+/// Unit tests using wiremock to mock HTTP responses.
+///
+/// These tests are deterministic and do not require network access.
+#[cfg(all(test, feature = "network"))]
+mod wiremock_tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    // ------------------------------------------------------------------------
+    // CargoNetwork Tests
+    // ------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_cargo_find_package_success() {
+        let mock_server = MockServer::start().await;
+
+        let response_body = r#"{
+            "crate": {
+                "name": "tokio",
+                "max_version": "1.40.0",
+                "description": "An event-driven, non-blocking I/O platform"
+            }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/tokio"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_body))
+            .mount(&mock_server)
+            .await;
+
+        let cargo = CargoNetwork::new().with_base_url(mock_server.uri());
+        let result = cargo.find_package("tokio").await;
+
+        assert!(result.is_ok());
+        let info = result.unwrap().expect("should have package info");
+        assert_eq!(info.name, "tokio");
+        assert_eq!(info.version, "1.40.0");
+        assert_eq!(
+            info.description,
+            Some("An event-driven, non-blocking I/O platform".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cargo_find_package_no_description() {
+        let mock_server = MockServer::start().await;
+
+        let response_body = r#"{
+            "crate": {
+                "name": "some-crate",
+                "max_version": "0.1.0",
+                "description": null
+            }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/some-crate"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_body))
+            .mount(&mock_server)
+            .await;
+
+        let cargo = CargoNetwork::new().with_base_url(mock_server.uri());
+        let result = cargo.find_package("some-crate").await;
+
+        assert!(result.is_ok());
+        let info = result.unwrap().expect("should have package info");
+        assert_eq!(info.name, "some-crate");
+        assert_eq!(info.version, "0.1.0");
+        assert!(info.description.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cargo_latest_version_success() {
+        let mock_server = MockServer::start().await;
+
+        let response_body = r#"{
+            "crate": {
+                "name": "serde",
+                "max_version": "1.0.210",
+                "description": "A serialization framework"
+            }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/serde"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_body))
+            .mount(&mock_server)
+            .await;
+
+        let cargo = CargoNetwork::new().with_base_url(mock_server.uri());
+        let result = cargo.latest_version("serde").await;
+
+        assert!(result.is_ok());
+        let version = result.unwrap().expect("should have version");
+        assert_eq!(version, "1.0.210");
+    }
+
+    #[tokio::test]
+    async fn test_cargo_find_package_404() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/nonexistent-crate"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let cargo = CargoNetwork::new().with_base_url(mock_server.uri());
+        let result = cargo.find_package("nonexistent-crate").await;
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cargo_latest_version_404() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/nonexistent-crate"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let cargo = CargoNetwork::new().with_base_url(mock_server.uri());
+        let result = cargo.latest_version("nonexistent-crate").await;
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cargo_find_package_malformed_json() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/bad-response"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not valid json"))
+            .mount(&mock_server)
+            .await;
+
+        let cargo = CargoNetwork::new().with_base_url(mock_server.uri());
+        let result = cargo.find_package("bad-response").await;
+
+        // Should gracefully handle malformed JSON
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cargo_find_package_incomplete_json() {
+        let mock_server = MockServer::start().await;
+
+        // Valid JSON but missing required fields
+        let response_body = r#"{"crate": {"name": "partial"}}"#;
+
+        Mock::given(method("GET"))
+            .and(path("/partial"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_body))
+            .mount(&mock_server)
+            .await;
+
+        let cargo = CargoNetwork::new().with_base_url(mock_server.uri());
+        let result = cargo.find_package("partial").await;
+
+        // Should gracefully handle missing fields
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cargo_find_package_server_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/server-error"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        let cargo = CargoNetwork::new().with_base_url(mock_server.uri());
+        let result = cargo.find_package("server-error").await;
+
+        // Should gracefully handle 500 errors
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    // ------------------------------------------------------------------------
+    // NpmNetwork Tests
+    // ------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_npm_find_package_success() {
+        let mock_server = MockServer::start().await;
+
+        let response_body = r#"{
+            "name": "lodash",
+            "description": "Lodash modular utilities",
+            "dist-tags": {
+                "latest": "4.17.21"
+            }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/lodash"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_body))
+            .mount(&mock_server)
+            .await;
+
+        let npm = NpmNetwork::new().with_base_url(mock_server.uri());
+        let result = npm.find_package("lodash").await;
+
+        assert!(result.is_ok());
+        let info = result.unwrap().expect("should have package info");
+        assert_eq!(info.name, "lodash");
+        assert_eq!(info.version, "4.17.21");
+        assert_eq!(
+            info.description,
+            Some("Lodash modular utilities".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_npm_find_package_no_description() {
+        let mock_server = MockServer::start().await;
+
+        let response_body = r#"{
+            "name": "minimal-pkg",
+            "dist-tags": {
+                "latest": "1.0.0"
+            }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/minimal-pkg"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_body))
+            .mount(&mock_server)
+            .await;
+
+        let npm = NpmNetwork::new().with_base_url(mock_server.uri());
+        let result = npm.find_package("minimal-pkg").await;
+
+        assert!(result.is_ok());
+        let info = result.unwrap().expect("should have package info");
+        assert_eq!(info.name, "minimal-pkg");
+        assert_eq!(info.version, "1.0.0");
+        assert!(info.description.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_npm_find_package_no_dist_tags() {
+        let mock_server = MockServer::start().await;
+
+        // Package with no dist-tags (edge case)
+        let response_body = r#"{
+            "name": "legacy-pkg",
+            "description": "A legacy package"
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/legacy-pkg"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_body))
+            .mount(&mock_server)
+            .await;
+
+        let npm = NpmNetwork::new().with_base_url(mock_server.uri());
+        let result = npm.find_package("legacy-pkg").await;
+
+        assert!(result.is_ok());
+        let info = result.unwrap().expect("should have package info");
+        assert_eq!(info.name, "legacy-pkg");
+        assert_eq!(info.version, "unknown"); // Falls back to "unknown"
+    }
+
+    #[tokio::test]
+    async fn test_npm_find_package_no_latest_tag() {
+        let mock_server = MockServer::start().await;
+
+        // Package with dist-tags but no "latest" tag
+        let response_body = r#"{
+            "name": "beta-pkg",
+            "description": "A beta package",
+            "dist-tags": {
+                "beta": "2.0.0-beta.1"
+            }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/beta-pkg"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_body))
+            .mount(&mock_server)
+            .await;
+
+        let npm = NpmNetwork::new().with_base_url(mock_server.uri());
+        let result = npm.find_package("beta-pkg").await;
+
+        assert!(result.is_ok());
+        let info = result.unwrap().expect("should have package info");
+        assert_eq!(info.name, "beta-pkg");
+        assert_eq!(info.version, "unknown"); // Falls back to "unknown"
+    }
+
+    #[tokio::test]
+    async fn test_npm_latest_version_success() {
+        let mock_server = MockServer::start().await;
+
+        let response_body = r#"{
+            "name": "react",
+            "description": "A JavaScript library for building user interfaces",
+            "dist-tags": {
+                "latest": "18.3.1",
+                "next": "19.0.0-rc.0"
+            }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/react"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_body))
+            .mount(&mock_server)
+            .await;
+
+        let npm = NpmNetwork::new().with_base_url(mock_server.uri());
+        let result = npm.latest_version("react").await;
+
+        assert!(result.is_ok());
+        let version = result.unwrap().expect("should have version");
+        assert_eq!(version, "18.3.1");
+    }
+
+    #[tokio::test]
+    async fn test_npm_latest_version_no_dist_tags() {
+        let mock_server = MockServer::start().await;
+
+        let response_body = r#"{
+            "name": "no-tags-pkg"
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/no-tags-pkg"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_body))
+            .mount(&mock_server)
+            .await;
+
+        let npm = NpmNetwork::new().with_base_url(mock_server.uri());
+        let result = npm.latest_version("no-tags-pkg").await;
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_npm_find_package_404() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/nonexistent-package"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let npm = NpmNetwork::new().with_base_url(mock_server.uri());
+        let result = npm.find_package("nonexistent-package").await;
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_npm_latest_version_404() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/nonexistent-package"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let npm = NpmNetwork::new().with_base_url(mock_server.uri());
+        let result = npm.latest_version("nonexistent-package").await;
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_npm_find_package_malformed_json() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/bad-json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{invalid json}"))
+            .mount(&mock_server)
+            .await;
+
+        let npm = NpmNetwork::new().with_base_url(mock_server.uri());
+        let result = npm.find_package("bad-json").await;
+
+        // Should gracefully handle malformed JSON
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_npm_find_package_server_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/server-error"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&mock_server)
+            .await;
+
+        let npm = NpmNetwork::new().with_base_url(mock_server.uri());
+        let result = npm.find_package("server-error").await;
+
+        // Should gracefully handle 503 errors
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_npm_scoped_package() {
+        let mock_server = MockServer::start().await;
+
+        let response_body = r#"{
+            "name": "@types/node",
+            "description": "TypeScript definitions for node",
+            "dist-tags": {
+                "latest": "22.5.0"
+            }
+        }"#;
+
+        // Scoped packages use URL encoding: @types/node -> @types%2Fnode
+        // But reqwest handles this, so the path matcher sees the encoded form
+        Mock::given(method("GET"))
+            .and(path("/@types/node"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_body))
+            .mount(&mock_server)
+            .await;
+
+        let npm = NpmNetwork::new().with_base_url(mock_server.uri());
+        let result = npm.find_package("@types/node").await;
+
+        assert!(result.is_ok());
+        let info = result.unwrap().expect("should have package info");
+        assert_eq!(info.name, "@types/node");
+        assert_eq!(info.version, "22.5.0");
     }
 }
