@@ -195,13 +195,17 @@ fn isolate_prose<'a>(
             Event::Start(Tag::CodeBlock(_)) => in_code_block = true,
             Event::End(TagEnd::CodeBlock) => in_code_block = false,
             Event::Start(Tag::BlockQuote(_)) => block_quote_depth += 1,
-            Event::End(TagEnd::BlockQuote(_)) => block_quote_depth = block_quote_depth.saturating_sub(1),
+            Event::End(TagEnd::BlockQuote(_)) => {
+                block_quote_depth = block_quote_depth.saturating_sub(1)
+            }
             Event::Start(Tag::Heading { .. }) => heading_depth += 1,
             Event::End(TagEnd::Heading(_)) => heading_depth = heading_depth.saturating_sub(1),
             Event::Text(_) | Event::SoftBreak | Event::HardBreak => {
                 if !in_code_block && block_quote_depth == 0 && heading_depth == 0 {
                     let slice = validate_and_slice(content, range.start, range.end)?;
-                    if !slice.trim().is_empty() || matches!(event, Event::SoftBreak | Event::HardBreak) {
+                    if !slice.trim().is_empty()
+                        || matches!(event, Event::SoftBreak | Event::HardBreak)
+                    {
                         pieces.push(slice);
                     }
                 }
@@ -249,7 +253,9 @@ fn isolate_block_quotes<'a>(
     for (event, range) in parser.into_offset_iter() {
         match event {
             Event::Start(Tag::BlockQuote(_)) => block_quote_depth += 1,
-            Event::End(TagEnd::BlockQuote(_)) => block_quote_depth = block_quote_depth.saturating_sub(1),
+            Event::End(TagEnd::BlockQuote(_)) => {
+                block_quote_depth = block_quote_depth.saturating_sub(1)
+            }
             Event::Text(_) if block_quote_depth > 0 => {
                 let slice = validate_and_slice(content, range.start, range.end)?;
                 pieces.push(slice);
@@ -510,8 +516,12 @@ mod tests {
     #[test]
     fn test_frontmatter_basic() {
         let content = "---\ntitle: Hello\nauthor: World\n---\n\n# Content";
-        let result = md_isolate(content, MarkdownScope::Frontmatter, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Frontmatter,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 1);
@@ -525,8 +535,12 @@ mod tests {
     #[test]
     fn test_frontmatter_missing() {
         let content = "# No Frontmatter\n\nJust content.";
-        let result = md_isolate(content, MarkdownScope::Frontmatter, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Frontmatter,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert!(items.is_empty());
@@ -538,8 +552,12 @@ mod tests {
     #[test]
     fn test_frontmatter_with_dots_closer() {
         let content = "---\nkey: value\n...\n\nBody text";
-        let result = md_isolate(content, MarkdownScope::Frontmatter, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Frontmatter,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 1);
@@ -556,8 +574,12 @@ mod tests {
     #[test]
     fn test_prose_basic() {
         let content = "# Heading\n\nThis is prose text.\n\nMore prose here.";
-        let result = md_isolate(content, MarkdownScope::Prose, IsolateAction::Concatenate(Some(" ".to_string())))
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Prose,
+            IsolateAction::Concatenate(Some(" ".to_string())),
+        )
+        .unwrap();
 
         if let IsolateResult::Concatenated(text) = result {
             assert!(text.contains("This is prose text."));
@@ -572,8 +594,8 @@ mod tests {
     #[test]
     fn test_prose_excludes_code_blocks() {
         let content = "Text before.\n\n```rust\nfn code() {}\n```\n\nText after.";
-        let result = md_isolate(content, MarkdownScope::Prose, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Prose, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             let combined: String = items.iter().map(|c| c.as_ref()).collect();
@@ -592,8 +614,12 @@ mod tests {
     #[test]
     fn test_code_block_fenced() {
         let content = "# Example\n\n```rust\nfn main() {\n    println!(\"hello\");\n}\n```";
-        let result = md_isolate(content, MarkdownScope::CodeBlock, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::CodeBlock,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 1);
@@ -607,8 +633,12 @@ mod tests {
     #[test]
     fn test_code_block_multiple() {
         let content = "```python\nprint('a')\n```\n\nText\n\n```js\nconsole.log('b');\n```";
-        let result = md_isolate(content, MarkdownScope::CodeBlock, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::CodeBlock,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 2);
@@ -626,8 +656,12 @@ mod tests {
     #[test]
     fn test_block_quote_basic() {
         let content = "Normal text.\n\n> This is quoted.\n> More quote.\n\nAfter.";
-        let result = md_isolate(content, MarkdownScope::BlockQuote, IsolateAction::Concatenate(Some(" ".to_string())))
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::BlockQuote,
+            IsolateAction::Concatenate(Some(" ".to_string())),
+        )
+        .unwrap();
 
         if let IsolateResult::Concatenated(text) = result {
             assert!(text.contains("This is quoted."));
@@ -641,8 +675,12 @@ mod tests {
     #[test]
     fn test_block_quote_nested() {
         let content = "> Outer quote\n>> Inner quote\n> Back to outer";
-        let result = md_isolate(content, MarkdownScope::BlockQuote, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::BlockQuote,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert!(!items.is_empty());
@@ -661,8 +699,12 @@ mod tests {
     #[test]
     fn test_heading_all_levels() {
         let content = "# H1\n\n## H2\n\n### H3\n\n#### H4\n\n##### H5\n\n###### H6";
-        let result = md_isolate(content, MarkdownScope::Heading, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Heading,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 6);
@@ -680,8 +722,12 @@ mod tests {
     #[test]
     fn test_heading_with_inline_code() {
         let content = "# Heading with `code`\n\nBody text.";
-        let result = md_isolate(content, MarkdownScope::Heading, IsolateAction::Concatenate(None))
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Heading,
+            IsolateAction::Concatenate(None),
+        )
+        .unwrap();
 
         if let IsolateResult::Concatenated(text) = result {
             assert!(text.contains("Heading with"));
@@ -698,8 +744,12 @@ mod tests {
     #[test]
     fn test_stylized_bold() {
         let content = "Normal **bold** text.";
-        let result = md_isolate(content, MarkdownScope::Stylized, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Stylized,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 1);
@@ -712,8 +762,12 @@ mod tests {
     #[test]
     fn test_stylized_mixed() {
         let content = "**bold** and *italic* and ~~strike~~";
-        let result = md_isolate(content, MarkdownScope::Stylized, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Stylized,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 3);
@@ -732,8 +786,12 @@ mod tests {
     #[test]
     fn test_italicized_basic() {
         let content = "Normal *italic* text.";
-        let result = md_isolate(content, MarkdownScope::Italicized, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Italicized,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 1);
@@ -746,8 +804,12 @@ mod tests {
     #[test]
     fn test_italicized_excludes_bold() {
         let content = "**bold** and *italic* and ~~strike~~";
-        let result = md_isolate(content, MarkdownScope::Italicized, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Italicized,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 1);
@@ -764,8 +826,12 @@ mod tests {
     #[test]
     fn test_non_italicized() {
         let content = "Normal *italic* text.";
-        let result = md_isolate(content, MarkdownScope::NonItalicized, IsolateAction::Concatenate(None))
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::NonItalicized,
+            IsolateAction::Concatenate(None),
+        )
+        .unwrap();
 
         if let IsolateResult::Concatenated(text) = result {
             assert!(text.contains("Normal"));
@@ -783,8 +849,8 @@ mod tests {
     #[test]
     fn test_links_inline() {
         let content = "Check out [Example](https://example.com) for more.";
-        let result = md_isolate(content, MarkdownScope::Links, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Links, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 2);
@@ -798,8 +864,8 @@ mod tests {
     #[test]
     fn test_links_multiple() {
         let content = "[First](https://first.com) and [Second](https://second.com)";
-        let result = md_isolate(content, MarkdownScope::Links, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Links, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 4);
@@ -815,8 +881,8 @@ mod tests {
     #[test]
     fn test_images_basic() {
         let content = "![Alt text](https://example.com/image.png)";
-        let result = md_isolate(content, MarkdownScope::Images, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Images, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 2);
@@ -830,8 +896,8 @@ mod tests {
     #[test]
     fn test_images_empty_alt() {
         let content = "![](https://example.com/img.jpg)";
-        let result = md_isolate(content, MarkdownScope::Images, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Images, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             // Only URL should be present
@@ -849,8 +915,8 @@ mod tests {
     #[test]
     fn test_lists_unordered() {
         let content = "- Item one\n- Item two\n- Item three";
-        let result = md_isolate(content, MarkdownScope::Lists, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Lists, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 3);
@@ -865,8 +931,8 @@ mod tests {
     #[test]
     fn test_lists_ordered() {
         let content = "1. First\n2. Second\n3. Third";
-        let result = md_isolate(content, MarkdownScope::Lists, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Lists, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 3);
@@ -881,8 +947,8 @@ mod tests {
     #[test]
     fn test_lists_nested() {
         let content = "- Parent\n  - Child\n    - Grandchild";
-        let result = md_isolate(content, MarkdownScope::Lists, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Lists, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             let combined: String = items.iter().map(|c| c.as_ref()).collect();
@@ -901,8 +967,8 @@ mod tests {
     #[test]
     fn test_tables_basic() {
         let content = "| Header 1 | Header 2 |\n|----------|----------|\n| Cell 1   | Cell 2   |";
-        let result = md_isolate(content, MarkdownScope::Tables, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Tables, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert!(!items.is_empty());
@@ -919,8 +985,8 @@ mod tests {
     #[test]
     fn test_tables_empty_when_no_tables() {
         let content = "# Heading\n\nJust regular text.";
-        let result = md_isolate(content, MarkdownScope::Tables, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Tables, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert!(items.is_empty());
@@ -936,8 +1002,12 @@ mod tests {
     #[test]
     fn test_footnotes_basic() {
         let content = "Text with footnote[^1].\n\n[^1]: This is the footnote content.";
-        let result = md_isolate(content, MarkdownScope::FootnoteDefinitions, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::FootnoteDefinitions,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             let combined: String = items.iter().map(|c| c.as_ref()).collect();
@@ -950,8 +1020,12 @@ mod tests {
     #[test]
     fn test_footnotes_multiple() {
         let content = "First[^a] and second[^b].\n\n[^a]: Note A.\n\n[^b]: Note B.";
-        let result = md_isolate(content, MarkdownScope::FootnoteDefinitions, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::FootnoteDefinitions,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             let combined: String = items.iter().map(|c| c.as_ref()).collect();
@@ -969,8 +1043,12 @@ mod tests {
     #[test]
     fn test_action_concatenate_no_delimiter() {
         let content = "# One\n\n## Two\n\n### Three";
-        let result = md_isolate(content, MarkdownScope::Heading, IsolateAction::Concatenate(None))
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Heading,
+            IsolateAction::Concatenate(None),
+        )
+        .unwrap();
 
         if let IsolateResult::Concatenated(text) = result {
             assert_eq!(text, "OneTwoThree");
@@ -982,8 +1060,12 @@ mod tests {
     #[test]
     fn test_action_concatenate_with_delimiter() {
         let content = "# One\n\n## Two\n\n### Three";
-        let result = md_isolate(content, MarkdownScope::Heading, IsolateAction::Concatenate(Some(", ".to_string())))
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Heading,
+            IsolateAction::Concatenate(Some(", ".to_string())),
+        )
+        .unwrap();
 
         if let IsolateResult::Concatenated(text) = result {
             assert_eq!(text, "One, Two, Three");
@@ -999,8 +1081,8 @@ mod tests {
     #[test]
     fn test_empty_content() {
         let content = "";
-        let result = md_isolate(content, MarkdownScope::Prose, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Prose, IsolateAction::LeaveAsVector).unwrap();
 
         assert!(result.is_empty());
     }
@@ -1008,8 +1090,12 @@ mod tests {
     #[test]
     fn test_zero_copy_borrowing() {
         let content = "# Heading";
-        let result = md_isolate(content, MarkdownScope::Heading, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Heading,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 1);
@@ -1030,8 +1116,12 @@ mod tests {
     #[test]
     fn test_unicode_content() {
         let content = "# \u{1F600} Emoji Title \u{1F389}\n\n\u{1F680} Body emoji";
-        let result = md_isolate(content, MarkdownScope::Heading, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Heading,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 1);
@@ -1046,8 +1136,12 @@ mod tests {
     fn test_multibyte_utf8_boundaries() {
         // Test with various multi-byte UTF-8 characters
         let content = "# \u{00E9}\u{00E8}\u{00EA}"; // e-acute, e-grave, e-circumflex (2 bytes each)
-        let result = md_isolate(content, MarkdownScope::Heading, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Heading,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 1);
@@ -1061,8 +1155,12 @@ mod tests {
     fn test_cjk_characters() {
         // Test with Chinese, Japanese, Korean characters
         let content = "# \u{4E2D}\u{6587}\u{65E5}\u{672C}\u{8A9E}"; // Chinese/Japanese/Korean chars
-        let result = md_isolate(content, MarkdownScope::Heading, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Heading,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 1);
@@ -1075,8 +1173,8 @@ mod tests {
     #[test]
     fn test_whitespace_only_content() {
         let content = "   \n\n   \t   \n";
-        let result = md_isolate(content, MarkdownScope::Prose, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Prose, IsolateAction::LeaveAsVector).unwrap();
 
         // Whitespace-only content should return empty result
         if let IsolateResult::Vector(items) = result {
@@ -1091,8 +1189,8 @@ mod tests {
     #[test]
     fn test_deeply_nested_lists() {
         let content = "- Level 1\n  - Level 2\n    - Level 3\n      - Level 4";
-        let result = md_isolate(content, MarkdownScope::Lists, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Lists, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             let combined: String = items.iter().map(|c| c.as_ref()).collect();
@@ -1108,8 +1206,12 @@ mod tests {
     #[test]
     fn test_code_block_with_language_info() {
         let content = "```typescript\nconst x: number = 42;\n```";
-        let result = md_isolate(content, MarkdownScope::CodeBlock, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::CodeBlock,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 1);
@@ -1122,8 +1224,12 @@ mod tests {
     #[test]
     fn test_strikethrough_in_stylized() {
         let content = "Normal ~~strikethrough text~~ more normal.";
-        let result = md_isolate(content, MarkdownScope::Stylized, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Stylized,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 1);
@@ -1136,8 +1242,8 @@ mod tests {
     #[test]
     fn test_reference_style_links() {
         let content = "[Link text][ref]\n\n[ref]: https://example.com";
-        let result = md_isolate(content, MarkdownScope::Links, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Links, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             // Should capture link text and URL
@@ -1151,8 +1257,8 @@ mod tests {
     #[test]
     fn test_autolinks() {
         let content = "Visit <https://example.com> for more info.";
-        let result = md_isolate(content, MarkdownScope::Links, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Links, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             // Autolinks should be captured
@@ -1165,8 +1271,12 @@ mod tests {
     #[test]
     fn test_setext_style_headings() {
         let content = "Heading Level 1\n================\n\nHeading Level 2\n----------------";
-        let result = md_isolate(content, MarkdownScope::Heading, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::Heading,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 2);
@@ -1180,8 +1290,8 @@ mod tests {
     #[test]
     fn test_horizontal_rules_dont_affect_prose() {
         let content = "Before rule.\n\n---\n\nAfter rule.";
-        let result = md_isolate(content, MarkdownScope::Prose, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result =
+            md_isolate(content, MarkdownScope::Prose, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             let combined: String = items.iter().map(|c| c.as_ref()).collect();
@@ -1195,8 +1305,12 @@ mod tests {
     #[test]
     fn test_indented_code_block() {
         let content = "Text before.\n\n    fn indented_code() {}\n\nText after.";
-        let result = md_isolate(content, MarkdownScope::CodeBlock, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::CodeBlock,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             // Indented code blocks should be captured
@@ -1210,8 +1324,12 @@ mod tests {
     #[test]
     fn test_inline_code_not_in_code_block() {
         let content = "Text with `inline code` here.\n\n```\nblock code\n```";
-        let result = md_isolate(content, MarkdownScope::CodeBlock, IsolateAction::LeaveAsVector)
-            .unwrap();
+        let result = md_isolate(
+            content,
+            MarkdownScope::CodeBlock,
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             // Only block code should be captured, not inline

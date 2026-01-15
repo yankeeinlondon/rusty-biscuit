@@ -33,4 +33,4 @@
 
 pub mod terminal;
 
-pub use terminal::{strip_ansi_codes, TestTerminal};
+pub use terminal::{TestTerminal, strip_ansi_codes};

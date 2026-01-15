@@ -113,11 +113,19 @@ pub fn xx_hash_variant(data: &str, variants: Vec<HashVariant>) -> u64 {
     }
 
     // Check which variants are requested
-    let has_block_trimming = variants.iter().any(|v| matches!(v, HashVariant::BlockTrimming));
+    let has_block_trimming = variants
+        .iter()
+        .any(|v| matches!(v, HashVariant::BlockTrimming));
     let has_blank_line = variants.iter().any(|v| matches!(v, HashVariant::BlankLine));
-    let has_leading_ws = variants.iter().any(|v| matches!(v, HashVariant::LeadingWhitespace));
-    let has_trailing_ws = variants.iter().any(|v| matches!(v, HashVariant::TrailingWhitespace));
-    let has_interior_ws = variants.iter().any(|v| matches!(v, HashVariant::InteriorWhitespace));
+    let has_leading_ws = variants
+        .iter()
+        .any(|v| matches!(v, HashVariant::LeadingWhitespace));
+    let has_trailing_ws = variants
+        .iter()
+        .any(|v| matches!(v, HashVariant::TrailingWhitespace));
+    let has_interior_ws = variants
+        .iter()
+        .any(|v| matches!(v, HashVariant::InteriorWhitespace));
 
     // Extract ReplacementMap and DropChars (there can be multiple of each)
     let replacements: Vec<_> = variants
@@ -340,7 +348,10 @@ mod tests {
     fn test_xx_hash_variant_blank_line_removes_empty_lines() {
         // BlankLine should produce consistent hashes regardless of blank lines
         let test_cases = vec![
-            ("flowchart LR\n\n    A --> B\n\n", "flowchart LR\n    A --> B"),
+            (
+                "flowchart LR\n\n    A --> B\n\n",
+                "flowchart LR\n    A --> B",
+            ),
             ("a\n\nb\n\nc", "a\nb\nc"),
             ("single line", "single line"),
             ("\n\nleading blanks", "leading blanks"),

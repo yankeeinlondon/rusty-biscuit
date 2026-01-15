@@ -17,8 +17,8 @@ pub mod theme;
 pub use render_html::MermaidHtml;
 pub use render_terminal::MermaidRenderError;
 pub use theme::{
-    mermaid_theme_for_syntect, MermaidTheme, MermaidThemeError, DEFAULT_DARK_THEME,
-    DEFAULT_LIGHT_THEME, NEUTRAL_THEME,
+    DEFAULT_DARK_THEME, DEFAULT_LIGHT_THEME, MermaidTheme, MermaidThemeError, NEUTRAL_THEME,
+    mermaid_theme_for_syntect,
 };
 
 use crate::markdown::highlighting::{ColorMode, ThemePair};
@@ -69,7 +69,10 @@ impl Mermaid {
     #[tracing::instrument(skip(instructions))]
     pub fn new<S: Into<String>>(instructions: S) -> Self {
         let instructions = instructions.into();
-        tracing::trace!(instructions_len = instructions.len(), "Creating Mermaid diagram");
+        tracing::trace!(
+            instructions_len = instructions.len(),
+            "Creating Mermaid diagram"
+        );
         Self {
             instructions,
             theme_pair: ThemePair::OneHalf,
@@ -436,7 +439,8 @@ mod tests {
     fn test_mermaid_with_theme_custom() {
         let light = DEFAULT_LIGHT_THEME.clone();
         let dark = DEFAULT_DARK_THEME.clone();
-        let diagram = Mermaid::new("flowchart LR\n    A --> B").with_theme(light.clone(), dark.clone());
+        let diagram =
+            Mermaid::new("flowchart LR\n    A --> B").with_theme(light.clone(), dark.clone());
 
         assert_eq!(diagram.theme(ColorMode::Light), &light);
         assert_eq!(diagram.theme(ColorMode::Dark), &dark);
@@ -444,15 +448,22 @@ mod tests {
 
     #[test]
     fn test_mermaid_use_syntect_theme() {
-        let diagram = Mermaid::new("flowchart LR\n    A --> B").use_syntect_theme(ThemePair::Gruvbox);
+        let diagram =
+            Mermaid::new("flowchart LR\n    A --> B").use_syntect_theme(ThemePair::Gruvbox);
 
         // Should resolve to syntect themes, not custom
         let light_theme = diagram.theme(ColorMode::Light);
         let dark_theme = diagram.theme(ColorMode::Dark);
 
         // Verify these are from syntect resolution
-        assert_eq!(light_theme, mermaid_theme_for_syntect(ThemePair::Gruvbox, ColorMode::Light));
-        assert_eq!(dark_theme, mermaid_theme_for_syntect(ThemePair::Gruvbox, ColorMode::Dark));
+        assert_eq!(
+            light_theme,
+            mermaid_theme_for_syntect(ThemePair::Gruvbox, ColorMode::Light)
+        );
+        assert_eq!(
+            dark_theme,
+            mermaid_theme_for_syntect(ThemePair::Gruvbox, ColorMode::Dark)
+        );
     }
 
     #[test]
@@ -467,14 +478,20 @@ mod tests {
     fn test_mermaid_theme_resolution_light() {
         let diagram = Mermaid::new("flowchart LR\n    A --> B");
         let theme = diagram.theme(ColorMode::Light);
-        assert_eq!(theme, mermaid_theme_for_syntect(ThemePair::OneHalf, ColorMode::Light));
+        assert_eq!(
+            theme,
+            mermaid_theme_for_syntect(ThemePair::OneHalf, ColorMode::Light)
+        );
     }
 
     #[test]
     fn test_mermaid_theme_resolution_dark() {
         let diagram = Mermaid::new("flowchart LR\n    A --> B");
         let theme = diagram.theme(ColorMode::Dark);
-        assert_eq!(theme, mermaid_theme_for_syntect(ThemePair::OneHalf, ColorMode::Dark));
+        assert_eq!(
+            theme,
+            mermaid_theme_for_syntect(ThemePair::OneHalf, ColorMode::Dark)
+        );
     }
 
     #[test]
@@ -550,8 +567,8 @@ mod tests {
 
     #[test]
     fn test_render_html_escapes_title() {
-        let diagram = Mermaid::new("flowchart LR\n    A --> B")
-            .with_title("<script>alert('xss')</script>");
+        let diagram =
+            Mermaid::new("flowchart LR\n    A --> B").with_title("<script>alert('xss')</script>");
         let html = diagram.render_for_html();
         // Should escape the title attribute
         assert!(html.body.contains("&lt;script&gt;"));

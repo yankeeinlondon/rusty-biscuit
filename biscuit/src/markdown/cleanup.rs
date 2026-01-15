@@ -65,11 +65,13 @@ impl EmphasisStyle {
 /// Valid values are `*` (asterisk) or `_` / `__` (underscore). Returns `None` if
 /// the variable is not set or has an invalid value.
 fn get_preferred_emphasis_style() -> Option<EmphasisStyle> {
-    std::env::var("PREFER_ITALICS").ok().and_then(|v| match v.trim() {
-        "*" => Some(EmphasisStyle::Asterisk),
-        "_" | "__" => Some(EmphasisStyle::Underscore),
-        _ => None,
-    })
+    std::env::var("PREFER_ITALICS")
+        .ok()
+        .and_then(|v| match v.trim() {
+            "*" => Some(EmphasisStyle::Asterisk),
+            "_" | "__" => Some(EmphasisStyle::Underscore),
+            _ => None,
+        })
 }
 
 // Placeholder characters for emphasis markers (private use area - won't be escaped by cmark)
@@ -107,8 +109,7 @@ fn preserve_original_emphasis<'a>(
                 let is_underscore = if let Some(style) = standardize_emphasis {
                     style == EmphasisStyle::Underscore
                 } else {
-                    range.start < content.len()
-                        && content[range.start..].starts_with('_')
+                    range.start < content.len() && content[range.start..].starts_with('_')
                 };
                 style_stack.push(is_underscore);
 
@@ -121,8 +122,8 @@ fn preserve_original_emphasis<'a>(
             }
             Event::Start(Tag::Strong) => {
                 // Strong (bold) ALWAYS preserves original style - never standardized
-                let is_underscore = range.start < content.len()
-                    && content[range.start..].starts_with('_');
+                let is_underscore =
+                    range.start < content.len() && content[range.start..].starts_with('_');
                 style_stack.push(is_underscore);
 
                 let placeholder = if is_underscore {
@@ -273,7 +274,8 @@ pub fn cleanup_content(content: &str) -> String {
     // Transform events: replace emphasis/strong events with placeholder characters.
     // This prevents cmark from normalizing them or escaping literal underscores/asterisks.
     // If preferred_style is set, emphasis will be standardized; strong always preserves original.
-    let events: Vec<Event> = preserve_original_emphasis(content, &events_with_ranges, preferred_style);
+    let events: Vec<Event> =
+        preserve_original_emphasis(content, &events_with_ranges, preferred_style);
 
     // Add "text" language to empty fenced code blocks
     let with_text_lang = add_text_language_to_empty_code_blocks(events);
@@ -531,8 +533,8 @@ fn fix_blockquote_formatting(output: &mut String) {
         }
 
         // Only fix blockquote lines (those starting with optional space + ">")
-        let is_blockquote_line = line.starts_with('>')
-            || (line.starts_with(' ') && line.trim_start().starts_with('>'));
+        let is_blockquote_line =
+            line.starts_with('>') || (line.starts_with(' ') && line.trim_start().starts_with('>'));
 
         let fixed_line = if is_blockquote_line {
             fix_blockquote_line(line)
@@ -643,7 +645,9 @@ fn detect_list_indentation(content: &str) -> usize {
 
         // Look for indented list items
         let indent = line.len() - trimmed.len();
-        if indent > 0 && (trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ")) {
+        if indent > 0
+            && (trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ "))
+        {
             // Found a nested list item - return its indentation
             return indent;
         }
@@ -867,9 +871,7 @@ fn add_text_language_to_empty_code_blocks(events: Vec<Event<'_>>) -> Vec<Event<'
             if let Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(ref info))) = event
                 && info.is_empty()
             {
-                return Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(CowStr::from(
-                    "text",
-                ))));
+                return Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(CowStr::from("text"))));
             }
             event
         })
@@ -1278,10 +1280,7 @@ mod tests {
         let cleaned = cleanup_content(content);
 
         // Should still have pipe characters for table structure
-        assert!(
-            cleaned.contains("|"),
-            "Table structure should be preserved"
-        );
+        assert!(cleaned.contains("|"), "Table structure should be preserved");
         assert!(cleaned.contains("Col1"));
         assert!(cleaned.contains("Col2"));
     }
@@ -1350,7 +1349,8 @@ mod tests {
     #[test]
     fn test_cleanup_preserves_code_block_indentation() {
         // Regression test: indentation inside code blocks must be preserved
-        let content = "```ts title=\"Greet Function\"\nfunction greet() {\n    console.log(\"hi\")\n}\n```";
+        let content =
+            "```ts title=\"Greet Function\"\nfunction greet() {\n    console.log(\"hi\")\n}\n```";
         let cleaned = cleanup_content(content);
 
         // The 4-space indentation before console.log must be preserved
@@ -1465,7 +1465,10 @@ mod tests {
 
         // All rows should have the same number of pipe characters
         let lines: Vec<&str> = cleaned.lines().collect();
-        assert!(lines.len() >= 3, "Should have at least 3 lines (header, separator, data)");
+        assert!(
+            lines.len() >= 3,
+            "Should have at least 3 lines (header, separator, data)"
+        );
 
         // Each data row should end with " |" (space before closing pipe)
         for line in &lines[2..] {
@@ -1553,7 +1556,10 @@ mod tests {
 
         // All formatting should be preserved
         assert!(cleaned.contains("`code`"), "Code should be preserved");
-        assert!(cleaned.contains("*emphasis*"), "Emphasis should be preserved");
+        assert!(
+            cleaned.contains("*emphasis*"),
+            "Emphasis should be preserved"
+        );
         assert!(cleaned.contains("[link](url)"), "Link should be preserved");
     }
 
@@ -1575,7 +1581,10 @@ mod tests {
         }
 
         // Content should be preserved
-        assert!(cleaned.contains("你好"), "CJK characters should be preserved");
+        assert!(
+            cleaned.contains("你好"),
+            "CJK characters should be preserved"
+        );
     }
 
     #[test]
@@ -1947,7 +1956,8 @@ mod tests {
         let cleaned = cleanup_content(content);
 
         // All items should have dash markers
-        let dash_count = cleaned.matches("\n- ").count() + if cleaned.starts_with("- ") { 1 } else { 0 };
+        let dash_count =
+            cleaned.matches("\n- ").count() + if cleaned.starts_with("- ") { 1 } else { 0 };
         assert_eq!(
             dash_count, 5,
             "All 5 items should use dash marker, got:\n{}",
@@ -2008,7 +2018,8 @@ mod tests {
     #[test]
     fn test_bracket_not_escaped_progress_indicator() {
         // Regression test: progress indicators should not be escaped
-        let content = "- [0%] started\n- [25%] progress\n- [50%] halfway\n- [75%] almost\n- [100%] done";
+        let content =
+            "- [0%] started\n- [25%] progress\n- [50%] halfway\n- [75%] almost\n- [100%] done";
         let cleaned = cleanup_content(content);
 
         assert!(

@@ -5,7 +5,7 @@
 
 use lazy_static::lazy_static;
 use syntect::parsing::SyntaxSet;
-use two_face::syntax::{extra_newlines as extra_syntax_set};
+use two_face::syntax::extra_newlines as extra_syntax_set;
 
 lazy_static! {
     /// Lazily loaded syntax set from two-face with extended grammars.

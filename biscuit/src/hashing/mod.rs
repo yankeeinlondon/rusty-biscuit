@@ -73,7 +73,6 @@ pub use argon2id::{
     verify_password,
 };
 
-
 /// The **HashVariant** enumeration let's you express
 /// characteristics about the content you're hashing
 /// which you want to remove from being a factor in the
@@ -117,5 +116,5 @@ pub enum HashVariant {
     ReplacementMap(HashMap<String, String>),
     /// Drop characters from the document before creating the
     /// hash.
-    DropChars(Vec<char>)
+    DropChars(Vec<char>),
 }

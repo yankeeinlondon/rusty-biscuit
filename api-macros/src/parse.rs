@@ -5,9 +5,9 @@
 
 use proc_macro2::Span;
 use syn::{
+    Attribute, Error, Ident, Result, Token,
     parse::{Parse, ParseStream},
     spanned::Spanned,
-    Attribute, Error, Ident, Result, Token,
 };
 
 /// Parsed API-level configuration from `#[api(...)]` attributes.
@@ -58,7 +58,10 @@ impl ApiConfig {
             } else {
                 return Err(meta.error(format!(
                     "unknown api attribute: `{}`",
-                    meta.path.get_ident().map(|i| i.to_string()).unwrap_or_default()
+                    meta.path
+                        .get_ident()
+                        .map(|i| i.to_string())
+                        .unwrap_or_default()
                 )));
             }
             Ok(())
@@ -252,7 +255,10 @@ impl EndpointConfig {
                     } else {
                         return Err(meta.error(format!(
                             "unknown endpoint attribute: `{}`",
-                            meta.path.get_ident().map(|i| i.to_string()).unwrap_or_default()
+                            meta.path
+                                .get_ident()
+                                .map(|i| i.to_string())
+                                .unwrap_or_default()
                         )));
                     }
                     Ok(())
@@ -280,13 +286,10 @@ impl EndpointConfig {
             None => return Ok(None),
         };
 
-        let method = method.ok_or_else(|| {
-            Error::new(span, "missing `method` in endpoint attribute")
-        })?;
+        let method =
+            method.ok_or_else(|| Error::new(span, "missing `method` in endpoint attribute"))?;
 
-        let path = path.ok_or_else(|| {
-            Error::new(span, "missing `path` in endpoint attribute")
-        })?;
+        let path = path.ok_or_else(|| Error::new(span, "missing `path` in endpoint attribute"))?;
 
         Ok(Some(EndpointConfig {
             method,
@@ -357,7 +360,10 @@ impl Parse for EndpointsInput {
         }
 
         let api_type = api_type.ok_or_else(|| {
-            Error::new(input.span(), "missing `api` attribute: #[endpoints(api = TypeName)]")
+            Error::new(
+                input.span(),
+                "missing `api` attribute: #[endpoints(api = TypeName)]",
+            )
         })?;
 
         Ok(EndpointsInput { api_type })

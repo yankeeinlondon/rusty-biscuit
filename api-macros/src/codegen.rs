@@ -173,17 +173,23 @@ pub fn generate_api_client(name: &Ident, config: &ApiConfig) -> TokenStream {
     // Decide whether to accept an api_key parameter based on auth method
     let (new_params, auth_setup) = if matches!(config.auth, Some(AuthMethod::None) | None) {
         // No auth - no api_key parameter needed
-        (quote! {}, quote! {
-            let client = api::ApiClient::builder(base_url)
-                .build()?;
-        })
+        (
+            quote! {},
+            quote! {
+                let client = api::ApiClient::builder(base_url)
+                    .build()?;
+            },
+        )
     } else {
         // Auth required - accept api_key parameter
-        (quote! { api_key: impl Into<String> }, quote! {
-            let client = api::ApiClient::builder(base_url)
-                .auth(#auth_method, api_key)
-                .build()?;
-        })
+        (
+            quote! { api_key: impl Into<String> },
+            quote! {
+                let client = api::ApiClient::builder(base_url)
+                    .auth(#auth_method, api_key)
+                    .build()?;
+            },
+        )
     };
 
     quote! {
@@ -237,8 +243,16 @@ mod tests {
         let result = path_substitution("/users/{id}", &["id".to_string()]);
         let result_str = result.to_string();
         // quote! tokenizes `format!` as `format !` (with a space)
-        assert!(result_str.contains("format"), "Expected 'format' in: {}", result_str);
-        assert!(result_str.contains("id"), "Expected 'id' in: {}", result_str);
+        assert!(
+            result_str.contains("format"),
+            "Expected 'format' in: {}",
+            result_str
+        );
+        assert!(
+            result_str.contains("id"),
+            "Expected 'id' in: {}",
+            result_str
+        );
     }
 
     #[test]

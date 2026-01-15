@@ -388,9 +388,12 @@ mod tests {
         let events = process_text(input);
 
         // Should not have any mark events
-        let has_mark = events
-            .iter()
-            .any(|e| matches!(e, InlineEvent::Start(InlineTag::Mark) | InlineEvent::End(InlineTag::Mark)));
+        let has_mark = events.iter().any(|e| {
+            matches!(
+                e,
+                InlineEvent::Start(InlineTag::Mark) | InlineEvent::End(InlineTag::Mark)
+            )
+        });
         assert!(
             !has_mark,
             "Code block content should not be processed for marks"
@@ -526,4 +529,3 @@ mod tests {
         );
     }
 }
-

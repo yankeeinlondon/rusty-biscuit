@@ -29,10 +29,16 @@ impl std::fmt::Display for PromptError {
             }
             Self::MissingFileReference(path) => write!(f, "file not found: {path}"),
             Self::InvalidUrlReference(url) => {
-                write!(f, "bare URL not allowed; use image:// or audio:// prefix: {url}")
+                write!(
+                    f,
+                    "bare URL not allowed; use image:// or audio:// prefix: {url}"
+                )
             }
             Self::InvalidBinaryPrompt => {
-                write!(f, "binary content is not a recognized audio or image format")
+                write!(
+                    f,
+                    "binary content is not a recognized audio or image format"
+                )
             }
             Self::InvalidJson(msg) => write!(f, "invalid JSON: {msg}"),
         }
@@ -307,8 +313,8 @@ impl<V: Serialize + Hash + Eq> TryFrom<&[u8]> for Prompt<V> {
             Some(BinaryContentType::Image) => {
                 // Check if it's SVG (text-based) vs raster
                 if value.starts_with(b"<svg") || value.starts_with(b"<?xml") {
-                    let svg_content =
-                        String::from_utf8(value.to_vec()).map_err(|_| PromptError::InvalidBinaryPrompt)?;
+                    let svg_content = String::from_utf8(value.to_vec())
+                        .map_err(|_| PromptError::InvalidBinaryPrompt)?;
                     prompt.images = Some(vec![PromptImage::Svg(svg_content)]);
                 } else {
                     prompt.images = Some(vec![PromptImage::Raster(value.to_vec())]);

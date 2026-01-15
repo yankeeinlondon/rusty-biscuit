@@ -110,9 +110,18 @@ mod tests {
 
     #[test]
     fn test_blake3_hash_trimmed() {
-        assert_eq!(blake3_hash_trimmed("  hello  "), blake3_hash_trimmed("hello"));
-        assert_eq!(blake3_hash_trimmed("\thello\t"), blake3_hash_trimmed("hello"));
-        assert_eq!(blake3_hash_trimmed("\n\nhello\n\n"), blake3_hash_trimmed("hello"));
+        assert_eq!(
+            blake3_hash_trimmed("  hello  "),
+            blake3_hash_trimmed("hello")
+        );
+        assert_eq!(
+            blake3_hash_trimmed("\thello\t"),
+            blake3_hash_trimmed("hello")
+        );
+        assert_eq!(
+            blake3_hash_trimmed("\n\nhello\n\n"),
+            blake3_hash_trimmed("hello")
+        );
     }
 
     #[test]

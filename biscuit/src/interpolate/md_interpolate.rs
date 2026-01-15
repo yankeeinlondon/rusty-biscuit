@@ -574,7 +574,8 @@ mod tests {
     #[test]
     fn test_no_match_returns_borrowed() {
         let content = "# Title\n\nSome text.";
-        let result = md_interpolate(content, MarkdownScope::Heading, "NotFound", "Replace").unwrap();
+        let result =
+            md_interpolate(content, MarkdownScope::Heading, "NotFound", "Replace").unwrap();
         assert_eq!(result, "# Title\n\nSome text.");
         assert!(matches!(result, Cow::Borrowed(_)));
     }
@@ -645,7 +646,8 @@ mod tests {
     #[test]
     fn test_unicode_content() {
         let content = "# Hello \u{1F600}\n\nHello \u{1F600}";
-        let result = md_interpolate(content, MarkdownScope::Heading, "\u{1F600}", "\u{1F389}").unwrap();
+        let result =
+            md_interpolate(content, MarkdownScope::Heading, "\u{1F600}", "\u{1F389}").unwrap();
         assert_eq!(result, "# Hello \u{1F389}\n\nHello \u{1F600}");
     }
 
@@ -680,8 +682,7 @@ mod tests {
     #[test]
     fn test_regex_no_match_returns_borrowed() {
         let content = "# Title\n\nBody text.";
-        let result =
-            md_interpolate_regex(content, MarkdownScope::Heading, r"\d+", "NUM").unwrap();
+        let result = md_interpolate_regex(content, MarkdownScope::Heading, r"\d+", "NUM").unwrap();
         assert_eq!(result, "# Title\n\nBody text.");
         assert!(matches!(result, Cow::Borrowed(_)));
     }
@@ -721,8 +722,7 @@ mod tests {
     #[test]
     fn test_regex_empty_scope_returns_borrowed() {
         let content = "No code blocks here.";
-        let result =
-            md_interpolate_regex(content, MarkdownScope::CodeBlock, r"\w+", "X").unwrap();
+        let result = md_interpolate_regex(content, MarkdownScope::CodeBlock, r"\w+", "X").unwrap();
         assert_eq!(result, "No code blocks here.");
         assert!(matches!(result, Cow::Borrowed(_)));
     }
@@ -742,8 +742,7 @@ mod tests {
     #[test]
     fn test_nested_styling() {
         let content = "Normal ***bold and italic*** text.";
-        let result =
-            md_interpolate(content, MarkdownScope::Stylized, "bold", "strong").unwrap();
+        let result = md_interpolate(content, MarkdownScope::Stylized, "bold", "strong").unwrap();
         assert_eq!(result, "Normal ***strong and italic*** text.");
     }
 
@@ -771,7 +770,8 @@ mod tests {
     #[test]
     fn test_frontmatter_replacement() {
         let content = "---\ntitle: Hello\n---\n\n# Hello World";
-        let result = md_interpolate(content, MarkdownScope::Frontmatter, "Hello", "Goodbye").unwrap();
+        let result =
+            md_interpolate(content, MarkdownScope::Frontmatter, "Hello", "Goodbye").unwrap();
         assert_eq!(result, "---\ntitle: Goodbye\n---\n\n# Hello World");
     }
 
@@ -818,8 +818,13 @@ mod tests {
     #[test]
     fn test_footnote_replacement() {
         let content = "Text with footnote[^1].\n\n[^1]: This is the footnote content.";
-        let result =
-            md_interpolate(content, MarkdownScope::FootnoteDefinitions, "footnote", "note").unwrap();
+        let result = md_interpolate(
+            content,
+            MarkdownScope::FootnoteDefinitions,
+            "footnote",
+            "note",
+        )
+        .unwrap();
         // Should replace "footnote" in the definition, not in the reference
         assert!(result.contains("[^1]: This is the note content."));
         // The reference should be unchanged
@@ -870,16 +875,14 @@ mod tests {
     #[test]
     fn test_deeply_nested_stylized() {
         let content = "Normal ***bold and italic*** text.";
-        let result =
-            md_interpolate(content, MarkdownScope::Stylized, "and", "&").unwrap();
+        let result = md_interpolate(content, MarkdownScope::Stylized, "and", "&").unwrap();
         assert_eq!(result, "Normal ***bold & italic*** text.");
     }
 
     #[test]
     fn test_strikethrough_replacement() {
         let content = "Keep ~~remove this~~ keep again.";
-        let result =
-            md_interpolate(content, MarkdownScope::Stylized, "remove", "delete").unwrap();
+        let result = md_interpolate(content, MarkdownScope::Stylized, "remove", "delete").unwrap();
         assert!(result.contains("~~delete this~~"));
     }
 
@@ -912,16 +915,14 @@ mod tests {
     #[test]
     fn test_empty_replacement_result() {
         let content = "# Remove Me\n\nbody";
-        let result =
-            md_interpolate(content, MarkdownScope::Heading, "Remove Me", "").unwrap();
+        let result = md_interpolate(content, MarkdownScope::Heading, "Remove Me", "").unwrap();
         assert_eq!(result, "# \n\nbody");
     }
 
     #[test]
     fn test_multiline_code_block_replacement() {
         let content = "```rust\nfn main() {\n    println!(\"hello\");\n}\n```\n\nhello outside";
-        let result =
-            md_interpolate(content, MarkdownScope::CodeBlock, "hello", "world").unwrap();
+        let result = md_interpolate(content, MarkdownScope::CodeBlock, "hello", "world").unwrap();
         assert!(result.contains("println!(\"world\")"));
         assert!(result.contains("hello outside")); // Not in code block
     }

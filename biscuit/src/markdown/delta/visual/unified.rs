@@ -11,9 +11,9 @@
 //! with continuation lines showing empty line numbers and maintaining
 //! the appropriate styling.
 
-use super::diff::{DiffLine, InlineSpan};
 use super::VisualDiffOptions;
-use textwrap::{wrap, Options as WrapOptions};
+use super::diff::{DiffLine, InlineSpan};
+use textwrap::{Options as WrapOptions, wrap};
 use unicode_width::UnicodeWidthStr;
 
 // ANSI escape codes
@@ -78,12 +78,7 @@ pub fn render(
                 line_no_new,
                 content,
             } => {
-                let lines = format_context_line(
-                    *line_no_old,
-                    *line_no_new,
-                    content,
-                    content_width,
-                );
+                let lines = format_context_line(*line_no_old, *line_no_new, content, content_width);
                 for formatted_line in lines {
                     output.push_str(&formatted_line);
                     output.push('\n');
@@ -94,12 +89,7 @@ pub fn render(
                 content,
                 inline_changes,
             } => {
-                let lines = format_removed_line(
-                    *line_no,
-                    content,
-                    inline_changes,
-                    content_width,
-                );
+                let lines = format_removed_line(*line_no, content, inline_changes, content_width);
                 for formatted_line in lines {
                     output.push_str(&formatted_line);
                     output.push('\n');
@@ -110,12 +100,7 @@ pub fn render(
                 content,
                 inline_changes,
             } => {
-                let lines = format_added_line(
-                    *line_no,
-                    content,
-                    inline_changes,
-                    content_width,
-                );
+                let lines = format_added_line(*line_no, content, inline_changes, content_width);
                 for formatted_line in lines {
                     output.push_str(&formatted_line);
                     output.push('\n');
@@ -128,7 +113,10 @@ pub fn render(
 }
 
 /// Filter lines to show only changes and surrounding context.
-fn filter_with_context(diff: &[DiffLine], context_lines: usize) -> std::collections::HashSet<usize> {
+fn filter_with_context(
+    diff: &[DiffLine],
+    context_lines: usize,
+) -> std::collections::HashSet<usize> {
     use std::collections::HashSet;
 
     let mut visible = HashSet::new();
@@ -201,7 +189,8 @@ fn format_removed_line(
     for (idx, line_content) in wrapped.iter().enumerate() {
         if idx == 0 {
             // First line shows line number and inline changes
-            let formatted_content = format_with_inline_changes(line_content, inline_changes, max_width, true);
+            let formatted_content =
+                format_with_inline_changes(line_content, inline_changes, max_width, true);
             lines.push(format!(
                 "{FG_RED}-{RESET} {BG_REMOVED}{:>4}{RESET}      {DIM}│{RESET} {}",
                 line_no, formatted_content
@@ -231,7 +220,8 @@ fn format_added_line(
     for (idx, line_content) in wrapped.iter().enumerate() {
         if idx == 0 {
             // First line shows line number and inline changes
-            let formatted_content = format_with_inline_changes(line_content, inline_changes, max_width, false);
+            let formatted_content =
+                format_with_inline_changes(line_content, inline_changes, max_width, false);
             lines.push(format!(
                 "{FG_GREEN}+{RESET}      {BG_ADDED}{:>4}{RESET} {DIM}│{RESET} {}",
                 line_no, formatted_content
@@ -338,10 +328,12 @@ fn wrap_to_width(s: &str, max_width: usize) -> Vec<String> {
     }
 
     // Configure textwrap options for proper word wrapping
-    let options = WrapOptions::new(max_width)
-        .break_words(true); // Break long words if needed
+    let options = WrapOptions::new(max_width).break_words(true); // Break long words if needed
 
-    let wrapped: Vec<String> = wrap(s, options).into_iter().map(|cow| cow.into_owned()).collect();
+    let wrapped: Vec<String> = wrap(s, options)
+        .into_iter()
+        .map(|cow| cow.into_owned())
+        .collect();
 
     // Ensure we always return at least one line
     if wrapped.is_empty() {
@@ -386,7 +378,10 @@ mod tests {
         let lines = format_context_line(10, 11, long_content, 15);
 
         // Should produce multiple visual lines
-        assert!(lines.len() > 1, "Long content should wrap to multiple lines");
+        assert!(
+            lines.len() > 1,
+            "Long content should wrap to multiple lines"
+        );
 
         // First line should show line numbers
         assert!(lines[0].contains("10"));

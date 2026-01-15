@@ -152,7 +152,12 @@ mod tests {
         }
     }
 
-    fn make_endpoint(id: &str, method: RestMethod, path: &str, request: Option<Schema>) -> Endpoint {
+    fn make_endpoint(
+        id: &str,
+        method: RestMethod,
+        path: &str,
+        request: Option<Schema>,
+    ) -> Endpoint {
         Endpoint {
             id: id.to_string(),
             method,
@@ -255,12 +260,7 @@ mod tests {
                     "/completions",
                     Some(Schema::new("CreateCompletionBody")),
                 ),
-                make_endpoint(
-                    "ListCompletions",
-                    RestMethod::Get,
-                    "/completions",
-                    None,
-                ),
+                make_endpoint("ListCompletions", RestMethod::Get, "/completions", None),
             ],
         );
 

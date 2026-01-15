@@ -32,8 +32,8 @@
 //! ```
 
 use argon2::{
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2, Params,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
 };
 use rand::rngs::OsRng;
 use thiserror::Error;
@@ -131,8 +131,13 @@ pub fn hash_password_with_params(
     time_cost: u32,
     parallelism: u32,
 ) -> Result<String, Argon2idError> {
-    let params = Params::new(memory_cost_kib, time_cost, parallelism, Some(DEFAULT_OUTPUT_LEN))
-        .map_err(|e| Argon2idError::InvalidParams(e.to_string()))?;
+    let params = Params::new(
+        memory_cost_kib,
+        time_cost,
+        parallelism,
+        Some(DEFAULT_OUTPUT_LEN),
+    )
+    .map_err(|e| Argon2idError::InvalidParams(e.to_string()))?;
 
     let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
     let salt = SaltString::generate(&mut OsRng);
@@ -193,8 +198,8 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, Argon2idError
 /// Returns `Argon2idError::InvalidParams` if the salt is invalid.
 /// Returns `Argon2idError::HashError` if hashing fails.
 pub fn hash_password_with_salt(password: &str, salt: &str) -> Result<String, Argon2idError> {
-    let salt =
-        SaltString::encode_b64(salt.as_bytes()).map_err(|e| Argon2idError::InvalidParams(e.to_string()))?;
+    let salt = SaltString::encode_b64(salt.as_bytes())
+        .map_err(|e| Argon2idError::InvalidParams(e.to_string()))?;
     let argon2 = Argon2::default();
 
     argon2
@@ -254,7 +259,10 @@ mod tests {
         // Parallelism of 0 is invalid
         let result = hash_password_with_params("password", 4096, 1, 0);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), Argon2idError::InvalidParams(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            Argon2idError::InvalidParams(_)
+        ));
     }
 
     #[test]

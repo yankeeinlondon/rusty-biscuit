@@ -257,7 +257,9 @@ mod tests {
 
         // Check request handling
         assert!(code.contains("let request = request.into()"));
-        assert!(code.contains("let (method, path, body, endpoint_headers) = request.into_parts()?"));
+        assert!(
+            code.contains("let (method, path, body, endpoint_headers) = request.into_parts()?")
+        );
         assert!(code.contains("format!(\"{}{}\", self.base_url, path)"));
 
         // Check HTTP method matching
@@ -267,7 +269,9 @@ mod tests {
         assert!(code.contains(r#""PATCH" => self.client.patch(&url)"#));
         assert!(code.contains(r#""DELETE" => self.client.delete(&url)"#));
         assert!(code.contains(r#""HEAD" => self.client.head(&url)"#));
-        assert!(code.contains(r#""OPTIONS" => self.client.request(reqwest::Method::OPTIONS, &url)"#));
+        assert!(
+            code.contains(r#""OPTIONS" => self.client.request(reqwest::Method::OPTIONS, &url)"#)
+        );
 
         // Check error handling
         assert!(code.contains("SchematicError::UnsupportedMethod"));
@@ -441,7 +445,10 @@ mod tests {
         // Note: unwrap_or and unwrap_or_default are safe
         let naked_unwrap_count = code.matches(".unwrap()").count();
         let expect_count = code.matches(".expect(").count();
-        assert_eq!(naked_unwrap_count, 0, "Should not have naked .unwrap() calls");
+        assert_eq!(
+            naked_unwrap_count, 0,
+            "Should not have naked .unwrap() calls"
+        );
         assert_eq!(expect_count, 0, "Should not have .expect() calls");
     }
 

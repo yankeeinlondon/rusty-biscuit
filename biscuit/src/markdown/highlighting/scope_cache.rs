@@ -125,7 +125,12 @@ mod tests {
     #[test]
     fn test_scope_for_tag_heading() {
         let cache = ScopeCache::global();
-        let tag = Tag::Heading { level: pulldown_cmark::HeadingLevel::H1, id: None, classes: vec![], attrs: vec![] };
+        let tag = Tag::Heading {
+            level: pulldown_cmark::HeadingLevel::H1,
+            id: None,
+            classes: vec![],
+            attrs: vec![],
+        };
         let scope = cache.scope_for_tag(&tag);
         assert!(scope.is_some());
         assert_eq!(scope.unwrap(), cache.heading);
@@ -160,7 +165,12 @@ mod tests {
     #[test]
     fn test_scope_for_tag_link() {
         let cache = ScopeCache::global();
-        let tag = Tag::Link { link_type: pulldown_cmark::LinkType::Inline, dest_url: "".into(), title: "".into(), id: "".into() };
+        let tag = Tag::Link {
+            link_type: pulldown_cmark::LinkType::Inline,
+            dest_url: "".into(),
+            title: "".into(),
+            id: "".into(),
+        };
         let scope = cache.scope_for_tag(&tag);
         assert!(scope.is_some());
         assert_eq!(scope.unwrap(), cache.link);

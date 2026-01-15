@@ -4,10 +4,10 @@
 //! and generates the actual HTTP client method implementations.
 
 use proc_macro2::{Span, TokenStream};
-use quote::{quote, format_ident};
+use quote::{format_ident, quote};
 use syn::{
-    parse2, Error, FnArg, ImplItem, ImplItemFn, ItemImpl, Pat, PatType, Result, ReturnType, Type,
-    TypePath,
+    Error, FnArg, ImplItem, ImplItemFn, ItemImpl, Pat, PatType, Result, ReturnType, Type, TypePath,
+    parse2,
 };
 
 use crate::codegen::{http_method_ident, response_format_type, to_screaming_snake_case};
@@ -79,10 +79,7 @@ fn endpoints_inner(attr: TokenStream, item: TokenStream) -> Result<TokenStream> 
 ///     self.client.execute_with_params(&ENDPOINT_GET_USER, &[("id", &id)]).await
 /// }
 /// ```
-fn transform_endpoint_method(
-    method: &ImplItemFn,
-    config: &EndpointConfig,
-) -> Result<ImplItemFn> {
+fn transform_endpoint_method(method: &ImplItemFn, config: &EndpointConfig) -> Result<ImplItemFn> {
     let method_name = &method.sig.ident;
     let _vis = &method.vis;
     let asyncness = &method.sig.asyncness;
@@ -101,7 +98,10 @@ fn transform_endpoint_method(
     let response_type = extract_response_type(output)?;
 
     // Generate static endpoint constant name
-    let endpoint_const_name = format_ident!("ENDPOINT_{}", to_screaming_snake_case(&method_name.to_string()));
+    let endpoint_const_name = format_ident!(
+        "ENDPOINT_{}",
+        to_screaming_snake_case(&method_name.to_string())
+    );
 
     // Generate the endpoint builder
     let http_method = http_method_ident(config.method);
@@ -131,9 +131,10 @@ fn transform_endpoint_method(
             if let FnArg::Typed(pat_type) = arg {
                 // Skip self parameter
                 if let Pat::Ident(ident) = &*pat_type.pat
-                    && ident.ident != "self" {
-                        return Some(pat_type);
-                    }
+                    && ident.ident != "self"
+                {
+                    return Some(pat_type);
+                }
             }
             None
         })
@@ -193,25 +194,23 @@ fn transform_endpoint_method(
 /// Extracts the response type T from Result<T, ApiError>.
 fn extract_response_type(output: &ReturnType) -> Result<TokenStream> {
     match output {
-        ReturnType::Default => {
-            Err(Error::new(
-                Span::call_site(),
-                "endpoint methods must return Result<T, ApiError>",
-            ))
-        }
+        ReturnType::Default => Err(Error::new(
+            Span::call_site(),
+            "endpoint methods must return Result<T, ApiError>",
+        )),
         ReturnType::Type(_, ty) => {
             // Expecting Type::Path with Result<T, ApiError>
             if let Type::Path(TypePath { path, .. }) = &**ty
                 && let Some(segment) = path.segments.last()
-                    && segment.ident == "Result" {
-                        // Extract the first generic argument (the T in Result<T, E>)
-                        if let syn::PathArguments::AngleBracketed(args) = &segment.arguments
-                            && let Some(syn::GenericArgument::Type(response_ty)) =
-                                args.args.first()
-                            {
-                                return Ok(quote! { #response_ty });
-                            }
-                    }
+                && segment.ident == "Result"
+            {
+                // Extract the first generic argument (the T in Result<T, E>)
+                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+                    && let Some(syn::GenericArgument::Type(response_ty)) = args.args.first()
+                {
+                    return Ok(quote! { #response_ty });
+                }
+            }
 
             Err(Error::new_spanned(
                 ty,

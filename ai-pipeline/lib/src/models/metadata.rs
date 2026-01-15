@@ -53,7 +53,6 @@ pub struct ModelPermission {
     is_blocking: bool,
 }
 
-
 /// Unlike most primary model providers who are quite
 /// sparse on metadata, Mistral provides a bunch of
 /// boolean flags to help demonstrate the capabilities
@@ -68,7 +67,7 @@ pub struct MistralCapabilities {
     ocr: bool,
     classification: bool,
     moderation: bool,
-    audio: bool
+    audio: bool,
 }
 
 /// The shape of a provider's model when returned from the
@@ -110,7 +109,6 @@ pub struct ModelDefinition {
     deprecation: Option<String>,
     /// only provided by Mistral
     deprecation_replacement_model: Option<String>,
-
 
     /// only provided on Moonshot AI
     root: Option<String>,

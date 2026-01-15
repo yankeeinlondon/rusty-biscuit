@@ -35,8 +35,7 @@ pub fn as_ast(md: &Markdown) -> MarkdownResult<markdown::mdast::Node> {
     let options = ParseOptions::gfm();
 
     // Parse content to MDAST
-    markdown::to_mdast(md.content(), &options)
-        .map_err(|e| MarkdownError::AstParse(e.to_string()))
+    markdown::to_mdast(md.content(), &options).map_err(|e| MarkdownError::AstParse(e.to_string()))
 }
 
 #[cfg(test)]

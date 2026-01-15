@@ -237,7 +237,9 @@ fn generate_auth_strategy_init(auth: &AuthStrategy) -> TokenStream {
     match auth {
         AuthStrategy::None => quote! { schematic_define::AuthStrategy::None },
         AuthStrategy::BearerToken { header } => match header {
-            Some(h) => quote! { schematic_define::AuthStrategy::BearerToken { header: Some(#h.to_string()) } },
+            Some(h) => {
+                quote! { schematic_define::AuthStrategy::BearerToken { header: Some(#h.to_string()) } }
+            }
             None => quote! { schematic_define::AuthStrategy::BearerToken { header: None } },
         },
         AuthStrategy::ApiKey { header } => {
@@ -417,7 +419,9 @@ mod tests {
             description: "API Key Auth API".to_string(),
             base_url: "https://api.apikey.com".to_string(),
             docs_url: None,
-            auth: AuthStrategy::ApiKey { header: "X-API-Key".to_string() },
+            auth: AuthStrategy::ApiKey {
+                header: "X-API-Key".to_string(),
+            },
             env_auth: vec!["API_KEY".to_string()],
             env_username: None,
             headers: vec![],

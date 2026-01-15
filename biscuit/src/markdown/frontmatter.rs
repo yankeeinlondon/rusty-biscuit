@@ -1,8 +1,8 @@
 //! Frontmatter parsing and manipulation utilities.
 
 use super::types::{FrontmatterMap, MarkdownError, MarkdownResult};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 
 /// Strategy for merging frontmatter fields.

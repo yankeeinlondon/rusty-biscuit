@@ -96,12 +96,15 @@ fn generated_files_exist_and_have_expected_structure() {
     write_cargo_toml(&schema_dir, false).expect("Failed to write Cargo.toml");
 
     // Verify files exist
-    assert!(schema_dir.join("Cargo.toml").exists(), "Cargo.toml should exist");
+    assert!(
+        schema_dir.join("Cargo.toml").exists(),
+        "Cargo.toml should exist"
+    );
     assert!(src_dir.join("lib.rs").exists(), "src/lib.rs should exist");
 
     // Verify Cargo.toml content
-    let cargo_content = std::fs::read_to_string(schema_dir.join("Cargo.toml"))
-        .expect("Failed to read Cargo.toml");
+    let cargo_content =
+        std::fs::read_to_string(schema_dir.join("Cargo.toml")).expect("Failed to read Cargo.toml");
     assert!(cargo_content.contains("schematic-schema"));
     assert!(cargo_content.contains("edition = \"2024\""));
     assert!(cargo_content.contains("reqwest"));
@@ -110,8 +113,8 @@ fn generated_files_exist_and_have_expected_structure() {
     assert!(cargo_content.contains("schematic-define")); // For AuthStrategy and UpdateStrategy
 
     // Verify lib.rs content
-    let lib_content = std::fs::read_to_string(src_dir.join("lib.rs"))
-        .expect("Failed to read lib.rs");
+    let lib_content =
+        std::fs::read_to_string(src_dir.join("lib.rs")).expect("Failed to read lib.rs");
 
     // Should have module-level documentation
     assert!(lib_content.contains("//!"));
@@ -225,17 +228,15 @@ fn generate_code_for_various_api_configurations() {
             env_auth: vec!["NESTED_API_KEY".to_string()],
             env_username: None,
             headers: vec![],
-            endpoints: vec![
-                Endpoint {
-                    id: "GetItem".to_string(),
-                    method: RestMethod::Get,
-                    path: "/orgs/{org}/repos/{repo}/items/{item}".to_string(),
-                    description: "Get deeply nested item".to_string(),
-                    request: None,
-                    response: ApiResponse::json_type("Item"),
-                    headers: vec![],
-                },
-            ],
+            endpoints: vec![Endpoint {
+                id: "GetItem".to_string(),
+                method: RestMethod::Get,
+                path: "/orgs/{org}/repos/{repo}/items/{item}".to_string(),
+                description: "Get deeply nested item".to_string(),
+                request: None,
+                response: ApiResponse::json_type("Item"),
+                headers: vec![],
+            }],
         },
     ];
 
@@ -252,7 +253,11 @@ fn generate_code_for_various_api_configurations() {
         );
 
         let lib_path = src_dir.join("lib.rs");
-        assert!(lib_path.exists(), "lib.rs should exist for API '{}'", api.name);
+        assert!(
+            lib_path.exists(),
+            "lib.rs should exist for API '{}'",
+            api.name
+        );
 
         let content = std::fs::read_to_string(&lib_path).expect("Failed to read lib.rs");
         assert!(

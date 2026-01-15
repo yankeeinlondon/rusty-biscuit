@@ -485,9 +485,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/api/v1/crates/broken/versions"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_string("not valid json"),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_string("not valid json"))
             .mount(&mock_server)
             .await;
 
@@ -549,9 +547,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/broken-package"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_string("{invalid json}"),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_string("{invalid json}"))
             .mount(&mock_server)
             .await;
 
@@ -575,8 +571,7 @@ mod tests {
             }
         });
 
-        let response: PyPIResponse =
-            serde_json::from_value(json_data).expect("Failed to parse");
+        let response: PyPIResponse = serde_json::from_value(json_data).expect("Failed to parse");
 
         assert_eq!(response.releases.len(), 2);
         assert!(response.releases.contains_key("1.0.0"));
@@ -614,9 +609,7 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/pypi/broken/json"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_string("malformed"),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_string("malformed"))
             .mount(&mock_server)
             .await;
 
@@ -673,8 +666,7 @@ mod tests {
             }
         }"#;
 
-        let response: PyPIResponse =
-            serde_json::from_str(json).expect("Failed to deserialize");
+        let response: PyPIResponse = serde_json::from_str(json).expect("Failed to deserialize");
 
         assert_eq!(response.releases.len(), 2);
         assert_eq!(response.releases.get("1.0.0").unwrap().len(), 1);

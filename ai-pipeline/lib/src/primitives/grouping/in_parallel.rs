@@ -216,10 +216,7 @@ mod tests {
 
     #[test]
     fn test_parallel_readonly() {
-        let parallel = InParallel::new(vec![
-            MultiplyStep { value: 5 },
-            MultiplyStep { value: 7 },
-        ]);
+        let parallel = InParallel::new(vec![MultiplyStep { value: 5 }, MultiplyStep { value: 7 }]);
 
         let mut state = PipelineState::new();
         state.set(MULTIPLIER, 2);
@@ -242,10 +239,7 @@ mod tests {
 
     #[test]
     fn test_supports_readonly() {
-        let parallel = InParallel::new(vec![
-            MultiplyStep { value: 1 },
-            MultiplyStep { value: 2 },
-        ]);
+        let parallel = InParallel::new(vec![MultiplyStep { value: 1 }, MultiplyStep { value: 2 }]);
 
         assert!(parallel.supports_readonly());
     }
@@ -253,7 +247,8 @@ mod tests {
     #[test]
     fn test_from_iter() {
         let values = vec![1, 2, 3];
-        let parallel = InParallel::collect_from(values.into_iter().map(|v| MultiplyStep { value: v }));
+        let parallel =
+            InParallel::collect_from(values.into_iter().map(|v| MultiplyStep { value: v }));
 
         assert_eq!(parallel.len(), 3);
     }

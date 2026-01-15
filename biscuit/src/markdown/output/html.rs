@@ -265,7 +265,9 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             InlineEvent::Standard(Event::End(TagEnd::BlockQuote(_))) => {
                 output.push_str("</blockquote>\n");
             }
-            InlineEvent::Standard(Event::Start(Tag::Link { dest_url, title, .. })) => {
+            InlineEvent::Standard(Event::Start(Tag::Link {
+                dest_url, title, ..
+            })) => {
                 // Parse title for structured content (class, style, prompt, etc.)
                 // We use a placeholder display since we're streaming; actual text follows
                 let link = Link::with_title_parsed("", &*dest_url, &title);
@@ -280,7 +282,10 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                     attrs.push_str(&format!(r#" style="{}""#, html_escape::encode_text(style)));
                 }
                 if let Some(target) = link.target() {
-                    attrs.push_str(&format!(r#" target="{}""#, html_escape::encode_text(target)));
+                    attrs.push_str(&format!(
+                        r#" target="{}""#,
+                        html_escape::encode_text(target)
+                    ));
                 }
                 if let Some(title) = link.title() {
                     attrs.push_str(&format!(r#" title="{}""#, html_escape::encode_text(title)));
@@ -307,10 +312,7 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                 output.push_str("</a>");
             }
             InlineEvent::Standard(Event::Code(text)) => {
-                output.push_str(&format!(
-                    "<code>{}</code>",
-                    html_escape::encode_text(&text)
-                ));
+                output.push_str(&format!("<code>{}</code>", html_escape::encode_text(&text)));
             }
             InlineEvent::Standard(Event::Text(text)) if !in_code_block => {
                 output.push_str(html_escape::encode_text(&text).as_ref());
@@ -406,7 +408,12 @@ fn highlight_code_block(
             // Highlight the line
             let ranges = hl
                 .highlight_line(line, highlighter.syntax_set())
-                .map_err(|e| crate::markdown::MarkdownError::ThemeLoad(format!("Syntax highlighting failed: {}", e)))?;
+                .map_err(|e| {
+                    crate::markdown::MarkdownError::ThemeLoad(format!(
+                        "Syntax highlighting failed: {}",
+                        e
+                    ))
+                })?;
 
             for (style, text) in ranges {
                 let fg = style.foreground;
@@ -427,14 +434,22 @@ fn highlight_code_block(
         // Simple pre/code block without line numbers
         output.push_str("<pre><code");
         if !language.is_empty() {
-            output.push_str(&format!(r#" class="language-{}""#, html_escape::encode_text(language)));
+            output.push_str(&format!(
+                r#" class="language-{}""#,
+                html_escape::encode_text(language)
+            ));
         }
         output.push('>');
 
         for line in LinesWithEndings::from(code) {
             let ranges = hl
                 .highlight_line(line, highlighter.syntax_set())
-                .map_err(|e| crate::markdown::MarkdownError::ThemeLoad(format!("Syntax highlighting failed: {}", e)))?;
+                .map_err(|e| {
+                    crate::markdown::MarkdownError::ThemeLoad(format!(
+                        "Syntax highlighting failed: {}",
+                        e
+                    ))
+                })?;
 
             for (style, text) in ranges {
                 let fg = style.foreground;
@@ -458,9 +473,16 @@ fn highlight_code_block(
 
 /// Generates CSS styles for syntax highlighting.
 fn generate_styles(highlighter: &CodeHighlighter, _options: &HtmlOptions) -> String {
-    let bg = highlighter.theme().settings.background.unwrap_or(
-        syntect::highlighting::Color { r: 40, g: 44, b: 52, a: 255 }
-    );
+    let bg = highlighter
+        .theme()
+        .settings
+        .background
+        .unwrap_or(syntect::highlighting::Color {
+            r: 40,
+            g: 44,
+            b: 52,
+            a: 255,
+        });
 
     format!(
         r#"<style>
@@ -519,8 +541,12 @@ mark {{
 }}
 </style>
 "#,
-        bg.r, bg.g, bg.b,
-        bg.r.saturating_sub(10), bg.g.saturating_sub(10), bg.b.saturating_sub(10)
+        bg.r,
+        bg.g,
+        bg.b,
+        bg.r.saturating_sub(10),
+        bg.g.saturating_sub(10),
+        bg.b.saturating_sub(10)
     )
 }
 
@@ -776,7 +802,10 @@ fn main() {}
         assert!(html.contains("<strong>"), "Should contain strong tag");
         assert!(html.contains("<del>"), "Should contain del tag");
         assert!(html.contains("</del>"), "Should contain closing del tag");
-        assert!(html.contains("</strong>"), "Should contain closing strong tag");
+        assert!(
+            html.contains("</strong>"),
+            "Should contain closing strong tag"
+        );
         assert!(html.contains("bold strikethrough"));
     }
 
@@ -784,7 +813,10 @@ fn main() {}
     fn test_html_no_strikethrough_without_markers() {
         let md: Markdown = "This is normal text without strikethrough.".into();
         let html = as_html(&md, HtmlOptions::default()).unwrap();
-        assert!(!html.contains("<del>"), "Should not contain del tag for normal text");
+        assert!(
+            !html.contains("<del>"),
+            "Should not contain del tag for normal text"
+        );
     }
 
     #[test]
@@ -792,7 +824,10 @@ fn main() {}
         let md: Markdown = "This has ~~unclosed strikethrough markers.".into();
         let html = as_html(&md, HtmlOptions::default()).unwrap();
         // Unclosed markers should be rendered literally, not as strikethrough
-        assert!(html.contains("~~unclosed"), "Unclosed markers should render literally");
+        assert!(
+            html.contains("~~unclosed"),
+            "Unclosed markers should render literally"
+        );
     }
 
     #[test]
@@ -801,7 +836,10 @@ fn main() {}
         let html = as_html(&md, HtmlOptions::default()).unwrap();
         // Should contain multiple del tags
         let del_count = html.matches("<del>").count();
-        assert!(del_count >= 2, "Should contain at least 2 del tags for multiple strikethroughs");
+        assert!(
+            del_count >= 2,
+            "Should contain at least 2 del tags for multiple strikethroughs"
+        );
         assert!(html.contains("one"));
         assert!(html.contains("two"));
     }
@@ -811,7 +849,10 @@ fn main() {}
         let md: Markdown = "This has **bold** and ~~strikethrough~~ text.".into();
         let html = as_html(&md, HtmlOptions::default()).unwrap();
         assert!(html.contains("<strong>"), "Should contain strong tag");
-        assert!(html.contains("</strong>"), "Should contain closing strong tag");
+        assert!(
+            html.contains("</strong>"),
+            "Should contain closing strong tag"
+        );
         assert!(html.contains("<del>"), "Should contain del tag");
         assert!(html.contains("</del>"), "Should contain closing del tag");
         assert!(html.contains("bold"));
@@ -887,7 +928,10 @@ fn main() {}
         let html = as_html(&md, HtmlOptions::default()).unwrap();
         // Should have code tag but not process == inside code
         assert!(html.contains("<code>"), "Should contain code tag");
-        assert!(html.contains("==code=="), "Should preserve == in inline code");
+        assert!(
+            html.contains("==code=="),
+            "Should preserve == in inline code"
+        );
     }
 
     #[test]
@@ -930,8 +974,14 @@ flowchart LR
         let html = as_html(&md, options).unwrap();
         // Should render as normal code block, not as mermaid diagram
         assert!(html.contains("code-block"), "Should have code-block class");
-        assert!(!html.contains("class=\"mermaid\""), "Should not have mermaid class");
-        assert!(!html.contains("mermaid.initialize"), "Should not include mermaid.js");
+        assert!(
+            !html.contains("class=\"mermaid\""),
+            "Should not have mermaid class"
+        );
+        assert!(
+            !html.contains("mermaid.initialize"),
+            "Should not include mermaid.js"
+        );
     }
 
     #[test]
@@ -948,12 +998,21 @@ flowchart LR
         };
         let html = as_html(&md, options).unwrap();
         // Should render as mermaid pre element for mermaid.js
-        assert!(html.contains("class=\"mermaid\""), "Should have mermaid class for mermaid.js");
+        assert!(
+            html.contains("class=\"mermaid\""),
+            "Should have mermaid class for mermaid.js"
+        );
         assert!(html.contains("role=\"img\""), "Should have ARIA role");
         assert!(html.contains("aria-label="), "Should have ARIA label");
         // Should include mermaid.js script
-        assert!(html.contains("mermaid.initialize"), "Should include mermaid initialization");
-        assert!(html.contains("cdn.jsdelivr.net/npm/mermaid"), "Should include mermaid CDN");
+        assert!(
+            html.contains("mermaid.initialize"),
+            "Should include mermaid initialization"
+        );
+        assert!(
+            html.contains("cdn.jsdelivr.net/npm/mermaid"),
+            "Should include mermaid CDN"
+        );
     }
 
     #[test]
@@ -970,9 +1029,15 @@ flowchart LR
         };
         let html = as_html(&md, options).unwrap();
         // Should render as pre/code with language-mermaid class
-        assert!(html.contains("language-mermaid"), "Should have language-mermaid class");
+        assert!(
+            html.contains("language-mermaid"),
+            "Should have language-mermaid class"
+        );
         assert!(html.contains("flowchart"), "Should contain diagram source");
-        assert!(!html.contains("mermaid.initialize"), "Should not include mermaid.js");
+        assert!(
+            !html.contains("mermaid.initialize"),
+            "Should not include mermaid.js"
+        );
     }
 
     #[test]
@@ -988,7 +1053,10 @@ flowchart LR
             ..Default::default()
         };
         let html = as_html(&md, options).unwrap();
-        assert!(html.contains("title=\"My Flowchart\""), "Should include title attribute");
+        assert!(
+            html.contains("title=\"My Flowchart\""),
+            "Should include title attribute"
+        );
     }
 
     #[test]
@@ -1033,8 +1101,14 @@ flowchart LR
         };
         let html = as_html(&md, options).unwrap();
         // Should escape script tags
-        assert!(!html.contains("<script>alert"), "Should escape XSS in mermaid content");
-        assert!(html.contains("&lt;script&gt;") || html.contains("&#60;script&#62;"), "Should have escaped entities");
+        assert!(
+            !html.contains("<script>alert"),
+            "Should escape XSS in mermaid content"
+        );
+        assert!(
+            html.contains("&lt;script&gt;") || html.contains("&#60;script&#62;"),
+            "Should have escaped entities"
+        );
     }
 
     #[test]
@@ -1050,7 +1124,10 @@ flowchart LR
             ..Default::default()
         };
         let html = as_html(&md, options).unwrap();
-        assert!(html.contains("class=\"mermaid\""), "Should detect MERMAID (uppercase)");
+        assert!(
+            html.contains("class=\"mermaid\""),
+            "Should detect MERMAID (uppercase)"
+        );
     }
 
     #[test]
@@ -1072,8 +1149,14 @@ flowchart LR
         let html = as_html(&md, options).unwrap();
         // Should have both: syntax-highlighted rust and mermaid diagram
         assert!(html.contains("code-block"), "Should have rust code block");
-        assert!(html.contains("class=\"mermaid\""), "Should have mermaid diagram");
-        assert!(html.contains("mermaid.initialize"), "Should include mermaid script");
+        assert!(
+            html.contains("class=\"mermaid\""),
+            "Should have mermaid diagram"
+        );
+        assert!(
+            html.contains("mermaid.initialize"),
+            "Should include mermaid script"
+        );
     }
 
     #[test]
@@ -1090,7 +1173,10 @@ fn main() {}
             ..Default::default()
         };
         let html = as_html(&md, options).unwrap();
-        assert!(!html.contains("mermaid.initialize"), "Should not include mermaid script when no diagrams");
+        assert!(
+            !html.contains("mermaid.initialize"),
+            "Should not include mermaid script when no diagrams"
+        );
     }
 
     #[test]
@@ -1108,17 +1194,39 @@ flowchart LR
         let html = as_html(&md, options).unwrap();
 
         // Verify registerIconPacks is present
-        assert!(html.contains("mermaid.registerIconPacks"), "Should include registerIconPacks call");
+        assert!(
+            html.contains("mermaid.registerIconPacks"),
+            "Should include registerIconPacks call"
+        );
 
         // Verify all 4 icon packs are registered
-        assert!(html.contains("@iconify-json/fa7-brands"), "Should register fa7-brands pack");
-        assert!(html.contains("@iconify-json/lucide"), "Should register lucide pack");
-        assert!(html.contains("@iconify-json/carbon"), "Should register carbon pack");
-        assert!(html.contains("@iconify-json/system-uicons"), "Should register system-uicons pack");
+        assert!(
+            html.contains("@iconify-json/fa7-brands"),
+            "Should register fa7-brands pack"
+        );
+        assert!(
+            html.contains("@iconify-json/lucide"),
+            "Should register lucide pack"
+        );
+        assert!(
+            html.contains("@iconify-json/carbon"),
+            "Should register carbon pack"
+        );
+        assert!(
+            html.contains("@iconify-json/system-uicons"),
+            "Should register system-uicons pack"
+        );
 
         // Verify registerIconPacks comes before initialize
-        let register_pos = html.find("registerIconPacks").expect("registerIconPacks should exist");
-        let initialize_pos = html.find("mermaid.initialize").expect("initialize should exist");
-        assert!(register_pos < initialize_pos, "registerIconPacks should come before initialize");
+        let register_pos = html
+            .find("registerIconPacks")
+            .expect("registerIconPacks should exist");
+        let initialize_pos = html
+            .find("mermaid.initialize")
+            .expect("initialize should exist");
+        assert!(
+            register_pos < initialize_pos,
+            "registerIconPacks should come before initialize"
+        );
     }
 }

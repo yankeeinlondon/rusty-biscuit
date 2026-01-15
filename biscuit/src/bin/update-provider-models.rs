@@ -34,10 +34,10 @@
 
 use clap::{Parser, ValueEnum};
 use color_eyre::eyre::{Context, Result};
-use shared::providers::base::Provider;
 use shared::providers::ProviderModel;
-use tracing::{info, Level};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use shared::providers::base::Provider;
+use tracing::{Level, info};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// Update ProviderModel enum with latest models from provider APIs
 #[derive(Parser, Debug)]
@@ -111,7 +111,7 @@ async fn main() -> Result<()> {
         .with(
             EnvFilter::from_default_env()
                 .add_directive(log_level.into())
-                .add_directive("shared=trace".parse()?) // Always trace shared lib
+                .add_directive("shared=trace".parse()?), // Always trace shared lib
         )
         .init();
 

@@ -148,7 +148,7 @@ impl Ord for VersionInfo {
             semver::Version::parse(&self.version),
             semver::Version::parse(&other.version),
         ) {
-            (Ok(a), Ok(b)) => b.cmp(&a), // Reverse order (newest first)
+            (Ok(a), Ok(b)) => b.cmp(&a),           // Reverse order (newest first)
             _ => other.version.cmp(&self.version), // Fallback to string comparison
         }
     }
@@ -371,9 +371,15 @@ mod tests {
     #[test]
     fn test_version_history_sort_and_update() {
         let mut history = VersionHistory::default();
-        history.versions.push(VersionInfo::new("1.0.0", VersionSignificance::Major));
-        history.versions.push(VersionInfo::new("2.0.0", VersionSignificance::Major));
-        history.versions.push(VersionInfo::new("1.5.0", VersionSignificance::Minor));
+        history
+            .versions
+            .push(VersionInfo::new("1.0.0", VersionSignificance::Major));
+        history
+            .versions
+            .push(VersionInfo::new("2.0.0", VersionSignificance::Major));
+        history
+            .versions
+            .push(VersionInfo::new("1.5.0", VersionSignificance::Minor));
 
         history.sort_versions();
         history.update_latest();

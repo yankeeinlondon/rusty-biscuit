@@ -32,8 +32,8 @@ pub use types::{
     FrontmatterChange, MarkdownDelta, MovedSection, SectionId, SectionPath,
 };
 
-use crate::markdown::toc::{MarkdownToc, MarkdownTocNode};
 use crate::markdown::Markdown;
+use crate::markdown::toc::{MarkdownToc, MarkdownTocNode};
 use std::collections::{HashMap, HashSet};
 
 /// Extracts all headings from a TOC into a flat list with their paths.
@@ -126,11 +126,14 @@ fn compare_frontmatter(original: &Markdown, updated: &Markdown, delta: &mut Mark
         let updated_value = updated_fm.get(*key);
 
         if original_value != updated_value
-            && let (Some(ov), Some(uv)) = (original_value, updated_value) {
-                delta
-                    .frontmatter_changes
-                    .push(FrontmatterChange::updated((*key).clone(), ov.clone(), uv.clone()));
-            }
+            && let (Some(ov), Some(uv)) = (original_value, updated_value)
+        {
+            delta.frontmatter_changes.push(FrontmatterChange::updated(
+                (*key).clone(),
+                ov.clone(),
+                uv.clone(),
+            ));
+        }
     }
 
     delta.frontmatter_changed = !delta.frontmatter_changes.is_empty();
@@ -145,7 +148,11 @@ fn compare_frontmatter(original: &Markdown, updated: &Markdown, delta: &mut Mark
 }
 
 /// Compares preamble (content before first heading).
-fn compare_preamble(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta: &mut MarkdownDelta) {
+fn compare_preamble(
+    original_toc: &MarkdownToc,
+    updated_toc: &MarkdownToc,
+    delta: &mut MarkdownDelta,
+) {
     delta.preamble_changed = original_toc.preamble_hash != updated_toc.preamble_hash;
 
     if delta.preamble_changed {
@@ -155,7 +162,11 @@ fn compare_preamble(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
 }
 
 /// Compares sections between two documents.
-fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta: &mut MarkdownDelta) {
+fn compare_sections(
+    original_toc: &MarkdownToc,
+    updated_toc: &MarkdownToc,
+    delta: &mut MarkdownDelta,
+) {
     let original_headings = extract_headings_with_paths(original_toc);
     let updated_headings = extract_headings_with_paths(updated_toc);
 
@@ -163,7 +174,8 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
     delta.statistics.new_section_count = updated_headings.len();
 
     // Build indexes for matching (using prelude hash for content comparison)
-    let mut original_by_content: HashMap<u64, Vec<(Vec<String>, &MarkdownTocNode)>> = HashMap::new();
+    let mut original_by_content: HashMap<u64, Vec<(Vec<String>, &MarkdownTocNode)>> =
+        HashMap::new();
     for (path, node) in &original_headings {
         original_by_content
             .entry(node.prelude_hash())
@@ -211,8 +223,7 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
                 continue;
             }
 
-            if orig_node.prelude_hash() == upd_node.prelude_hash()
-                && orig_node.prelude_hash() != 0
+            if orig_node.prelude_hash() == upd_node.prelude_hash() && orig_node.prelude_hash() != 0
             {
                 // Same content, different path = moved
                 let level_delta = upd_node.level as i8 - orig_node.level as i8;
@@ -254,7 +265,7 @@ fn compare_sections(original_toc: &MarkdownToc, updated_toc: &MarkdownToc, delta
                 let upd_content = upd_node.prelude_content().unwrap_or("");
 
                 // Use semantic hashing to compare content ignoring whitespace differences
-                use crate::hashing::{xx_hash_variant, HashVariant};
+                use crate::hashing::{HashVariant, xx_hash_variant};
                 let semantic_variants = vec![
                     HashVariant::LeadingWhitespace,
                     HashVariant::TrailingWhitespace,
@@ -489,10 +500,7 @@ fn describe_whitespace_change(original: &str, updated: &str) -> String {
         .iter()
         .map(|l| l.len() - l.trim_end().len())
         .sum();
-    let upd_trailing: usize = upd_lines
-        .iter()
-        .map(|l| l.len() - l.trim_end().len())
-        .sum();
+    let upd_trailing: usize = upd_lines.iter().map(|l| l.len() - l.trim_end().len()).sum();
 
     if orig_trailing != upd_trailing {
         changes.push("trailing space".to_string());
@@ -628,10 +636,7 @@ fn compare_code_blocks(
                             )
                         } else {
                             // Only info string changed - provide detailed diff
-                            describe_info_string_change(
-                                &orig_cb.info_string,
-                                &upd_cb.info_string,
-                            )
+                            describe_info_string_change(&orig_cb.info_string, &upd_cb.info_string)
                         };
 
                         let action = if content_changed {
@@ -652,17 +657,14 @@ fn compare_code_blocks(
                         if content_changed {
                             delta.statistics.code_blocks_modified += 1;
                             // Track byte-level changes for content modifications
-                            let edit_dist =
-                                levenshtein_distance(&orig_cb.content, &upd_cb.content);
+                            let edit_dist = levenshtein_distance(&orig_cb.content, &upd_cb.content);
                             delta.statistics.bytes_modified += edit_dist;
                         }
                         if info_changed && !content_changed {
                             delta.statistics.code_blocks_language_changed += 1;
                             // Info string change counts as a modification
-                            let edit_dist = levenshtein_distance(
-                                &orig_cb.info_string,
-                                &upd_cb.info_string,
-                            );
+                            let edit_dist =
+                                levenshtein_distance(&orig_cb.info_string, &upd_cb.info_string);
                             delta.statistics.bytes_modified += edit_dist.max(1);
                         }
                     }
@@ -756,10 +758,10 @@ fn find_similar_slug(
         let max_len = target.len().max(slug.len());
         let similarity = 1.0 - (distance as f32 / max_len as f32);
 
-        if similarity > 0.5
-            && (best_match.is_none() || similarity > best_match.as_ref().unwrap().1) {
-                best_match = Some((slug.clone(), similarity));
-            }
+        if similarity > 0.5 && (best_match.is_none() || similarity > best_match.as_ref().unwrap().1)
+        {
+            best_match = Some((slug.clone(), similarity));
+        }
     }
 
     best_match
@@ -790,7 +792,11 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
 
     for i in 1..=m {
         for j in 1..=n {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
             dp[i][j] = (dp[i - 1][j] + 1)
                 .min(dp[i][j - 1] + 1)
                 .min(dp[i - 1][j - 1] + cost);

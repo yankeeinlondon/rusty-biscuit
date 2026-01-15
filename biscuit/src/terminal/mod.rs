@@ -9,10 +9,18 @@ mod supports;
 
 pub use ansi::AnsiBuilder;
 pub use supports::{
-    color_depth, supported_underline_variants, supports_italics, supports_setting_foreground,
-    supports_underline, UnderlineSupport, UnderlineVariants,
+    COLORS_8_DEPTH,
+    COLORS_16_DEPTH,
+    COLORS_256_DEPTH,
     // Color depth constants
-    TRUE_COLOR_DEPTH, COLORS_256_DEPTH, COLORS_16_DEPTH, COLORS_8_DEPTH,
+    TRUE_COLOR_DEPTH,
+    UnderlineSupport,
+    UnderlineVariants,
+    color_depth,
+    supported_underline_variants,
+    supports_italics,
+    supports_setting_foreground,
+    supports_underline,
 };
 
 #[cfg(test)]

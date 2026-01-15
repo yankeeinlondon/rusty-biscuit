@@ -206,15 +206,13 @@ mod tests {
 
     #[test]
     fn test_builder_base_url() {
-        let builder = ClientBuilder::new("test-key")
-            .base_url("https://custom.api.com");
+        let builder = ClientBuilder::new("test-key").base_url("https://custom.api.com");
         assert_eq!(builder.base_url, "https://custom.api.com");
     }
 
     #[test]
     fn test_builder_china_endpoint() {
-        let builder = ClientBuilder::new("test-key")
-            .china_endpoint();
+        let builder = ClientBuilder::new("test-key").china_endpoint();
         assert_eq!(builder.base_url, ZAI_CN_API_BASE_URL);
     }
 

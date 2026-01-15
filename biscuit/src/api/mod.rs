@@ -6,8 +6,8 @@
 //!
 //! Created during Phase 0 of the provider refactoring (2025-12-30).
 
-pub mod types;
 pub mod openai_compat;
+pub mod types;
 
+pub use openai_compat::{get_all_provider_models, get_provider_models_from_api};
 pub use types::{ApiAuth, ApiEndpoint};
-pub use openai_compat::{get_provider_models_from_api, get_all_provider_models};

@@ -4,8 +4,8 @@
 //! request and response bodies. These schemas are used during code
 //! generation to create strongly-typed Rust structs.
 
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::fmt::Debug;
 
 /// Trait bound for types that can be used in API schemas.
@@ -45,11 +45,16 @@ use std::fmt::Debug;
 /// let req = MyRequest { name: "test".into(), count: 42 };
 /// accepts_schema(req);
 /// ```
-pub trait SchemaObject: Serialize + DeserializeOwned + Debug + Clone + Send + Sync + 'static {}
+pub trait SchemaObject:
+    Serialize + DeserializeOwned + Debug + Clone + Send + Sync + 'static
+{
+}
 
 // Blanket implementation for all qualifying types
-impl<T> SchemaObject for T where T: Serialize + DeserializeOwned + Debug + Clone + Send + Sync + 'static
-{}
+impl<T> SchemaObject for T where
+    T: Serialize + DeserializeOwned + Debug + Clone + Send + Sync + 'static
+{
+}
 
 /// A schema descriptor for code generation.
 ///

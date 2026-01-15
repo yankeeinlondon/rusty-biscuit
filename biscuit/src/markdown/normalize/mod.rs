@@ -142,7 +142,10 @@ pub fn validate_structure(content: &str) -> StructureValidation {
     }
 
     // Check for multiple H1s
-    let h1_count = headings.iter().filter(|h| h.level == HeadingLevel::H1).count();
+    let h1_count = headings
+        .iter()
+        .filter(|h| h.level == HeadingLevel::H1)
+        .count();
     if h1_count > 1 {
         validation.add_issue(StructureIssue::new(
             StructureIssueKind::MultipleH1,
@@ -230,7 +233,12 @@ pub fn normalize(
     for heading in &headings {
         let new_level_raw = heading.level.as_u8() as i8 + level_adjustment;
         if let Some(new_level) = HeadingLevel::new(new_level_raw as u8) {
-            replacements.push((heading.byte_start, heading.byte_end, heading.level, new_level));
+            replacements.push((
+                heading.byte_start,
+                heading.byte_end,
+                heading.level,
+                new_level,
+            ));
             report.add_adjustment(HeadingAdjustment::new(
                 heading.title.clone(),
                 heading.line_number,
@@ -384,7 +392,10 @@ mod tests {
         let content = "#### Level 4\n\n##### Level 5\n\n###### Level 6";
         let result = normalize(content, Some(HeadingLevel::H5));
 
-        assert!(matches!(result, Err(NormalizationError::LevelOverflow { .. })));
+        assert!(matches!(
+            result,
+            Err(NormalizationError::LevelOverflow { .. })
+        ));
     }
 
     #[test]

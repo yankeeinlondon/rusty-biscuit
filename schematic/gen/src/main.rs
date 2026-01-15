@@ -50,7 +50,7 @@ fn main() -> Result<(), GeneratorError> {
             return Err(GeneratorError::ConfigError(format!(
                 "Unknown API: '{}'. Available APIs: openai",
                 other
-            )))
+            )));
         }
     };
 
@@ -66,9 +66,7 @@ fn main() -> Result<(), GeneratorError> {
 
     // Generate Cargo.toml in the parent directory of src/
     // The output_dir points to src/, so we need to get its parent for Cargo.toml
-    let schema_dir = output_dir
-        .parent()
-        .unwrap_or(Path::new("schematic/schema"));
+    let schema_dir = output_dir.parent().unwrap_or(Path::new("schematic/schema"));
     write_cargo_toml(schema_dir, cli.dry_run)?;
 
     if !cli.dry_run && cli.verbose > 0 {

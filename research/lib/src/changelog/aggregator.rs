@@ -35,9 +35,7 @@
 use super::discovery::discover_changelog_file;
 use super::github::fetch_github_releases;
 use super::registry::fetch_registry_versions;
-use super::types::{
-    ChangelogError, ChangelogSource, ConfidenceLevel, VersionHistory, VersionInfo,
-};
+use super::types::{ChangelogError, ChangelogSource, ConfidenceLevel, VersionHistory, VersionInfo};
 use reqwest::Client as HttpClient;
 use std::collections::HashMap;
 
@@ -396,12 +394,12 @@ mod tests {
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].sources.len(), 2);
         assert_eq!(merged[0].new_features.len(), 2);
-        assert!(merged[0]
-            .sources
-            .contains(&ChangelogSource::GitHubRelease));
-        assert!(merged[0]
-            .sources
-            .contains(&ChangelogSource::RegistryVersion));
+        assert!(merged[0].sources.contains(&ChangelogSource::GitHubRelease));
+        assert!(
+            merged[0]
+                .sources
+                .contains(&ChangelogSource::RegistryVersion)
+        );
     }
 
     #[test]
@@ -572,10 +570,7 @@ mod tests {
         incoming.summary = Some("Summary from incoming".to_string());
 
         merge_single_version(&mut existing, &incoming);
-        assert_eq!(
-            existing.summary,
-            Some("Summary from incoming".to_string())
-        );
+        assert_eq!(existing.summary, Some("Summary from incoming".to_string()));
 
         // Existing summary should not be overwritten
         let mut existing = VersionInfo::new("2.0.0", VersionSignificance::Major);
@@ -617,9 +612,11 @@ mod tests {
         let versions = parse_changelog_file(content);
         assert_eq!(versions.len(), 1);
         assert_eq!(versions[0].version, "1.0.0");
-        assert!(versions[0]
-            .sources
-            .contains(&ChangelogSource::ChangelogFile));
+        assert!(
+            versions[0]
+                .sources
+                .contains(&ChangelogSource::ChangelogFile)
+        );
     }
 
     #[test]

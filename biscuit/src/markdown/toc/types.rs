@@ -79,7 +79,7 @@ impl MarkdownTocNode {
         source_span: (usize, usize),
         line_range: (usize, usize),
     ) -> Self {
-        use crate::hashing::{xx_hash, xx_hash_variant, HashVariant};
+        use crate::hashing::{HashVariant, xx_hash, xx_hash_variant};
 
         let title_hash = xx_hash(&title);
         let title_hash_trimmed = xx_hash_variant(&title, vec![HashVariant::BlockTrimming]);
@@ -126,12 +126,14 @@ impl MarkdownTocNode {
 
     /// Returns the prelude normalized hash (whitespace-insensitive), or 0 if no prelude.
     pub fn prelude_hash_normalized(&self) -> u64 {
-        self.prelude.as_ref().map_or(0, |p| p.content_hash_normalized)
+        self.prelude
+            .as_ref()
+            .map_or(0, |p| p.content_hash_normalized)
     }
 
     /// Computes the subtree hash by combining prelude content with all children.
     pub fn compute_subtree_hash(&mut self) {
-        use crate::hashing::{xx_hash, xx_hash_variant, HashVariant};
+        use crate::hashing::{HashVariant, xx_hash, xx_hash_variant};
 
         // Build combined content for subtree: prelude + all child subtrees
         let mut combined = self
@@ -210,7 +212,7 @@ pub struct PreludeNode {
 impl PreludeNode {
     /// Creates a new prelude node from content and location info.
     pub fn new(content: String, source_span: (usize, usize), line_range: (usize, usize)) -> Self {
-        use crate::hashing::{xx_hash, xx_hash_variant, HashVariant};
+        use crate::hashing::{HashVariant, xx_hash, xx_hash_variant};
 
         let content_hash = xx_hash(&content);
         let content_hash_trimmed = xx_hash_variant(&content, vec![HashVariant::BlockTrimming]);
@@ -275,7 +277,7 @@ impl CodeBlockInfo {
         line_range: (usize, usize),
         parent_section_path: Vec<String>,
     ) -> Self {
-        use crate::hashing::{xx_hash, xx_hash_variant, HashVariant};
+        use crate::hashing::{HashVariant, xx_hash, xx_hash_variant};
 
         let content_hash = xx_hash(&content);
         let content_hash_trimmed = xx_hash_variant(&content, vec![HashVariant::BlockTrimming]);
@@ -492,7 +494,12 @@ impl MarkdownToc {
     }
 
     /// Adds a slug to the index.
-    pub fn add_to_slug_index(&mut self, slug: String, section_path: Vec<String>, line_number: usize) {
+    pub fn add_to_slug_index(
+        &mut self,
+        slug: String,
+        section_path: Vec<String>,
+        line_number: usize,
+    ) {
         self.slug_index
             .entry(slug)
             .or_default()
@@ -506,7 +513,13 @@ mod tests {
 
     #[test]
     fn test_toc_node_new() {
-        let node = MarkdownTocNode::new(2, "Test Heading".to_string(), "test-heading".to_string(), (0, 100), (1, 10));
+        let node = MarkdownTocNode::new(
+            2,
+            "Test Heading".to_string(),
+            "test-heading".to_string(),
+            (0, 100),
+            (1, 10),
+        );
 
         assert_eq!(node.level, 2);
         assert_eq!(node.title, "Test Heading");
@@ -550,9 +563,22 @@ mod tests {
 
     #[test]
     fn test_toc_node_count() {
-        let mut root = MarkdownTocNode::new(1, "Root".to_string(), "root".to_string(), (0, 100), (1, 10));
-        let child1 = MarkdownTocNode::new(2, "Child1".to_string(), "child1".to_string(), (10, 50), (2, 5));
-        let child2 = MarkdownTocNode::new(2, "Child2".to_string(), "child2".to_string(), (50, 100), (5, 10));
+        let mut root =
+            MarkdownTocNode::new(1, "Root".to_string(), "root".to_string(), (0, 100), (1, 10));
+        let child1 = MarkdownTocNode::new(
+            2,
+            "Child1".to_string(),
+            "child1".to_string(),
+            (10, 50),
+            (2, 5),
+        );
+        let child2 = MarkdownTocNode::new(
+            2,
+            "Child2".to_string(),
+            "child2".to_string(),
+            (50, 100),
+            (5, 10),
+        );
         root.children.push(child1);
         root.children.push(child2);
 
@@ -561,8 +587,15 @@ mod tests {
 
     #[test]
     fn test_toc_node_find_by_slug() {
-        let mut root = MarkdownTocNode::new(1, "Root".to_string(), "root".to_string(), (0, 100), (1, 10));
-        let child = MarkdownTocNode::new(2, "Child".to_string(), "child".to_string(), (10, 50), (2, 5));
+        let mut root =
+            MarkdownTocNode::new(1, "Root".to_string(), "root".to_string(), (0, 100), (1, 10));
+        let child = MarkdownTocNode::new(
+            2,
+            "Child".to_string(),
+            "child".to_string(),
+            (10, 50),
+            (2, 5),
+        );
         root.children.push(child);
 
         assert!(root.find_by_slug("root").is_some());
@@ -611,8 +644,15 @@ mod tests {
     #[test]
     fn test_markdown_toc_heading_count() {
         let mut toc = MarkdownToc::new();
-        let mut root = MarkdownTocNode::new(1, "Root".to_string(), "root".to_string(), (0, 100), (1, 10));
-        root.children.push(MarkdownTocNode::new(2, "Child".to_string(), "child".to_string(), (10, 50), (2, 5)));
+        let mut root =
+            MarkdownTocNode::new(1, "Root".to_string(), "root".to_string(), (0, 100), (1, 10));
+        root.children.push(MarkdownTocNode::new(
+            2,
+            "Child".to_string(),
+            "child".to_string(),
+            (10, 50),
+            (2, 5),
+        ));
         toc.structure.push(root);
 
         assert_eq!(toc.heading_count(), 2);
@@ -621,7 +661,13 @@ mod tests {
     #[test]
     fn test_markdown_toc_root_level() {
         let mut toc = MarkdownToc::new();
-        toc.structure.push(MarkdownTocNode::new(2, "H2".to_string(), "h2".to_string(), (0, 100), (1, 10)));
+        toc.structure.push(MarkdownTocNode::new(
+            2,
+            "H2".to_string(),
+            "h2".to_string(),
+            (0, 100),
+            (1, 10),
+        ));
 
         assert_eq!(toc.root_level(), Some(2));
     }
@@ -631,7 +677,13 @@ mod tests {
         let mut toc = MarkdownToc::new();
         let mut h1 = MarkdownTocNode::new(1, "H1".to_string(), "h1".to_string(), (0, 100), (1, 10));
         let mut h2 = MarkdownTocNode::new(2, "H2".to_string(), "h2".to_string(), (10, 50), (2, 5));
-        h2.children.push(MarkdownTocNode::new(4, "H4".to_string(), "h4".to_string(), (20, 40), (3, 4)));
+        h2.children.push(MarkdownTocNode::new(
+            4,
+            "H4".to_string(),
+            "h4".to_string(),
+            (20, 40),
+            (3, 4),
+        ));
         h1.children.push(h2);
         toc.structure.push(h1);
 

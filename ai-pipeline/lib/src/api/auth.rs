@@ -1,5 +1,3 @@
-
-
 /// The `ApiAuthMethod` expresses
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum ApiAuthMethod {
@@ -7,5 +5,5 @@ pub enum ApiAuthMethod {
     ApiKey(String),
     /// API key passed as query parameter (e.g., Gemini uses `?key=API_KEY`)
     QueryParam(String),
-    None
+    None,
 }

@@ -823,9 +823,9 @@ impl ProviderModel {
         // Convert back from variant naming to model ID:
         // Order matters: handle triple before double before single
         model_part
-            .replace("___", "/")  // Triple underscore → /
-            .replace("__", "-")   // Double underscore → -
-            .replace("_", ".")    // Single underscore → .
+            .replace("___", "/") // Triple underscore → /
+            .replace("__", "-") // Double underscore → -
+            .replace("_", ".") // Single underscore → .
             .to_lowercase()
     }
 
@@ -855,9 +855,9 @@ impl ProviderModel {
             | Self::OpenAi__O1
             | Self::OpenAi(_) => Provider::OpenAi,
 
-            Self::Deepseek__Chat
-            | Self::Deepseek__Reasoner
-            | Self::Deepseek(_) => Provider::Deepseek,
+            Self::Deepseek__Chat | Self::Deepseek__Reasoner | Self::Deepseek(_) => {
+                Provider::Deepseek
+            }
 
             Self::Gemini__Gemini__3__Flash__Preview
             | Self::Gemini__Gemini__2__0__Flash__Exp
@@ -891,9 +891,15 @@ impl ProviderModel {
         use std::borrow::Cow;
         match self {
             // Anthropic static variants
-            Self::Anthropic__ClaudeOpus__4__5__20251101 => Cow::Borrowed("claude-opus-4-5-20251101"),
-            Self::Anthropic__ClaudeSonnet__4__5__20250929 => Cow::Borrowed("claude-sonnet-4-5-20250929"),
-            Self::Anthropic__ClaudeHaiku__4__0__20250107 => Cow::Borrowed("claude-haiku-4-0-20250107"),
+            Self::Anthropic__ClaudeOpus__4__5__20251101 => {
+                Cow::Borrowed("claude-opus-4-5-20251101")
+            }
+            Self::Anthropic__ClaudeSonnet__4__5__20250929 => {
+                Cow::Borrowed("claude-sonnet-4-5-20250929")
+            }
+            Self::Anthropic__ClaudeHaiku__4__0__20250107 => {
+                Cow::Borrowed("claude-haiku-4-0-20250107")
+            }
             Self::Anthropic(id) => Cow::Borrowed(id),
 
             // OpenAI static variants
@@ -1088,9 +1094,13 @@ impl ProviderModel {
             if matches!(provider, Provider::OpenRouter | Provider::ZenMux) {
                 for model_id in model_ids {
                     // Parse aggregator model IDs like "anthropic/claude-opus-4-5"
-                    if let Some((underlying_provider_str, underlying_model)) = model_id.split_once('/') {
+                    if let Some((underlying_provider_str, underlying_model)) =
+                        model_id.split_once('/')
+                    {
                         // Try to match to a known provider
-                        if let Some(underlying_provider) = Self::parse_provider_name(underlying_provider_str) {
+                        if let Some(underlying_provider) =
+                            Self::parse_provider_name(underlying_provider_str)
+                        {
                             // Check if we successfully queried the underlying provider directly
                             // (not just having an API key - some providers don't support /v1/models)
                             if api_models.contains_key(&underlying_provider) {
@@ -1112,11 +1122,17 @@ impl ProviderModel {
 
                                 // Aggregator variant: {AGGREGATOR}__{PROVIDER}__{MODEL}
                                 // Uses full model_id (e.g., "google/gemini-3-flash") which becomes Google___Gemini__3__Flash
-                                let aggregator_variant_name = Self::model_id_to_variant_name(model_id);
-                                let aggregator_variant = format!("{:?}__{}", provider, aggregator_variant_name);
+                                let aggregator_variant_name =
+                                    Self::model_id_to_variant_name(model_id);
+                                let aggregator_variant =
+                                    format!("{:?}__{}", provider, aggregator_variant_name);
 
                                 if !seen_variants.contains(&aggregator_variant) {
-                                    new_variants.push((*provider, model_id.clone(), aggregator_variant_name));
+                                    new_variants.push((
+                                        *provider,
+                                        model_id.clone(),
+                                        aggregator_variant_name,
+                                    ));
                                     seen_variants.insert(aggregator_variant); // Track to avoid duplicates
                                     *models_added.entry(*provider).or_insert(0) += 1;
                                     aggregator_hints_applied += 1;
@@ -1124,10 +1140,18 @@ impl ProviderModel {
 
                                 // Underlying provider variant: {PROVIDER}__{MODEL}
                                 // Uses just the model part (e.g., "gemini-3-flash") which becomes Gemini__3__Flash
-                                let underlying_variant_name = Self::model_id_to_variant_name(underlying_model);
-                                let underlying_variant = format!("{:?}__{}", underlying_provider, underlying_variant_name);
+                                let underlying_variant_name =
+                                    Self::model_id_to_variant_name(underlying_model);
+                                let underlying_variant = format!(
+                                    "{:?}__{}",
+                                    underlying_provider, underlying_variant_name
+                                );
                                 if !seen_variants.contains(&underlying_variant) {
-                                    new_variants.push((underlying_provider, underlying_model.to_string(), underlying_variant_name));
+                                    new_variants.push((
+                                        underlying_provider,
+                                        underlying_model.to_string(),
+                                        underlying_variant_name,
+                                    ));
                                     seen_variants.insert(underlying_variant); // Track to avoid duplicates
                                     *models_added.entry(underlying_provider).or_insert(0) += 1;
                                     aggregator_hints_applied += 1;
@@ -1157,8 +1181,8 @@ impl ProviderModel {
             // Use codegen module to inject variants
             // Use CARGO_MANIFEST_DIR to get absolute path at compile time
             // This ensures the path works regardless of where the binary is run from
-            let types_rs_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("src/providers/types.rs");
+            let types_rs_path =
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/providers/types.rs");
 
             let variant_count = crate::codegen::inject_enum_variants(
                 "ProviderModel",
@@ -1322,9 +1346,8 @@ impl TryFrom<String> for ProviderModel {
         use regex::Regex;
 
         // Validate format (case-insensitive for provider)
-        static MODEL_RE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9._:-]+$").expect("Invalid regex")
-        });
+        static MODEL_RE: Lazy<Regex> =
+            Lazy::new(|| Regex::new(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9._:-]+$").expect("Invalid regex"));
 
         if !MODEL_RE.is_match(&value) {
             return Err(ProviderError::InvalidModelString { input: value });
@@ -1432,9 +1455,15 @@ impl<'de> Deserialize<'de> for ProviderModel {
         // Match against static variants first, then use outlets
         match (provider.as_str(), model_id) {
             // Anthropic static variants
-            ("anthropic", "claude-opus-4-5-20251101") => Ok(Self::Anthropic__ClaudeOpus__4__5__20251101),
-            ("anthropic", "claude-sonnet-4-5-20250929") => Ok(Self::Anthropic__ClaudeSonnet__4__5__20250929),
-            ("anthropic", "claude-haiku-4-0-20250107") => Ok(Self::Anthropic__ClaudeHaiku__4__0__20250107),
+            ("anthropic", "claude-opus-4-5-20251101") => {
+                Ok(Self::Anthropic__ClaudeOpus__4__5__20251101)
+            }
+            ("anthropic", "claude-sonnet-4-5-20250929") => {
+                Ok(Self::Anthropic__ClaudeSonnet__4__5__20250929)
+            }
+            ("anthropic", "claude-haiku-4-0-20250107") => {
+                Ok(Self::Anthropic__ClaudeHaiku__4__0__20250107)
+            }
             ("anthropic", id) => Ok(Self::Anthropic(id.to_string())),
 
             // OpenAI static variants
@@ -1487,7 +1516,10 @@ mod tests {
 
     #[test]
     fn provider_list_format_default() {
-        assert_eq!(ProviderListFormat::default(), ProviderListFormat::StringLiterals);
+        assert_eq!(
+            ProviderListFormat::default(),
+            ProviderListFormat::StringLiterals
+        );
     }
 
     // ProviderModel tests
@@ -1562,7 +1594,10 @@ mod tests {
         fn deserialize_to_outlet_variant() {
             let json = "\"openai/gpt-5-experimental\"";
             let model: ProviderModel = serde_json::from_str(json).unwrap();
-            assert_eq!(model, ProviderModel::OpenAi("gpt-5-experimental".to_string()));
+            assert_eq!(
+                model,
+                ProviderModel::OpenAi("gpt-5-experimental".to_string())
+            );
         }
 
         #[test]
@@ -1570,7 +1605,12 @@ mod tests {
             let json = "\"no-slash-here\"";
             let result: Result<ProviderModel, _> = serde_json::from_str(json);
             assert!(result.is_err());
-            assert!(result.unwrap_err().to_string().contains("expected 'provider/model-id'"));
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("expected 'provider/model-id'")
+            );
         }
 
         #[test]
@@ -1658,10 +1698,7 @@ mod tests {
                 .to_string()
                 .try_into()
                 .unwrap();
-            assert_eq!(
-                model,
-                ProviderModel::Anthropic__ClaudeOpus__4__5__20251101
-            );
+            assert_eq!(model, ProviderModel::Anthropic__ClaudeOpus__4__5__20251101);
         }
 
         #[test]
@@ -1693,9 +1730,7 @@ mod tests {
             let result: Result<ProviderModel, _> = "no-slash-here".to_string().try_into();
             assert!(result.is_err());
             let err = result.unwrap_err();
-            assert!(err
-                .to_string()
-                .contains("Invalid model string format"));
+            assert!(err.to_string().contains("Invalid model string format"));
         }
 
         #[test]

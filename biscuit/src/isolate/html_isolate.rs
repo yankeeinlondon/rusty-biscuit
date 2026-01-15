@@ -266,9 +266,12 @@ mod tests {
     #[test]
     fn test_inner_html_extraction() {
         let html = "<div>Hello</div><div>World</div>";
-        let result =
-            html_isolate(html, HtmlScope::InnerHtml(HtmlTag::Div), IsolateAction::LeaveAsVector)
-                .unwrap();
+        let result = html_isolate(
+            html,
+            HtmlScope::InnerHtml(HtmlTag::Div),
+            IsolateAction::LeaveAsVector,
+        )
+        .unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 2);
@@ -365,8 +368,7 @@ mod tests {
     #[test]
     fn test_prose_extraction() {
         let html = "<p>Hello <strong>World</strong>!</p>";
-        let result =
-            html_isolate(html, HtmlScope::Prose, IsolateAction::LeaveAsVector).unwrap();
+        let result = html_isolate(html, HtmlScope::Prose, IsolateAction::LeaveAsVector).unwrap();
 
         if let IsolateResult::Vector(items) = result {
             assert_eq!(items.len(), 1);

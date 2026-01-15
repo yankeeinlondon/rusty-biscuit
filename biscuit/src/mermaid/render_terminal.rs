@@ -293,7 +293,10 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            format!("Diagram too large ({} bytes, max {})", size, MAX_DIAGRAM_SIZE)
+            format!(
+                "Diagram too large ({} bytes, max {})",
+                size, MAX_DIAGRAM_SIZE
+            )
         );
     }
 
@@ -358,7 +361,9 @@ mod tests {
 
     #[test]
     fn test_command_exists_with_nonexistent_command() {
-        assert!(!command_exists("this_command_definitely_does_not_exist_xyz123"));
+        assert!(!command_exists(
+            "this_command_definitely_does_not_exist_xyz123"
+        ));
     }
 
     #[test]

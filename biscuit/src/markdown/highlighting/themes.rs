@@ -8,9 +8,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::OnceLock;
 use syntect::highlighting::Theme as SyntectTheme;
-use two_face::theme::{
-    EmbeddedLazyThemeSet, EmbeddedThemeName, extra as extra_themes,
-};
+use two_face::theme::{EmbeddedLazyThemeSet, EmbeddedThemeName, extra as extra_themes};
 
 /// Error type for invalid theme name parsing.
 #[derive(Debug, Clone)]
@@ -424,7 +422,11 @@ pub fn detect_color_mode() -> ColorMode {
         && let Some(bg) = colorfgbg.split(';').next_back()
         && let Ok(bg_num) = bg.parse::<u8>()
     {
-        let mode = if bg_num < 7 { ColorMode::Dark } else { ColorMode::Light };
+        let mode = if bg_num < 7 {
+            ColorMode::Dark
+        } else {
+            ColorMode::Light
+        };
         tracing::info!(
             color_mode = %if mode == ColorMode::Dark { "dark" } else { "light" },
             source = "COLORFGBG",
@@ -453,9 +455,7 @@ pub(crate) fn load_theme(theme_pair: ThemePair, color_mode: ColorMode) -> Syntec
     let theme = theme_pair.resolve(color_mode);
     let embedded_name = theme.to_embedded_name();
 
-    THEME_SET
-        .get(embedded_name)
-        .clone()
+    THEME_SET.get(embedded_name).clone()
 }
 
 #[cfg(test)]
@@ -516,8 +516,13 @@ mod tests {
 
         // Dark themes should have dark backgrounds (r,g,b all < 100 typically)
         let bg = theme.settings.background.unwrap();
-        assert!(bg.r < 100 && bg.g < 100 && bg.b < 100,
-            "Expected dark background, got RGB({},{},{})", bg.r, bg.g, bg.b);
+        assert!(
+            bg.r < 100 && bg.g < 100 && bg.b < 100,
+            "Expected dark background, got RGB({},{},{})",
+            bg.r,
+            bg.g,
+            bg.b
+        );
     }
 
     #[test]
@@ -533,8 +538,13 @@ mod tests {
 
         // Light themes should have light backgrounds (r,g,b all > 200 typically)
         let bg = theme.settings.background.unwrap();
-        assert!(bg.r > 200 && bg.g > 200 && bg.b > 200,
-            "Expected light background, got RGB({},{},{})", bg.r, bg.g, bg.b);
+        assert!(
+            bg.r > 200 && bg.g > 200 && bg.b > 200,
+            "Expected light background, got RGB({},{},{})",
+            bg.r,
+            bg.g,
+            bg.b
+        );
     }
 
     #[test]
@@ -554,10 +564,22 @@ mod tests {
         assert_eq!(ThemePair::try_from("github").unwrap(), ThemePair::Github);
         assert_eq!(ThemePair::try_from("one-half").unwrap(), ThemePair::OneHalf);
         assert_eq!(ThemePair::try_from("onehalf").unwrap(), ThemePair::OneHalf);
-        assert_eq!(ThemePair::try_from("base16-ocean").unwrap(), ThemePair::Base16Ocean);
-        assert_eq!(ThemePair::try_from("base-16-ocean").unwrap(), ThemePair::Base16Ocean);
-        assert_eq!(ThemePair::try_from("vs-dark").unwrap(), ThemePair::VisualStudioDark);
-        assert_eq!(ThemePair::try_from("visual-studio-dark").unwrap(), ThemePair::VisualStudioDark);
+        assert_eq!(
+            ThemePair::try_from("base16-ocean").unwrap(),
+            ThemePair::Base16Ocean
+        );
+        assert_eq!(
+            ThemePair::try_from("base-16-ocean").unwrap(),
+            ThemePair::Base16Ocean
+        );
+        assert_eq!(
+            ThemePair::try_from("vs-dark").unwrap(),
+            ThemePair::VisualStudioDark
+        );
+        assert_eq!(
+            ThemePair::try_from("visual-studio-dark").unwrap(),
+            ThemePair::VisualStudioDark
+        );
     }
 
     #[test]
@@ -579,7 +601,10 @@ mod tests {
     #[test]
     fn test_from_str_or_default() {
         assert_eq!(ThemePair::from_str_or_default("github"), ThemePair::Github);
-        assert_eq!(ThemePair::from_str_or_default("unknown"), ThemePair::OneHalf);
+        assert_eq!(
+            ThemePair::from_str_or_default("unknown"),
+            ThemePair::OneHalf
+        );
         assert_eq!(ThemePair::from_str_or_default(""), ThemePair::OneHalf);
     }
 
@@ -602,10 +627,22 @@ mod tests {
 
     #[test]
     fn test_code_theme_lookup() {
-        assert_eq!(get_code_theme_for_prose(ThemePair::OneHalf), ThemePair::Monokai);
-        assert_eq!(get_code_theme_for_prose(ThemePair::Github), ThemePair::Monokai);
-        assert_eq!(get_code_theme_for_prose(ThemePair::Base16Ocean), ThemePair::Github);
-        assert_eq!(get_code_theme_for_prose(ThemePair::Monokai), ThemePair::Monokai);
+        assert_eq!(
+            get_code_theme_for_prose(ThemePair::OneHalf),
+            ThemePair::Monokai
+        );
+        assert_eq!(
+            get_code_theme_for_prose(ThemePair::Github),
+            ThemePair::Monokai
+        );
+        assert_eq!(
+            get_code_theme_for_prose(ThemePair::Base16Ocean),
+            ThemePair::Github
+        );
+        assert_eq!(
+            get_code_theme_for_prose(ThemePair::Monokai),
+            ThemePair::Monokai
+        );
     }
 
     #[test]

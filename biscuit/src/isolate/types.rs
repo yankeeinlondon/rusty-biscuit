@@ -177,10 +177,8 @@ mod tests {
 
     #[test]
     fn test_isolate_result_into_vec() {
-        let vec_result: IsolateResult = IsolateResult::Vector(vec![
-            Cow::Borrowed("a"),
-            Cow::Borrowed("b"),
-        ]);
+        let vec_result: IsolateResult =
+            IsolateResult::Vector(vec![Cow::Borrowed("a"), Cow::Borrowed("b")]);
         assert_eq!(vec_result.into_vec(), vec!["a", "b"]);
 
         let concat_result: IsolateResult = IsolateResult::Concatenated("combined".to_string());

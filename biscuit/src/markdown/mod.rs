@@ -27,16 +27,16 @@
 //! assert_eq!(title, Some("Hello World".to_string()));
 //! ```
 
-mod frontmatter;
-mod types;
 pub mod cleanup;
 pub mod delta;
 pub mod dsl;
+mod frontmatter;
 pub mod highlighting;
 pub mod inline;
 pub mod normalize;
 pub mod output;
 pub mod toc;
+mod types;
 
 pub use delta::{
     BrokenLink, ChangeAction, CodeBlockChange, ContentChange, DeltaStatistics, DocumentChange,
@@ -417,10 +417,7 @@ impl Markdown {
     /// assert!(releveled.content().starts_with("## Main"));
     /// assert_eq!(adjustment, 1); // Demoted by 1 level
     /// ```
-    pub fn relevel(
-        &self,
-        target: HeadingLevel,
-    ) -> Result<(Markdown, i8), NormalizationError> {
+    pub fn relevel(&self, target: HeadingLevel) -> Result<(Markdown, i8), NormalizationError> {
         let (new_content, adjustment) = normalize::relevel(&self.content, target)?;
         let new_md = Markdown::with_frontmatter(self.frontmatter.clone(), new_content);
         Ok((new_md, adjustment))
@@ -430,7 +427,9 @@ impl Markdown {
 impl From<String> for Markdown {
     fn from(content: String) -> Self {
         match frontmatter::parse_frontmatter(&content) {
-            Ok((frontmatter, remaining_content)) => Self::with_frontmatter(frontmatter, remaining_content),
+            Ok((frontmatter, remaining_content)) => {
+                Self::with_frontmatter(frontmatter, remaining_content)
+            }
             Err(_) => Self::new(content),
         }
     }
@@ -535,7 +534,9 @@ title: Test
         let content = "# No frontmatter";
         let mut md: Markdown = content.into();
 
-        md.frontmatter_mut().insert("title", json!("Added")).unwrap();
+        md.frontmatter_mut()
+            .insert("title", json!("Added"))
+            .unwrap();
         let title: Option<String> = md.fm_get("title").unwrap();
         assert_eq!(title, Some("Added".to_string()));
     }
@@ -579,9 +580,7 @@ title: Test
         let content = "# Test";
         let mut md: Markdown = content.into();
 
-        md.cleanup()
-            .fm_insert("author", "Alice")
-            .unwrap();
+        md.cleanup().fm_insert("author", "Alice").unwrap();
 
         let author: Option<String> = md.fm_get("author").unwrap();
         assert_eq!(author, Some("Alice".to_string()));

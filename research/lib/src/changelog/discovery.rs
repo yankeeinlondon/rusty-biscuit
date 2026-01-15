@@ -34,9 +34,9 @@
 //! # }
 //! ```
 
-use super::types::{ChangelogError, ChangelogSource, VersionInfo};
 #[cfg(test)]
 use super::types::VersionSignificance;
+use super::types::{ChangelogError, ChangelogSource, VersionInfo};
 use regex::Regex;
 use std::time::Duration;
 
@@ -199,10 +199,7 @@ pub async fn discover_changelog_file(
 }
 
 /// Fetch URL content with timeout and size limits
-async fn fetch_with_timeout(
-    client: &reqwest::Client,
-    url: &str,
-) -> Result<String, ChangelogError> {
+async fn fetch_with_timeout(client: &reqwest::Client, url: &str) -> Result<String, ChangelogError> {
     let response = client
         .get(url)
         .timeout(FETCH_TIMEOUT)
@@ -344,8 +341,8 @@ pub fn parse_conventional_changelog(content: &str) -> Vec<VersionInfo> {
     let mut versions = Vec::new();
 
     // Regex for version headers: ## 1.2.3 (2024-01-15) or ## 1.2.3
-    let version_re = Regex::new(r"^##\s+(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)\s*(?:\((.+?)\))?$")
-        .unwrap();
+    let version_re =
+        Regex::new(r"^##\s+(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)\s*(?:\((.+?)\))?$").unwrap();
     // Regex for section headers
     let section_re = Regex::new(r"^###\s+(.+)$").unwrap();
 
@@ -551,7 +548,11 @@ mod tests {
         assert!(v2_0_0.breaking_changes.len() >= 3);
 
         // Verify no "Unreleased" version
-        assert!(!versions.iter().any(|v| v.version.eq_ignore_ascii_case("unreleased")));
+        assert!(
+            !versions
+                .iter()
+                .any(|v| v.version.eq_ignore_ascii_case("unreleased"))
+        );
     }
 
     #[test]
@@ -658,12 +659,16 @@ mod tests {
         let versions = parse_keep_a_changelog(content);
 
         assert_eq!(versions.len(), 1);
-        assert!(versions[0].sources.contains(&ChangelogSource::ChangelogFile));
+        assert!(
+            versions[0]
+                .sources
+                .contains(&ChangelogSource::ChangelogFile)
+        );
     }
 
     #[tokio::test]
     async fn test_discover_changelog_file_mock() {
-        use wiremock::{matchers::*, Mock, MockServer, ResponseTemplate};
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::*};
 
         let server = MockServer::start().await;
 

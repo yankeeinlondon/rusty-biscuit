@@ -22,7 +22,7 @@ mod types;
 
 pub use types::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode, PreludeNode};
 
-use crate::hashing::{xx_hash, xx_hash_variant, HashVariant};
+use crate::hashing::{HashVariant, xx_hash, xx_hash_variant};
 use crate::markdown::Markdown;
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
 
@@ -36,10 +36,9 @@ fn generate_slug(text: &str) -> String {
     for c in text.chars() {
         if c.is_alphanumeric() {
             slug.push(c.to_ascii_lowercase());
-        } else if (c.is_whitespace() || c == '-' || c == '_')
-            && !slug.ends_with('-') {
-                slug.push('-');
-            }
+        } else if (c.is_whitespace() || c == '-' || c == '_') && !slug.ends_with('-') {
+            slug.push('-');
+        }
     }
 
     // Trim leading/trailing hyphens
@@ -88,7 +87,11 @@ struct InternalLinkExtract {
 /// Extracts headings, code blocks, and internal links from markdown content.
 fn extract_elements(
     content: &str,
-) -> (Vec<HeadingInfo>, Vec<CodeBlockExtract>, Vec<InternalLinkExtract>) {
+) -> (
+    Vec<HeadingInfo>,
+    Vec<CodeBlockExtract>,
+    Vec<InternalLinkExtract>,
+) {
     let parser = Parser::new(content);
 
     let mut headings = Vec::new();
@@ -190,10 +193,7 @@ fn extract_elements(
 }
 
 /// Builds the hierarchical TOC structure from flat heading list.
-fn build_hierarchy(
-    headings: &[HeadingInfo],
-    content: &str,
-) -> (Vec<MarkdownTocNode>, String) {
+fn build_hierarchy(headings: &[HeadingInfo], content: &str) -> (Vec<MarkdownTocNode>, String) {
     if headings.is_empty() {
         return (Vec::new(), content.to_string());
     }
@@ -352,7 +352,11 @@ impl From<&Markdown> for MarkdownToc {
 
         // Build section path helper
         fn get_section_path(structure: &[MarkdownTocNode], target_line: usize) -> Vec<String> {
-            fn find_path(node: &MarkdownTocNode, target_line: usize, path: &mut Vec<String>) -> bool {
+            fn find_path(
+                node: &MarkdownTocNode,
+                target_line: usize,
+                path: &mut Vec<String>,
+            ) -> bool {
                 if target_line >= node.line_range.0 && target_line < node.line_range.1 {
                     path.push(node.title.clone());
                     for child in &node.children {

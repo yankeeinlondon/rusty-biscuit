@@ -221,7 +221,10 @@ mod tests {
     #[test]
     fn test_model_metadata_has_capability() {
         let metadata = ModelMetadata {
-            capabilities: vec!["function_calling".to_string(), "structured_output".to_string()],
+            capabilities: vec![
+                "function_calling".to_string(),
+                "structured_output".to_string(),
+            ],
             ..Default::default()
         };
 

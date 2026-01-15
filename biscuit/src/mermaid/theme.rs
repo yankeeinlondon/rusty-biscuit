@@ -512,10 +512,12 @@ mod tests {
 
     #[test]
     fn test_theme_try_from_string() {
-        let json = String::from(r##"{
+        let json = String::from(
+            r##"{
             "background": "#1e1e1e",
             "primaryColor": "#569cd6"
-        }"##);
+        }"##,
+        );
 
         let theme = MermaidTheme::try_from(json).unwrap();
         assert_eq!(theme.background, "#1e1e1e");

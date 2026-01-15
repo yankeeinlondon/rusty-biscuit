@@ -148,7 +148,7 @@ pub async fn fetch_github_releases(
         if let Some(pos) = repo_url.find("//") {
             let after_slash = &repo_url[pos + 2..];
             if let Some(slash_pos) = after_slash.find('/') {
-                format!("{}{}",  &repo_url[..pos + 2], &after_slash[..slash_pos])
+                format!("{}{}", &repo_url[..pos + 2], &after_slash[..slash_pos])
             } else {
                 repo_url.to_string()
             }
@@ -220,7 +220,10 @@ pub async fn fetch_github_releases(
         }
 
         // Parse version from tag name (strip 'v' prefix if present)
-        let version_str = release.tag_name.strip_prefix('v').unwrap_or(&release.tag_name);
+        let version_str = release
+            .tag_name
+            .strip_prefix('v')
+            .unwrap_or(&release.tag_name);
 
         // Create VersionInfo
         let mut version_info = match VersionInfo::from_version_str(version_str) {
@@ -287,7 +290,9 @@ fn parse_release_body(body: &str, version_info: &mut VersionInfo) {
         if line_lower.contains("breaking") && (line.starts_with('#') || trimmed.ends_with(':')) {
             current_section = Some("breaking");
             continue;
-        } else if line_lower.contains("feature") && (line.starts_with('#') || trimmed.ends_with(':')) {
+        } else if line_lower.contains("feature")
+            && (line.starts_with('#') || trimmed.ends_with(':'))
+        {
             current_section = Some("features");
             continue;
         } else if line.starts_with('#') {
@@ -300,7 +305,9 @@ fn parse_release_body(body: &str, version_info: &mut VersionInfo) {
 
         // Parse list items in current section
         if let Some(section) = current_section
-            && let Some(item) = trimmed.strip_prefix('-').or_else(|| trimmed.strip_prefix('*'))
+            && let Some(item) = trimmed
+                .strip_prefix('-')
+                .or_else(|| trimmed.strip_prefix('*'))
         {
             let item = item.trim();
             if !item.is_empty() {
@@ -394,7 +401,11 @@ mod tests {
         assert_eq!(versions.len(), 2);
         assert_eq!(versions[0].version, "1.2.3");
         assert_eq!(versions[1].version, "1.2.2");
-        assert!(versions[0].sources.contains(&ChangelogSource::GitHubRelease));
+        assert!(
+            versions[0]
+                .sources
+                .contains(&ChangelogSource::GitHubRelease)
+        );
         assert_eq!(versions[0].new_features.len(), 2);
         assert_eq!(versions[0].breaking_changes.len(), 1);
     }
@@ -414,7 +425,10 @@ mod tests {
         let result = fetch_github_releases(&client, &repo_url, 10).await;
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ChangelogError::RateLimitExceeded));
+        assert!(matches!(
+            result.unwrap_err(),
+            ChangelogError::RateLimitExceeded
+        ));
     }
 
     #[tokio::test]
@@ -436,7 +450,10 @@ mod tests {
         let result = fetch_github_releases(&client, &repo_url, 10).await;
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ChangelogError::RateLimitExceeded));
+        assert!(matches!(
+            result.unwrap_err(),
+            ChangelogError::RateLimitExceeded
+        ));
     }
 
     #[tokio::test]

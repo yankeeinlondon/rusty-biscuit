@@ -1,15 +1,9 @@
-use crate::models::model_metadata::{ModelMetadata, Modality};
+use crate::models::model_metadata::{Modality, ModelMetadata};
 use crate::rigging::providers::models::{
-    anthropic::ProviderModelAnthropic,
-    deepseek::ProviderModelDeepseek,
-    gemini::ProviderModelGemini,
-    groq::ProviderModelGroq,
-    mistral::ProviderModelMistral,
-    moonshotai::ProviderModelMoonshotAi,
-    openai::ProviderModelOpenAi,
-    openrouter::ProviderModelOpenRouter,
-    xai::ProviderModelXai,
-    zai::ProviderModelZai,
+    anthropic::ProviderModelAnthropic, deepseek::ProviderModelDeepseek,
+    gemini::ProviderModelGemini, groq::ProviderModelGroq, mistral::ProviderModelMistral,
+    moonshotai::ProviderModelMoonshotAi, openai::ProviderModelOpenAi,
+    openrouter::ProviderModelOpenRouter, xai::ProviderModelXai, zai::ProviderModelZai,
     zenmux::ProviderModelZenMux,
 };
 
@@ -178,14 +172,17 @@ mod tests {
     #[test]
     fn test_all_provider_variants_constructible() {
         // This test ensures the enum variants compile and are accessible
-        let _anthropic = ProviderModel::Anthropic(ProviderModelAnthropic::Claude__Opus__4__5__20251101);
+        let _anthropic =
+            ProviderModel::Anthropic(ProviderModelAnthropic::Claude__Opus__4__5__20251101);
         let _deepseek = ProviderModel::Deepseek(ProviderModelDeepseek::Deepseek__Chat);
         let _gemini = ProviderModel::Gemini(ProviderModelGemini::Gemini__2_5__Pro);
         let _groq = ProviderModel::Groq(ProviderModelGroq::Llama__3_3__70b__Versatile);
-        let _mistral = ProviderModel::Mistral(ProviderModelMistral::Bespoke("mistral-large".to_string()));
+        let _mistral =
+            ProviderModel::Mistral(ProviderModelMistral::Bespoke("mistral-large".to_string()));
         let _moonshot = ProviderModel::MoonshotAi(ProviderModelMoonshotAi::Kimi__K2__Thinking);
         let _openai = ProviderModel::OpenAi(ProviderModelOpenAi::O3);
-        let _openrouter = ProviderModel::OpenRouter(ProviderModelOpenRouter::Bespoke("test".to_string()));
+        let _openrouter =
+            ProviderModel::OpenRouter(ProviderModelOpenRouter::Bespoke("test".to_string()));
         let _xai = ProviderModel::Xai(ProviderModelXai::Grok__3);
         let _zai = ProviderModel::Zai(ProviderModelZai::Glm__4_7);
         let _zenmux = ProviderModel::ZenMux(ProviderModelZenMux::Bespoke("test".to_string()));
@@ -196,7 +193,8 @@ mod tests {
     /// With the empty placeholder metadata file, all models should return None.
     #[test]
     fn test_metadata_accessors_return_none_for_unknown() {
-        let model = ProviderModel::OpenAi(ProviderModelOpenAi::Bespoke("unknown-model".to_string()));
+        let model =
+            ProviderModel::OpenAi(ProviderModelOpenAi::Bespoke("unknown-model".to_string()));
 
         assert!(model.metadata().is_none());
         assert!(model.context_window().is_none());

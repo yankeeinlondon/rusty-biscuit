@@ -8,7 +8,10 @@ pub mod prose;
 pub(crate) mod scope_cache;
 pub(crate) mod themes;
 
-pub use themes::{ColorMode, ThemePair, InvalidThemeName, get_code_theme_for_prose, detect_prose_theme, detect_code_theme, detect_color_mode};
+pub use themes::{
+    ColorMode, InvalidThemeName, ThemePair, detect_code_theme, detect_color_mode,
+    detect_prose_theme, get_code_theme_for_prose,
+};
 
 use syntect::highlighting::Theme as SyntectTheme;
 use syntect::parsing::SyntaxSet;

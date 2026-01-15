@@ -48,7 +48,11 @@ pub struct SkillFrontmatter {
     pub description: String,
 
     /// Optional list of tools the skill is allowed to use
-    #[serde(alias = "tools", alias = "allowed-tools", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        alias = "tools",
+        alias = "allowed-tools",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub allowed_tools: Option<Vec<String>>,
 
     /// Optional last updated timestamp
@@ -128,7 +132,11 @@ pub fn extract_frontmatter(content: &str) -> Option<(String, String)> {
                 let is_pure_delimiter = after_dashes.is_empty()
                     || after_dashes.starts_with('\n')
                     || after_dashes.starts_with("\r\n")
-                    || after_dashes.chars().next().map(|c| c.is_whitespace() && c != ' ').unwrap_or(false);
+                    || after_dashes
+                        .chars()
+                        .next()
+                        .map(|c| c.is_whitespace() && c != ' ')
+                        .unwrap_or(false);
 
                 // Also allow "---" followed by only whitespace until end of line
                 let is_pure_delimiter = is_pure_delimiter || {
@@ -304,8 +312,7 @@ pub fn repair_skill_frontmatter(content: &str) -> String {
         // Real YAML frontmatter shouldn't have lines like "# heading" (without colon)
         let has_markdown_headings = yaml.lines().any(|line| {
             let trimmed = line.trim();
-            (trimmed.starts_with("# ") || trimmed.starts_with("## "))
-                && !trimmed.contains(':')
+            (trimmed.starts_with("# ") || trimmed.starts_with("## ")) && !trimmed.contains(':')
         });
 
         if has_markdown_headings {
@@ -453,8 +460,12 @@ fn try_reconstruct_frontmatter(content: &str) -> Option<String> {
 
     // Check for patterns like "## name:" or "name:"
     let looks_like_yaml = (first_trimmed.starts_with("## ") && first_trimmed.contains(':'))
-        || (first_trimmed.starts_with("# ") && first_trimmed.contains(':') && first_trimmed.len() > 3)
-        || (first_trimmed.contains(':') && !first_trimmed.starts_with('#') && !first_trimmed.contains("**"));
+        || (first_trimmed.starts_with("# ")
+            && first_trimmed.contains(':')
+            && first_trimmed.len() > 3)
+        || (first_trimmed.contains(':')
+            && !first_trimmed.starts_with('#')
+            && !first_trimmed.contains("**"));
 
     if !looks_like_yaml {
         return None;
@@ -1098,7 +1109,10 @@ Body
             FrontmatterError::InvalidYaml(_) => {
                 // serde will fail to deserialize without created_at field
             }
-            other => panic!("Expected InvalidYaml for missing created_at, got {:?}", other),
+            other => panic!(
+                "Expected InvalidYaml for missing created_at, got {:?}",
+                other
+            ),
         }
     }
 
@@ -1121,7 +1135,10 @@ Body
             FrontmatterError::InvalidYaml(_) => {
                 // serde will fail to deserialize without updated_at field
             }
-            other => panic!("Expected InvalidYaml for missing updated_at, got {:?}", other),
+            other => panic!(
+                "Expected InvalidYaml for missing updated_at, got {:?}",
+                other
+            ),
         }
     }
 
@@ -1333,7 +1350,10 @@ Body
             FrontmatterError::InvalidYaml(msg) => {
                 assert!(msg.contains("confidence must be"));
             }
-            other => panic!("Expected InvalidYaml for invalid confidence, got {:?}", other),
+            other => panic!(
+                "Expected InvalidYaml for invalid confidence, got {:?}",
+                other
+            ),
         }
     }
 
@@ -1492,7 +1512,11 @@ Body content here.
 
         // Should be parseable after repair
         let result = parse_and_validate_frontmatter(&repaired);
-        assert!(result.is_ok(), "Repaired content should be valid: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Repaired content should be valid: {:?}",
+            result
+        );
 
         let (frontmatter, _) = result.unwrap();
         assert_eq!(frontmatter.name, "chalk");
@@ -1514,7 +1538,11 @@ tools: \[Read, Write, Edit\]
 
         // Should be parseable after repair
         let result = parse_and_validate_frontmatter(&repaired);
-        assert!(result.is_ok(), "Repaired content should be valid: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Repaired content should be valid: {:?}",
+            result
+        );
 
         let (frontmatter, _) = result.unwrap();
         assert_eq!(
@@ -1544,7 +1572,11 @@ Body content.
 
         // Should be parseable after repair
         let result = parse_and_validate_frontmatter(&repaired);
-        assert!(result.is_ok(), "Repaired content should be valid: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Repaired content should be valid: {:?}",
+            result
+        );
 
         let (frontmatter, _) = result.unwrap();
         assert_eq!(frontmatter.name, "clap");
@@ -1565,7 +1597,11 @@ description: Test description
 
         // Should be parseable after repair
         let result = parse_and_validate_frontmatter(&repaired);
-        assert!(result.is_ok(), "Repaired content should be valid: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Repaired content should be valid: {:?}",
+            result
+        );
 
         let (frontmatter, _) = result.unwrap();
         assert_eq!(frontmatter.name, "test-skill");
@@ -1590,7 +1626,11 @@ Content here.
 
         // Should be parseable after repair
         let result = parse_and_validate_frontmatter(&repaired);
-        assert!(result.is_ok(), "Repaired content should be valid: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Repaired content should be valid: {:?}",
+            result
+        );
 
         let (frontmatter, _body) = result.unwrap();
         assert_eq!(frontmatter.name, "chalk");
@@ -1625,7 +1665,11 @@ Body content.
 
         // Should still be parseable
         let result = parse_and_validate_frontmatter(&repaired);
-        assert!(result.is_ok(), "Valid content should remain valid: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Valid content should remain valid: {:?}",
+            result
+        );
 
         let (frontmatter, _) = result.unwrap();
         assert_eq!(frontmatter.name, "test-skill");
@@ -1648,7 +1692,11 @@ Use this skill when you need to **design or implement a Rust CLI**.
 
         // Should be parseable after repair
         let result = parse_and_validate_frontmatter(&repaired);
-        assert!(result.is_ok(), "Repaired clap content should be valid: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Repaired clap content should be valid: {:?}",
+            result
+        );
 
         let (frontmatter, _) = result.unwrap();
         assert_eq!(frontmatter.name, "clap");
@@ -1674,7 +1722,11 @@ Use this skill when you need to **design or implement a Rust CLI**.
 
         // Should be parseable after repair
         let result = parse_and_validate_frontmatter(&repaired);
-        assert!(result.is_ok(), "Repaired chalk content should be valid: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Repaired chalk content should be valid: {:?}",
+            result
+        );
 
         let (frontmatter, _) = result.unwrap();
         assert_eq!(frontmatter.name, "chalk");

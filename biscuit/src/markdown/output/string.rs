@@ -26,8 +26,8 @@ pub fn as_string(md: &Markdown) -> String {
         md.content().to_string()
     } else {
         // Serialize frontmatter as YAML
-        let yaml = serde_yaml::to_string(md.frontmatter().as_map())
-            .unwrap_or_else(|_| String::new());
+        let yaml =
+            serde_yaml::to_string(md.frontmatter().as_map()).unwrap_or_else(|_| String::new());
 
         // Build the full document with frontmatter delimiters
         let mut output = String::new();
@@ -86,7 +86,8 @@ mod tests {
         let mut md = Markdown::new("Content".to_string());
         md.fm_insert("title", "Document").unwrap();
         md.fm_insert("tags", json!(["rust", "markdown"])).unwrap();
-        md.fm_insert("metadata", json!({"version": "1.0", "draft": false})).unwrap();
+        md.fm_insert("metadata", json!({"version": "1.0", "draft": false}))
+            .unwrap();
 
         let output = as_string(&md);
 

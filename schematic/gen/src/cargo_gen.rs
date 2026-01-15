@@ -113,7 +113,8 @@ mod tests {
         let content = generate_cargo_toml();
 
         // Parse as TOML to validate syntax
-        let parsed: toml::Table = toml::from_str(&content).expect("Generated content should be valid TOML");
+        let parsed: toml::Table =
+            toml::from_str(&content).expect("Generated content should be valid TOML");
 
         // Verify package section exists
         assert!(parsed.contains_key("package"));
@@ -126,7 +127,10 @@ mod tests {
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let package = parsed.get("package").unwrap().as_table().unwrap();
-        assert_eq!(package.get("name").unwrap().as_str().unwrap(), "schematic-schema");
+        assert_eq!(
+            package.get("name").unwrap().as_str().unwrap(),
+            "schematic-schema"
+        );
     }
 
     #[test]
@@ -144,7 +148,10 @@ mod tests {
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let package = parsed.get("package").unwrap().as_table().unwrap();
-        assert_eq!(package.get("license").unwrap().as_str().unwrap(), "AGPL-3.0-only");
+        assert_eq!(
+            package.get("license").unwrap().as_str().unwrap(),
+            "AGPL-3.0-only"
+        );
     }
 
     #[test]
@@ -153,7 +160,10 @@ mod tests {
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
-        assert!(deps.contains_key("reqwest"), "reqwest dependency is required");
+        assert!(
+            deps.contains_key("reqwest"),
+            "reqwest dependency is required"
+        );
 
         // Verify reqwest has expected features
         let reqwest = deps.get("reqwest").unwrap().as_table().unwrap();
@@ -182,7 +192,10 @@ mod tests {
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
-        assert!(deps.contains_key("serde_json"), "serde_json dependency is required");
+        assert!(
+            deps.contains_key("serde_json"),
+            "serde_json dependency is required"
+        );
     }
 
     #[test]
@@ -191,7 +204,10 @@ mod tests {
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
-        assert!(deps.contains_key("thiserror"), "thiserror dependency is required");
+        assert!(
+            deps.contains_key("thiserror"),
+            "thiserror dependency is required"
+        );
     }
 
     #[test]
@@ -222,7 +238,10 @@ mod tests {
 
         // Verify schematic-define has path dependency
         let schematic_define = deps.get("schematic-define").unwrap().as_table().unwrap();
-        assert!(schematic_define.contains_key("path"), "schematic-define should use path dependency");
+        assert!(
+            schematic_define.contains_key("path"),
+            "schematic-define should use path dependency"
+        );
     }
 
     #[test]

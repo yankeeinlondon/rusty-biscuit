@@ -176,7 +176,10 @@ mod tests {
     fn model_error_no_valid_model_displays_correctly() {
         let error = ModelError::NoValidModel {
             attempted: vec![
-                ("anthropic/claude-haiku-4-5".to_string(), "No API key".to_string()),
+                (
+                    "anthropic/claude-haiku-4-5".to_string(),
+                    "No API key".to_string(),
+                ),
                 ("gemini/gemini-flash".to_string(), "No API key".to_string()),
             ],
         };

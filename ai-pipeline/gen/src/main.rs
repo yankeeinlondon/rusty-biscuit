@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use strum::IntoEnumIterator;
-use tracing::{info, warn, Level};
+use tracing::{Level, info, warn};
 
 use ai_pipeline::api::openai_api::{get_api_keys, get_provider_models_from_api};
 use ai_pipeline::rigging::providers::Provider;
@@ -16,7 +16,7 @@ mod parsera;
 use errors::GeneratorError;
 use generator::ModelEnumGenerator;
 use metadata_generator::MetadataGenerator;
-use parsera::{fetch_parsera_specs_with_retry, find_parsera_metadata, ParseraModel};
+use parsera::{ParseraModel, fetch_parsera_specs_with_retry, find_parsera_metadata};
 
 #[derive(Parser)]
 #[command(name = "gen-models")]
@@ -24,7 +24,11 @@ use parsera::{fetch_parsera_specs_with_retry, find_parsera_metadata, ParseraMode
 #[command(version)]
 struct Cli {
     /// Output directory for generated files
-    #[arg(short, long, default_value = "ai-pipeline/lib/src/rigging/providers/models")]
+    #[arg(
+        short,
+        long,
+        default_value = "ai-pipeline/lib/src/rigging/providers/models"
+    )]
     output: PathBuf,
 
     /// Specific providers to generate (comma-separated)
@@ -170,13 +174,17 @@ async fn process_providers(
     for provider in providers {
         // Check if we have an API key
         let Some(api_key) = api_keys.get(&provider) else {
-            summary.skipped.push((provider, "No API key configured".to_string()));
+            summary
+                .skipped
+                .push((provider, "No API key configured".to_string()));
             continue;
         };
 
         // Skip local providers
         if provider.config().is_local {
-            summary.skipped.push((provider, "Local provider".to_string()));
+            summary
+                .skipped
+                .push((provider, "Local provider".to_string()));
             continue;
         }
 

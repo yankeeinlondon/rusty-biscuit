@@ -22,15 +22,18 @@
 //! assert!(output.contains("title: Hello"));
 //! ```
 
-mod string;
 mod ast;
-pub mod terminal;
 pub mod html;
+mod string;
+pub mod terminal;
 
-pub use string::as_string;
 pub use ast::as_ast;
-pub use terminal::{ColorDepth, ImageRenderer, ItalicMode, MermaidMode, TerminalOptions, for_terminal, write_terminal};
 pub use html::{HtmlOptions, as_html};
+pub use string::as_string;
+pub use terminal::{
+    ColorDepth, ImageRenderer, ItalicMode, MermaidMode, TerminalOptions, for_terminal,
+    write_terminal,
+};
 
 #[cfg(test)]
 mod tests {

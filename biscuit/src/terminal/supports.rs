@@ -514,12 +514,15 @@ pub fn supported_underline_variants() -> UnderlineVariants {
     // 3. Check TERM for known terminal patterns
     match term.as_str() {
         // Full extended underline support
-        "xterm-kitty" | "kitty" | "kitty-direct" | "wezterm" | "alacritty"
-        | "alacritty-direct" | "ghostty" | "foot" | "foot-direct" | "contour" => {
+        "xterm-kitty" | "kitty" | "kitty-direct" | "wezterm" | "alacritty" | "alacritty-direct"
+        | "ghostty" | "foot" | "foot-direct" | "contour" => {
             return full_support();
         }
         // Basic underline via common terminal types
-        "xterm-256color" | "xterm-direct" | "tmux-256color" | "screen-256color"
+        "xterm-256color"
+        | "xterm-direct"
+        | "tmux-256color"
+        | "screen-256color"
         | "rxvt-unicode-256color" => {
             // These may or may not support extended underlines depending on
             // the actual terminal behind them. Return basic only to be safe.

@@ -364,7 +364,11 @@ impl Link {
 
         if let Some(data) = &self.data {
             for (key, value) in data {
-                attrs.push_str(&format!(r#" data-{}="{}""#, html_escape(key), html_escape(value)));
+                attrs.push_str(&format!(
+                    r#" data-{}="{}""#,
+                    html_escape(key),
+                    html_escape(value)
+                ));
             }
         }
 
@@ -637,10 +641,7 @@ fn parse_html_link(input: &str) -> Result<Link, LinkParseError> {
     let attrs_str = &opening_tag[2..].trim(); // Remove "<a"
     let attrs = parse_html_attributes(attrs_str);
 
-    let href = attrs
-        .get("href")
-        .ok_or(LinkParseError::MissingUrl)?
-        .clone();
+    let href = attrs.get("href").ok_or(LinkParseError::MissingUrl)?.clone();
 
     let mut link = Link::new(display, href);
 
@@ -975,9 +976,15 @@ fn is_structured_mode(content: &str) -> bool {
                 b'=' => {
                     // Check if there's a valid key before this =
                     let before = &content[..i];
-                    let key_part = before.trim().split(&[' ', ','][..]).next_back().unwrap_or("");
+                    let key_part = before
+                        .trim()
+                        .split(&[' ', ','][..])
+                        .next_back()
+                        .unwrap_or("");
                     if !key_part.is_empty()
-                        && key_part.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+                        && key_part
+                            .chars()
+                            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
                     {
                         has_unquoted_equals = true;
                         break;
@@ -1407,8 +1414,9 @@ mod tests {
     #[test]
     fn test_try_from_html_with_data_attributes() {
         let link = Link::try_from(
-            r#"<a href="https://example.com" data-prompt="Click me" data-id="123">Click</a>"#
-        ).unwrap();
+            r#"<a href="https://example.com" data-prompt="Click me" data-id="123">Click</a>"#,
+        )
+        .unwrap();
 
         assert_eq!(link.prompt(), Some("Click me"));
         let data = link.data().unwrap();
@@ -1417,9 +1425,9 @@ mod tests {
 
     #[test]
     fn test_try_from_html_with_escaped_content() {
-        let link = Link::try_from(
-            r#"<a href="https://example.com?a=1&amp;b=2">&lt;script&gt;</a>"#
-        ).unwrap();
+        let link =
+            Link::try_from(r#"<a href="https://example.com?a=1&amp;b=2">&lt;script&gt;</a>"#)
+                .unwrap();
 
         assert_eq!(link.display(), "<script>");
         assert_eq!(link.href(), "https://example.com?a=1&b=2");
@@ -1503,8 +1511,9 @@ mod tests {
     #[test]
     fn test_try_from_markdown_structured_multiple_props() {
         let link = Link::try_from(
-            r#"[Click](https://example.com class="btn" prompt="click me" style="color:red")"#
-        ).unwrap();
+            r#"[Click](https://example.com class="btn" prompt="click me" style="color:red")"#,
+        )
+        .unwrap();
 
         assert_eq!(link.class(), Some("btn"));
         assert_eq!(link.prompt(), Some("click me"));
@@ -1527,9 +1536,8 @@ mod tests {
 
     #[test]
     fn test_try_from_markdown_structured_with_title() {
-        let link = Link::try_from(
-            r#"[Click](https://example.com title="My Title" class="btn")"#
-        ).unwrap();
+        let link =
+            Link::try_from(r#"[Click](https://example.com title="My Title" class="btn")"#).unwrap();
 
         assert_eq!(link.title(), Some("My Title"));
         assert_eq!(link.class(), Some("btn"));
@@ -1537,9 +1545,9 @@ mod tests {
 
     #[test]
     fn test_try_from_markdown_structured_data_attributes() {
-        let link = Link::try_from(
-            r#"[Click](https://example.com data-id="123" data-action="submit")"#
-        ).unwrap();
+        let link =
+            Link::try_from(r#"[Click](https://example.com data-id="123" data-action="submit")"#)
+                .unwrap();
 
         let data = link.data().unwrap();
         assert_eq!(data.get("id"), Some(&"123".to_string()));
@@ -1730,8 +1738,8 @@ mod tests {
 
     #[test]
     fn test_parsed_style_basic() {
-        let link = Link::new("Click", "https://example.com")
-            .with_style("color: red; font-size: 14px");
+        let link =
+            Link::new("Click", "https://example.com").with_style("color: red; font-size: 14px");
         let parsed = link.parsed_style().unwrap();
         assert_eq!(parsed.get("color"), Some(&"red".to_string()));
         assert_eq!(parsed.get("font-size"), Some(&"14px".to_string()));
@@ -1756,8 +1764,8 @@ mod tests {
 
     #[test]
     fn test_parsed_style_empty_declarations() {
-        let link = Link::new("Click", "https://example.com")
-            .with_style("color: red;;;font-size: 12px");
+        let link =
+            Link::new("Click", "https://example.com").with_style("color: red;;;font-size: 12px");
         let parsed = link.parsed_style().unwrap();
         assert_eq!(parsed.get("color"), Some(&"red".to_string()));
         assert_eq!(parsed.get("font-size"), Some(&"12px".to_string()));
@@ -1771,8 +1779,8 @@ mod tests {
 
     #[test]
     fn test_parsed_style_case_insensitive_keys() {
-        let link = Link::new("Click", "https://example.com")
-            .with_style("Color: red; FONT-SIZE: 14px");
+        let link =
+            Link::new("Click", "https://example.com").with_style("Color: red; FONT-SIZE: 14px");
         let parsed = link.parsed_style().unwrap();
         assert_eq!(parsed.get("color"), Some(&"red".to_string()));
         assert_eq!(parsed.get("font-size"), Some(&"14px".to_string()));
@@ -1780,8 +1788,8 @@ mod tests {
 
     #[test]
     fn test_parsed_style_preserves_value_case() {
-        let link = Link::new("Click", "https://example.com")
-            .with_style("font-family: Arial, Helvetica");
+        let link =
+            Link::new("Click", "https://example.com").with_style("font-family: Arial, Helvetica");
         let parsed = link.parsed_style().unwrap();
         assert_eq!(
             parsed.get("font-family"),
@@ -1813,8 +1821,8 @@ mod tests {
 
     #[test]
     fn test_parsed_style_empty_key_or_value() {
-        let link = Link::new("Click", "https://example.com")
-            .with_style(": red; color: ; valid: value");
+        let link =
+            Link::new("Click", "https://example.com").with_style(": red; color: ; valid: value");
         let parsed = link.parsed_style().unwrap();
         // Empty key and empty value should be skipped
         assert_eq!(parsed.get("valid"), Some(&"value".to_string()));
@@ -2071,7 +2079,8 @@ mod tests {
 
     #[test]
     fn test_with_title_parsed_structured_mode_unquoted_values() {
-        let link = Link::with_title_parsed("Click", "https://example.com", "class=btn target=_blank");
+        let link =
+            Link::with_title_parsed("Click", "https://example.com", "class=btn target=_blank");
         assert_eq!(link.class(), Some("btn"));
         assert_eq!(link.target(), Some("_blank"));
     }

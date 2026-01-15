@@ -1,8 +1,8 @@
 use clap::Parser;
-use color_eyre::eyre::{eyre, Context, Result};
+use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::Cli;
 use shared::markdown::highlighting::{
-    detect_code_theme, detect_color_mode, detect_prose_theme, ColorMode, ThemePair,
+    ColorMode, ThemePair, detect_code_theme, detect_color_mode, detect_prose_theme,
 };
 use shared::markdown::output::{HtmlOptions, MermaidMode, TerminalOptions, write_terminal};
 use shared::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
@@ -124,9 +124,9 @@ fn main() -> Result<()> {
         } else {
             // Extract filename if --toc-filename is used
             let filename = if cli.toc_filename {
-                cli.input.as_ref().and_then(|p| {
-                    p.file_name().map(|f| f.to_string_lossy().into_owned())
-                })
+                cli.input
+                    .as_ref()
+                    .and_then(|p| p.file_name().map(|f| f.to_string_lossy().into_owned()))
             } else {
                 None
             };
@@ -172,8 +172,7 @@ fn main() -> Result<()> {
 
         let html = md.as_html(options).context("Failed to convert to HTML")?;
         let temp_path = std::env::temp_dir().join("md-preview.html");
-        std::fs::write(&temp_path, &html)
-            .wrap_err("Failed to write temp HTML file")?;
+        std::fs::write(&temp_path, &html).wrap_err("Failed to write temp HTML file")?;
 
         // Non-blocking open, graceful error handling
         if let Err(e) = open::that(&temp_path) {
@@ -227,9 +226,7 @@ fn load_markdown(path: Option<&PathBuf>) -> Result<Markdown> {
         // No path provided - check if stdin has data
         if atty::is(atty::Stream::Stdin) {
             // Interactive terminal - no input available
-            Err(eyre!(
-                "No input file provided. Use `md --help` for usage."
-            ))
+            Err(eyre!("No input file provided. Use `md --help` for usage."))
         } else {
             // Piped input available
             read_from_stdin()
@@ -350,7 +347,10 @@ fn print_toc_node<W: Write>(
         writeln!(
             out,
             "{}{}{} ({:016x})",
-            prefix, connector, node.title, node.prelude_hash_normalized()
+            prefix,
+            connector,
+            node.title,
+            node.prelude_hash_normalized()
         )
         .ok();
     } else {
@@ -408,19 +408,13 @@ fn format_code_block_change(lang: &str, section_path: &str, description: &str) -
         )
     } else if description.starts_with("Added") {
         // Added code block
-        format!(
-            "{INVERSE}{lang}{RESET} code block added in {BOLD}{section_path}{RESET}"
-        )
+        format!("{INVERSE}{lang}{RESET} code block added in {BOLD}{section_path}{RESET}")
     } else if description.starts_with("Removed") {
         // Removed code block
-        format!(
-            "{INVERSE}{lang}{RESET} code block removed from {BOLD}{section_path}{RESET}"
-        )
+        format!("{INVERSE}{lang}{RESET} code block removed from {BOLD}{section_path}{RESET}")
     } else {
         // Fallback for other descriptions
-        format!(
-            "{INVERSE}{lang}{RESET} code block in {BOLD}{section_path}{RESET}: {description}"
-        )
+        format!("{INVERSE}{lang}{RESET} code block in {BOLD}{section_path}{RESET}: {description}")
     }
 }
 
@@ -470,7 +464,12 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
                     shared::markdown::ChangeAction::PropertyUpdated => "~",
                     _ => "?",
                 };
-                writeln!(handle, "  {} {}: {}", symbol, change.key, change.description).ok();
+                writeln!(
+                    handle,
+                    "  {} {}: {}",
+                    symbol, change.key, change.description
+                )
+                .ok();
             }
         }
         writeln!(handle).ok();
@@ -606,12 +605,7 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
             )
             .ok();
             if let Some(ref suggestion) = link.suggested_replacement {
-                writeln!(
-                    handle,
-                    " → did you mean #{}?",
-                    suggestion
-                )
-                .ok();
+                writeln!(handle, " → did you mean #{}?", suggestion).ok();
             } else {
                 writeln!(handle).ok();
             }
@@ -638,11 +632,20 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
                 })
                 .unwrap_or_default();
             // description contains the whitespace type(s) - show in italics
-            writeln!(handle, "  - {}: {ITALIC}{}{RESET}", path_str, change.description).ok();
+            writeln!(
+                handle,
+                "  - {}: {ITALIC}{}{RESET}",
+                path_str, change.description
+            )
+            .ok();
         }
         // Dim italic note after the list
         writeln!(handle).ok();
-        writeln!(handle, "  \x1b[2m\x1b[3mwhitespace only changes have no visual effect when rendered\x1b[0m").ok();
+        writeln!(
+            handle,
+            "  \x1b[2m\x1b[3mwhitespace only changes have no visual effect when rendered\x1b[0m"
+        )
+        .ok();
         writeln!(handle).ok();
     }
 
@@ -665,13 +668,14 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
         writeln!(handle).ok();
 
         // Visual diff output
-        use shared::markdown::delta::visual::{render_visual_diff, VisualDiffOptions};
+        use shared::markdown::delta::visual::{VisualDiffOptions, render_visual_diff};
 
         let options = VisualDiffOptions::default();
 
         // Frontmatter visual diff (if changed)
         if delta.frontmatter_changed && !delta.frontmatter_formatting_only {
-            let fm_orig = serde_yaml::to_string(original.frontmatter().as_map()).unwrap_or_default();
+            let fm_orig =
+                serde_yaml::to_string(original.frontmatter().as_map()).unwrap_or_default();
             let fm_upd = serde_yaml::to_string(updated.frontmatter().as_map()).unwrap_or_default();
 
             if !fm_orig.is_empty() || !fm_upd.is_empty() {

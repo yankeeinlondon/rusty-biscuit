@@ -362,9 +362,10 @@ pub fn speak(message: &str, config: &VoiceConfig) -> Result<(), TtsError> {
     select_voice(&mut tts, config)?;
 
     // Speak and wait for completion
-    tts.speak(message, false).map_err(|e| TtsError::SpeechFailed {
-        source: Box::new(e),
-    })?;
+    tts.speak(message, false)
+        .map_err(|e| TtsError::SpeechFailed {
+            source: Box::new(e),
+        })?;
 
     // Block until speech completes
     std::thread::sleep(std::time::Duration::from_millis(100));
@@ -517,16 +518,20 @@ fn select_voice(tts: &mut Tts, config: &VoiceConfig) -> Result<(), TtsError> {
         match selector {
             VoiceSelector::ById(id) => {
                 if let Some(voice) = voices.iter().find(|v| v.id() == id.as_str()) {
-                    return tts.set_voice(voice).map_err(|e| TtsError::VoiceSelectionFailed {
-                        reason: format!("Failed to set voice by ID '{}': {}", id, e),
-                    });
+                    return tts
+                        .set_voice(voice)
+                        .map_err(|e| TtsError::VoiceSelectionFailed {
+                            reason: format!("Failed to set voice by ID '{}': {}", id, e),
+                        });
                 }
             }
             VoiceSelector::ByName(name) => {
                 if let Some(voice) = voices.iter().find(|v| v.name() == name.as_str()) {
-                    return tts.set_voice(voice).map_err(|e| TtsError::VoiceSelectionFailed {
-                        reason: format!("Failed to set voice by name '{}': {}", name, e),
-                    });
+                    return tts
+                        .set_voice(voice)
+                        .map_err(|e| TtsError::VoiceSelectionFailed {
+                            reason: format!("Failed to set voice by name '{}': {}", name, e),
+                        });
                 }
             }
         }
@@ -538,26 +543,32 @@ fn select_voice(tts: &mut Tts, config: &VoiceConfig) -> Result<(), TtsError> {
     if config.gender != Gender::Any
         && let Some(voice) = find_best_voice(&voices, lang_prefix, config.gender)
     {
-        return tts.set_voice(voice).map_err(|e| TtsError::VoiceSelectionFailed {
-            reason: format!(
-                "Failed to set {:?} voice for language '{}': {}",
-                config.gender, lang_prefix, e
-            ),
-        });
+        return tts
+            .set_voice(voice)
+            .map_err(|e| TtsError::VoiceSelectionFailed {
+                reason: format!(
+                    "Failed to set {:?} voice for language '{}': {}",
+                    config.gender, lang_prefix, e
+                ),
+            });
     }
 
     // Step 3: Fall back to language filtering only (any gender) with quality preference
     if let Some(voice) = find_best_voice(&voices, lang_prefix, Gender::Any) {
-        return tts.set_voice(voice).map_err(|e| TtsError::VoiceSelectionFailed {
-            reason: format!("Failed to set voice for language '{}': {}", lang_prefix, e),
-        });
+        return tts
+            .set_voice(voice)
+            .map_err(|e| TtsError::VoiceSelectionFailed {
+                reason: format!("Failed to set voice for language '{}': {}", lang_prefix, e),
+            });
     }
 
     // Step 4: Final fallback - any English voice
     if let Some(voice) = voices.iter().find(|v| v.language().starts_with("en")) {
-        return tts.set_voice(voice).map_err(|e| TtsError::VoiceSelectionFailed {
-            reason: format!("Failed to set fallback English voice: {}", e),
-        });
+        return tts
+            .set_voice(voice)
+            .map_err(|e| TtsError::VoiceSelectionFailed {
+                reason: format!("Failed to set fallback English voice: {}", e),
+            });
     }
 
     // Step 5: No suitable voice found
@@ -809,17 +820,17 @@ mod tests {
             config.voice_stack[1],
             VoiceSelector::ByName("Second".into())
         );
-        assert_eq!(config.voice_stack[2], VoiceSelector::ById("third-id".into()));
+        assert_eq!(
+            config.voice_stack[2],
+            VoiceSelector::ById("third-id".into())
+        );
     }
 
     #[test]
     fn test_voice_config_with_name_creates_config() {
         let config = VoiceConfig::with_name("Alice");
         assert_eq!(config.voice_stack.len(), 1);
-        assert_eq!(
-            config.voice_stack[0],
-            VoiceSelector::ByName("Alice".into())
-        );
+        assert_eq!(config.voice_stack[0], VoiceSelector::ByName("Alice".into()));
     }
 
     #[test]

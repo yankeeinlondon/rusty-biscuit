@@ -208,10 +208,7 @@ mod tests {
     #[test]
     fn test_enum_has_provider_doc_comment() {
         // Test known provider
-        let generator = ModelEnumGenerator::new(
-            "OpenAi".to_string(),
-            vec!["gpt-4o".to_string()],
-        );
+        let generator = ModelEnumGenerator::new("OpenAi".to_string(), vec!["gpt-4o".to_string()]);
         let code = generator.generate();
 
         assert!(
@@ -220,10 +217,8 @@ mod tests {
         );
 
         // Test another known provider
-        let generator = ModelEnumGenerator::new(
-            "Anthropic".to_string(),
-            vec!["claude-3".to_string()],
-        );
+        let generator =
+            ModelEnumGenerator::new("Anthropic".to_string(), vec!["claude-3".to_string()]);
         let code = generator.generate();
 
         assert!(
@@ -232,10 +227,8 @@ mod tests {
         );
 
         // Test unknown provider falls back gracefully
-        let generator = ModelEnumGenerator::new(
-            "UnknownProvider".to_string(),
-            vec!["model-x".to_string()],
-        );
+        let generator =
+            ModelEnumGenerator::new("UnknownProvider".to_string(), vec!["model-x".to_string()]);
         let code = generator.generate();
 
         assert!(

@@ -1,6 +1,6 @@
 pub mod atomic;
-pub mod grouping;
 pub mod functional_grouping;
+pub mod grouping;
 pub mod runnable;
 pub mod state;
 

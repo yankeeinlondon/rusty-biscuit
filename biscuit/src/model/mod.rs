@@ -21,5 +21,5 @@
 pub mod selection;
 pub mod types;
 
-pub use selection::{get_model, ModelError};
+pub use selection::{ModelError, get_model};
 pub use types::{LlmClient, ModelKind, ModelProvider, ModelQuality, ModelStack, TaskKind};

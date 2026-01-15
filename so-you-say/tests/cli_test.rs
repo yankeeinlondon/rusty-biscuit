@@ -190,15 +190,7 @@ fn test_cli_special_chars_args() {
 #[test]
 fn test_cli_gender_flag_male() {
     let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "so-you-say",
-            "--",
-            "--gender",
-            "male",
-            "test",
-        ])
+        .args(["run", "-p", "so-you-say", "--", "--gender", "male", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -364,10 +356,7 @@ fn test_cli_voice_option() {
         .output()
         .expect("Failed to execute");
 
-    assert!(
-        output.status.success(),
-        "CLI should accept --voice option"
-    );
+    assert!(output.status.success(), "CLI should accept --voice option");
 }
 
 #[test]

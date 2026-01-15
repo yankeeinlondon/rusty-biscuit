@@ -51,9 +51,7 @@ pub struct GeminiModel {
 /// Build the authentication header for a provider
 fn build_auth_header(provider: &Provider, api_key: &str) -> (String, String) {
     match &provider.config().auth_method {
-        ApiAuthMethod::BearerToken => {
-            ("Authorization".to_string(), format!("Bearer {}", api_key))
-        }
+        ApiAuthMethod::BearerToken => ("Authorization".to_string(), format!("Bearer {}", api_key)),
         ApiAuthMethod::ApiKey(header) => (header.clone(), api_key.to_string()),
         ApiAuthMethod::QueryParam(_) => (String::new(), String::new()),
         ApiAuthMethod::None => (String::new(), String::new()),
@@ -61,10 +59,7 @@ fn build_auth_header(provider: &Provider, api_key: &str) -> (String, String) {
 }
 
 /// Fetch with retry logic for transient failures
-async fn fetch_with_retry<F, Fut, T, E>(
-    mut operation: F,
-    provider_name: &str,
-) -> Result<T, E>
+async fn fetch_with_retry<F, Fut, T, E>(mut operation: F, provider_name: &str) -> Result<T, E>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, E>>,
@@ -162,8 +157,11 @@ pub async fn get_provider_models_from_api(
 
     let provider_name = format!("{:?}", provider).to_lowercase();
 
-    debug!("Fetching models from {} at {}", provider_name,
-           url.split('?').next().unwrap_or(&url)); // Don't log API key
+    debug!(
+        "Fetching models from {} at {}",
+        provider_name,
+        url.split('?').next().unwrap_or(&url)
+    ); // Don't log API key
 
     // Build auth header (empty for QueryParam auth)
     let (header_name, header_value) = build_auth_header(&provider, api_key);

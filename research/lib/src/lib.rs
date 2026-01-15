@@ -407,9 +407,7 @@ impl ResearchMetadata {
         }
 
         // Save if we made any changes
-        if needs_save
-            && let Err(e) = v1.save(output_dir).await
-        {
+        if needs_save && let Err(e) = v1.save(output_dir).await {
             tracing::warn!("Failed to save migrated metadata: {}", e);
         }
 
@@ -428,7 +426,9 @@ impl ResearchMetadata {
         let content = fs::read_to_string(&skill_path).await.ok()?;
 
         // First try to parse as-is
-        if let Ok((frontmatter, _body)) = validation::frontmatter::parse_and_validate_frontmatter(&content) {
+        if let Ok((frontmatter, _body)) =
+            validation::frontmatter::parse_and_validate_frontmatter(&content)
+        {
             return Some(frontmatter.description);
         }
 
@@ -448,7 +448,10 @@ impl ResearchMetadata {
             }
             Err(e) => {
                 tracing::debug!("Repair failed for {}: {}", skill_path.display(), e);
-                tracing::debug!("Repaired content first 500 chars: {}", &repaired[..500.min(repaired.len())]);
+                tracing::debug!(
+                    "Repaired content first 500 chars: {}",
+                    &repaired[..500.min(repaired.len())]
+                );
                 None
             }
         }
@@ -1045,7 +1048,8 @@ fn format_version_history_for_prompt(history: &changelog::types::VersionHistory)
         output.push_str("|---------|------|--------------|---------||\n");
 
         for version in &history.versions {
-            let date_str = version.release_date
+            let date_str = version
+                .release_date
                 .map(|d| d.format("%Y-%m-%d").to_string())
                 .unwrap_or_else(|| "Unknown".to_string());
 
@@ -1067,7 +1071,9 @@ fn format_version_history_for_prompt(history: &changelog::types::VersionHistory)
     }
 
     // Breaking changes
-    let breaking_changes: Vec<_> = history.versions.iter()
+    let breaking_changes: Vec<_> = history
+        .versions
+        .iter()
         .filter(|v| !v.breaking_changes.is_empty())
         .collect();
 
@@ -1082,7 +1088,9 @@ fn format_version_history_for_prompt(history: &changelog::types::VersionHistory)
     }
 
     // New features
-    let feature_versions: Vec<_> = history.versions.iter()
+    let feature_versions: Vec<_> = history
+        .versions
+        .iter()
         .filter(|v| !v.new_features.is_empty())
         .collect();
 
@@ -1153,7 +1161,9 @@ fn build_changelog_prompt(
             ConfidenceLevel::Low => "Low",
         };
 
-        let sources_str = history.sources_used.iter()
+        let sources_str = history
+            .sources_used
+            .iter()
             .map(|s| match s {
                 ChangelogSource::GitHubRelease => "github_releases",
                 ChangelogSource::ChangelogFile => "changelog_file",
@@ -1739,7 +1749,10 @@ where
             }
         }
     } else {
-        warn!(task = name, "No library info available, using LLM-only mode");
+        warn!(
+            task = name,
+            "No library info available, using LLM-only mode"
+        );
         None
     };
 
@@ -1874,7 +1887,10 @@ where
             }
         }
     } else {
-        warn!(task = name, "No library info available, using LLM-only mode");
+        warn!(
+            task = name,
+            "No library info available, using LLM-only mode"
+        );
         None
     };
 
@@ -2165,8 +2181,14 @@ async fn run_incremental_research(
     // Extract library context from metadata (clone to owned strings for futures)
     let (package_manager, language, url) = match existing_metadata.library_details() {
         Some(details) => (
-            details.package_manager.clone().unwrap_or_else(|| "unknown".to_string()),
-            details.language.clone().unwrap_or_else(|| "unknown".to_string()),
+            details
+                .package_manager
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
+            details
+                .language
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
             details.url.clone().unwrap_or_else(|| "N/A".to_string()),
         ),
         None => (
@@ -2180,8 +2202,14 @@ async fn run_incremental_research(
     let library_info = existing_metadata
         .library_details()
         .map(|details| LibraryInfo {
-            package_manager: details.package_manager.clone().unwrap_or_else(|| "unknown".to_string()),
-            language: details.language.clone().unwrap_or_else(|| "unknown".to_string()),
+            package_manager: details
+                .package_manager
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
+            language: details
+                .language
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
             url: details.url.clone().unwrap_or_else(|| "N/A".to_string()),
             repository: details.repository.clone(),
             description: None,
@@ -2792,9 +2820,7 @@ pub async fn list_with_migrate(
         let mut errors = 0;
 
         // Also check the api directory
-        let api_path = PathBuf::from(&research_dir)
-            .join(".research")
-            .join("api");
+        let api_path = PathBuf::from(&research_dir).join(".research").join("api");
 
         for base_path in [&library_path, &api_path] {
             if !base_path.exists() {
@@ -2871,10 +2897,7 @@ pub async fn list_with_migrate(
                 needs_manual_fix.len()
             );
         }
-        println!(
-            "  {} already complete, {} errors",
-            already_complete, errors
-        );
+        println!("  {} already complete, {} errors", already_complete, errors);
 
         // Show guidance if there are topics needing manual fix
         if !needs_manual_fix.is_empty() {
@@ -3183,7 +3206,9 @@ async fn regenerate_skill_from_existing_research(
 /// ## Errors
 ///
 /// Returns `ResearchError::Io` if file deletion fails.
-async fn delete_research_output_documents(output_dir: &std::path::Path) -> Result<(), ResearchError> {
+async fn delete_research_output_documents(
+    output_dir: &std::path::Path,
+) -> Result<(), ResearchError> {
     // Standard research documents to delete
     let documents_to_delete = vec![
         "overview.md",
@@ -3333,7 +3358,8 @@ pub async fn research(
     }
 
     // Check for existing metadata (incremental mode) - skip if force_recreation is true
-    if !force_recreation && let Some(existing_metadata) = ResearchMetadata::load(&output_dir).await {
+    if !force_recreation && let Some(existing_metadata) = ResearchMetadata::load(&output_dir).await
+    {
         println!("Found existing research for '{}'", topic);
 
         // Check for missing standard prompts
@@ -4131,8 +4157,7 @@ pub async fn research_api(
     let start_time = std::time::Instant::now();
 
     // Check for existing metadata
-    if !force_recreation
-        && let Some(_existing_metadata) = ResearchMetadata::load(&output_dir).await
+    if !force_recreation && let Some(_existing_metadata) = ResearchMetadata::load(&output_dir).await
     {
         println!("Found existing API research for '{}'", api_name);
         // TODO: Implement incremental mode for API research
@@ -4163,7 +4188,10 @@ pub async fn research_api(
     println!("   This is a placeholder that creates the research directory structure.");
 
     if !questions.is_empty() {
-        println!("   {} additional question(s) provided (not yet processed)", questions.len());
+        println!(
+            "   {} additional question(s) provided (not yet processed)",
+            questions.len()
+        );
     }
 
     let total_time = start_time.elapsed().as_secs_f32();
@@ -4203,7 +4231,9 @@ mod tests {
         let metadata = ResearchMetadata::new_library(Some(&lib_info));
 
         assert_eq!(metadata.kind, ResearchKind::Library);
-        let details = metadata.library_details().expect("should have library details");
+        let details = metadata
+            .library_details()
+            .expect("should have library details");
         assert_eq!(details.package_manager.as_deref(), Some("crates.io"));
         assert_eq!(details.language.as_deref(), Some("Rust"));
         assert!(metadata.additional_files.is_empty());
@@ -4215,7 +4245,9 @@ mod tests {
 
         assert_eq!(metadata.kind, ResearchKind::Library);
         // Even without LibraryInfo, we still get default LibraryDetails
-        let details = metadata.library_details().expect("should have library details");
+        let details = metadata
+            .library_details()
+            .expect("should have library details");
         assert!(details.package_manager.is_none());
         assert!(metadata.additional_files.is_empty());
     }
@@ -4896,8 +4928,8 @@ Content with spaces in separator."#;
 
     mod extract_tool_results_tests {
         use super::*;
-        use rig::message::{Text, ToolResult, ToolResultContent};
         use rig::OneOrMany;
+        use rig::message::{Text, ToolResult, ToolResultContent};
 
         #[test]
         fn test_extract_empty_history() {
@@ -4948,7 +4980,8 @@ Content with spaces in separator."#;
         fn test_extract_multiple_tool_results() {
             // Simulates a typical MaxDepthError scenario where multiple search/scrape
             // operations were performed but the agent never produced a final answer.
-            let search_result = "Web search: colored-text crate is a Rust library for terminal colors.";
+            let search_result =
+                "Web search: colored-text crate is a Rust library for terminal colors.";
             let scrape_result = "Page content: The colored_text crate provides...";
             let another_search = "Web search: No integration partners found for colored-text.";
 

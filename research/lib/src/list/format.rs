@@ -201,7 +201,10 @@ fn format_main_line(topic: &TopicInfo, hide_type_badge: bool, verbose: bool) -> 
         }
 
         // Add 🐞 icon if there are any issues (other than migration)
-        if topic.missing_metadata || !topic.missing_output.is_empty() || !topic.missing_underlying.is_empty() {
+        if topic.missing_metadata
+            || !topic.missing_output.is_empty()
+            || !topic.missing_underlying.is_empty()
+        {
             icons.push("🐞");
         }
 

@@ -46,8 +46,14 @@ fn test_complex_fixture_exists() {
 fn test_frontmatter_fixture_exists() {
     // Verify frontmatter fixture loads
     let content = load_fixture("valid/frontmatter.md");
-    assert!(!content.is_empty(), "Frontmatter fixture should not be empty");
-    assert!(content.starts_with("---"), "Frontmatter should start with ---");
+    assert!(
+        !content.is_empty(),
+        "Frontmatter fixture should not be empty"
+    );
+    assert!(
+        content.starts_with("---"),
+        "Frontmatter should start with ---"
+    );
 }
 
 // Future test placeholders (to be implemented in later phases):

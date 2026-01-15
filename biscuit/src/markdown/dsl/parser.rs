@@ -129,9 +129,10 @@ fn parse_highlight(s: &str) -> Result<HighlightSpec, MarkdownError> {
             // Parse range
             let range_parts: Vec<&str> = part.split('-').collect();
             if range_parts.len() != 2 {
-                return Err(MarkdownError::InvalidLineRange(
-                    format!("Invalid range format: {}", part)
-                ));
+                return Err(MarkdownError::InvalidLineRange(format!(
+                    "Invalid range format: {}",
+                    part
+                )));
             }
 
             let start = range_parts[0].trim().parse::<usize>().map_err(|_| {
@@ -214,11 +215,31 @@ mod tests {
 
     #[test]
     fn test_parse_line_numbering_variants() {
-        assert!(parse_code_info("rust line-numbering=1").unwrap().line_numbering);
-        assert!(parse_code_info("rust line-numbering=yes").unwrap().line_numbering);
-        assert!(parse_code_info("rust line-numbering=on").unwrap().line_numbering);
-        assert!(!parse_code_info("rust line-numbering=no").unwrap().line_numbering);
-        assert!(!parse_code_info("rust line-numbering=0").unwrap().line_numbering);
+        assert!(
+            parse_code_info("rust line-numbering=1")
+                .unwrap()
+                .line_numbering
+        );
+        assert!(
+            parse_code_info("rust line-numbering=yes")
+                .unwrap()
+                .line_numbering
+        );
+        assert!(
+            parse_code_info("rust line-numbering=on")
+                .unwrap()
+                .line_numbering
+        );
+        assert!(
+            !parse_code_info("rust line-numbering=no")
+                .unwrap()
+                .line_numbering
+        );
+        assert!(
+            !parse_code_info("rust line-numbering=0")
+                .unwrap()
+                .line_numbering
+        );
     }
 
     #[test]
@@ -276,7 +297,8 @@ mod tests {
 
     #[test]
     fn test_parse_multiple_attributes() {
-        let meta = parse_code_info(r#"ts title="Greet" line-numbering=true highlight=1,4-6"#).unwrap();
+        let meta =
+            parse_code_info(r#"ts title="Greet" line-numbering=true highlight=1,4-6"#).unwrap();
         assert_eq!(meta.language, "ts");
         assert_eq!(meta.title, Some("Greet".to_string()));
         assert!(meta.line_numbering);
@@ -289,7 +311,10 @@ mod tests {
     fn test_parse_custom_attributes() {
         let meta = parse_code_info("rust custom-key=custom-value another=123").unwrap();
         assert_eq!(meta.language, "rust");
-        assert_eq!(meta.custom.get("custom-key"), Some(&"custom-value".to_string()));
+        assert_eq!(
+            meta.custom.get("custom-key"),
+            Some(&"custom-value".to_string())
+        );
         assert_eq!(meta.custom.get("another"), Some(&"123".to_string()));
     }
 

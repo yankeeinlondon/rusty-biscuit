@@ -178,6 +178,9 @@ mod tests {
 
         let v0: MetadataV0 = serde_json::from_str(json).unwrap();
         let info = v0.library_info.unwrap();
-        assert_eq!(info.repository, Some("https://github.com/lodash/lodash".to_string()));
+        assert_eq!(
+            info.repository,
+            Some("https://github.com/lodash/lodash".to_string())
+        );
     }
 }

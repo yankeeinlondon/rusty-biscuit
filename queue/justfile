@@ -1,0 +1,55 @@
+set dotenv-load
+set positional-arguments
+
+BOLD := '\033[1m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+YELLOW2 := '\033[38;5;3m'
+BLACK := '\033[30m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+WHITE := '\033[37m'
+
+default:
+    @echo
+    @echo "Queue"
+    @echo "------------------------------------"
+    @echo ""
+    @just --list | grep -v 'default'
+    @echo
+
+# build research modules (cli, lib)
+build *args="":
+    @echo ""
+    @echo "Build Queue CLI"
+    @echo "--------------------"
+    @echo ""
+    @cargo build -p queue {{args}}
+
+# run tests across research modules
+test *args="":
+    @echo ""
+    @echo "Testing Queue CLI"
+    @echo "----------------------"
+    @echo ""
+    @cargo test -p queue {{args}}
+
+lint *args="":
+    @echo ""
+    @echo "Linting Queue CLI"
+    @echo "----------------------"
+    @echo ""
+    @cargo clippy
+
+# install the `research` binary into the executable path
+install:
+    @cargo build --release -p queue
+    @cargo install --path "." --locked
+
+# run the debug release of the Research CLI
+cli *args="":
+    @cargo run -p so-you-say -- {{args}}

@@ -2,9 +2,9 @@
 
 use super::base::Provider;
 use super::cache::{acquire_fetch_lock, check_cache, write_cache};
-use super::types::{LlmEntry, ProviderListFormat, OpenAIModelsResponse};
 use super::constants::*;
 use super::retry::*;
+use super::types::{LlmEntry, OpenAIModelsResponse, ProviderListFormat};
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -58,7 +58,10 @@ pub enum ProviderError {
     ClientBuildFailed { provider: String, reason: String },
 
     #[error("Missing API key for {provider} (set one of: {env_vars:?})")]
-    MissingApiKey { provider: String, env_vars: Vec<String> },
+    MissingApiKey {
+        provider: String,
+        env_vars: Vec<String>,
+    },
 }
 
 // OpenAI types now imported from super::types (Phase 0 refactoring)
@@ -242,11 +245,7 @@ fn normalize_and_dedupe(entries: Vec<LlmEntry>) -> Vec<LlmEntry> {
         }
     }
 
-    normalized.sort_by(|a, b| {
-        a.provider
-            .cmp(&b.provider)
-            .then(a.model.cmp(&b.model))
-    });
+    normalized.sort_by(|a, b| a.provider.cmp(&b.provider).then(a.model.cmp(&b.model)));
 
     normalized
 }
@@ -268,7 +267,10 @@ pub async fn fetch_all_providers() -> Result<Vec<LlmEntry>, ProviderError> {
         return Ok(cached);
     }
 
-    info!("Loading models from curated registry ({})", super::curated::LAST_UPDATED);
+    info!(
+        "Loading models from curated registry ({})",
+        super::curated::LAST_UPDATED
+    );
 
     // Start with curated models (always available, no API keys needed)
     let mut all_entries = super::curated::get_curated_models();
@@ -285,7 +287,10 @@ pub async fn fetch_all_providers() -> Result<Vec<LlmEntry>, ProviderError> {
                 all_entries.extend(openai_models);
             }
             Err(e) => {
-                warn!("Failed to fetch from OpenAI API, using curated OpenAI models: {}", e);
+                warn!(
+                    "Failed to fetch from OpenAI API, using curated OpenAI models: {}",
+                    e
+                );
                 // Curated OpenAI models already in all_entries
             }
         }
@@ -298,7 +303,8 @@ pub async fn fetch_all_providers() -> Result<Vec<LlmEntry>, ProviderError> {
 
     let normalized = normalize_and_dedupe(all_entries);
 
-    info!("Total models in registry: {} (from {} providers)",
+    info!(
+        "Total models in registry: {} (from {} providers)",
         normalized.len(),
         super::curated::PROVIDER_COUNT
     );

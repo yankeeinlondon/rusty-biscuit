@@ -700,7 +700,10 @@ mod tests {
     fn test_metadata_needs_migration_method() {
         // Test the Metadata::needs_migration() method directly
         let v0: Metadata = serde_json::from_str(r#"{"kind": "library"}"#).unwrap();
-        assert!(v0.needs_migration(), "v0 (default schema_version=0) needs migration");
+        assert!(
+            v0.needs_migration(),
+            "v0 (default schema_version=0) needs migration"
+        );
 
         let v1_incomplete: Metadata =
             serde_json::from_str(r#"{"schema_version": 1, "kind": "library"}"#).unwrap();

@@ -30,24 +30,20 @@
 //! }
 //! ```
 
+pub mod base;
 pub mod cache;
 pub mod constants;
 pub mod curated;
 pub mod discovery;
 pub mod retry;
 pub mod types;
-pub mod base;
 pub mod zai;
 pub mod zenmux;
 
 // Re-export main types and functions
-pub use curated::{get_curated_models, LAST_UPDATED, PROVIDER_COUNT};
-pub use discovery::{generate_provider_list, ProviderError};
-pub use types::{LlmEntry, ProviderListFormat, OpenAIModelsResponse, OpenAIModel, ProviderModel};
 pub use base::{
-    Provider,
-    has_provider_api_key,
-    get_api_keys,
-    get_provider_models,
-    artificial_analysis_url
+    Provider, artificial_analysis_url, get_api_keys, get_provider_models, has_provider_api_key,
 };
+pub use curated::{LAST_UPDATED, PROVIDER_COUNT, get_curated_models};
+pub use discovery::{ProviderError, generate_provider_list};
+pub use types::{LlmEntry, OpenAIModel, OpenAIModelsResponse, ProviderListFormat, ProviderModel};

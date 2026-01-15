@@ -9,9 +9,9 @@
 //! with continuation lines showing empty line numbers and maintaining
 //! the appropriate background color.
 
-use super::diff::{DiffLine, InlineSpan};
 use super::VisualDiffOptions;
-use textwrap::{wrap, Options as WrapOptions};
+use super::diff::{DiffLine, InlineSpan};
+use textwrap::{Options as WrapOptions, wrap};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 // ANSI escape codes
@@ -62,12 +62,7 @@ pub fn render(
                 line_no_new,
                 content,
             } => {
-                let lines = format_context_line(
-                    *line_no_old,
-                    *line_no_new,
-                    content,
-                    content_width,
-                );
+                let lines = format_context_line(*line_no_old, *line_no_new, content, content_width);
                 for line in lines {
                     output.push_str(&line);
                     output.push('\n');
@@ -391,7 +386,10 @@ fn format_content_with_spans(
 
         if span_width <= remaining {
             if span.emphasized {
-                result.push_str(&format!("{}{BOLD}{UNDERLINE}{}{RESET}", bg_emphasis, span_content));
+                result.push_str(&format!(
+                    "{}{BOLD}{UNDERLINE}{}{RESET}",
+                    bg_emphasis, span_content
+                ));
             } else {
                 result.push_str(&format!("{}{}{RESET}", bg_base, span_content));
             }
@@ -414,7 +412,11 @@ fn format_content_with_spans(
 
     // Pad to full width
     if visual_width < max_width {
-        result.push_str(&format!("{}{}{RESET}", bg_base, " ".repeat(max_width - visual_width)));
+        result.push_str(&format!(
+            "{}{}{RESET}",
+            bg_base,
+            " ".repeat(max_width - visual_width)
+        ));
     }
 
     result
@@ -435,10 +437,12 @@ fn wrap_to_width(s: &str, max_width: usize) -> Vec<String> {
     }
 
     // Configure textwrap options for proper word wrapping
-    let options = WrapOptions::new(max_width)
-        .break_words(true); // Break long words if needed
+    let options = WrapOptions::new(max_width).break_words(true); // Break long words if needed
 
-    let wrapped: Vec<String> = wrap(s, options).into_iter().map(|cow| cow.into_owned()).collect();
+    let wrapped: Vec<String> = wrap(s, options)
+        .into_iter()
+        .map(|cow| cow.into_owned())
+        .collect();
 
     // Ensure we always return at least one line
     if wrapped.is_empty() {
@@ -514,7 +518,10 @@ mod tests {
         let lines = format_context_line(42, 42, long_content, 20);
 
         // Should produce multiple visual lines
-        assert!(lines.len() > 1, "Long content should wrap to multiple lines");
+        assert!(
+            lines.len() > 1,
+            "Long content should wrap to multiple lines"
+        );
 
         // First line should show line numbers
         assert!(lines[0].contains("42"));

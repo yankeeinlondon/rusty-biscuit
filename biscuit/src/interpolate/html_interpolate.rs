@@ -318,13 +318,9 @@ mod tests {
     #[test]
     fn test_regex_no_match() {
         let html = "<p>Hello World</p>";
-        let result = html_interpolate_regex(
-            html,
-            HtmlScope::InnerHtml(HtmlTag::All),
-            r"\d+",
-            "NUM",
-        )
-        .unwrap();
+        let result =
+            html_interpolate_regex(html, HtmlScope::InnerHtml(HtmlTag::All), r"\d+", "NUM")
+                .unwrap();
 
         assert!(matches!(result, Cow::Borrowed(_)));
         assert_eq!(result, html);
@@ -374,9 +370,13 @@ mod tests {
     #[test]
     fn test_outer_html_scope() {
         let html = r#"<div class="test">Content</div>"#;
-        let result =
-            html_interpolate(html, HtmlScope::OuterHtml(HtmlTag::Div), "Content", "Modified")
-                .unwrap();
+        let result = html_interpolate(
+            html,
+            HtmlScope::OuterHtml(HtmlTag::Div),
+            "Content",
+            "Modified",
+        )
+        .unwrap();
 
         assert!(result.contains("Modified"));
     }
@@ -475,13 +475,9 @@ mod tests {
     #[test]
     fn test_regex_scope_restriction() {
         let html = "<div>Item 123</div><span>Item 456</span>";
-        let result = html_interpolate_regex(
-            html,
-            HtmlScope::InnerHtml(HtmlTag::Div),
-            r"\d+",
-            "XXX",
-        )
-        .unwrap();
+        let result =
+            html_interpolate_regex(html, HtmlScope::InnerHtml(HtmlTag::Div), r"\d+", "XXX")
+                .unwrap();
 
         assert!(result.contains("Item XXX"));
         assert!(result.contains("Item 456")); // span should be unchanged
@@ -506,9 +502,13 @@ mod tests {
     #[test]
     fn test_unicode_html_replacement() {
         let html = "<div>\u{1F600} Hello \u{1F389}</div>";
-        let result =
-            html_interpolate(html, HtmlScope::InnerHtml(HtmlTag::Div), "\u{1F600}", "[smile]")
-                .unwrap();
+        let result = html_interpolate(
+            html,
+            HtmlScope::InnerHtml(HtmlTag::Div),
+            "\u{1F600}",
+            "[smile]",
+        )
+        .unwrap();
         assert!(result.contains("[smile]"));
         // Other emoji should be unchanged
         assert!(result.contains("\u{1F389}"));
@@ -538,9 +538,13 @@ mod tests {
     #[test]
     fn test_header_element_interpolate() {
         let html = "<header><nav>Navigation</nav></header><main>Main content</main>";
-        let result =
-            html_interpolate(html, HtmlScope::InnerHtml(HtmlTag::Header), "Navigation", "Nav")
-                .unwrap();
+        let result = html_interpolate(
+            html,
+            HtmlScope::InnerHtml(HtmlTag::Header),
+            "Navigation",
+            "Nav",
+        )
+        .unwrap();
         assert!(result.contains("Nav"));
         // Main should be unchanged
         assert!(result.contains("Main content"));
@@ -573,9 +577,13 @@ mod tests {
     #[test]
     fn test_head_element_interpolate() {
         let html = "<html><head><title>Page Title</title></head><body>Body</body></html>";
-        let result =
-            html_interpolate(html, HtmlScope::InnerHtml(HtmlTag::Head), "Page Title", "New Title")
-                .unwrap();
+        let result = html_interpolate(
+            html,
+            HtmlScope::InnerHtml(HtmlTag::Head),
+            "Page Title",
+            "New Title",
+        )
+        .unwrap();
         assert!(result.contains("New Title"));
         // Body should be unchanged
         assert!(result.contains("Body"));
@@ -611,13 +619,9 @@ mod tests {
     #[test]
     fn test_regex_case_insensitive_html() {
         let html = "<div>Hello HELLO hello</div>";
-        let result = html_interpolate_regex(
-            html,
-            HtmlScope::InnerHtml(HtmlTag::Div),
-            r"(?i)hello",
-            "hi",
-        )
-        .unwrap();
+        let result =
+            html_interpolate_regex(html, HtmlScope::InnerHtml(HtmlTag::Div), r"(?i)hello", "hi")
+                .unwrap();
         // All variants should be replaced
         let hi_count = result.matches("hi").count();
         assert_eq!(hi_count, 3);

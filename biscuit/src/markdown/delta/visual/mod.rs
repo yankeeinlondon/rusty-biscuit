@@ -21,9 +21,9 @@ mod diff;
 mod side_by_side;
 mod unified;
 
-pub use diff::{compute_visual_diff, DiffLine, InlineSpan};
+pub use diff::{DiffLine, InlineSpan, compute_visual_diff};
 
-use terminal_size::{terminal_size, Width};
+use terminal_size::{Width, terminal_size};
 
 /// Threshold for switching between side-by-side and unified views.
 const SIDE_BY_SIDE_THRESHOLD: u16 = 110;

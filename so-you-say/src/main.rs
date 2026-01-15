@@ -1,5 +1,5 @@
 use clap::{Parser, ValueEnum};
-use shared::tts::{available_system_voices, Gender, SystemVoiceInfo, VoiceConfig, VoiceSelector};
+use shared::tts::{Gender, SystemVoiceInfo, VoiceConfig, VoiceSelector, available_system_voices};
 use std::io::{self, Read};
 
 /// Gender preference for voice selection
@@ -212,7 +212,12 @@ fn print_voices(voices: &[SystemVoiceInfo], filter_gender: Option<GenderArg>) {
     }
 
     // Calculate column widths
-    let name_width = filtered.iter().map(|v| v.name.len()).max().unwrap_or(4).max(4);
+    let name_width = filtered
+        .iter()
+        .map(|v| v.name.len())
+        .max()
+        .unwrap_or(4)
+        .max(4);
     let lang_width = filtered
         .iter()
         .map(|v| v.language.len())
@@ -223,13 +228,18 @@ fn print_voices(voices: &[SystemVoiceInfo], filter_gender: Option<GenderArg>) {
     // Print header
     println!(
         "{:<name_width$}  {:<lang_width$}  {:<7}  ID",
-        "NAME", "LANGUAGE", "GENDER",
+        "NAME",
+        "LANGUAGE",
+        "GENDER",
         name_width = name_width,
         lang_width = lang_width
     );
     println!(
         "{:-<name_width$}  {:-<lang_width$}  {:-<7}  {:-<40}",
-        "", "", "", "",
+        "",
+        "",
+        "",
+        "",
         name_width = name_width,
         lang_width = lang_width
     );
@@ -333,7 +343,12 @@ mod tests {
 
     #[test]
     fn test_join_args_with_empty_strings() {
-        let args = vec!["".to_string(), "Hello".to_string(), "".to_string(), "world".to_string()];
+        let args = vec![
+            "".to_string(),
+            "Hello".to_string(),
+            "".to_string(),
+            "world".to_string(),
+        ];
         assert_eq!(join_args(args), " Hello  world");
     }
 

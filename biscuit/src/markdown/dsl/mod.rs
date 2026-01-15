@@ -68,7 +68,11 @@ impl HighlightSpec {
     }
 
     /// Adds a range of lines to highlight.
-    pub fn add_range(&mut self, start: usize, end: usize) -> Result<(), crate::markdown::MarkdownError> {
+    pub fn add_range(
+        &mut self,
+        start: usize,
+        end: usize,
+    ) -> Result<(), crate::markdown::MarkdownError> {
         self.0.push(ValidLineRange::range(start, end)?);
         Ok(())
     }
@@ -99,7 +103,10 @@ pub struct ValidLineRange {
 impl ValidLineRange {
     /// Creates a single-line range.
     pub fn single(line: usize) -> Self {
-        Self { start: line, end: line }
+        Self {
+            start: line,
+            end: line,
+        }
     }
 
     /// Creates a range from start to end (inclusive).
@@ -109,9 +116,10 @@ impl ValidLineRange {
     /// Returns an error if start > end.
     pub fn range(start: usize, end: usize) -> Result<Self, crate::markdown::MarkdownError> {
         if start > end {
-            Err(crate::markdown::MarkdownError::InvalidLineRange(
-                format!("{}-{} (start must be <= end)", start, end)
-            ))
+            Err(crate::markdown::MarkdownError::InvalidLineRange(format!(
+                "{}-{} (start must be <= end)",
+                start, end
+            )))
         } else {
             Ok(Self { start, end })
         }

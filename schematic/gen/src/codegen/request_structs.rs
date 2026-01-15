@@ -323,7 +323,9 @@ mod tests {
         assert!(code.contains("pub struct GetMessageRequest"));
         assert!(code.contains("pub thread_id: String"));
         assert!(code.contains("pub message_id: String"));
-        assert!(code.contains(r#"format!("/threads/{}/messages/{}", self.thread_id, self.message_id)"#));
+        assert!(
+            code.contains(r#"format!("/threads/{}/messages/{}", self.thread_id, self.message_id)"#)
+        );
     }
 
     #[test]

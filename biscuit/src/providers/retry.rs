@@ -36,10 +36,7 @@ use tracing::warn;
 /// ```
 pub fn is_rate_limit_error(error: &ProviderError) -> bool {
     match error {
-        ProviderError::HttpError(e) => e
-            .status()
-            .map(|s| s.as_u16() == 429)
-            .unwrap_or(false),
+        ProviderError::HttpError(e) => e.status().map(|s| s.as_u16() == 429).unwrap_or(false),
         ProviderError::RateLimitExceeded { .. } => true,
         _ => false,
     }
@@ -120,7 +117,7 @@ where
             Err(_) => {
                 return Err(ProviderError::Timeout {
                     provider: provider_name.to_string(),
-                })
+                });
             }
         }
     }
@@ -153,10 +150,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_with_retry_success() {
-        let result = fetch_with_retry(
-            || async { Ok::<i32, ProviderError>(42) },
-            "test_provider"
-        ).await;
+        let result =
+            fetch_with_retry(|| async { Ok::<i32, ProviderError>(42) }, "test_provider").await;
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
@@ -169,8 +164,9 @@ mod tests {
                 tokio::time::sleep(Duration::from_secs(60)).await;
                 Ok::<i32, ProviderError>(42)
             },
-            "test_provider"
-        ).await;
+            "test_provider",
+        )
+        .await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -189,8 +185,9 @@ mod tests {
                     provider: "test".to_string(),
                 })
             },
-            "test_provider"
-        ).await;
+            "test_provider",
+        )
+        .await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -203,8 +200,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_with_retry_exhausts_retries() {
-        use std::sync::atomic::{AtomicU32, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
 
         let attempt_count = Arc::new(AtomicU32::new(0));
         let attempt_count_clone = attempt_count.clone();
@@ -219,8 +216,9 @@ mod tests {
                     })
                 }
             },
-            "test_provider"
-        ).await;
+            "test_provider",
+        )
+        .await;
 
         assert!(result.is_err());
         // MAX_RETRIES + 1 initial attempt = 4 total attempts

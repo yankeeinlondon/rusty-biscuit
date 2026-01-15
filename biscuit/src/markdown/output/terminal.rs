@@ -28,10 +28,12 @@
 //! ```
 
 use crate::markdown::{
-    dsl::parse_code_info,
-    highlighting::{prose::ProseHighlighter, scope_cache::ScopeCache, CodeHighlighter, ColorMode, ThemePair},
-    inline::{InlineEvent, InlineTag, MarkProcessor},
     Markdown, MarkdownError,
+    dsl::parse_code_info,
+    highlighting::{
+        CodeHighlighter, ColorMode, ThemePair, prose::ProseHighlighter, scope_cache::ScopeCache,
+    },
+    inline::{InlineEvent, InlineTag, MarkProcessor},
 };
 use comfy_table::{Attribute, Cell, CellAlignment, ContentArrangement, Table, presets};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -40,7 +42,7 @@ use std::path::{Path, PathBuf};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color, Style};
 use syntect::parsing::{Scope, SyntaxReference};
-use terminal_size::{terminal_size, Width};
+use terminal_size::{Width, terminal_size};
 use unicode_width::UnicodeWidthStr;
 use viuer::{KittySupport, get_kitty_support, is_iterm_supported};
 
@@ -72,7 +74,7 @@ impl ColorDepth {
     /// - `Colors16` if terminal supports basic 16 colors
     /// - `None` if no color support detected
     pub fn auto_detect() -> Self {
-        use crate::terminal::{TRUE_COLOR_DEPTH, COLORS_256_DEPTH, COLORS_16_DEPTH};
+        use crate::terminal::{COLORS_16_DEPTH, COLORS_256_DEPTH, TRUE_COLOR_DEPTH};
 
         let depth = crate::terminal::color_depth();
         if depth >= TRUE_COLOR_DEPTH {
@@ -258,9 +260,7 @@ impl ImageRenderer {
         );
         let graphics_supported = is_tty && (kitty_supported || is_iterm_supported());
 
-        let terminal_width = terminal_size()
-            .map(|(Width(w), _)| w)
-            .unwrap_or(80);
+        let terminal_width = terminal_size().map(|(Width(w), _)| w).unwrap_or(80);
 
         let base = base_path
             .map(|p| p.to_path_buf())
@@ -484,7 +484,9 @@ pub struct TerminalOptions {
 
 impl Default for TerminalOptions {
     fn default() -> Self {
-        use crate::markdown::highlighting::{detect_prose_theme, detect_code_theme, detect_color_mode};
+        use crate::markdown::highlighting::{
+            detect_code_theme, detect_color_mode, detect_prose_theme,
+        };
 
         let prose_theme = detect_prose_theme();
         let code_theme = detect_code_theme(prose_theme);
@@ -595,10 +597,8 @@ pub fn write_terminal<W: std::io::Write>(
     let code_highlighter = CodeHighlighter::new(options.code_theme, options.color_mode);
 
     // Load prose theme for ProseHighlighter
-    let prose_syntect_theme = crate::markdown::highlighting::themes::load_theme(
-        options.prose_theme,
-        options.color_mode,
-    );
+    let prose_syntect_theme =
+        crate::markdown::highlighting::themes::load_theme(options.prose_theme, options.color_mode);
     let prose_highlighter = ProseHighlighter::new(&prose_syntect_theme);
 
     // Use LineWrapper for proper word wrapping at terminal width
@@ -608,7 +608,10 @@ pub fn write_terminal<W: std::io::Write>(
     let mut scope_stack: Vec<Scope> = vec![prose_highlighter.base_scope()];
 
     // Enable table parsing extension and wrap with MarkProcessor for ==highlight== support
-    let parser = Parser::new_ext(md.content(), Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH);
+    let parser = Parser::new_ext(
+        md.content(),
+        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
+    );
     let events = MarkProcessor::new(parser);
     let mut in_code_block = false;
     let mut code_buffer = String::new();
@@ -654,7 +657,12 @@ pub fn write_terminal<W: std::io::Write>(
 
     // Compute blockquote background color from theme (subtle lift from page)
     let blockquote_bg = {
-        let theme_bg = prose_syntect_theme.settings.background.unwrap_or(Color { r: 0, g: 0, b: 0, a: 255 });
+        let theme_bg = prose_syntect_theme.settings.background.unwrap_or(Color {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255,
+        });
         compute_blockquote_bg(theme_bg, options.color_mode)
     };
 
@@ -914,7 +922,12 @@ pub fn write_terminal<W: std::io::Write>(
                 let base_style = prose_highlighter.base_style();
                 if style.foreground == base_style.foreground {
                     // Apply standard link blue color (similar to HTML default #0066cc)
-                    style.foreground = Color { r: 65, g: 160, b: 225, a: 255 }; // Soft blue
+                    style.foreground = Color {
+                        r: 65,
+                        g: 160,
+                        b: 225,
+                        a: 255,
+                    }; // Soft blue
                     // Also add underline for extra visual distinction
                     style.font_style |= syntect::highlighting::FontStyle::UNDERLINE;
                 }
@@ -938,7 +951,10 @@ pub fn write_terminal<W: std::io::Write>(
             // List handling
             InlineEvent::Standard(Event::Start(Tag::List(start_num))) => {
                 // When a nested list starts inside an item, add newline to separate from parent text
-                if !list_stack.is_empty() && !wrapper.output().is_empty() && !wrapper.output().ends_with('\n') {
+                if !list_stack.is_empty()
+                    && !wrapper.output().is_empty()
+                    && !wrapper.output().ends_with('\n')
+                {
                     wrapper.newline();
                 }
                 list_stack.push(start_num);
@@ -960,13 +976,21 @@ pub fn write_terminal<W: std::io::Write>(
                         Some(num) => {
                             // Ordered list: emit number and increment
                             let style = prose_highlighter.base_style();
-                            wrapper.emit_styled_marker(&format!("{}{}. ", indent, num), style, emit_italic);
+                            wrapper.emit_styled_marker(
+                                &format!("{}{}. ", indent, num),
+                                style,
+                                emit_italic,
+                            );
                             *num += 1;
                         }
                         None => {
                             // Unordered list: emit bullet
                             let style = prose_highlighter.base_style();
-                            wrapper.emit_styled_marker(&format!("{}- ", indent), style, emit_italic);
+                            wrapper.emit_styled_marker(
+                                &format!("{}- ", indent),
+                                style,
+                                emit_italic,
+                            );
                         }
                     }
                 }
@@ -1098,7 +1122,11 @@ pub fn write_terminal<W: std::io::Write>(
             InlineEvent::Standard(Event::End(TagEnd::Table)) => {
                 in_table = false;
                 // Render the buffered table with proper formatting
-                wrapper.push_with_newlines(&render_table(&table_rows, &table_alignments, terminal_width));
+                wrapper.push_with_newlines(&render_table(
+                    &table_rows,
+                    &table_alignments,
+                    terminal_width,
+                ));
                 // Add blank line after table for spacing from following content
                 wrapper.push_with_newlines("\n\n");
                 table_rows.clear();
@@ -1144,7 +1172,9 @@ pub fn write_terminal<W: std::io::Write>(
                         writer.flush().ok();
                         just_rendered_image = true;
                     } else {
-                        wrapper.push_with_newlines(&renderer.render_image(&current_image_path, &current_alt));
+                        wrapper.push_with_newlines(
+                            &renderer.render_image(&current_image_path, &current_alt),
+                        );
                         just_rendered_image = true;
                     }
                 } else {
@@ -1265,7 +1295,10 @@ fn emit_prose_text(
         ));
     } else {
         // Apply foreground color and text
-        result.push_str(&format!("\x1b[38;2;{};{};{}m{}\x1b[0m", fg.r, fg.g, fg.b, text));
+        result.push_str(&format!(
+            "\x1b[38;2;{};{};{}m{}\x1b[0m",
+            fg.r, fg.g, fg.b, text
+        ));
     }
     result
 }
@@ -1373,7 +1406,6 @@ fn strip_code_markers(s: &str) -> String {
 /// considering ANSI escape codes and inline code markers which don't contribute
 /// to visual width.
 fn calculate_min_column_width(rows: &[Vec<String>], col_index: usize) -> usize {
-
     let mut max_word_len = 0;
     for row in rows {
         if let Some(cell) = row.get(col_index) {
@@ -1406,12 +1438,8 @@ fn calculate_min_column_width(rows: &[Vec<String>], col_index: usize) -> usize {
     skip(rows, alignments),
     fields(row_count = rows.len(), col_count, terminal_width)
 )]
-fn render_table(
-    rows: &[Vec<String>],
-    alignments: &[CellAlignment],
-    terminal_width: u16,
-) -> String {
-    use comfy_table::{ColumnConstraint, Color as ComfyColor, Width};
+fn render_table(rows: &[Vec<String>], alignments: &[CellAlignment], terminal_width: u16) -> String {
+    use comfy_table::{Color as ComfyColor, ColumnConstraint, Width};
 
     if rows.is_empty() {
         return String::new();
@@ -1517,9 +1545,7 @@ fn emit_code_text(text: &str, style: Style, bg_color: Color) -> String {
     let fg = style.foreground;
     format!(
         "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m{}\x1b[0m",
-        bg_color.r, bg_color.g, bg_color.b,
-        fg.r, fg.g, fg.b,
-        text
+        bg_color.r, bg_color.g, bg_color.b, fg.r, fg.g, fg.b, text
     )
 }
 
@@ -1534,8 +1560,8 @@ fn emit_code_text(text: &str, style: Style, bg_color: Color) -> String {
 /// RGB tuple: (255, 255, 255) for dark mode (white text), (0, 0, 0) for light mode (black text)
 fn header_text_color(color_mode: ColorMode) -> (u8, u8, u8) {
     match color_mode {
-        ColorMode::Dark => (255, 255, 255),  // WHITE
-        ColorMode::Light => (0, 0, 0),       // BLACK
+        ColorMode::Dark => (255, 255, 255), // WHITE
+        ColorMode::Light => (0, 0, 0),      // BLACK
     }
 }
 
@@ -1570,13 +1596,21 @@ fn format_header_row(
 
     // For empty language, default to "text" unless we have a title-only header
     let show_language = !language.is_empty() || title.is_none();
-    let lang = if language.is_empty() { "text" } else { language };
+    let lang = if language.is_empty() {
+        "text"
+    } else {
+        language
+    };
 
     // Calculate visible widths for spacing
     // Title: " {title} " = 1 + title.len() + 1 = title.len() + 2
     // Language: " {lang} " = 1 + lang.len() + 1 = lang.len() + 2
     let title_width = title.map(|t| t.chars().count() + 2).unwrap_or(0);
-    let lang_width = if show_language { lang.chars().count() + 2 } else { 0 };
+    let lang_width = if show_language {
+        lang.chars().count() + 2
+    } else {
+        0
+    };
     let total_content_width = title_width + lang_width;
 
     // Calculate spacing to right-align language (or fill line for title-only)
@@ -1595,9 +1629,7 @@ fn format_header_row(
         // Bold + BG + FG + space + title + space + reset
         output.push_str(&format!(
             "\x1b[1m\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m {} \x1b[0m",
-            bg_color.r, bg_color.g, bg_color.b,
-            text_color.0, text_color.1, text_color.2,
-            t
+            bg_color.r, bg_color.g, bg_color.b, text_color.0, text_color.1, text_color.2, t
         ));
     }
 
@@ -1611,9 +1643,7 @@ fn format_header_row(
         // BG + FG + space + lang + space + reset
         output.push_str(&format!(
             "\x1b[48;2;{};{};{}m\x1b[38;2;{};{};{}m {} \x1b[0m",
-            bg_color.r, bg_color.g, bg_color.b,
-            text_color.0, text_color.1, text_color.2,
-            lang
+            bg_color.r, bg_color.g, bg_color.b, text_color.0, text_color.1, text_color.2, lang
         ));
     }
 
@@ -1676,7 +1706,6 @@ impl LineWrapper {
     /// Uses `▐` character followed by 3 spaces for visual separation.
     /// The entire line gets a subtle background color.
     fn emit_blockquote_prefix(&mut self, depth: usize, bg: Color) {
-
         self.blockquote_depth = depth;
         self.blockquote_bg = Some(bg);
 
@@ -1756,7 +1785,14 @@ impl LineWrapper {
     /// * `emit_italic` - Whether to emit italic escape codes
     /// * `in_strikethrough` - Whether to apply strikethrough formatting
     /// * `in_mark` - Whether to apply highlight background
-    fn emit_styled(&mut self, text: &str, style: Style, emit_italic: bool, in_strikethrough: bool, in_mark: bool) {
+    fn emit_styled(
+        &mut self,
+        text: &str,
+        style: Style,
+        emit_italic: bool,
+        in_strikethrough: bool,
+        in_mark: bool,
+    ) {
         // Split into segments, preserving whitespace
         // We iterate over whitespace-separated words, handling spaces between them
         let mut current_word = String::new();
@@ -1802,8 +1838,14 @@ impl LineWrapper {
     }
 
     /// Emits a single word, wrapping if necessary.
-    fn emit_word(&mut self, word: &str, style: Style, emit_italic: bool, in_strikethrough: bool, in_mark: bool) {
-
+    fn emit_word(
+        &mut self,
+        word: &str,
+        style: Style,
+        emit_italic: bool,
+        in_strikethrough: bool,
+        in_mark: bool,
+    ) {
         let word_width = UnicodeWidthStr::width(word);
 
         // Check if word fits on current line
@@ -1842,7 +1884,14 @@ impl LineWrapper {
     /// These are emitted directly without word-wrap logic.
     fn emit_styled_marker(&mut self, text: &str, style: Style, emit_italic: bool) {
         // Note: markers don't use blockquote background (they have their own styling)
-        self.output.push_str(&emit_prose_text(text, style, emit_italic, false, false, None));
+        self.output.push_str(&emit_prose_text(
+            text,
+            style,
+            emit_italic,
+            false,
+            false,
+            None,
+        ));
         self.current_col += UnicodeWidthStr::width(text);
     }
 
@@ -1861,7 +1910,14 @@ impl LineWrapper {
 
         // Emit styled text INSIDE the hyperlink
         // Note: We don't use word wrapping for links - they stay on one line
-        self.output.push_str(&emit_prose_text(text, style, emit_italic, false, false, None));
+        self.output.push_str(&emit_prose_text(
+            text,
+            style,
+            emit_italic,
+            false,
+            false,
+            None,
+        ));
 
         // OSC8 hyperlink end: ESC ] 8 ; ; BEL
         self.output.push_str("\x1b]8;;\x07");
@@ -2091,7 +2147,9 @@ fn highlight_code(
             if !text_without_newline.is_empty() {
                 output.push_str(&format!(
                     "\x1b[38;2;{};{};{}m{}",
-                    style.foreground.r, style.foreground.g, style.foreground.b,
+                    style.foreground.r,
+                    style.foreground.g,
+                    style.foreground.b,
                     text_without_newline
                 ));
             }
@@ -2168,7 +2226,7 @@ fn find_syntax<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{strip_ansi_codes, TestTerminal};
+    use crate::testing::{TestTerminal, strip_ansi_codes};
 
     #[test]
     fn test_color_depth_auto_detect() {
@@ -2176,10 +2234,7 @@ mod tests {
         // Just verify it returns a valid variant
         assert!(matches!(
             depth,
-            ColorDepth::TrueColor
-                | ColorDepth::Colors256
-                | ColorDepth::Colors16
-                | ColorDepth::None
+            ColorDepth::TrueColor | ColorDepth::Colors256 | ColorDepth::Colors16 | ColorDepth::None
         ));
     }
 
@@ -2265,7 +2320,10 @@ fn main() {}
         let plain = strip_ansi_codes(&output);
         // Inline code should NOT have backticks in terminal output
         assert!(plain.contains("cargo build"));
-        assert!(!plain.contains("`cargo build`"), "Backticks should be removed in terminal output");
+        assert!(
+            !plain.contains("`cargo build`"),
+            "Backticks should be removed in terminal output"
+        );
     }
 
     #[test]
@@ -2284,7 +2342,10 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         // Should contain strikethrough ANSI code \x1b[9m
-        assert!(output.contains("\x1b[9m"), "Should contain strikethrough ANSI code");
+        assert!(
+            output.contains("\x1b[9m"),
+            "Should contain strikethrough ANSI code"
+        );
 
         // Content should be present when stripped
         let plain = strip_ansi_codes(&output);
@@ -2298,7 +2359,10 @@ fn main() {}
 
         // Should contain both bold and strikethrough codes
         assert!(output.contains("\x1b[1m"), "Should contain bold code");
-        assert!(output.contains("\x1b[9m"), "Should contain strikethrough code");
+        assert!(
+            output.contains("\x1b[9m"),
+            "Should contain strikethrough code"
+        );
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("bold strikethrough"));
@@ -2313,7 +2377,10 @@ fn main() {}
 
         // Should contain both italic and strikethrough codes
         assert!(output.contains("\x1b[3m"), "Should contain italic code");
-        assert!(output.contains("\x1b[9m"), "Should contain strikethrough code");
+        assert!(
+            output.contains("\x1b[9m"),
+            "Should contain strikethrough code"
+        );
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("italic strikethrough"));
@@ -2329,7 +2396,10 @@ fn main() {}
         // Should contain bold, italic, and strikethrough codes
         assert!(output.contains("\x1b[1m"), "Should contain bold code");
         assert!(output.contains("\x1b[3m"), "Should contain italic code");
-        assert!(output.contains("\x1b[9m"), "Should contain strikethrough code");
+        assert!(
+            output.contains("\x1b[9m"),
+            "Should contain strikethrough code"
+        );
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("all styles"));
@@ -2341,7 +2411,10 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         // Should NOT contain strikethrough ANSI code
-        assert!(!output.contains("\x1b[9m"), "Should not contain strikethrough code for normal text");
+        assert!(
+            !output.contains("\x1b[9m"),
+            "Should not contain strikethrough code for normal text"
+        );
     }
 
     #[test]
@@ -2351,7 +2424,10 @@ fn main() {}
 
         // Unclosed markers should be rendered literally, not as strikethrough
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("~~unclosed"), "Unclosed markers should render literally");
+        assert!(
+            plain.contains("~~unclosed"),
+            "Unclosed markers should render literally"
+        );
     }
 
     #[test]
@@ -2360,7 +2436,10 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         // Should contain strikethrough code (at least once, possibly multiple times)
-        assert!(output.contains("\x1b[9m"), "Should contain strikethrough code");
+        assert!(
+            output.contains("\x1b[9m"),
+            "Should contain strikethrough code"
+        );
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("one"));
@@ -2373,7 +2452,10 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         // Should contain strikethrough code
-        assert!(output.contains("\x1b[9m"), "Strikethrough should work in list items");
+        assert!(
+            output.contains("\x1b[9m"),
+            "Strikethrough should work in list items"
+        );
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("completed item"));
@@ -2390,7 +2472,10 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         // Should contain background color ANSI code \x1b[48;2;255;243;184m (yellow background)
-        assert!(output.contains("\x1b[48;2;255;243;184m"), "Should contain highlight background ANSI code");
+        assert!(
+            output.contains("\x1b[48;2;255;243;184m"),
+            "Should contain highlight background ANSI code"
+        );
 
         // Content should be present when stripped
         let plain = strip_ansi_codes(&output);
@@ -2404,7 +2489,10 @@ fn main() {}
 
         // Should contain both bold and highlight background codes
         assert!(output.contains("\x1b[1m"), "Should contain bold code");
-        assert!(output.contains("\x1b[48;2;255;243;184m"), "Should contain highlight background code");
+        assert!(
+            output.contains("\x1b[48;2;255;243;184m"),
+            "Should contain highlight background code"
+        );
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("bold highlight"));
@@ -2419,7 +2507,10 @@ fn main() {}
 
         // Should contain both italic and highlight background codes
         assert!(output.contains("\x1b[3m"), "Should contain italic code");
-        assert!(output.contains("\x1b[48;2;255;243;184m"), "Should contain highlight background code");
+        assert!(
+            output.contains("\x1b[48;2;255;243;184m"),
+            "Should contain highlight background code"
+        );
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("italic highlight"));
@@ -2431,7 +2522,10 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         // Should NOT contain highlight background ANSI code (specifically yellow highlight)
-        assert!(!output.contains("\x1b[48;2;255;243;184m"), "Should not contain highlight background without markers");
+        assert!(
+            !output.contains("\x1b[48;2;255;243;184m"),
+            "Should not contain highlight background without markers"
+        );
     }
 
     #[test]
@@ -2441,7 +2535,10 @@ fn main() {}
 
         // Unclosed markers should be rendered literally, not as highlight
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("==unclosed"), "Unclosed markers should render literally");
+        assert!(
+            plain.contains("==unclosed"),
+            "Unclosed markers should render literally"
+        );
     }
 
     #[test]
@@ -2450,7 +2547,10 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         // Should contain highlight background code (at least once)
-        assert!(output.contains("\x1b[48;2;255;243;184m"), "Should contain highlight background code");
+        assert!(
+            output.contains("\x1b[48;2;255;243;184m"),
+            "Should contain highlight background code"
+        );
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("one"));
@@ -2463,7 +2563,10 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         // Should contain highlight background code
-        assert!(output.contains("\x1b[48;2;255;243;184m"), "Highlight should work in list items");
+        assert!(
+            output.contains("\x1b[48;2;255;243;184m"),
+            "Highlight should work in list items"
+        );
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("highlighted item"));
@@ -2477,7 +2580,10 @@ fn main() {}
 
         // The == markers should appear literally in code block content
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("==not highlighted=="), "Code block should preserve == markers");
+        assert!(
+            plain.contains("==not highlighted=="),
+            "Code block should preserve == markers"
+        );
     }
 
     #[test]
@@ -2488,13 +2594,21 @@ fn main() {}
         // Empty highlight (====) creates start + end events with no content between
         // so no text actually gets the background color applied, but the events are balanced
         let plain = strip_ansi_codes(&output);
-        assert!(plain.contains("empty highlight"), "Text after empty highlight should render");
+        assert!(
+            plain.contains("empty highlight"),
+            "Text after empty highlight should render"
+        );
         // The ==== should not cause any rendering issues
     }
 
     #[test]
     fn test_header_row_with_title() {
-        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        let bg_color = Color {
+            r: 40,
+            g: 40,
+            b: 40,
+            a: 255,
+        };
         let header = format_header_row(Some("Example"), "rust", bg_color, ColorMode::Dark, 80);
 
         // Should contain both title and language
@@ -2508,7 +2622,12 @@ fn main() {}
 
     #[test]
     fn test_header_row_no_title() {
-        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        let bg_color = Color {
+            r: 40,
+            g: 40,
+            b: 40,
+            a: 255,
+        };
         let header = format_header_row(None, "javascript", bg_color, ColorMode::Dark, 80);
 
         // Should only contain language
@@ -2522,7 +2641,12 @@ fn main() {}
 
     #[test]
     fn test_header_row_default_language() {
-        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        let bg_color = Color {
+            r: 40,
+            g: 40,
+            b: 40,
+            a: 255,
+        };
         let header = format_header_row(None, "", bg_color, ColorMode::Dark, 80);
 
         // Should default to "text"
@@ -2532,7 +2656,12 @@ fn main() {}
 
     #[test]
     fn test_header_row_dark_mode() {
-        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        let bg_color = Color {
+            r: 40,
+            g: 40,
+            b: 40,
+            a: 255,
+        };
         let header = format_header_row(Some("Title"), "rust", bg_color, ColorMode::Dark, 80);
 
         // Should contain white text color (255, 255, 255)
@@ -2541,7 +2670,12 @@ fn main() {}
 
     #[test]
     fn test_header_row_light_mode() {
-        let bg_color = Color { r: 240, g: 240, b: 240, a: 255 };
+        let bg_color = Color {
+            r: 240,
+            g: 240,
+            b: 240,
+            a: 255,
+        };
         let header = format_header_row(Some("Title"), "rust", bg_color, ColorMode::Light, 80);
 
         // Should contain black text color (0, 0, 0)
@@ -2550,7 +2684,12 @@ fn main() {}
 
     #[test]
     fn test_header_row_bold_title() {
-        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        let bg_color = Color {
+            r: 40,
+            g: 40,
+            b: 40,
+            a: 255,
+        };
         let header = format_header_row(Some("Title"), "rust", bg_color, ColorMode::Dark, 80);
 
         // Should contain bold code
@@ -2559,7 +2698,12 @@ fn main() {}
 
     #[test]
     fn test_header_row_no_bold_language() {
-        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        let bg_color = Color {
+            r: 40,
+            g: 40,
+            b: 40,
+            a: 255,
+        };
         let header = format_header_row(None, "rust", bg_color, ColorMode::Dark, 80);
 
         // Language-only header should not start with bold (title is what gets bolded)
@@ -2570,7 +2714,12 @@ fn main() {}
 
     #[test]
     fn test_header_row_right_alignment() {
-        let bg_color = Color { r: 40, g: 40, b: 40, a: 255 };
+        let bg_color = Color {
+            r: 40,
+            g: 40,
+            b: 40,
+            a: 255,
+        };
         // Title "Test" (4 chars) + leading/trailing spaces = 6 visible chars
         // Language "rs" (2 chars) + spaces " rs " = 4 visible chars
         // Total content: 10 chars, terminal width: 80, so spacing: 70 chars
@@ -2845,7 +2994,8 @@ fn main() {}
         options.include_line_numbers = true;
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
-        let code = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10";
+        let code =
+            "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10";
         let result = highlight_code(code, "rust", &highlighter, &options, &meta, ColorMode::Dark);
 
         assert!(result.is_ok());
@@ -2892,10 +3042,7 @@ fn main() {}
         // Find where the line number gutter starts (after top padding)
         // The gutter should appear after a background color escape sequence
         // Pattern: [bg color][gray fg][number] │ [code]
-        let gutter_pattern = format!(
-            "{}\x1b[38;2;128;128;128m",
-            bg_escape
-        );
+        let gutter_pattern = format!("{}\x1b[38;2;128;128;128m", bg_escape);
 
         assert!(
             output.contains(&gutter_pattern),
@@ -3130,7 +3277,10 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         // Code blocks should have background color
-        assert!(output.contains("\x1b[48;2;"), "Code should have background colors");
+        assert!(
+            output.contains("\x1b[48;2;"),
+            "Code should have background colors"
+        );
     }
 
     #[test]
@@ -3139,7 +3289,10 @@ fn main() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         // Output should end with reset code
-        assert!(output.ends_with("\x1b[0m"), "Output should end with terminal reset");
+        assert!(
+            output.ends_with("\x1b[0m"),
+            "Output should end with terminal reset"
+        );
     }
 
     #[test]
@@ -3147,8 +3300,18 @@ fn main() {}
         use syntect::highlighting::{Color, FontStyle, Style};
 
         let style = Style {
-            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
-            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
             font_style: FontStyle::empty(),
         };
 
@@ -3171,8 +3334,18 @@ fn main() {}
         use syntect::highlighting::{Color, FontStyle, Style};
 
         let style = Style {
-            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
-            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
             font_style: FontStyle::ITALIC,
         };
 
@@ -3199,8 +3372,18 @@ fn main() {}
         use syntect::highlighting::{Color, FontStyle, Style};
 
         let style = Style {
-            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
-            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
             font_style: FontStyle::ITALIC,
         };
 
@@ -3223,8 +3406,18 @@ fn main() {}
         use syntect::highlighting::{Color, FontStyle, Style};
 
         let style = Style {
-            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
-            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
             font_style: FontStyle::BOLD,
         };
 
@@ -3246,8 +3439,18 @@ fn main() {}
         use syntect::highlighting::{Color, FontStyle, Style};
 
         let style = Style {
-            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
-            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
             font_style: FontStyle::UNDERLINE,
         };
 
@@ -3267,8 +3470,18 @@ fn main() {}
         use syntect::highlighting::{Color, FontStyle, Style};
 
         let style = Style {
-            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
-            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
@@ -3285,8 +3498,18 @@ fn main() {}
         use syntect::highlighting::{Color, FontStyle, Style};
 
         let style = Style {
-            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
-            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
@@ -3294,7 +3517,10 @@ fn main() {}
 
         // Should have bold but NOT italic
         assert!(result.contains("\x1b[1m"), "Should have bold");
-        assert!(!result.contains("\x1b[3m"), "Should NOT have italic when emit_italic=false");
+        assert!(
+            !result.contains("\x1b[3m"),
+            "Should NOT have italic when emit_italic=false"
+        );
     }
 
     /// Test: strikethrough text should include ANSI strikethrough escape code (\x1b[9m).
@@ -3303,8 +3529,18 @@ fn main() {}
         use syntect::highlighting::{Color, FontStyle, Style};
 
         let style = Style {
-            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
-            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
             font_style: FontStyle::empty(),
         };
 
@@ -3328,8 +3564,18 @@ fn main() {}
         use syntect::highlighting::{Color, FontStyle, Style};
 
         let style = Style {
-            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
-            background: Color { r: 0, g: 0, b: 0, a: 255 },
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
             font_style: FontStyle::BOLD | FontStyle::ITALIC,
         };
 
@@ -3346,11 +3592,26 @@ fn main() {}
         use syntect::highlighting::{Color, FontStyle, Style};
 
         let style = Style {
-            foreground: Color { r: 255, g: 128, b: 64, a: 255 },
-            background: Color { r: 30, g: 30, b: 30, a: 255 },
+            foreground: Color {
+                r: 255,
+                g: 128,
+                b: 64,
+                a: 255,
+            },
+            background: Color {
+                r: 30,
+                g: 30,
+                b: 30,
+                a: 255,
+            },
             font_style: FontStyle::empty(),
         };
-        let bg = Color { r: 30, g: 30, b: 30, a: 255 };
+        let bg = Color {
+            r: 30,
+            g: 30,
+            b: 30,
+            a: 255,
+        };
 
         let result = emit_code_text("code", style, bg);
 
@@ -3483,12 +3744,18 @@ fn main() {}
 
         // Inline code SHOULD have background color for contrast
         let bg_count = output.matches("\x1b[48;2;").count();
-        assert!(bg_count > 0, "Inline code should have background color for contrast");
+        assert!(
+            bg_count > 0,
+            "Inline code should have background color for contrast"
+        );
 
         let plain = strip_ansi_codes(&output);
         // No backticks in terminal output
         assert!(plain.contains("cargo build"));
-        assert!(!plain.contains("`"), "Backticks should be removed in terminal output");
+        assert!(
+            !plain.contains("`"),
+            "Backticks should be removed in terminal output"
+        );
     }
 
     #[test]
@@ -3574,12 +3841,17 @@ fn main() {}
 
     #[test]
     fn test_for_terminal_nested_list() {
-        let md: Markdown = "- Parent item\n  - Child item\n  - Another child\n- Second parent".into();
+        let md: Markdown =
+            "- Parent item\n  - Child item\n  - Another child\n- Second parent".into();
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         // Parent item should have newline before nested list starts
-        assert!(plain.contains("- Parent item\n"), "Parent should end with newline, got:\n{}", plain);
+        assert!(
+            plain.contains("- Parent item\n"),
+            "Parent should end with newline, got:\n{}",
+            plain
+        );
         assert!(plain.contains("  - Child item\n"));
         assert!(plain.contains("  - Another child\n"));
         assert!(plain.contains("- Second parent\n"));
@@ -3629,7 +3901,8 @@ fn main() {}
   - Example:
     - `## Environment Variables`
     - `### Priority Order`
-    - `### Fallback Behavior`"#.into();
+    - `### Fallback Behavior`"#
+            .into();
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         let plain = strip_ansi_codes(&output);
@@ -3661,18 +3934,38 @@ fn main() {}
     /// Regression test: triple-nested lists render with correct indentation
     #[test]
     fn test_triple_nested_list_indentation() {
-        let md: Markdown = "- Level 1\n  - Level 2\n    - Level 3\n    - Level 3b\n  - Level 2b\n- Level 1b".into();
+        let md: Markdown =
+            "- Level 1\n  - Level 2\n    - Level 3\n    - Level 3b\n  - Level 2b\n- Level 1b"
+                .into();
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
         // Verify each level has correct indentation and newlines
-        assert!(plain.contains("- Level 1\n"), "Level 1 should end with newline");
-        assert!(plain.contains("  - Level 2\n"), "Level 2 should have 2-space indent");
-        assert!(plain.contains("    - Level 3\n"), "Level 3 should have 4-space indent");
-        assert!(plain.contains("    - Level 3b\n"), "Level 3b should have 4-space indent");
-        assert!(plain.contains("  - Level 2b\n"), "Level 2b should return to 2-space indent");
-        assert!(plain.contains("- Level 1b\n"), "Level 1b should return to no indent");
+        assert!(
+            plain.contains("- Level 1\n"),
+            "Level 1 should end with newline"
+        );
+        assert!(
+            plain.contains("  - Level 2\n"),
+            "Level 2 should have 2-space indent"
+        );
+        assert!(
+            plain.contains("    - Level 3\n"),
+            "Level 3 should have 4-space indent"
+        );
+        assert!(
+            plain.contains("    - Level 3b\n"),
+            "Level 3b should have 4-space indent"
+        );
+        assert!(
+            plain.contains("  - Level 2b\n"),
+            "Level 2b should return to 2-space indent"
+        );
+        assert!(
+            plain.contains("- Level 1b\n"),
+            "Level 1b should return to no indent"
+        );
     }
 
     // ==================== Table Regression Tests ====================
@@ -3713,14 +4006,18 @@ fn main() {}
     /// Regression test: tables with multiple rows render correctly
     #[test]
     fn test_table_multiple_rows() {
-        let md: Markdown = "| Col1 | Col2 |\n|------|------|\n| A | B |\n| C | D |\n| E | F |".into();
+        let md: Markdown =
+            "| Col1 | Col2 |\n|------|------|\n| A | B |\n| C | D |\n| E | F |".into();
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
         // Table should have box-drawing structure (comfy-table uses UTF8_BORDERS_ONLY preset)
         assert!(plain.contains("┌"), "Should have top-left corner");
-        assert!(plain.contains("╞") || plain.contains("├"), "Should have header separator");
+        assert!(
+            plain.contains("╞") || plain.contains("├"),
+            "Should have header separator"
+        );
         assert!(plain.contains("└"), "Should have bottom-left corner");
 
         // Verify content is present
@@ -3734,7 +4031,8 @@ fn main() {}
         assert!(
             line_count >= 7,
             "Should have at least 7 lines, got {} in:\n{}",
-            line_count, plain
+            line_count,
+            plain
         );
     }
 
@@ -3745,7 +4043,8 @@ fn main() {}
     /// content alignment. The markers are stripped and content is rendered plain.
     #[test]
     fn test_table_with_inline_code() {
-        let md: Markdown = "| Variable | Description |\n|----------|-------------|\n| `FOO` | A variable |".into();
+        let md: Markdown =
+            "| Variable | Description |\n|----------|-------------|\n| `FOO` | A variable |".into();
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         let plain = strip_ansi_codes(&output);
@@ -3775,7 +4074,8 @@ fn main() {}
     /// Regression test: table after heading has proper spacing
     #[test]
     fn test_table_after_heading_spacing() {
-        let md: Markdown = "## Environment Variables\n\n| Var | Desc |\n|-----|------|\n| A | B |".into();
+        let md: Markdown =
+            "## Environment Variables\n\n| Var | Desc |\n|-----|------|\n| A | B |".into();
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         let plain = strip_ansi_codes(&output);
@@ -3816,7 +4116,10 @@ fn main() {}
         assert!(plain.contains(" 3 "), "Third data row should be present");
 
         // Should have box-drawing borders
-        assert!(plain.contains("┌") && plain.contains("└"), "Should have table borders");
+        assert!(
+            plain.contains("┌") && plain.contains("└"),
+            "Should have table borders"
+        );
     }
 
     /// Test that table headers render correctly
@@ -3833,7 +4136,10 @@ fn main() {}
         assert!(plain.contains("Data"), "Data should be present");
 
         // Should have table structure with header separator
-        assert!(plain.contains("╞") || plain.contains("├"), "Should have header separator");
+        assert!(
+            plain.contains("╞") || plain.contains("├"),
+            "Should have header separator"
+        );
     }
 
     /// Test that inline code in tables renders correctly.
@@ -3856,7 +4162,10 @@ fn main() {}
         assert!(plain.contains("Another"), "Description should be present");
 
         // Should have table structure
-        assert!(plain.contains("┌") && plain.contains("└"), "Should have table borders");
+        assert!(
+            plain.contains("┌") && plain.contains("└"),
+            "Should have table borders"
+        );
     }
 
     // ==================== Table Alignment Tests ====================
@@ -3900,7 +4209,8 @@ fn main() {}
     /// Test that tables handle mixed alignments
     #[test]
     fn test_table_mixed_alignments() {
-        let md: Markdown = "| Left | Center | Right |\n|:-----|:------:|------:|\n| L1 | C1 | R1 |".into();
+        let md: Markdown =
+            "| Left | Center | Right |\n|:-----|:------:|------:|\n| L1 | C1 | R1 |".into();
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
         let plain = strip_ansi_codes(&output);
 
@@ -3928,15 +4238,36 @@ fn main() {}
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
 
         // These should all find the Rust syntax
-        assert!(find_syntax("rust", highlighter.syntax_set()).is_some(), "lowercase 'rust' should find Rust syntax");
-        assert!(find_syntax("Rust", highlighter.syntax_set()).is_some(), "exact 'Rust' should find Rust syntax");
-        assert!(find_syntax("RUST", highlighter.syntax_set()).is_some(), "uppercase 'RUST' should find Rust syntax");
-        assert!(find_syntax("rs", highlighter.syntax_set()).is_some(), "extension 'rs' should find Rust syntax");
+        assert!(
+            find_syntax("rust", highlighter.syntax_set()).is_some(),
+            "lowercase 'rust' should find Rust syntax"
+        );
+        assert!(
+            find_syntax("Rust", highlighter.syntax_set()).is_some(),
+            "exact 'Rust' should find Rust syntax"
+        );
+        assert!(
+            find_syntax("RUST", highlighter.syntax_set()).is_some(),
+            "uppercase 'RUST' should find Rust syntax"
+        );
+        assert!(
+            find_syntax("rs", highlighter.syntax_set()).is_some(),
+            "extension 'rs' should find Rust syntax"
+        );
 
         // Python
-        assert!(find_syntax("python", highlighter.syntax_set()).is_some(), "lowercase 'python' should find Python syntax");
-        assert!(find_syntax("Python", highlighter.syntax_set()).is_some(), "exact 'Python' should find Python syntax");
-        assert!(find_syntax("py", highlighter.syntax_set()).is_some(), "extension 'py' should find Python syntax");
+        assert!(
+            find_syntax("python", highlighter.syntax_set()).is_some(),
+            "lowercase 'python' should find Python syntax"
+        );
+        assert!(
+            find_syntax("Python", highlighter.syntax_set()).is_some(),
+            "exact 'Python' should find Python syntax"
+        );
+        assert!(
+            find_syntax("py", highlighter.syntax_set()).is_some(),
+            "extension 'py' should find Python syntax"
+        );
     }
 
     /// Regression test: find_syntax must handle common aliases.
@@ -3948,15 +4279,36 @@ fn main() {}
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
 
         // Bash aliases
-        assert!(find_syntax("bash", highlighter.syntax_set()).is_some(), "'bash' should find Bash syntax");
-        assert!(find_syntax("sh", highlighter.syntax_set()).is_some(), "'sh' should find Bash syntax");
-        assert!(find_syntax("shell", highlighter.syntax_set()).is_some(), "'shell' alias should find Bash syntax");
+        assert!(
+            find_syntax("bash", highlighter.syntax_set()).is_some(),
+            "'bash' should find Bash syntax"
+        );
+        assert!(
+            find_syntax("sh", highlighter.syntax_set()).is_some(),
+            "'sh' should find Bash syntax"
+        );
+        assert!(
+            find_syntax("shell", highlighter.syntax_set()).is_some(),
+            "'shell' alias should find Bash syntax"
+        );
 
         // JavaScript/TypeScript
-        assert!(find_syntax("js", highlighter.syntax_set()).is_some(), "'js' should find JavaScript syntax");
-        assert!(find_syntax("javascript", highlighter.syntax_set()).is_some(), "'javascript' alias should find JS syntax");
-        assert!(find_syntax("ts", highlighter.syntax_set()).is_some(), "'ts' should find TypeScript syntax");
-        assert!(find_syntax("typescript", highlighter.syntax_set()).is_some(), "'typescript' alias should find TS syntax");
+        assert!(
+            find_syntax("js", highlighter.syntax_set()).is_some(),
+            "'js' should find JavaScript syntax"
+        );
+        assert!(
+            find_syntax("javascript", highlighter.syntax_set()).is_some(),
+            "'javascript' alias should find JS syntax"
+        );
+        assert!(
+            find_syntax("ts", highlighter.syntax_set()).is_some(),
+            "'ts' should find TypeScript syntax"
+        );
+        assert!(
+            find_syntax("typescript", highlighter.syntax_set()).is_some(),
+            "'typescript' alias should find TS syntax"
+        );
     }
 
     /// Regression test: code blocks must have syntax highlighting with multiple colors.
@@ -4021,12 +4373,18 @@ fn main() {}
         // Test inline code with surrounding text
         let input = "Use \x00CODE\x00cargo build\x00/CODE\x00 to compile";
         let output = process_cell_content(input);
-        assert_eq!(output, "Use \x1b[48;2;50;50;55mcargo build\x1b[0m to compile");
+        assert_eq!(
+            output,
+            "Use \x1b[48;2;50;50;55mcargo build\x1b[0m to compile"
+        );
 
         // Test multiple inline codes
         let input = "Use \x00CODE\x00foo\x00/CODE\x00 and \x00CODE\x00bar\x00/CODE\x00";
         let output = process_cell_content(input);
-        assert_eq!(output, "Use \x1b[48;2;50;50;55mfoo\x1b[0m and \x1b[48;2;50;50;55mbar\x1b[0m");
+        assert_eq!(
+            output,
+            "Use \x1b[48;2;50;50;55mfoo\x1b[0m and \x1b[48;2;50;50;55mbar\x1b[0m"
+        );
 
         // Test no markers
         let input = "Plain text";
@@ -4131,7 +4489,10 @@ fn main() {}
         let plain = strip_ansi_codes(&output);
 
         // Table should render with box-drawing borders
-        assert!(plain.contains("┌") && plain.contains("┘"), "Table should render with borders");
+        assert!(
+            plain.contains("┌") && plain.contains("┘"),
+            "Table should render with borders"
+        );
 
         // All content should be present
         assert!(plain.contains("Column A"));
@@ -4151,12 +4512,32 @@ fn main() {}
     fn test_table_width_constraint_enforced() {
         // Create a table with content that would exceed 50 chars per row
         let rows = vec![
-            vec!["Field".to_string(), "Description".to_string(), "Example".to_string()],
-            vec!["tool.name".to_string(), "Tool being called".to_string(), "\"brave_search\"".to_string()],
-            vec!["tool.query".to_string(), "Search query/URL".to_string(), "\"rust async\"".to_string()],
-            vec!["tool.duration_ms".to_string(), "Execution time".to_string(), "1234".to_string()],
+            vec![
+                "Field".to_string(),
+                "Description".to_string(),
+                "Example".to_string(),
+            ],
+            vec![
+                "tool.name".to_string(),
+                "Tool being called".to_string(),
+                "\"brave_search\"".to_string(),
+            ],
+            vec![
+                "tool.query".to_string(),
+                "Search query/URL".to_string(),
+                "\"rust async\"".to_string(),
+            ],
+            vec![
+                "tool.duration_ms".to_string(),
+                "Execution time".to_string(),
+                "1234".to_string(),
+            ],
         ];
-        let alignments = vec![CellAlignment::Left, CellAlignment::Left, CellAlignment::Center];
+        let alignments = vec![
+            CellAlignment::Left,
+            CellAlignment::Left,
+            CellAlignment::Center,
+        ];
 
         // Use width that can fit the content without mid-word breaks
         let adequate_width: u16 = 60;
@@ -4170,7 +4551,11 @@ fn main() {}
             assert!(
                 display_width <= adequate_width as usize,
                 "Line {} exceeds width constraint: {} > {} in:\n{}\nFull table:\n{}",
-                i, display_width, adequate_width, line, plain
+                i,
+                display_width,
+                adequate_width,
+                line,
+                plain
             );
         }
 
@@ -4196,15 +4581,47 @@ fn main() {}
     fn test_table_no_mid_word_splitting() {
         // Table from the bug report screenshot
         let rows = vec![
-            vec!["Field".to_string(), "Description".to_string(), "Example".to_string()],
-            vec!["tool.name".to_string(), "Tool being called".to_string(), "\"brave_search\"".to_string()],
-            vec!["tool.query".to_string(), "Search query/URL".to_string(), "\"rust async\"".to_string()],
-            vec!["tool.duration_ms".to_string(), "Execution time".to_string(), "1234".to_string()],
-            vec!["tool.results_count".to_string(), "Results returned".to_string(), "10".to_string()],
-            vec!["http.status_code".to_string(), "HTTP response".to_string(), "200".to_string()],
-            vec!["otel.kind".to_string(), "Span kind".to_string(), "\"client\"".to_string()],
+            vec![
+                "Field".to_string(),
+                "Description".to_string(),
+                "Example".to_string(),
+            ],
+            vec![
+                "tool.name".to_string(),
+                "Tool being called".to_string(),
+                "\"brave_search\"".to_string(),
+            ],
+            vec![
+                "tool.query".to_string(),
+                "Search query/URL".to_string(),
+                "\"rust async\"".to_string(),
+            ],
+            vec![
+                "tool.duration_ms".to_string(),
+                "Execution time".to_string(),
+                "1234".to_string(),
+            ],
+            vec![
+                "tool.results_count".to_string(),
+                "Results returned".to_string(),
+                "10".to_string(),
+            ],
+            vec![
+                "http.status_code".to_string(),
+                "HTTP response".to_string(),
+                "200".to_string(),
+            ],
+            vec![
+                "otel.kind".to_string(),
+                "Span kind".to_string(),
+                "\"client\"".to_string(),
+            ],
         ];
-        let alignments = vec![CellAlignment::Left, CellAlignment::Left, CellAlignment::Center];
+        let alignments = vec![
+            CellAlignment::Left,
+            CellAlignment::Left,
+            CellAlignment::Center,
+        ];
 
         // Test with narrow width (60 chars) like the screenshot showed
         let narrow_width: u16 = 60;
@@ -4215,9 +4632,9 @@ fn main() {}
         // Check for mid-word splits by looking at line breaks
         // Bad patterns: word followed immediately by newline with continuation on next line
         let bad_patterns = [
-            "duration_m\n",  // duration_ms split after duration_m
-            "results_co\n",  // results_count split
-            "status_cod\n",  // status_code split
+            "duration_m\n", // duration_ms split after duration_m
+            "results_co\n", // results_count split
+            "status_cod\n", // status_code split
             "_m │",         // duration_ms split at underscore
             "_co │",        // results_count split
         ];
@@ -4226,7 +4643,8 @@ fn main() {}
             assert!(
                 !plain.contains(pattern),
                 "Bad word split detected: found '{}' in:\n{}",
-                pattern.escape_default(), plain
+                pattern.escape_default(),
+                plain
             );
         }
 
@@ -4247,12 +4665,32 @@ fn main() {}
     fn test_table_very_narrow_width() {
         // Table from the bug report screenshot
         let rows = vec![
-            vec!["Field".to_string(), "Description".to_string(), "Example".to_string()],
-            vec!["tool.name".to_string(), "Tool being called".to_string(), "\"brave_search\"".to_string()],
-            vec!["tool.query".to_string(), "Search query/URL".to_string(), "\"rust async\"".to_string()],
-            vec!["tool.duration_ms".to_string(), "Execution time".to_string(), "1234".to_string()],
+            vec![
+                "Field".to_string(),
+                "Description".to_string(),
+                "Example".to_string(),
+            ],
+            vec![
+                "tool.name".to_string(),
+                "Tool being called".to_string(),
+                "\"brave_search\"".to_string(),
+            ],
+            vec![
+                "tool.query".to_string(),
+                "Search query/URL".to_string(),
+                "\"rust async\"".to_string(),
+            ],
+            vec![
+                "tool.duration_ms".to_string(),
+                "Execution time".to_string(),
+                "1234".to_string(),
+            ],
         ];
-        let alignments = vec![CellAlignment::Left, CellAlignment::Left, CellAlignment::Center];
+        let alignments = vec![
+            CellAlignment::Left,
+            CellAlignment::Left,
+            CellAlignment::Center,
+        ];
 
         // Very narrow width to force issues
         let narrow_width: u16 = 40;
@@ -4268,7 +4706,11 @@ fn main() {}
             assert!(
                 display_width <= narrow_width as usize,
                 "Line {} exceeds width constraint: {} > {} in:\n{}\nFull table:\n{}",
-                i, display_width, narrow_width, line, plain
+                i,
+                display_width,
+                narrow_width,
+                line,
+                plain
             );
         }
     }
@@ -4282,7 +4724,11 @@ fn main() {}
     fn test_table_inline_code_markers_stripped_for_width() {
         // Simulate rows WITH inline code markers (as they come from markdown parsing)
         let rows = vec![
-            vec!["Field".to_string(), "Description".to_string(), "Example".to_string()],
+            vec![
+                "Field".to_string(),
+                "Description".to_string(),
+                "Example".to_string(),
+            ],
             // Data cells with inline code markers (like real markdown `tool.name`)
             vec![
                 "\x00CODE\x00tool.name\x00/CODE\x00".to_string(),
@@ -4295,7 +4741,11 @@ fn main() {}
                 "\x00CODE\x001234\x00/CODE\x00".to_string(),
             ],
         ];
-        let alignments = vec![CellAlignment::Left, CellAlignment::Left, CellAlignment::Center];
+        let alignments = vec![
+            CellAlignment::Left,
+            CellAlignment::Left,
+            CellAlignment::Center,
+        ];
 
         // With adequate width, markers should not cause misalignment
         let width: u16 = 70;
@@ -4310,17 +4760,33 @@ fn main() {}
         );
 
         // Content should be intact (markers converted to styling)
-        assert!(plain.contains("tool.name"), "tool.name should be present:\n{}", plain);
-        assert!(plain.contains("tool.duration_ms"), "tool.duration_ms should be present:\n{}", plain);
-        assert!(plain.contains("brave_search"), "brave_search should be present:\n{}", plain);
+        assert!(
+            plain.contains("tool.name"),
+            "tool.name should be present:\n{}",
+            plain
+        );
+        assert!(
+            plain.contains("tool.duration_ms"),
+            "tool.duration_ms should be present:\n{}",
+            plain
+        );
+        assert!(
+            plain.contains("brave_search"),
+            "brave_search should be present:\n{}",
+            plain
+        );
 
         // Headers and data should align - check that column separators line up
         // by verifying all lines have similar structure
         let lines: Vec<&str> = plain.lines().collect();
-        assert!(lines.len() >= 3, "Table should have header + separator + data rows");
+        assert!(
+            lines.len() >= 3,
+            "Table should have header + separator + data rows"
+        );
 
         // All content lines should have the same width (proper alignment)
-        let content_widths: Vec<usize> = lines.iter()
+        let content_widths: Vec<usize> = lines
+            .iter()
             .map(|line| unicode_width::UnicodeWidthStr::width(*line))
             .collect();
         let first_width = content_widths[0];
@@ -4338,18 +4804,55 @@ fn main() {}
     #[ignore] // Run with: cargo test -p shared --lib test_table_width_visual -- --ignored --nocapture
     fn test_table_width_visual() {
         let rows = vec![
-            vec!["Field".to_string(), "Description".to_string(), "Example".to_string()],
-            vec!["tool.name".to_string(), "Tool being called".to_string(), "\"brave_search\"".to_string()],
-            vec!["tool.query".to_string(), "Search query/URL".to_string(), "\"rust async\"".to_string()],
-            vec!["tool.duration_ms".to_string(), "Execution time".to_string(), "1234".to_string()],
-            vec!["tool.results_count".to_string(), "Results returned".to_string(), "10".to_string()],
-            vec!["http.status_code".to_string(), "HTTP response".to_string(), "200".to_string()],
-            vec!["otel.kind".to_string(), "Span kind".to_string(), "\"client\"".to_string()],
+            vec![
+                "Field".to_string(),
+                "Description".to_string(),
+                "Example".to_string(),
+            ],
+            vec![
+                "tool.name".to_string(),
+                "Tool being called".to_string(),
+                "\"brave_search\"".to_string(),
+            ],
+            vec![
+                "tool.query".to_string(),
+                "Search query/URL".to_string(),
+                "\"rust async\"".to_string(),
+            ],
+            vec![
+                "tool.duration_ms".to_string(),
+                "Execution time".to_string(),
+                "1234".to_string(),
+            ],
+            vec![
+                "tool.results_count".to_string(),
+                "Results returned".to_string(),
+                "10".to_string(),
+            ],
+            vec![
+                "http.status_code".to_string(),
+                "HTTP response".to_string(),
+                "200".to_string(),
+            ],
+            vec![
+                "otel.kind".to_string(),
+                "Span kind".to_string(),
+                "\"client\"".to_string(),
+            ],
         ];
-        let alignments = vec![CellAlignment::Left, CellAlignment::Left, CellAlignment::Center];
+        let alignments = vec![
+            CellAlignment::Left,
+            CellAlignment::Left,
+            CellAlignment::Center,
+        ];
 
         for width in [40u16, 60, 80, 100, 120] {
-            eprintln!("\n{}\nTerminal width: {}\n{}", "=".repeat(60), width, "=".repeat(60));
+            eprintln!(
+                "\n{}\nTerminal width: {}\n{}",
+                "=".repeat(60),
+                width,
+                "=".repeat(60)
+            );
 
             let output = render_table(&rows, &alignments, width);
             let plain = strip_ansi_codes(&output);
@@ -4374,13 +4877,18 @@ fn main() {}
         assert!(plain.contains("Header"));
 
         // Should have table structure
-        assert!(plain.contains("┌") && plain.contains("└"), "Should have table borders");
+        assert!(
+            plain.contains("┌") && plain.contains("└"),
+            "Should have table borders"
+        );
     }
 
     /// Test that tables with many columns distribute width fairly
     #[test]
     fn test_table_many_columns_fair_width() {
-        let md: Markdown = "| A | B | C | D | E | F |\n|---|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 | 6 |".into();
+        let md: Markdown =
+            "| A | B | C | D | E | F |\n|---|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 | 6 |"
+                .into();
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
         let plain = strip_ansi_codes(&output);
 
@@ -4408,7 +4916,11 @@ fn main() {}
         let plain = strip_ansi_codes(&output);
 
         // Should only contain reset code
-        assert_eq!(plain.trim(), "", "Empty markdown should produce empty output");
+        assert_eq!(
+            plain.trim(),
+            "",
+            "Empty markdown should produce empty output"
+        );
     }
 
     /// Test that single column table renders correctly
@@ -4421,10 +4933,16 @@ fn main() {}
         // Should have header and data
         assert!(plain.contains("Single"), "Header should be present");
         assert!(plain.contains("Data 1"), "First data row should be present");
-        assert!(plain.contains("Data 2"), "Second data row should be present");
+        assert!(
+            plain.contains("Data 2"),
+            "Second data row should be present"
+        );
 
         // Should have table structure
-        assert!(plain.contains("┌") && plain.contains("└"), "Should have table borders");
+        assert!(
+            plain.contains("┌") && plain.contains("└"),
+            "Should have table borders"
+        );
     }
 
     /// Test that table with empty cells renders correctly
@@ -4443,7 +4961,10 @@ fn main() {}
         assert!(plain.contains("Y"));
 
         // Should have table structure
-        assert!(plain.contains("┌") && plain.contains("└"), "Should have table borders");
+        assert!(
+            plain.contains("┌") && plain.contains("└"),
+            "Should have table borders"
+        );
     }
 
     /// Test that ragged rows (fewer cells than columns) are handled
@@ -4464,13 +4985,17 @@ fn main() {}
         assert!(plain.contains("2"));
 
         // Should have table structure
-        assert!(plain.contains("┌") && plain.contains("└"), "Should have table borders");
+        assert!(
+            plain.contains("┌") && plain.contains("└"),
+            "Should have table borders"
+        );
     }
 
     /// Test that Unicode characters in table cells render correctly
     #[test]
     fn test_table_unicode_characters() {
-        let md: Markdown = "| Emoji | CJK |\n|-------|-----|\n| 🎉 | 中文 |\n| ✅ | 日本語 |".into();
+        let md: Markdown =
+            "| Emoji | CJK |\n|-------|-----|\n| 🎉 | 中文 |\n| ✅ | 日本語 |".into();
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
         let plain = strip_ansi_codes(&output);
 
@@ -4479,11 +5004,20 @@ fn main() {}
         assert!(plain.contains("CJK"));
 
         // Should have Unicode content
-        assert!(plain.contains("🎉") || plain.contains("✅"), "Emoji should be present");
-        assert!(plain.contains("中文") || plain.contains("日本語"), "CJK characters should be present");
+        assert!(
+            plain.contains("🎉") || plain.contains("✅"),
+            "Emoji should be present"
+        );
+        assert!(
+            plain.contains("中文") || plain.contains("日本語"),
+            "CJK characters should be present"
+        );
 
         // Should have table structure
-        assert!(plain.contains("┌") && plain.contains("└"), "Should have table borders");
+        assert!(
+            plain.contains("┌") && plain.contains("└"),
+            "Should have table borders"
+        );
     }
 
     // ---- ANSI Handling Tests ----
@@ -4504,7 +5038,10 @@ fn main() {}
         assert!(plain.contains("very_long_code_sample"));
 
         // Should have table structure
-        assert!(plain.contains("┌") && plain.contains("└"), "Should have table borders");
+        assert!(
+            plain.contains("┌") && plain.contains("└"),
+            "Should have table borders"
+        );
     }
 
     /// Test that long inline code in one cell, short text in another works
@@ -4521,13 +5058,17 @@ fn main() {}
         assert!(plain.contains("this_is_a_very_long_code_identifier"));
 
         // Should have table structure
-        assert!(plain.contains("┌") && plain.contains("└"), "Should have table borders");
+        assert!(
+            plain.contains("┌") && plain.contains("└"),
+            "Should have table borders"
+        );
     }
 
     /// Test that multiple inline code blocks in same cell work
     #[test]
     fn test_table_multiple_inline_code_in_cell() {
-        let md: Markdown = "| Command |\n|---------|\n| Use `cargo build` then `cargo test` |".into();
+        let md: Markdown =
+            "| Command |\n|---------|\n| Use `cargo build` then `cargo test` |".into();
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
         let plain = strip_ansi_codes(&output);
 
@@ -4541,7 +5082,10 @@ fn main() {}
         assert!(plain.contains("then"));
 
         // Should have table structure
-        assert!(plain.contains("┌") && plain.contains("└"), "Should have table borders");
+        assert!(
+            plain.contains("┌") && plain.contains("└"),
+            "Should have table borders"
+        );
     }
 
     // ---- Integration Tests ----
@@ -4564,7 +5108,8 @@ More text after the table.
 
 - List item 1
 - List item 2
-"#.into();
+"#
+        .into();
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
         let plain = strip_ansi_codes(&output);
 
@@ -4592,7 +5137,10 @@ More text after the table.
         assert!(plain.contains("- List item 2"));
 
         // Should have table structure
-        assert!(plain.contains("┌") && plain.contains("└"), "Should have table borders");
+        assert!(
+            plain.contains("┌") && plain.contains("└"),
+            "Should have table borders"
+        );
     }
 
     /// Test that multiple tables in same document render correctly
@@ -4609,7 +5157,8 @@ More text after the table.
 | X | Y | Z |
 |---|---|---|
 | a | b | c |
-"#.into();
+"#
+        .into();
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
         let plain = strip_ansi_codes(&output);
 
@@ -4634,7 +5183,11 @@ More text after the table.
 
         // Should have multiple table structures
         let table_count = plain.matches("┌").count();
-        assert!(table_count >= 2, "Should have at least 2 tables (found {} top borders)", table_count);
+        assert!(
+            table_count >= 2,
+            "Should have at least 2 tables (found {} top borders)",
+            table_count
+        );
     }
 
     /// Test that table with complex nested markdown in cells works
@@ -4657,7 +5210,10 @@ More text after the table.
         assert!(plain.contains("disabled"));
 
         // Should have table structure
-        assert!(plain.contains("┌") && plain.contains("└"), "Should have table borders");
+        assert!(
+            plain.contains("┌") && plain.contains("└"),
+            "Should have table borders"
+        );
     }
 
     // ---- ImageRenderer Tests ----
@@ -4721,7 +5277,10 @@ More text after the table.
         let renderer2 = ImageRenderer::new(None);
 
         // Both should have the same graphics support detection
-        assert_eq!(renderer1.graphics_supported(), renderer2.graphics_supported());
+        assert_eq!(
+            renderer1.graphics_supported(),
+            renderer2.graphics_supported()
+        );
         assert_eq!(renderer1.is_tty(), renderer2.is_tty());
     }
 
@@ -5002,7 +5561,10 @@ fn line6() {}
         let plain = strip_ansi_codes(&output);
 
         // Verify title is present in header row
-        assert!(plain.contains("Complete Example"), "Header should contain title");
+        assert!(
+            plain.contains("Complete Example"),
+            "Header should contain title"
+        );
 
         // Verify language is present in header row
         assert!(plain.contains("rust"), "Header should contain language");
@@ -5031,10 +5593,16 @@ fn line6() {}
 
         // Should contain padding (top and bottom)
         // Padding rows are: \x1b[48;2;R;G;Bm\x1b[K\x1b[0m\n
-        assert!(output.contains("\x1b[K"), "Should contain padding clear codes");
+        assert!(
+            output.contains("\x1b[K"),
+            "Should contain padding clear codes"
+        );
 
         // Should have proper ANSI structure even with no code lines
-        assert!(output.contains("\x1b[48;2;"), "Should contain background color codes");
+        assert!(
+            output.contains("\x1b[48;2;"),
+            "Should contain background color codes"
+        );
         assert!(output.contains("\x1b[0m"), "Should contain reset codes");
     }
 
@@ -5060,17 +5628,18 @@ fn line6() {}
 
         // Check for common mid-word break patterns (word fragments at line ends)
         let bad_patterns = [
-            "charac\n",   // "character" split
-            "Markdo\n",   // "Markdown" split
-            "itali\n",    // "italics" split
-            "eithe\n",    // "either" split
+            "charac\n", // "character" split
+            "Markdo\n", // "Markdown" split
+            "itali\n",  // "italics" split
+            "eithe\n",  // "either" split
         ];
 
         for pattern in bad_patterns {
             assert!(
                 !plain.contains(pattern),
                 "Bad word split detected: found '{}' in:\n{}",
-                pattern.escape_default(), plain
+                pattern.escape_default(),
+                plain
             );
         }
 
@@ -5079,7 +5648,8 @@ fn line6() {}
             assert!(
                 plain.contains(word),
                 "Complete word '{}' should be present:\n{}",
-                word, plain
+                word,
+                plain
             );
         }
     }
@@ -5111,7 +5681,9 @@ fn line6() {}
             assert!(
                 !line.starts_with(' ') && !line.starts_with('\t'),
                 "Line {} starts with whitespace: '{}'\nFull output:\n{}",
-                i + 1, line.escape_default(), plain
+                i + 1,
+                line.escape_default(),
+                plain
             );
         }
     }
@@ -5122,7 +5694,12 @@ fn line6() {}
         use syntect::highlighting::Color;
 
         let style = Style {
-            foreground: Color { r: 255, g: 255, b: 255, a: 255 },
+            foreground: Color {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
             background: Color::BLACK,
             font_style: syntect::highlighting::FontStyle::empty(),
         };
@@ -5144,7 +5721,8 @@ fn line6() {}
             assert!(
                 width <= 20,
                 "Line exceeds max width: '{}' (width: {})",
-                line, width
+                line,
+                width
             );
         }
 
@@ -5161,8 +5739,18 @@ fn line6() {}
         use syntect::highlighting::Color;
 
         let style = Style {
-            foreground: Color { r: 200, g: 200, b: 200, a: 255 },
-            background: Color { r: 40, g: 40, b: 40, a: 255 },
+            foreground: Color {
+                r: 200,
+                g: 200,
+                b: 200,
+                a: 255,
+            },
+            background: Color {
+                r: 40,
+                g: 40,
+                b: 40,
+                a: 255,
+            },
             font_style: syntect::highlighting::FontStyle::empty(),
         };
 
@@ -5175,7 +5763,10 @@ fn line6() {}
         let plain = strip_ansi_codes(&output);
 
         // Should contain the inline code
-        assert!(plain.contains("cargo build"), "Should contain 'cargo build'");
+        assert!(
+            plain.contains("cargo build"),
+            "Should contain 'cargo build'"
+        );
         // Should contain surrounding text
         assert!(plain.contains("Command:"), "Should contain 'Command:'");
     }
@@ -5205,11 +5796,18 @@ fn line6() {}
         );
 
         // Verify key words are complete
-        for word in ["paragraph", "definitely", "wrapping", "boundaries", "readability"] {
+        for word in [
+            "paragraph",
+            "definitely",
+            "wrapping",
+            "boundaries",
+            "readability",
+        ] {
             assert!(
                 plain.contains(word),
                 "Word '{}' should be complete, not split:\n{}",
-                word, plain
+                word,
+                plain
             );
         }
     }
@@ -5220,13 +5818,23 @@ fn line6() {}
         use syntect::highlighting::{Color, FontStyle};
 
         let bold_style = Style {
-            foreground: Color { r: 255, g: 255, b: 255, a: 255 },
+            foreground: Color {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
             background: Color::BLACK,
             font_style: FontStyle::BOLD,
         };
 
         let italic_style = Style {
-            foreground: Color { r: 255, g: 255, b: 255, a: 255 },
+            foreground: Color {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
             background: Color::BLACK,
             font_style: FontStyle::ITALIC,
         };
@@ -5245,8 +5853,14 @@ fn line6() {}
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("This has"), "Should contain 'This has'");
-        assert!(plain.contains("mixed styles"), "Should contain 'mixed styles'");
-        assert!(plain.contains("in one line"), "Should contain 'in one line'");
+        assert!(
+            plain.contains("mixed styles"),
+            "Should contain 'mixed styles'"
+        );
+        assert!(
+            plain.contains("in one line"),
+            "Should contain 'in one line'"
+        );
     }
 
     /// Test: multiline prose should not have blank lines between wrapped lines.
@@ -5263,7 +5877,10 @@ fn line6() {}
         let lines: Vec<&str> = plain.lines().collect();
         for (i, window) in lines.windows(2).enumerate() {
             if window[0].is_empty() && window[1].is_empty() {
-                panic!("Found consecutive blank lines at position {}: {:?}", i, lines);
+                panic!(
+                    "Found consecutive blank lines at position {}: {:?}",
+                    i, lines
+                );
             }
         }
     }
@@ -5282,7 +5899,10 @@ fn line6() {}
         let lines: Vec<&str> = plain.lines().collect();
         for (i, window) in lines.windows(2).enumerate() {
             if window[0].is_empty() && window[1].is_empty() {
-                panic!("Found consecutive blank lines at position {}: {:?}", i, lines);
+                panic!(
+                    "Found consecutive blank lines at position {}: {:?}",
+                    i, lines
+                );
             }
         }
     }
@@ -5322,7 +5942,11 @@ fn line6() {}
         // For "separate it from" (3 words + 2 spaces when styled), we expect up to 5 bg codes
         // But we should NOT have consecutive duplicate codes
         let has_double_bg = output.contains("\x1b[48;2;255;243;184m\x1b[48;2;255;243;184m");
-        assert!(!has_double_bg, "Should not have consecutive duplicate background codes: {:?}", output);
+        assert!(
+            !has_double_bg,
+            "Should not have consecutive duplicate background codes: {:?}",
+            output
+        );
     }
 
     /// Test: strikethrough section from test.md should not have extra blank lines.
@@ -5354,7 +5978,11 @@ Unlike the strikethrough functionality, the **highlight** feature for Markdown l
         let lines: Vec<&str> = plain.lines().collect();
         for (i, window) in lines.windows(3).enumerate() {
             if window[0].is_empty() && window[1].is_empty() && window[2].is_empty() {
-                panic!("Found three consecutive blank lines at position {}: {:?}", i, &lines[i.saturating_sub(2)..i.min(lines.len()-1)+5]);
+                panic!(
+                    "Found three consecutive blank lines at position {}: {:?}",
+                    i,
+                    &lines[i.saturating_sub(2)..i.min(lines.len() - 1) + 5]
+                );
             }
         }
 
@@ -5435,7 +6063,10 @@ Following paragraph."#;
         let lines: Vec<&str> = plain.lines().collect();
         let following_idx = lines.iter().position(|l| l.contains("Following"));
 
-        assert!(following_idx.is_some(), "Should contain 'Following paragraph'");
+        assert!(
+            following_idx.is_some(),
+            "Should contain 'Following paragraph'"
+        );
         let idx = following_idx.unwrap();
 
         // The line before "Following" should be empty (the separation blank line)
@@ -5481,7 +6112,9 @@ fn bar() {}
         );
 
         // They should NOT be on the same line
-        let combined_line = lines.iter().find(|l| l.contains("fn foo") && l.contains("fn bar"));
+        let combined_line = lines
+            .iter()
+            .find(|l| l.contains("fn foo") && l.contains("fn bar"));
         assert!(
             combined_line.is_none(),
             "fn foo and fn bar should not be on the same line"
@@ -5533,7 +6166,9 @@ fn bar() {}
             if !prev_line.is_empty() && curr_line.is_empty() && i + 2 < lines.len() {
                 panic!(
                     "Found unexpected blank line at position {}: prev={:?}, curr={:?}",
-                    i + 1, prev_line, curr_line
+                    i + 1,
+                    prev_line,
+                    curr_line
                 );
             }
         }
@@ -5545,8 +6180,18 @@ fn bar() {}
         use syntect::highlighting::{Color, FontStyle, Style};
 
         let base_style = Style {
-            foreground: Color { r: 200, g: 200, b: 200, a: 255 },
-            background: Color { r: 0, g: 0, b: 0, a: 0 },
+            foreground: Color {
+                r: 200,
+                g: 200,
+                b: 200,
+                a: 255,
+            },
+            background: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 0,
+            },
             font_style: FontStyle::empty(),
         };
 
@@ -5674,7 +6319,10 @@ fn bar() {}
         let output = for_terminal(&md, TerminalOptions::default()).unwrap();
 
         // Check for bold ANSI code
-        assert!(output.contains("\x1b[1m"), "Should contain bold code in blockquote");
+        assert!(
+            output.contains("\x1b[1m"),
+            "Should contain bold code in blockquote"
+        );
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("Bold"));
@@ -6127,7 +6775,12 @@ flowchart LR
         let header = format_header_row(
             Some("My Diagram"),
             "", // Empty language = title-only header
-            Color { r: 34, g: 34, b: 34, a: 255 },
+            Color {
+                r: 34,
+                g: 34,
+                b: 34,
+                a: 255,
+            },
             ColorMode::Dark,
             80,
         );
@@ -6157,7 +6810,12 @@ flowchart LR
         let header = format_header_row(
             None,
             "",
-            Color { r: 34, g: 34, b: 34, a: 255 },
+            Color {
+                r: 34,
+                g: 34,
+                b: 34,
+                a: 255,
+            },
             ColorMode::Dark,
             80,
         );
@@ -6180,7 +6838,12 @@ flowchart LR
         let header = format_header_row(
             Some("Example"),
             "rust",
-            Color { r: 34, g: 34, b: 34, a: 255 },
+            Color {
+                r: 34,
+                g: 34,
+                b: 34,
+                a: 255,
+            },
             ColorMode::Dark,
             80,
         );
@@ -6301,7 +6964,9 @@ flowchart LR
         let end_pos = output.find(osc8_end).expect("OSC8 end should exist");
 
         // The BEL after the URL marks where visible content begins
-        let after_url_bel = output[start_pos..].find('\x07').expect("BEL should exist after URL");
+        let after_url_bel = output[start_pos..]
+            .find('\x07')
+            .expect("BEL should exist after URL");
         let content_start = start_pos + after_url_bel + 1;
 
         // Extract the content between OSC8 open and close

@@ -113,9 +113,8 @@ impl<'a> HtmlExtractor<'a> {
     /// if none match.
     #[allow(dead_code)]
     fn extract_with_fallback(&self, selectors: &[&str], fallback_selector: &str) -> String {
-        self.first_text(selectors).unwrap_or_else(|| {
-            self.first_text(&[fallback_selector]).unwrap_or_default()
-        })
+        self.first_text(selectors)
+            .unwrap_or_else(|| self.first_text(&[fallback_selector]).unwrap_or_default())
     }
 }
 

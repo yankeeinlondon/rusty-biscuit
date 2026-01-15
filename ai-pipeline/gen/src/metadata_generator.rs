@@ -43,7 +43,9 @@ impl MetadataGenerator {
         code.push_str("use std::collections::HashMap;\n");
         code.push_str("use std::sync::LazyLock;\n\n");
         code.push_str("#[allow(unused_imports)]\n");
-        code.push_str("use crate::models::model_metadata::{ModelMetadata, ModelModalities, Modality};\n\n");
+        code.push_str(
+            "use crate::models::model_metadata::{ModelMetadata, ModelModalities, Modality};\n\n",
+        );
 
         // Static lookup table
         let capacity = self.entries.len();

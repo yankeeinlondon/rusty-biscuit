@@ -47,8 +47,9 @@ use crate::schema::Schema;
 /// let methods: Vec<_> = RestMethod::iter().collect();
 /// assert_eq!(methods.len(), 7);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[derive(Display, EnumIter, EnumString)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumIter, EnumString,
+)]
 #[serde(rename_all = "UPPERCASE")]
 #[strum(serialize_all = "UPPERCASE")]
 pub enum RestMethod {
@@ -249,7 +250,10 @@ mod tests {
         assert_eq!(RestMethod::from_str("PATCH").unwrap(), RestMethod::Patch);
         assert_eq!(RestMethod::from_str("DELETE").unwrap(), RestMethod::Delete);
         assert_eq!(RestMethod::from_str("HEAD").unwrap(), RestMethod::Head);
-        assert_eq!(RestMethod::from_str("OPTIONS").unwrap(), RestMethod::Options);
+        assert_eq!(
+            RestMethod::from_str("OPTIONS").unwrap(),
+            RestMethod::Options
+        );
     }
 
     #[test]

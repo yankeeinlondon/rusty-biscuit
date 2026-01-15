@@ -3,7 +3,7 @@
 //! This test suite verifies end-to-end functionality of the migration system,
 //! including loading v0 files, creating backups, and auto-saving migrated data.
 
-use research_lib::metadata::{migration, MetadataV0};
+use research_lib::metadata::{MetadataV0, migration};
 use research_lib::{ResearchKind, ResearchMetadata};
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -314,7 +314,10 @@ async fn test_load_v1_no_migration() {
 
     // No backup should be created
     let backup_path = output_dir.join("metadata.v0.json.backup");
-    assert!(!backup_path.exists(), "Backup should not exist for v1 files");
+    assert!(
+        !backup_path.exists(),
+        "Backup should not exist for v1 files"
+    );
 }
 
 #[tokio::test]
@@ -383,7 +386,10 @@ fn test_migrated_v1_serializes_correctly() {
     let value: serde_json::Value = serde_json::from_str(&v1_json).unwrap();
 
     // Should have v1 structure
-    assert_eq!(value.get("schema_version").and_then(|v| v.as_u64()), Some(1));
+    assert_eq!(
+        value.get("schema_version").and_then(|v| v.as_u64()),
+        Some(1)
+    );
     assert!(value.get("details").is_some());
     assert!(value.get("library_info").is_none()); // v0 field should not be present
 
@@ -486,7 +492,10 @@ async fn test_v0_migration_extracts_when_to_use_from_skill_md() {
     // Verify when_to_use was extracted from SKILL.md frontmatter
     assert_eq!(
         metadata.when_to_use,
-        Some("Expert knowledge for styling terminal output with Chalk. Use when building CLIs.".to_string())
+        Some(
+            "Expert knowledge for styling terminal output with Chalk. Use when building CLIs."
+                .to_string()
+        )
     );
 
     // Verify it was saved to metadata.json
@@ -529,8 +538,9 @@ async fn test_v1_without_when_to_use_extracts_from_skill_md() {
         .await
         .expect("Failed to create skill dir");
 
-    let skill_content =
-        create_skill_md("Expert knowledge for error handling in Rust. Use when building libraries.");
+    let skill_content = create_skill_md(
+        "Expert knowledge for error handling in Rust. Use when building libraries.",
+    );
     fs::write(skill_dir.join("SKILL.md"), &skill_content)
         .await
         .expect("Failed to write SKILL.md");
@@ -543,7 +553,9 @@ async fn test_v1_without_when_to_use_extracts_from_skill_md() {
     // Verify when_to_use was extracted from SKILL.md frontmatter
     assert_eq!(
         metadata.when_to_use,
-        Some("Expert knowledge for error handling in Rust. Use when building libraries.".to_string())
+        Some(
+            "Expert knowledge for error handling in Rust. Use when building libraries.".to_string()
+        )
     );
 
     // Verify it was saved to metadata.json

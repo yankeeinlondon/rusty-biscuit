@@ -125,10 +125,7 @@ mod tests {
 
     #[test]
     fn test_enum_variant_name_from_wire_id() {
-        assert_eq!(
-          enum_variant_name_from_wire_id("gpt-4o"),
-          "Gpt__4o"
-        );
+        assert_eq!(enum_variant_name_from_wire_id("gpt-4o"), "Gpt__4o");
         assert_eq!(
             enum_variant_name_from_wire_id("gpt-4.1-mini"),
             "Gpt__4_1__Mini"

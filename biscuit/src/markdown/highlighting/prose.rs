@@ -140,7 +140,12 @@ mod tests {
         let theme = load_test_theme();
         let highlighter = ProseHighlighter::new(&theme);
 
-        let tag = Tag::Heading { level: HeadingLevel::H1, id: None, classes: vec![], attrs: vec![] };
+        let tag = Tag::Heading {
+            level: HeadingLevel::H1,
+            id: None,
+            classes: vec![],
+            attrs: vec![],
+        };
         let style = highlighter.style_for_tag(&tag, &[highlighter.base_scope()]);
 
         // Style should have some properties set
@@ -179,7 +184,12 @@ mod tests {
 
         // Simulate nested context: base -> heading -> strong
         let base = highlighter.base_scope();
-        let heading_tag = Tag::Heading { level: HeadingLevel::H1, id: None, classes: vec![], attrs: vec![] };
+        let heading_tag = Tag::Heading {
+            level: HeadingLevel::H1,
+            id: None,
+            classes: vec![],
+            attrs: vec![],
+        };
         let heading_scope = ScopeCache::global().scope_for_tag(&heading_tag).unwrap();
 
         let strong_tag = Tag::Strong;
@@ -235,7 +245,11 @@ mod tests {
         let duration = start.elapsed();
 
         // Initialization should be fast (< 1ms)
-        assert!(duration.as_millis() < 1, "Initialization took {}ms", duration.as_millis());
+        assert!(
+            duration.as_millis() < 1,
+            "Initialization took {}ms",
+            duration.as_millis()
+        );
     }
 
     #[test]
@@ -255,7 +269,10 @@ mod tests {
         let style = highlighter.style_for_tag(&link_tag, &[highlighter.base_scope()]);
 
         // Style should have some foreground color
-        assert!(style.foreground.a > 0, "Link style should have foreground color");
+        assert!(
+            style.foreground.a > 0,
+            "Link style should have foreground color"
+        );
     }
 
     #[test]
@@ -264,10 +281,8 @@ mod tests {
         // This test documents the behavior for themes used in the terminal output.
 
         // Github theme has a distinct link color
-        let github_theme = crate::markdown::highlighting::themes::load_theme(
-            ThemePair::Github,
-            ColorMode::Dark,
-        );
+        let github_theme =
+            crate::markdown::highlighting::themes::load_theme(ThemePair::Github, ColorMode::Dark);
         let github_highlighter = ProseHighlighter::new(&github_theme);
         let github_base = github_highlighter.base_style();
         let link_tag = Tag::Link {
@@ -276,7 +291,8 @@ mod tests {
             title: "".into(),
             id: "".into(),
         };
-        let github_link = github_highlighter.style_for_tag(&link_tag, &[github_highlighter.base_scope()]);
+        let github_link =
+            github_highlighter.style_for_tag(&link_tag, &[github_highlighter.base_scope()]);
 
         // Github theme should have different colors for base and link
         assert_ne!(
@@ -285,13 +301,12 @@ mod tests {
         );
 
         // OneHalf theme does NOT have a distinct link color
-        let onehalf_theme = crate::markdown::highlighting::themes::load_theme(
-            ThemePair::OneHalf,
-            ColorMode::Dark,
-        );
+        let onehalf_theme =
+            crate::markdown::highlighting::themes::load_theme(ThemePair::OneHalf, ColorMode::Dark);
         let onehalf_highlighter = ProseHighlighter::new(&onehalf_theme);
         let onehalf_base = onehalf_highlighter.base_style();
-        let onehalf_link = onehalf_highlighter.style_for_tag(&link_tag, &[onehalf_highlighter.base_scope()]);
+        let onehalf_link =
+            onehalf_highlighter.style_for_tag(&link_tag, &[onehalf_highlighter.base_scope()]);
 
         // OneHalf theme has the same color for base and link
         // (this is why we need fallback styling in terminal.rs)

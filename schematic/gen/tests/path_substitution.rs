@@ -35,9 +35,15 @@ fn single_path_param_struct_has_field() {
     let code = format_tokens(&tokens);
 
     // Verify struct has path param field
-    assert!(code.contains("pub user_id: String"), "Should have user_id field");
+    assert!(
+        code.contains("pub user_id: String"),
+        "Should have user_id field"
+    );
     // Verify struct is named correctly
-    assert!(code.contains("pub struct GetUserRequest"), "Should be named GetUserRequest");
+    assert!(
+        code.contains("pub struct GetUserRequest"),
+        "Should be named GetUserRequest"
+    );
 }
 
 #[test]
@@ -85,8 +91,14 @@ fn multiple_path_params_struct_has_all_fields() {
     let code = format_tokens(&tokens);
 
     // Verify struct has both path param fields
-    assert!(code.contains("pub thread_id: String"), "Should have thread_id field");
-    assert!(code.contains("pub message_id: String"), "Should have message_id field");
+    assert!(
+        code.contains("pub thread_id: String"),
+        "Should have thread_id field"
+    );
+    assert!(
+        code.contains("pub message_id: String"),
+        "Should have message_id field"
+    );
 }
 
 #[test]
@@ -130,7 +142,10 @@ fn three_path_params_into_parts_format_string() {
     // Verify all three fields exist
     assert!(code.contains("pub org: String"), "Should have org field");
     assert!(code.contains("pub repo: String"), "Should have repo field");
-    assert!(code.contains("pub issue: String"), "Should have issue field");
+    assert!(
+        code.contains("pub issue: String"),
+        "Should have issue field"
+    );
 
     // Verify format string (may be split across lines by prettyplease)
     assert!(
@@ -165,7 +180,10 @@ fn no_path_params_no_fields() {
     let code = format_tokens(&tokens);
 
     // Struct should exist but have no path param fields
-    assert!(code.contains("pub struct ListItemsRequest"), "Should have struct");
+    assert!(
+        code.contains("pub struct ListItemsRequest"),
+        "Should have struct"
+    );
 
     // Verify path is used directly (no format!)
     assert!(
@@ -195,8 +213,14 @@ fn path_param_with_body_has_both_fields() {
     let code = format_tokens(&tokens);
 
     // Verify both path param and body fields exist
-    assert!(code.contains("pub thread_id: String"), "Should have thread_id field");
-    assert!(code.contains("pub body: UpdateThreadBody"), "Should have body field");
+    assert!(
+        code.contains("pub thread_id: String"),
+        "Should have thread_id field"
+    );
+    assert!(
+        code.contains("pub body: UpdateThreadBody"),
+        "Should have body field"
+    );
 
     // Verify format string for path
     assert!(
@@ -234,9 +258,18 @@ fn multiple_path_params_with_body() {
     let code = format_tokens(&tokens);
 
     // Verify all fields
-    assert!(code.contains("pub thread_id: String"), "Should have thread_id field");
-    assert!(code.contains("pub message_id: String"), "Should have message_id field");
-    assert!(code.contains("pub body: CreateCommentBody"), "Should have body field");
+    assert!(
+        code.contains("pub thread_id: String"),
+        "Should have thread_id field"
+    );
+    assert!(
+        code.contains("pub message_id: String"),
+        "Should have message_id field"
+    );
+    assert!(
+        code.contains("pub body: CreateCommentBody"),
+        "Should have body field"
+    );
 
     // Verify format string (may be split across lines by prettyplease)
     assert!(
@@ -335,7 +368,10 @@ fn path_param_at_start() {
     let tokens = generate_request_struct(&endpoint);
     let code = format_tokens(&tokens);
 
-    assert!(code.contains("pub version: String"), "Should have version field");
+    assert!(
+        code.contains("pub version: String"),
+        "Should have version field"
+    );
     assert!(
         code.contains(r#"format!("/{}/resource", self.version)"#),
         "Should have format string\nGenerated code:\n{}",
@@ -359,5 +395,8 @@ fn underscore_in_param_name() {
     let code = format_tokens(&tokens);
 
     // Verify snake_case param name is preserved
-    assert!(code.contains("pub user_id: String"), "Should preserve underscore in field name");
+    assert!(
+        code.contains("pub user_id: String"),
+        "Should preserve underscore in field name"
+    );
 }

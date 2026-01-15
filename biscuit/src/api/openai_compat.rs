@@ -6,9 +6,9 @@
 //! All major LLM providers expose a `/v1/models` endpoint that follows the OpenAI API
 //! specification, allowing us to query available models uniformly across providers.
 
-use std::collections::HashMap;
 use futures::stream::{self, StreamExt};
 use reqwest::Client;
+use std::collections::HashMap;
 use tracing::{debug, info, warn};
 
 use crate::providers::base::{Provider, build_auth_header};
@@ -108,22 +108,19 @@ pub async fn get_provider_models_from_api(
 
     // Check response size
     if let Some(content_length) = response.content_length()
-        && content_length as usize > MAX_RESPONSE_SIZE {
-            return Err(ProviderError::ResponseTooLarge {
-                provider: provider_name.clone(),
-                size: content_length as usize,
-            });
-        }
+        && content_length as usize > MAX_RESPONSE_SIZE
+    {
+        return Err(ProviderError::ResponseTooLarge {
+            provider: provider_name.clone(),
+            size: content_length as usize,
+        });
+    }
 
     // Parse response
     let data: OpenAIModelsResponse = response.json().await?;
 
     // Extract model IDs (unprefixed)
-    let models: Vec<String> = data
-        .data
-        .into_iter()
-        .map(|model| model.id)
-        .collect();
+    let models: Vec<String> = data.data.into_iter().map(|model| model.id).collect();
 
     info!("Fetched {} models from {}", models.len(), provider_name);
 
@@ -205,10 +202,11 @@ pub async fn get_all_provider_models() -> Result<HashMap<Provider, Vec<String>>,
         .collect();
 
     // Execute in parallel with buffer_unordered(8) to limit concurrent requests
-    let results: Vec<(Provider, Result<Vec<String>, ProviderError>)> = stream::iter(provider_futures)
-        .buffer_unordered(8)
-        .collect()
-        .await;
+    let results: Vec<(Provider, Result<Vec<String>, ProviderError>)> =
+        stream::iter(provider_futures)
+            .buffer_unordered(8)
+            .collect()
+            .await;
 
     // Collect successful results and log errors
     let mut all_models = HashMap::new();
@@ -224,15 +222,18 @@ pub async fn get_all_provider_models() -> Result<HashMap<Provider, Vec<String>>,
         }
     }
 
-    info!("Successfully fetched models from {} providers", all_models.len());
+    info!(
+        "Successfully fetched models from {} providers",
+        all_models.len()
+    );
 
     Ok(all_models)
 }
 
 #[cfg(test)]
 mod tests {
-    use wiremock::{MockServer, Mock, ResponseTemplate};
-    use wiremock::matchers::{method, path, header};
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn test_get_provider_models_from_api_success() {
@@ -301,12 +302,9 @@ mod tests {
 
         Mock::given(method("GET"))
             .and(path("/v1/models"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({
-                        "data": large_data
-                    }))
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": large_data
+            })))
             .mount(&mock_server)
             .await;
 

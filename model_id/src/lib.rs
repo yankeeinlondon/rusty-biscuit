@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Fields, LitStr};
+use syn::{Data, DeriveInput, Fields, LitStr, parse_macro_input};
 
 /// Derive `ModelId` for enums.
 ///
@@ -109,10 +109,9 @@ pub fn derive_model_id(input: TokenStream) -> TokenStream {
     }
 
     // Check if there's a Bespoke variant for the fallback
-    let has_bespoke = data_enum
-        .variants
-        .iter()
-        .any(|v| v.ident == "Bespoke" && matches!(&v.fields, Fields::Unnamed(u) if u.unnamed.len() == 1));
+    let has_bespoke = data_enum.variants.iter().any(|v| {
+        v.ident == "Bespoke" && matches!(&v.fields, Fields::Unnamed(u) if u.unnamed.len() == 1)
+    });
 
     let from_str_fallback = if has_bespoke {
         quote! { _ => Ok(Self::Bespoke(s.to_string())) }
@@ -127,8 +126,8 @@ pub fn derive_model_id(input: TokenStream) -> TokenStream {
 
     // Generate optional metadata method if configured
     let metadata_method = if let Some(config) = metadata_config {
-        let lookup_path: syn::Path = syn::parse_str(&config.lookup_path)
-            .expect("invalid lookup path in model_id_metadata");
+        let lookup_path: syn::Path =
+            syn::parse_str(&config.lookup_path).expect("invalid lookup path in model_id_metadata");
         let returns_path: syn::Path = syn::parse_str(&config.returns_type)
             .expect("invalid returns type in model_id_metadata");
 
@@ -206,9 +205,7 @@ pub fn derive_model_id(input: TokenStream) -> TokenStream {
 /// - Converts underscores to hyphens
 /// - Lowercases all characters
 fn normalize_provider(s: &str) -> String {
-    s.trim_matches('_')
-        .replace('_', "-")
-        .to_ascii_lowercase()
+    s.trim_matches('_').replace('_', "-").to_ascii_lowercase()
 }
 
 /// Decode the model name according to:

@@ -14,8 +14,8 @@
 mod common;
 
 use common::load_fixture;
-use shared::mermaid::{Mermaid, DEFAULT_DARK_THEME, DEFAULT_LIGHT_THEME};
 use shared::markdown::highlighting::{ColorMode, ThemePair};
+use shared::mermaid::{DEFAULT_DARK_THEME, DEFAULT_LIGHT_THEME, Mermaid};
 
 /// Test simple flowchart fixture can be loaded and rendered to HTML.
 #[test]
@@ -66,7 +66,11 @@ fn test_fixture_with_title() {
 
     // Note: The Mermaid struct doesn't parse frontmatter automatically,
     // so we test that the raw content is preserved
-    assert!(diagram.instructions().contains("title: User Authentication Flow"));
+    assert!(
+        diagram
+            .instructions()
+            .contains("title: User Authentication Flow")
+    );
 }
 
 /// Test empty fixture produces valid (though useless) diagram.
@@ -114,8 +118,7 @@ fn test_custom_theme_with_fixture() {
     let light = DEFAULT_LIGHT_THEME.clone();
     let dark = DEFAULT_DARK_THEME.clone();
 
-    let diagram = Mermaid::from(content.as_str())
-        .with_theme(light.clone(), dark.clone());
+    let diagram = Mermaid::from(content.as_str()).with_theme(light.clone(), dark.clone());
 
     assert_eq!(diagram.theme(ColorMode::Light), &light);
     assert_eq!(diagram.theme(ColorMode::Dark), &dark);
@@ -125,8 +128,7 @@ fn test_custom_theme_with_fixture() {
 #[test]
 fn test_syntect_theme_with_fixture() {
     let content = load_fixture("mermaid/valid/simple_flowchart.mmd");
-    let diagram = Mermaid::from(content.as_str())
-        .use_syntect_theme(ThemePair::Gruvbox);
+    let diagram = Mermaid::from(content.as_str()).use_syntect_theme(ThemePair::Gruvbox);
 
     // Verify theme is resolved from syntect (may be same as default, so just check it's valid)
     let theme_light = diagram.theme(ColorMode::Light);
@@ -167,8 +169,7 @@ fn test_alt_text_detection() {
 #[test]
 fn test_alt_text_with_title_override() {
     let content = load_fixture("mermaid/valid/simple_flowchart.mmd");
-    let diagram = Mermaid::from(content.as_str())
-        .with_title("Custom Title");
+    let diagram = Mermaid::from(content.as_str()).with_title("Custom Title");
 
     assert_eq!(diagram.alt_text(), "Custom Title");
 }
@@ -195,8 +196,8 @@ fn test_html_escaping_in_instructions() {
 /// Test HTML escaping in title attribute.
 #[test]
 fn test_html_escaping_in_title() {
-    let diagram = Mermaid::new("flowchart LR\n    A --> B")
-        .with_title("<script>alert('xss')</script>");
+    let diagram =
+        Mermaid::new("flowchart LR\n    A --> B").with_title("<script>alert('xss')</script>");
 
     let html = diagram.render_for_html();
 
@@ -237,8 +238,7 @@ fn test_html_body_has_aria_attributes() {
 #[test]
 fn test_html_with_title_includes_attribute() {
     let content = load_fixture("mermaid/valid/simple_flowchart.mmd");
-    let diagram = Mermaid::from(content.as_str())
-        .with_title("Test Diagram");
+    let diagram = Mermaid::from(content.as_str()).with_title("Test Diagram");
 
     let html = diagram.render_for_html();
     assert!(html.body.contains(r#"title="Test Diagram""#));
@@ -363,8 +363,14 @@ fn test_html_has_icon_pack_registration() {
     );
 
     // Verify registerIconPacks comes BEFORE initialize
-    let register_pos = html.head.find("registerIconPacks").expect("registerIconPacks should exist");
-    let initialize_pos = html.head.find("initialize").expect("initialize should exist");
+    let register_pos = html
+        .head
+        .find("registerIconPacks")
+        .expect("registerIconPacks should exist");
+    let initialize_pos = html
+        .head
+        .find("initialize")
+        .expect("initialize should exist");
     assert!(
         register_pos < initialize_pos,
         "registerIconPacks must be called before initialize"

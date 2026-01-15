@@ -62,17 +62,15 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
         env_auth: vec![password_env.to_string()], // Password from env_auth[0]
         env_username: Some(username_env.to_string()),
         headers: vec![],
-        endpoints: vec![
-            Endpoint {
-                id: "GetItems".to_string(),
-                method: RestMethod::Get,
-                path: "/items".to_string(),
-                description: "Get items".to_string(),
-                request: None,
-                response: ApiResponse::json_type("ItemsResponse"),
-                headers: vec![],
-            },
-        ],
+        endpoints: vec![Endpoint {
+            id: "GetItems".to_string(),
+            method: RestMethod::Get,
+            path: "/items".to_string(),
+            description: "Get items".to_string(),
+            request: None,
+            response: ApiResponse::json_type("ItemsResponse"),
+            headers: vec![],
+        }],
     }
 }
 
@@ -197,8 +195,7 @@ fn no_auth_generates_no_auth_code() {
     // Should NOT contain any env::var calls for auth
     // Check that there's no bearer/api key setup code
     assert!(
-        !code.contains(r#"header("Authorization""#)
-            || code.contains("// Apply authentication"),
+        !code.contains(r#"header("Authorization""#) || code.contains("// Apply authentication"),
         "No auth API should not set Authorization header (except in match arm)\nGenerated code:\n{}",
         code
     );
@@ -516,8 +513,7 @@ fn request_enum_has_into_parts_method() {
 
     // The enum should delegate into_parts to the inner request struct
     assert!(
-        code.contains("impl TestApiRequest")
-            && code.contains("fn into_parts"),
+        code.contains("impl TestApiRequest") && code.contains("fn into_parts"),
         "Request enum should have into_parts method\nGenerated code:\n{}",
         code
     );

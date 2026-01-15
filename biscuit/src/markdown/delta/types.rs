@@ -147,7 +147,11 @@ impl FrontmatterChange {
     }
 
     /// Creates an "updated" change.
-    pub fn updated(key: String, old_value: serde_json::Value, new_value: serde_json::Value) -> Self {
+    pub fn updated(
+        key: String,
+        old_value: serde_json::Value,
+        new_value: serde_json::Value,
+    ) -> Self {
         Self::new(
             ChangeAction::PropertyUpdated,
             key.clone(),
@@ -748,12 +752,7 @@ mod tests {
 
     #[test]
     fn test_content_change_added() {
-        let change = ContentChange::added(
-            vec!["New Section".to_string()],
-            2,
-            10,
-            "New Section",
-        );
+        let change = ContentChange::added(vec!["New Section".to_string()], 2, 10, "New Section");
         assert!(matches!(change.action, ChangeAction::Added));
         assert!(change.original_path.is_none());
         assert!(change.new_path.is_some());
@@ -761,12 +760,7 @@ mod tests {
 
     #[test]
     fn test_content_change_removed() {
-        let change = ContentChange::removed(
-            vec!["Old Section".to_string()],
-            2,
-            5,
-            "Old Section",
-        );
+        let change = ContentChange::removed(vec!["Old Section".to_string()], 2, 5, "Old Section");
         assert!(matches!(change.action, ChangeAction::Removed));
         assert!(change.original_path.is_some());
         assert!(change.new_path.is_none());
@@ -774,7 +768,14 @@ mod tests {
 
     #[test]
     fn test_moved_section_promoted() {
-        let moved = MovedSection::new(12345, vec!["A".to_string()], vec!["A".to_string()], -1, 0, 0);
+        let moved = MovedSection::new(
+            12345,
+            vec!["A".to_string()],
+            vec!["A".to_string()],
+            -1,
+            0,
+            0,
+        );
         assert!(moved.was_promoted());
         assert!(!moved.was_demoted());
     }

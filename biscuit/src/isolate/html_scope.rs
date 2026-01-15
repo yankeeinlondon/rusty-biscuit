@@ -323,7 +323,10 @@ mod tests {
         assert_eq!(HtmlTag::Body.as_selector(), "body");
         assert_eq!(HtmlTag::Div.as_selector(), "div");
         assert_eq!(HtmlTag::H1.as_selector(), "h1");
-        assert_eq!(HtmlTag::PreBlock.as_selector(), "pre:has(code[class*='language-'])");
+        assert_eq!(
+            HtmlTag::PreBlock.as_selector(),
+            "pre:has(code[class*='language-'])"
+        );
     }
 
     #[test]

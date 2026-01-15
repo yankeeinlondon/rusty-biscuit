@@ -33,5 +33,5 @@ pub mod string;
 // Re-export core functions for convenient access
 pub use html_interpolate::{html_interpolate, html_interpolate_regex};
 pub use interpolate_regex::interpolate_regex;
-pub use string::interpolate;
 pub use md_interpolate::{md_interpolate, md_interpolate_regex};
+pub use string::interpolate;

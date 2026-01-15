@@ -103,7 +103,9 @@ pub fn generate_css_variables(
 ) -> String {
     // Helper to unwrap Option<String> or use fallback
     let opt = |val: &Option<String>, fallback: &'static str| -> String {
-        val.as_ref().map(|s| s.to_string()).unwrap_or_else(|| fallback.to_string())
+        val.as_ref()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| fallback.to_string())
     };
 
     format!(
@@ -192,7 +194,10 @@ mod tests {
     #[test]
     fn test_detect_diagram_type_flowchart() {
         assert_eq!(detect_diagram_type("flowchart LR"), "Flowchart diagram");
-        assert_eq!(detect_diagram_type("flowchart TD\n    A --> B"), "Flowchart diagram");
+        assert_eq!(
+            detect_diagram_type("flowchart TD\n    A --> B"),
+            "Flowchart diagram"
+        );
     }
 
     #[test]
@@ -217,7 +222,10 @@ mod tests {
 
     #[test]
     fn test_detect_diagram_type_er() {
-        assert_eq!(detect_diagram_type("erDiagram"), "Entity relationship diagram");
+        assert_eq!(
+            detect_diagram_type("erDiagram"),
+            "Entity relationship diagram"
+        );
     }
 
     #[test]

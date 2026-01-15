@@ -5,7 +5,7 @@
 
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse2, Data, DeriveInput, Error, Fields, Result};
+use syn::{Data, DeriveInput, Error, Fields, Result, parse2};
 
 use crate::codegen::generate_api_client;
 use crate::parse::ApiConfig;

@@ -1,4 +1,3 @@
-
 /// The **SmartConcat** struct is a functional grouping operation
 /// which takes 2 or more markdown documents and creates a single
 /// document by concatenating them together.
