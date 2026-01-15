@@ -1,2 +1,0 @@
-# Inline and Vector Images
-
