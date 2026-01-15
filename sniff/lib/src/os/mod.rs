@@ -612,10 +612,10 @@ pub struct OsInfo {
     pub linux_distro: Option<LinuxDistro>,
     /// Kernel version
     pub kernel: String,
-    /// System architecture (e.g., "x86_64", "aarch64")
-    pub arch: String,
     /// System hostname
     pub hostname: String,
+    /// System uptime in seconds
+    pub uptime_seconds: u64,
     /// System package managers detected on the system
     pub system_package_managers: Option<SystemPackageManagers>,
     /// Locale and language settings
@@ -678,15 +678,8 @@ pub fn detect_os() -> Result<OsInfo> {
         distribution: non_empty(System::distribution_id()),
         linux_distro,
         kernel: System::kernel_version().unwrap_or_default(),
-        arch: {
-            let arch = System::cpu_arch();
-            if arch.is_empty() {
-                std::env::consts::ARCH.to_string()
-            } else {
-                arch
-            }
-        },
         hostname: System::host_name().unwrap_or_default(),
+        uptime_seconds: System::uptime(),
         system_package_managers,
         locale,
         time,
@@ -2874,8 +2867,8 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
                 family: LinuxFamily::Debian,
             }),
             kernel: "6.5.0-generic".to_string(),
-            arch: "x86_64".to_string(),
             hostname: "myhost".to_string(),
+            uptime_seconds: 3600, // 1 hour for test
             system_package_managers: None,
             locale: None,
             time: None,
