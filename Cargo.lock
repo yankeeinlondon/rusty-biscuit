@@ -4833,6 +4833,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "ec4rs",
+ "futures",
  "getifaddrs",
  "git2",
  "hyperpolyglot",

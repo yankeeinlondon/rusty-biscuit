@@ -453,21 +453,10 @@ pub async fn enrich_dependency(mut entry: DependencyEntry) -> DependencyEntry {
 /// ```
 #[cfg(feature = "network")]
 pub async fn enrich_dependencies(entries: Vec<DependencyEntry>) -> Vec<DependencyEntry> {
-    use std::future::Future;
-    use std::pin::Pin;
+    use futures::future::join_all;
 
-    // Collect all futures
-    let futures: Vec<Pin<Box<dyn Future<Output = DependencyEntry> + Send>>> = entries
-        .into_iter()
-        .map(|e| Box::pin(enrich_dependency(e)) as Pin<Box<dyn Future<Output = DependencyEntry> + Send>>)
-        .collect();
-
-    // Execute all in parallel using join_all pattern
-    let mut results = Vec::with_capacity(futures.len());
-    for future in futures {
-        results.push(future.await);
-    }
-    results
+    let futures = entries.into_iter().map(enrich_dependency);
+    join_all(futures).await
 }
 
 /// Stub for when network feature is disabled.

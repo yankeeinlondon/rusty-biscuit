@@ -7,6 +7,7 @@ license = "AGPL-3.0-only"
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 ec4rs = "1"
+futures = { version = "0.3", optional = true }
 getifaddrs = "0.6.0"
 git2 = "0.20.3"
 hyperpolyglot = "0.1.7"
@@ -23,7 +24,7 @@ walkdir = "2.5"
 
 [features]
 default = []
-network = ["dep:reqwest", "dep:tokio", "reqwest/rustls-tls"]
+network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls-tls"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal = "0.33"

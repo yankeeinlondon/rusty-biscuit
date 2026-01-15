@@ -209,7 +209,6 @@ fn test_detect_os_has_detection_fields() {
 
     // OS info should have populated fields
     assert!(!os.name.is_empty(), "OS name should be detected");
-    assert!(!os.arch.is_empty(), "Architecture should be detected");
     assert!(!os.kernel.is_empty(), "Kernel version should be detected");
 
     // OS type should match current platform

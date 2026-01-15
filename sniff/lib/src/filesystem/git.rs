@@ -461,41 +461,48 @@ fn get_repo_status(repo: &Repository) -> Result<RepoStatus> {
 
     let statuses = repo.statuses(Some(&mut opts))?;
 
+    use std::collections::HashSet;
+
     let mut staged = 0;
     let mut unstaged = 0;
     let mut untracked_count = 0;
 
-    // Collect paths for dirty and untracked files
-    let mut dirty_paths: Vec<PathBuf> = Vec::new();
+    // Use HashSet for O(1) deduplication instead of Vec::contains which is O(n)
+    let mut dirty_set: HashSet<PathBuf> = HashSet::new();
     let mut untracked_paths: Vec<PathBuf> = Vec::new();
 
     for entry in statuses.iter() {
         let status = entry.status();
         let path = entry.path().map(PathBuf::from);
 
-        if status.is_index_new() || status.is_index_modified() || status.is_index_deleted() {
+        let is_staged =
+            status.is_index_new() || status.is_index_modified() || status.is_index_deleted();
+        let is_unstaged = status.is_wt_modified() || status.is_wt_deleted();
+        let is_untracked = status.is_wt_new();
+
+        if is_staged {
             staged += 1;
-            if let Some(ref p) = path
-                && !dirty_paths.contains(p)
-            {
-                dirty_paths.push(p.clone());
-            }
         }
-        if status.is_wt_modified() || status.is_wt_deleted() {
+        if is_unstaged {
             unstaged += 1;
-            if let Some(ref p) = path
-                && !dirty_paths.contains(p)
-            {
-                dirty_paths.push(p.clone());
+        }
+        if is_untracked {
+            untracked_count += 1;
+            if let Some(ref p) = path {
+                untracked_paths.push(p.clone());
             }
         }
-        if status.is_wt_new() {
-            untracked_count += 1;
+
+        // Add to dirty set if staged or unstaged (but not untracked)
+        if (is_staged || is_unstaged) && !is_untracked {
             if let Some(p) = path {
-                untracked_paths.push(p);
+                dirty_set.insert(p);
             }
         }
     }
+
+    // Convert HashSet to Vec for downstream processing
+    let dirty_paths: Vec<PathBuf> = dirty_set.into_iter().collect();
 
     // Get HEAD commit SHA and upstream commit
     let (head_sha, origin_commit) = get_commit_refs(repo);

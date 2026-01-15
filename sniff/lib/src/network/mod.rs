@@ -98,7 +98,12 @@ pub fn detect_network() -> Result<NetworkInfo> {
                     entry.ipv6_addresses.push(v6.address);
                 }
             }
-            _ => {}
+            getifaddrs::Address::Mac(mac) => {
+                // Only set MAC if not already set (first non-zero wins)
+                if entry.mac_address.is_none() && mac != [0u8; 6] {
+                    entry.mac_address = Some(format_mac_address(&mac));
+                }
+            }
         }
     }
 
@@ -112,6 +117,21 @@ pub fn detect_network() -> Result<NetworkInfo> {
         primary_interface: primary,
         permission_denied: false,
     })
+}
+
+/// Formats a MAC address as a colon-separated hex string.
+///
+/// ## Examples
+///
+/// ```ignore
+/// let mac = [0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E];
+/// assert_eq!(format_mac_address(&mac), "00:1a:2b:3c:4d:5e");
+/// ```
+fn format_mac_address(mac: &[u8; 6]) -> String {
+    format!(
+        "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+    )
 }
 
 /// Finds the primary network interface.
@@ -213,6 +233,52 @@ mod tests {
         if !info.permission_denied {
             for iface in &info.interfaces {
                 assert!(!iface.name.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn test_format_mac_address() {
+        let mac = [0x00, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e];
+        assert_eq!(format_mac_address(&mac), "00:1a:2b:3c:4d:5e");
+    }
+
+    #[test]
+    fn test_format_mac_address_all_zeros() {
+        let mac = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        assert_eq!(format_mac_address(&mac), "00:00:00:00:00:00");
+    }
+
+    #[test]
+    fn test_format_mac_address_all_ff() {
+        let mac = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+        assert_eq!(format_mac_address(&mac), "ff:ff:ff:ff:ff:ff");
+    }
+
+    #[test]
+    fn test_non_loopback_has_mac_address() {
+        let info = detect_network().unwrap();
+        if !info.permission_denied {
+            // At least one non-loopback interface should have a MAC address
+            // (on most systems with physical or virtual network hardware)
+            let has_mac = info
+                .interfaces
+                .iter()
+                .filter(|i| !i.flags.is_loopback)
+                .any(|i| i.mac_address.is_some());
+
+            // This is a soft assertion - not all systems will have MAC addresses visible
+            // (e.g., containers, minimal VMs). We just ensure we don't crash.
+            if has_mac {
+                let iface_with_mac = info
+                    .interfaces
+                    .iter()
+                    .find(|i| i.mac_address.is_some())
+                    .unwrap();
+                let mac = iface_with_mac.mac_address.as_ref().unwrap();
+                // MAC should be formatted as xx:xx:xx:xx:xx:xx
+                assert_eq!(mac.len(), 17, "MAC address should be 17 chars: {mac}");
+                assert_eq!(mac.matches(':').count(), 5, "MAC should have 5 colons: {mac}");
             }
         }
     }

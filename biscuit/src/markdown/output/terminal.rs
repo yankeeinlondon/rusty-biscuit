@@ -5245,11 +5245,14 @@ More text after the table.
     fn test_image_renderer_accessors() {
         let renderer = ImageRenderer::new(None);
 
-        // is_tty should be false in test context
-        assert!(!renderer.is_tty());
+        // Test that accessors return values
+        let is_tty = renderer.is_tty();
+        let graphics_supported = renderer.graphics_supported();
 
-        // graphics_supported should be false when not TTY
-        assert!(!renderer.graphics_supported());
+        // graphics_supported requires is_tty to be true
+        if graphics_supported {
+            assert!(is_tty, "graphics_supported should be false when not a TTY");
+        }
 
         // Terminal width should be reasonable
         assert!(renderer.terminal_width() >= 10);
@@ -5412,19 +5415,25 @@ More text after the table.
         assert!(result.contains("▉ IMAGE[]"));
     }
 
-    /// Test render_image when graphics_supported is false
+    /// Test render_image fallback behavior
     #[test]
     fn test_render_image_no_graphics_support() {
         let renderer = ImageRenderer::new(None);
-        // In test context, graphics_supported should be false
-        assert!(!renderer.graphics_supported());
 
-        // Create a temp file that exists
-        let tmp = std::env::temp_dir().join("test_image_render.png");
+        // Create a temp file with invalid image data
+        // This should trigger fallback regardless of graphics_supported value
+        let tmp = std::env::temp_dir().join("test_image_render_invalid.png");
         std::fs::write(&tmp, b"fake png data").unwrap();
 
         let result = renderer.render_image(tmp.to_str().unwrap(), "Test");
-        assert!(result.contains("▉ IMAGE[Test]"));
+
+        // Should get fallback text either because:
+        // 1. graphics_supported is false, or
+        // 2. viuer fails to decode invalid PNG data
+        assert!(
+            result.contains("▉ IMAGE[Test]"),
+            "Expected fallback placeholder for invalid image data"
+        );
 
         std::fs::remove_file(&tmp).ok();
     }
