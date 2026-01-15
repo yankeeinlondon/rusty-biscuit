@@ -171,12 +171,14 @@ pub fn detect_simd() -> SimdCapabilities {
 
 /// CPU information.
 ///
-/// Contains details about the processor including brand, logical cores,
-/// physical cores when available, and SIMD capabilities.
+/// Contains details about the processor including brand, architecture,
+/// logical cores, physical cores when available, and SIMD capabilities.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CpuInfo {
     /// CPU brand string (e.g., "Intel(R) Core(TM) i7-9750H")
     pub brand: String,
+    /// CPU architecture (e.g., "x86_64", "aarch64", "arm64")
+    pub arch: String,
     /// Number of logical CPU cores (includes hyperthreading)
     pub logical_cores: usize,
     /// Number of physical CPU cores (None if unavailable)

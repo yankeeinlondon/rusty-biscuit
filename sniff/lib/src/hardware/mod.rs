@@ -178,6 +178,55 @@ mod tests {
     }
 
     #[test]
+    fn test_available_bytes_is_not_zero() {
+        // Regression test: available_bytes should never be 0 on a running system
+        // This catches the macOS bug where sysinfo's available_memory() returns 0
+        let info = detect_hardware().unwrap();
+        assert_ne!(
+            info.memory.available_bytes, 0,
+            "available_bytes should not be 0 on a running system (total: {}, used: {})",
+            info.memory.total_bytes, info.memory.used_bytes
+        );
+    }
+
+    #[test]
+    fn test_memory_accounting_is_valid() {
+        // Regression test: verify memory values have sensible relationships
+        let info = detect_hardware().unwrap();
+
+        // Available memory should be non-zero
+        assert!(
+            info.memory.available_bytes > 0,
+            "available_bytes should be > 0 (got {})",
+            info.memory.available_bytes
+        );
+
+        // Available memory should be less than or equal to total
+        assert!(
+            info.memory.available_bytes <= info.memory.total_bytes,
+            "available_bytes ({}) should be <= total_bytes ({})",
+            info.memory.available_bytes,
+            info.memory.total_bytes
+        );
+
+        // Used memory should be less than or equal to total
+        assert!(
+            info.memory.used_bytes <= info.memory.total_bytes,
+            "used_bytes ({}) should be <= total_bytes ({})",
+            info.memory.used_bytes,
+            info.memory.total_bytes
+        );
+
+        // The sum of available and used can exceed total due to caching/buffers,
+        // but both should be reasonable values
+        assert!(
+            info.memory.available_bytes < u64::MAX / 2,
+            "available_bytes suspiciously large: {}",
+            info.memory.available_bytes
+        );
+    }
+
+    #[test]
     fn test_cpu_count_is_positive() {
         let info = detect_hardware().unwrap();
         assert!(info.cpu.logical_cores > 0);
