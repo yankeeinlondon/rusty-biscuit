@@ -1,4 +1,4 @@
-use sniff_lib::{detect, detect_with_config, SniffConfig};
+use sniff_lib::{SniffConfig, detect, detect_with_config};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -35,9 +35,11 @@ fn test_detect_cargo_workspace() {
     let config = SniffConfig::new().base_dir(path);
     let result = detect_with_config(config).unwrap();
     let fs = result.filesystem.unwrap();
-    assert!(fs.monorepo.is_some());
-    let mono = fs.monorepo.unwrap();
-    assert_eq!(mono.packages.len(), 2);
+    assert!(fs.repo.is_some());
+    let repo = fs.repo.unwrap();
+    assert!(repo.is_monorepo);
+    assert!(repo.packages.is_some());
+    assert_eq!(repo.packages.unwrap().len(), 2);
 }
 
 #[test]
@@ -47,7 +49,11 @@ fn test_detect_completes_in_reasonable_time() {
     let _ = detect();
     let elapsed = start.elapsed();
     // Allow slack for CI environments and package manager detection (PATH scanning)
-    assert!(elapsed.as_millis() < 10000, "Detection took too long: {:?}", elapsed);
+    assert!(
+        elapsed.as_millis() < 10000,
+        "Detection took too long: {:?}",
+        elapsed
+    );
 }
 
 #[test]
@@ -89,9 +95,13 @@ fn test_detect_pnpm_workspace() {
     let config = SniffConfig::new().base_dir(path);
     let result = detect_with_config(config).unwrap();
     let fs = result.filesystem.unwrap();
-    assert!(fs.monorepo.is_some());
-    let mono = fs.monorepo.unwrap();
-    assert_eq!(mono.tool, sniff_lib::filesystem::MonorepoTool::PnpmWorkspaces);
+    assert!(fs.repo.is_some());
+    let repo = fs.repo.unwrap();
+    assert!(repo.is_monorepo);
+    assert_eq!(
+        repo.monorepo_tool,
+        Some(sniff_lib::filesystem::MonorepoTool::PnpmWorkspaces)
+    );
 }
 
 // === Regression tests for JSON serialization of partial results ===
@@ -103,8 +113,14 @@ fn test_skip_hardware_json_omits_hardware_key() {
     let config = SniffConfig::new().skip_hardware();
     let result = detect_with_config(config).unwrap();
     let json = serde_json::to_string(&result).unwrap();
-    assert!(!json.contains("\"hardware\""), "JSON should not contain hardware key when skipped");
-    assert!(json.contains("\"network\""), "JSON should contain network key");
+    assert!(
+        !json.contains("\"hardware\""),
+        "JSON should not contain hardware key when skipped"
+    );
+    assert!(
+        json.contains("\"network\""),
+        "JSON should contain network key"
+    );
 }
 
 #[test]
@@ -113,8 +129,14 @@ fn test_skip_network_json_omits_network_key() {
     let config = SniffConfig::new().skip_network();
     let result = detect_with_config(config).unwrap();
     let json = serde_json::to_string(&result).unwrap();
-    assert!(!json.contains("\"network\""), "JSON should not contain network key when skipped");
-    assert!(json.contains("\"hardware\""), "JSON should contain hardware key");
+    assert!(
+        !json.contains("\"network\""),
+        "JSON should not contain network key when skipped"
+    );
+    assert!(
+        json.contains("\"hardware\""),
+        "JSON should contain hardware key"
+    );
 }
 
 #[test]
@@ -123,22 +145,38 @@ fn test_skip_filesystem_json_omits_filesystem_key() {
     let config = SniffConfig::new().skip_filesystem();
     let result = detect_with_config(config).unwrap();
     let json = serde_json::to_string(&result).unwrap();
-    assert!(!json.contains("\"filesystem\""), "JSON should not contain filesystem key when skipped");
-    assert!(json.contains("\"hardware\""), "JSON should contain hardware key");
+    assert!(
+        !json.contains("\"filesystem\""),
+        "JSON should not contain filesystem key when skipped"
+    );
+    assert!(
+        json.contains("\"hardware\""),
+        "JSON should contain hardware key"
+    );
 }
 
 #[test]
 fn test_hardware_only_json_contains_only_hardware() {
     // Regression test: When only hardware is requested, JSON should contain ONLY hardware
-    let config = SniffConfig::new()
-        .skip_network()
-        .skip_filesystem();
+    let config = SniffConfig::new().skip_network().skip_filesystem();
     let result = detect_with_config(config).unwrap();
     let json = serde_json::to_string(&result).unwrap();
-    assert!(json.contains("\"hardware\""), "JSON should contain hardware key");
-    assert!(!json.contains("\"network\""), "JSON should not contain network key");
-    assert!(!json.contains("\"filesystem\""), "JSON should not contain filesystem key");
-    assert!(!json.contains("\"interfaces\""), "JSON should not contain interfaces (from network)");
+    assert!(
+        json.contains("\"hardware\""),
+        "JSON should contain hardware key"
+    );
+    assert!(
+        !json.contains("\"network\""),
+        "JSON should not contain network key"
+    );
+    assert!(
+        !json.contains("\"filesystem\""),
+        "JSON should not contain filesystem key"
+    );
+    assert!(
+        !json.contains("\"interfaces\""),
+        "JSON should not contain interfaces (from network)"
+    );
 }
 
 #[test]
@@ -148,8 +186,14 @@ fn test_partial_result_deserialization_roundtrip() {
     let result = detect_with_config(config).unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let parsed: sniff_lib::SniffResult = serde_json::from_str(&json).unwrap();
-    assert!(parsed.hardware.is_none(), "Deserialized hardware should be None");
-    assert!(parsed.network.is_some(), "Deserialized network should be Some");
+    assert!(
+        parsed.hardware.is_none(),
+        "Deserialized hardware should be None"
+    );
+    assert!(
+        parsed.network.is_some(),
+        "Deserialized network should be Some"
+    );
 }
 
 // ============================================================================
@@ -246,7 +290,7 @@ fn test_detect_timezone_returns_valid_offset() {
 /// Tests that detect_os_type matches the current platform.
 #[test]
 fn test_detect_os_type_matches_platform() {
-    use sniff_lib::hardware::{detect_os_type, OsType};
+    use sniff_lib::hardware::{OsType, detect_os_type};
 
     let os_type = detect_os_type();
 
@@ -292,7 +336,7 @@ fn test_detect_os_type_matches_platform() {
 #[cfg(target_os = "macos")]
 #[test]
 fn test_macos_package_managers_finds_expected_managers() {
-    use sniff_lib::hardware::{detect_macos_package_managers, SystemPackageManager};
+    use sniff_lib::hardware::{SystemPackageManager, detect_macos_package_managers};
 
     let managers = detect_macos_package_managers();
 
@@ -321,10 +365,7 @@ fn test_macos_package_managers_finds_expected_managers() {
             .managers
             .iter()
             .any(|m| m.manager == SystemPackageManager::Homebrew);
-        assert!(
-            has_homebrew,
-            "Homebrew should be detected when installed"
-        );
+        assert!(has_homebrew, "Homebrew should be detected when installed");
         assert_eq!(
             managers.primary,
             Some(SystemPackageManager::Homebrew),
@@ -337,7 +378,7 @@ fn test_macos_package_managers_finds_expected_managers() {
 #[cfg(target_os = "linux")]
 #[test]
 fn test_linux_package_managers_finds_at_least_one() {
-    use sniff_lib::hardware::{detect_linux_package_managers, detect_linux_distro};
+    use sniff_lib::hardware::{detect_linux_distro, detect_linux_package_managers};
 
     // Get distro info to determine family
     let linux_family = detect_linux_distro().map(|d| d.family);

@@ -351,9 +351,7 @@ mod tests {
     fn test_apple_silicon_capabilities() {
         let gpus = detect_gpus();
         // Find Apple Silicon GPU if present
-        if let Some(apple_gpu) = gpus.iter().find(|g| {
-            g.vendor.as_deref() == Some("Apple")
-        }) {
+        if let Some(apple_gpu) = gpus.iter().find(|g| g.vendor.as_deref() == Some("Apple")) {
             // Apple Silicon has unified memory
             assert!(
                 apple_gpu.capabilities.unified_memory,

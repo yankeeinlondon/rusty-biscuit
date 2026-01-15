@@ -5,11 +5,16 @@ pub mod error;
 pub mod filesystem;
 pub mod hardware;
 pub mod network;
+pub mod os;
 
 pub use error::{Result, SniffError};
-pub use hardware::{HardwareInfo, OsInfo};
-pub use network::NetworkInfo;
 pub use filesystem::FilesystemInfo;
+pub use hardware::HardwareInfo;
+pub use network::NetworkInfo;
+
+// Re-export key OS types from the os module for convenience.
+// The canonical path is `sniff_lib::os::*`.
+pub use os::OsInfo;
 
 /// Complete system detection result.
 ///
@@ -146,7 +151,7 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
     let os = if config.skip_os {
         None
     } else {
-        Some(hardware::detect_os()?)
+        Some(os::detect_os()?)
     };
 
     let hardware = if config.skip_hardware {
@@ -166,13 +171,18 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
     let filesystem = if config.skip_filesystem {
         None
     } else {
-        let base = config.base_dir.unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
+        let base = config
+            .base_dir
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         Some(filesystem::detect_filesystem(&base, config.deep)?)
     };
 
-    Ok(SniffResult { os, hardware, network, filesystem })
+    Ok(SniffResult {
+        os,
+        hardware,
+        network,
+        filesystem,
+    })
 }
 
 #[cfg(test)]
@@ -220,8 +230,7 @@ mod tests {
 
     #[test]
     fn test_detect_with_base_dir() {
-        let config = SniffConfig::new()
-            .base_dir(PathBuf::from("."));
+        let config = SniffConfig::new().base_dir(PathBuf::from("."));
         let result = detect_with_config(config).unwrap();
         assert!(result.filesystem.is_some());
     }
@@ -246,15 +255,21 @@ mod tests {
     // Regression test: Combining skip_os with other sections should work correctly
     #[test]
     fn test_skip_os_with_filesystem_only() {
-        let config = SniffConfig::new()
-            .skip_os()
-            .skip_hardware()
-            .skip_network();
+        let config = SniffConfig::new().skip_os().skip_hardware().skip_network();
         let result = detect_with_config(config).unwrap();
         assert!(result.os.is_none(), "OS should be None when skipped");
-        assert!(result.hardware.is_none(), "Hardware should be None when skipped");
-        assert!(result.network.is_none(), "Network should be None when skipped");
-        assert!(result.filesystem.is_some(), "Filesystem should be Some when not skipped");
+        assert!(
+            result.hardware.is_none(),
+            "Hardware should be None when skipped"
+        );
+        assert!(
+            result.network.is_none(),
+            "Network should be None when skipped"
+        );
+        assert!(
+            result.filesystem.is_some(),
+            "Filesystem should be Some when not skipped"
+        );
     }
 
     // Regression test: Multiple skip flags including OS

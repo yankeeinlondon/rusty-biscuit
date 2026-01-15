@@ -1,8 +1,8 @@
+use crate::Result;
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use crate::Result;
 
 /// Maximum files to scan before early termination
 const MAX_FILES: usize = 10_000;
@@ -104,10 +104,10 @@ pub fn detect_languages(root: &Path) -> Result<LanguageBreakdown> {
 
     // Use the `ignore` crate which respects .gitignore files
     let walker = WalkBuilder::new(root)
-        .hidden(true)           // Skip hidden files (like .git)
-        .git_ignore(true)       // Respect .gitignore
-        .git_global(true)       // Respect global gitignore
-        .git_exclude(true)      // Respect .git/info/exclude
+        .hidden(true) // Skip hidden files (like .git)
+        .git_ignore(true) // Respect .gitignore
+        .git_global(true) // Respect global gitignore
+        .git_exclude(true) // Respect .git/info/exclude
         .filter_entry(|e| !is_excluded_dir(e))
         .build();
 
@@ -261,11 +261,15 @@ mod tests {
         let mut language_files = HashMap::new();
         language_files.insert(
             "Rust".to_string(),
-            (0..7).map(|i| PathBuf::from(format!("file{}.rs", i))).collect(),
+            (0..7)
+                .map(|i| PathBuf::from(format!("file{}.rs", i)))
+                .collect(),
         );
         language_files.insert(
             "JavaScript".to_string(),
-            (0..3).map(|i| PathBuf::from(format!("file{}.js", i))).collect(),
+            (0..3)
+                .map(|i| PathBuf::from(format!("file{}.js", i)))
+                .collect(),
         );
 
         let stats = calculate_stats(&language_files, 10);

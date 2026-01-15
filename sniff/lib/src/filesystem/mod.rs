@@ -1,18 +1,20 @@
+use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use crate::Result;
 
-pub mod languages;
-pub mod git;
-pub mod monorepo;
-pub mod dependencies;
 pub mod formatting;
+pub mod git;
+pub mod languages;
+pub mod repo;
 
+pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
+pub use git::{
+    BehindStatus, CommitInfo, GitInfo, HostingProvider, RemoteInfo, RepoStatus, detect_git,
+};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
-pub use git::{BehindStatus, GitInfo, RepoStatus, RemoteInfo, HostingProvider, CommitInfo, detect_git};
-pub use monorepo::{MonorepoInfo, MonorepoTool, PackageLocation, detect_monorepo};
-pub use dependencies::{PackageManager, DependencyReport, ManifestLocation, DependencyEntry, DependencyKind, PackageDependencies, detect_dependencies};
-pub use formatting::{FormattingConfig, EditorConfigSection, detect_formatting};
+pub use repo::{
+    DependencyEntry, DependencyKind, MonorepoTool, PackageLocation, RepoInfo, detect_repo,
+};
 
 /// Complete filesystem analysis for a directory.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -21,10 +23,8 @@ pub struct FilesystemInfo {
     pub languages: Option<LanguageBreakdown>,
     /// Git repository information
     pub git: Option<GitInfo>,
-    /// Monorepo detection results
-    pub monorepo: Option<MonorepoInfo>,
-    /// Dependency analysis
-    pub dependencies: Option<DependencyReport>,
+    /// Repository detection results (monorepo or single-package repo)
+    pub repo: Option<RepoInfo>,
     /// EditorConfig formatting configuration
     pub formatting: Option<FormattingConfig>,
 }
@@ -33,15 +33,13 @@ pub struct FilesystemInfo {
 pub fn detect_filesystem(root: &Path, deep: bool) -> Result<FilesystemInfo> {
     let languages = detect_languages(root).ok();
     let git = detect_git(root, deep)?;
-    let monorepo = detect_monorepo(root)?;
-    let dependencies = detect_dependencies(root).ok();
+    let repo = detect_repo(root)?;
     let formatting = detect_formatting(root).ok().flatten();
 
     Ok(FilesystemInfo {
         languages,
         git,
-        monorepo,
-        dependencies,
+        repo,
         formatting,
     })
 }

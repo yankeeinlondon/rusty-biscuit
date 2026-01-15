@@ -389,10 +389,7 @@ pub fn detect_git(path: &Path, deep: bool) -> Result<Option<GitInfo>> {
         .to_path_buf();
 
     let head = repo.head().ok();
-    let current_branch = head
-        .as_ref()
-        .and_then(|h| h.shorthand())
-        .map(String::from);
+    let current_branch = head.as_ref().and_then(|h| h.shorthand()).map(String::from);
 
     let in_worktree = repo.is_worktree();
     let recent = get_recent_commits(&repo, 10, deep);
@@ -479,16 +476,18 @@ fn get_repo_status(repo: &Repository) -> Result<RepoStatus> {
         if status.is_index_new() || status.is_index_modified() || status.is_index_deleted() {
             staged += 1;
             if let Some(ref p) = path
-                && !dirty_paths.contains(p) {
-                    dirty_paths.push(p.clone());
-                }
+                && !dirty_paths.contains(p)
+            {
+                dirty_paths.push(p.clone());
+            }
         }
         if status.is_wt_modified() || status.is_wt_deleted() {
             unstaged += 1;
             if let Some(ref p) = path
-                && !dirty_paths.contains(p) {
-                    dirty_paths.push(p.clone());
-                }
+                && !dirty_paths.contains(p)
+            {
+                dirty_paths.push(p.clone());
+            }
         }
         if status.is_wt_new() {
             untracked_count += 1;
@@ -547,7 +546,9 @@ fn get_upstream_commit(repo: &Repository) -> Option<String> {
     }
 
     let branch_name = head.shorthand()?;
-    let branch = repo.find_branch(branch_name, git2::BranchType::Local).ok()?;
+    let branch = repo
+        .find_branch(branch_name, git2::BranchType::Local)
+        .ok()?;
 
     // Get the upstream branch (this handles dynamic remote discovery)
     let upstream = branch.upstream().ok()?;
@@ -594,7 +595,8 @@ fn get_file_diff(repo: &Repository, filepath: &Path) -> Result<String> {
         let mut diff_opts = git2::DiffOptions::new();
         diff_opts.pathspec(filepath);
 
-        if let Ok(staged_diff) = repo.diff_tree_to_index(Some(&head_tree), None, Some(&mut diff_opts))
+        if let Ok(staged_diff) =
+            repo.diff_tree_to_index(Some(&head_tree), None, Some(&mut diff_opts))
         {
             let staged_output = diff_to_string(&staged_diff)?;
             if !staged_output.is_empty() {
@@ -723,7 +725,8 @@ fn get_remote_branches(repo: &Repository, remote_name: &str) -> Option<Vec<Strin
         .filter_map(|head| {
             let name = head.name();
             // Filter to only branch refs (refs/heads/*)
-            name.strip_prefix("refs/heads/").map(|branch| branch.to_string())
+            name.strip_prefix("refs/heads/")
+                .map(|branch| branch.to_string())
         })
         .collect();
 
@@ -980,7 +983,9 @@ mod tests {
     #[test]
     fn test_hosting_provider_aws_codecommit() {
         assert_eq!(
-            HostingProvider::from_url("https://git-codecommit.us-east-1.amazonaws.com/v1/repos/repo"),
+            HostingProvider::from_url(
+                "https://git-codecommit.us-east-1.amazonaws.com/v1/repos/repo"
+            ),
             HostingProvider::AwsCodeCommit
         );
     }
@@ -1849,10 +1854,7 @@ mod tests {
 
         // Verify roundtrip for both cases
         let deserialized_with: CommitInfo = serde_json::from_str(&json_with).unwrap();
-        assert_eq!(
-            deserialized_with.remotes,
-            Some(vec!["origin".to_string()])
-        );
+        assert_eq!(deserialized_with.remotes, Some(vec!["origin".to_string()]));
 
         let deserialized_without: CommitInfo = serde_json::from_str(&json_without).unwrap();
         assert_eq!(deserialized_without.remotes, None);

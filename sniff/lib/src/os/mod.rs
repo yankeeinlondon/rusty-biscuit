@@ -3,6 +3,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
+use sysinfo::System;
+
+use crate::Result;
 
 // ============================================================================
 // OS Type Detection
@@ -59,7 +62,7 @@ impl std::fmt::Display for OsType {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::hardware::detect_os_type;
+/// use sniff_lib::os::detect_os_type;
 ///
 /// let os_type = detect_os_type();
 /// println!("Running on: {}", os_type);
@@ -159,7 +162,7 @@ pub struct LinuxDistro {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::hardware::{infer_linux_family, LinuxFamily};
+/// use sniff_lib::os::{infer_linux_family, LinuxFamily};
 ///
 /// assert_eq!(infer_linux_family("ubuntu"), LinuxFamily::Debian);
 /// assert_eq!(infer_linux_family("fedora"), LinuxFamily::RedHat);
@@ -238,8 +241,13 @@ pub fn infer_linux_family(distro_id: &str) -> LinuxFamily {
     ];
 
     // SUSE family (zypper/rpm)
-    const SUSE_DISTROS: &[&str] =
-        &["opensuse", "suse", "sles", "opensuse-leap", "opensuse-tumbleweed"];
+    const SUSE_DISTROS: &[&str] = &[
+        "opensuse",
+        "suse",
+        "sles",
+        "opensuse-leap",
+        "opensuse-tumbleweed",
+    ];
 
     // Check each family
     if DEBIAN_DISTROS
@@ -291,7 +299,7 @@ pub fn infer_linux_family(distro_id: &str) -> LinuxFamily {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::hardware::detect_linux_distro;
+/// use sniff_lib::os::detect_linux_distro;
 ///
 /// if let Some(distro) = detect_linux_distro() {
 ///     println!("Distribution: {} ({})", distro.name, distro.id);
@@ -616,6 +624,75 @@ pub struct OsInfo {
     pub time: Option<TimeInfo>,
 }
 
+/// Detects operating system information from the current system.
+///
+/// This function gathers OS type, distribution details, package managers,
+/// locale, and timezone information.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use sniff_lib::os::detect_os;
+///
+/// let os = detect_os().unwrap();
+/// println!("OS: {} {}", os.name, os.version);
+/// println!("Arch: {}", os.arch);
+/// println!("Hostname: {}", os.hostname);
+/// ```
+///
+/// ## Errors
+///
+/// Currently returns `Ok` in all cases, but future versions may return
+/// errors for system information gathering failures.
+pub fn detect_os() -> Result<OsInfo> {
+    // Helper to convert empty strings to None
+    let non_empty = |s: String| if s.is_empty() { None } else { Some(s) };
+
+    let os_type = detect_os_type();
+    let linux_distro = detect_linux_distro();
+    // Extract linux family before moving linux_distro into OsInfo
+    let linux_family = linux_distro.as_ref().map(|d| d.family);
+
+    // Detect system package managers based on OS type
+    let system_package_managers = match os_type {
+        OsType::Linux => Some(detect_linux_package_managers(linux_family)),
+        OsType::MacOS => Some(detect_macos_package_managers()),
+        OsType::Windows => Some(detect_windows_package_managers()),
+        OsType::FreeBSD | OsType::OpenBSD | OsType::NetBSD => {
+            Some(detect_bsd_package_managers(os_type))
+        }
+        OsType::IOS | OsType::Android | OsType::Other => None,
+    };
+
+    // Detect locale settings
+    let locale = Some(detect_locale());
+
+    // Detect timezone and time information
+    let time = Some(detect_timezone());
+
+    Ok(OsInfo {
+        os_type,
+        name: System::name().unwrap_or_default(),
+        version: System::os_version().unwrap_or_default(),
+        long_version: System::long_os_version(),
+        distribution: non_empty(System::distribution_id()),
+        linux_distro,
+        kernel: System::kernel_version().unwrap_or_default(),
+        arch: {
+            let arch = System::cpu_arch();
+            if arch.is_empty() {
+                std::env::consts::ARCH.to_string()
+            } else {
+                arch
+            }
+        },
+        hostname: System::host_name().unwrap_or_default(),
+        system_package_managers,
+        locale,
+        time,
+    })
+}
+
 /// Runs a command with a timeout, returning stdout as a string if successful.
 ///
 /// ## Arguments
@@ -772,11 +849,8 @@ pub fn detect_ntp_status() -> NtpStatus {
         Some("yes") => NtpStatus::Synchronized,
         Some("no") => {
             // Check if NTP is active but not synced vs inactive
-            let ntp_active = run_command_with_timeout(
-                "timedatectl",
-                &["show", "--property=NTP", "--value"],
-                5,
-            );
+            let ntp_active =
+                run_command_with_timeout("timedatectl", &["show", "--property=NTP", "--value"], 5);
             match ntp_active.as_deref().map(str::trim) {
                 Some("yes") => NtpStatus::Unsynchronized,
                 Some("no") => NtpStatus::Inactive,
@@ -813,7 +887,7 @@ pub fn detect_ntp_status() -> NtpStatus {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::hardware::detect_timezone;
+/// use sniff_lib::os::detect_timezone;
 ///
 /// let time_info = detect_timezone();
 /// println!("Timezone: {:?}", time_info.timezone);
@@ -915,7 +989,7 @@ pub struct LocaleInfo {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::hardware::detect_locale;
+/// use sniff_lib::os::detect_locale;
 ///
 /// let locale = detect_locale();
 /// if let Some(lang) = &locale.preferred_language {
@@ -978,7 +1052,7 @@ fn is_extractable_locale(locale: &str) -> bool {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::hardware::extract_language_code;
+/// use sniff_lib::os::extract_language_code;
 ///
 /// assert_eq!(extract_language_code("en_US.UTF-8"), Some("en".to_string()));
 /// assert_eq!(extract_language_code("de_DE"), Some("de".to_string()));
@@ -1014,7 +1088,7 @@ pub fn extract_language_code(locale: &str) -> Option<String> {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::hardware::extract_encoding;
+/// use sniff_lib::os::extract_encoding;
 ///
 /// assert_eq!(extract_encoding("en_US.UTF-8"), Some("UTF-8".to_string()));
 /// assert_eq!(extract_encoding("de_DE.ISO-8859-1"), Some("ISO-8859-1".to_string()));
@@ -1242,7 +1316,7 @@ impl SystemPackageManager {
     /// ## Examples
     ///
     /// ```
-    /// use sniff_lib::hardware::SystemPackageManager;
+    /// use sniff_lib::os::SystemPackageManager;
     ///
     /// assert_eq!(SystemPackageManager::Apt.executable_name(), "apt");
     /// assert_eq!(SystemPackageManager::Homebrew.executable_name(), "brew");
@@ -1312,7 +1386,7 @@ impl SystemPackageManager {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::hardware::PackageManagerCommands;
+/// use sniff_lib::os::PackageManagerCommands;
 ///
 /// let apt_commands = PackageManagerCommands {
 ///     list: Some("apt list --installed".to_string()),
@@ -1369,7 +1443,7 @@ pub struct SystemPackageManagers {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::hardware::get_path_dirs;
+/// use sniff_lib::os::get_path_dirs;
 ///
 /// let dirs = get_path_dirs();
 /// // dirs contains PathBuf entries for each valid directory in PATH
@@ -1412,7 +1486,7 @@ pub fn get_path_dirs() -> Vec<PathBuf> {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::hardware::{get_path_dirs, command_exists_in_path};
+/// use sniff_lib::os::{get_path_dirs, command_exists_in_path};
 ///
 /// let path_dirs = get_path_dirs();
 /// if let Some(path) = command_exists_in_path("git", &path_dirs) {
@@ -1495,7 +1569,7 @@ fn command_exists_in_path_windows(cmd: &str, path_dirs: &[PathBuf]) -> Option<Pa
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::hardware::{get_commands_for_manager, SystemPackageManager};
+/// use sniff_lib::os::{get_commands_for_manager, SystemPackageManager};
 ///
 /// let apt_cmds = get_commands_for_manager(SystemPackageManager::Apt);
 /// assert_eq!(apt_cmds.list, Some("apt list --installed".to_string()));
@@ -1821,7 +1895,7 @@ const AUR_HELPERS: &[SystemPackageManager] = &[
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::hardware::{detect_linux_package_managers, LinuxFamily};
+/// use sniff_lib::os::{detect_linux_package_managers, LinuxFamily};
 ///
 /// // With family hint (recommended on Linux)
 /// let managers = detect_linux_package_managers(Some(LinuxFamily::Debian));
@@ -2047,7 +2121,7 @@ const SOFTWAREUPDATE_PATH: &str = "/usr/sbin/softwareupdate";
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::hardware::detect_macos_package_managers;
+/// use sniff_lib::os::detect_macos_package_managers;
 ///
 /// let managers = detect_macos_package_managers();
 /// println!("Primary: {:?}", managers.primary);
@@ -2150,7 +2224,7 @@ pub fn detect_macos_package_managers() -> SystemPackageManagers {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::hardware::detect_windows_package_managers;
+/// use sniff_lib::os::detect_windows_package_managers;
 ///
 /// let managers = detect_windows_package_managers();
 /// if let Some(primary) = managers.primary {
@@ -2191,9 +2265,7 @@ pub fn detect_windows_package_managers() -> SystemPackageManagers {
     let windir = std::env::var("windir")
         .or_else(|_| std::env::var("WINDIR"))
         .unwrap_or_else(|_| r"C:\Windows".to_string());
-    let dism_path = PathBuf::from(&windir)
-        .join("system32")
-        .join("dism.exe");
+    let dism_path = PathBuf::from(&windir).join("system32").join("dism.exe");
     if dism_path.is_file() {
         let manager = SystemPackageManager::Dism;
         managers.push(DetectedPackageManager {
@@ -2282,10 +2354,10 @@ pub fn detect_windows_package_managers() -> SystemPackageManagers {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::hardware::{detect_bsd_package_managers, OsType};
+/// use sniff_lib::os::{detect_bsd_package_managers, OsType};
 ///
 /// let managers = detect_bsd_package_managers(OsType::FreeBSD);
-/// assert_eq!(managers.primary, Some(sniff_lib::hardware::SystemPackageManager::Pkg));
+/// assert_eq!(managers.primary, Some(sniff_lib::os::SystemPackageManager::Pkg));
 /// ```
 ///
 /// ## Arguments
@@ -3061,10 +3133,7 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
 
         #[test]
         fn test_full_locale_with_encoding() {
-            assert_eq!(
-                extract_language_code("en_US.UTF-8"),
-                Some("en".to_string())
-            );
+            assert_eq!(extract_language_code("en_US.UTF-8"), Some("en".to_string()));
         }
 
         #[test]
@@ -3079,10 +3148,7 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
 
         #[test]
         fn test_locale_with_modifier() {
-            assert_eq!(
-                extract_language_code("sr_RS@latin"),
-                Some("sr".to_string())
-            );
+            assert_eq!(extract_language_code("sr_RS@latin"), Some("sr".to_string()));
         }
 
         #[test]
@@ -3400,7 +3466,10 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
             assert_eq!(SystemPackageManager::Pacman.to_string(), "pacman");
             assert_eq!(SystemPackageManager::Portage.to_string(), "emerge");
             assert_eq!(SystemPackageManager::Winget.to_string(), "winget");
-            assert_eq!(SystemPackageManager::Msys2Pacman.to_string(), "pacman (MSYS2)");
+            assert_eq!(
+                SystemPackageManager::Msys2Pacman.to_string(),
+                "pacman (MSYS2)"
+            );
         }
 
         #[test]
@@ -3409,7 +3478,10 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
             assert_eq!(SystemPackageManager::Homebrew.executable_name(), "brew");
             assert_eq!(SystemPackageManager::Portage.executable_name(), "emerge");
             assert_eq!(SystemPackageManager::Pacman.executable_name(), "pacman");
-            assert_eq!(SystemPackageManager::Msys2Pacman.executable_name(), "pacman");
+            assert_eq!(
+                SystemPackageManager::Msys2Pacman.executable_name(),
+                "pacman"
+            );
             assert_eq!(SystemPackageManager::Ports.executable_name(), "make");
         }
 
@@ -4134,11 +4206,7 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
                 let found = LINUX_PACKAGE_MANAGERS
                     .iter()
                     .any(|(mgr, _)| *mgr == expected);
-                assert!(
-                    found,
-                    "{:?} should be in LINUX_PACKAGE_MANAGERS",
-                    expected
-                );
+                assert!(found, "{:?} should be in LINUX_PACKAGE_MANAGERS", expected);
             }
         }
 
@@ -4321,11 +4389,7 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
 
             // If a primary is set, exactly one manager should have is_primary = true
             if let Some(primary) = result.primary {
-                let primary_count = result
-                    .managers
-                    .iter()
-                    .filter(|m| m.is_primary)
-                    .count();
+                let primary_count = result.managers.iter().filter(|m| m.is_primary).count();
                 assert_eq!(
                     primary_count, 1,
                     "Exactly one manager should be marked as primary"
@@ -4343,11 +4407,7 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
                 );
             } else {
                 // If no primary, no manager should have is_primary = true
-                let primary_count = result
-                    .managers
-                    .iter()
-                    .filter(|m| m.is_primary)
-                    .count();
+                let primary_count = result.managers.iter().filter(|m| m.is_primary).count();
                 assert_eq!(
                     primary_count, 0,
                     "No manager should be primary when primary is None"
@@ -4411,10 +4471,7 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
             let result = detect_bsd_package_managers(OsType::FreeBSD);
 
             // Verify that if any managers are detected, they're FreeBSD-appropriate
-            let valid_freebsd_managers = [
-                SystemPackageManager::Pkg,
-                SystemPackageManager::Ports,
-            ];
+            let valid_freebsd_managers = [SystemPackageManager::Pkg, SystemPackageManager::Ports];
 
             for detected in &result.managers {
                 assert!(
@@ -4466,10 +4523,7 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
             let result = detect_bsd_package_managers(OsType::NetBSD);
 
             // Verify that if any managers are detected, they're NetBSD-appropriate
-            let valid_netbsd_managers = [
-                SystemPackageManager::Pkgin,
-                SystemPackageManager::PkgAdd,
-            ];
+            let valid_netbsd_managers = [SystemPackageManager::Pkgin, SystemPackageManager::PkgAdd];
 
             for detected in &result.managers {
                 assert!(
@@ -4493,12 +4547,7 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
         #[test]
         fn test_detect_bsd_package_managers_non_bsd_returns_empty() {
             // Non-BSD OS types should return empty results
-            let non_bsd_types = [
-                OsType::Linux,
-                OsType::MacOS,
-                OsType::Windows,
-                OsType::Other,
-            ];
+            let non_bsd_types = [OsType::Linux, OsType::MacOS, OsType::Windows, OsType::Other];
 
             for os_type in non_bsd_types {
                 let result = detect_bsd_package_managers(os_type);
@@ -4522,11 +4571,7 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
 
                 // If a primary is set, exactly one manager should have is_primary = true
                 if let Some(primary) = result.primary {
-                    let primary_count = result
-                        .managers
-                        .iter()
-                        .filter(|m| m.is_primary)
-                        .count();
+                    let primary_count = result.managers.iter().filter(|m| m.is_primary).count();
                     assert_eq!(
                         primary_count, 1,
                         "{:?}: Exactly one manager should be marked as primary",
@@ -4546,11 +4591,7 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
                     );
                 } else if !result.managers.is_empty() {
                     // If we have managers but no primary, check consistency
-                    let primary_count = result
-                        .managers
-                        .iter()
-                        .filter(|m| m.is_primary)
-                        .count();
+                    let primary_count = result.managers.iter().filter(|m| m.is_primary).count();
                     assert_eq!(
                         primary_count, 0,
                         "{:?}: No manager should be primary when primary is None",

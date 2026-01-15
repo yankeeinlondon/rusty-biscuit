@@ -1,6 +1,6 @@
+use sniff_lib::SniffResult;
 use sniff_lib::filesystem::git::BehindStatus;
 use sniff_lib::hardware::NtpStatus;
-use sniff_lib::SniffResult;
 use std::path::Path;
 
 /// Format bytes into human-readable units (KB, MB, GB, TB)
@@ -39,9 +39,10 @@ fn format_number(n: usize) -> String {
 /// Convert absolute path to relative path from repo root
 fn relative_path(path: &Path, repo_root: Option<&Path>) -> String {
     if let Some(root) = repo_root
-        && let Ok(rel) = path.strip_prefix(root) {
-            return rel.display().to_string();
-        }
+        && let Ok(rel) = path.strip_prefix(root)
+    {
+        return rel.display().to_string();
+    }
     path.display().to_string()
 }
 
@@ -250,9 +251,9 @@ fn print_hardware_section(
     println!();
 
     // Print GPU info if available
-    if !hardware.gpus.is_empty() {
+    if !hardware.gpu.is_empty() {
         println!("GPUs:");
-        for gpu in &hardware.gpus {
+        for gpu in &hardware.gpu {
             let vendor_str = gpu.vendor.as_deref().unwrap_or("Unknown");
             println!("  {} ({}, {})", gpu.name, vendor_str, gpu.backend);
             if verbose > 0 {
@@ -349,28 +350,25 @@ fn print_network_section(network: &sniff_lib::NetworkInfo) {
     println!();
 }
 
-fn print_filesystem_section(
-    fs: &sniff_lib::FilesystemInfo,
-    verbose: u8,
-    repo_root: Option<&Path>,
-) {
+fn print_filesystem_section(fs: &sniff_lib::FilesystemInfo, verbose: u8, repo_root: Option<&Path>) {
     println!("=== Filesystem ===");
 
     // Print EditorConfig formatting info at verbose level 2+
     if verbose > 1
-        && let Some(ref formatting) = fs.formatting {
-            println!("EditorConfig: {}", formatting.config_path.display());
-            for section in &formatting.sections {
-                println!("  [{}]", section.pattern);
-                if let Some(style) = &section.indent_style {
-                    println!("    indent_style: {}", style);
-                }
-                if let Some(size) = section.indent_size {
-                    println!("    indent_size: {}", size);
-                }
+        && let Some(ref formatting) = fs.formatting
+    {
+        println!("EditorConfig: {}", formatting.config_path.display());
+        for section in &formatting.sections {
+            println!("  [{}]", section.pattern);
+            if let Some(style) = &section.indent_style {
+                println!("    indent_style: {}", style);
             }
-            println!();
+            if let Some(size) = section.indent_size {
+                println!("    indent_size: {}", size);
+            }
         }
+        println!();
+    }
 
     if let Some(ref langs) = fs.languages {
         println!(
@@ -395,7 +393,10 @@ fn print_filesystem_section(
                     println!("    - {}", file.display());
                 }
                 if lang.files.len() > file_show_count {
-                    println!("    ... and {} more files", lang.files.len() - file_show_count);
+                    println!(
+                        "    ... and {} more files",
+                        lang.files.len() - file_show_count
+                    );
                 }
             }
         }
@@ -428,23 +429,21 @@ fn print_filesystem_section(
         // Show HEAD commit (first recent commit)
         if let Some(commit) = git.recent.first() {
             println!("  HEAD: {} ({})", &commit.sha[..8], commit.author);
-            println!(
-                "  Message: {}",
-                commit.message.lines().next().unwrap_or("")
-            );
+            println!("  Message: {}", commit.message.lines().next().unwrap_or(""));
             // Show which remotes have this commit (deep mode)
             if let Some(ref remotes) = commit.remotes {
                 println!("    Synced to: {}", remotes.join(", "));
             }
         }
 
-        let dirty = if git.status.is_dirty { "dirty" } else { "clean" };
+        let dirty = if git.status.is_dirty {
+            "dirty"
+        } else {
+            "clean"
+        };
         println!(
             "  Status: {} ({} staged, {} unstaged, {} untracked)",
-            dirty,
-            git.status.staged_count,
-            git.status.unstaged_count,
-            git.status.untracked_count
+            dirty, git.status.staged_count, git.status.unstaged_count, git.status.untracked_count
         );
 
         // Show is_behind status (deep mode only)
@@ -550,47 +549,39 @@ fn print_filesystem_section(
     }
     println!();
 
-    if let Some(ref mono) = fs.monorepo {
-        println!("Monorepo: {:?}", mono.tool);
-        println!("  Packages: {}", mono.packages.len());
-        let show_count = if verbose > 0 { mono.packages.len() } else { 5 };
-        for pkg in mono.packages.iter().take(show_count) {
-            let path_str = relative_path(&pkg.path, repo_root);
-            let lang_info = pkg
-                .primary_language
-                .as_ref()
-                .map(|l| format!(" [{}]", l))
-                .unwrap_or_default();
-            println!("    {} ({}){}", pkg.name, path_str, lang_info);
+    if let Some(ref repo) = fs.repo {
+        if repo.is_monorepo {
+            if let Some(ref tool) = repo.monorepo_tool {
+                println!("Monorepo: {:?}", tool);
+            }
+            if let Some(ref packages) = repo.packages {
+                println!("  Packages: {}", packages.len());
+                let show_count = if verbose > 0 { packages.len() } else { 5 };
+                for pkg in packages.iter().take(show_count) {
+                    let path_str = relative_path(&pkg.path, repo_root);
+                    let lang_info = pkg
+                        .primary_language
+                        .as_ref()
+                        .map(|l| format!(" [{}]", l))
+                        .unwrap_or_default();
+                    println!("    {} ({}){}", pkg.name, path_str, lang_info);
 
-            // Show package details at verbose level 1+
-            if verbose > 0 {
-                if !pkg.detected_managers.is_empty() {
-                    println!("      Managers: {}", pkg.detected_managers.join(", "));
+                    // Show package details at verbose level 1+
+                    if verbose > 0 {
+                        if !pkg.detected_managers.is_empty() {
+                            println!("      Managers: {}", pkg.detected_managers.join(", "));
+                        }
+                        if verbose > 1 && !pkg.languages.is_empty() {
+                            println!("      Languages: {}", pkg.languages.join(", "));
+                        }
+                    }
                 }
-                if verbose > 1 && !pkg.languages.is_empty() {
-                    println!("      Languages: {}", pkg.languages.join(", "));
+                if packages.len() > show_count {
+                    println!("    ... and {} more", packages.len() - show_count);
                 }
             }
-        }
-        if mono.packages.len() > show_count {
-            println!("    ... and {} more", mono.packages.len() - show_count);
         }
     }
-
-    if let Some(ref deps) = fs.dependencies
-        && !deps.detected_managers.is_empty() {
-            println!("Package Managers:");
-            for pm in &deps.detected_managers {
-                println!("  {:?} ({})", pm, pm.primary_language());
-            }
-            if verbose > 0 && !deps.manifests.is_empty() {
-                println!("Manifests ({}):", deps.manifests.len());
-                for manifest in &deps.manifests {
-                    println!("  {:?}: {}", manifest.manager, manifest.path.display());
-                }
-            }
-        }
 }
 
 pub fn print_json(result: &SniffResult) -> serde_json::Result<()> {
