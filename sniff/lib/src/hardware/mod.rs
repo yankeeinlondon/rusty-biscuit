@@ -77,15 +77,35 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
             .first()
             .map(|c| c.brand().to_string())
             .unwrap_or_default(),
+        arch: {
+            let arch = System::cpu_arch();
+            if arch.is_empty() {
+                std::env::consts::ARCH.to_string()
+            } else {
+                arch
+            }
+        },
         logical_cores: sys.cpus().len(),
         physical_cores: System::physical_core_count(),
         simd: detect_simd(),
     };
 
+    // On macOS (and possibly other platforms), available_memory() may return 0.
+    // In this case, fall back to free_memory() which provides usable memory info.
+    let available = sys.available_memory();
+    let available_bytes = if available == 0 {
+        sys.free_memory()
+    } else {
+        available
+    };
+
     let memory = MemoryInfo {
         total_bytes: sys.total_memory(),
-        available_bytes: sys.available_memory(),
+        available_bytes,
         used_bytes: sys.used_memory(),
+        total_swap: sys.total_swap(),
+        free_swap: sys.free_swap(),
+        used_swap: sys.used_swap(),
     };
 
     let disks = Disks::new_with_refreshed_list();
@@ -175,7 +195,12 @@ mod tests {
         let os = detect_os().unwrap();
         // OS name should be non-empty (macOS, Linux, etc.)
         assert!(!os.name.is_empty());
-        // Architecture should be known
-        assert!(!os.arch.is_empty());
+    }
+
+    #[test]
+    fn test_cpu_arch_populated() {
+        let hw = detect_hardware().unwrap();
+        // CPU architecture should be known
+        assert!(!hw.cpu.arch.is_empty());
     }
 }
