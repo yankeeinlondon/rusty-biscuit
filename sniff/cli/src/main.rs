@@ -87,6 +87,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if include_only_mode {
         // In include-only mode, skip everything not explicitly included
         // Skip flags are ignored
+        // OS is included with hardware, but skipped for other sections
+        if !cli.hardware {
+            config = config.skip_os();
+        }
         if !cli.hardware {
             config = config.skip_hardware();
         }

@@ -7,8 +7,9 @@ mod fixtures;
 #[test]
 fn test_detect_returns_hardware_info() {
     let result = detect().unwrap();
+    let os = result.os.expect("os should be present");
+    assert!(!os.name.is_empty());
     let hardware = result.hardware.expect("hardware should be present");
-    assert!(!hardware.os.name.is_empty());
     assert!(hardware.memory.total_bytes > 0);
 }
 
@@ -54,9 +55,9 @@ fn test_serialization_roundtrip() {
     let result = detect().unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let parsed: sniff_lib::SniffResult = serde_json::from_str(&json).unwrap();
-    let orig_hw = result.hardware.expect("hardware should be present");
-    let parsed_hw = parsed.hardware.expect("parsed hardware should be present");
-    assert_eq!(orig_hw.os.name, parsed_hw.os.name);
+    let orig_os = result.os.expect("os should be present");
+    let parsed_os = parsed.os.expect("parsed os should be present");
+    assert_eq!(orig_os.name, parsed_os.name);
 }
 
 #[test]
@@ -155,27 +156,27 @@ fn test_partial_result_deserialization_roundtrip() {
 // OS Detection Integration Tests
 // ============================================================================
 
-/// Tests that detect_hardware returns populated OS detection fields.
+/// Tests that detect_os returns populated OS detection fields.
 #[test]
-fn test_detect_hardware_has_os_detection_fields() {
-    use sniff_lib::hardware::detect_hardware;
+fn test_detect_os_has_detection_fields() {
+    use sniff_lib::hardware::detect_os;
 
-    let hw = detect_hardware().expect("detect_hardware should succeed");
+    let os = detect_os().expect("detect_os should succeed");
 
     // OS info should have populated fields
-    assert!(!hw.os.name.is_empty(), "OS name should be detected");
-    assert!(!hw.os.arch.is_empty(), "Architecture should be detected");
-    assert!(!hw.os.kernel.is_empty(), "Kernel version should be detected");
+    assert!(!os.name.is_empty(), "OS name should be detected");
+    assert!(!os.arch.is_empty(), "Architecture should be detected");
+    assert!(!os.kernel.is_empty(), "Kernel version should be detected");
 
     // OS type should match current platform
     #[cfg(target_os = "macos")]
-    assert_eq!(hw.os.os_type, sniff_lib::hardware::OsType::MacOS);
+    assert_eq!(os.os_type, sniff_lib::hardware::OsType::MacOS);
 
     #[cfg(target_os = "linux")]
-    assert_eq!(hw.os.os_type, sniff_lib::hardware::OsType::Linux);
+    assert_eq!(os.os_type, sniff_lib::hardware::OsType::Linux);
 
     #[cfg(target_os = "windows")]
-    assert_eq!(hw.os.os_type, sniff_lib::hardware::OsType::Windows);
+    assert_eq!(os.os_type, sniff_lib::hardware::OsType::Windows);
 }
 
 /// Tests that detect_locale returns valid locale data.
@@ -362,21 +363,21 @@ fn test_linux_package_managers_finds_at_least_one() {
     }
 }
 
-/// Tests that the hardware info from detect() includes package manager info.
+/// Tests that the OS info from detect() includes package manager info.
 #[test]
-fn test_hardware_includes_package_managers() {
+fn test_os_includes_package_managers() {
     let result = detect().unwrap();
-    let hw = result.hardware.expect("hardware should be present");
+    let os = result.os.expect("os should be present");
 
     // On desktop platforms (macOS, Linux, Windows), package managers should be detected
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     {
         assert!(
-            hw.system_package_managers.is_some(),
+            os.system_package_managers.is_some(),
             "System package managers should be detected on desktop platforms"
         );
 
-        let mgrs = hw.system_package_managers.as_ref().unwrap();
+        let mgrs = os.system_package_managers.as_ref().unwrap();
         // At minimum, the structure should be valid
         assert!(
             mgrs.primary.is_some() || mgrs.managers.is_empty(),
@@ -385,30 +386,30 @@ fn test_hardware_includes_package_managers() {
     }
 }
 
-/// Tests that the hardware info from detect() includes locale info.
+/// Tests that the OS info from detect() includes locale info.
 #[test]
-fn test_hardware_includes_locale() {
+fn test_os_includes_locale() {
     let result = detect().unwrap();
-    let hw = result.hardware.expect("hardware should be present");
+    let os = result.os.expect("os should be present");
 
     assert!(
-        hw.locale.is_some(),
-        "Locale info should be included in hardware detection"
+        os.locale.is_some(),
+        "Locale info should be included in OS detection"
     );
 }
 
-/// Tests that the hardware info from detect() includes time info.
+/// Tests that the OS info from detect() includes time info.
 #[test]
-fn test_hardware_includes_time_info() {
+fn test_os_includes_time_info() {
     let result = detect().unwrap();
-    let hw = result.hardware.expect("hardware should be present");
+    let os = result.os.expect("os should be present");
 
     assert!(
-        hw.time.is_some(),
-        "Time info should be included in hardware detection"
+        os.time.is_some(),
+        "Time info should be included in OS detection"
     );
 
-    let time = hw.time.as_ref().unwrap();
+    let time = os.time.as_ref().unwrap();
     // Verify basic time info fields
     assert!(
         time.utc_offset_seconds >= -12 * 3600 && time.utc_offset_seconds <= 14 * 3600,

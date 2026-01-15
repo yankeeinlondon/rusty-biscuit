@@ -50,6 +50,8 @@ pub struct SniffConfig {
     pub include_cpu_usage: bool,
     /// Enable deep git inspection (network operations for remote info)
     pub deep: bool,
+    /// Skip OS detection
+    pub skip_os: bool,
     /// Skip hardware detection
     pub skip_hardware: bool,
     /// Skip network detection
@@ -79,6 +81,12 @@ impl SniffConfig {
     /// Enable deep git inspection (fetches remote branch info, checks if behind).
     pub fn deep(mut self, enable: bool) -> Self {
         self.deep = enable;
+        self
+    }
+
+    /// Skip OS detection.
+    pub fn skip_os(mut self) -> Self {
+        self.skip_os = true;
         self
     }
 
@@ -135,8 +143,11 @@ pub fn detect() -> Result<SniffResult> {
 /// let result = detect_with_config(config).unwrap();
 /// ```
 pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
-    // OS detection is always performed (not tied to hardware flag)
-    let os = Some(hardware::detect_os()?);
+    let os = if config.skip_os {
+        None
+    } else {
+        Some(hardware::detect_os()?)
+    };
 
     let hardware = if config.skip_hardware {
         None
@@ -213,5 +224,51 @@ mod tests {
             .base_dir(PathBuf::from("."));
         let result = detect_with_config(config).unwrap();
         assert!(result.filesystem.is_some());
+    }
+
+    // Regression test: OS should be skipped when skip_os is set
+    // Bug: When using --filesystem flag, OS section was still displayed
+    #[test]
+    fn test_skip_os_returns_none() {
+        let config = SniffConfig::new().skip_os();
+        let result = detect_with_config(config).unwrap();
+        assert!(result.os.is_none(), "OS should be None when skip_os is set");
+    }
+
+    // Regression test: OS should be present by default
+    #[test]
+    fn test_os_present_by_default() {
+        let config = SniffConfig::new();
+        let result = detect_with_config(config).unwrap();
+        assert!(result.os.is_some(), "OS should be Some by default");
+    }
+
+    // Regression test: Combining skip_os with other sections should work correctly
+    #[test]
+    fn test_skip_os_with_filesystem_only() {
+        let config = SniffConfig::new()
+            .skip_os()
+            .skip_hardware()
+            .skip_network();
+        let result = detect_with_config(config).unwrap();
+        assert!(result.os.is_none(), "OS should be None when skipped");
+        assert!(result.hardware.is_none(), "Hardware should be None when skipped");
+        assert!(result.network.is_none(), "Network should be None when skipped");
+        assert!(result.filesystem.is_some(), "Filesystem should be Some when not skipped");
+    }
+
+    // Regression test: Multiple skip flags including OS
+    #[test]
+    fn test_multiple_skip_flags_including_os() {
+        let config = SniffConfig::new()
+            .skip_os()
+            .skip_hardware()
+            .skip_network()
+            .skip_filesystem();
+        let result = detect_with_config(config).unwrap();
+        assert!(result.os.is_none());
+        assert!(result.hardware.is_none());
+        assert!(result.network.is_none());
+        assert!(result.filesystem.is_none());
     }
 }
