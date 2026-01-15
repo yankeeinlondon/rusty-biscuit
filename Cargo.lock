@@ -4949,6 +4949,7 @@ dependencies = [
  "predicates",
  "serde_json",
  "sniff-lib",
+ "tokio",
 ]
 
 [[package]]
@@ -4962,12 +4963,14 @@ dependencies = [
  "hyperpolyglot",
  "ignore",
  "metal",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
  "sysinfo",
  "tempfile",
  "thiserror 2.0.17",
+ "tokio",
  "toml 0.9.10+spec-1.1.0",
  "walkdir",
 ]

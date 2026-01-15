@@ -11,16 +11,23 @@ getifaddrs = "0.6.0"
 git2 = "0.20.3"
 hyperpolyglot = "0.1.7"
 ignore = "0.4"
+reqwest = { version = "0.12", features = ["json"], default-features = false, optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 sysinfo = "0.37.2"
 thiserror = "2.0"
+tokio = { version = "1", features = ["rt"], optional = true }
 toml = "0.9"
 walkdir = "2.5"
+
+[features]
+default = []
+network = ["dep:reqwest", "dep:tokio", "reqwest/rustls-tls"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal = "0.33"
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["rt", "macros"] }

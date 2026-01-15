@@ -1,8 +1,10 @@
 use clap::Parser;
-use sniff_lib::{SniffConfig, detect_with_config};
+use sniff_lib::package::enrich_dependencies;
+use sniff_lib::{detect_with_config, SniffConfig, SniffResult};
 use std::path::PathBuf;
 
 mod output;
+use output::OutputFilter;
 
 /// Detect system and repository information
 #[derive(Parser)]
@@ -86,21 +88,19 @@ struct Cli {
 
 impl Cli {
     /// Collect all active filter flags into a vector of flag names.
+    ///
+    /// Filter flags are mutually exclusive: only one can be active at a time.
+    /// Note: --hardware, --network, --filesystem are include-only flags (not filter flags)
+    /// and can be combined with each other.
     fn active_filter_flags(&self) -> Vec<&'static str> {
         let mut flags = Vec::new();
 
-        // Top-level filter flags
+        // The --os flag is a filter (shows only OS section)
         if self.os {
             flags.push("--os");
         }
-        if self.filesystem {
-            flags.push("--filesystem");
-        }
-        if self.hardware {
-            flags.push("--hardware");
-        }
 
-        // Detail-level filter flags
+        // Detail-level filter flags (mutually exclusive)
         if self.git {
             flags.push("--git");
         }
@@ -142,6 +142,41 @@ impl Cli {
             Ok(())
         }
     }
+
+    /// Determine the output filter based on active filter flags.
+    ///
+    /// Only detail-level filter flags trigger filter mode.
+    /// Top-level flags (--os, --hardware, --filesystem, --network) use include-only mode.
+    fn output_filter(&self) -> OutputFilter {
+        // Only use filter mode for detail-level flags (mutually exclusive)
+        // Top-level include flags (--hardware, --network, --filesystem) are handled by include-only mode
+        if self.os {
+            return OutputFilter::Os;
+        }
+        if self.cpu {
+            return OutputFilter::Cpu;
+        }
+        if self.gpu {
+            return OutputFilter::Gpu;
+        }
+        if self.memory {
+            return OutputFilter::Memory;
+        }
+        if self.storage {
+            return OutputFilter::Storage;
+        }
+        if self.git {
+            return OutputFilter::Git;
+        }
+        if self.repo {
+            return OutputFilter::Repo;
+        }
+        if self.language {
+            return OutputFilter::Language;
+        }
+
+        OutputFilter::All
+    }
 }
 
 const AFTER_HELP: &str = "\
@@ -181,7 +216,8 @@ FILTER FLAGS (mutually exclusive):
     sniff --cpu --memory      # ERROR: mutually exclusive
 ";
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     // Validate mutually exclusive filter flags early
@@ -191,7 +227,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Canonicalize path if provided
-    let base_dir = cli.base.map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+    let base_dir = cli
+        .base
+        .clone()
+        .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
 
     let mut config = SniffConfig::new();
 
@@ -199,51 +238,124 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         config = config.base_dir(base);
     }
 
-    if cli.deep {
+    let deep_enabled = cli.deep;
+    if deep_enabled {
         config = config.deep(true);
     }
 
-    // Check if we're in include-only mode (any include flag is set)
-    let include_only_mode = cli.hardware || cli.network || cli.filesystem;
+    // Determine output filter
+    let output_filter = cli.output_filter();
 
-    if include_only_mode {
-        // In include-only mode, skip everything not explicitly included
-        // Skip flags are ignored
-        // OS is included with hardware, but skipped for other sections
-        if !cli.hardware {
-            config = config.skip_os();
+    // Apply skip logic based on filter mode
+    match output_filter {
+        // --os filter: show only OS section
+        OutputFilter::Os => {
+            config = config.skip_hardware().skip_network().skip_filesystem();
         }
-        if !cli.hardware {
-            config = config.skip_hardware();
+        // Hardware detail filters: show only hardware section (no OS needed for subsections)
+        OutputFilter::Cpu | OutputFilter::Gpu | OutputFilter::Memory | OutputFilter::Storage => {
+            config = config.skip_os().skip_network().skip_filesystem();
         }
-        if !cli.network {
-            config = config.skip_network();
+        // Filesystem detail filters: show only filesystem section
+        OutputFilter::Git | OutputFilter::Repo | OutputFilter::Language => {
+            config = config.skip_os().skip_hardware().skip_network();
         }
-        if !cli.filesystem {
-            config = config.skip_filesystem();
-        }
-    } else {
-        // Default behavior: respect skip flags
-        if cli.skip_hardware {
-            config = config.skip_hardware();
-        }
-        if cli.skip_network {
-            config = config.skip_network();
-        }
-        if cli.skip_filesystem {
-            config = config.skip_filesystem();
+        // OutputFilter::Hardware and OutputFilter::Filesystem are not used directly
+        // They're handled by include-only mode below
+        OutputFilter::Hardware | OutputFilter::Filesystem | OutputFilter::All => {
+            // Check include-only mode for section selection
+            let include_only_mode = cli.hardware || cli.network || cli.filesystem;
+
+            if include_only_mode {
+                // In include-only mode, skip everything not explicitly included
+                // OS is included with hardware, but skipped for other sections
+                if !cli.hardware {
+                    config = config.skip_os().skip_hardware();
+                }
+                if !cli.network {
+                    config = config.skip_network();
+                }
+                if !cli.filesystem {
+                    config = config.skip_filesystem();
+                }
+            } else {
+                // Default behavior: respect skip flags
+                if cli.skip_hardware {
+                    config = config.skip_hardware();
+                }
+                if cli.skip_network {
+                    config = config.skip_network();
+                }
+                if cli.skip_filesystem {
+                    config = config.skip_filesystem();
+                }
+            }
         }
     }
 
-    let result = detect_with_config(config)?;
+    let mut result = detect_with_config(config)?;
+
+    // Enrich dependencies with latest versions when --deep is enabled
+    if deep_enabled {
+        result = enrich_result_dependencies(result).await;
+    }
 
     if cli.json {
         output::print_json(&result)?;
     } else {
-        output::print_text(&result, cli.verbose, include_only_mode);
+        output::print_text(&result, cli.verbose, output_filter);
     }
 
     Ok(())
+}
+
+/// Enriches all dependencies in a SniffResult with latest versions from package registries.
+///
+/// This function iterates through the filesystem.repo section and enriches:
+/// - Non-monorepo dependencies (on RepoInfo)
+/// - Monorepo package dependencies (on each PackageLocation)
+async fn enrich_result_dependencies(mut result: SniffResult) -> SniffResult {
+    let Some(ref mut filesystem) = result.filesystem else {
+        return result;
+    };
+
+    let Some(ref mut repo) = filesystem.repo else {
+        return result;
+    };
+
+    // Enrich non-monorepo dependencies
+    if let Some(deps) = repo.dependencies.take() {
+        repo.dependencies = Some(enrich_dependencies(deps).await);
+    }
+    if let Some(deps) = repo.dev_dependencies.take() {
+        repo.dev_dependencies = Some(enrich_dependencies(deps).await);
+    }
+    if let Some(deps) = repo.peer_dependencies.take() {
+        repo.peer_dependencies = Some(enrich_dependencies(deps).await);
+    }
+    if let Some(deps) = repo.optional_dependencies.take() {
+        repo.optional_dependencies = Some(enrich_dependencies(deps).await);
+    }
+
+    // Enrich monorepo package dependencies
+    if let Some(ref mut packages) = repo.packages {
+        for pkg in packages.iter_mut() {
+            if let Some(deps) = pkg.dependencies.take() {
+                pkg.dependencies = Some(enrich_dependencies(deps).await);
+            }
+            if let Some(deps) = pkg.dev_dependencies.take() {
+                pkg.dev_dependencies = Some(enrich_dependencies(deps).await);
+            }
+            if let Some(deps) = pkg.peer_dependencies.take() {
+                pkg.peer_dependencies = Some(enrich_dependencies(deps).await);
+            }
+            if let Some(deps) = pkg.optional_dependencies.take() {
+                pkg.optional_dependencies = Some(enrich_dependencies(deps).await);
+            }
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]
@@ -337,24 +449,35 @@ mod tests {
         }
 
         #[test]
-        fn filesystem_and_git_are_mutually_exclusive() {
-            let cli = parse_args(&["--filesystem", "--git"]).unwrap();
+        fn git_and_repo_are_mutually_exclusive() {
+            // --filesystem is an include-only flag, not a filter flag
+            // Test with two detail-level filter flags instead
+            let cli = parse_args(&["--git", "--repo"]).unwrap();
             let result = cli.validate_filter_flags();
             assert!(result.is_err());
             let err = result.unwrap_err();
-            assert!(err.contains("--filesystem"));
             assert!(err.contains("--git"));
+            assert!(err.contains("--repo"));
             assert!(err.contains("mutually exclusive"));
         }
 
         #[test]
-        fn hardware_and_cpu_are_mutually_exclusive() {
+        fn filesystem_can_combine_with_filter() {
+            // --filesystem is an include-only flag, can combine with filter flags
+            // (though the filter flag takes precedence)
+            let cli = parse_args(&["--filesystem", "--git"]).unwrap();
+            let result = cli.validate_filter_flags();
+            // Only --git is a filter flag, so only 1 active = valid
+            assert!(result.is_ok());
+        }
+
+        #[test]
+        fn hardware_can_combine_with_filter() {
+            // --hardware is an include-only flag, not a filter flag
             let cli = parse_args(&["--hardware", "--cpu"]).unwrap();
             let result = cli.validate_filter_flags();
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(err.contains("--hardware"));
-            assert!(err.contains("--cpu"));
+            // Only --cpu is a filter flag, so only 1 active = valid
+            assert!(result.is_ok());
         }
 
         #[test]
@@ -439,11 +562,28 @@ mod tests {
         }
 
         #[test]
-        fn top_level_flags_come_first() {
+        fn os_comes_before_detail_flags() {
             let cli = parse_args(&["--cpu", "--os", "--git"]).unwrap();
             let flags = cli.active_filter_flags();
-            // os comes before cpu in the implementation
+            // --os comes before detail flags in the implementation
+            // Note: --hardware and --filesystem are NOT filter flags
             assert_eq!(flags, vec!["--os", "--git", "--cpu"]);
+        }
+
+        #[test]
+        fn hardware_is_not_a_filter_flag() {
+            // --hardware is an include-only flag, not a filter flag
+            let cli = parse_args(&["--hardware"]).unwrap();
+            let flags = cli.active_filter_flags();
+            assert!(flags.is_empty());
+        }
+
+        #[test]
+        fn filesystem_is_not_a_filter_flag() {
+            // --filesystem is an include-only flag, not a filter flag
+            let cli = parse_args(&["--filesystem"]).unwrap();
+            let flags = cli.active_filter_flags();
+            assert!(flags.is_empty());
         }
     }
 

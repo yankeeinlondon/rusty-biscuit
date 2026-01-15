@@ -50,10 +50,19 @@ pub struct DependencyEntry {
     /// The kind of dependency
     pub kind: DependencyKind,
     /// Version requirement as specified in the manifest (e.g., "^1.0", ">=2.0, <3.0")
-    pub version_req: String,
+    ///
+    /// Previously named `version_req`, renamed to `targeted_version` in Phase 5.
+    #[serde(alias = "version_req")]
+    pub targeted_version: String,
     /// Actual resolved version from the lockfile (if available)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actual_version: Option<String>,
+    /// The package manager used for this dependency (e.g., "cargo", "npm")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package_manager: Option<String>,
+    /// Latest version available from the registry (only populated with --deep flag)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<String>,
     /// Target specification for target-specific dependencies (e.g., "cfg(target_os = \"macos\")")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
@@ -193,8 +202,8 @@ fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         return Ok(None);
     }
 
-    // Expand globs and collect packages
-    let packages = expand_glob_patterns(root, &members);
+    // Expand globs and collect packages with dependencies
+    let packages = expand_glob_patterns_with_deps(root, &members);
 
     Ok(Some(RepoInfo {
         is_monorepo: true,
@@ -206,6 +215,67 @@ fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         optional_dependencies: None,
         packages: Some(packages),
     }))
+}
+
+/// Parses Cargo.toml dependencies into DependencyEntry structs.
+fn parse_cargo_dependencies(toml_path: &Path) -> Option<(Vec<DependencyEntry>, Vec<DependencyEntry>, Vec<DependencyEntry>)> {
+    let content = std::fs::read_to_string(toml_path).ok()?;
+    let parsed: toml::Value = toml::from_str(&content).ok()?;
+
+    let normal_deps = parse_cargo_dep_section(&parsed, "dependencies", DependencyKind::Normal);
+    let dev_deps = parse_cargo_dep_section(&parsed, "dev-dependencies", DependencyKind::Dev);
+    let build_deps = parse_cargo_dep_section(&parsed, "build-dependencies", DependencyKind::Build);
+
+    Some((normal_deps, dev_deps, build_deps))
+}
+
+/// Parses a single dependencies section from Cargo.toml.
+fn parse_cargo_dep_section(parsed: &toml::Value, section: &str, kind: DependencyKind) -> Vec<DependencyEntry> {
+    let Some(deps) = parsed.get(section).and_then(|d| d.as_table()) else {
+        return Vec::new();
+    };
+
+    deps.iter()
+        .map(|(name, value)| {
+            let (version_req, features, optional) = match value {
+                toml::Value::String(v) => (v.clone(), Vec::new(), false),
+                toml::Value::Table(t) => {
+                    let version = t
+                        .get("version")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("*")
+                        .to_string();
+                    let features = t
+                        .get("features")
+                        .and_then(|f| f.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let optional = t
+                        .get("optional")
+                        .and_then(|o| o.as_bool())
+                        .unwrap_or(false);
+                    (version, features, optional)
+                }
+                _ => ("*".to_string(), Vec::new(), false),
+            };
+
+            DependencyEntry {
+                name: name.clone(),
+                kind,
+                targeted_version: version_req,
+                actual_version: None,
+                package_manager: Some("cargo".to_string()),
+                latest_version: None,
+                target: None,
+                optional,
+                features,
+            }
+        })
+        .collect()
 }
 
 fn detect_pnpm_workspace(root: &Path) -> Result<Option<RepoInfo>> {
@@ -478,6 +548,87 @@ fn expand_glob_patterns(root: &Path, patterns: &[&str]) -> Vec<PackageLocation> 
     }
 
     packages
+}
+
+/// Expand glob patterns and parse dependencies for Cargo workspaces.
+fn expand_glob_patterns_with_deps(root: &Path, patterns: &[&str]) -> Vec<PackageLocation> {
+    let mut packages = Vec::new();
+
+    for pattern in patterns {
+        if pattern.contains('*') {
+            let parts: Vec<&str> = pattern.split('*').collect();
+            if let Some(prefix) = parts.first() {
+                let search_dir = root.join(prefix.trim_end_matches('/'));
+                if let Ok(entries) = std::fs::read_dir(&search_dir) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        if entry.path().is_dir() {
+                            let path = entry.path();
+                            packages.push(create_package_location_with_deps(&path, root));
+                        }
+                    }
+                }
+            }
+        } else {
+            let path = root.join(pattern);
+            if path.exists() {
+                packages.push(create_package_location_with_deps(&path, root));
+            }
+        }
+    }
+
+    packages
+}
+
+/// Creates a PackageLocation with parsed dependencies.
+fn create_package_location_with_deps(path: &Path, root: &Path) -> PackageLocation {
+    let name = make_namespaced_name(path, root);
+    let (primary_language, languages) = detect_package_languages(path);
+    let detected_managers = detect_package_managers(path);
+
+    // Try to parse Cargo.toml dependencies
+    let cargo_toml = path.join("Cargo.toml");
+    let (dependencies, dev_dependencies, optional_dependencies) =
+        if cargo_toml.exists() {
+            if let Some((normal, dev, build)) = parse_cargo_dependencies(&cargo_toml) {
+                // Merge normal and build deps into dependencies
+                let mut all_deps = normal;
+                all_deps.extend(build);
+
+                // Handle optional dependencies
+                let (optional, regular): (Vec<_>, Vec<_>) =
+                    all_deps.into_iter().partition(|d| d.optional);
+
+                let deps = if regular.is_empty() {
+                    None
+                } else {
+                    Some(regular)
+                };
+                let dev_deps = if dev.is_empty() { None } else { Some(dev) };
+                let opt_deps = if optional.is_empty() {
+                    None
+                } else {
+                    Some(optional)
+                };
+
+                (deps, dev_deps, opt_deps)
+            } else {
+                (None, None, None)
+            }
+        } else {
+            (None, None, None)
+        };
+
+    PackageLocation {
+        name,
+        path: path.to_path_buf(),
+        primary_language,
+        languages,
+        detected_managers,
+        dependencies,
+        dev_dependencies,
+        peer_dependencies: None,
+        optional_dependencies,
+    }
 }
 
 #[cfg(test)]

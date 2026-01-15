@@ -6,6 +6,7 @@ pub mod filesystem;
 pub mod hardware;
 pub mod network;
 pub mod os;
+pub mod package;
 
 pub use error::{Result, SniffError};
 pub use filesystem::FilesystemInfo;

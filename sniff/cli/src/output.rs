@@ -3,6 +3,36 @@ use sniff_lib::filesystem::git::BehindStatus;
 use sniff_lib::hardware::NtpStatus;
 use std::path::Path;
 
+/// Filter mode for output - determines which subsection to display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutputFilter {
+    /// Show all sections (no filtering)
+    #[default]
+    All,
+    /// Show only OS section
+    Os,
+    /// Show only hardware section (full) - used via include-only mode
+    #[allow(dead_code)]
+    Hardware,
+    /// Show only filesystem section (full) - used via include-only mode
+    #[allow(dead_code)]
+    Filesystem,
+    /// Show only CPU info (hardware subsection)
+    Cpu,
+    /// Show only GPU info (hardware subsection)
+    Gpu,
+    /// Show only memory info (hardware subsection)
+    Memory,
+    /// Show only storage info (hardware subsection)
+    Storage,
+    /// Show only git info (filesystem subsection)
+    Git,
+    /// Show only repo/monorepo info (filesystem subsection)
+    Repo,
+    /// Show only language detection (filesystem subsection)
+    Language,
+}
+
 /// Format bytes into human-readable units (KB, MB, GB, TB)
 fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;
@@ -46,8 +76,7 @@ fn relative_path(path: &Path, repo_root: Option<&Path>) -> String {
     path.display().to_string()
 }
 
-#[allow(unused_variables)]
-pub fn print_text(result: &SniffResult, verbose: u8, include_only_mode: bool) {
+pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter) {
     // Get repo root for relative paths
     let repo_root = result
         .filesystem
@@ -55,24 +84,87 @@ pub fn print_text(result: &SniffResult, verbose: u8, include_only_mode: bool) {
         .and_then(|fs| fs.git.as_ref())
         .map(|git| git.repo_root.as_path());
 
-    // Print OS section if present
-    if let Some(ref os) = result.os {
-        print_os_section(os, verbose);
-    }
-
-    // Print hardware section if present
-    if let Some(ref hardware) = result.hardware {
-        print_hardware_section(hardware, verbose, repo_root);
-    }
-
-    // Print network section if present
-    if let Some(ref network) = result.network {
-        print_network_section(network);
-    }
-
-    // Print filesystem section if present
-    if let Some(ref filesystem) = result.filesystem {
-        print_filesystem_section(filesystem, verbose, repo_root);
+    match filter {
+        OutputFilter::All => {
+            // Print all sections that are present
+            if let Some(ref os) = result.os {
+                print_os_section(os, verbose);
+            }
+            if let Some(ref hardware) = result.hardware {
+                print_hardware_section(hardware, verbose, repo_root);
+            }
+            if let Some(ref network) = result.network {
+                print_network_section(network);
+            }
+            if let Some(ref filesystem) = result.filesystem {
+                print_filesystem_section(filesystem, verbose, repo_root);
+            }
+        }
+        OutputFilter::Os => {
+            if let Some(ref os) = result.os {
+                print_os_section(os, verbose);
+            }
+        }
+        // Note: Hardware and Filesystem are not used as filter modes;
+        // they're handled via include-only mode in OutputFilter::All
+        OutputFilter::Hardware | OutputFilter::Filesystem => {
+            // This branch shouldn't normally be reached since output_filter()
+            // returns All for --hardware/--filesystem flags (they use include-only mode).
+            // But we handle it for completeness.
+            if let Some(ref os) = result.os {
+                print_os_section(os, verbose);
+            }
+            if let Some(ref hardware) = result.hardware {
+                print_hardware_section(hardware, verbose, repo_root);
+            }
+            if let Some(ref network) = result.network {
+                print_network_section(network);
+            }
+            if let Some(ref filesystem) = result.filesystem {
+                print_filesystem_section(filesystem, verbose, repo_root);
+            }
+        }
+        OutputFilter::Cpu => {
+            if let Some(ref hardware) = result.hardware {
+                print_cpu_section(&hardware.cpu, verbose);
+            }
+        }
+        OutputFilter::Gpu => {
+            if let Some(ref hardware) = result.hardware {
+                print_gpu_section(&hardware.gpu, verbose);
+            }
+        }
+        OutputFilter::Memory => {
+            if let Some(ref hardware) = result.hardware {
+                print_memory_section(&hardware.memory);
+            }
+        }
+        OutputFilter::Storage => {
+            if let Some(ref hardware) = result.hardware {
+                print_storage_section(&hardware.storage, verbose, repo_root);
+            }
+        }
+        OutputFilter::Git => {
+            if let Some(ref filesystem) = result.filesystem
+                && let Some(ref git) = filesystem.git
+            {
+                print_git_section(git, verbose, repo_root);
+            }
+        }
+        OutputFilter::Repo => {
+            if let Some(ref filesystem) = result.filesystem
+                && let Some(ref repo) = filesystem.repo
+            {
+                print_repo_section(repo, verbose, repo_root);
+            }
+        }
+        OutputFilter::Language => {
+            if let Some(ref filesystem) = result.filesystem
+                && let Some(ref langs) = filesystem.languages
+            {
+                print_language_section(langs, verbose);
+            }
+        }
     }
 }
 
@@ -350,6 +442,301 @@ fn print_network_section(network: &sniff_lib::NetworkInfo) {
     println!();
 }
 
+// ============================================================================
+// Subsection print functions (for --cpu, --gpu, --memory, --storage filters)
+// ============================================================================
+
+fn print_cpu_section(cpu: &sniff_lib::hardware::CpuInfo, verbose: u8) {
+    println!("=== CPU ===");
+    println!("Brand: {}", cpu.brand);
+    println!("Logical cores: {}", cpu.logical_cores);
+    if let Some(physical) = cpu.physical_cores {
+        println!("Physical cores: {}", physical);
+    }
+
+    // Print SIMD capabilities at verbose level 1+
+    if verbose > 0 {
+        let simd = &cpu.simd;
+        let mut caps = Vec::new();
+        if simd.avx512f {
+            caps.push("AVX-512");
+        } else if simd.avx2 {
+            caps.push("AVX2");
+        } else if simd.avx {
+            caps.push("AVX");
+        }
+        if simd.sse4_2 {
+            caps.push("SSE4.2");
+        }
+        if simd.fma {
+            caps.push("FMA");
+        }
+        if simd.neon {
+            caps.push("NEON");
+        }
+        if !caps.is_empty() {
+            println!("SIMD: {}", caps.join(", "));
+        }
+    }
+
+    println!();
+}
+
+fn print_gpu_section(gpus: &[sniff_lib::hardware::GpuInfo], verbose: u8) {
+    println!("=== GPU ===");
+    if gpus.is_empty() {
+        println!("No GPUs detected");
+    } else {
+        for gpu in gpus {
+            let vendor_str = gpu.vendor.as_deref().unwrap_or("Unknown");
+            println!("{} ({}, {})", gpu.name, vendor_str, gpu.backend);
+            if verbose > 0 {
+                if let Some(mem) = gpu.memory_bytes {
+                    println!("  Memory: {}", format_bytes(mem));
+                }
+                println!("  Type: {:?}", gpu.device_type);
+                if let Some(ref family) = gpu.metal_family {
+                    println!("  Metal Family: {}", family);
+                }
+                if gpu.is_headless {
+                    println!("  Headless: yes");
+                }
+                if gpu.is_removable {
+                    println!("  Removable: yes (eGPU)");
+                }
+            }
+            if verbose > 1 {
+                let caps = &gpu.capabilities;
+                let mut cap_list = Vec::new();
+                if caps.raytracing {
+                    cap_list.push("Raytracing");
+                }
+                if caps.mesh_shaders {
+                    cap_list.push("Mesh Shaders");
+                }
+                if caps.unified_memory {
+                    cap_list.push("Unified Memory");
+                }
+                if caps.dynamic_libraries {
+                    cap_list.push("Dynamic Libraries");
+                }
+                if !cap_list.is_empty() {
+                    println!("  Capabilities: {}", cap_list.join(", "));
+                }
+                if let Some(max_buf) = gpu.max_buffer_bytes {
+                    println!("  Max Buffer: {}", format_bytes(max_buf));
+                }
+            }
+        }
+    }
+    println!();
+}
+
+fn print_memory_section(memory: &sniff_lib::hardware::MemoryInfo) {
+    println!("=== Memory ===");
+    println!("Total: {}", format_bytes(memory.total_bytes));
+    println!("Available: {}", format_bytes(memory.available_bytes));
+    println!("Used: {}", format_bytes(memory.used_bytes));
+    let usage_percent =
+        (memory.used_bytes as f64 / memory.total_bytes as f64) * 100.0;
+    println!("Usage: {:.1}%", usage_percent);
+    println!();
+}
+
+fn print_storage_section(
+    storage: &[sniff_lib::hardware::StorageInfo],
+    verbose: u8,
+    repo_root: Option<&Path>,
+) {
+    println!("=== Storage ===");
+    for disk in storage {
+        let mount_str = relative_path(&disk.mount_point, repo_root);
+        let kind_str = match disk.kind {
+            sniff_lib::hardware::StorageKind::Ssd => "SSD",
+            sniff_lib::hardware::StorageKind::Hdd => "HDD",
+            sniff_lib::hardware::StorageKind::Unknown => "",
+        };
+        if kind_str.is_empty() {
+            println!("{} ({})", mount_str, disk.file_system);
+        } else {
+            println!("{} ({}, {})", mount_str, disk.file_system, kind_str);
+        }
+        if verbose > 0 {
+            println!("  Total: {}", format_bytes(disk.total_bytes));
+            println!("  Available: {}", format_bytes(disk.available_bytes));
+            if disk.is_removable {
+                println!("  Removable: yes");
+            }
+        }
+    }
+    println!();
+}
+
+fn print_git_section(
+    git: &sniff_lib::filesystem::git::GitInfo,
+    verbose: u8,
+    repo_root: Option<&Path>,
+) {
+    println!("=== Git ===");
+    let root_str = relative_path(&git.repo_root, repo_root);
+    println!(
+        "Root: {}",
+        if root_str.is_empty() {
+            ".".to_string()
+        } else {
+            root_str
+        }
+    );
+    if let Some(ref branch) = git.current_branch {
+        println!("Branch: {}", branch);
+    }
+
+    if git.in_worktree {
+        println!("In Worktree: yes");
+    }
+
+    if let Some(commit) = git.recent.first() {
+        println!("HEAD: {} ({})", &commit.sha[..8], commit.author);
+        println!(
+            "Message: {}",
+            commit.message.lines().next().unwrap_or("")
+        );
+        if let Some(ref remotes) = commit.remotes {
+            println!("Synced to: {}", remotes.join(", "));
+        }
+    }
+
+    let dirty = if git.status.is_dirty {
+        "dirty"
+    } else {
+        "clean"
+    };
+    println!(
+        "Status: {} ({} staged, {} unstaged, {} untracked)",
+        dirty,
+        git.status.staged_count,
+        git.status.unstaged_count,
+        git.status.untracked_count
+    );
+
+    if let Some(ref behind) = git.status.is_behind {
+        match behind {
+            BehindStatus::NotBehind => println!("Behind: no"),
+            BehindStatus::Behind(remotes) => {
+                println!("Behind: {}", remotes.join(", "));
+            }
+        }
+    }
+
+    if verbose > 0 && git.recent.len() > 1 {
+        println!("Recent commits:");
+        for commit in git.recent.iter().skip(1).take(5) {
+            let short_msg = commit.message.lines().next().unwrap_or("");
+            let truncated = if short_msg.len() > 50 {
+                format!("{}...", &short_msg[..47])
+            } else {
+                short_msg.to_string()
+            };
+            print!("  {} - {}", &commit.sha[..8], truncated);
+            if verbose > 1
+                && let Some(ref remotes) = commit.remotes
+            {
+                print!(" [{}]", remotes.join(", "));
+            }
+            println!();
+        }
+        if git.recent.len() > 6 {
+            println!("  ... and {} more", git.recent.len() - 6);
+        }
+    }
+
+    for remote in &git.remotes {
+        print!("Remote {}: {:?}", remote.name, remote.provider);
+        if let Some(ref branches) = remote.branches {
+            print!(" ({} branches)", branches.len());
+        }
+        println!();
+    }
+    println!();
+}
+
+fn print_repo_section(
+    repo: &sniff_lib::filesystem::repo::RepoInfo,
+    verbose: u8,
+    repo_root: Option<&Path>,
+) {
+    println!("=== Repository ===");
+
+    if repo.is_monorepo {
+        if let Some(ref tool) = repo.monorepo_tool {
+            println!("Monorepo: {:?}", tool);
+        }
+        if let Some(ref packages) = repo.packages {
+            println!("Packages: {}", packages.len());
+            let show_count = if verbose > 0 { packages.len() } else { 5 };
+            for pkg in packages.iter().take(show_count) {
+                let path_str = relative_path(&pkg.path, repo_root);
+                let lang_info = pkg
+                    .primary_language
+                    .as_ref()
+                    .map(|l| format!(" [{}]", l))
+                    .unwrap_or_default();
+                println!("  {} ({}){}", pkg.name, path_str, lang_info);
+
+                if verbose > 0 && !pkg.detected_managers.is_empty() {
+                    println!("    Managers: {}", pkg.detected_managers.join(", "));
+                }
+                if verbose > 1 && !pkg.languages.is_empty() {
+                    println!("    Languages: {}", pkg.languages.join(", "));
+                }
+            }
+            if packages.len() > show_count {
+                println!("  ... and {} more", packages.len() - show_count);
+            }
+        }
+    } else {
+        println!("Single-package repository");
+        println!("Root: {}", repo.root.display());
+    }
+    println!();
+}
+
+fn print_language_section(
+    langs: &sniff_lib::filesystem::languages::LanguageBreakdown,
+    verbose: u8,
+) {
+    println!("=== Languages ===");
+    println!("Files analyzed: {}", format_number(langs.total_files));
+    if let Some(ref primary) = langs.primary {
+        println!("Primary: {}", primary);
+    }
+    let show_count = if verbose > 0 { 10 } else { 5 };
+    for lang in langs.languages.iter().take(show_count) {
+        println!(
+            "{}: {} files ({:.1}%)",
+            lang.language,
+            format_number(lang.file_count),
+            lang.percentage
+        );
+        if verbose > 1 && !lang.files.is_empty() {
+            let file_show_count = 3.min(lang.files.len());
+            for file in lang.files.iter().take(file_show_count) {
+                println!("  - {}", file.display());
+            }
+            if lang.files.len() > file_show_count {
+                println!(
+                    "  ... and {} more files",
+                    lang.files.len() - file_show_count
+                );
+            }
+        }
+    }
+    if langs.languages.len() > show_count {
+        println!("... and {} more", langs.languages.len() - show_count);
+    }
+    println!();
+}
+
 fn print_filesystem_section(fs: &sniff_lib::FilesystemInfo, verbose: u8, repo_root: Option<&Path>) {
     println!("=== Filesystem ===");
 
@@ -549,36 +936,36 @@ fn print_filesystem_section(fs: &sniff_lib::FilesystemInfo, verbose: u8, repo_ro
     }
     println!();
 
-    if let Some(ref repo) = fs.repo {
-        if repo.is_monorepo {
-            if let Some(ref tool) = repo.monorepo_tool {
-                println!("Monorepo: {:?}", tool);
-            }
-            if let Some(ref packages) = repo.packages {
-                println!("  Packages: {}", packages.len());
-                let show_count = if verbose > 0 { packages.len() } else { 5 };
-                for pkg in packages.iter().take(show_count) {
-                    let path_str = relative_path(&pkg.path, repo_root);
-                    let lang_info = pkg
-                        .primary_language
-                        .as_ref()
-                        .map(|l| format!(" [{}]", l))
-                        .unwrap_or_default();
-                    println!("    {} ({}){}", pkg.name, path_str, lang_info);
+    if let Some(ref repo) = fs.repo
+        && repo.is_monorepo
+    {
+        if let Some(ref tool) = repo.monorepo_tool {
+            println!("Monorepo: {:?}", tool);
+        }
+        if let Some(ref packages) = repo.packages {
+            println!("  Packages: {}", packages.len());
+            let show_count = if verbose > 0 { packages.len() } else { 5 };
+            for pkg in packages.iter().take(show_count) {
+                let path_str = relative_path(&pkg.path, repo_root);
+                let lang_info = pkg
+                    .primary_language
+                    .as_ref()
+                    .map(|l| format!(" [{}]", l))
+                    .unwrap_or_default();
+                println!("    {} ({}){}", pkg.name, path_str, lang_info);
 
-                    // Show package details at verbose level 1+
-                    if verbose > 0 {
-                        if !pkg.detected_managers.is_empty() {
-                            println!("      Managers: {}", pkg.detected_managers.join(", "));
-                        }
-                        if verbose > 1 && !pkg.languages.is_empty() {
-                            println!("      Languages: {}", pkg.languages.join(", "));
-                        }
+                // Show package details at verbose level 1+
+                if verbose > 0 {
+                    if !pkg.detected_managers.is_empty() {
+                        println!("      Managers: {}", pkg.detected_managers.join(", "));
+                    }
+                    if verbose > 1 && !pkg.languages.is_empty() {
+                        println!("      Languages: {}", pkg.languages.join(", "));
                     }
                 }
-                if packages.len() > show_count {
-                    println!("    ... and {} more", packages.len() - show_count);
-                }
+            }
+            if packages.len() > show_count {
+                println!("    ... and {} more", packages.len() - show_count);
             }
         }
     }
