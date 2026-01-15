@@ -456,3 +456,161 @@ fn test_os_includes_time_info() {
         "UTC offset should be within valid range"
     );
 }
+
+// ============================================================================
+// Network ip_addresses Integration Tests
+// ============================================================================
+
+/// Tests that network info includes ip_addresses field with proper structure.
+#[test]
+fn test_network_has_ip_addresses_field() {
+    let result = detect().unwrap();
+    let network = result.network.expect("network should be present");
+
+    if !network.permission_denied {
+        // ip_addresses field should exist and have v4/v6 vectors
+        // (even if empty, the structure should be present)
+        let v4_count = network.ip_addresses.v4.len();
+        let v6_count = network.ip_addresses.v6.len();
+
+        // If interfaces have addresses, they should be aggregated
+        let expected_v4: usize = network
+            .interfaces
+            .iter()
+            .map(|i| i.ipv4_addresses.len())
+            .sum();
+        let expected_v6: usize = network
+            .interfaces
+            .iter()
+            .map(|i| i.ipv6_addresses.len())
+            .sum();
+
+        assert_eq!(
+            v4_count, expected_v4,
+            "ip_addresses.v4 count should match interface IPv4 sum"
+        );
+        assert_eq!(
+            v6_count, expected_v6,
+            "ip_addresses.v6 count should match interface IPv6 sum"
+        );
+    }
+}
+
+/// Tests that ip_addresses JSON serialization produces expected structure.
+#[test]
+fn test_network_ip_addresses_json_structure() {
+    let result = detect().unwrap();
+    let json = serde_json::to_string(&result).expect("SniffResult should serialize");
+
+    // If network is present, JSON should have ip_addresses with v4/v6
+    if result.network.is_some() {
+        // Parse as Value to inspect structure
+        let value: serde_json::Value =
+            serde_json::from_str(&json).expect("JSON should parse as Value");
+
+        if let Some(network) = value.get("network") {
+            let ip_addresses = network.get("ip_addresses");
+            assert!(
+                ip_addresses.is_some(),
+                "network should have ip_addresses field"
+            );
+
+            let ip_addr = ip_addresses.unwrap();
+            assert!(ip_addr.get("v4").is_some(), "ip_addresses should have v4");
+            assert!(ip_addr.get("v6").is_some(), "ip_addresses should have v6");
+
+            // v4 and v6 should be arrays
+            assert!(
+                ip_addr.get("v4").unwrap().is_array(),
+                "ip_addresses.v4 should be an array"
+            );
+            assert!(
+                ip_addr.get("v6").unwrap().is_array(),
+                "ip_addresses.v6 should be an array"
+            );
+
+            // Each address entry should have address and interface fields
+            if let Some(v4_arr) = ip_addr.get("v4").and_then(|v| v.as_array()) {
+                for addr in v4_arr {
+                    assert!(
+                        addr.get("address").is_some(),
+                        "IPv4 entry should have address field"
+                    );
+                    assert!(
+                        addr.get("interface").is_some(),
+                        "IPv4 entry should have interface field"
+                    );
+                }
+            }
+
+            if let Some(v6_arr) = ip_addr.get("v6").and_then(|v| v.as_array()) {
+                for addr in v6_arr {
+                    assert!(
+                        addr.get("address").is_some(),
+                        "IPv6 entry should have address field"
+                    );
+                    assert!(
+                        addr.get("interface").is_some(),
+                        "IPv6 entry should have interface field"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Tests that ip_addresses roundtrip through JSON correctly.
+#[test]
+fn test_network_ip_addresses_roundtrip() {
+    let result = detect().unwrap();
+    let json = serde_json::to_string(&result).expect("SniffResult should serialize");
+    let parsed: sniff_lib::SniffResult =
+        serde_json::from_str(&json).expect("JSON should deserialize");
+
+    if let (Some(orig_net), Some(parsed_net)) = (&result.network, &parsed.network) {
+        // Counts should match
+        assert_eq!(
+            orig_net.ip_addresses.v4.len(),
+            parsed_net.ip_addresses.v4.len(),
+            "v4 count should survive roundtrip"
+        );
+        assert_eq!(
+            orig_net.ip_addresses.v6.len(),
+            parsed_net.ip_addresses.v6.len(),
+            "v6 count should survive roundtrip"
+        );
+
+        // Contents should match
+        for (orig, parsed) in orig_net
+            .ip_addresses
+            .v4
+            .iter()
+            .zip(parsed_net.ip_addresses.v4.iter())
+        {
+            assert_eq!(
+                orig.address, parsed.address,
+                "IPv4 address should survive roundtrip"
+            );
+            assert_eq!(
+                orig.interface, parsed.interface,
+                "IPv4 interface should survive roundtrip"
+            );
+        }
+
+        for (orig, parsed) in orig_net
+            .ip_addresses
+            .v6
+            .iter()
+            .zip(parsed_net.ip_addresses.v6.iter())
+        {
+            assert_eq!(
+                orig.address, parsed.address,
+                "IPv6 address should survive roundtrip"
+            );
+            assert_eq!(
+                orig.interface, parsed.interface,
+                "IPv6 interface should survive roundtrip"
+            );
+        }
+    }
+}

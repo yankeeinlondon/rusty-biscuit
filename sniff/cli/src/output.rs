@@ -497,6 +497,23 @@ fn print_network_section(network: &sniff_lib::NetworkInfo) {
                 println!("    IPv6: {}", ip);
             }
         }
+
+        // Print aggregated IP addresses (only if there are any)
+        if !network.ip_addresses.v4.is_empty() {
+            println!();
+            println!("All IPv4 Addresses ({}):", network.ip_addresses.v4.len());
+            for addr in &network.ip_addresses.v4 {
+                println!("  {} ({})", addr.address, addr.interface);
+            }
+        }
+
+        if !network.ip_addresses.v6.is_empty() {
+            println!();
+            println!("All IPv6 Addresses ({}):", network.ip_addresses.v6.len());
+            for addr in &network.ip_addresses.v6 {
+                println!("  {} ({})", addr.address, addr.interface);
+            }
+        }
     }
     println!();
 }

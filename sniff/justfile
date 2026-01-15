@@ -1,16 +1,45 @@
+BOLD := '\033[1m'
+RESET := '\033[0m'
+
 default:
-    @just --list
+    @echo "{{BOLD}}Sniff CLI and Library{{RESET}}"
+    @echo
+    @just --list | grep -v 'default'
 
-build:
-    cargo build -p sniff-lib
-    cargo build -p sniff
+# build library and CLI
+build *args="":
+    @echo "Building ..."
+    @echo
+    @cargo build -p sniff-lib -- {{args}}
+    @cargo build -p sniff-cli -- {{args}}
+    @echo
 
-test:
-    cargo test -p sniff-lib
-    cargo test -p sniff
+# test library and CLI
+test *args="":
+    @echo "Testing {{BOLD}}Library{{RESET}} code"
+    @echo ""
+    @cargo test -p sniff-lib -- {{args}}
+    @echo ""
+    @echo "Testing {{BOLD}}CLI{{RESET}} code"
+    @echo ""
+    @cargo test -p sniff-cli -- {{args}}
 
-lint:
-    cargo clippy -p sniff-lib -p sniff
+# lint with clippy
+lint *args="":
+    @cargo clippy -p sniff-lib -p sniff-cli -- {{args}}
 
-install:
-    cargo install --path cli
+# install latest release version of CLI
+install *args="":
+    @cargo install --path cli -- {{args}}
+
+# build and show the docs for the library code
+docs:
+    @echo "Building and then showing latest docs for the library code"
+    @echo ""
+    @cargo doc -p sniff-lib --open
+
+# build and show the docs for the Sniff CLI
+cli_docs:
+    @echo "Building and then showing latest docs for the Sniff CLI"
+    @echo ""
+    @cargo doc -p sniff-lib --open
