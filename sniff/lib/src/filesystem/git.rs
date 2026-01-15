@@ -152,18 +152,13 @@ pub struct GitInfo {
 /// let status = BehindStatus::Behind(vec!["origin".to_string(), "upstream".to_string()]);
 /// assert_eq!(serde_json::to_string(&status).unwrap(), r#"["origin","upstream"]"#);
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum BehindStatus {
     /// Local branch is not behind any remote.
+    #[default]
     NotBehind,
     /// Local branch is behind these remotes.
     Behind(Vec<String>),
-}
-
-impl Default for BehindStatus {
-    fn default() -> Self {
-        Self::NotBehind
-    }
 }
 
 impl Serialize for BehindStatus {
@@ -244,6 +239,7 @@ pub struct RepoStatus {
     /// When `--deep` is used:
     /// - `Some(BehindStatus::NotBehind)` → serializes as `false`
     /// - `Some(BehindStatus::Behind(vec![...]))` → serializes as array of remote names
+    ///
     /// When `--deep` is not used: `None` → field is omitted
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_behind: Option<BehindStatus>,
