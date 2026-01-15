@@ -160,11 +160,15 @@ fn test_include_mode_ignores_skip_flags() {
 fn test_include_mode_json_output() {
     // Include-only mode should work with JSON output
     // Skipped sections are omitted entirely
+    // With single --hardware flag, output is flattened (cpu, gpu, memory, storage at top level)
     cargo_bin_cmd!("sniff")
         .args(["--hardware", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"hardware\""))
+        .stdout(predicate::str::contains("\"cpu\""))
+        .stdout(predicate::str::contains("\"gpu\""))
+        .stdout(predicate::str::contains("\"memory\""))
+        .stdout(predicate::str::contains("\"storage\""))
         .stdout(predicate::str::contains("\"network\"").not()); // network skipped
 }
 
@@ -174,13 +178,16 @@ fn test_include_mode_json_output() {
 
 #[test]
 fn test_hardware_only_json_excludes_all_other_sections() {
-    // Regression test: --hardware should output ONLY hardware in JSON
+    // Regression test: --hardware should output ONLY hardware in JSON (flattened)
     // Bug: Previously output `"network": { "interfaces": [], ... }` and `"filesystem": null`
     cargo_bin_cmd!("sniff")
         .args(["--hardware", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"hardware\""))
+        .stdout(predicate::str::contains("\"cpu\""))
+        .stdout(predicate::str::contains("\"gpu\""))
+        .stdout(predicate::str::contains("\"memory\""))
+        .stdout(predicate::str::contains("\"storage\""))
         .stdout(predicate::str::contains("\"network\"").not())
         .stdout(predicate::str::contains("\"filesystem\"").not())
         .stdout(predicate::str::contains("\"interfaces\"").not())
@@ -189,12 +196,14 @@ fn test_hardware_only_json_excludes_all_other_sections() {
 
 #[test]
 fn test_network_only_json_excludes_all_other_sections() {
-    // Regression test: --network should output ONLY network in JSON
+    // Regression test: --network should output ONLY network in JSON (flattened)
     cargo_bin_cmd!("sniff")
         .args(["--network", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"network\""))
+        .stdout(predicate::str::contains("\"interfaces\""))
+        .stdout(predicate::str::contains("\"permission_denied\""))
+        .stdout(predicate::str::contains("\"network\"").not())
         .stdout(predicate::str::contains("\"hardware\"").not())
         .stdout(predicate::str::contains("\"filesystem\"").not())
         .stdout(predicate::str::contains("\"os\"").not())
@@ -203,12 +212,13 @@ fn test_network_only_json_excludes_all_other_sections() {
 
 #[test]
 fn test_filesystem_only_json_excludes_all_other_sections() {
-    // Regression test: --filesystem should output ONLY filesystem in JSON
+    // Regression test: --filesystem should output ONLY filesystem in JSON (flattened)
     cargo_bin_cmd!("sniff")
         .args(["--filesystem", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"filesystem\""))
+        .stdout(predicate::str::contains("\"git\""))
+        .stdout(predicate::str::contains("\"languages\""))
         .stdout(predicate::str::contains("\"hardware\"").not())
         .stdout(predicate::str::contains("\"network\"").not())
         .stdout(predicate::str::contains("\"interfaces\"").not())
@@ -253,11 +263,12 @@ fn test_deep_flag_parses_correctly() {
 #[test]
 fn test_deep_flag_with_json_output() {
     // Verify --deep with JSON output produces valid JSON with git fields
+    // With single --filesystem flag, output is flattened (no "filesystem" wrapper)
     cargo_bin_cmd!("sniff")
         .args(["--deep", "--filesystem", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"filesystem\""))
+        .stdout(predicate::str::contains("\"git\""))
         .stdout(predicate::str::contains("\"recent\"")); // new commits array field
 }
 
@@ -277,12 +288,14 @@ fn test_filesystem_json_contains_new_git_fields() {
 #[test]
 fn test_deep_flag_does_not_affect_non_filesystem() {
     // --deep flag should not break other sections
+    // With single --hardware flag, output is flattened (no "hardware" or "os" wrapper)
     cargo_bin_cmd!("sniff")
         .args(["--deep", "--hardware", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"hardware\""))
-        .stdout(predicate::str::contains("\"os\""));
+        .stdout(predicate::str::contains("\"cpu\""))
+        .stdout(predicate::str::contains("\"gpu\""))
+        .stdout(predicate::str::contains("\"os\"").not()); // OS excluded with --hardware
 }
 
 #[test]
@@ -487,7 +500,7 @@ fn test_language_filter_with_json() {
 
 #[test]
 fn test_os_filter_with_json() {
-    // Regression test: --os --json should filter to only OS data
+    // Regression test: --os --json should filter to only OS data (flattened)
     let output = cargo_bin_cmd!("sniff")
         .args(["--os", "--json"])
         .assert()
@@ -499,14 +512,360 @@ fn test_os_filter_with_json() {
     let json_str = std::str::from_utf8(&output).unwrap();
     let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
 
-    // Should have only os section
-    assert!(json.get("os").is_some());
+    // Should have OS fields at top level (flattened, no "os" wrapper)
+    assert!(json.get("name").is_some());
+    assert!(json.get("kernel").is_some());
+    assert!(json.get("hostname").is_some());
+
+    // Should not have arch (moved to CPU section)
+    assert!(json.get("arch").is_none());
+
+    // Should not have other sections or wrappers
+    assert!(json.get("os").is_none());
     assert!(json.get("hardware").is_none());
     assert!(json.get("network").is_none());
     assert!(json.get("filesystem").is_none());
+}
 
-    // OS should have data
-    let os = json.get("os").unwrap();
-    assert!(os.get("name").is_some());
-    assert!(os.get("kernel").is_some());
+// ============================================================================
+// Regression tests for bug: --hardware flag should flatten JSON output
+// and not include OS section
+// ============================================================================
+
+#[test]
+fn test_hardware_flag_json_excludes_os() {
+    // Regression test: --hardware should not include OS section
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--json", "--hardware"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json_str = String::from_utf8(output).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+    // Bug: OS section was incorrectly included with --hardware
+    assert!(
+        json.get("os").is_none(),
+        "--hardware flag should not include OS section"
+    );
+
+    // Should have hardware data at top level (flattened)
+    assert!(
+        json.get("cpu").is_some(),
+        "CPU data should be at top level"
+    );
+    assert!(
+        json.get("gpu").is_some(),
+        "GPU data should be at top level"
+    );
+    assert!(
+        json.get("memory").is_some(),
+        "Memory data should be at top level"
+    );
+    assert!(
+        json.get("storage").is_some(),
+        "Storage data should be at top level"
+    );
+}
+
+#[test]
+fn test_hardware_flag_json_flattens_structure() {
+    // Regression test: --hardware should flatten output (no "hardware" wrapper)
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--json", "--hardware"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json_str = String::from_utf8(output).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+    // Bug: Output was wrapped in {"hardware": {...}}
+    assert!(
+        json.get("hardware").is_none(),
+        "Output should not have 'hardware' wrapper - data should be flattened to top level"
+    );
+
+    // Top-level keys should be the hardware components directly
+    let keys: Vec<&str> = json.as_object().unwrap().keys().map(|s| s.as_str()).collect();
+    assert!(
+        keys.contains(&"cpu"),
+        "cpu should be a top-level key, got: {:?}",
+        keys
+    );
+    assert!(
+        keys.contains(&"gpu"),
+        "gpu should be a top-level key, got: {:?}",
+        keys
+    );
+    assert!(
+        keys.contains(&"memory"),
+        "memory should be a top-level key, got: {:?}",
+        keys
+    );
+    assert!(
+        keys.contains(&"storage"),
+        "storage should be a top-level key, got: {:?}",
+        keys
+    );
+
+    // Should not have other section keys
+    assert!(
+        !keys.contains(&"os"),
+        "Should not have os key, got: {:?}",
+        keys
+    );
+    assert!(
+        !keys.contains(&"network"),
+        "Should not have network key, got: {:?}",
+        keys
+    );
+    assert!(
+        !keys.contains(&"filesystem"),
+        "Should not have filesystem key, got: {:?}",
+        keys
+    );
+}
+
+#[test]
+fn test_hardware_flag_text_output_works() {
+    // Regression test: --hardware should still work with text output
+    cargo_bin_cmd!("sniff")
+        .arg("--hardware")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("=== Hardware ==="))
+        .stdout(predicate::str::contains("CPU:"))
+        .stdout(predicate::str::contains("Memory:"));
+}
+
+#[test]
+fn test_hardware_flag_text_excludes_os() {
+    // Regression test: --hardware text output should not show OS section
+    let output = cargo_bin_cmd!("sniff")
+        .arg("--hardware")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let output_str = String::from_utf8(output).unwrap();
+
+    // Should NOT contain OS section header
+    assert!(
+        !output_str.contains("=== OS ==="),
+        "Text output should not contain OS section with --hardware flag"
+    );
+
+    // Should contain hardware section
+    assert!(
+        output_str.contains("=== Hardware ==="),
+        "Text output should contain Hardware section"
+    );
+}
+
+#[test]
+fn test_multiple_sections_not_flattened() {
+    // Regression test: Multiple sections should keep parent structure
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--json", "--hardware", "--network"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json_str = String::from_utf8(output).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+    // When multiple sections are requested, they should be wrapped
+    assert!(
+        json.get("hardware").is_some(),
+        "Multiple sections should have 'hardware' wrapper"
+    );
+    assert!(
+        json.get("network").is_some(),
+        "Multiple sections should have 'network' wrapper"
+    );
+
+    // Should NOT have flattened keys
+    assert!(
+        json.get("cpu").is_none(),
+        "Multiple sections should not flatten cpu to top level"
+    );
+}
+
+#[test]
+fn test_filesystem_flag_also_flattens() {
+    // Regression test: --filesystem should also flatten when used alone
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--json", "--filesystem"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json_str = String::from_utf8(output).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+    // Should not have filesystem wrapper
+    assert!(
+        json.get("filesystem").is_none(),
+        "Single --filesystem flag should flatten output"
+    );
+
+    // Should not have other sections
+    assert!(
+        json.get("os").is_none(),
+        "--filesystem should not include OS"
+    );
+    assert!(
+        json.get("hardware").is_none(),
+        "--filesystem should not include hardware"
+    );
+    assert!(
+        json.get("network").is_none(),
+        "--filesystem should not include network"
+    );
+}
+
+#[test]
+fn test_detail_filters_still_work() {
+    // Regression test: Detail-level filters (--cpu, --gpu, etc.) should still work
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--json", "--cpu"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json_str = String::from_utf8(output).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+    // CPU filter should return flattened CPU data
+    assert!(
+        json.get("brand").is_some(),
+        "CPU filter should have brand field at top level"
+    );
+    assert!(
+        json.get("logical_cores").is_some(),
+        "CPU filter should have logical_cores field"
+    );
+
+    // Should not have wrapper
+    assert!(
+        json.get("cpu").is_none(),
+        "CPU filter should not have cpu wrapper"
+    );
+    assert!(
+        json.get("hardware").is_none(),
+        "CPU filter should not have hardware wrapper"
+    );
+}
+
+#[test]
+fn test_os_flag_json_flattens_structure() {
+    // Regression test: --os should flatten output (no "os" wrapper)
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--json", "--os"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json_str = String::from_utf8(output).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+    // Should not have os wrapper
+    assert!(
+        json.get("os").is_none(),
+        "Output should not have 'os' wrapper - data should be flattened to top level"
+    );
+
+    // Top-level keys should be OS fields directly
+    assert!(
+        json.get("name").is_some(),
+        "name should be a top-level key"
+    );
+    assert!(
+        json.get("kernel").is_some(),
+        "kernel should be a top-level key"
+    );
+    assert!(
+        json.get("hostname").is_some(),
+        "hostname should be a top-level key"
+    );
+    // Note: arch was moved from OS to CPU section
+    assert!(
+        json.get("arch").is_none(),
+        "arch should not be in OS section (moved to CPU)"
+    );
+
+    // Should not have other section keys
+    assert!(
+        json.get("hardware").is_none(),
+        "Should not have hardware key"
+    );
+    assert!(
+        json.get("network").is_none(),
+        "Should not have network key"
+    );
+    assert!(
+        json.get("filesystem").is_none(),
+        "Should not have filesystem key"
+    );
+}
+
+#[test]
+fn test_network_flag_json_flattens_structure() {
+    // Regression test: --network should flatten output (no "network" wrapper)
+    let output = cargo_bin_cmd!("sniff")
+        .args(["--json", "--network"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json_str = String::from_utf8(output).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+    // Should not have network wrapper
+    assert!(
+        json.get("network").is_none(),
+        "Output should not have 'network' wrapper - data should be flattened to top level"
+    );
+
+    // Top-level keys should be network fields directly
+    assert!(
+        json.get("interfaces").is_some(),
+        "interfaces should be a top-level key"
+    );
+    assert!(
+        json.get("permission_denied").is_some(),
+        "permission_denied should be a top-level key"
+    );
+
+    // Should not have other section keys
+    assert!(
+        json.get("os").is_none(),
+        "Should not have os key"
+    );
+    assert!(
+        json.get("hardware").is_none(),
+        "Should not have hardware key"
+    );
+    assert!(
+        json.get("filesystem").is_none(),
+        "Should not have filesystem key"
+    );
 }

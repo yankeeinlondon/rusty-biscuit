@@ -4,32 +4,36 @@ use sniff_lib::hardware::NtpStatus;
 use std::path::Path;
 
 /// Filter mode for output - determines which subsection to display.
+///
+/// When a single top-level section is requested (Os, Hardware, Network, Filesystem),
+/// the JSON output is flattened - the section's fields appear at the top level without
+/// a wrapper object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OutputFilter {
     /// Show all sections (no filtering)
     #[default]
     All,
-    /// Show only OS section
+    /// Show only OS section (flattened in JSON)
     Os,
-    /// Show only hardware section (full) - used via include-only mode
-    #[allow(dead_code)]
+    /// Show only hardware section (flattened in JSON)
     Hardware,
-    /// Show only filesystem section (full) - used via include-only mode
-    #[allow(dead_code)]
+    /// Show only network section (flattened in JSON)
+    Network,
+    /// Show only filesystem section (flattened in JSON)
     Filesystem,
-    /// Show only CPU info (hardware subsection)
+    /// Show only CPU info (hardware subsection, flattened in JSON)
     Cpu,
-    /// Show only GPU info (hardware subsection)
+    /// Show only GPU info (hardware subsection, flattened in JSON)
     Gpu,
-    /// Show only memory info (hardware subsection)
+    /// Show only memory info (hardware subsection, flattened in JSON)
     Memory,
-    /// Show only storage info (hardware subsection)
+    /// Show only storage info (hardware subsection, flattened in JSON)
     Storage,
-    /// Show only git info (filesystem subsection)
+    /// Show only git info (filesystem subsection, flattened in JSON)
     Git,
-    /// Show only repo/monorepo info (filesystem subsection)
+    /// Show only repo/monorepo info (filesystem subsection, flattened in JSON)
     Repo,
-    /// Show only language detection (filesystem subsection)
+    /// Show only language detection (filesystem subsection, flattened in JSON)
     Language,
 }
 
@@ -76,6 +80,35 @@ fn relative_path(path: &Path, repo_root: Option<&Path>) -> String {
     path.display().to_string()
 }
 
+/// Format uptime in seconds to a human-readable string
+fn format_uptime(seconds: u64) -> String {
+    let days = seconds / 86400;
+    let hours = (seconds % 86400) / 3600;
+    let minutes = (seconds % 3600) / 60;
+    let secs = seconds % 60;
+
+    let mut parts = Vec::new();
+
+    if days > 0 {
+        parts.push(format!("{} day{}", days, if days == 1 { "" } else { "s" }));
+    }
+    if hours > 0 {
+        parts.push(format!("{} hour{}", hours, if hours == 1 { "" } else { "s" }));
+    }
+    if minutes > 0 || (days == 0 && hours == 0 && secs == 0) {
+        parts.push(format!("{} minute{}", minutes, if minutes == 1 { "" } else { "s" }));
+    }
+    if secs > 0 && days == 0 && hours == 0 {
+        parts.push(format!("{} second{}", secs, if secs == 1 { "" } else { "s" }));
+    }
+
+    if parts.is_empty() {
+        "0 seconds".to_string()
+    } else {
+        parts.join(", ")
+    }
+}
+
 pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter) {
     // Get repo root for relative paths
     let repo_root = result
@@ -100,26 +133,23 @@ pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter) {
                 print_filesystem_section(filesystem, verbose, repo_root);
             }
         }
+        // Top-level section filters (used for single-section requests)
         OutputFilter::Os => {
             if let Some(ref os) = result.os {
                 print_os_section(os, verbose);
             }
         }
-        // Note: Hardware and Filesystem are not used as filter modes;
-        // they're handled via include-only mode in OutputFilter::All
-        OutputFilter::Hardware | OutputFilter::Filesystem => {
-            // This branch shouldn't normally be reached since output_filter()
-            // returns All for --hardware/--filesystem flags (they use include-only mode).
-            // But we handle it for completeness.
-            if let Some(ref os) = result.os {
-                print_os_section(os, verbose);
-            }
+        OutputFilter::Hardware => {
             if let Some(ref hardware) = result.hardware {
                 print_hardware_section(hardware, verbose, repo_root);
             }
+        }
+        OutputFilter::Network => {
             if let Some(ref network) = result.network {
                 print_network_section(network);
             }
+        }
+        OutputFilter::Filesystem => {
             if let Some(ref filesystem) = result.filesystem {
                 print_filesystem_section(filesystem, verbose, repo_root);
             }
@@ -181,8 +211,8 @@ fn print_os_section(os: &sniff_lib::OsInfo, verbose: u8) {
         println!("Distribution: {}", distro);
     }
     println!("Kernel: {}", os.kernel);
-    println!("Architecture: {}", os.arch);
     println!("Hostname: {}", os.hostname);
+    println!("Uptime: {}", format_uptime(os.uptime_seconds));
     println!();
 
     // Print package managers section if detected
@@ -303,6 +333,7 @@ fn print_hardware_section(
         "CPU: {} ({} logical cores)",
         hardware.cpu.brand, hardware.cpu.logical_cores
     );
+    println!("Architecture: {}", hardware.cpu.arch);
     if let Some(physical) = hardware.cpu.physical_cores {
         println!("Physical cores: {}", physical);
     }
@@ -340,6 +371,12 @@ fn print_hardware_section(
         format_bytes(hardware.memory.available_bytes)
     );
     println!("  Used: {}", format_bytes(hardware.memory.used_bytes));
+    if hardware.memory.total_swap > 0 {
+        println!("  Swap: {} total, {} used",
+            format_bytes(hardware.memory.total_swap),
+            format_bytes(hardware.memory.used_swap)
+        );
+    }
     println!();
 
     // Print GPU info if available
@@ -449,6 +486,7 @@ fn print_network_section(network: &sniff_lib::NetworkInfo) {
 fn print_cpu_section(cpu: &sniff_lib::hardware::CpuInfo, verbose: u8) {
     println!("=== CPU ===");
     println!("Brand: {}", cpu.brand);
+    println!("Architecture: {}", cpu.arch);
     println!("Logical cores: {}", cpu.logical_cores);
     if let Some(physical) = cpu.physical_cores {
         println!("Physical cores: {}", physical);
@@ -540,6 +578,18 @@ fn print_memory_section(memory: &sniff_lib::hardware::MemoryInfo) {
     let usage_percent =
         (memory.used_bytes as f64 / memory.total_bytes as f64) * 100.0;
     println!("Usage: {:.1}%", usage_percent);
+
+    // Show swap information if swap is available
+    if memory.total_swap > 0 {
+        println!();
+        println!("Swap:");
+        println!("  Total: {}", format_bytes(memory.total_swap));
+        println!("  Free: {}", format_bytes(memory.free_swap));
+        println!("  Used: {}", format_bytes(memory.used_swap));
+        let swap_usage_percent =
+            (memory.used_swap as f64 / memory.total_swap as f64) * 100.0;
+        println!("  Usage: {:.1}%", swap_usage_percent);
+    }
     println!();
 }
 
@@ -987,19 +1037,36 @@ fn apply_filter_to_json(result: &SniffResult, filter: OutputFilter) -> serde_jso
             serde_json::to_value(result).unwrap_or(Value::Null)
         }
         OutputFilter::Os => {
-            json!({
-                "os": result.os
-            })
+            // Flatten: return OS fields at top level (name, version, kernel, etc.)
+            if let Some(ref os) = result.os {
+                serde_json::to_value(os).unwrap_or(Value::Null)
+            } else {
+                json!({})
+            }
+        }
+        OutputFilter::Network => {
+            // Flatten: return network fields at top level (interfaces, primary_interface, etc.)
+            if let Some(ref network) = result.network {
+                serde_json::to_value(network).unwrap_or(Value::Null)
+            } else {
+                json!({})
+            }
         }
         OutputFilter::Hardware => {
-            json!({
-                "hardware": result.hardware
-            })
+            // Flatten: return hardware fields at top level (cpu, gpu, memory, storage)
+            if let Some(ref hw) = result.hardware {
+                serde_json::to_value(hw).unwrap_or(Value::Null)
+            } else {
+                json!({})
+            }
         }
         OutputFilter::Filesystem => {
-            json!({
-                "filesystem": result.filesystem
-            })
+            // Flatten: return filesystem fields at top level (git, languages, repo, formatting)
+            if let Some(ref fs) = result.filesystem {
+                serde_json::to_value(fs).unwrap_or(Value::Null)
+            } else {
+                json!({})
+            }
         }
         OutputFilter::Cpu => {
             // Flatten: return CPU data at top level
@@ -1064,4 +1131,58 @@ pub fn print_json(result: &SniffResult, filter: OutputFilter) -> serde_json::Res
     let filtered_json = apply_filter_to_json(result, filter);
     println!("{}", serde_json::to_string_pretty(&filtered_json)?);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_uptime_zero() {
+        assert_eq!(format_uptime(0), "0 minutes");
+    }
+
+    #[test]
+    fn test_format_uptime_seconds() {
+        assert_eq!(format_uptime(30), "30 seconds");
+        assert_eq!(format_uptime(1), "1 second");
+    }
+
+    #[test]
+    fn test_format_uptime_minutes() {
+        assert_eq!(format_uptime(60), "1 minute");
+        assert_eq!(format_uptime(120), "2 minutes");
+        assert_eq!(format_uptime(90), "1 minute, 30 seconds");
+    }
+
+    #[test]
+    fn test_format_uptime_hours() {
+        assert_eq!(format_uptime(3600), "1 hour");
+        assert_eq!(format_uptime(3660), "1 hour, 1 minute");
+        assert_eq!(format_uptime(7200), "2 hours");
+        assert_eq!(format_uptime(7320), "2 hours, 2 minutes");
+    }
+
+    #[test]
+    fn test_format_uptime_days() {
+        assert_eq!(format_uptime(86400), "1 day");
+        assert_eq!(format_uptime(86400 + 3600), "1 day, 1 hour");
+        assert_eq!(
+            format_uptime(86400 + 3660),
+            "1 day, 1 hour, 1 minute"
+        );
+        assert_eq!(
+            format_uptime(2 * 86400 + 5 * 3600 + 30 * 60),
+            "2 days, 5 hours, 30 minutes"
+        );
+    }
+
+    #[test]
+    fn test_format_uptime_long() {
+        // 16 days, 13 hours, 26 minutes
+        assert_eq!(
+            format_uptime(16 * 86400 + 13 * 3600 + 26 * 60),
+            "16 days, 13 hours, 26 minutes"
+        );
+    }
 }

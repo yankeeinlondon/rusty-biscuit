@@ -145,14 +145,10 @@ impl Cli {
 
     /// Determine the output filter based on active filter flags.
     ///
-    /// Only detail-level filter flags trigger filter mode.
-    /// Top-level flags (--os, --hardware, --filesystem, --network) use include-only mode.
+    /// Returns specific filter variants for single-section requests to enable flattening.
+    /// When multiple sections are requested, returns `OutputFilter::All`.
     fn output_filter(&self) -> OutputFilter {
-        // Only use filter mode for detail-level flags (mutually exclusive)
-        // Top-level include flags (--hardware, --network, --filesystem) are handled by include-only mode
-        if self.os {
-            return OutputFilter::Os;
-        }
+        // Detail-level filter flags (mutually exclusive)
         if self.cpu {
             return OutputFilter::Cpu;
         }
@@ -175,6 +171,27 @@ impl Cli {
             return OutputFilter::Language;
         }
 
+        // Top-level section flags
+        // When used alone, return specific filter for flattening
+        // When combined, return All for normal structure
+        let sections = [
+            (self.os, OutputFilter::Os),
+            (self.hardware, OutputFilter::Hardware),
+            (self.network, OutputFilter::Network),
+            (self.filesystem, OutputFilter::Filesystem),
+        ];
+
+        let active_sections: Vec<OutputFilter> = sections
+            .iter()
+            .filter_map(|&(flag, filter)| if flag { Some(filter) } else { None })
+            .collect();
+
+        // If exactly one section is requested, return its specific filter (enables flattening)
+        if active_sections.len() == 1 {
+            return active_sections[0];
+        }
+
+        // Multiple sections or no flags = return All
         OutputFilter::All
     }
 }
@@ -248,11 +265,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Apply skip logic based on filter mode
     match output_filter {
-        // --os filter: show only OS section
+        // Top-level section filters: skip all OTHER sections
         OutputFilter::Os => {
             config = config.skip_hardware().skip_network().skip_filesystem();
         }
-        // Hardware detail filters: show only hardware section (no OS needed for subsections)
+        OutputFilter::Hardware => {
+            config = config.skip_os().skip_network().skip_filesystem();
+        }
+        OutputFilter::Network => {
+            config = config.skip_os().skip_hardware().skip_filesystem();
+        }
+        OutputFilter::Filesystem => {
+            config = config.skip_os().skip_hardware().skip_network();
+        }
+        // Hardware detail filters: show only hardware section
         OutputFilter::Cpu | OutputFilter::Gpu | OutputFilter::Memory | OutputFilter::Storage => {
             config = config.skip_os().skip_network().skip_filesystem();
         }
@@ -260,17 +286,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         OutputFilter::Git | OutputFilter::Repo | OutputFilter::Language => {
             config = config.skip_os().skip_hardware().skip_network();
         }
-        // OutputFilter::Hardware and OutputFilter::Filesystem are not used directly
-        // They're handled by include-only mode below
-        OutputFilter::Hardware | OutputFilter::Filesystem | OutputFilter::All => {
-            // Check include-only mode for section selection
+        // All: respect include-only mode or skip flags
+        OutputFilter::All => {
             let include_only_mode = cli.hardware || cli.network || cli.filesystem;
 
             if include_only_mode {
-                // In include-only mode, skip everything not explicitly included
-                // OS is included with hardware, but skipped for other sections
+                // In include-only mode (multiple sections selected), skip everything not included
+                // Always skip OS in include-only mode (it's not individually selectable)
+                config = config.skip_os();
+
                 if !cli.hardware {
-                    config = config.skip_os().skip_hardware();
+                    config = config.skip_hardware();
                 }
                 if !cli.network {
                     config = config.skip_network();
