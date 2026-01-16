@@ -1,5 +1,5 @@
+use biscuit_speaks::{Gender, SystemVoiceInfo, VoiceConfig, VoiceSelector, available_system_voices};
 use clap::{Parser, ValueEnum};
-use shared::tts::{Gender, SystemVoiceInfo, VoiceConfig, VoiceSelector, available_system_voices};
 use std::io::{self, Read};
 
 /// Gender preference for voice selection
@@ -307,8 +307,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         config = config.of_gender(gender.into());
     }
 
-    // Call the shared TTS function
-    shared::tts::speak_when_able(&message, &config);
+    // Call the TTS function
+    biscuit_speaks::speak_when_able(&message, &config);
 
     Ok(())
 }

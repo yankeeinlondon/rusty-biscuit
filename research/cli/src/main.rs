@@ -262,7 +262,7 @@ async fn main() {
 
                     // Only announce if not cancelled
                     if !result.cancelled {
-                        use shared::tts::{VoiceConfig, speak_when_able};
+                        use biscuit_speaks::{VoiceConfig, speak_when_able};
                         let message =
                             format!("Research for the {} library has completed", result.topic);
                         speak_when_able(&message, &VoiceConfig::default());
@@ -345,7 +345,7 @@ async fn main() {
 
                     // Only announce if not cancelled
                     if !result.cancelled {
-                        use shared::tts::{VoiceConfig, speak_when_able};
+                        use biscuit_speaks::{VoiceConfig, speak_when_able};
                         let message =
                             format!("Research for the {} API has completed", result.topic);
                         speak_when_able(&message, &VoiceConfig::default());
