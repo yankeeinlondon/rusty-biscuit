@@ -27,7 +27,6 @@ A Library (and CLI) for generating diagnostics on a number of programming langua
 - C++
 - C#
 - Swift
-- Kotlin
 - Scala (`tree-sitter-scala`)
 - Lua (`tree-sitter-lua`)
 

@@ -1,0 +1,45 @@
+BOLD := '\033[1m'
+RESET := '\033[0m'
+
+default:
+    @echo "{{BOLD}}Tree Hugger{{RESET}} CLI and Library"
+    @echo
+    @just --list | grep -v 'default'
+
+# build library and CLI
+build *args="":
+    @echo "Building ..."
+    @echo
+    @cargo build -p tree-hugger-lib -- {{args}}
+    @cargo build -p tree-hugger-cli -- {{args}}
+    @echo
+
+# test library and CLI
+test *args="":
+    @echo "Testing {{BOLD}}Library{{RESET}} code"
+    @echo ""
+    @cargo test -p tree-hugger-lib -- {{args}}
+    @echo ""
+    @echo "Testing {{BOLD}}CLI{{RESET}} code"
+    @echo ""
+    @cargo test -p tree-hugger-cli -- {{args}}
+
+# lint with clippy
+lint *args="":
+    @cargo clippy -p tree-hugger-lib -p tree-hugger-cli -- {{args}}
+
+# install latest release version of CLI
+install *args="":
+    @cargo install --path cli -- {{args}}
+
+# build and show the docs for the library code
+docs:
+    @echo "Building and then showing latest docs for the library code"
+    @echo ""
+    @cargo doc -p tree-hugger-lib --open
+
+# build and show the docs for the tree-hugger CLI
+cli_docs:
+    @echo "Building and then showing latest docs for the tree-hugger CLI"
+    @echo ""
+    @cargo doc -p tree-hugger-lib --open
