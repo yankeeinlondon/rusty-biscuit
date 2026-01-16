@@ -27,6 +27,31 @@ This area of the `dockhand` monorepo is focused on **research** and is broken up
 
 ## Configuration
 
+### System Dependencies
+
+The research CLI uses text-to-speech for completion announcements, which requires platform-specific system libraries on Linux:
+
+**Ubuntu/Debian:**
+
+```bash
+sudo apt-get update
+sudo apt-get install libspeechd-dev
+```
+
+**Fedora/RHEL:**
+
+```bash
+sudo dnf install speech-dispatcher-devel
+```
+
+**Arch Linux:**
+
+```bash
+sudo pacman -S speech-dispatcher
+```
+
+**macOS/Windows:** No additional dependencies required.
+
 ### Environment Variables
 
 | Variable | Description | Default |
@@ -218,8 +243,8 @@ These are generated in parallel using `gpt-5.2`:
 
 - A tree-shaped linked structure of documents
 - Modeled after Claude Code's **skill** structure:
-  - Entry point: `SKILL.md` (concise, <200 lines)
-  - Links to sub-areas with greater detail
+    - Entry point: `SKILL.md` (concise, <200 lines)
+    - Links to sub-areas with greater detail
 - Enables LLMs to selectively use relevant parts
 - Optimizes context window usage
 
@@ -231,8 +256,8 @@ Generated after deep_dive.md completes using `gemini-3-flash-preview`:
 
 - A compact summary for quick reference
 - Frontmatter includes:
-  - `summary`: Single-sentence description
-  - `repo`: Link to source repository (when available)
+    - `summary`: Single-sentence description
+    - `repo`: Link to source repository (when available)
 - Body contains a paragraph-length overview
 - Derived from the deep dive document
 

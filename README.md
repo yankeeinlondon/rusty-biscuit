@@ -90,6 +90,32 @@ This monorepo hosts the following packages:
    so-you-say "hello world" --gender male
    ```
 
+## System Dependencies
+
+Some packages require system libraries to be installed:
+
+### Text-to-Speech (research, so-you-say)
+
+The TTS functionality requires platform-specific dependencies:
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt-get update
+sudo apt-get install libspeechd-dev
+```
+
+**Linux (Fedora/RHEL):**
+```bash
+sudo dnf install speech-dispatcher-devel
+```
+
+**Linux (Arch):**
+```bash
+sudo pacman -S speech-dispatcher
+```
+
+**macOS/Windows:** No additional dependencies required.
+
 ## More Details
 
 For more functional/usage details on any of the packages in this monorepo refer to the `README.md` files in their respective directories.
