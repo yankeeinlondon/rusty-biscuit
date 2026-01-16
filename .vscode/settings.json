@@ -73,6 +73,7 @@
         "getifaddrs",
         "Gitea",
         "Gryphe",
+        "Gtty",
         "Guix",
         "Hanami",
         "Heighlighting",
@@ -88,8 +89,10 @@
         "isterminal",
         "Itfree",
         "jamba",
+        "Kokoro",
         "Kuaishou",
         "Kwaipilot",
+        "libspeech",
         "linuxmint",
         "llada",
         "llemma",
@@ -117,6 +120,7 @@
         "Msys",
         "Multimodal",
         "mxlinux",
+        "Mycroft",
         "mypopover",
         "mythomax",
         "Nala",
@@ -138,6 +142,7 @@
         "Paolino",
         "Parsera",
         "Paru",
+        "Pico",
         "Pipeliner",
         "pixtral",
         "Pkgin",
@@ -173,6 +178,7 @@
         "sorcererlm",
         "Spack",
         "Speciale",
+        "SSML",
         "steamos",
         "Stepfun",
         "STRIKETHROUGH",
@@ -217,5 +223,6 @@
         "Zhipu",
         "zigbuild",
         "zorin"
-    ]
+    ],
+    "editor.tabSize": 4
 }
