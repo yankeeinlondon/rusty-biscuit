@@ -167,22 +167,14 @@ Model selection and management utilities.
 - `types.rs` - Model-related type definitions
 - `selection.rs` - Interactive model selection (future)
 
-### TTS Module (`tts.rs`)
+### TTS Functionality
 
-Cross-platform text-to-speech using system TTS.
-
-**Example:**
-
-```rust
-use shared::tts::announce;
-
-announce("Research complete").await;
-```
+TTS functionality has been moved to the `biscuit-speaks` crate. See that package for text-to-speech capabilities.
 
 **Used by:**
 
 - `research` CLI for completion announcements
-- `speak` CLI for text-to-speech conversion
+- `so-you-say` CLI (formerly `speak`) for text-to-speech conversion
 
 ## Architecture
 

@@ -6,26 +6,26 @@ default:
     @echo
     @just --list | grep -v 'default'
 
-# build library and CLI
+# build library
 build *args="":
-    @echo "Building biscuit-hash..."
+    @echo "Building biscuit-speaks..."
     @echo
-    @cargo build -p biscuit-hash -- {{args}}
+    @cargo build -p biscuit-speaks {{args}}
     @echo
 
-# test library and CLI
+# test library
 test *args="":
-    @echo "Testing {{BOLD}}biscuit-hash{{RESET}} library"
+    @echo "Testing {{BOLD}}biscuit-speaks{{RESET}} library"
     @echo ""
-    @cargo test -p biscuit-hash --all-features  -- {{args}}
+    @cargo test -p biscuit-speaks --all-features {{args}}
 
 # lint with clippy
 lint *args="":
-    @cargo clippy -p biscuit-hash -- {{args}}
+    @cargo clippy -p biscuit-speaks -- {{args}}
 
 
 # build and show the docs for the library code
 docs:
-    @echo "Build and then show latest docs for the biscuit-hash library code"
+    @echo "Build and then show latest docs for the biscuit-speaks library code"
     @echo ""
-    @cargo doc -p biscuit-hash --open
+    @cargo doc -p biscuit-speaks --open

@@ -23,5 +23,27 @@
 
 ## Usage Examples
 
+```rust
+use biscuit_speaks::{speak_when_able, VoiceConfig, Gender};
 
+// Simple usage with defaults
+speak_when_able("Hello, world!", &VoiceConfig::default());
+
+// With custom voice selection
+speak_when_able(
+    "Custom voice",
+    &VoiceConfig::new()
+        .with_name("Samantha")
+        .of_gender(Gender::Female)
+        .with_volume(0.8),
+);
+```
+
+## Features
+
+- Cross-platform system TTS (macOS, Windows, Linux)
+- Voice selection by name or ID
+- Gender and language preferences
+- Volume control
+- Premium/Enhanced voice quality preference on macOS
 
