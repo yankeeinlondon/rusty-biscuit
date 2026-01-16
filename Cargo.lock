@@ -444,6 +444,11 @@ dependencies = [
 [[package]]
 name = "biscuit-speaks"
 version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.17",
+ "tracing",
+ "tts",
+]
 
 [[package]]
 name = "bit-set"
@@ -4087,13 +4092,13 @@ dependencies = [
 name = "research-cli"
 version = "0.1.0"
 dependencies = [
+ "biscuit-speaks",
  "clap 4.5.54",
  "dirs",
  "dotenvy",
  "glob",
  "open",
  "research-lib",
- "shared",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -4103,6 +4108,7 @@ dependencies = [
 name = "research-lib"
 version = "0.1.0"
 dependencies = [
+ "biscuit-speaks",
  "chrono",
  "dirs",
  "dotenvy",
@@ -4713,7 +4719,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
- "tts",
  "two-face",
  "unicode-width 0.2.2",
  "url",
@@ -4861,8 +4866,8 @@ dependencies = [
 name = "so-you-say"
 version = "0.1.0"
 dependencies = [
+ "biscuit-speaks",
  "clap 4.5.54",
- "shared",
 ]
 
 [[package]]

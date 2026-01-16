@@ -13,9 +13,6 @@ name = "update-provider-models"
 path = "src/bin/update-provider-models.rs"
 
 [dependencies]
-# Text-to-speech
-tts = "0.26.3"
-
 # Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

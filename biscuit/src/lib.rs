@@ -16,8 +16,9 @@
 //! - [`providers`] - LLM provider discovery and model listing (Phase 1 - in progress)
 //! - [`terminal`] - Terminal color detection utilities (Phase 1)
 //! - [`testing`] - Testing utilities for terminal output verification (Phase 2)
-//! - [`tts`] - Text-to-speech utilities for announcing task completion
 //! - [`tools`] - Agent tools for rig-core (Brave Search, Screen Scrape)
+//!
+//! **Note:** TTS functionality has moved to the `biscuit-speaks` crate.
 
 pub mod api;
 pub mod codegen;
@@ -35,4 +36,3 @@ pub mod symbols;
 
 pub mod testing;
 pub mod tools;
-pub mod tts;

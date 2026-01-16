@@ -1,6 +1,13 @@
 [package]
 name = "biscuit-speaks"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[lib]
+name = "biscuit_speaks"
 
 [dependencies]
+tts = "0.26.3"
+thiserror = "2.0"
+tracing = "0.1"
