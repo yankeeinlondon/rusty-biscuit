@@ -3,6 +3,7 @@
 pub struct TreeFile {
     pub file: String,
     content: Option<String>,
+    hash:
 
     /// a cache of symbols in the file which is populated
     /// lazily
