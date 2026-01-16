@@ -21,7 +21,7 @@
 //!
 //! ```no_run
 //! use std::path::Path;
-//! use schematic_define::apis::define_openai_api;
+//! use schematic_definitions::openai::define_openai_api;
 //! use schematic_gen::output::generate_and_write;
 //!
 //! let api = define_openai_api();

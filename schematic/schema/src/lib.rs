@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 use serde::{Deserialize, Serialize};
+pub use schematic_definitions::openai::{DeleteModelResponse, ListModelsResponse, Model};
 /// Errors that can occur when making API requests.
 ///
 /// This enum captures all error conditions that may arise during

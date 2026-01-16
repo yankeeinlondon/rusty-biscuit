@@ -1,6 +1,6 @@
 //! Schematic Definition Library
 //!
-//! This crate provides types for defining REST APIs in a declarative way.
+//! This crate provides types (primitives) for defining REST APIs in a declarative way.
 //! These definitions are consumed by the `schematic-gen` binary to generate
 //! strongly-typed Rust client code.
 //!
@@ -47,19 +47,13 @@
 //! assert_eq!(api.endpoints.len(), 1);
 //! ```
 //!
-//! ## Pre-built API Definitions
+//! ## API Definitions
 //!
-//! The [`apis`] module contains pre-built API definitions for common services:
-//!
-//! ```
-//! use schematic_define::apis::define_openai_api;
-//!
-//! let openai = define_openai_api();
-//! assert_eq!(openai.name, "OpenAI");
-//! ```
+//! Actual API definitions (like OpenAI) are in the separate `schematic-definitions` crate,
+//! which uses these primitives to define real-world APIs.
 
-pub mod apis;
 pub mod auth;
+pub mod prelude;
 pub mod response;
 pub mod schema;
 pub mod types;

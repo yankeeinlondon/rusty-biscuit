@@ -1,0 +1,13 @@
+[package]
+name = "schematic-definitions"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "REST API definitions using schematic primitives"
+
+[dependencies]
+schematic-define = { path = "../define" }
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1.0"

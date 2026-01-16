@@ -24,6 +24,7 @@ description = "Generated REST API client code from schematic definitions"
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 schematic-define = { version = "0.1.0", path = "../define" }
+schematic-definitions = { version = "0.1.0", path = "../definitions" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"

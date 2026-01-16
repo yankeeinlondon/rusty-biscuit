@@ -7,7 +7,7 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
-use schematic_define::apis::openai::define_openai_api;
+use schematic_definitions::openai::define_openai_api;
 use schematic_gen::cargo_gen::write_cargo_toml;
 use schematic_gen::output::generate_and_write;
 
@@ -101,6 +101,14 @@ fn generated_files_exist_and_have_expected_structure() {
         "Cargo.toml should exist"
     );
     assert!(src_dir.join("lib.rs").exists(), "src/lib.rs should exist");
+    assert!(
+        src_dir.join("prelude.rs").exists(),
+        "src/prelude.rs should exist"
+    );
+    assert!(
+        src_dir.join("openai.rs").exists(),
+        "src/openai.rs should exist"
+    );
 
     // Verify Cargo.toml content
     let cargo_content =
@@ -112,26 +120,40 @@ fn generated_files_exist_and_have_expected_structure() {
     assert!(cargo_content.contains("tokio"));
     assert!(cargo_content.contains("schematic-define")); // For AuthStrategy and UpdateStrategy
 
-    // Verify lib.rs content
+    // Verify lib.rs content (now just module declarations)
     let lib_content =
         std::fs::read_to_string(src_dir.join("lib.rs")).expect("Failed to read lib.rs");
+    assert!(lib_content.contains("//!"));
+    assert!(lib_content.contains("pub mod openai;"));
+    assert!(lib_content.contains("pub mod prelude;"));
+
+    // Verify openai.rs content (API module)
+    let api_content =
+        std::fs::read_to_string(src_dir.join("openai.rs")).expect("Failed to read openai.rs");
 
     // Should have module-level documentation
-    assert!(lib_content.contains("//!"));
-    assert!(lib_content.contains("OpenAI"));
+    assert!(api_content.contains("//!"));
+    assert!(api_content.contains("OpenAI"));
 
     // Should have all the generated components
-    assert!(lib_content.contains("pub enum SchematicError"));
-    assert!(lib_content.contains("pub struct OpenAI"));
-    assert!(lib_content.contains("pub enum OpenAIRequest"));
+    assert!(api_content.contains("pub enum SchematicError"));
+    assert!(api_content.contains("pub struct OpenAI"));
+    assert!(api_content.contains("pub enum OpenAIRequest"));
 
     // Should have request structs for all endpoints
-    assert!(lib_content.contains("pub struct ListModelsRequest"));
-    assert!(lib_content.contains("pub struct RetrieveModelRequest"));
-    assert!(lib_content.contains("pub struct DeleteModelRequest"));
+    assert!(api_content.contains("pub struct ListModelsRequest"));
+    assert!(api_content.contains("pub struct RetrieveModelRequest"));
+    assert!(api_content.contains("pub struct DeleteModelRequest"));
 
     // Should have the async request method
-    assert!(lib_content.contains("pub async fn request"));
+    assert!(api_content.contains("pub async fn request"));
+
+    // Verify prelude.rs content
+    let prelude_content =
+        std::fs::read_to_string(src_dir.join("prelude.rs")).expect("Failed to read prelude.rs");
+    assert!(prelude_content.contains("OpenAI"));
+    assert!(prelude_content.contains("OpenAIRequest"));
+    assert!(prelude_content.contains("SchematicError"));
 }
 
 /// Tests generating code for multiple different API configurations.

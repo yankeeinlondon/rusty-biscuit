@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use clap::Parser;
-use schematic_define::apis::openai::define_openai_api;
+use schematic_definitions::openai::define_openai_api;
 use schematic_gen::cargo_gen::write_cargo_toml;
 use schematic_gen::errors::GeneratorError;
 use schematic_gen::output::generate_and_write;

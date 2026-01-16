@@ -687,11 +687,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "schematic-definitions"
+version = "0.1.0"
+dependencies = [
+ "schematic-define",
+ "serde",
+]
+
+[[package]]
 name = "schematic-schema"
 version = "0.1.0"
 dependencies = [
  "reqwest",
  "schematic-define",
+ "schematic-definitions",
  "serde",
  "serde_json",
  "thiserror",

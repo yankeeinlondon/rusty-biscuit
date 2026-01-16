@@ -9,13 +9,13 @@ default:
     @just --list | grep -v 'default'
     @echo
 
-# build schematic packages (define, gen)
+# build schematic packages (define, definitions, gen)
 build *args="":
     @echo ""
     @echo "Build Schematic Packages"
     @echo "------------------------"
     @echo ""
-    @cargo build -p schematic-define -p schematic-gen {{args}}
+    @cargo build -p schematic-define -p schematic-definitions -p schematic-gen {{args}}
 
 # run tests for schematic packages
 test *args="":
@@ -23,7 +23,7 @@ test *args="":
     @echo "Testing Schematic Packages"
     @echo "--------------------------"
     @echo ""
-    @cargo test -p schematic-define -p schematic-gen {{args}}
+    @cargo test -p schematic-define -p schematic-definitions -p schematic-gen {{args}}
 
 # run clippy on schematic packages
 lint:
@@ -32,6 +32,7 @@ lint:
     @echo "--------------------------"
     @echo ""
     @cargo clippy -p schematic-define -- -D warnings
+    @cargo clippy -p schematic-definitions -- -D warnings
     @cargo clippy -p schematic-gen -- -D warnings
 
 # generate OpenAI API client code (dry-run preview)
