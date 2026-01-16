@@ -22,7 +22,7 @@ mod types;
 
 pub use types::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode, PreludeNode};
 
-use crate::hashing::{HashVariant, xx_hash, xx_hash_variant};
+use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
 use crate::markdown::Markdown;
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
 

@@ -1,0 +1,91 @@
+[
+  {
+    "recommendation": "Split Phase 2 into 2a (migrate with stub) and 2b (delete stub)",
+    "type": "parallel_execution",
+    "priority": "HIGH",
+    "time_saved_minutes": 10,
+    "risk_level": "LOW",
+    "race_conditions": "NONE",
+    "implementation": "Create re-export stub in biscuit/src/tts.rs: pub use biscuit_speaks::*;",
+    "enables": ["Immediate start of Phases 3-5 after 2a", "Consumers remain compatible during transition"]
+  },
+  {
+    "recommendation": "Run Phases 3, 4, 5 (consumer updates) in true parallel",
+    "type": "concurrent_execution",
+    "priority": "HIGH",
+    "time_saved_minutes": 4,
+    "risk_level": "VERY_LOW",
+    "race_conditions": "NONE",
+    "implementation": "cargo build -p so-you-say -p research-cli -p research-lib",
+    "justification": "Zero file conflicts - each package modifies different source files"
+  },
+  {
+    "recommendation": "Run Phase 6 (cleanup) and Phase 7 (docs) in parallel",
+    "type": "concurrent_execution",
+    "priority": "MEDIUM",
+    "time_saved_minutes": 2,
+    "risk_level": "VERY_LOW",
+    "race_conditions": "NONE",
+    "implementation": "Execute both phases without waiting for the other to complete",
+    "justification": "No shared files - Phase 6 modifies Rust source, Phase 7 modifies .md files"
+  },
+  {
+    "recommendation": "Run tests and clippy in parallel during Phase 8",
+    "type": "concurrent_execution",
+    "priority": "LOW",
+    "time_saved_minutes": 4,
+    "risk_level": "LOW",
+    "race_conditions": "NONE",
+    "implementation": "cargo test --workspace & cargo clippy --workspace & wait",
+    "justification": "Both read compiled artifacts without modifying source code or interfering"
+  },
+  {
+    "recommendation": "Verify no cyclic workspace dependencies introduced",
+    "type": "dependency_analysis",
+    "priority": "CRITICAL",
+    "time_saved_minutes": 0,
+    "risk_level": "MEDIUM_MITIGATED",
+    "race_conditions": "NONE",
+    "implementation": "Ensure biscuit-speaks has no reverse dependencies; keep as leaf node",
+    "current_graph": "so-you-say → biscuit, research-cli → biscuit, research-lib → biscuit",
+    "post_migration_graph": "so-you-say → biscuit-speaks, research-cli → biscuit-speaks, research-lib → biscuit-speaks",
+    "result": "NO CYCLES - safe to parallelize"
+  },
+  {
+    "recommendation": "Use re-export stub for gradual cutover",
+    "type": "migration_pattern",
+    "priority": "HIGH",
+    "time_saved_minutes": 10,
+    "risk_level": "LOW",
+    "race_conditions": "NONE",
+    "implementation": "Phase 2a creates stub; consumer updates work during transition; stub deleted in Phase 2b or 6",
+    "benefits": [
+      "No intermediate broken builds",
+      "Consumers can be updated in any order",
+      "Maintains API compatibility throughout"
+    ]
+  },
+  {
+    "recommendation": "Parallel Test & Validation During Phase 8",
+    "type": "testing_optimization",
+    "priority": "MEDIUM",
+    "time_saved_minutes": 4,
+    "risk_level": "LOW",
+    "race_conditions": "NONE",
+    "implementation": "Run cargo test and cargo clippy simultaneously after cargo build",
+    "command": "cargo test --workspace & cargo clippy --workspace -- -D warnings &",
+    "savings": "From 12-15 min sequential to 6-8 min parallel"
+  },
+  {
+    "recommendation": "Reorder phases for optimal critical path",
+    "type": "scheduling_optimization",
+    "priority": "HIGH",
+    "time_saved_minutes": 18,
+    "risk_level": "LOW",
+    "race_conditions": "NONE",
+    "implementation": "Phase 1 → 2a → (2b+3+4+5 parallel) → (6+7 parallel) → 8",
+    "original_sequence": "1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 (45 min)",
+    "optimized_sequence": "1 → 2a → [2b||3||4||5||6] → [7] → 8 (27 min)",
+    "improvement_percentage": 40
+  }
+]

@@ -265,7 +265,7 @@ fn compare_sections(
                 let upd_content = upd_node.prelude_content().unwrap_or("");
 
                 // Use semantic hashing to compare content ignoring whitespace differences
-                use crate::hashing::{HashVariant, xx_hash_variant};
+                use biscuit_hash::{HashVariant, xx_hash_variant};
                 let semantic_variants = vec![
                     HashVariant::LeadingWhitespace,
                     HashVariant::TrailingWhitespace,

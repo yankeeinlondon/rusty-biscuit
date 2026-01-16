@@ -79,7 +79,7 @@ impl MarkdownTocNode {
         source_span: (usize, usize),
         line_range: (usize, usize),
     ) -> Self {
-        use crate::hashing::{HashVariant, xx_hash, xx_hash_variant};
+        use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
 
         let title_hash = xx_hash(&title);
         let title_hash_trimmed = xx_hash_variant(&title, vec![HashVariant::BlockTrimming]);
@@ -133,7 +133,7 @@ impl MarkdownTocNode {
 
     /// Computes the subtree hash by combining prelude content with all children.
     pub fn compute_subtree_hash(&mut self) {
-        use crate::hashing::{HashVariant, xx_hash, xx_hash_variant};
+        use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
 
         // Build combined content for subtree: prelude + all child subtrees
         let mut combined = self
@@ -212,7 +212,7 @@ pub struct PreludeNode {
 impl PreludeNode {
     /// Creates a new prelude node from content and location info.
     pub fn new(content: String, source_span: (usize, usize), line_range: (usize, usize)) -> Self {
-        use crate::hashing::{HashVariant, xx_hash, xx_hash_variant};
+        use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
 
         let content_hash = xx_hash(&content);
         let content_hash_trimmed = xx_hash_variant(&content, vec![HashVariant::BlockTrimming]);
@@ -277,7 +277,7 @@ impl CodeBlockInfo {
         line_range: (usize, usize),
         parent_section_path: Vec<String>,
     ) -> Self {
-        use crate::hashing::{HashVariant, xx_hash, xx_hash_variant};
+        use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
 
         let content_hash = xx_hash(&content);
         let content_hash_trimmed = xx_hash_variant(&content, vec![HashVariant::BlockTrimming]);

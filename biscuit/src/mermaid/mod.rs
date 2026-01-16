@@ -158,9 +158,9 @@ impl Mermaid {
     /// let hash = diagram.hash();
     /// ```
     pub fn hash(&self) -> u64 {
-        crate::hashing::xx_hash_variant(
+        biscuit_hash::xx_hash_variant(
             &self.instructions,
-            vec![crate::hashing::HashVariant::BlankLine],
+            vec![biscuit_hash::HashVariant::BlankLine],
         )
     }
 
