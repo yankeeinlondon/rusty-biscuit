@@ -1,6 +1,7 @@
 use sniff_lib::SniffResult;
 use sniff_lib::filesystem::git::BehindStatus;
 use sniff_lib::hardware::NtpStatus;
+use sniff_lib::programs::ProgramsInfo;
 use std::path::Path;
 
 /// Filter mode for output - determines which subsection to display.
@@ -35,6 +36,20 @@ pub enum OutputFilter {
     Repo,
     /// Show only language detection (filesystem subsection, flattened in JSON)
     Language,
+    /// Show only programs info (installed programs detection)
+    Programs,
+    /// Show only editors (programs subsection)
+    Editors,
+    /// Show only utilities (programs subsection)
+    Utilities,
+    /// Show only language package managers (programs subsection)
+    LanguagePackageManagers,
+    /// Show only OS package managers (programs subsection)
+    OsPackageManagers,
+    /// Show only TTS clients (programs subsection)
+    TtsClients,
+    /// Show only terminal apps (programs subsection)
+    TerminalApps,
 }
 
 /// Format bytes into human-readable units (KB, MB, GB, TB)
@@ -248,6 +263,17 @@ pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter) {
             {
                 print_language_section(langs, verbose);
             }
+        }
+        // Programs filters are handled separately in main.rs
+        OutputFilter::Programs
+        | OutputFilter::Editors
+        | OutputFilter::Utilities
+        | OutputFilter::LanguagePackageManagers
+        | OutputFilter::OsPackageManagers
+        | OutputFilter::TtsClients
+        | OutputFilter::TerminalApps => {
+            // These are handled by print_programs_text, should not reach here
+            unreachable!("Programs filters should be handled separately")
         }
     }
 }
@@ -1131,12 +1157,267 @@ fn apply_filter_to_json(result: &SniffResult, filter: OutputFilter) -> serde_jso
                 json!({})
             }
         }
+        // Programs filters are handled by print_programs_json
+        OutputFilter::Programs
+        | OutputFilter::Editors
+        | OutputFilter::Utilities
+        | OutputFilter::LanguagePackageManagers
+        | OutputFilter::OsPackageManagers
+        | OutputFilter::TtsClients
+        | OutputFilter::TerminalApps => {
+            unreachable!("Programs filters should be handled by print_programs_json")
+        }
     }
 }
 
 pub fn print_json(result: &SniffResult, filter: OutputFilter) -> serde_json::Result<()> {
     let filtered_json = apply_filter_to_json(result, filter);
     println!("{}", serde_json::to_string_pretty(&filtered_json)?);
+    Ok(())
+}
+
+// ============================================================================
+// Programs output functions
+// ============================================================================
+
+/// Print programs information as text.
+pub fn print_programs_text(programs: &ProgramsInfo, verbose: u8, filter: OutputFilter) {
+    match filter {
+        OutputFilter::Programs => {
+            print_all_programs(programs, verbose);
+        }
+        OutputFilter::Editors => {
+            print_editors_section(&programs.editors, verbose);
+        }
+        OutputFilter::Utilities => {
+            print_utilities_section(&programs.utilities, verbose);
+        }
+        OutputFilter::LanguagePackageManagers => {
+            print_lang_pkg_mgrs_section(&programs.language_package_managers, verbose);
+        }
+        OutputFilter::OsPackageManagers => {
+            print_os_pkg_mgrs_section(&programs.os_package_managers, verbose);
+        }
+        OutputFilter::TtsClients => {
+            print_tts_clients_section(&programs.tts_clients, verbose);
+        }
+        OutputFilter::TerminalApps => {
+            print_terminal_apps_section(&programs.terminal_apps, verbose);
+        }
+        _ => {
+            // Should not reach here, but print all as fallback
+            print_all_programs(programs, verbose);
+        }
+    }
+}
+
+fn print_all_programs(programs: &ProgramsInfo, verbose: u8) {
+    print_editors_section(&programs.editors, verbose);
+    print_utilities_section(&programs.utilities, verbose);
+    print_lang_pkg_mgrs_section(&programs.language_package_managers, verbose);
+    print_os_pkg_mgrs_section(&programs.os_package_managers, verbose);
+    print_tts_clients_section(&programs.tts_clients, verbose);
+    print_terminal_apps_section(&programs.terminal_apps, verbose);
+}
+
+fn print_editors_section(editors: &sniff_lib::programs::InstalledEditors, verbose: u8) {
+    use sniff_lib::programs::ProgramMetadata;
+
+    println!("=== Editors ===");
+    let installed = editors.installed();
+    if installed.is_empty() {
+        println!("No editors detected");
+    } else {
+        println!("Installed ({}):", installed.len());
+        for editor in &installed {
+            let name = editor.display_name();
+            if verbose > 0 {
+                let desc = editor.description();
+                println!("  {} - {}", name, desc);
+                if verbose > 1 {
+                    println!("    Website: {}", editor.website());
+                    if let Some(path) = editors.path(*editor) {
+                        println!("    Path: {}", path.display());
+                    }
+                }
+            } else {
+                print!("  {}", name);
+                println!();
+            }
+        }
+    }
+    println!();
+}
+
+fn print_utilities_section(utilities: &sniff_lib::programs::InstalledUtilities, verbose: u8) {
+    use sniff_lib::programs::ProgramMetadata;
+
+    println!("=== Utilities ===");
+    let installed = utilities.installed();
+    if installed.is_empty() {
+        println!("No utilities detected");
+    } else {
+        println!("Installed ({}):", installed.len());
+        for util in &installed {
+            let name = util.display_name();
+            if verbose > 0 {
+                let desc = util.description();
+                println!("  {} - {}", name, desc);
+                if verbose > 1 {
+                    println!("    Website: {}", util.website());
+                    if let Some(path) = utilities.path(*util) {
+                        println!("    Path: {}", path.display());
+                    }
+                }
+            } else {
+                print!("  {}", name);
+                println!();
+            }
+        }
+    }
+    println!();
+}
+
+fn print_lang_pkg_mgrs_section(
+    pkg_mgrs: &sniff_lib::programs::InstalledLanguagePackageManagers,
+    verbose: u8,
+) {
+    use sniff_lib::programs::ProgramMetadata;
+
+    println!("=== Language Package Managers ===");
+    let installed = pkg_mgrs.installed();
+    if installed.is_empty() {
+        println!("No language package managers detected");
+    } else {
+        println!("Installed ({}):", installed.len());
+        for pm in &installed {
+            let name = pm.display_name();
+            if verbose > 0 {
+                let desc = pm.description();
+                println!("  {} - {}", name, desc);
+                if verbose > 1 {
+                    println!("    Website: {}", pm.website());
+                    if let Some(path) = pkg_mgrs.path(*pm) {
+                        println!("    Path: {}", path.display());
+                    }
+                }
+            } else {
+                print!("  {}", name);
+                println!();
+            }
+        }
+    }
+    println!();
+}
+
+fn print_os_pkg_mgrs_section(
+    pkg_mgrs: &sniff_lib::programs::InstalledOsPackageManagers,
+    verbose: u8,
+) {
+    use sniff_lib::programs::ProgramMetadata;
+
+    println!("=== OS Package Managers ===");
+    let installed = pkg_mgrs.installed();
+    if installed.is_empty() {
+        println!("No OS package managers detected");
+    } else {
+        println!("Installed ({}):", installed.len());
+        for pm in &installed {
+            let name = pm.display_name();
+            if verbose > 0 {
+                let desc = pm.description();
+                println!("  {} - {}", name, desc);
+                if verbose > 1 {
+                    println!("    Website: {}", pm.website());
+                    if let Some(path) = pkg_mgrs.path(*pm) {
+                        println!("    Path: {}", path.display());
+                    }
+                }
+            } else {
+                print!("  {}", name);
+                println!();
+            }
+        }
+    }
+    println!();
+}
+
+fn print_tts_clients_section(clients: &sniff_lib::programs::InstalledTtsClients, verbose: u8) {
+    use sniff_lib::programs::ProgramMetadata;
+
+    println!("=== TTS Clients ===");
+    let installed = clients.installed();
+    if installed.is_empty() {
+        println!("No TTS clients detected");
+    } else {
+        println!("Installed ({}):", installed.len());
+        for client in &installed {
+            let name = client.display_name();
+            if verbose > 0 {
+                let desc = client.description();
+                println!("  {} - {}", name, desc);
+                if verbose > 1 {
+                    println!("    Website: {}", client.website());
+                    if let Some(path) = clients.path(*client) {
+                        println!("    Path: {}", path.display());
+                    }
+                }
+            } else {
+                print!("  {}", name);
+                println!();
+            }
+        }
+    }
+    println!();
+}
+
+fn print_terminal_apps_section(apps: &sniff_lib::programs::InstalledTerminalApps, verbose: u8) {
+    use sniff_lib::programs::ProgramMetadata;
+
+    println!("=== Terminal Apps ===");
+    let installed = apps.installed();
+    if installed.is_empty() {
+        println!("No terminal apps detected");
+    } else {
+        println!("Installed ({}):", installed.len());
+        for app in &installed {
+            let name = app.display_name();
+            if verbose > 0 {
+                let desc = app.description();
+                println!("  {} - {}", name, desc);
+                if verbose > 1 {
+                    println!("    Website: {}", app.website());
+                    if let Some(path) = apps.path(*app) {
+                        println!("    Path: {}", path.display());
+                    }
+                }
+            } else {
+                print!("  {}", name);
+                println!();
+            }
+        }
+    }
+    println!();
+}
+
+/// Print programs information as JSON.
+pub fn print_programs_json(programs: &ProgramsInfo, filter: OutputFilter) -> serde_json::Result<()> {
+    use serde_json::json;
+
+    let json_value = match filter {
+        OutputFilter::Programs => serde_json::to_value(programs)?,
+        OutputFilter::Editors => serde_json::to_value(&programs.editors)?,
+        OutputFilter::Utilities => serde_json::to_value(&programs.utilities)?,
+        OutputFilter::LanguagePackageManagers => {
+            serde_json::to_value(&programs.language_package_managers)?
+        }
+        OutputFilter::OsPackageManagers => serde_json::to_value(&programs.os_package_managers)?,
+        OutputFilter::TtsClients => serde_json::to_value(&programs.tts_clients)?,
+        OutputFilter::TerminalApps => serde_json::to_value(&programs.terminal_apps)?,
+        _ => json!({}),
+    };
+
+    println!("{}", serde_json::to_string_pretty(&json_value)?);
     Ok(())
 }
 

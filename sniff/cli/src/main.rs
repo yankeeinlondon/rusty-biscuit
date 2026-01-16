@@ -1,5 +1,6 @@
 use clap::Parser;
 use sniff_lib::package::enrich_dependencies;
+use sniff_lib::programs::ProgramsInfo;
 use sniff_lib::{detect_with_config, SniffConfig, SniffResult};
 use std::path::PathBuf;
 
@@ -84,6 +85,35 @@ struct Cli {
     /// Show only storage information
     #[arg(long, help_heading = "Filter Flags")]
     storage: bool,
+
+    // === Programs filter flags ===
+    /// Show only installed programs detection
+    #[arg(long, help_heading = "Programs Flags")]
+    programs: bool,
+
+    /// Show only installed editors
+    #[arg(long, help_heading = "Programs Flags")]
+    editors: bool,
+
+    /// Show only installed utilities
+    #[arg(long, help_heading = "Programs Flags")]
+    utilities: bool,
+
+    /// Show only language package managers
+    #[arg(long, help_heading = "Programs Flags")]
+    language_package_managers: bool,
+
+    /// Show only OS package managers
+    #[arg(long, help_heading = "Programs Flags")]
+    os_package_managers: bool,
+
+    /// Show only TTS clients
+    #[arg(long, help_heading = "Programs Flags")]
+    tts_clients: bool,
+
+    /// Show only terminal apps
+    #[arg(long, help_heading = "Programs Flags")]
+    terminal_apps: bool,
 }
 
 impl Cli {
@@ -121,6 +151,29 @@ impl Cli {
         }
         if self.storage {
             flags.push("--storage");
+        }
+
+        // Programs filter flags
+        if self.programs {
+            flags.push("--programs");
+        }
+        if self.editors {
+            flags.push("--editors");
+        }
+        if self.utilities {
+            flags.push("--utilities");
+        }
+        if self.language_package_managers {
+            flags.push("--language-package-managers");
+        }
+        if self.os_package_managers {
+            flags.push("--os-package-managers");
+        }
+        if self.tts_clients {
+            flags.push("--tts-clients");
+        }
+        if self.terminal_apps {
+            flags.push("--terminal-apps");
         }
 
         flags
@@ -171,6 +224,29 @@ impl Cli {
             return OutputFilter::Language;
         }
 
+        // Programs filter flags
+        if self.programs {
+            return OutputFilter::Programs;
+        }
+        if self.editors {
+            return OutputFilter::Editors;
+        }
+        if self.utilities {
+            return OutputFilter::Utilities;
+        }
+        if self.language_package_managers {
+            return OutputFilter::LanguagePackageManagers;
+        }
+        if self.os_package_managers {
+            return OutputFilter::OsPackageManagers;
+        }
+        if self.tts_clients {
+            return OutputFilter::TtsClients;
+        }
+        if self.terminal_apps {
+            return OutputFilter::TerminalApps;
+        }
+
         // Top-level section flags
         // When used alone, return specific filter for flattening
         // When combined, return All for normal structure
@@ -193,6 +269,17 @@ impl Cli {
 
         // Multiple sections or no flags = return All
         OutputFilter::All
+    }
+
+    /// Check if any programs-related filter flag is active.
+    fn is_programs_mode(&self) -> bool {
+        self.programs
+            || self.editors
+            || self.utilities
+            || self.language_package_managers
+            || self.os_package_managers
+            || self.tts_clients
+            || self.terminal_apps
     }
 }
 
@@ -243,6 +330,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
+    // Determine output filter
+    let output_filter = cli.output_filter();
+
+    // Handle programs mode separately (doesn't use SniffResult)
+    if cli.is_programs_mode() {
+        let programs = ProgramsInfo::detect();
+        if cli.json {
+            output::print_programs_json(&programs, output_filter)?;
+        } else {
+            output::print_programs_text(&programs, cli.verbose, output_filter);
+        }
+        return Ok(());
+    }
+
     // Canonicalize path if provided
     let base_dir = cli
         .base
@@ -259,9 +360,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if deep_enabled {
         config = config.deep(true);
     }
-
-    // Determine output filter
-    let output_filter = cli.output_filter();
 
     // Apply skip logic based on filter mode
     match output_filter {
@@ -316,6 +414,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     config = config.skip_filesystem();
                 }
             }
+        }
+        // Programs filters are handled earlier in main, should not reach here
+        OutputFilter::Programs
+        | OutputFilter::Editors
+        | OutputFilter::Utilities
+        | OutputFilter::LanguagePackageManagers
+        | OutputFilter::OsPackageManagers
+        | OutputFilter::TtsClients
+        | OutputFilter::TerminalApps => {
+            unreachable!("Programs mode should be handled before this point")
         }
     }
 

@@ -31,8 +31,8 @@ mod stubs;
 pub use language::LanguagePackageManager;
 pub use manager::{BoxFuture, PackageManager, PackageManagerShape};
 pub use network::{
-    enrich_dependencies, enrich_dependency, BunNetwork, CargoNetwork, NpmNetwork, PnpmNetwork,
-    YarnNetwork,
+    BunNetwork, CargoNetwork, NpmNetwork, PnpmNetwork, YarnNetwork, enrich_dependencies,
+    enrich_dependency,
 };
 pub use os::OsPackageManager;
 pub use registry::{get_package_manager, is_registered, registered_managers};

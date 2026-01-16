@@ -18,9 +18,9 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use super::{BoxFuture, LanguagePackageManager, PackageManagerShape};
+use crate::Result;
 use crate::os::{command_exists_in_path, get_path_dirs};
 use crate::package::stubs::PackageInfo;
-use crate::Result;
 
 // ============================================================================
 // crates.io API Types
@@ -192,7 +192,7 @@ impl PackageManagerShape for CargoNetwork {
                             Err(_) => Ok(None),
                         }
                     }
-                    Ok(_) => Ok(None), // Non-success status (404, etc.)
+                    Ok(_) => Ok(None),  // Non-success status (404, etc.)
                     Err(_) => Ok(None), // Network error - graceful degradation
                 }
             })
@@ -652,7 +652,9 @@ mod tests {
     #[tokio::test]
     async fn test_cargo_network_nonexistent_package() {
         let cargo = CargoNetwork::new();
-        let result = cargo.find_package("this-crate-definitely-does-not-exist-xyz123").await;
+        let result = cargo
+            .find_package("this-crate-definitely-does-not-exist-xyz123")
+            .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
@@ -682,7 +684,9 @@ mod tests {
     #[tokio::test]
     async fn test_npm_network_nonexistent_package() {
         let npm = NpmNetwork::new();
-        let result = npm.find_package("this-package-definitely-does-not-exist-xyz123").await;
+        let result = npm
+            .find_package("this-package-definitely-does-not-exist-xyz123")
+            .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }

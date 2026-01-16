@@ -231,10 +231,7 @@ fn find_primary_interface(interfaces: &[NetworkInterface]) -> Option<String> {
     }
 
     // Priority 2: Physical (even if not running)
-    if let Some(iface) = candidates
-        .iter()
-        .find(|i| is_physical_interface(&i.name))
-    {
+    if let Some(iface) = candidates.iter().find(|i| is_physical_interface(&i.name)) {
         return Some(iface.name.clone());
     }
 
@@ -247,10 +244,7 @@ fn find_primary_interface(interfaces: &[NetworkInterface]) -> Option<String> {
     }
 
     // Priority 4: Any non-virtual
-    if let Some(iface) = candidates
-        .iter()
-        .find(|i| !is_virtual_interface(&i.name))
-    {
+    if let Some(iface) = candidates.iter().find(|i| !is_virtual_interface(&i.name)) {
         return Some(iface.name.clone());
     }
 
@@ -289,11 +283,8 @@ pub fn detect_network_filtered() -> Result<NetworkInfo> {
         .retain(|i| !i.flags.is_loopback && i.flags.is_up);
 
     // Collect retained interface names for filtering ip_addresses
-    let retained_names: std::collections::HashSet<&str> = info
-        .interfaces
-        .iter()
-        .map(|i| i.name.as_str())
-        .collect();
+    let retained_names: std::collections::HashSet<&str> =
+        info.interfaces.iter().map(|i| i.name.as_str()).collect();
 
     // Filter ip_addresses to only include addresses from retained interfaces
     info.ip_addresses
@@ -403,7 +394,11 @@ mod tests {
                 let mac = iface_with_mac.mac_address.as_ref().unwrap();
                 // MAC should be formatted as xx:xx:xx:xx:xx:xx
                 assert_eq!(mac.len(), 17, "MAC address should be 17 chars: {mac}");
-                assert_eq!(mac.matches(':').count(), 5, "MAC should have 5 colons: {mac}");
+                assert_eq!(
+                    mac.matches(':').count(),
+                    5,
+                    "MAC should have 5 colons: {mac}"
+                );
             }
         }
     }
@@ -417,11 +412,7 @@ mod tests {
         let info = detect_network().unwrap();
         if !info.permission_denied {
             // Sum of per-interface IPv4 addresses should equal aggregated v4 count
-            let per_iface_v4: usize = info
-                .interfaces
-                .iter()
-                .map(|i| i.ipv4_addresses.len())
-                .sum();
+            let per_iface_v4: usize = info.interfaces.iter().map(|i| i.ipv4_addresses.len()).sum();
             assert_eq!(
                 info.ip_addresses.v4.len(),
                 per_iface_v4,
@@ -429,11 +420,7 @@ mod tests {
             );
 
             // Sum of per-interface IPv6 addresses should equal aggregated v6 count
-            let per_iface_v6: usize = info
-                .interfaces
-                .iter()
-                .map(|i| i.ipv6_addresses.len())
-                .sum();
+            let per_iface_v6: usize = info.interfaces.iter().map(|i| i.ipv6_addresses.len()).sum();
             assert_eq!(
                 info.ip_addresses.v6.len(),
                 per_iface_v6,
@@ -700,8 +687,7 @@ mod tests {
 
         let primary = find_primary_interface(&interfaces);
         assert_eq!(
-            primary,
-            None,
+            primary, None,
             "Should return None when no interfaces have IPv4 addresses"
         );
     }
@@ -716,8 +702,7 @@ mod tests {
 
         let primary = find_primary_interface(&interfaces);
         assert_eq!(
-            primary,
-            None,
+            primary, None,
             "Should return None when only loopback interface exists"
         );
     }
@@ -812,15 +797,14 @@ mod tests {
                     || primary.starts_with("veth");
 
                 // Check if there's a physical interface available
-                let has_physical = info
-                    .interfaces
-                    .iter()
-                    .any(|i| !i.flags.is_loopback
+                let has_physical = info.interfaces.iter().any(|i| {
+                    !i.flags.is_loopback
                         && !i.ipv4_addresses.is_empty()
                         && i.flags.is_up
                         && (i.name.starts_with("en") && !i.name.starts_with("enx")
                             || i.name.starts_with("eth")
-                            || i.name.starts_with("wlan")));
+                            || i.name.starts_with("wlan"))
+                });
 
                 if has_physical {
                     assert!(

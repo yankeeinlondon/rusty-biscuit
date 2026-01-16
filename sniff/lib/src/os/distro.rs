@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-use super::detect_os_type;
 use super::OsType;
+use super::detect_os_type;
 
 // ============================================================================
 // Linux Distribution Detection
@@ -899,8 +899,7 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
 
         // Only write system-release file
         {
-            let mut file =
-                std::fs::File::create(&system_release_path).expect("should create file");
+            let mut file = std::fs::File::create(&system_release_path).expect("should create file");
             writeln!(file, "CentOS Linux release 7.9.2009 (Core)").expect("should write");
         }
 

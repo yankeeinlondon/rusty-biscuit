@@ -7,11 +7,13 @@ pub mod hardware;
 pub mod network;
 pub mod os;
 pub mod package;
+pub mod programs;
 
 pub use error::{Result, SniffError};
 pub use filesystem::FilesystemInfo;
 pub use hardware::HardwareInfo;
 pub use network::NetworkInfo;
+pub use programs::{ProgramsInfo, ProgramMetadata};
 
 // Re-export key OS types from the os module for convenience.
 // The canonical path is `sniff_lib::os::*`.

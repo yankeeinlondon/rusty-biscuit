@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 
-use super::distro::LinuxFamily;
 use super::OsType;
+use super::distro::LinuxFamily;
 
 // ============================================================================
 // Package Manager Detection Infrastructure

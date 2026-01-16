@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use super::{BoxFuture, LanguagePackageManager, OsPackageManager, PackageManagerShape};
-use crate::os::{command_exists_in_path, get_path_dirs};
 use crate::Result;
+use crate::os::{command_exists_in_path, get_path_dirs};
 
 // ============================================================================
 // PackageInfo Struct

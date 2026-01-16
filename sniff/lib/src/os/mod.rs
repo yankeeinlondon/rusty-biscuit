@@ -24,17 +24,17 @@ mod time;
 
 // Re-export all public types for API stability
 pub use distro::{
-    detect_linux_distro, infer_linux_family, parse_lsb_release_content, parse_os_release_content,
-    parse_system_release_content, LinuxDistro, LinuxFamily,
+    LinuxDistro, LinuxFamily, detect_linux_distro, infer_linux_family, parse_lsb_release_content,
+    parse_os_release_content, parse_system_release_content,
 };
-pub use locale::{detect_locale, extract_encoding, extract_language_code, LocaleInfo};
+pub use locale::{LocaleInfo, detect_locale, extract_encoding, extract_language_code};
 pub use package_manager::{
+    DetectedPackageManager, PackageManagerCommands, SystemPackageManager, SystemPackageManagers,
     command_exists_in_path, detect_bsd_package_managers, detect_linux_package_managers,
     detect_macos_package_managers, detect_windows_package_managers, get_commands_for_manager,
-    get_path_dirs, DetectedPackageManager, PackageManagerCommands, SystemPackageManager,
-    SystemPackageManagers,
+    get_path_dirs,
 };
-pub use time::{detect_ntp_status, detect_timezone, NtpStatus, TimeInfo};
+pub use time::{NtpStatus, TimeInfo, detect_ntp_status, detect_timezone};
 
 // ============================================================================
 // OS Type Detection

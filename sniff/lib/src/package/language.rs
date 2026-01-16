@@ -532,8 +532,14 @@ mod tests {
     fn test_language_package_manager_display() {
         assert_eq!(format!("{}", LanguagePackageManager::Npm), "npm");
         assert_eq!(format!("{}", LanguagePackageManager::Cargo), "cargo");
-        assert_eq!(format!("{}", LanguagePackageManager::YarnBerry), "yarn-berry");
-        assert_eq!(format!("{}", LanguagePackageManager::GoModules), "go-modules");
+        assert_eq!(
+            format!("{}", LanguagePackageManager::YarnBerry),
+            "yarn-berry"
+        );
+        assert_eq!(
+            format!("{}", LanguagePackageManager::GoModules),
+            "go-modules"
+        );
     }
 
     #[test]

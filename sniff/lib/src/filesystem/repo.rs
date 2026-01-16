@@ -218,7 +218,13 @@ fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
 }
 
 /// Parses Cargo.toml dependencies into DependencyEntry structs.
-fn parse_cargo_dependencies(toml_path: &Path) -> Option<(Vec<DependencyEntry>, Vec<DependencyEntry>, Vec<DependencyEntry>)> {
+fn parse_cargo_dependencies(
+    toml_path: &Path,
+) -> Option<(
+    Vec<DependencyEntry>,
+    Vec<DependencyEntry>,
+    Vec<DependencyEntry>,
+)> {
     let content = std::fs::read_to_string(toml_path).ok()?;
     let parsed: toml::Value = toml::from_str(&content).ok()?;
 
@@ -230,7 +236,11 @@ fn parse_cargo_dependencies(toml_path: &Path) -> Option<(Vec<DependencyEntry>, V
 }
 
 /// Parses a single dependencies section from Cargo.toml.
-fn parse_cargo_dep_section(parsed: &toml::Value, section: &str, kind: DependencyKind) -> Vec<DependencyEntry> {
+fn parse_cargo_dep_section(
+    parsed: &toml::Value,
+    section: &str,
+    kind: DependencyKind,
+) -> Vec<DependencyEntry> {
     let Some(deps) = parsed.get(section).and_then(|d| d.as_table()) else {
         return Vec::new();
     };
@@ -254,10 +264,7 @@ fn parse_cargo_dep_section(parsed: &toml::Value, section: &str, kind: Dependency
                                 .collect()
                         })
                         .unwrap_or_default();
-                    let optional = t
-                        .get("optional")
-                        .and_then(|o| o.as_bool())
-                        .unwrap_or(false);
+                    let optional = t.get("optional").and_then(|o| o.as_bool()).unwrap_or(false);
                     (version, features, optional)
                 }
                 _ => ("*".to_string(), Vec::new(), false),
@@ -587,36 +594,35 @@ fn create_package_location_with_deps(path: &Path, root: &Path) -> PackageLocatio
 
     // Try to parse Cargo.toml dependencies
     let cargo_toml = path.join("Cargo.toml");
-    let (dependencies, dev_dependencies, optional_dependencies) =
-        if cargo_toml.exists() {
-            if let Some((normal, dev, build)) = parse_cargo_dependencies(&cargo_toml) {
-                // Merge normal and build deps into dependencies
-                let mut all_deps = normal;
-                all_deps.extend(build);
+    let (dependencies, dev_dependencies, optional_dependencies) = if cargo_toml.exists() {
+        if let Some((normal, dev, build)) = parse_cargo_dependencies(&cargo_toml) {
+            // Merge normal and build deps into dependencies
+            let mut all_deps = normal;
+            all_deps.extend(build);
 
-                // Handle optional dependencies
-                let (optional, regular): (Vec<_>, Vec<_>) =
-                    all_deps.into_iter().partition(|d| d.optional);
+            // Handle optional dependencies
+            let (optional, regular): (Vec<_>, Vec<_>) =
+                all_deps.into_iter().partition(|d| d.optional);
 
-                let deps = if regular.is_empty() {
-                    None
-                } else {
-                    Some(regular)
-                };
-                let dev_deps = if dev.is_empty() { None } else { Some(dev) };
-                let opt_deps = if optional.is_empty() {
-                    None
-                } else {
-                    Some(optional)
-                };
-
-                (deps, dev_deps, opt_deps)
+            let deps = if regular.is_empty() {
+                None
             } else {
-                (None, None, None)
-            }
+                Some(regular)
+            };
+            let dev_deps = if dev.is_empty() { None } else { Some(dev) };
+            let opt_deps = if optional.is_empty() {
+                None
+            } else {
+                Some(optional)
+            };
+
+            (deps, dev_deps, opt_deps)
         } else {
             (None, None, None)
-        };
+        }
+    } else {
+        (None, None, None)
+    };
 
     PackageLocation {
         name,
