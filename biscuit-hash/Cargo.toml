@@ -1,0 +1,22 @@
+[package]
+name = "biscuit-hash"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["xx_hash"]
+xx_hash = ["dep:xxhash-rust"]
+blake3 = ["dep:blake3"]
+argon2id = ["dep:argon2", "dep:rand", "dep:thiserror"]
+
+[dependencies]
+# xxHash - fast non-cryptographic hashing (default)
+xxhash-rust = { version = "0.8.15", features = ["xxh64"], optional = true }
+
+# BLAKE3 - fast cryptographic hashing
+blake3 = { version = "1.8.3", optional = true }
+
+# Argon2id - password hashing
+argon2 = { version = "0.5.3", features = ["rand"], optional = true }
+rand = { version = "0.8", optional = true }
+thiserror = { version = "2", optional = true }

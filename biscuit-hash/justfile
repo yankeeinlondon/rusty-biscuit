@@ -1,0 +1,31 @@
+BOLD := '\033[1m'
+RESET := '\033[0m'
+
+default:
+    @echo "{{BOLD}}biscuit-hash{{RESET}} Library"
+    @echo
+    @just --list | grep -v 'default'
+
+# build library and CLI
+build *args="":
+    @echo "Building biscuit-hash..."
+    @echo
+    @cargo build -p biscuit-hash -- {{args}}
+    @echo
+
+# test library and CLI
+test *args="":
+    @echo "Testing {{BOLD}}biscuit-hash{{RESET}} library"
+    @echo ""
+    @cargo test -p biscuit-hash --all-features  -- {{args}}
+
+# lint with clippy
+lint *args="":
+    @cargo clippy -p biscuit-hash -- {{args}}
+
+
+# build and show the docs for the library code
+docs:
+    @echo "Build and then show latest docs for the biscuit-hash library code"
+    @echo ""
+    @cargo doc -p biscuit-hash --open

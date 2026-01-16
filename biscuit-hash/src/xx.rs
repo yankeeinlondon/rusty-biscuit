@@ -12,7 +12,7 @@
 //! ## Examples
 //!
 //! ```rust
-//! use shared::hashing::{xx_hash, xx_hash_variant, HashVariant};
+//! use biscuit_hash::{xx_hash, xx_hash_variant, HashVariant};
 //!
 //! let content = "Hello, World!";
 //! let hash = xx_hash(content);
@@ -31,9 +31,44 @@
 //! );
 //! ```
 
+use std::collections::HashMap;
 use xxhash_rust::xxh64::xxh64;
 
-use crate::hashing::HashVariant;
+/// The **HashVariant** enumeration lets you express characteristics about
+/// the content you're hashing which you want to remove from being a factor
+/// in the hash which is being created.
+///
+/// ## Examples
+///
+/// ```rust
+/// use std::collections::HashMap;
+/// use biscuit_hash::HashVariant;
+///
+/// let mut replacements = HashMap::new();
+/// replacements.insert("\u{2019}".to_string(), "'".to_string());
+///
+/// let hash_strategy = HashVariant::ReplacementMap(replacements);
+/// ```
+#[derive(Clone)]
+pub enum HashVariant {
+    /// Trims the whitespace at the beginning and end of the
+    /// content block being hashed.
+    BlockTrimming,
+    /// Removes all blank lines in the content block being hashed.
+    BlankLine,
+    /// Removes the leading whitespace on every line.
+    LeadingWhitespace,
+    /// Removes the trailing whitespace on every line.
+    TrailingWhitespace,
+    /// Removes all _extra_ interior whitespace; this means that
+    /// whitespace in the interior of a line's content is removed
+    /// after the first space.
+    InteriorWhitespace,
+    /// Allows the caller to specify a dictionary of FROM -> TO content.
+    ReplacementMap(HashMap<String, String>),
+    /// Drop characters from the document before creating the hash.
+    DropChars(Vec<char>),
+}
 
 /// Computes XXH64 hash of the input string.
 ///
@@ -42,7 +77,7 @@ use crate::hashing::HashVariant;
 /// ## Examples
 ///
 /// ```rust
-/// use shared::hashing::xx_hash;
+/// use biscuit_hash::xx_hash;
 ///
 /// let hash = xx_hash("Hello, World!");
 /// assert_eq!(hash, xx_hash("Hello, World!")); // Deterministic
@@ -60,7 +95,7 @@ pub fn xx_hash(data: &str) -> u64 {
 /// ## Examples
 ///
 /// ```rust
-/// use shared::hashing::xx_hash_bytes;
+/// use biscuit_hash::xx_hash_bytes;
 ///
 /// let hash = xx_hash_bytes(b"Hello, World!");
 /// assert_eq!(hash, xx_hash_bytes(b"Hello, World!"));
@@ -90,7 +125,7 @@ pub fn xx_hash_bytes(data: &[u8]) -> u64 {
 /// ## Examples
 ///
 /// ```rust
-/// use shared::hashing::{xx_hash, xx_hash_variant, HashVariant};
+/// use biscuit_hash::{xx_hash, xx_hash_variant, HashVariant};
 ///
 /// // Empty variants = same as xx_hash
 /// assert_eq!(xx_hash_variant("hello", vec![]), xx_hash("hello"));
