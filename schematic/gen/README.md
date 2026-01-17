@@ -57,7 +57,7 @@ schematic-gen --api openai -vvv    # Full debug output
 
 ```rust
 use std::path::Path;
-use schematic_define::apis::define_openai_api;
+use schematic_definitions::openai::define_openai_api;
 use schematic_gen::output::generate_and_write;
 
 fn main() -> Result<(), schematic_gen::errors::GeneratorError> {
@@ -156,6 +156,17 @@ The generator follows a multi-phase pipeline:
 │  - Create parent directories                                     │
 │  - Generate Cargo.toml for schema package                        │
 └─────────────────────────────────────────────────────────────────┘
+```
+
+## Generated Output Structure
+
+The generator produces per-API module files:
+
+```
+schema/src/
+├── lib.rs         # Module declarations
+├── prelude.rs     # Convenient re-exports
+└── openai.rs      # OpenAI API client code
 ```
 
 ## Generated Code Structure

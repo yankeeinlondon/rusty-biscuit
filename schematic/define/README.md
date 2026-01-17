@@ -325,17 +325,30 @@ Paths support template parameters using curly braces. These become fields in the
 // Generated code will require both `user_id` and `post_id` parameters
 ```
 
-## Pre-built API Definitions
+## Prelude
 
-The `apis` module contains ready-to-use definitions:
+For convenient imports, use the prelude:
 
 ```rust
-use schematic_define::apis::define_openai_api;
+use schematic_define::prelude::*;
+
+// Now you have access to all core types:
+// RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, Schema, etc.
+```
+
+## Pre-built API Definitions
+
+Pre-built API definitions (like OpenAI) are in the separate `schematic-definitions` crate:
+
+```rust
+use schematic_definitions::openai::define_openai_api;
 
 let openai = define_openai_api();
 assert_eq!(openai.name, "OpenAI");
 assert_eq!(openai.endpoints.len(), 3);
 ```
+
+See the [schematic-definitions README](../definitions/README.md) for available APIs.
 
 ## Schema with Module Paths
 
