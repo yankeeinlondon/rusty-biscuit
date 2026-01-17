@@ -4,6 +4,9 @@ use crate::types::VolumeLevel;
 ///
 /// This is the primary primitive which will be used
 /// for TTS functionality.
+///
+/// Note: This is work-in-progress and currently unused.
+/// The main TTS functionality is provided by `lib.rs`.
 pub struct Speak {
     /// the text which will be spoken
     pub text: String,
@@ -14,7 +17,6 @@ pub struct Speak {
     pub volume: VolumeLevel,
     /// the voice a user has requested to use
     requested_voice: Option<String>,
-    pub voice: Voice,
 }
 
 impl Speak {
@@ -23,8 +25,7 @@ impl Speak {
             text: text.into(),
             audio: None,
             volume: VolumeLevel::Normal,
-
-            voice: Voice,
+            requested_voice: None,
         }
     }
 }
