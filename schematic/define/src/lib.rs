@@ -6,6 +6,8 @@
 //!
 //! ## Core Types
 //!
+//! ### REST API Types
+//!
 //! - [`RestApi`] - A complete REST API definition with base URL, auth, and endpoints
 //! - [`Endpoint`] - A single API endpoint with method, path, and schemas
 //! - [`RestMethod`] - HTTP methods (GET, POST, PUT, etc.)
@@ -13,6 +15,16 @@
 //! - [`UpdateStrategy`] - Strategy for updating auth in API variants (NoChange, ChangeTo)
 //! - [`ApiResponse`] - Response type definitions (JSON, Text, Binary, Empty)
 //! - [`Schema`] - Type information for request/response bodies
+//!
+//! ### WebSocket API Types
+//!
+//! - [`WebSocketApi`] - Complete WebSocket API definition with base URL, auth, and endpoints
+//! - [`WebSocketEndpoint`] - Single WebSocket endpoint with path, parameters, and message schemas
+//! - [`ConnectionParam`] - Query/path parameter definition for WebSocket connections
+//! - [`ParamType`] - Parameter types (String, Integer, Boolean, Float)
+//! - [`ConnectionLifecycle`] - Open, close, and keepalive message schemas
+//! - [`MessageSchema`] - Single message type with direction and schema
+//! - [`MessageDirection`] - Message flow direction (Client, Server, Bidirectional)
 //!
 //! ## Examples
 //!
@@ -57,9 +69,14 @@ pub mod prelude;
 pub mod response;
 pub mod schema;
 pub mod types;
+pub mod websocket;
 
 // Re-export main types at crate root
 pub use auth::{AuthStrategy, UpdateStrategy};
 pub use response::ApiResponse;
 pub use schema::{Schema, SchemaObject};
 pub use types::{Endpoint, RestApi, RestMethod};
+pub use websocket::{
+    ConnectionLifecycle, ConnectionParam, MessageDirection, MessageSchema, ParamType,
+    WebSocketApi, WebSocketEndpoint,
+};

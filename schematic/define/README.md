@@ -1,14 +1,16 @@
 # schematic-define
 
-REST API definition types for the Schematic code generation system.
+REST and WebSocket API definition types for the Schematic code generation system.
 
 ## Overview
 
-`schematic-define` provides a declarative way to describe REST APIs. These definitions are consumed by `schematic-gen` to generate strongly-typed Rust client code with automatic authentication, request serialization, and response deserialization.
+`schematic-define` provides a declarative way to describe REST and WebSocket APIs. These definitions are consumed by `schematic-gen` to generate strongly-typed Rust client code with automatic authentication, request serialization, and response deserialization.
 
 The definition process is intentionally **data-driven**: you describe *what* the API looks like (endpoints, methods, schemas) rather than *how* to call it. The generator handles the implementation details.
 
 ## Core Types
+
+### REST API Types
 
 | Type | Purpose |
 |------|---------|
@@ -18,6 +20,18 @@ The definition process is intentionally **data-driven**: you describe *what* the
 | `AuthStrategy` | Authentication configuration (Bearer, API Key, Basic, None) |
 | `ApiResponse` | Response type (JSON, Text, Binary, Empty) |
 | `Schema` | Type name and optional module path for code generation |
+
+### WebSocket API Types
+
+| Type | Purpose |
+|------|---------|
+| `WebSocketApi` | Complete WebSocket API definition with base URL, auth, and endpoints |
+| `WebSocketEndpoint` | Single WebSocket endpoint with path, parameters, and message schemas |
+| `ConnectionParam` | Query/path parameter definition for WebSocket connections |
+| `ParamType` | Parameter types (String, Integer, Boolean, Float) |
+| `ConnectionLifecycle` | Open, close, and keepalive message schemas |
+| `MessageSchema` | Single message type with direction (Client, Server, Bidirectional) |
+| `MessageDirection` | Message flow direction enumeration |
 
 ## Definition Workflow
 
@@ -132,7 +146,98 @@ Err(SchematicError::MissingCredential {
 | `ApiResponse::Binary` | `Vec<u8>` | File downloads, images |
 | `ApiResponse::Empty` | `()` | DELETE, 204 responses |
 
-## Examples
+## WebSocket APIs
+
+WebSocket APIs use a parallel type system that shares authentication strategies with REST APIs but provides WebSocket-specific concepts like connection parameters, message direction, and lifecycle management.
+
+### WebSocket Example: ElevenLabs Text-to-Speech
+
+```rust
+use schematic_define::{
+    WebSocketApi, WebSocketEndpoint, ConnectionParam, ParamType,
+    ConnectionLifecycle, MessageSchema, MessageDirection,
+    AuthStrategy, Schema
+};
+
+let api = WebSocketApi {
+    name: "ElevenLabsTTS".to_string(),
+    description: "ElevenLabs Text-to-Speech WebSocket API".to_string(),
+    base_url: "wss://api.elevenlabs.io/v1".to_string(),
+    docs_url: Some("https://elevenlabs.io/docs/api-reference/websockets".to_string()),
+    auth: AuthStrategy::ApiKey { header: "xi-api-key".to_string() },
+    env_auth: vec!["ELEVEN_LABS_API_KEY".to_string()],
+    endpoints: vec![
+        WebSocketEndpoint {
+            id: "TextToSpeech".to_string(),
+            path: "/text-to-speech/{voice_id}/stream-input".to_string(),
+            description: "Stream text and receive audio chunks".to_string(),
+            connection_params: vec![
+                ConnectionParam {
+                    name: "model_id".to_string(),
+                    param_type: ParamType::String,
+                    required: false,
+                    description: Some("Model to use for synthesis".to_string()),
+                },
+                ConnectionParam {
+                    name: "output_format".to_string(),
+                    param_type: ParamType::String,
+                    required: false,
+                    description: Some("Audio output format".to_string()),
+                },
+            ],
+            lifecycle: ConnectionLifecycle {
+                open: Some(MessageSchema {
+                    name: "BOS".to_string(),
+                    direction: MessageDirection::Client,
+                    schema: Schema::new("BeginOfStreamMessage"),
+                    description: Some("Begin-of-stream message".to_string()),
+                }),
+                close: Some(MessageSchema {
+                    name: "EOS".to_string(),
+                    direction: MessageDirection::Client,
+                    schema: Schema::new("EndOfStreamMessage"),
+                    description: Some("End-of-stream signal".to_string()),
+                }),
+                keepalive: None,
+            },
+            messages: vec![
+                MessageSchema {
+                    name: "TextChunk".to_string(),
+                    direction: MessageDirection::Client,
+                    schema: Schema::new("TextChunkMessage"),
+                    description: Some("Text to synthesize".to_string()),
+                },
+                MessageSchema {
+                    name: "AudioChunk".to_string(),
+                    direction: MessageDirection::Server,
+                    schema: Schema::new("AudioChunkResponse"),
+                    description: Some("Audio data chunk".to_string()),
+                },
+            ],
+        },
+    ],
+};
+```
+
+### Message Direction
+
+WebSocket messages have a direction indicating their flow:
+
+| Direction | Description |
+|-----------|-------------|
+| `Client` | Sent from client to server |
+| `Server` | Sent from server to client |
+| `Bidirectional` | Can flow in either direction |
+
+### Connection Lifecycle
+
+WebSocket connections can define special lifecycle messages:
+
+- **open**: Message sent immediately after connection (e.g., initialization/config)
+- **close**: Message sent before graceful disconnection
+- **keepalive**: Heartbeat message to maintain connection
+
+## REST API Examples
 
 ### Example 1: Simple Public API (No Auth)
 
@@ -333,7 +438,9 @@ For convenient imports, use the prelude:
 use schematic_define::prelude::*;
 
 // Now you have access to all core types:
-// RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, Schema, etc.
+// REST: RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, Schema
+// WebSocket: WebSocketApi, WebSocketEndpoint, ConnectionParam, ParamType,
+//            ConnectionLifecycle, MessageSchema, MessageDirection
 ```
 
 ## Pre-built API Definitions

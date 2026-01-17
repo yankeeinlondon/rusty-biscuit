@@ -4,7 +4,7 @@
 //! request and response bodies. These schemas are used during code
 //! generation to create strongly-typed Rust structs.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
 use std::fmt::Debug;
 
@@ -82,7 +82,7 @@ impl<T> SchemaObject for T where
 /// let schema = Schema::with_path("Model", "crate::types");
 /// assert_eq!(schema.full_path(), "crate::types::Model");
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Schema {
     /// The Rust type name (e.g., "ListModelsResponse").
     pub type_name: String,
