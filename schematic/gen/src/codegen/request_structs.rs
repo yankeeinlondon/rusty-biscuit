@@ -66,8 +66,8 @@ pub fn generate_request_struct(endpoint: &Endpoint) -> TokenStream {
     // Generate into_parts method
     let into_parts = generate_into_parts(endpoint, &path_params, &method_str);
 
-    // Generate doc comment
-    let doc_comment = format!("Request for {} endpoint.", endpoint.id);
+    // Generate doc comment (leading space for proper /// formatting)
+    let doc_comment = format!(" Request for {} endpoint.", endpoint.id);
 
     // Combine all fields
     let all_fields = if has_body {
@@ -98,7 +98,8 @@ pub fn generate_request_struct(endpoint: &Endpoint) -> TokenStream {
 fn generate_param_fields(path_params: &[&str]) -> TokenStream {
     let fields = path_params.iter().map(|param| {
         let field_name = format_ident!("{}", param);
-        let doc = format!("Path parameter: {}", param);
+        // Leading space for proper /// formatting
+        let doc = format!(" Path parameter: {}", param);
         quote! {
             #[doc = #doc]
             pub #field_name: String,

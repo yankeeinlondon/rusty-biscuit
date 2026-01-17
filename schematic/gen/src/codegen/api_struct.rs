@@ -55,7 +55,8 @@ use schematic_define::{AuthStrategy, RestApi};
 pub fn generate_api_struct(api: &RestApi) -> TokenStream {
     let struct_name = format_ident!("{}", api.name);
     let base_url = &api.base_url;
-    let description = format!("{} client.", api.description);
+    // Leading space for proper /// formatting
+    let description = format!(" {} client.", api.description);
     let env_auth = &api.env_auth;
 
     // Generate auth strategy initialization

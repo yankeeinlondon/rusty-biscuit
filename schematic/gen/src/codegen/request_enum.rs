@@ -45,8 +45,8 @@ use schematic_define::RestApi;
 /// ```
 pub fn generate_request_enum(api: &RestApi) -> TokenStream {
     let enum_name = format_ident!("{}Request", api.name);
-    let enum_doc = format!("Request enum for {} API.", api.name);
-    let enum_doc_detail = "Each variant wraps a strongly-typed request struct.";
+    let enum_doc = format!(" Request enum for {} API.", api.name);
+    let enum_doc_detail = " Each variant wraps a strongly-typed request struct.";
 
     // Generate enum variants
     let variants = generate_enum_variants(api);
@@ -90,7 +90,8 @@ fn generate_enum_variants(api: &RestApi) -> TokenStream {
     let variants = api.endpoints.iter().map(|endpoint| {
         let variant_name = format_ident!("{}", endpoint.id);
         let struct_name = format_ident!("{}Request", endpoint.id);
-        let doc = &endpoint.description;
+        // Add leading space for proper /// formatting
+        let doc = format!(" {}", endpoint.description);
 
         quote! {
             #[doc = #doc]
