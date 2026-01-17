@@ -14,7 +14,6 @@
 //! ```ignore
 //! use schematic_schema::prelude::*;
 //! ```
-#![allow(unused_imports)]
 pub mod shared;
 pub mod prelude;
 pub mod elevenlabs;

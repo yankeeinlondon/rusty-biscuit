@@ -54,8 +54,6 @@ pub fn assemble_shared_module() -> TokenStream {
         //!
         #![doc = #generated_notice]
 
-        #![allow(unused_imports)]
-
         #error_type
     }
 }
@@ -110,8 +108,6 @@ pub fn assemble_api_module(api: &RestApi) -> TokenStream {
         #![doc = #module_doc]
         //!
         #![doc = #generated_notice]
-
-        #![allow(unused_imports)]
 
         use serde::{Deserialize, Serialize};
 
@@ -178,8 +174,6 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
         //! ```ignore
         //! use schematic_schema::prelude::*;
         //! ```
-
-        #![allow(unused_imports)]
 
         // Shared types and utilities
         pub mod shared;
@@ -585,14 +579,15 @@ mod tests {
     }
 
     #[test]
-    fn assemble_api_code_includes_lint_attributes() {
+    fn assemble_api_code_has_no_unnecessary_lint_allows() {
         let api = make_simple_api();
         let tokens = assemble_api_code(&api);
         let code = tokens.to_string();
 
-        // Only unused_imports is allowed - dead_code is not needed for public items
-        assert!(code.contains("unused_imports"));
+        // Generated code should not need blanket lint suppressions
+        // All public items are used, all imports are used
         assert!(!code.contains("dead_code"));
+        assert!(!code.contains("unused_imports"));
     }
 
     // === validate_code tests ===
