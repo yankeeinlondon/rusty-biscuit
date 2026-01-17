@@ -124,8 +124,16 @@ fn generated_files_exist_and_have_expected_structure() {
     let lib_content =
         std::fs::read_to_string(src_dir.join("lib.rs")).expect("Failed to read lib.rs");
     assert!(lib_content.contains("//!"));
+    assert!(lib_content.contains("pub mod shared;"));
     assert!(lib_content.contains("pub mod openai;"));
     assert!(lib_content.contains("pub mod prelude;"));
+
+    // Verify shared.rs content (common error type)
+    let shared_content =
+        std::fs::read_to_string(src_dir.join("shared.rs")).expect("Failed to read shared.rs");
+    assert!(shared_content.contains("//!"));
+    assert!(shared_content.contains("pub enum SchematicError"));
+    assert!(shared_content.contains("thiserror::Error"));
 
     // Verify openai.rs content (API module)
     let api_content =
@@ -136,7 +144,7 @@ fn generated_files_exist_and_have_expected_structure() {
     assert!(api_content.contains("OpenAI"));
 
     // Should have all the generated components
-    assert!(api_content.contains("pub enum SchematicError"));
+    assert!(api_content.contains("use crate::shared::SchematicError"));
     assert!(api_content.contains("pub struct OpenAI"));
     assert!(api_content.contains("pub enum OpenAIRequest"));
 
@@ -281,7 +289,17 @@ fn generate_code_for_various_api_configurations() {
             api.name
         );
 
-        let content = std::fs::read_to_string(&lib_path).expect("Failed to read lib.rs");
+        // Check the API module file (e.g., simpleapi.rs, allmethods.rs)
+        let api_module_path = src_dir.join(format!("{}.rs", api.name.to_lowercase()));
+        assert!(
+            api_module_path.exists(),
+            "{}.rs should exist for API '{}'",
+            api.name.to_lowercase(),
+            api.name
+        );
+
+        let content =
+            std::fs::read_to_string(&api_module_path).expect("Failed to read API module file");
         assert!(
             content.contains(&format!("pub struct {}", api.name)),
             "Should contain API struct for '{}'",
