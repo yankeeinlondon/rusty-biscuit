@@ -22,7 +22,6 @@
   </tr>
 </table>
 
-
 ## Architecture
 
 ```sh
@@ -78,12 +77,12 @@ async fn main() -> Result<(), SchematicError> {
 
 ## Packages
 
-| Package | Description | Details |
-|---------|-------------|---------|
-| [schematic-define](./define/) | REST API definition primitives | [README](./define/README.md) |
-| [schematic-definitions](./definitions/) | Pre-built API definitions | [README](./definitions/README.md) |
-| [schematic-gen](./gen/) | Code generator CLI/library | [README](./gen/README.md) |
-| [schematic-schema](./schema/) | Generated API clients | [README](./schema/README.md) |
+| Package                                 | Description                    | Details                           |
+|-----------------------------------------|--------------------------------|-----------------------------------|
+| [schematic-define](./define/)           | REST API definition primitives | [README](./define/README.md)      |
+| [schematic-definitions](./definitions/) | Pre-built API definitions      | [README](./definitions/README.md) |
+| [schematic-gen](./gen/)                 | Code generator CLI/library     | [README](./gen/README.md)         |
+| [schematic-schema](./schema/)           | Generated API clients          | [README](./schema/README.md)      |
 
 ## Key Features
 

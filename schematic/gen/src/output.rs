@@ -54,7 +54,6 @@ pub fn assemble_shared_module() -> TokenStream {
         //!
         #![doc = #generated_notice]
 
-        #![allow(dead_code)]
         #![allow(unused_imports)]
 
         #error_type
@@ -112,7 +111,6 @@ pub fn assemble_api_module(api: &RestApi) -> TokenStream {
         //!
         #![doc = #generated_notice]
 
-        #![allow(dead_code)]
         #![allow(unused_imports)]
 
         use serde::{Deserialize, Serialize};
@@ -181,7 +179,6 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
         //! use schematic_schema::prelude::*;
         //! ```
 
-        #![allow(dead_code)]
         #![allow(unused_imports)]
 
         // Shared types and utilities
@@ -475,7 +472,7 @@ pub fn generate_and_write_all(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestMethod, Schema};
+    use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestMethod};
     use std::fs;
     use tempfile::TempDir;
 
@@ -535,7 +532,7 @@ mod tests {
                     method: RestMethod::Post,
                     path: "/completions".to_string(),
                     description: "Creates a completion".to_string(),
-                    request: Some(Schema::new("CreateCompletionRequest")),
+                    request: Some(ApiRequest::json_type("CreateCompletionRequest")),
                     response: ApiResponse::json_type("Completion"),
                     headers: vec![],
                 },
@@ -593,8 +590,9 @@ mod tests {
         let tokens = assemble_api_code(&api);
         let code = tokens.to_string();
 
-        assert!(code.contains("dead_code"));
+        // Only unused_imports is allowed - dead_code is not needed for public items
         assert!(code.contains("unused_imports"));
+        assert!(!code.contains("dead_code"));
     }
 
     // === validate_code tests ===

@@ -136,7 +136,7 @@ fn generate_from_impls(api: &RestApi, enum_name: &proc_macro2::Ident) -> TokenSt
 mod tests {
     use super::*;
     use crate::codegen::request_structs::{format_generated_code, validate_generated_code};
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestMethod, Schema};
+    use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestMethod};
 
     fn make_api(name: &str, endpoints: Vec<Endpoint>) -> RestApi {
         RestApi {
@@ -156,7 +156,7 @@ mod tests {
         id: &str,
         method: RestMethod,
         path: &str,
-        request: Option<Schema>,
+        request: Option<ApiRequest>,
     ) -> Endpoint {
         Endpoint {
             id: id.to_string(),
@@ -258,7 +258,7 @@ mod tests {
                     "CreateCompletion",
                     RestMethod::Post,
                     "/completions",
-                    Some(Schema::new("CreateCompletionBody")),
+                    Some(ApiRequest::json_type("CreateCompletionBody")),
                 ),
                 make_endpoint("ListCompletions", RestMethod::Get, "/completions", None),
             ],

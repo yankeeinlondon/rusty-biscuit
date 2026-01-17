@@ -6,7 +6,7 @@
 //! - The `into_parts()` method correctly substitutes parameters into the path
 
 use proc_macro2::TokenStream;
-use schematic_define::{ApiResponse, Endpoint, RestMethod, Schema};
+use schematic_define::{ApiRequest, ApiResponse, Endpoint, RestMethod};
 use schematic_gen::codegen::generate_request_struct;
 
 /// Formats generated tokens into readable code for assertions.
@@ -204,7 +204,7 @@ fn path_param_with_body_has_both_fields() {
         method: RestMethod::Patch,
         path: "/threads/{thread_id}".to_string(),
         description: "Update a thread".to_string(),
-        request: Some(Schema::new("UpdateThreadBody")),
+        request: Some(ApiRequest::json_type("UpdateThreadBody")),
         response: ApiResponse::json_type("Thread"),
         headers: vec![],
     };
@@ -249,7 +249,7 @@ fn multiple_path_params_with_body() {
         method: RestMethod::Post,
         path: "/threads/{thread_id}/messages/{message_id}/comments".to_string(),
         description: "Create a comment".to_string(),
-        request: Some(Schema::new("CreateCommentBody")),
+        request: Some(ApiRequest::json_type("CreateCommentBody")),
         response: ApiResponse::json_type("Comment"),
         headers: vec![],
     };

@@ -166,9 +166,10 @@ pub enum Currency {
 }
 
 /// Resource types for workspace management.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceType {
+    #[default]
     Voice,
     VoiceCollection,
     PronunciationDictionary,
@@ -208,10 +209,11 @@ pub enum HistorySource {
 }
 
 /// Webhook authentication type.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WebhookAuthType {
     /// HMAC authentication
+    #[default]
     Hmac,
     /// OAuth2 authentication
     Oauth2,
@@ -230,9 +232,10 @@ pub enum SortDirection {
 }
 
 /// Access level for resource sharing.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AccessLevel {
+    #[default]
     Admin,
     Editor,
     Commenter,
@@ -411,8 +414,8 @@ impl Default for GenerationConfig {
 // =============================================================================
 
 /// Request body for text-to-speech endpoints.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CreateSpeechRequest {
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CreateSpeechBody {
     /// Text to convert to speech.
     pub text: String,
 
@@ -653,8 +656,8 @@ pub struct ListSharedVoicesResponse {
 }
 
 /// Request to add a shared voice.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AddSharedVoiceRequest {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AddSharedVoiceBody {
     /// New name for the voice.
     pub new_name: String,
 }
@@ -674,8 +677,8 @@ pub struct AddSampleResponse {
 }
 
 /// Request to create a PVC voice.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CreatePvcVoiceRequest {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreatePvcVoiceBody {
     /// Voice name.
     pub name: String,
 
@@ -692,8 +695,8 @@ pub struct CreatePvcVoiceRequest {
 }
 
 /// Request to train a PVC voice.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TrainPvcVoiceRequest {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrainPvcVoiceBody {
     /// Model to use for training.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
@@ -882,8 +885,8 @@ pub struct GetHistoryResponse {
 }
 
 /// Request to download history items.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DownloadHistoryRequest {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DownloadHistoryBody {
     /// History item IDs to download.
     pub history_item_ids: Vec<String>,
 
@@ -893,8 +896,8 @@ pub struct DownloadHistoryRequest {
 }
 
 /// Request to create a sound effect.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CreateSoundEffectRequest {
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CreateSoundEffectBody {
     /// Text prompt for the sound effect.
     pub text: String,
 
@@ -1068,8 +1071,8 @@ pub struct ResourceResponse {
 }
 
 /// Request to share a resource.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ShareResourceRequest {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShareResourceBody {
     /// Access level to grant.
     pub role: AccessLevel,
 
@@ -1090,8 +1093,8 @@ pub struct ShareResourceRequest {
 }
 
 /// Request to unshare a resource.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UnshareResourceRequest {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnshareResourceBody {
     /// Resource type.
     pub resource_type: ResourceType,
 
@@ -1109,8 +1112,8 @@ pub struct UnshareResourceRequest {
 }
 
 /// Request to copy resource to workspace.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CopyResourceRequest {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopyResourceBody {
     /// Resource type.
     pub resource_type: ResourceType,
 
@@ -1200,9 +1203,15 @@ pub enum PermissionSpec {
     List(Vec<ApiPermission>),
 }
 
+impl Default for PermissionSpec {
+    fn default() -> Self {
+        Self::All("all".to_string())
+    }
+}
+
 /// Request to create an API key.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CreateApiKeyRequest {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateApiKeyBody {
     /// Key name.
     pub name: String,
 
@@ -1226,8 +1235,8 @@ pub struct CreateApiKeyResponse {
 }
 
 /// Request to update an API key.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UpdateApiKeyRequest {
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct UpdateApiKeyBody {
     /// Enable/disable the key.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_enabled: Option<bool>,
@@ -1304,12 +1313,13 @@ pub struct ListWebhooksResponse {
 }
 
 /// Webhook settings for creation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebhookSettings {
     /// Authentication type.
     pub auth_type: WebhookAuthType,
 
     /// Webhook name.
+    #[serde(default)]
     pub name: String,
 
     /// Webhook URL.
@@ -1317,8 +1327,8 @@ pub struct WebhookSettings {
 }
 
 /// Request to create a webhook.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CreateWebhookRequest {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateWebhookBody {
     /// Webhook settings.
     pub settings: WebhookSettings,
 }
@@ -1335,8 +1345,8 @@ pub struct CreateWebhookResponse {
 }
 
 /// Request to update a webhook.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UpdateWebhookRequest {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateWebhookBody {
     /// Disable/enable the webhook.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_disabled: Option<bool>,

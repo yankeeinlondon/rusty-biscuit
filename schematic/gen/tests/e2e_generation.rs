@@ -167,7 +167,7 @@ fn generated_files_exist_and_have_expected_structure() {
 /// Tests generating code for multiple different API configurations.
 #[test]
 fn generate_code_for_various_api_configurations() {
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod, Schema};
+    use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
 
     let test_cases = [
         // Simple API with no auth
@@ -215,7 +215,7 @@ fn generate_code_for_various_api_configurations() {
                     method: RestMethod::Post,
                     path: "/resource".to_string(),
                     description: "POST".to_string(),
-                    request: Some(Schema::new("CreateRequest")),
+                    request: Some(ApiRequest::json_type("CreateRequest")),
                     response: ApiResponse::json_type("Response"),
                     headers: vec![],
                 },
@@ -224,7 +224,7 @@ fn generate_code_for_various_api_configurations() {
                     method: RestMethod::Put,
                     path: "/resource/{id}".to_string(),
                     description: "PUT".to_string(),
-                    request: Some(Schema::new("UpdateRequest")),
+                    request: Some(ApiRequest::json_type("UpdateRequest")),
                     response: ApiResponse::json_type("Response"),
                     headers: vec![],
                 },
@@ -233,7 +233,7 @@ fn generate_code_for_various_api_configurations() {
                     method: RestMethod::Patch,
                     path: "/resource/{id}".to_string(),
                     description: "PATCH".to_string(),
-                    request: Some(Schema::new("PatchRequest")),
+                    request: Some(ApiRequest::json_type("PatchRequest")),
                     response: ApiResponse::json_type("Response"),
                     headers: vec![],
                 },

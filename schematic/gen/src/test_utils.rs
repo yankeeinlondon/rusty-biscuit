@@ -4,7 +4,7 @@
 //! across the codebase, reducing duplication and ensuring consistency.
 
 use proc_macro2::TokenStream;
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod, Schema};
+use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
 
 /// Creates a minimal RestApi for testing.
 ///
@@ -60,7 +60,7 @@ pub fn make_endpoint(
     id: &str,
     method: RestMethod,
     path: &str,
-    request: Option<Schema>,
+    request: Option<ApiRequest>,
 ) -> Endpoint {
     Endpoint {
         id: id.to_string(),
@@ -136,7 +136,7 @@ pub fn make_complex_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/completions".to_string(),
                 description: "Creates a completion".to_string(),
-                request: Some(Schema::new("CreateCompletionRequest")),
+                request: Some(ApiRequest::json_type("CreateCompletionRequest")),
                 response: ApiResponse::json_type("Completion"),
                 headers: vec![],
             },

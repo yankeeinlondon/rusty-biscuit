@@ -45,9 +45,12 @@ use crate::parser::extract_path_params;
 /// }
 /// ```
 pub fn generate_request_struct(endpoint: &Endpoint) -> TokenStream {
+    use schematic_define::ApiRequest;
+
     let struct_name = format_ident!("{}Request", endpoint.id);
     let path_params = extract_path_params(&endpoint.path);
-    let has_body = endpoint.request.is_some();
+    // Only JSON requests have a typed body field
+    let has_body = matches!(&endpoint.request, Some(ApiRequest::Json(_)));
     let method_str = endpoint.method.to_string();
 
     // Generate struct fields
@@ -107,14 +110,22 @@ fn generate_param_fields(path_params: &[&str]) -> TokenStream {
 
 /// Generates the body field if the endpoint has a request schema.
 fn generate_body_field(endpoint: &Endpoint) -> TokenStream {
+    use schematic_define::ApiRequest;
+
     match &endpoint.request {
-        Some(schema) => {
+        Some(ApiRequest::Json(schema)) => {
             let type_name = format_ident!("{}", schema.type_name);
             quote! {
                 /// Request body
                 pub body: #type_name,
             }
         }
+        // FormData, UrlEncoded, Text, Binary don't have a typed body field
+        // The generated code will handle these differently
+        Some(ApiRequest::FormData { .. })
+        | Some(ApiRequest::UrlEncoded { .. })
+        | Some(ApiRequest::Text { .. })
+        | Some(ApiRequest::Binary { .. }) => quote! {},
         None => quote! {},
     }
 }
@@ -160,10 +171,13 @@ fn generate_default_impl(
 
 /// Generates the into_parts method.
 fn generate_into_parts(endpoint: &Endpoint, path_params: &[&str], method_str: &str) -> TokenStream {
-    let path_format = generate_path_format(&endpoint.path, path_params);
-    let has_body = endpoint.request.is_some();
+    use schematic_define::ApiRequest;
 
-    let body_expr = if has_body {
+    let path_format = generate_path_format(&endpoint.path, path_params);
+    // Only JSON requests have a typed body field
+    let has_json_body = matches!(&endpoint.request, Some(ApiRequest::Json(_)));
+
+    let body_expr = if has_json_body {
         quote! {
             Some(serde_json::to_string(&self.body).map_err(|e| {
                 SchematicError::SerializationError(e.to_string())
@@ -260,13 +274,13 @@ pub fn format_generated_code(tokens: &TokenStream) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schematic_define::{ApiResponse, RestMethod, Schema};
+    use schematic_define::{ApiRequest, ApiResponse, RestMethod};
 
     fn make_endpoint(
         id: &str,
         method: RestMethod,
         path: &str,
-        request: Option<Schema>,
+        request: Option<ApiRequest>,
     ) -> Endpoint {
         Endpoint {
             id: id.to_string(),
@@ -334,7 +348,7 @@ mod tests {
             "CreateCompletion",
             RestMethod::Post,
             "/completions",
-            Some(Schema::new("CreateCompletionRequest")),
+            Some(ApiRequest::json_type("CreateCompletionRequest")),
         );
         let tokens = generate_request_struct(&endpoint);
 
@@ -356,7 +370,7 @@ mod tests {
             "CreateMessage",
             RestMethod::Post,
             "/threads/{thread_id}/messages",
-            Some(Schema::new("CreateMessageRequest")),
+            Some(ApiRequest::json_type("CreateMessageRequest")),
         );
         let tokens = generate_request_struct(&endpoint);
 
@@ -388,7 +402,7 @@ mod tests {
             "UpdateThread",
             RestMethod::Patch,
             "/threads/{thread_id}",
-            Some(Schema::new("UpdateThreadRequest")),
+            Some(ApiRequest::json_type("UpdateThreadRequest")),
         );
         let tokens = generate_request_struct(&endpoint);
 
@@ -414,7 +428,7 @@ mod tests {
             "ComplexEndpoint",
             RestMethod::Post,
             "/orgs/{org}/repos/{repo}/issues",
-            Some(Schema::new("CreateIssueRequest")),
+            Some(ApiRequest::json_type("CreateIssueRequest")),
         );
         let tokens = generate_request_struct(&endpoint);
 

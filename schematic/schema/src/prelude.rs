@@ -15,5 +15,8 @@
 //! }
 //! ```
 pub use crate::shared::SchematicError;
+pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};
 pub use crate::openai::{OpenAI, OpenAIRequest};
+pub use schematic_definitions::elevenlabs::*;
 pub use schematic_definitions::openai::*;
+
