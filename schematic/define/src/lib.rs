@@ -14,6 +14,9 @@
 //! - [`AuthStrategy`] - Authentication strategies (Bearer, API Key, Basic, None)
 //! - [`UpdateStrategy`] - Strategy for updating auth in API variants (NoChange, ChangeTo)
 //! - [`ApiResponse`] - Response type definitions (JSON, Text, Binary, Empty)
+//! - [`ApiRequest`] - Request body type definitions (JSON, FormData, UrlEncoded, Text, Binary)
+//! - [`FormField`] - Form field definitions for multipart and URL-encoded requests
+//! - [`FormFieldKind`] - Form field type classification (Text, File, Files, Json)
 //! - [`Schema`] - Type information for request/response bodies
 //!
 //! ### WebSocket API Types
@@ -66,6 +69,7 @@
 
 pub mod auth;
 pub mod prelude;
+pub mod request;
 pub mod response;
 pub mod schema;
 pub mod types;
@@ -73,6 +77,7 @@ pub mod websocket;
 
 // Re-export main types at crate root
 pub use auth::{AuthStrategy, UpdateStrategy};
+pub use request::{ApiRequest, FormField, FormFieldKind};
 pub use response::ApiResponse;
 pub use schema::{Schema, SchemaObject};
 pub use types::{Endpoint, RestApi, RestMethod};

@@ -39,6 +39,7 @@
 //! ```
 
 pub use crate::auth::{AuthStrategy, UpdateStrategy};
+pub use crate::request::{ApiRequest, FormField, FormFieldKind};
 pub use crate::response::ApiResponse;
 pub use crate::schema::{Schema, SchemaObject};
 pub use crate::types::{Endpoint, RestApi, RestMethod};

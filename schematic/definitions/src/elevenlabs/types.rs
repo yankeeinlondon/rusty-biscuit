@@ -666,6 +666,13 @@ pub struct AddSharedVoiceResponse {
     pub voice_id: String,
 }
 
+/// Response from adding a voice sample.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AddSampleResponse {
+    /// The sample ID.
+    pub sample_id: String,
+}
+
 /// Request to create a PVC voice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CreatePvcVoiceRequest {

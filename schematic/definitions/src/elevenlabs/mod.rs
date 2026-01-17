@@ -32,7 +32,9 @@ mod types;
 
 pub use types::*;
 
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod, Schema};
+use schematic_define::{
+    ApiRequest, ApiResponse, AuthStrategy, Endpoint, FormField, RestApi, RestMethod, Schema,
+};
 
 /// Creates the ElevenLabs REST API definition.
 ///
@@ -86,7 +88,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/text-to-speech/{voice_id}".to_string(),
                 description: "Converts text into speech and returns audio".to_string(),
-                request: Some(Schema::new("CreateSpeechRequest")),
+                request: Some(ApiRequest::json_type("CreateSpeechRequest")),
                 response: ApiResponse::Binary,
                 headers: vec![],
             },
@@ -95,7 +97,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/text-to-speech/{voice_id}/stream".to_string(),
                 description: "Streams audio as it's generated".to_string(),
-                request: Some(Schema::new("CreateSpeechRequest")),
+                request: Some(ApiRequest::json_type("CreateSpeechRequest")),
                 response: ApiResponse::Binary,
                 headers: vec![],
             },
@@ -104,7 +106,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/text-to-speech/{voice_id}/with-timestamps".to_string(),
                 description: "Returns audio with character-level timing information".to_string(),
-                request: Some(Schema::new("CreateSpeechRequest")),
+                request: Some(ApiRequest::json_type("CreateSpeechRequest")),
                 response: ApiResponse::json_type("SpeechWithTimestampsResponse"),
                 headers: vec![],
             },
@@ -113,7 +115,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/text-to-speech/{voice_id}/stream/with-timestamps".to_string(),
                 description: "Streams audio chunks with timing information".to_string(),
-                request: Some(Schema::new("CreateSpeechRequest")),
+                request: Some(ApiRequest::json_type("CreateSpeechRequest")),
                 response: ApiResponse::json_type("SpeechWithTimestampsResponse"),
                 headers: vec![],
             },
@@ -175,7 +177,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/voices/{voice_id}/settings/edit".to_string(),
                 description: "Updates voice settings".to_string(),
-                request: Some(Schema::new("VoiceSettings")),
+                request: Some(ApiRequest::json_type("VoiceSettings")),
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
             },
@@ -201,6 +203,21 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
             },
+            Endpoint {
+                id: "AddVoiceSample".to_string(),
+                method: RestMethod::Post,
+                path: "/v1/voices/{voice_id}/samples".to_string(),
+                description: "Upload audio sample for voice cloning".to_string(),
+                request: Some(ApiRequest::form_data(vec![
+                    FormField::file_accept("audio", vec!["audio/*".into()])
+                        .with_description("Audio file (mp3, wav, ogg, m4a)"),
+                    FormField::text("name")
+                        .optional()
+                        .with_description("Name for the sample"),
+                ])),
+                response: ApiResponse::json_type("AddSampleResponse"),
+                headers: vec![],
+            },
 
             // =================================================================
             // Voice Library Endpoints
@@ -219,7 +236,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/voices/add/{public_user_id}/{voice_id}".to_string(),
                 description: "Adds a shared voice to your library".to_string(),
-                request: Some(Schema::new("AddSharedVoiceRequest")),
+                request: Some(ApiRequest::json_type("AddSharedVoiceRequest")),
                 response: ApiResponse::json_type("AddSharedVoiceResponse"),
                 headers: vec![],
             },
@@ -232,7 +249,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/voices/pvc".to_string(),
                 description: "Creates a professional voice clone".to_string(),
-                request: Some(Schema::new("CreatePvcVoiceRequest")),
+                request: Some(ApiRequest::json_type("CreatePvcVoiceRequest")),
                 response: ApiResponse::json_type("AddSharedVoiceResponse"),
                 headers: vec![],
             },
@@ -241,7 +258,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/voices/pvc/{voice_id}".to_string(),
                 description: "Updates a PVC voice".to_string(),
-                request: Some(Schema::new("CreatePvcVoiceRequest")),
+                request: Some(ApiRequest::json_type("CreatePvcVoiceRequest")),
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
             },
@@ -250,7 +267,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/voices/pvc/{voice_id}/train".to_string(),
                 description: "Starts training a PVC voice".to_string(),
-                request: Some(Schema::new("TrainPvcVoiceRequest")),
+                request: Some(ApiRequest::json_type("TrainPvcVoiceRequest")),
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
             },
@@ -263,7 +280,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/sound-generation".to_string(),
                 description: "Generates a sound effect from text".to_string(),
-                request: Some(Schema::new("CreateSoundEffectRequest")),
+                request: Some(ApiRequest::json_type("CreateSoundEffectRequest")),
                 response: ApiResponse::Binary,
                 headers: vec![],
             },
@@ -277,7 +294,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 path: "/v1/models".to_string(),
                 description: "Lists all available models".to_string(),
                 request: None,
-                response: ApiResponse::Json(Schema::new("Vec<ModelInfo>")),
+                response: ApiResponse::json_type("Vec<ModelInfo>"),
                 headers: vec![],
             },
 
@@ -338,7 +355,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/history/download".to_string(),
                 description: "Downloads multiple history items as ZIP".to_string(),
-                request: Some(Schema::new("DownloadHistoryRequest")),
+                request: Some(ApiRequest::json_type("DownloadHistoryRequest")),
                 response: ApiResponse::Binary,
                 headers: vec![],
             },
@@ -395,7 +412,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/workspace/resources/{resource_id}/share".to_string(),
                 description: "Shares a resource".to_string(),
-                request: Some(Schema::new("ShareResourceRequest")),
+                request: Some(ApiRequest::json_type("ShareResourceRequest")),
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
             },
@@ -404,7 +421,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/workspace/resources/{resource_id}/unshare".to_string(),
                 description: "Removes sharing for a resource".to_string(),
-                request: Some(Schema::new("UnshareResourceRequest")),
+                request: Some(ApiRequest::json_type("UnshareResourceRequest")),
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
             },
@@ -413,7 +430,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/workspace/resources/{resource_id}/copy-to-workspace".to_string(),
                 description: "Copies a resource to another workspace".to_string(),
-                request: Some(Schema::new("CopyResourceRequest")),
+                request: Some(ApiRequest::json_type("CopyResourceRequest")),
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
             },
@@ -444,7 +461,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/service-accounts/{service_account_user_id}/api-keys".to_string(),
                 description: "Creates an API key for a service account".to_string(),
-                request: Some(Schema::new("CreateApiKeyRequest")),
+                request: Some(ApiRequest::json_type("CreateApiKeyRequest")),
                 response: ApiResponse::json_type("CreateApiKeyResponse"),
                 headers: vec![],
             },
@@ -453,7 +470,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Patch,
                 path: "/v1/service-accounts/{service_account_user_id}/api-keys/{api_key_id}".to_string(),
                 description: "Updates an API key".to_string(),
-                request: Some(Schema::new("UpdateApiKeyRequest")),
+                request: Some(ApiRequest::json_type("UpdateApiKeyRequest")),
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
             },
@@ -484,7 +501,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Post,
                 path: "/v1/workspace/webhooks".to_string(),
                 description: "Creates a webhook".to_string(),
-                request: Some(Schema::new("CreateWebhookRequest")),
+                request: Some(ApiRequest::json_type("CreateWebhookRequest")),
                 response: ApiResponse::json_type("CreateWebhookResponse"),
                 headers: vec![],
             },
@@ -493,7 +510,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 method: RestMethod::Patch,
                 path: "/v1/workspace/webhooks/{webhook_id}".to_string(),
                 description: "Updates a webhook".to_string(),
-                request: Some(Schema::new("UpdateWebhookRequest")),
+                request: Some(ApiRequest::json_type("UpdateWebhookRequest")),
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
             },
@@ -839,6 +856,38 @@ mod tests {
                 "Endpoint {} should have Binary response",
                 id
             );
+        }
+    }
+
+    #[test]
+    fn add_voice_sample_uses_form_data() {
+        use schematic_define::{ApiRequest, FormFieldKind};
+
+        let api = define_elevenlabs_rest_api();
+
+        let add_sample = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "AddVoiceSample")
+            .expect("AddVoiceSample endpoint missing");
+
+        assert_eq!(add_sample.method, RestMethod::Post);
+        assert!(add_sample.path.contains("/samples"));
+
+        // Verify it's a form-data request with file upload
+        if let Some(ApiRequest::FormData { fields }) = &add_sample.request {
+            assert_eq!(fields.len(), 2);
+
+            // First field should be the audio file
+            assert_eq!(fields[0].name, "audio");
+            assert!(fields[0].required);
+            assert!(matches!(fields[0].kind, FormFieldKind::File { .. }));
+
+            // Second field should be optional name
+            assert_eq!(fields[1].name, "name");
+            assert!(!fields[1].required);
+        } else {
+            panic!("AddVoiceSample should have FormData request");
         }
     }
 

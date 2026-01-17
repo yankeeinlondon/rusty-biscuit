@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
 use crate::auth::AuthStrategy;
+use crate::request::ApiRequest;
 use crate::response::ApiResponse;
-use crate::schema::Schema;
 
 /// HTTP methods supported by REST APIs.
 ///
@@ -178,22 +178,41 @@ pub struct RestApi {
 /// assert!(endpoint.path.contains("{user_id}"));
 /// ```
 ///
-/// A POST endpoint with a request body:
+/// A POST endpoint with a JSON request body:
 ///
 /// ```
-/// use schematic_define::{Endpoint, RestMethod, ApiResponse, Schema};
+/// use schematic_define::{Endpoint, RestMethod, ApiResponse, ApiRequest};
 ///
 /// let endpoint = Endpoint {
 ///     id: "CreateUser".to_string(),
 ///     method: RestMethod::Post,
 ///     path: "/users".to_string(),
 ///     description: "Create a new user".to_string(),
-///     request: Some(Schema::new("CreateUserRequest")),
+///     request: Some(ApiRequest::json_type("CreateUserRequest")),
 ///     response: ApiResponse::json_type("User"),
 ///     headers: vec![],
 /// };
 ///
 /// assert!(endpoint.request.is_some());
+/// ```
+///
+/// A POST endpoint with multipart form-data:
+///
+/// ```
+/// use schematic_define::{Endpoint, RestMethod, ApiResponse, ApiRequest, FormField};
+///
+/// let endpoint = Endpoint {
+///     id: "UploadFile".to_string(),
+///     method: RestMethod::Post,
+///     path: "/files".to_string(),
+///     description: "Upload a file".to_string(),
+///     request: Some(ApiRequest::form_data(vec![
+///         FormField::file_accept("document", vec!["application/pdf".into()]),
+///         FormField::text("title").optional(),
+///     ])),
+///     response: ApiResponse::json_type("FileUploadResponse"),
+///     headers: vec![],
+/// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
@@ -209,8 +228,11 @@ pub struct Endpoint {
     pub path: String,
     /// Human-readable description of what this endpoint does.
     pub description: String,
-    /// Request body schema (typically `None` for GET/DELETE requests).
-    pub request: Option<Schema>,
+    /// Request body definition (typically `None` for GET/DELETE requests).
+    ///
+    /// Use [`ApiRequest::json_type`] for JSON bodies, [`ApiRequest::form_data`]
+    /// for multipart uploads, or other variants as needed.
+    pub request: Option<ApiRequest>,
     /// Expected response type for this endpoint.
     pub response: ApiResponse,
     /// HTTP headers specific to this endpoint.

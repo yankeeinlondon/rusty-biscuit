@@ -18,7 +18,10 @@ The definition process is intentionally **data-driven**: you describe *what* the
 | `Endpoint` | Single endpoint with method, path, request/response schemas |
 | `RestMethod` | HTTP methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS) |
 | `AuthStrategy` | Authentication configuration (Bearer, API Key, Basic, None) |
+| `ApiRequest` | Request body type (JSON, FormData, UrlEncoded, Text, Binary) |
 | `ApiResponse` | Response type (JSON, Text, Binary, Empty) |
+| `FormField` | Form field definition for multipart/URL-encoded requests |
+| `FormFieldKind` | Form field type (Text, File, Files, Json) |
 | `Schema` | Type name and optional module path for code generation |
 
 ### WebSocket API Types
@@ -135,6 +138,76 @@ If required credentials are not found in the environment, the generated code ret
 Err(SchematicError::MissingCredential {
     env_vars: vec!["OPENAI_API_KEY".to_string(), "OPENAI_KEY".to_string()],
 })
+```
+
+## Request Types
+
+Endpoints can accept different request body formats via `ApiRequest`:
+
+| Variant | Content-Type | Use Case |
+|---------|-------------|----------|
+| `ApiRequest::Json(schema)` | `application/json` | Most API requests |
+| `ApiRequest::FormData { fields }` | `multipart/form-data` | File uploads, mixed data |
+| `ApiRequest::UrlEncoded { fields }` | `application/x-www-form-urlencoded` | Simple form data |
+| `ApiRequest::Text { content_type }` | Custom text MIME | Raw text bodies |
+| `ApiRequest::Binary { content_type }` | Custom binary MIME | Raw binary bodies |
+
+### Form Fields
+
+`FormField` describes individual fields in multipart or URL-encoded forms:
+
+```rust
+use schematic_define::{ApiRequest, FormField, FormFieldKind, Schema};
+
+// File upload with optional metadata
+let request = ApiRequest::form_data(vec![
+    FormField::file_accept("audio", vec!["audio/*".into()])
+        .with_description("Audio file (mp3, wav, ogg)"),
+    FormField::text("name")
+        .optional()
+        .with_description("Optional name for the file"),
+    FormField::json("metadata", Schema::new("FileMetadata"))
+        .optional(),
+]);
+```
+
+### FormFieldKind Variants
+
+| Kind | Description |
+|------|-------------|
+| `Text` | Plain text field |
+| `File { accept }` | Single file with optional MIME restrictions |
+| `Files { accept, min, max }` | Multiple files with optional count constraints |
+| `Json(Schema)` | Embedded JSON data |
+
+### Builder Methods
+
+`FormField` provides convenient builders:
+
+```rust
+use schematic_define::FormField;
+
+// Required text field
+let name = FormField::text("name");
+
+// Optional text field with description
+let bio = FormField::text("bio")
+    .optional()
+    .with_description("User biography");
+
+// File upload accepting any type
+let doc = FormField::file("document");
+
+// File upload with MIME restrictions
+let image = FormField::file_accept("avatar", vec!["image/*".into()]);
+
+// Multiple files with constraints
+let samples = FormField::files_with_constraints(
+    "audio_samples",
+    vec!["audio/*".into()],
+    Some(1),   // min
+    Some(10),  // max
+);
 ```
 
 ## Response Types
@@ -282,7 +355,7 @@ A user management API with CRUD operations:
 
 ```rust
 use schematic_define::{
-    RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, Schema
+    RestApi, Endpoint, RestMethod, AuthStrategy, ApiRequest, ApiResponse
 };
 
 let api = RestApi {
@@ -294,6 +367,7 @@ let api = RestApi {
     env_auth: vec!["MYSERVICE_API_KEY".to_string()],
     env_username: None,
     env_password: None,
+    headers: vec![],
     endpoints: vec![
         // List all users
         Endpoint {
@@ -303,6 +377,7 @@ let api = RestApi {
             description: "List all users".to_string(),
             request: None,
             response: ApiResponse::json_type("ListUsersResponse"),
+            headers: vec![],
         },
         // Get a specific user by ID (path parameter)
         Endpoint {
@@ -312,15 +387,17 @@ let api = RestApi {
             description: "Retrieve a user by ID".to_string(),
             request: None,
             response: ApiResponse::json_type("User"),
+            headers: vec![],
         },
-        // Create a new user (with request body)
+        // Create a new user (with JSON request body)
         Endpoint {
             id: "CreateUser".to_string(),
             method: RestMethod::Post,
             path: "/users".to_string(),
             description: "Create a new user".to_string(),
-            request: Some(Schema::new("CreateUserRequest")),
+            request: Some(ApiRequest::json_type("CreateUserRequest")),
             response: ApiResponse::json_type("User"),
+            headers: vec![],
         },
         // Update a user
         Endpoint {
@@ -328,8 +405,9 @@ let api = RestApi {
             method: RestMethod::Put,
             path: "/users/{user_id}".to_string(),
             description: "Update an existing user".to_string(),
-            request: Some(Schema::new("UpdateUserRequest")),
+            request: Some(ApiRequest::json_type("UpdateUserRequest")),
             response: ApiResponse::json_type("User"),
+            headers: vec![],
         },
         // Delete a user
         Endpoint {
@@ -339,18 +417,19 @@ let api = RestApi {
             description: "Delete a user".to_string(),
             request: None,
             response: ApiResponse::Empty,
+            headers: vec![],
         },
     ],
 };
 ```
 
-### Example 3: File Storage API with Multiple Auth & Response Types
+### Example 3: File Storage API with File Uploads
 
-A more complex API demonstrating various response types and API key authentication:
+A file storage API demonstrating multipart form-data uploads:
 
 ```rust
 use schematic_define::{
-    RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, Schema
+    RestApi, Endpoint, RestMethod, AuthStrategy, ApiRequest, ApiResponse, FormField
 };
 
 let api = RestApi {
@@ -362,6 +441,7 @@ let api = RestApi {
     env_auth: vec!["STORAGE_API_KEY".to_string()],
     env_username: None,
     env_password: None,
+    headers: vec![],
     endpoints: vec![
         // List files - returns JSON
         Endpoint {
@@ -371,15 +451,21 @@ let api = RestApi {
             description: "List all files in storage".to_string(),
             request: None,
             response: ApiResponse::json_type("FileList"),
+            headers: vec![],
         },
-        // Upload file - accepts binary, returns JSON metadata
+        // Upload file - multipart form-data
         Endpoint {
             id: "UploadFile".to_string(),
             method: RestMethod::Post,
             path: "/files".to_string(),
             description: "Upload a new file".to_string(),
-            request: Some(Schema::new("UploadRequest")),
+            request: Some(ApiRequest::form_data(vec![
+                FormField::file("file").with_description("The file to upload"),
+                FormField::text("folder").optional().with_description("Target folder"),
+                FormField::text("description").optional(),
+            ])),
             response: ApiResponse::json_type("FileMetadata"),
+            headers: vec![],
         },
         // Download file - returns binary data
         Endpoint {
@@ -389,6 +475,7 @@ let api = RestApi {
             description: "Download file contents".to_string(),
             request: None,
             response: ApiResponse::Binary,
+            headers: vec![],
         },
         // Get file metadata - returns JSON
         Endpoint {
@@ -398,6 +485,7 @@ let api = RestApi {
             description: "Get file metadata".to_string(),
             request: None,
             response: ApiResponse::json_type("FileMetadata"),
+            headers: vec![],
         },
         // Delete file - returns empty
         Endpoint {
@@ -407,15 +495,7 @@ let api = RestApi {
             description: "Delete a file".to_string(),
             request: None,
             response: ApiResponse::Empty,
-        },
-        // Get raw text content (e.g., for text files)
-        Endpoint {
-            id: "GetTextContent".to_string(),
-            method: RestMethod::Get,
-            path: "/files/{file_id}/text".to_string(),
-            description: "Get file as plain text".to_string(),
-            request: None,
-            response: ApiResponse::Text,
+            headers: vec![],
         },
     ],
 };
@@ -438,7 +518,8 @@ For convenient imports, use the prelude:
 use schematic_define::prelude::*;
 
 // Now you have access to all core types:
-// REST: RestApi, Endpoint, RestMethod, AuthStrategy, ApiResponse, Schema
+// REST: RestApi, Endpoint, RestMethod, AuthStrategy, ApiRequest, ApiResponse,
+//       FormField, FormFieldKind, Schema
 // WebSocket: WebSocketApi, WebSocketEndpoint, ConnectionParam, ParamType,
 //            ConnectionLifecycle, MessageSchema, MessageDirection
 ```
@@ -471,6 +552,33 @@ assert_eq!(simple.full_path(), "User");
 // Type in specific module
 let qualified = Schema::with_path("User", "crate::models::user");
 assert_eq!(qualified.full_path(), "crate::models::user::User");
+```
+
+## Migration from Schema to ApiRequest
+
+If you have existing code using `Option<Schema>` for `Endpoint.request`, you need to migrate to `Option<ApiRequest>`:
+
+```rust
+// Before (deprecated pattern)
+Endpoint {
+    request: Some(Schema::new("CreateUserRequest")),
+    // ...
+}
+
+// After (new pattern)
+Endpoint {
+    request: Some(ApiRequest::json_type("CreateUserRequest")),
+    // ...
+}
+```
+
+For backward compatibility, `ApiRequest` implements `From<Schema>`:
+
+```rust
+use schematic_define::{ApiRequest, Schema};
+
+let schema = Schema::new("MyRequest");
+let request: ApiRequest = schema.into(); // Converts to ApiRequest::Json(schema)
 ```
 
 ## Dependencies
