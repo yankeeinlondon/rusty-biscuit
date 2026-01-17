@@ -44,6 +44,17 @@ use owo_colors::OwoColorize;
 pub fn format_terminal(result: &LinkResult) -> String {
     let mut output = String::new();
 
+    // Report stale symlinks that were cleaned up
+    if !result.stale_removed.is_empty() {
+        output.push_str(&format!(
+            "{}\n",
+            format!("Cleaned up {} stale symlink(s)", result.stale_removed.len())
+                .yellow()
+                .bold()
+        ));
+        output.push('\n');
+    }
+
     if result.links.is_empty() {
         output.push_str(&"No topics processed\n".dimmed().to_string());
         return output;
@@ -72,124 +83,137 @@ pub fn format_terminal(result: &LinkResult) -> String {
 fn format_skill_link(link: &SkillLink) -> String {
     let topic_name = link.name.bold();
 
-    // Determine the message based on the combination of actions
-    match (&link.claude_action, &link.opencode_action) {
+    // Format skill status
+    let skill_status = format_skill_actions(&link.claude_action, &link.opencode_action);
+
+    // Format doc status if present
+    let doc_status = match (&link.claude_doc_action, &link.opencode_doc_action) {
+        (Some(claude), Some(opencode)) => {
+            let doc_info = format_doc_actions(claude, opencode);
+            if !doc_info.is_empty() {
+                format!(" | {}", doc_info)
+            } else {
+                String::new()
+            }
+        }
+        _ => String::new(),
+    };
+
+    format!("- {}: {}{}", topic_name, skill_status, doc_status)
+}
+
+/// Format skill actions (Claude Code and OpenCode skills).
+fn format_skill_actions(claude: &SkillAction, opencode: &SkillAction) -> String {
+    match (claude, opencode) {
         // Both created successfully
         (SkillAction::CreatedLink, SkillAction::CreatedLink) => {
-            format!(
-                "- {}: {}",
-                topic_name,
-                "added link to both Claude Code and OpenCode".green()
-            )
+            "skills linked to both".green().to_string()
         }
 
         // Both already linked
         (SkillAction::NoneAlreadyLinked, SkillAction::NoneAlreadyLinked) => {
-            format!("- {}: {}", topic_name, "already linked".dimmed().italic())
+            "skills already linked".dimmed().italic().to_string()
         }
 
         // Both have local definitions
         (SkillAction::NoneLocalDefinition, SkillAction::NoneLocalDefinition) => {
-            format!(
-                "- {}: {}",
-                topic_name,
-                "already had a local definition for this skill".yellow()
-            )
+            "local skill definitions exist".yellow().to_string()
         }
 
         // Both invalid
         (SkillAction::NoneSkillDirectoryInvalid, SkillAction::NoneSkillDirectoryInvalid) => {
-            format!(
-                "- {}: {}",
-                topic_name,
-                "skill directory invalid (no SKILL.md)".yellow()
-            )
+            "skill directory invalid (no SKILL.md)".yellow().to_string()
         }
 
         // One created, one already linked
-        (SkillAction::CreatedLink, SkillAction::NoneAlreadyLinked) => {
-            format!(
-                "- {}: {}",
-                topic_name,
-                format!(
-                    "{} already linked, created link for {}",
-                    "OpenCode".italic(),
-                    "Claude Code".italic()
-                )
-                .green()
-            )
-        }
-        (SkillAction::NoneAlreadyLinked, SkillAction::CreatedLink) => {
-            format!(
-                "- {}: {}",
-                topic_name,
-                format!(
-                    "{} already linked, created link for {}",
-                    "Claude Code".italic(),
-                    "OpenCode".italic()
-                )
-                .green()
-            )
-        }
+        (SkillAction::CreatedLink, SkillAction::NoneAlreadyLinked) => format!(
+            "{} already linked, created for {}",
+            "OpenCode".italic(),
+            "Claude Code".italic()
+        )
+        .green()
+        .to_string(),
+        (SkillAction::NoneAlreadyLinked, SkillAction::CreatedLink) => format!(
+            "{} already linked, created for {}",
+            "Claude Code".italic(),
+            "OpenCode".italic()
+        )
+        .green()
+        .to_string(),
 
         // One created, one has local definition
-        (SkillAction::CreatedLink, SkillAction::NoneLocalDefinition) => {
-            format!(
-                "- {}: created link for {}, {} has local definition",
-                topic_name,
-                "Claude Code".italic(),
-                "OpenCode".italic()
-            )
-        }
-        (SkillAction::NoneLocalDefinition, SkillAction::CreatedLink) => {
-            format!(
-                "- {}: {} has local definition, created link for {}",
-                topic_name,
-                "Claude Code".italic(),
-                "OpenCode".italic()
-            )
-        }
+        (SkillAction::CreatedLink, SkillAction::NoneLocalDefinition) => format!(
+            "created for {}, {} has local definition",
+            "Claude Code".italic(),
+            "OpenCode".italic()
+        ),
+        (SkillAction::NoneLocalDefinition, SkillAction::CreatedLink) => format!(
+            "{} has local definition, created for {}",
+            "Claude Code".italic(),
+            "OpenCode".italic()
+        ),
 
         // One created, one invalid
-        (SkillAction::CreatedLink, SkillAction::NoneSkillDirectoryInvalid) => {
-            format!(
-                "- {}: created link for {} (OpenCode: invalid skill directory)",
-                topic_name,
-                "Claude Code".italic()
-            )
-        }
-        (SkillAction::NoneSkillDirectoryInvalid, SkillAction::CreatedLink) => {
-            format!(
-                "- {}: created link for {} (Claude Code: invalid skill directory)",
-                topic_name,
-                "OpenCode".italic()
-            )
-        }
+        (SkillAction::CreatedLink, SkillAction::NoneSkillDirectoryInvalid) => format!(
+            "created for {} (OpenCode: invalid skill directory)",
+            "Claude Code".italic()
+        ),
+        (SkillAction::NoneSkillDirectoryInvalid, SkillAction::CreatedLink) => format!(
+            "created for {} (Claude Code: invalid skill directory)",
+            "OpenCode".italic()
+        ),
 
         // Failures
         (SkillAction::FailedPermissionDenied(msg), _)
         | (_, SkillAction::FailedPermissionDenied(msg)) => {
-            format!(
-                "- {}: {}",
-                topic_name,
-                format!("failed to create link (permission denied: {})", msg).red()
-            )
+            format!("failed (permission denied: {})", msg).red().to_string()
         }
 
         (SkillAction::FailedOther(msg), _) | (_, SkillAction::FailedOther(msg)) => {
-            format!(
-                "- {}: {}",
-                topic_name,
-                format!("failed to create link ({})", msg).red()
-            )
+            format!("failed ({})", msg).red().to_string()
         }
 
         // Mixed states - handle remaining combinations
-        (claude, opencode) => {
-            let claude_status = format_action_status(claude, "Claude Code");
-            let opencode_status = format_action_status(opencode, "OpenCode");
-            format!("- {}: {}, {}", topic_name, claude_status, opencode_status)
+        (claude_action, opencode_action) => {
+            let claude_status = format_action_status(claude_action, "Claude Code");
+            let opencode_status = format_action_status(opencode_action, "OpenCode");
+            format!("{}, {}", claude_status, opencode_status)
         }
+    }
+}
+
+/// Format doc actions (Claude Code and OpenCode docs).
+fn format_doc_actions(claude: &SkillAction, opencode: &SkillAction) -> String {
+    match (claude, opencode) {
+        // Both created successfully
+        (SkillAction::CreatedLink, SkillAction::CreatedLink) => {
+            "docs linked".green().to_string()
+        }
+
+        // Both already linked
+        (SkillAction::NoneAlreadyLinked, SkillAction::NoneAlreadyLinked) => {
+            "docs already linked".dimmed().to_string()
+        }
+
+        // Both have local definitions
+        (SkillAction::NoneLocalDefinition, SkillAction::NoneLocalDefinition) => {
+            "local docs exist".yellow().to_string()
+        }
+
+        // One created, one already linked
+        (SkillAction::CreatedLink, SkillAction::NoneAlreadyLinked)
+        | (SkillAction::NoneAlreadyLinked, SkillAction::CreatedLink) => {
+            "docs linked (partial)".green().to_string()
+        }
+
+        // Failures in docs
+        (SkillAction::FailedPermissionDenied(_), _)
+        | (_, SkillAction::FailedPermissionDenied(_))
+        | (SkillAction::FailedOther(_), _)
+        | (_, SkillAction::FailedOther(_)) => "doc linking failed".red().to_string(),
+
+        // Other combinations
+        _ => String::new(),
     }
 }
 
@@ -271,7 +295,7 @@ mod tests {
 
         let output = format_terminal(&result);
         assert!(output.contains("clap"));
-        assert!(output.contains("added link to both Claude Code and OpenCode"));
+        assert!(output.contains("skills linked to both"));
     }
 
     #[test]
@@ -317,7 +341,7 @@ mod tests {
 
         let output = format_terminal(&result);
         assert!(output.contains("tokio"));
-        assert!(output.contains("already linked"));
+        assert!(output.contains("skills already linked"));
     }
 
     #[test]
@@ -331,7 +355,7 @@ mod tests {
 
         let output = format_terminal(&result);
         assert!(output.contains("actix"));
-        assert!(output.contains("already had a local definition for this skill"));
+        assert!(output.contains("local skill definitions exist"));
     }
 
     #[test]
@@ -555,5 +579,101 @@ mod tests {
         let deserialized: LinkResult = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.links.len(), 0);
         assert_eq!(deserialized.errors.len(), 0);
+    }
+
+    // Tests for stale symlink reporting
+    #[test]
+    fn test_format_terminal_with_stale_symlinks_removed() {
+        let mut result = LinkResult::new();
+        result.stale_removed.push("/home/user/.claude/skills/old-skill".to_string());
+        result.stale_removed.push("/home/user/.config/opencode/skill/another".to_string());
+
+        let output = format_terminal(&result);
+        assert!(output.contains("Cleaned up 2 stale symlink"));
+    }
+
+    #[test]
+    fn test_format_terminal_no_stale_symlinks() {
+        let result = LinkResult::new();
+        let output = format_terminal(&result);
+        // Should not mention stale symlinks when there are none
+        assert!(!output.contains("stale"));
+    }
+
+    // Tests for doc action formatting
+    #[test]
+    fn test_format_terminal_with_doc_actions_both_created() {
+        let mut result = LinkResult::new();
+        result.links.push(SkillLink::new_with_docs(
+            "clap".to_string(),
+            SkillAction::CreatedLink,
+            SkillAction::CreatedLink,
+            Some(SkillAction::CreatedLink),
+            Some(SkillAction::CreatedLink),
+        ));
+
+        let output = format_terminal(&result);
+        assert!(output.contains("clap"));
+        assert!(output.contains("docs linked"));
+    }
+
+    #[test]
+    fn test_format_terminal_with_doc_actions_already_linked() {
+        let mut result = LinkResult::new();
+        result.links.push(SkillLink::new_with_docs(
+            "serde".to_string(),
+            SkillAction::NoneAlreadyLinked,
+            SkillAction::NoneAlreadyLinked,
+            Some(SkillAction::NoneAlreadyLinked),
+            Some(SkillAction::NoneAlreadyLinked),
+        ));
+
+        let output = format_terminal(&result);
+        assert!(output.contains("serde"));
+        assert!(output.contains("docs already linked"));
+    }
+
+    #[test]
+    fn test_format_terminal_without_doc_actions() {
+        let mut result = LinkResult::new();
+        result.links.push(SkillLink::new(
+            "tokio".to_string(),
+            SkillAction::CreatedLink,
+            SkillAction::CreatedLink,
+        ));
+
+        let output = format_terminal(&result);
+        assert!(output.contains("tokio"));
+        // Should not mention docs when there are no doc actions
+        assert!(!output.contains("docs linked"));
+    }
+
+    #[test]
+    fn test_format_json_with_doc_actions() {
+        let mut result = LinkResult::new();
+        result.links.push(SkillLink::new_with_docs(
+            "clap".to_string(),
+            SkillAction::CreatedLink,
+            SkillAction::CreatedLink,
+            Some(SkillAction::CreatedLink),
+            Some(SkillAction::NoneAlreadyLinked),
+        ));
+
+        let json = format_json(&result).unwrap();
+        assert!(json.contains("\"claude_doc_action\""));
+        assert!(json.contains("\"opencode_doc_action\""));
+    }
+
+    #[test]
+    fn test_format_json_with_stale_symlinks() {
+        let mut result = LinkResult::new();
+        result.stale_removed.push("/path/to/removed".to_string());
+        result.stale_failed.push(("/path/to/failed".to_string(), "permission denied".to_string()));
+
+        let json = format_json(&result).unwrap();
+        assert!(json.contains("\"stale_removed\""));
+        assert!(json.contains("/path/to/removed"));
+        assert!(json.contains("\"stale_failed\""));
+        assert!(json.contains("/path/to/failed"));
     }
 }

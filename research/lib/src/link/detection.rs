@@ -69,6 +69,114 @@ pub fn get_opencode_skills_dir() -> Result<PathBuf, DetectionError> {
     Ok(home.join(".config/opencode/skill"))
 }
 
+/// Get the Claude Code docs directory (~/.claude/docs/)
+///
+/// # Errors
+///
+/// Returns `DetectionError::HomeDirectoryNotFound` if the home directory
+/// cannot be determined.
+pub fn get_claude_docs_dir() -> Result<PathBuf, DetectionError> {
+    // In tests, prefer HOME env var over dirs::home_dir() to avoid caching issues
+    let home = if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home)
+    } else {
+        dirs::home_dir().ok_or(DetectionError::HomeDirectoryNotFound)?
+    };
+    Ok(home.join(".claude/docs"))
+}
+
+/// Get the OpenCode docs directory (~/.config/opencode/docs/)
+///
+/// # Errors
+///
+/// Returns `DetectionError::HomeDirectoryNotFound` if the home directory
+/// cannot be determined.
+pub fn get_opencode_docs_dir() -> Result<PathBuf, DetectionError> {
+    // In tests, prefer HOME env var over dirs::home_dir() to avoid caching issues
+    let home = if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home)
+    } else {
+        dirs::home_dir().ok_or(DetectionError::HomeDirectoryNotFound)?
+    };
+    Ok(home.join(".config/opencode/docs"))
+}
+
+/// Result of scanning a directory for stale (broken) symlinks.
+#[derive(Debug, Clone, Default)]
+pub struct StaleSymlinkScanResult {
+    /// List of broken symlinks that were found and removed
+    pub removed: Vec<PathBuf>,
+    /// List of broken symlinks that could not be removed (with error messages)
+    pub failed: Vec<(PathBuf, String)>,
+}
+
+/// Scan a directory for broken (stale) symlinks and remove them.
+///
+/// This function scans only the immediate children of the directory, looking for
+/// symbolic links whose targets no longer exist. Any broken symlinks found are
+/// removed, with results reported.
+///
+/// # Arguments
+///
+/// * `dir` - The directory to scan for broken symlinks
+///
+/// # Returns
+///
+/// A `StaleSymlinkScanResult` containing lists of removed symlinks and any failures.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use research_lib::link::detection::scan_and_remove_stale_symlinks;
+/// use std::path::Path;
+///
+/// let result = scan_and_remove_stale_symlinks(Path::new("/home/user/.claude/skills"));
+/// for removed in &result.removed {
+///     eprintln!("Removed stale symlink: {}", removed.display());
+/// }
+/// ```
+pub fn scan_and_remove_stale_symlinks(dir: &Path) -> StaleSymlinkScanResult {
+    let mut result = StaleSymlinkScanResult::default();
+
+    // If directory doesn't exist, nothing to scan
+    if !dir.exists() {
+        debug!("Directory does not exist, skipping stale symlink scan: {}", dir.display());
+        return result;
+    }
+
+    // Read directory entries
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            warn!("Failed to read directory for stale symlink scan: {}: {}", dir.display(), e);
+            return result;
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        // Check if this is a broken symlink
+        if check_is_broken_symlink(&path) {
+            debug!("Found stale symlink: {}", path.display());
+
+            // Attempt to remove it
+            match std::fs::remove_file(&path) {
+                Ok(()) => {
+                    debug!("Removed stale symlink: {}", path.display());
+                    result.removed.push(path);
+                }
+                Err(e) => {
+                    warn!("Failed to remove stale symlink {}: {}", path.display(), e);
+                    result.failed.push((path, e.to_string()));
+                }
+            }
+        }
+    }
+
+    result
+}
+
 /// Check if a path exists (file, directory, or symlink).
 ///
 /// This function uses `symlink_metadata()` to check existence without
@@ -803,5 +911,170 @@ mod tests {
         assert!(result.is_ok());
         let path = result.unwrap();
         assert!(path.to_string_lossy().contains(".config/opencode/skill"));
+    }
+
+    #[test]
+    fn get_claude_docs_dir_returns_path() {
+        let result = get_claude_docs_dir();
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(path.to_string_lossy().contains(".claude/docs"));
+    }
+
+    #[test]
+    fn get_opencode_docs_dir_returns_path() {
+        let result = get_opencode_docs_dir();
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(path.to_string_lossy().contains(".config/opencode/docs"));
+    }
+
+    // Tests for scan_and_remove_stale_symlinks
+    #[test]
+    fn scan_and_remove_stale_symlinks_empty_dir() {
+        let temp = TempDir::new().unwrap();
+        let result = scan_and_remove_stale_symlinks(temp.path());
+        assert!(result.removed.is_empty());
+        assert!(result.failed.is_empty());
+    }
+
+    #[test]
+    fn scan_and_remove_stale_symlinks_nonexistent_dir() {
+        let temp = TempDir::new().unwrap();
+        let nonexistent = temp.path().join("does-not-exist");
+        let result = scan_and_remove_stale_symlinks(&nonexistent);
+        assert!(result.removed.is_empty());
+        assert!(result.failed.is_empty());
+    }
+
+    #[test]
+    fn scan_and_remove_stale_symlinks_ignores_regular_files() {
+        let temp = TempDir::new().unwrap();
+        fs::write(temp.path().join("file.txt"), "content").unwrap();
+        let result = scan_and_remove_stale_symlinks(temp.path());
+        assert!(result.removed.is_empty());
+        assert!(result.failed.is_empty());
+        // File should still exist
+        assert!(temp.path().join("file.txt").exists());
+    }
+
+    #[test]
+    fn scan_and_remove_stale_symlinks_ignores_regular_dirs() {
+        let temp = TempDir::new().unwrap();
+        fs::create_dir(temp.path().join("subdir")).unwrap();
+        let result = scan_and_remove_stale_symlinks(temp.path());
+        assert!(result.removed.is_empty());
+        assert!(result.failed.is_empty());
+        // Directory should still exist
+        assert!(temp.path().join("subdir").exists());
+    }
+
+    #[test]
+    fn scan_and_remove_stale_symlinks_ignores_working_symlinks() {
+        let temp = TempDir::new().unwrap();
+        let target = temp.path().join("target");
+        let link = temp.path().join("link");
+        fs::write(&target, "content").unwrap();
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        #[cfg(unix)]
+        {
+            let result = scan_and_remove_stale_symlinks(temp.path());
+            assert!(result.removed.is_empty());
+            assert!(result.failed.is_empty());
+            // Working symlink should still exist
+            assert!(link.exists());
+        }
+    }
+
+    #[test]
+    fn scan_and_remove_stale_symlinks_removes_broken_symlinks() {
+        let temp = TempDir::new().unwrap();
+        let target = temp.path().join("target");
+        let link = temp.path().join("broken-link");
+
+        // Create and then delete target to create broken symlink
+        fs::write(&target, "content").unwrap();
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        fs::remove_file(&target).unwrap();
+
+        #[cfg(unix)]
+        {
+            // Verify it's broken before scan
+            assert!(check_is_broken_symlink(&link));
+
+            let result = scan_and_remove_stale_symlinks(temp.path());
+            assert_eq!(result.removed.len(), 1);
+            assert_eq!(result.removed[0], link);
+            assert!(result.failed.is_empty());
+
+            // Symlink should be gone
+            assert!(!link.symlink_metadata().is_ok());
+        }
+    }
+
+    #[test]
+    fn scan_and_remove_stale_symlinks_handles_multiple_broken_symlinks() {
+        let temp = TempDir::new().unwrap();
+
+        #[cfg(unix)]
+        {
+            // Create multiple broken symlinks
+            for i in 0..3 {
+                let target = temp.path().join(format!("target{}", i));
+                let link = temp.path().join(format!("broken-link{}", i));
+                fs::write(&target, "content").unwrap();
+                std::os::unix::fs::symlink(&target, &link).unwrap();
+                fs::remove_file(&target).unwrap();
+            }
+
+            let result = scan_and_remove_stale_symlinks(temp.path());
+            assert_eq!(result.removed.len(), 3);
+            assert!(result.failed.is_empty());
+        }
+    }
+
+    #[test]
+    fn scan_and_remove_stale_symlinks_mixed_content() {
+        let temp = TempDir::new().unwrap();
+
+        // Create regular file
+        fs::write(temp.path().join("regular.txt"), "content").unwrap();
+
+        // Create regular directory
+        fs::create_dir(temp.path().join("regular-dir")).unwrap();
+
+        #[cfg(unix)]
+        {
+            // Create working symlink
+            let target1 = temp.path().join("target1");
+            let working_link = temp.path().join("working-link");
+            fs::write(&target1, "content").unwrap();
+            std::os::unix::fs::symlink(&target1, &working_link).unwrap();
+
+            // Create broken symlink
+            let target2 = temp.path().join("target2");
+            let broken_link = temp.path().join("broken-link");
+            fs::write(&target2, "content").unwrap();
+            std::os::unix::fs::symlink(&target2, &broken_link).unwrap();
+            fs::remove_file(&target2).unwrap();
+
+            let result = scan_and_remove_stale_symlinks(temp.path());
+
+            // Only the broken symlink should be removed
+            assert_eq!(result.removed.len(), 1);
+            assert_eq!(result.removed[0], broken_link);
+            assert!(result.failed.is_empty());
+
+            // Everything else should still exist
+            assert!(temp.path().join("regular.txt").exists());
+            assert!(temp.path().join("regular-dir").exists());
+            assert!(working_link.exists());
+        }
     }
 }

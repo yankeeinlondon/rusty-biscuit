@@ -185,6 +185,106 @@ pub fn create_skill_symlink(
     Ok(())
 }
 
+/// Validates that a deep_dive.md file exists.
+///
+/// # Arguments
+///
+/// * `path` - Path to the deep_dive.md file to validate
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the file exists, otherwise returns a `CreationError::InvalidSource`.
+#[instrument]
+pub fn validate_deep_dive_file(path: &Path) -> Result<(), CreationError> {
+    debug!("Validating deep dive file: {:?}", path);
+
+    if !path.exists() {
+        debug!("Deep dive file does not exist: {:?}", path);
+        return Err(CreationError::InvalidSource(path.to_path_buf()));
+    }
+
+    if !path.is_file() {
+        debug!("Deep dive path is not a file: {:?}", path);
+        return Err(CreationError::InvalidSource(path.to_path_buf()));
+    }
+
+    debug!("Deep dive file validated successfully: {:?}", path);
+    Ok(())
+}
+
+/// Creates an absolute symbolic link from a deep_dive.md file to a docs directory.
+///
+/// This function:
+/// 1. Validates the source deep_dive.md exists
+/// 2. Creates parent directories if needed
+/// 3. Creates an absolute symlink with the topic name as the file name
+///
+/// # Arguments
+///
+/// * `deep_dive_path` - The source deep_dive.md file path
+/// * `symlink_location` - Where to create the symlink (e.g., `~/.claude/docs/clap.md`)
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the symlink was created successfully, otherwise returns
+/// a `CreationError` describing what went wrong.
+///
+/// # Errors
+///
+/// - `CreationError::InvalidSource` - Source file missing
+/// - `CreationError::ParentDirectory` - Failed to create parent directory
+/// - `CreationError::SymlinkCreation` - Failed to create the symlink
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use std::path::Path;
+/// use research_lib::link::creation::create_deep_dive_symlink;
+///
+/// let deep_dive = Path::new("/home/user/.research/library/clap/deep_dive.md");
+/// let symlink_location = Path::new("/home/user/.claude/docs/clap.md");
+/// create_deep_dive_symlink(deep_dive, symlink_location)?;
+/// # Ok::<(), research_lib::link::creation::CreationError>(())
+/// ```
+#[instrument]
+pub fn create_deep_dive_symlink(
+    deep_dive_path: &Path,
+    symlink_location: &Path,
+) -> Result<(), CreationError> {
+    debug!(
+        "Creating deep dive symlink: {:?} -> {:?}",
+        symlink_location, deep_dive_path
+    );
+
+    // 1. Validate source exists and is a file
+    validate_deep_dive_file(deep_dive_path)?;
+
+    // 2. Create parent directory if needed
+    ensure_parent_directory(symlink_location).map_err(CreationError::ParentDirectory)?;
+
+    // 3. Create absolute symlink
+    let absolute_source = deep_dive_path
+        .canonicalize()
+        .map_err(|_| CreationError::InvalidSource(deep_dive_path.to_path_buf()))?;
+
+    debug!("Creating absolute symlink to: {:?}", absolute_source);
+
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&absolute_source, symlink_location)
+        .map_err(CreationError::SymlinkCreation)?;
+
+    #[cfg(not(unix))]
+    {
+        return Err(CreationError::SymlinkCreation(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "Symlink creation is only supported on Unix-like systems",
+        )));
+    }
+
+    debug!("Deep dive symlink created successfully");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,5 +542,127 @@ mod tests {
         // Verify we can access files through the symlink
         assert!(symlink_location.join("SKILL.md").exists());
         assert!(symlink_location.join("docs").join("readme.md").exists());
+    }
+
+    // Tests for validate_deep_dive_file
+    #[test]
+    fn validate_deep_dive_file_accepts_valid_file() {
+        let temp = TempDir::new().unwrap();
+        let deep_dive = temp.path().join("deep_dive.md");
+        let mut file = File::create(&deep_dive).unwrap();
+        writeln!(file, "# Deep Dive").unwrap();
+
+        let result = validate_deep_dive_file(&deep_dive);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_deep_dive_file_rejects_nonexistent_path() {
+        let temp = TempDir::new().unwrap();
+        let nonexistent = temp.path().join("does_not_exist.md");
+
+        let result = validate_deep_dive_file(&nonexistent);
+        assert!(matches!(result, Err(CreationError::InvalidSource(_))));
+    }
+
+    #[test]
+    fn validate_deep_dive_file_rejects_directory() {
+        let temp = TempDir::new().unwrap();
+        let dir = temp.path().join("not_a_file");
+        fs::create_dir(&dir).unwrap();
+
+        let result = validate_deep_dive_file(&dir);
+        assert!(matches!(result, Err(CreationError::InvalidSource(_))));
+    }
+
+    // Tests for create_deep_dive_symlink
+    #[test]
+    fn create_deep_dive_symlink_creates_valid_symlink() {
+        let temp = TempDir::new().unwrap();
+        let deep_dive = temp.path().join("deep_dive.md");
+        let mut file = File::create(&deep_dive).unwrap();
+        writeln!(file, "# Deep Dive Content").unwrap();
+
+        let symlink_location = temp.path().join("docs").join("topic.md");
+
+        let result = create_deep_dive_symlink(&deep_dive, &symlink_location);
+        assert!(result.is_ok());
+        assert!(symlink_location.exists());
+        assert!(symlink_location.is_symlink());
+    }
+
+    #[test]
+    fn create_deep_dive_symlink_creates_absolute_symlink() {
+        let temp = TempDir::new().unwrap();
+        let deep_dive = temp.path().join("deep_dive.md");
+        let mut file = File::create(&deep_dive).unwrap();
+        writeln!(file, "# Deep Dive").unwrap();
+
+        let symlink_location = temp.path().join("docs").join("topic.md");
+
+        create_deep_dive_symlink(&deep_dive, &symlink_location).unwrap();
+
+        // Read the symlink target
+        let target = fs::read_link(&symlink_location).unwrap();
+        // Absolute paths start with /
+        assert!(target.is_absolute());
+    }
+
+    #[test]
+    fn create_deep_dive_symlink_creates_parent_directories() {
+        let temp = TempDir::new().unwrap();
+        let deep_dive = temp.path().join("deep_dive.md");
+        let mut file = File::create(&deep_dive).unwrap();
+        writeln!(file, "# Deep Dive").unwrap();
+
+        let symlink_location = temp.path().join("a").join("b").join("c").join("topic.md");
+
+        let result = create_deep_dive_symlink(&deep_dive, &symlink_location);
+        assert!(result.is_ok());
+        assert!(symlink_location.parent().unwrap().exists());
+        assert!(symlink_location.exists());
+    }
+
+    #[test]
+    fn create_deep_dive_symlink_rejects_invalid_source() {
+        let temp = TempDir::new().unwrap();
+        let invalid_source = temp.path().join("nonexistent.md");
+        let symlink_location = temp.path().join("link.md");
+
+        let result = create_deep_dive_symlink(&invalid_source, &symlink_location);
+        assert!(matches!(result, Err(CreationError::InvalidSource(_))));
+    }
+
+    #[test]
+    fn create_deep_dive_symlink_fails_when_symlink_already_exists() {
+        let temp = TempDir::new().unwrap();
+        let deep_dive = temp.path().join("deep_dive.md");
+        let mut file = File::create(&deep_dive).unwrap();
+        writeln!(file, "# Deep Dive").unwrap();
+
+        let symlink_location = temp.path().join("link.md");
+
+        // Create symlink first time
+        create_deep_dive_symlink(&deep_dive, &symlink_location).unwrap();
+
+        // Try to create again - should fail
+        let result = create_deep_dive_symlink(&deep_dive, &symlink_location);
+        assert!(matches!(result, Err(CreationError::SymlinkCreation(_))));
+    }
+
+    #[test]
+    fn create_deep_dive_symlink_verifies_symlink_points_to_correct_target() {
+        let temp = TempDir::new().unwrap();
+        let deep_dive = temp.path().join("deep_dive.md");
+        let mut file = File::create(&deep_dive).unwrap();
+        writeln!(file, "# Deep Dive").unwrap();
+
+        let symlink_location = temp.path().join("link.md");
+
+        create_deep_dive_symlink(&deep_dive, &symlink_location).unwrap();
+
+        let target = fs::read_link(&symlink_location).unwrap();
+        let expected = deep_dive.canonicalize().unwrap();
+        assert_eq!(target, expected);
     }
 }

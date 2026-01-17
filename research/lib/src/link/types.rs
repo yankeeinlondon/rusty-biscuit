@@ -83,6 +83,14 @@ pub struct SkillLink {
 
     /// Action taken for OpenCode (~/.config/opencode/skill/)
     pub opencode_action: SkillAction,
+
+    /// Action taken for Claude Code deep dive doc (~/.claude/docs/)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_doc_action: Option<SkillAction>,
+
+    /// Action taken for OpenCode deep dive doc (~/.config/opencode/docs/)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencode_doc_action: Option<SkillAction>,
 }
 
 impl SkillLink {
@@ -92,6 +100,25 @@ impl SkillLink {
             name,
             claude_action,
             opencode_action,
+            claude_doc_action: None,
+            opencode_doc_action: None,
+        }
+    }
+
+    /// Creates a new SkillLink with skill and doc actions
+    pub fn new_with_docs(
+        name: String,
+        claude_action: SkillAction,
+        opencode_action: SkillAction,
+        claude_doc_action: Option<SkillAction>,
+        opencode_doc_action: Option<SkillAction>,
+    ) -> Self {
+        Self {
+            name,
+            claude_action,
+            opencode_action,
+            claude_doc_action,
+            opencode_doc_action,
         }
     }
 
@@ -122,6 +149,14 @@ pub struct LinkResult {
     /// Errors encountered during processing that prevented specific operations
     /// Format: (topic_name, error_message)
     pub errors: Vec<(String, String)>,
+
+    /// Stale symlinks that were removed during cleanup
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stale_removed: Vec<String>,
+
+    /// Stale symlinks that could not be removed (path, error message)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stale_failed: Vec<(String, String)>,
 }
 
 impl LinkResult {
@@ -130,6 +165,8 @@ impl LinkResult {
         Self {
             links: Vec::new(),
             errors: Vec::new(),
+            stale_removed: Vec::new(),
+            stale_failed: Vec::new(),
         }
     }
 
