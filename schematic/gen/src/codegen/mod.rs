@@ -31,11 +31,13 @@
 pub mod api_struct;
 pub mod client;
 pub mod error;
+pub mod module_docs;
 pub mod request_enum;
 pub mod request_structs;
 
 pub use api_struct::generate_api_struct;
 pub use client::generate_request_method;
 pub use error::generate_error_type;
+pub use module_docs::ModuleDocBuilder;
 pub use request_enum::generate_request_enum;
 pub use request_structs::generate_request_struct;

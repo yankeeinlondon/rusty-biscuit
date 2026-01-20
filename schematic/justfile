@@ -78,3 +78,9 @@ test-e2e:
     @echo "-----------------"
     @echo ""
     @cargo test -p schematic-gen --test e2e_generation -- --ignored
+
+# build and show the docs for the library code
+docs:
+    @echo "Documentation for Schematic packages"
+    @echo ""
+    @cargo doc --workspace --no-deps --open
