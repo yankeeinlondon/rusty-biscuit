@@ -17,3 +17,5 @@
 pub mod shared;
 pub mod prelude;
 pub mod elevenlabs;
+pub mod huggingfacehub;
+pub mod openai;

@@ -15,5 +15,5 @@
 //! }
 //! ```
 pub use crate::shared::SchematicError;
-pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};
-pub use schematic_definitions::elevenlabs::*;
+pub use crate::huggingfacehub::{HuggingFaceHub, HuggingFaceHubRequest};
+pub use schematic_definitions::huggingface::*;
