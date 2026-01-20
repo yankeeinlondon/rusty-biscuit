@@ -72,7 +72,6 @@ pub enum OutputFormat {
     Opus48000_192,
 }
 
-
 /// Voice category classification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1673,10 +1672,7 @@ mod tests {
     #[test]
     fn generation_config_default() {
         let config = GenerationConfig::default();
-        assert_eq!(
-            config.chunk_length_schedule,
-            Some(vec![120, 160, 250, 290])
-        );
+        assert_eq!(config.chunk_length_schedule, Some(vec![120, 160, 250, 290]));
     }
 
     #[test]

@@ -4,8 +4,8 @@
 //! request and response bodies. These schemas are used during code
 //! generation to create strongly-typed Rust structs.
 
-use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
 /// Trait bound for types that can be used in API schemas.

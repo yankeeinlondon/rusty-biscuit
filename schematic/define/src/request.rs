@@ -602,7 +602,8 @@ mod tests {
 
     #[test]
     fn api_request_url_encoded() {
-        let request = ApiRequest::url_encoded(vec![FormField::text("user"), FormField::text("pass")]);
+        let request =
+            ApiRequest::url_encoded(vec![FormField::text("user"), FormField::text("pass")]);
 
         if let ApiRequest::UrlEncoded { fields } = request {
             assert_eq!(fields.len(), 2);
@@ -706,7 +707,7 @@ mod tests {
 
     #[test]
     fn integration_mixed_endpoint_types() {
-        use crate::{AuthStrategy, Endpoint, RestApi, RestMethod, ApiResponse};
+        use crate::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
 
         // Create an API with mixed request types
         let api = RestApi {
@@ -737,7 +738,9 @@ mod tests {
                     description: "Upload a file to a folder".to_string(),
                     request: Some(ApiRequest::form_data(vec![
                         FormField::file("file").with_description("The file to upload"),
-                        FormField::text("name").optional().with_description("Override filename"),
+                        FormField::text("name")
+                            .optional()
+                            .with_description("Override filename"),
                         FormField::json("metadata", Schema::new("FileMetadata")).optional(),
                     ])),
                     response: ApiResponse::json_type("File"),
@@ -799,7 +802,9 @@ mod tests {
             )
             .with_description("Documents to process (1-10 files)"),
             FormField::text("category").with_description("Document category"),
-            FormField::text("tags").optional().with_description("Comma-separated tags"),
+            FormField::text("tags")
+                .optional()
+                .with_description("Comma-separated tags"),
         ]);
 
         if let ApiRequest::FormData { fields } = &request {
@@ -828,10 +833,7 @@ mod tests {
         // Ensure all ApiRequest variants can be serialized
         let variants = vec![
             ApiRequest::json_type("TestRequest"),
-            ApiRequest::form_data(vec![
-                FormField::file("doc"),
-                FormField::text("name"),
-            ]),
+            ApiRequest::form_data(vec![FormField::file("doc"), FormField::text("name")]),
             ApiRequest::url_encoded(vec![
                 FormField::text("username"),
                 FormField::text("password"),

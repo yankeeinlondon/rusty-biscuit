@@ -68,7 +68,10 @@ impl<'a> ModuleDocBuilder<'a> {
         let desc = &self.api.description;
 
         if let Some(docs_url) = &self.api.docs_url {
-            format!(" Generated API client for [{}]({}).\n\n {}", name, docs_url, desc)
+            format!(
+                " Generated API client for [{}]({}).\n\n {}",
+                name, docs_url, desc
+            )
         } else {
             format!(" Generated API client for {}.\n\n {}", name, desc)
         }

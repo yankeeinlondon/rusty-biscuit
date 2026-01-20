@@ -44,6 +44,6 @@ pub use crate::response::ApiResponse;
 pub use crate::schema::{Schema, SchemaObject};
 pub use crate::types::{Endpoint, RestApi, RestMethod};
 pub use crate::websocket::{
-    ConnectionLifecycle, ConnectionParam, MessageDirection, MessageSchema, ParamType,
-    WebSocketApi, WebSocketEndpoint,
+    ConnectionLifecycle, ConnectionParam, MessageDirection, MessageSchema, ParamType, WebSocketApi,
+    WebSocketEndpoint,
 };

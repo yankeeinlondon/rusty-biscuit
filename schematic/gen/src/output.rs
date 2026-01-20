@@ -28,8 +28,8 @@ use quote::{format_ident, quote};
 use schematic_define::RestApi;
 
 use crate::codegen::{
-    generate_api_struct, generate_error_type, generate_request_enum, generate_request_method,
-    generate_request_struct, ModuleDocBuilder,
+    ModuleDocBuilder, generate_api_struct, generate_error_type, generate_request_enum,
+    generate_request_method, generate_request_struct,
 };
 use crate::errors::GeneratorError;
 

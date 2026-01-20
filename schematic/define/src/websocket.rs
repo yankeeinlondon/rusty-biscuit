@@ -326,7 +326,6 @@ pub struct WebSocketEndpoint {
     pub messages: Vec<MessageSchema>,
 }
 
-
 /// A complete WebSocket API definition.
 ///
 /// This struct captures all the information needed to generate a typed client
@@ -725,7 +724,9 @@ mod tests {
                         name: "EOS".to_string(),
                         direction: MessageDirection::Client,
                         schema: Schema::new("EndOfStreamMessage"),
-                        description: Some("End-of-stream signal to flush remaining audio".to_string()),
+                        description: Some(
+                            "End-of-stream signal to flush remaining audio".to_string(),
+                        ),
                     }),
                     keepalive: None,
                 },
