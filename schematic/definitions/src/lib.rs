@@ -7,6 +7,7 @@
 //!
 //! - [`openai`] - OpenAI Models API definition
 //! - [`elevenlabs`] - ElevenLabs TTS and voice management API definition
+//! - [`huggingface`] - Hugging Face Hub API for model/dataset discovery
 //!
 //! ## Examples
 //!
@@ -28,11 +29,21 @@
 //! let ws_api = define_elevenlabs_websocket_api();
 //! assert_eq!(ws_api.name, "ElevenLabsTTS");
 //! ```
+//!
+//! ```
+//! use schematic_definitions::huggingface::define_huggingface_hub_api;
+//!
+//! let api = define_huggingface_hub_api();
+//! assert_eq!(api.name, "HuggingFaceHub");
+//! assert!(api.endpoints.len() >= 26);
+//! ```
 
 pub mod elevenlabs;
+pub mod huggingface;
 pub mod openai;
 pub mod prelude;
 
 // Re-export API definition functions for convenience
 pub use elevenlabs::{define_elevenlabs_rest_api, define_elevenlabs_websocket_api};
+pub use huggingface::define_huggingface_hub_api;
 pub use openai::define_openai_api;
