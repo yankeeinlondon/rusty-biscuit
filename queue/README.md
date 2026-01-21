@@ -1,123 +1,155 @@
 # Queue
 
-A TUI-based command scheduler that queues jobs for later execution.
+A TUI-based command scheduler that queues jobs for later execution. Schedule commands to run at specific times or after delays, with intelligent terminal detection for optimal execution.
 
-## Installation
+## Quick Start
 
-```sh
+```bash
+# Install
 cargo install --path cli
-```
 
-## Usage
-
-All invocations open an interactive TUI. You can optionally pre-schedule a task from the command line:
-
-```sh
-# Open the TUI with an empty task list
+# Open TUI with empty task list
 queue
 
-# Open the TUI with a task scheduled for 7:00am
-queue --at 7:00am "so-you-say 'good morning'"
+# Schedule a task for 7:00am
+queue --at 7:00am "make build"
 
-# Open the TUI with a task scheduled in 15 minutes
+# Schedule a task in 15 minutes
 queue --in 15m "echo 'reminder'"
 ```
 
-### Flags
+## Architecture
 
-| Flag | Description |
-|------|-------------|
-| `--at TIME` | Pre-schedule a command for a specific time |
-| `--in DELAY` | Pre-schedule a command after a delay |
-| `--debug` | Enable debug logging to `~/.queue-debug.log` |
-| `--version` | Display version and exit |
-| `--help` | Display help and exit |
+Queue consists of two crates with distinct responsibilities:
 
-## TUI Keyboard Shortcuts
+```text
+queue/
+├── lib/    # Core library: data types, persistence, execution, terminal detection
+└── cli/    # TUI application: interface, event handling, modals
+```
 
-### Main Window
+### queue-lib
 
-| Key | Action |
-|-----|--------|
-| `Q` | Quit (with confirmation) |
-| `Esc` | Quit immediately |
-| `N` | New task (opens input modal) |
-| `E` | Edit selected task |
-| `R` | Remove mode |
-| `X` | Cancel selected pending task |
-| `H` | History (opens history modal) |
-| `↑` / `k` | Select previous task |
-| `↓` / `j` | Select next task |
+The core library provides:
+
+- **Data Types** - `ScheduledTask`, `ExecutionTarget`, `TaskStatus`
+- **Persistence** - JSONL file storage with cross-platform locking
+- **Execution** - Async task scheduling with tokio
+- **Terminal Detection** - Capability detection for 8 terminal types
+
+See [lib/README.md](lib/README.md) for detailed API documentation.
+
+### queue-cli
+
+The TUI application provides:
+
+- **Interactive Interface** - ratatui-based terminal UI
+- **Modal Forms** - Task creation, editing, and history browsing
+- **Event Loop** - Non-blocking input handling with 50ms responsiveness
+- **Wezterm Integration** - Split pane workflow for seamless task viewing
+
+See [cli/README.md](cli/README.md) for detailed TUI documentation.
+
+## Key Features
+
+### Terminal-Aware Execution
+
+Commands execute in the most appropriate environment based on detected terminal:
+
+| Terminal       | Default Target | Pane Support |
+|----------------|----------------|:------------:|
+| Wezterm        | New Pane       | Yes          |
+| iTerm2         | New Pane       | Yes          |
+| Terminal.app   | New Window     | No           |
+| GNOME Terminal | New Window     | No           |
+| Konsole        | New Window     | No           |
+| XTerm          | New Window     | No           |
+| Unknown        | Background     | No           |
+
+### Wezterm Split Workflow
+
+When running in Wezterm, Queue creates an optimized layout:
+
+```text
+┌──────────────────────────────────────────────────────────────────┐
+│                                                                  │
+│                    Task Execution Area (80%)                     │
+│                    Commands run here in splits                   │
+│                                                                  │
+├──────────────────────────────────────────────────────────────────┤
+│                    TUI Control Pane (20%)                        │
+│                    Schedule and monitor tasks                    │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Flexible Scheduling
+
+Schedule commands with times or delays:
+
+```bash
+# Time formats
+queue --at 7:00am "command"    # 12-hour
+queue --at 19:30 "command"     # 24-hour
+
+# Delay formats
+queue --in 15 "command"        # 15 minutes (default)
+queue --in 30s "command"       # 30 seconds
+queue --in 2h "command"        # 2 hours
+queue --in 1d "command"        # 1 day
+```
+
+## TUI Overview
+
+### Main Screen
+
+| Key | Action         |
+|-----|----------------|
+| `N` | New task       |
+| `E` | Edit selected  |
+| `X` | Cancel pending |
+| `H` | View history   |
+| `Q` | Quit           |
 
 ### Input Modal
 
-| Key | Action |
-|-----|--------|
-| `Tab` | Next field |
-| `Shift+Tab` | Previous field |
-| `Enter` | Submit form |
-| `Esc` | Cancel |
-| `Space` | Toggle selector fields |
-| `←` / `→` | Move cursor / toggle selectors |
+| Key     | Action          |
+|---------|-----------------|
+| `Tab`   | Next field      |
+| `Enter` | Submit          |
+| `Space` | Toggle selector |
+| `Esc`   | Cancel          |
 
-### History Modal
+See [cli/README.md](cli/README.md) for complete keyboard reference.
 
-| Key | Action |
-|-----|--------|
-| `↑` / `k` | Select previous |
-| `↓` / `j` | Select next |
-| `Enter` | Use selected command |
-| `N` | Create new task from selected |
-| `F` / `/` | Filter mode |
-| `Esc` | Close modal |
+## Data Storage
 
-## Time Formats
+Tasks persist to `~/.queue-history.jsonl` in JSONL format:
 
-The `--at` flag accepts:
-
-- 12-hour format: `7:00am`, `11:30pm`
-- 24-hour format: `19:30`, `07:00`
-
-## Delay Formats
-
-The `--in` flag accepts delays with optional units:
-
-| Unit | Example | Description |
-|------|---------|-------------|
-| (none) | `15` | 15 minutes (default) |
-| `s` | `30s` | 30 seconds |
-| `m` | `5m` | 5 minutes |
-| `h` | `2h` | 2 hours |
-| `d` | `1d` | 1 day |
-
-## Execution Targets
-
-Tasks can execute in different environments:
-
-- **Pane**: Opens in a new Wezterm pane (default in Wezterm)
-- **Window**: Opens in a new terminal window (Terminal.app, iTerm2, etc.)
-- **Background**: Runs detached (no terminal output)
-
-## Architecture
-
-The queue package is split into two crates:
-
-- **queue-lib**: Core library with data types, persistence, and execution
-- **queue-cli**: TUI application and CLI interface
+```json
+{"id":1,"command":"make build","scheduled_at":"2024-01-15T10:00:00Z","target":"new_pane","status":{"status":"completed"},"created_at":"2024-01-15T09:55:00Z"}
+```
 
 ## Development
 
-```sh
+```bash
 # Build
 cargo build -p queue-cli
+cargo build -p queue-lib
 
 # Test
-cargo test -p queue-lib
 cargo test -p queue-cli
+cargo test -p queue-lib
 
 # Lint
 cargo clippy -p queue-lib -p queue-cli
 
-# Generate documentation
-cargo doc -p queue-lib -p queue-cli --no-deps
+# Debug mode (logs to ~/.queue-debug.log)
+queue --debug
 ```
+
+## Detailed Documentation
+
+| Document                       | Contents                                                  |
+|--------------------------------|-----------------------------------------------------------|
+| [lib/README.md](lib/README.md) | Data types, persistence API, executor, terminal detection |
+| [cli/README.md](cli/README.md) | TUI architecture, keyboard shortcuts, modal system        |
