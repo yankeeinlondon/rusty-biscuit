@@ -272,3 +272,779 @@ fn extracts_go_doc_comments() -> Result<(), TreeHuggerError> {
 
     Ok(())
 }
+
+// ============================================================================
+// Regression tests for generics support
+// ============================================================================
+
+#[test]
+fn extracts_rust_generic_types() -> Result<(), TreeHuggerError> {
+    // Regression test: Generic types in parameters and return types should be captured
+    let tree_file = TreeFile::new(fixture_path("generics.rs"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Check generic return type
+    let identity = symbols
+        .iter()
+        .find(|s| s.name == "identity")
+        .expect("should find identity function");
+    let sig = identity.signature.as_ref().expect("should have signature");
+    assert_eq!(sig.return_type.as_deref(), Some("T"), "generic return type");
+    assert_eq!(sig.parameters[0].type_annotation.as_deref(), Some("T"), "generic param type");
+
+    // Check complex generic return type
+    let try_parse = symbols
+        .iter()
+        .find(|s| s.name == "try_parse")
+        .expect("should find try_parse function");
+    let sig = try_parse.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("Result<T, E>"),
+        "complex generic return type"
+    );
+
+    // Check impl Trait return type
+    let make_iter = symbols
+        .iter()
+        .find(|s| s.name == "make_iter")
+        .expect("should find make_iter function");
+    let sig = make_iter.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("impl Iterator<Item = usize>"),
+        "impl Trait return type"
+    );
+
+    // Check primitive type in parameters (previously broken)
+    assert_eq!(
+        sig.parameters[0].type_annotation.as_deref(),
+        Some("usize"),
+        "primitive param type should be captured"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_typescript_generic_types() -> Result<(), TreeHuggerError> {
+    // Regression test: TypeScript generics should be captured
+    let tree_file = TreeFile::new(fixture_path("generics.ts"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Check generic identity function
+    let identity = symbols
+        .iter()
+        .find(|s| s.name == "identity")
+        .expect("should find identity function");
+    let sig = identity.signature.as_ref().expect("should have signature");
+    assert_eq!(sig.return_type.as_deref(), Some("T"), "TS generic return type");
+
+    // Check complex generic types
+    let map_array = symbols
+        .iter()
+        .find(|s| s.name == "mapArray")
+        .expect("should find mapArray function");
+    let sig = map_array.signature.as_ref().expect("should have signature");
+    assert_eq!(sig.return_type.as_deref(), Some("U[]"), "array generic return type");
+    assert_eq!(
+        sig.parameters[0].type_annotation.as_deref(),
+        Some("T[]"),
+        "array generic param type"
+    );
+    assert_eq!(
+        sig.parameters[1].type_annotation.as_deref(),
+        Some("(item: T) => U"),
+        "function type param"
+    );
+
+    // Check Promise generic
+    let fetch_data = symbols
+        .iter()
+        .find(|s| s.name == "fetchData")
+        .expect("should find fetchData function");
+    let sig = fetch_data.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("Promise<T>"),
+        "Promise generic return type"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_python_generic_types() -> Result<(), TreeHuggerError> {
+    // Regression test: Python typing generics should be captured
+    let tree_file = TreeFile::new(fixture_path("generics.py"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Check List generic
+    let map_list = symbols
+        .iter()
+        .find(|s| s.name == "map_list")
+        .expect("should find map_list function");
+    let sig = map_list.signature.as_ref().expect("should have signature");
+    assert_eq!(sig.return_type.as_deref(), Some("List[U]"), "List generic return");
+    assert_eq!(
+        sig.parameters[0].type_annotation.as_deref(),
+        Some("List[T]"),
+        "List generic param"
+    );
+
+    // Check Optional generic
+    let first_or_none = symbols
+        .iter()
+        .find(|s| s.name == "first_or_none")
+        .expect("should find first_or_none function");
+    let sig = first_or_none.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("Optional[T]"),
+        "Optional generic return"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_go_generic_types() -> Result<(), TreeHuggerError> {
+    // Regression test: Go 1.18+ generics should be captured
+    let tree_file = TreeFile::new(fixture_path("generics.go"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Check generic function
+    let identity = symbols
+        .iter()
+        .find(|s| s.name == "Identity")
+        .expect("should find Identity function");
+    let sig = identity.signature.as_ref().expect("should have signature");
+    assert_eq!(sig.return_type.as_deref(), Some("T"), "Go generic return type");
+
+    // Check generic pointer return type
+    let new_container = symbols
+        .iter()
+        .find(|s| s.name == "NewContainer")
+        .expect("should find NewContainer function");
+    let sig = new_container.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("*Container[T]"),
+        "Go generic pointer return type"
+    );
+
+    // Check multi-parameter declaration (a, b T should capture both)
+    let max = symbols
+        .iter()
+        .find(|s| s.name == "Max")
+        .expect("should find Max function");
+    let sig = max.signature.as_ref().expect("should have signature");
+    assert_eq!(sig.parameters.len(), 2, "should have 2 parameters");
+    assert_eq!(sig.parameters[0].name, "a");
+    assert_eq!(sig.parameters[1].name, "b");
+    assert_eq!(sig.parameters[0].type_annotation.as_deref(), Some("T"));
+    assert_eq!(sig.parameters[1].type_annotation.as_deref(), Some("T"));
+
+    Ok(())
+}
+
+// ============================================================================
+// Regression tests for type metadata extraction
+// These tests ensure struct fields, enum variants, and type parameters are captured.
+// ============================================================================
+
+#[test]
+fn extracts_rust_struct_fields() -> Result<(), TreeHuggerError> {
+    // Regression test: Struct fields should be captured with their types and doc comments
+    let tree_file = TreeFile::new(fixture_path("sample.rs"))?;
+    let symbols = tree_file.symbols()?;
+
+    let greeter = symbols
+        .iter()
+        .find(|s| s.name == "Greeter" && s.kind == tree_hugger_lib::SymbolKind::Type)
+        .expect("should find Greeter struct");
+
+    let meta = greeter
+        .type_metadata
+        .as_ref()
+        .expect("should have type metadata");
+
+    // Check fields
+    assert_eq!(meta.fields.len(), 1, "Greeter should have 1 field");
+    assert_eq!(meta.fields[0].name, "prefix");
+    assert_eq!(
+        meta.fields[0].type_annotation.as_deref(),
+        Some("String"),
+        "field type should be captured"
+    );
+    assert!(
+        meta.fields[0].doc_comment.is_some(),
+        "field doc comment should be captured"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_rust_enum_variants() -> Result<(), TreeHuggerError> {
+    // Regression test: Enum variants should be captured with tuple fields and struct fields
+    let tree_file = TreeFile::new(fixture_path("types.rs"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Check simple enum (now correctly identified as Enum, not Type)
+    let message = symbols
+        .iter()
+        .find(|s| s.name == "Message" && s.kind == tree_hugger_lib::SymbolKind::Enum)
+        .expect("should find Message enum");
+
+    let meta = message
+        .type_metadata
+        .as_ref()
+        .expect("should have type metadata");
+
+    // Should have multiple variants
+    assert!(meta.variants.len() >= 3, "Message should have at least 3 variants");
+
+    // Find specific variants
+    let quit = meta.variants.iter().find(|v| v.name == "Quit");
+    assert!(quit.is_some(), "should find Quit variant");
+    assert!(
+        quit.unwrap().tuple_fields.is_empty() && quit.unwrap().struct_fields.is_empty(),
+        "Quit should be a unit variant"
+    );
+
+    let write = meta.variants.iter().find(|v| v.name == "Write");
+    assert!(write.is_some(), "should find Write variant");
+    assert!(
+        !write.unwrap().tuple_fields.is_empty(),
+        "Write should be a tuple variant"
+    );
+
+    let move_variant = meta.variants.iter().find(|v| v.name == "Move");
+    assert!(move_variant.is_some(), "should find Move variant");
+    assert!(
+        !move_variant.unwrap().struct_fields.is_empty(),
+        "Move should be a struct variant"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_rust_generic_type_parameters() -> Result<(), TreeHuggerError> {
+    // Regression test: Generic type parameters should be captured
+    let tree_file = TreeFile::new(fixture_path("types.rs"))?;
+    let symbols = tree_file.symbols()?;
+
+    let container = symbols
+        .iter()
+        .find(|s| s.name == "Container" && s.kind == tree_hugger_lib::SymbolKind::Type)
+        .expect("should find Container struct");
+
+    let meta = container
+        .type_metadata
+        .as_ref()
+        .expect("should have type metadata");
+
+    assert!(
+        !meta.type_parameters.is_empty(),
+        "Container should have type parameters"
+    );
+    assert!(
+        meta.type_parameters.contains(&"T".to_string()),
+        "should capture T type parameter"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_rust_tuple_struct_fields() -> Result<(), TreeHuggerError> {
+    // Regression test: Tuple struct fields should be captured with indexed names
+    let tree_file = TreeFile::new(fixture_path("types.rs"))?;
+    let symbols = tree_file.symbols()?;
+
+    let point = symbols
+        .iter()
+        .find(|s| s.name == "Point" && s.kind == tree_hugger_lib::SymbolKind::Type)
+        .expect("should find Point tuple struct");
+
+    let meta = point
+        .type_metadata
+        .as_ref()
+        .expect("should have type metadata");
+
+    assert_eq!(meta.fields.len(), 2, "Point should have 2 tuple fields");
+    assert_eq!(meta.fields[0].name, "0", "first field should be indexed as 0");
+    assert_eq!(meta.fields[1].name, "1", "second field should be indexed as 1");
+    assert!(
+        meta.fields[0].type_annotation.is_some(),
+        "tuple field types should be captured"
+    );
+
+    Ok(())
+}
+
+// ============================================================================
+// Regression tests for struct vs enum type distinction
+// Bug: Both structs and enums were reported as "type" without distinguishing them.
+// ============================================================================
+
+#[test]
+fn distinguishes_rust_struct_from_enum() -> Result<(), TreeHuggerError> {
+    // Regression test: Structs should be SymbolKind::Type, enums should be SymbolKind::Enum
+    let tree_file = TreeFile::new(fixture_path("types.rs"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Check that Point struct is captured as Type
+    let point = symbols
+        .iter()
+        .find(|s| s.name == "Point")
+        .expect("should find Point");
+    assert_eq!(
+        point.kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "Point struct should be SymbolKind::Type"
+    );
+
+    // Check that Container struct is captured as Type
+    let container = symbols
+        .iter()
+        .find(|s| s.name == "Container")
+        .expect("should find Container");
+    assert_eq!(
+        container.kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "Container struct should be SymbolKind::Type"
+    );
+
+    // Check that Message enum is captured as Enum, not Type
+    let message = symbols
+        .iter()
+        .find(|s| s.name == "Message")
+        .expect("should find Message");
+    assert_eq!(
+        message.kind,
+        tree_hugger_lib::SymbolKind::Enum,
+        "Message enum should be SymbolKind::Enum, not Type"
+    );
+
+    // Check that Result enum is captured as Enum
+    let result = symbols
+        .iter()
+        .find(|s| s.name == "Result")
+        .expect("should find Result");
+    assert_eq!(
+        result.kind,
+        tree_hugger_lib::SymbolKind::Enum,
+        "Result enum should be SymbolKind::Enum, not Type"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn rust_enum_is_included_in_types_filter() -> Result<(), TreeHuggerError> {
+    // Regression test: Enums should still be included when filtering for "types"
+    // via SymbolKind::is_type(), even though they have a distinct kind.
+    let tree_file = TreeFile::new(fixture_path("types.rs"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Filter for type-like symbols (what the `hug types` command does)
+    let type_symbols: Vec<_> = symbols
+        .into_iter()
+        .filter(|s| s.kind.is_type())
+        .collect();
+
+    // Should find both structs and enums
+    assert!(
+        type_symbols.iter().any(|s| s.name == "Point"),
+        "Point struct should be in types"
+    );
+    assert!(
+        type_symbols.iter().any(|s| s.name == "Message"),
+        "Message enum should be in types"
+    );
+    assert!(
+        type_symbols.iter().any(|s| s.name == "Result"),
+        "Result enum should be in types"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn distinguishes_typescript_interface_from_enum() -> Result<(), TreeHuggerError> {
+    // Regression test: TypeScript enums should be SymbolKind::Enum, not Type
+    let tree_file = TreeFile::new(fixture_path("sample.ts"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Check that GreetingService interface is captured as Interface
+    let greeting_service = symbols
+        .iter()
+        .find(|s| s.name == "GreetingService")
+        .expect("should find GreetingService");
+    assert_eq!(
+        greeting_service.kind,
+        tree_hugger_lib::SymbolKind::Interface,
+        "GreetingService should be SymbolKind::Interface"
+    );
+
+    // Check that GreetFn type alias is captured as Type
+    let greet_fn = symbols
+        .iter()
+        .find(|s| s.name == "GreetFn")
+        .expect("should find GreetFn");
+    assert_eq!(
+        greet_fn.kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "GreetFn type alias should be SymbolKind::Type"
+    );
+
+    // Check that Status enum is captured as Enum, not Type
+    let status = symbols
+        .iter()
+        .find(|s| s.name == "Status")
+        .expect("should find Status");
+    assert_eq!(
+        status.kind,
+        tree_hugger_lib::SymbolKind::Enum,
+        "Status enum should be SymbolKind::Enum, not Type"
+    );
+
+    Ok(())
+}
+
+// ============================================================================
+// Comprehensive type distinction tests for all typed languages
+// ============================================================================
+
+#[test]
+fn distinguishes_java_types() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("types.java"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Class should be Type (Java classes are the primary type mechanism)
+    let point = symbols.iter().find(|s| s.name == "Point");
+    assert!(point.is_some(), "should find Point class");
+    assert_eq!(
+        point.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "Java class should be SymbolKind::Type"
+    );
+
+    // Enum should be Enum
+    let status = symbols.iter().find(|s| s.name == "Status");
+    assert!(status.is_some(), "should find Status enum");
+    assert_eq!(
+        status.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Enum,
+        "Java enum should be SymbolKind::Enum"
+    );
+
+    // Record should be Type (Java records are a type mechanism)
+    let person = symbols.iter().find(|s| s.name == "Person");
+    assert!(person.is_some(), "should find Person record");
+    assert_eq!(
+        person.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "Java record should be SymbolKind::Type"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn distinguishes_c_types() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("types.c"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Struct should be Type
+    let point = symbols.iter().find(|s| s.name == "Point");
+    assert!(point.is_some(), "should find Point struct");
+    assert_eq!(
+        point.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "C struct should be SymbolKind::Type"
+    );
+
+    // Enum should be Enum
+    let status = symbols.iter().find(|s| s.name == "Status");
+    assert!(status.is_some(), "should find Status enum");
+    assert_eq!(
+        status.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Enum,
+        "C enum should be SymbolKind::Enum"
+    );
+
+    // Typedef should be Type
+    let alias = symbols.iter().find(|s| s.name == "PointAlias");
+    assert!(alias.is_some(), "should find PointAlias typedef");
+    assert_eq!(
+        alias.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "C typedef should be SymbolKind::Type"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn distinguishes_cpp_types() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("types.cpp"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Struct should be Type
+    let point = symbols.iter().find(|s| s.name == "Point");
+    assert!(point.is_some(), "should find Point struct");
+    assert_eq!(
+        point.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "C++ struct should be SymbolKind::Type"
+    );
+
+    // Class should be Type
+    let greeter = symbols.iter().find(|s| s.name == "Greeter");
+    assert!(greeter.is_some(), "should find Greeter class");
+    assert_eq!(
+        greeter.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "C++ class should be SymbolKind::Type"
+    );
+
+    // Enum should be Enum
+    let status = symbols.iter().find(|s| s.name == "Status");
+    assert!(status.is_some(), "should find Status enum");
+    assert_eq!(
+        status.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Enum,
+        "C++ enum should be SymbolKind::Enum"
+    );
+
+    // Scoped enum (enum class) should also be Enum
+    let color = symbols.iter().find(|s| s.name == "Color");
+    assert!(color.is_some(), "should find Color enum class");
+    assert_eq!(
+        color.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Enum,
+        "C++ enum class should be SymbolKind::Enum"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn distinguishes_csharp_types() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("types.cs"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Struct should be Type
+    let point = symbols.iter().find(|s| s.name == "Point");
+    assert!(point.is_some(), "should find Point struct");
+    assert_eq!(
+        point.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "C# struct should be SymbolKind::Type"
+    );
+
+    // Class should be Class
+    let greeter = symbols.iter().find(|s| s.name == "Greeter");
+    assert!(greeter.is_some(), "should find Greeter class");
+    assert_eq!(
+        greeter.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Class,
+        "C# class should be SymbolKind::Class"
+    );
+
+    // Interface should be Interface
+    let service = symbols.iter().find(|s| s.name == "IGreetingService");
+    assert!(service.is_some(), "should find IGreetingService interface");
+    assert_eq!(
+        service.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Interface,
+        "C# interface should be SymbolKind::Interface"
+    );
+
+    // Enum should be Enum
+    let status = symbols.iter().find(|s| s.name == "Status");
+    assert!(status.is_some(), "should find Status enum");
+    assert_eq!(
+        status.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Enum,
+        "C# enum should be SymbolKind::Enum"
+    );
+
+    // Record should be Type
+    let person = symbols.iter().find(|s| s.name == "Person");
+    assert!(person.is_some(), "should find Person record");
+    assert_eq!(
+        person.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "C# record should be SymbolKind::Type"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn distinguishes_swift_types() -> Result<(), TreeHuggerError> {
+    // Note: Swift's tree-sitter grammar uses a single `class_declaration` node for
+    // struct, class, and enum, with a `declaration_kind` field to differentiate.
+    // Fine-grained distinction would require Rust-level handling of this field.
+    // For now, all are captured as Type, with protocols captured as Interface.
+    let tree_file = TreeFile::new(fixture_path("types.swift"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Struct should be Type (Swift grammar limitation - all class_declaration are Type)
+    let point = symbols.iter().find(|s| s.name == "Point");
+    assert!(point.is_some(), "should find Point struct");
+    assert_eq!(
+        point.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "Swift struct should be SymbolKind::Type"
+    );
+
+    // Class should be Type (Swift grammar limitation)
+    let greeter = symbols.iter().find(|s| s.name == "Greeter");
+    assert!(greeter.is_some(), "should find Greeter class");
+    assert_eq!(
+        greeter.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "Swift class should be SymbolKind::Type (grammar limitation)"
+    );
+
+    // Enum should be Type (Swift grammar limitation)
+    let status = symbols.iter().find(|s| s.name == "Status");
+    assert!(status.is_some(), "should find Status enum");
+    assert_eq!(
+        status.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "Swift enum should be SymbolKind::Type (grammar limitation)"
+    );
+
+    // Protocol should be Interface (this works correctly)
+    let service = symbols.iter().find(|s| s.name == "GreetingService");
+    assert!(service.is_some(), "should find GreetingService protocol");
+    assert_eq!(
+        service.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Interface,
+        "Swift protocol should be SymbolKind::Interface"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn distinguishes_scala_types() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("types.scala"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Class should be Class
+    let point = symbols.iter().find(|s| s.name == "Point");
+    assert!(point.is_some(), "should find Point class");
+    assert_eq!(
+        point.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Class,
+        "Scala class should be SymbolKind::Class"
+    );
+
+    // Trait should be Trait
+    let greeter = symbols.iter().find(|s| s.name == "Greeter");
+    assert!(greeter.is_some(), "should find Greeter trait");
+    assert_eq!(
+        greeter.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Trait,
+        "Scala trait should be SymbolKind::Trait"
+    );
+
+    // Object should be Module
+    let default_greeter = symbols.iter().find(|s| s.name == "DefaultGreeter");
+    assert!(default_greeter.is_some(), "should find DefaultGreeter object");
+    assert_eq!(
+        default_greeter.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Module,
+        "Scala object should be SymbolKind::Module"
+    );
+
+    // Enum should be Enum (Scala 3)
+    let status = symbols.iter().find(|s| s.name == "Status");
+    assert!(status.is_some(), "should find Status enum");
+    assert_eq!(
+        status.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Enum,
+        "Scala 3 enum should be SymbolKind::Enum"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn distinguishes_php_types() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("types.php"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Class should be Class
+    let greeter = symbols.iter().find(|s| s.name == "Greeter");
+    assert!(greeter.is_some(), "should find Greeter class");
+    assert_eq!(
+        greeter.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Class,
+        "PHP class should be SymbolKind::Class"
+    );
+
+    // Interface should be Interface
+    let service = symbols.iter().find(|s| s.name == "GreetingService");
+    assert!(service.is_some(), "should find GreetingService interface");
+    assert_eq!(
+        service.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Interface,
+        "PHP interface should be SymbolKind::Interface"
+    );
+
+    // Trait should be Trait
+    let greeting_trait = symbols.iter().find(|s| s.name == "GreetingTrait");
+    assert!(greeting_trait.is_some(), "should find GreetingTrait trait");
+    assert_eq!(
+        greeting_trait.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Trait,
+        "PHP trait should be SymbolKind::Trait"
+    );
+
+    // Enum should be Enum (PHP 8.1+)
+    let status = symbols.iter().find(|s| s.name == "Status");
+    assert!(status.is_some(), "should find Status enum");
+    assert_eq!(
+        status.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Enum,
+        "PHP enum should be SymbolKind::Enum"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn distinguishes_go_types() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("types.go"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Struct should be Type (Go uses type for all type definitions)
+    let point = symbols.iter().find(|s| s.name == "Point");
+    assert!(point.is_some(), "should find Point struct");
+    assert_eq!(
+        point.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "Go struct should be SymbolKind::Type"
+    );
+
+    // Interface should also be Type (Go doesn't distinguish at AST level)
+    // This is expected behavior for Go - the type keyword is used for both
+    let service = symbols.iter().find(|s| s.name == "GreetingService");
+    assert!(service.is_some(), "should find GreetingService interface");
+    assert_eq!(
+        service.unwrap().kind,
+        tree_hugger_lib::SymbolKind::Type,
+        "Go interface should be SymbolKind::Type (Go uses 'type' for all)"
+    );
+
+    Ok(())
+}

@@ -53,3 +53,10 @@ export interface GreetingService {
 
 /** Type alias for a greeting function. */
 export type GreetFn = (name: string) => string;
+
+/** Status codes for responses. */
+export enum Status {
+    Success,
+    Error,
+    Pending,
+}
