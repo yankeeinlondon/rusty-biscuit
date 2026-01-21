@@ -72,6 +72,12 @@ Following our restructuring work we will:
                     - pressing `ESC` will bring the user back to the main window
                     - pressing `F` will bring up a temporary "filter" modal which will allow the user to
 
+### Showing Status on Main window
+
+- The main window shows the tasks upcoming but also those which have completed
+- When a queued task is executed the task line is italicized and dimmed
+
+
 ### The "where" parameter
 
 When a task is setup it will always default to:
@@ -141,6 +147,5 @@ This is a low fidelity draft of what the History modal might look like:
 ## Skills
 
 - use the `wezterm` skill for working with Wezterm's CLI and multiplexing functionality
-- use the `ghostty` skill for working with Ghostty's multiplexing functionality
 - use the `ratatui` and `crossterm` skills for working with the TUI
 - ALWAYS use the `rust` and `rust-testing` skills
