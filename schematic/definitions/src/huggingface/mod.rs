@@ -531,11 +531,7 @@ mod tests {
     fn text_response_endpoints() {
         let api = define_huggingface_hub_api();
 
-        let text_endpoints = [
-            "GetModelReadme",
-            "GetModelCard",
-            "GetDatasetReadme",
-        ];
+        let text_endpoints = ["GetModelReadme", "GetModelCard", "GetDatasetReadme"];
 
         for id in &text_endpoints {
             let endpoint = api

@@ -166,7 +166,9 @@ fn format_skill_actions(claude: &SkillAction, opencode: &SkillAction) -> String 
         // Failures
         (SkillAction::FailedPermissionDenied(msg), _)
         | (_, SkillAction::FailedPermissionDenied(msg)) => {
-            format!("failed (permission denied: {})", msg).red().to_string()
+            format!("failed (permission denied: {})", msg)
+                .red()
+                .to_string()
         }
 
         (SkillAction::FailedOther(msg), _) | (_, SkillAction::FailedOther(msg)) => {
@@ -186,9 +188,7 @@ fn format_skill_actions(claude: &SkillAction, opencode: &SkillAction) -> String 
 fn format_doc_actions(claude: &SkillAction, opencode: &SkillAction) -> String {
     match (claude, opencode) {
         // Both created successfully
-        (SkillAction::CreatedLink, SkillAction::CreatedLink) => {
-            "docs linked".green().to_string()
-        }
+        (SkillAction::CreatedLink, SkillAction::CreatedLink) => "docs linked".green().to_string(),
 
         // Both already linked
         (SkillAction::NoneAlreadyLinked, SkillAction::NoneAlreadyLinked) => {
@@ -585,8 +585,12 @@ mod tests {
     #[test]
     fn test_format_terminal_with_stale_symlinks_removed() {
         let mut result = LinkResult::new();
-        result.stale_removed.push("/home/user/.claude/skills/old-skill".to_string());
-        result.stale_removed.push("/home/user/.config/opencode/skill/another".to_string());
+        result
+            .stale_removed
+            .push("/home/user/.claude/skills/old-skill".to_string());
+        result
+            .stale_removed
+            .push("/home/user/.config/opencode/skill/another".to_string());
 
         let output = format_terminal(&result);
         assert!(output.contains("Cleaned up 2 stale symlink"));
@@ -668,7 +672,10 @@ mod tests {
     fn test_format_json_with_stale_symlinks() {
         let mut result = LinkResult::new();
         result.stale_removed.push("/path/to/removed".to_string());
-        result.stale_failed.push(("/path/to/failed".to_string(), "permission denied".to_string()));
+        result.stale_failed.push((
+            "/path/to/failed".to_string(),
+            "permission denied".to_string(),
+        ));
 
         let json = format_json(&result).unwrap();
         assert!(json.contains("\"stale_removed\""));

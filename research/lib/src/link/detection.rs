@@ -140,7 +140,10 @@ pub fn scan_and_remove_stale_symlinks(dir: &Path) -> StaleSymlinkScanResult {
 
     // If directory doesn't exist, nothing to scan
     if !dir.exists() {
-        debug!("Directory does not exist, skipping stale symlink scan: {}", dir.display());
+        debug!(
+            "Directory does not exist, skipping stale symlink scan: {}",
+            dir.display()
+        );
         return result;
     }
 
@@ -148,7 +151,11 @@ pub fn scan_and_remove_stale_symlinks(dir: &Path) -> StaleSymlinkScanResult {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) => {
-            warn!("Failed to read directory for stale symlink scan: {}: {}", dir.display(), e);
+            warn!(
+                "Failed to read directory for stale symlink scan: {}: {}",
+                dir.display(),
+                e
+            );
             return result;
         }
     };

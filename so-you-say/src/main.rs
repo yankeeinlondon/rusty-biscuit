@@ -1,4 +1,6 @@
-use biscuit_speaks::{Gender, SystemVoiceInfo, VoiceConfig, VoiceSelector, available_system_voices};
+use biscuit_speaks::{
+    Gender, SystemVoiceInfo, VoiceConfig, VoiceSelector, available_system_voices,
+};
 use clap::{Parser, ValueEnum};
 use std::io::{self, Read};
 

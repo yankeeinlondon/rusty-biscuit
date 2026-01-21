@@ -66,32 +66,9 @@ impl InstalledEditors {
     /// Detect which popular editors are installed on the system.
     pub fn new() -> Self {
         let programs = [
-            "vi",
-            "vim",
-            "nvim",
-            "emacs",
-            "xemacs",
-            "nano",
-            "hx",
-            "code",
-            "codium",
-            "subl",
-            "zed",
-            "micro",
-            "kak",
-            "amp",
-            "lapce",
-            "phpstorm",
-            "idea",
-            "pycharm",
-            "webstorm",
-            "clion",
-            "goland",
-            "rider",
-            "mate",
-            "bbedit",
-            "geany",
-            "kate",
+            "vi", "vim", "nvim", "emacs", "xemacs", "nano", "hx", "code", "codium", "subl", "zed",
+            "micro", "kak", "amp", "lapce", "phpstorm", "idea", "pycharm", "webstorm", "clion",
+            "goland", "rider", "mate", "bbedit", "geany", "kate",
         ];
 
         let results = find_programs_parallel(&programs);

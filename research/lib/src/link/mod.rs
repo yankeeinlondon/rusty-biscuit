@@ -104,8 +104,7 @@ pub async fn link(
         detection::get_claude_skills_dir().map_err(|_| LinkError::HomeDirectory)?;
     let opencode_skills_dir =
         detection::get_opencode_skills_dir().map_err(|_| LinkError::HomeDirectory)?;
-    let claude_docs_dir =
-        detection::get_claude_docs_dir().map_err(|_| LinkError::HomeDirectory)?;
+    let claude_docs_dir = detection::get_claude_docs_dir().map_err(|_| LinkError::HomeDirectory)?;
     let opencode_docs_dir =
         detection::get_opencode_docs_dir().map_err(|_| LinkError::HomeDirectory)?;
 
@@ -268,7 +267,10 @@ pub async fn link(
             } else {
                 match creation::create_deep_dive_symlink(&deep_dive_path, &claude_doc_target) {
                     Ok(()) => {
-                        info!("Created deep dive symlink for {} at Claude Code", topic.name);
+                        info!(
+                            "Created deep dive symlink for {} at Claude Code",
+                            topic.name
+                        );
                         SkillAction::CreatedLink
                     }
                     Err(creation::CreationError::SymlinkCreation(e))

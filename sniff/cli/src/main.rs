@@ -1,7 +1,7 @@
 use clap::Parser;
 use sniff_lib::package::enrich_dependencies;
 use sniff_lib::programs::ProgramsInfo;
-use sniff_lib::{detect_with_config, SniffConfig, SniffResult};
+use sniff_lib::{SniffConfig, SniffResult, detect_with_config};
 use std::path::PathBuf;
 
 mod output;

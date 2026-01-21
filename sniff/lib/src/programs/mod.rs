@@ -56,7 +56,9 @@ pub mod utilities;
 use serde::{Deserialize, Serialize};
 
 pub use editors::InstalledEditors;
-pub use enums::{Editor, LanguagePackageManager, OsPackageManager, TerminalApp, TtsClient, Utility};
+pub use enums::{
+    Editor, LanguagePackageManager, OsPackageManager, TerminalApp, TtsClient, Utility,
+};
 pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 pub use terminal_apps::InstalledTerminalApps;

@@ -13,8 +13,8 @@ use serde::Deserialize;
 use tracing::{debug, info, warn};
 
 use crate::api::auth::ApiAuthMethod;
-use crate::rigging::providers::provider_errors::ProviderError;
 use crate::rigging::providers::Provider;
+use crate::rigging::providers::provider_errors::ProviderError;
 
 /// Maximum response size in bytes (10 MB)
 const MAX_RESPONSE_SIZE: usize = 10 * 1024 * 1024;

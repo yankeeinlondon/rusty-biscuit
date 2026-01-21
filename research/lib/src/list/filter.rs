@@ -149,7 +149,9 @@ fn build_glob_matcher(patterns: &[String]) -> Result<globset::GlobSet, FilterErr
 ///
 /// Returns `true` if the pattern contains any of: `*`, `?`, `[`, `]`, `{`, `}`
 fn has_glob_metacharacters(pattern: &str) -> bool {
-    pattern.chars().any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
+    pattern
+        .chars()
+        .any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
 }
 
 #[cfg(test)]

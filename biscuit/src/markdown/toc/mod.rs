@@ -22,8 +22,8 @@ mod types;
 
 pub use types::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode, PreludeNode};
 
-use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
 use crate::markdown::Markdown;
+use biscuit_hash::{HashVariant, xx_hash, xx_hash_variant};
 use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
 
 /// Generates a URL-safe slug from heading text.

@@ -88,10 +88,7 @@ fn test_verbose_flag() {
 #[test]
 fn test_double_verbose_flag() {
     // -vv should work (higher verbosity)
-    cargo_bin_cmd!("sniff")
-        .arg("-vv")
-        .assert()
-        .success();
+    cargo_bin_cmd!("sniff").arg("-vv").assert().success();
 }
 
 // === Include-only mode tests ===
@@ -337,15 +334,30 @@ fn test_cpu_filter_with_json() {
     let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
 
     // Should have CPU fields at top level (flattened)
-    assert!(json.get("brand").is_some(), "brand field should exist at top level");
-    assert!(json.get("logical_cores").is_some(), "logical_cores should exist at top level");
+    assert!(
+        json.get("brand").is_some(),
+        "brand field should exist at top level"
+    );
+    assert!(
+        json.get("logical_cores").is_some(),
+        "logical_cores should exist at top level"
+    );
     assert!(json.get("simd").is_some(), "simd should exist at top level");
 
     // Should NOT have hardware/os/network/filesystem containers
-    assert!(json.get("hardware").is_none(), "hardware container should not exist");
+    assert!(
+        json.get("hardware").is_none(),
+        "hardware container should not exist"
+    );
     assert!(json.get("os").is_none(), "os section should not exist");
-    assert!(json.get("network").is_none(), "network section should not exist");
-    assert!(json.get("filesystem").is_none(), "filesystem section should not exist");
+    assert!(
+        json.get("network").is_none(),
+        "network section should not exist"
+    );
+    assert!(
+        json.get("filesystem").is_none(),
+        "filesystem section should not exist"
+    );
 }
 
 #[test]
@@ -363,12 +375,21 @@ fn test_memory_filter_with_json() {
     let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
 
     // Should have memory fields at top level (flattened)
-    assert!(json.get("total_bytes").unwrap().as_u64().unwrap() > 0, "memory should have non-zero total");
-    assert!(json.get("available_bytes").is_some(), "available_bytes should exist");
+    assert!(
+        json.get("total_bytes").unwrap().as_u64().unwrap() > 0,
+        "memory should have non-zero total"
+    );
+    assert!(
+        json.get("available_bytes").is_some(),
+        "available_bytes should exist"
+    );
     assert!(json.get("used_bytes").is_some(), "used_bytes should exist");
 
     // Should NOT have hardware/os/network/filesystem containers
-    assert!(json.get("hardware").is_none(), "hardware container should not exist");
+    assert!(
+        json.get("hardware").is_none(),
+        "hardware container should not exist"
+    );
     assert!(json.get("os").is_none());
     assert!(json.get("network").is_none());
     assert!(json.get("filesystem").is_none());
@@ -389,7 +410,10 @@ fn test_gpu_filter_with_json() {
     let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
 
     // Top level should be an array (GPU list)
-    assert!(json.is_array(), "GPU output should be an array at top level");
+    assert!(
+        json.is_array(),
+        "GPU output should be an array at top level"
+    );
 
     // The array might be empty on systems without GPU, but structure should be correct
     let gpu_array = json.as_array().unwrap();
@@ -414,7 +438,10 @@ fn test_storage_filter_with_json() {
     let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
 
     // Top level should be an array (storage/disk list)
-    assert!(json.is_array(), "Storage output should be an array at top level");
+    assert!(
+        json.is_array(),
+        "Storage output should be an array at top level"
+    );
 
     // Should have at least one disk
     let storage = json.as_array().unwrap();
@@ -439,10 +466,16 @@ fn test_git_filter_with_json() {
     let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
 
     // Should have git fields at top level (flattened)
-    assert!(json.get("repo_root").is_some() || json.get("current_branch").is_some(), "git data should exist at top level");
+    assert!(
+        json.get("repo_root").is_some() || json.get("current_branch").is_some(),
+        "git data should exist at top level"
+    );
 
     // Should NOT have filesystem/hardware/os/network containers
-    assert!(json.get("filesystem").is_none(), "filesystem container should not exist");
+    assert!(
+        json.get("filesystem").is_none(),
+        "filesystem container should not exist"
+    );
     assert!(json.get("hardware").is_none());
     assert!(json.get("os").is_none());
     assert!(json.get("network").is_none());
@@ -464,10 +497,16 @@ fn test_repo_filter_with_json() {
 
     // Top level should have repo fields (might be null if no repo structure detected)
     // Check for typical repo fields like "root", "is_monorepo", "packages"
-    assert!(json.is_object() || json.is_null(), "repo output should be object or null at top level");
+    assert!(
+        json.is_object() || json.is_null(),
+        "repo output should be object or null at top level"
+    );
 
     // Should NOT have filesystem/hardware/os/network containers
-    assert!(json.get("filesystem").is_none(), "filesystem container should not exist");
+    assert!(
+        json.get("filesystem").is_none(),
+        "filesystem container should not exist"
+    );
     assert!(json.get("hardware").is_none());
     assert!(json.get("os").is_none());
     assert!(json.get("network").is_none());
@@ -489,10 +528,16 @@ fn test_language_filter_with_json() {
 
     // Top level should have language fields (might be null if no languages detected)
     // Check for typical language breakdown fields like "total_files", "languages", "primary"
-    assert!(json.is_object() || json.is_null(), "language output should be object or null at top level");
+    assert!(
+        json.is_object() || json.is_null(),
+        "language output should be object or null at top level"
+    );
 
     // Should NOT have filesystem/hardware/os/network containers
-    assert!(json.get("filesystem").is_none(), "filesystem container should not exist");
+    assert!(
+        json.get("filesystem").is_none(),
+        "filesystem container should not exist"
+    );
     assert!(json.get("hardware").is_none());
     assert!(json.get("os").is_none());
     assert!(json.get("network").is_none());
@@ -553,14 +598,8 @@ fn test_hardware_flag_json_excludes_os() {
     );
 
     // Should have hardware data at top level (flattened)
-    assert!(
-        json.get("cpu").is_some(),
-        "CPU data should be at top level"
-    );
-    assert!(
-        json.get("gpu").is_some(),
-        "GPU data should be at top level"
-    );
+    assert!(json.get("cpu").is_some(), "CPU data should be at top level");
+    assert!(json.get("gpu").is_some(), "GPU data should be at top level");
     assert!(
         json.get("memory").is_some(),
         "Memory data should be at top level"
@@ -592,7 +631,12 @@ fn test_hardware_flag_json_flattens_structure() {
     );
 
     // Top-level keys should be the hardware components directly
-    let keys: Vec<&str> = json.as_object().unwrap().keys().map(|s| s.as_str()).collect();
+    let keys: Vec<&str> = json
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|s| s.as_str())
+        .collect();
     assert!(
         keys.contains(&"cpu"),
         "cpu should be a top-level key, got: {:?}",
@@ -792,10 +836,7 @@ fn test_os_flag_json_flattens_structure() {
     );
 
     // Top-level keys should be OS fields directly
-    assert!(
-        json.get("name").is_some(),
-        "name should be a top-level key"
-    );
+    assert!(json.get("name").is_some(), "name should be a top-level key");
     assert!(
         json.get("kernel").is_some(),
         "kernel should be a top-level key"
@@ -815,10 +856,7 @@ fn test_os_flag_json_flattens_structure() {
         json.get("hardware").is_none(),
         "Should not have hardware key"
     );
-    assert!(
-        json.get("network").is_none(),
-        "Should not have network key"
-    );
+    assert!(json.get("network").is_none(), "Should not have network key");
     assert!(
         json.get("filesystem").is_none(),
         "Should not have filesystem key"
@@ -856,10 +894,7 @@ fn test_network_flag_json_flattens_structure() {
     );
 
     // Should not have other section keys
-    assert!(
-        json.get("os").is_none(),
-        "Should not have os key"
-    );
+    assert!(json.get("os").is_none(), "Should not have os key");
     assert!(
         json.get("hardware").is_none(),
         "Should not have hardware key"

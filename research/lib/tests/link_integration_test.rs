@@ -112,7 +112,14 @@ fn create_skill_with_deep_dive(library: &Path, name: &str, topic_type: &str) {
 
     // Create deep_dive.md
     let deep_dive = topic_dir.join("deep_dive.md");
-    fs::write(&deep_dive, format!("# {} Deep Dive\n\nComprehensive documentation for {}.", name, name)).unwrap();
+    fs::write(
+        &deep_dive,
+        format!(
+            "# {} Deep Dive\n\nComprehensive documentation for {}.",
+            name, name
+        ),
+    )
+    .unwrap();
 
     // Create metadata.json
     let metadata = topic_dir.join("metadata.json");
@@ -625,8 +632,18 @@ async fn test_stale_symlinks_are_removed_before_linking() {
     create_broken_symlink(&opencode_skills, "stale-opencode-skill");
 
     // Verify broken symlinks exist before running link
-    assert!(claude_skills.join("stale-claude-skill").symlink_metadata().is_ok());
-    assert!(opencode_skills.join("stale-opencode-skill").symlink_metadata().is_ok());
+    assert!(
+        claude_skills
+            .join("stale-claude-skill")
+            .symlink_metadata()
+            .is_ok()
+    );
+    assert!(
+        opencode_skills
+            .join("stale-opencode-skill")
+            .symlink_metadata()
+            .is_ok()
+    );
 
     // Set environment variables
     unsafe {
@@ -647,13 +664,33 @@ async fn test_stale_symlinks_are_removed_before_linking() {
     let link_result = result.unwrap();
 
     // Verify stale symlinks were removed
-    assert!(!claude_skills.join("stale-claude-skill").symlink_metadata().is_ok());
-    assert!(!opencode_skills.join("stale-opencode-skill").symlink_metadata().is_ok());
+    assert!(
+        !claude_skills
+            .join("stale-claude-skill")
+            .symlink_metadata()
+            .is_ok()
+    );
+    assert!(
+        !opencode_skills
+            .join("stale-opencode-skill")
+            .symlink_metadata()
+            .is_ok()
+    );
 
     // Verify stale_removed contains our broken symlinks
     assert_eq!(link_result.stale_removed.len(), 2);
-    assert!(link_result.stale_removed.iter().any(|s| s.contains("stale-claude-skill")));
-    assert!(link_result.stale_removed.iter().any(|s| s.contains("stale-opencode-skill")));
+    assert!(
+        link_result
+            .stale_removed
+            .iter()
+            .any(|s| s.contains("stale-claude-skill"))
+    );
+    assert!(
+        link_result
+            .stale_removed
+            .iter()
+            .any(|s| s.contains("stale-opencode-skill"))
+    );
 }
 
 #[tokio::test]
@@ -736,19 +773,41 @@ async fn test_deep_dive_symlinks_created_with_topic_name() {
     let claude_doc_link = claude_docs.join("test-topic.md");
     let opencode_doc_link = opencode_docs.join("test-topic.md");
 
-    assert!(claude_doc_link.exists(), "Claude Code doc symlink should exist");
-    assert!(claude_doc_link.is_symlink(), "Claude Code doc should be a symlink");
-    assert!(opencode_doc_link.exists(), "OpenCode doc symlink should exist");
-    assert!(opencode_doc_link.is_symlink(), "OpenCode doc should be a symlink");
+    assert!(
+        claude_doc_link.exists(),
+        "Claude Code doc symlink should exist"
+    );
+    assert!(
+        claude_doc_link.is_symlink(),
+        "Claude Code doc should be a symlink"
+    );
+    assert!(
+        opencode_doc_link.exists(),
+        "OpenCode doc symlink should exist"
+    );
+    assert!(
+        opencode_doc_link.is_symlink(),
+        "OpenCode doc should be a symlink"
+    );
 
     // Verify content is accessible through symlink
     let content = fs::read_to_string(&claude_doc_link).unwrap();
     assert!(content.contains("test-topic Deep Dive"));
 
     // Verify doc actions in result
-    let topic_link = link_result.links.iter().find(|l| l.name == "test-topic").unwrap();
-    assert!(matches!(topic_link.claude_doc_action, Some(SkillAction::CreatedLink)));
-    assert!(matches!(topic_link.opencode_doc_action, Some(SkillAction::CreatedLink)));
+    let topic_link = link_result
+        .links
+        .iter()
+        .find(|l| l.name == "test-topic")
+        .unwrap();
+    assert!(matches!(
+        topic_link.claude_doc_action,
+        Some(SkillAction::CreatedLink)
+    ));
+    assert!(matches!(
+        topic_link.opencode_doc_action,
+        Some(SkillAction::CreatedLink)
+    ));
 }
 
 #[tokio::test]
@@ -773,8 +832,15 @@ async fn test_deep_dive_links_are_idempotent() {
     let link_result1 = result1.unwrap();
 
     // Verify first run created links
-    let topic1 = link_result1.links.iter().find(|l| l.name == "test-topic").unwrap();
-    assert!(matches!(topic1.claude_doc_action, Some(SkillAction::CreatedLink)));
+    let topic1 = link_result1
+        .links
+        .iter()
+        .find(|l| l.name == "test-topic")
+        .unwrap();
+    assert!(matches!(
+        topic1.claude_doc_action,
+        Some(SkillAction::CreatedLink)
+    ));
 
     // Run link command second time
     let result2 = link(vec![], vec![], false).await;
@@ -788,8 +854,15 @@ async fn test_deep_dive_links_are_idempotent() {
     }
 
     // Verify second run reports already linked
-    let topic2 = link_result2.links.iter().find(|l| l.name == "test-topic").unwrap();
-    assert!(matches!(topic2.claude_doc_action, Some(SkillAction::NoneAlreadyLinked)));
+    let topic2 = link_result2
+        .links
+        .iter()
+        .find(|l| l.name == "test-topic")
+        .unwrap();
+    assert!(matches!(
+        topic2.claude_doc_action,
+        Some(SkillAction::NoneAlreadyLinked)
+    ));
 
     // Symlink should still work
     let doc_link = claude_docs.join("test-topic.md");
@@ -826,7 +899,11 @@ async fn test_no_deep_dive_results_in_none_doc_action() {
     let link_result = result.unwrap();
 
     // Verify doc actions are None when no deep_dive.md exists
-    let topic = link_result.links.iter().find(|l| l.name == "no-deep-dive").unwrap();
+    let topic = link_result
+        .links
+        .iter()
+        .find(|l| l.name == "no-deep-dive")
+        .unwrap();
     assert!(topic.claude_doc_action.is_none());
     assert!(topic.opencode_doc_action.is_none());
 }
@@ -913,9 +990,24 @@ async fn test_stale_doc_symlinks_also_removed() {
 
     // Verify stale doc symlinks were removed
     assert!(!claude_docs.join("stale-doc.md").symlink_metadata().is_ok());
-    assert!(!opencode_docs.join("another-stale.md").symlink_metadata().is_ok());
+    assert!(
+        !opencode_docs
+            .join("another-stale.md")
+            .symlink_metadata()
+            .is_ok()
+    );
 
     // Verify stale_removed contains the doc symlinks
-    assert!(link_result.stale_removed.iter().any(|s| s.contains("stale-doc.md")));
-    assert!(link_result.stale_removed.iter().any(|s| s.contains("another-stale.md")));
+    assert!(
+        link_result
+            .stale_removed
+            .iter()
+            .any(|s| s.contains("stale-doc.md"))
+    );
+    assert!(
+        link_result
+            .stale_removed
+            .iter()
+            .any(|s| s.contains("another-stale.md"))
+    );
 }

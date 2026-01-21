@@ -735,7 +735,10 @@ pub struct Co2Emissions {
     pub training_type: Option<String>,
 
     /// Geographical location of training.
-    #[serde(rename = "geographical_location", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "geographical_location",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub geographical_location: Option<String>,
 
     /// Hardware used for training.
@@ -995,7 +998,11 @@ pub struct DatasetCardData {
     pub tags: Vec<String>,
 
     /// Task categories.
-    #[serde(rename = "task_categories", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "task_categories",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub task_categories: Vec<String>,
 
     /// Task IDs.
@@ -1003,7 +1010,11 @@ pub struct DatasetCardData {
     pub task_ids: Vec<String>,
 
     /// Size category.
-    #[serde(rename = "size_categories", default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        rename = "size_categories",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub size_categories: Vec<String>,
 
     /// Pretty name.
@@ -1393,7 +1404,10 @@ pub struct WhoAmIResponse {
     pub is_pro: bool,
 
     /// Periodic account data (models, datasets, etc.).
-    #[serde(rename = "periodicalAccountData", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "periodicalAccountData",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub periodical_account_data: Option<PeriodicalAccountData>,
 
     /// Avatar URL.
@@ -2273,12 +2287,18 @@ mod tests {
 
     #[test]
     fn repo_type_serialization() {
-        assert_eq!(serde_json::to_string(&RepoType::Model).unwrap(), "\"model\"");
+        assert_eq!(
+            serde_json::to_string(&RepoType::Model).unwrap(),
+            "\"model\""
+        );
         assert_eq!(
             serde_json::to_string(&RepoType::Dataset).unwrap(),
             "\"dataset\""
         );
-        assert_eq!(serde_json::to_string(&RepoType::Space).unwrap(), "\"space\"");
+        assert_eq!(
+            serde_json::to_string(&RepoType::Space).unwrap(),
+            "\"space\""
+        );
     }
 
     #[test]

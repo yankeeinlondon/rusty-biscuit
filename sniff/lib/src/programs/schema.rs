@@ -295,10 +295,12 @@ fn parse_version(output: &str, info: &ProgramInfo) -> Result<String, ProgramErro
         }
 
         VersionParseStrategy::Regex => {
-            let pattern = info.version_regex.ok_or_else(|| ProgramError::ParseFailed {
-                program: program.clone(),
-                details: "regex pattern not specified".to_string(),
-            })?;
+            let pattern = info
+                .version_regex
+                .ok_or_else(|| ProgramError::ParseFailed {
+                    program: program.clone(),
+                    details: "regex pattern not specified".to_string(),
+                })?;
             let re = regex::Regex::new(pattern).map_err(|e| ProgramError::ParseFailed {
                 program: program.clone(),
                 details: format!("invalid regex: {}", e),

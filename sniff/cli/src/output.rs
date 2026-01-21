@@ -162,13 +162,25 @@ fn format_uptime(seconds: u64) -> String {
         parts.push(format!("{} day{}", days, if days == 1 { "" } else { "s" }));
     }
     if hours > 0 {
-        parts.push(format!("{} hour{}", hours, if hours == 1 { "" } else { "s" }));
+        parts.push(format!(
+            "{} hour{}",
+            hours,
+            if hours == 1 { "" } else { "s" }
+        ));
     }
     if minutes > 0 || (days == 0 && hours == 0 && secs == 0) {
-        parts.push(format!("{} minute{}", minutes, if minutes == 1 { "" } else { "s" }));
+        parts.push(format!(
+            "{} minute{}",
+            minutes,
+            if minutes == 1 { "" } else { "s" }
+        ));
     }
     if secs > 0 && days == 0 && hours == 0 {
-        parts.push(format!("{} second{}", secs, if secs == 1 { "" } else { "s" }));
+        parts.push(format!(
+            "{} second{}",
+            secs,
+            if secs == 1 { "" } else { "s" }
+        ));
     }
 
     if parts.is_empty() {
@@ -434,7 +446,8 @@ fn print_hardware_section(
     );
     println!("  Used: {}", format_bytes(hardware.memory.used_bytes));
     if hardware.memory.total_swap > 0 {
-        println!("  Swap: {} total, {} used",
+        println!(
+            "  Swap: {} total, {} used",
             format_bytes(hardware.memory.total_swap),
             format_bytes(hardware.memory.used_swap)
         );
@@ -608,8 +621,7 @@ fn print_memory_section(memory: &sniff_lib::hardware::MemoryInfo) {
     println!("Total: {}", format_bytes(memory.total_bytes));
     println!("Available: {}", format_bytes(memory.available_bytes));
     println!("Used: {}", format_bytes(memory.used_bytes));
-    let usage_percent =
-        (memory.used_bytes as f64 / memory.total_bytes as f64) * 100.0;
+    let usage_percent = (memory.used_bytes as f64 / memory.total_bytes as f64) * 100.0;
     println!("Usage: {:.1}%", usage_percent);
 
     // Show swap information if swap is available
@@ -619,8 +631,7 @@ fn print_memory_section(memory: &sniff_lib::hardware::MemoryInfo) {
         println!("  Total: {}", format_bytes(memory.total_swap));
         println!("  Free: {}", format_bytes(memory.free_swap));
         println!("  Used: {}", format_bytes(memory.used_swap));
-        let swap_usage_percent =
-            (memory.used_swap as f64 / memory.total_swap as f64) * 100.0;
+        let swap_usage_percent = (memory.used_swap as f64 / memory.total_swap as f64) * 100.0;
         println!("  Usage: {:.1}%", swap_usage_percent);
     }
     println!();
@@ -680,10 +691,7 @@ fn print_git_section(
 
     if let Some(commit) = git.recent.first() {
         println!("HEAD: {} ({})", &commit.sha[..8], commit.author);
-        println!(
-            "Message: {}",
-            commit.message.lines().next().unwrap_or("")
-        );
+        println!("Message: {}", commit.message.lines().next().unwrap_or(""));
         if let Some(ref remotes) = commit.remotes {
             println!("Synced to: {}", remotes.join(", "));
         }
@@ -696,10 +704,7 @@ fn print_git_section(
     };
     println!(
         "Status: {} ({} staged, {} unstaged, {} untracked)",
-        dirty,
-        git.status.staged_count,
-        git.status.unstaged_count,
-        git.status.untracked_count
+        dirty, git.status.staged_count, git.status.unstaged_count, git.status.untracked_count
     );
 
     if let Some(ref behind) = git.status.is_behind {
@@ -1062,7 +1067,7 @@ fn print_filesystem_section(fs: &sniff_lib::FilesystemInfo, verbose: u8, repo_ro
 /// For subsection filters (--cpu, --gpu, --memory, --storage, --git, --repo, --language),
 /// the output is flattened to the top level without the parent container.
 fn apply_filter_to_json(result: &SniffResult, filter: OutputFilter) -> serde_json::Value {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     match filter {
         OutputFilter::All => {
@@ -1401,7 +1406,10 @@ fn print_terminal_apps_section(apps: &sniff_lib::programs::InstalledTerminalApps
 }
 
 /// Print programs information as JSON.
-pub fn print_programs_json(programs: &ProgramsInfo, filter: OutputFilter) -> serde_json::Result<()> {
+pub fn print_programs_json(
+    programs: &ProgramsInfo,
+    filter: OutputFilter,
+) -> serde_json::Result<()> {
     use serde_json::json;
 
     let json_value = match filter {
@@ -1455,10 +1463,7 @@ mod tests {
     fn test_format_uptime_days() {
         assert_eq!(format_uptime(86400), "1 day");
         assert_eq!(format_uptime(86400 + 3600), "1 day, 1 hour");
-        assert_eq!(
-            format_uptime(86400 + 3660),
-            "1 day, 1 hour, 1 minute"
-        );
+        assert_eq!(format_uptime(86400 + 3660), "1 day, 1 hour, 1 minute");
         assert_eq!(
             format_uptime(2 * 86400 + 5 * 3600 + 30 * 60),
             "2 days, 5 hours, 30 minutes"
