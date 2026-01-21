@@ -20,11 +20,13 @@
 (parameter
   (identifier) @local.definition.parameter)
 
+; Methods - capture full node for signature extraction
 (method_declaration
-  name: (identifier) @local.definition.method)
+  name: (identifier) @local.definition.method) @local.definition.method.context
 
+; Local functions - capture full node for signature extraction
 (local_function_statement
-  name: (identifier) @local.definition.method)
+  name: (identifier) @local.definition.method) @local.definition.method.context
 
 (property_declaration
   name: (identifier) @local.definition)
@@ -32,8 +34,9 @@
 (type_parameter
   (identifier) @local.definition.type)
 
+; Classes - capture full node for context
 (class_declaration
-  name: (identifier) @local.definition)
+  name: (identifier) @local.definition) @local.definition.type.context
 
 ; References
 (identifier) @local.reference

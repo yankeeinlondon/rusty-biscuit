@@ -8,21 +8,12 @@ use crate::error::TreeHuggerError;
 use crate::shared::ProgrammingLanguage;
 
 /// Configuration options for building a `TreePackage`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TreePackageConfig {
     /// Optional language override for the package.
     pub language: Option<ProgrammingLanguage>,
     /// Glob patterns to exclude when scanning files.
     pub ignores: Vec<String>,
-}
-
-impl Default for TreePackageConfig {
-    fn default() -> Self {
-        Self {
-            language: None,
-            ignores: Vec::new(),
-        }
-    }
 }
 
 /// A `TreePackage` represents a collection of related source files.
@@ -168,7 +159,7 @@ fn detect_primary_language(root: &Path) -> Result<ProgrammingLanguage, TreeHugge
             continue;
         }
 
-        if let Some(language) = ProgrammingLanguage::from_path(&entry.path()) {
+        if let Some(language) = ProgrammingLanguage::from_path(entry.path()) {
             *counts.entry(language).or_insert(0) += 1;
         }
     }

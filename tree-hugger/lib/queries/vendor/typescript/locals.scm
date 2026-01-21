@@ -29,3 +29,15 @@
 (required_parameter
   (rest_pattern
     (identifier) @local.definition.parameter))
+
+; Interface declarations - capture full node
+(interface_declaration
+  name: (type_identifier) @local.definition.interface) @local.definition.interface.context
+
+; Type alias declarations - capture full node
+(type_alias_declaration
+  name: (type_identifier) @local.definition.type) @local.definition.type.context
+
+; Enum declarations - capture full node
+(enum_declaration
+  name: (identifier) @local.definition.type) @local.definition.type.context

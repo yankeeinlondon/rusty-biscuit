@@ -1,9 +1,11 @@
+; Functions - capture full node for signature extraction
 ((function_declaration
-  name: (identifier) @local.definition.function) ; @function
+  name: (identifier) @local.definition.function) @local.definition.function.context
   )
 
+; Methods - capture full node for signature extraction
 ((method_declaration
-  name: (field_identifier) @local.definition.method) ; @function.method
+  name: (field_identifier) @local.definition.method) @local.definition.method.context
   )
 
 (short_var_declaration
@@ -28,9 +30,10 @@
   (const_spec
     name: (identifier) @local.definition.var))
 
+; Type definitions - capture full node
 (type_declaration
   (type_spec
-    name: (type_identifier) @local.definition.type))
+    name: (type_identifier) @local.definition.type)) @local.definition.type.context
 
 ; reference
 (identifier) @local.reference

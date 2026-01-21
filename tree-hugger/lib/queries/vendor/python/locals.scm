@@ -49,19 +49,21 @@
   (dictionary_splat_pattern
     (identifier) @local.definition.parameter))
 
-; Function defines function and scope
+; Function defines function and scope - capture full node for signature extraction
 ((function_definition
-  name: (identifier) @local.definition.function) @local.scope
+  name: (identifier) @local.definition.function) @local.scope @local.definition.function.context
   (#set! definition.function.scope "parent"))
 
+; Class defines type and scope - capture full node
 ((class_definition
-  name: (identifier) @local.definition.type) @local.scope
+  name: (identifier) @local.definition.type) @local.scope @local.definition.type.context
   (#set! definition.type.scope "parent"))
 
+; Methods - capture full node for signature extraction
 (class_definition
   body: (block
     (function_definition
-      name: (identifier) @local.definition.method)))
+      name: (identifier) @local.definition.method) @local.definition.method.context))
 
 ; Loops
 ; not a scope!

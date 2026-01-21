@@ -1,6 +1,6 @@
-; Functions definitions
+; Functions definitions - capture full node for signature extraction
 (function_declarator
-  declarator: (identifier) @local.definition.function)
+  declarator: (identifier) @local.definition.function) @local.definition.function.context
 
 (preproc_function_def
   name: (identifier) @local.definition.macro) @local.scope
@@ -33,11 +33,13 @@
 (field_declaration
   declarator: (field_identifier) @local.definition.field)
 
+; Type definitions - capture full node for context
 (type_definition
-  declarator: (type_identifier) @local.definition.type)
+  declarator: (type_identifier) @local.definition.type) @local.definition.type.context
 
+; Struct definitions - capture full node for context
 (struct_specifier
-  name: (type_identifier) @local.definition.type)
+  name: (type_identifier) @local.definition.type) @local.definition.type.context
 
 ; goto
 (labeled_statement

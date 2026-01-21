@@ -54,17 +54,21 @@
 (package_declaration
   (identifier) @local.definition.namespace)
 
+; Classes - capture full node for context
 (class_declaration
-  name: (identifier) @local.definition.type)
+  name: (identifier) @local.definition.type) @local.definition.type.context
 
+; Records - capture full node for context
 (record_declaration
-  name: (identifier) @local.definition.type)
+  name: (identifier) @local.definition.type) @local.definition.type.context
 
+; Enums - capture full node for context
 (enum_declaration
-  name: (identifier) @local.definition.enum)
+  name: (identifier) @local.definition.enum) @local.definition.enum.context
 
+; Methods - capture full node for signature extraction
 (method_declaration
-  name: (identifier) @local.definition.method)
+  name: (identifier) @local.definition.method) @local.definition.method.context
 
 (local_variable_declaration
   declarator: (variable_declarator

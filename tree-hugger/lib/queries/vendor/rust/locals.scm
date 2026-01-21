@@ -12,14 +12,15 @@
 (use_list
   (identifier) @local.definition.import) ; use std::process::{Child, Command, Stdio};
 
-; Functions
+; Functions - capture full node for signature extraction
 (function_item
-  name: (identifier) @local.definition.function)
+  name: (identifier) @local.definition.function) @local.definition.function.context
 
+; Methods (functions with self parameter)
 (function_item
   name: (identifier) @local.definition.method
   parameters: (parameters
-    (self_parameter)))
+    (self_parameter))) @local.definition.method.context
 
 ; Variables
 (parameter
@@ -52,10 +53,14 @@
 
 ; Types
 (struct_item
-  name: (type_identifier) @local.definition.type)
+  name: (type_identifier) @local.definition.type) @local.definition.type.context
 
 (enum_item
-  name: (type_identifier) @local.definition.type)
+  name: (type_identifier) @local.definition.type) @local.definition.type.context
+
+; Traits
+(trait_item
+  name: (type_identifier) @local.definition.trait) @local.definition.trait.context
 
 ; Fields
 (field_declaration

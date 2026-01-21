@@ -31,13 +31,18 @@
 (namespace_import
   (identifier) @local.definition.import)
 
+; Functions - capture full node for signature extraction
 (function_declaration
   (identifier) @local.definition.function
-  (#set! definition.var.scope parent))
+  (#set! definition.var.scope parent)) @local.definition.function.context
 
+; Methods - capture full node for signature extraction
 (method_definition
   (property_identifier) @local.definition.function
-  (#set! definition.var.scope parent))
+  (#set! definition.var.scope parent)) @local.definition.function.context
+
+; Arrow functions - capture full node for signature extraction
+(arrow_function) @local.definition.function.context
 
 ; References
 ;------------

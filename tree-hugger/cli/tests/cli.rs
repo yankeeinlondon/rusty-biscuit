@@ -238,3 +238,104 @@ fn test_glob_pattern_json() {
         .success()
         .stdout(predicate::str::contains("\"files\""));
 }
+
+// ============================================================================
+// Phase 7: CLI Output Enhancement tests
+// ============================================================================
+
+#[test]
+fn test_plain_flag_exists_in_help() {
+    // Regression test: --plain flag should appear in help output
+    hug_cmd()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--plain"));
+}
+
+#[test]
+fn test_plain_flag_suppresses_ansi() {
+    // Test that --plain output contains no ANSI escape codes
+    let output = hug_cmd()
+        .args(["symbols", "tree-hugger/lib/tests/fixtures/sample.rs", "--plain"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8_lossy(&output);
+    // ANSI escape codes start with ESC (0x1B)
+    assert!(
+        !stdout.contains('\x1b'),
+        "Output contains ANSI escape codes: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_json_output_has_no_escape_codes() {
+    // Test that --json output contains no ANSI escape codes
+    let output = hug_cmd()
+        .args(["symbols", "tree-hugger/lib/tests/fixtures/sample.rs", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8_lossy(&output);
+    // ANSI escape codes start with ESC (0x1B)
+    assert!(
+        !stdout.contains('\x1b'),
+        "JSON output contains ANSI escape codes: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_json_contains_doc_comment() {
+    // Test that JSON output includes doc_comment field for documented symbols
+    hug_cmd()
+        .args(["functions", "tree-hugger/lib/tests/fixtures/sample.rs", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"doc_comment\""))
+        .stdout(predicate::str::contains("Greets a person by name"));
+}
+
+#[test]
+fn test_json_contains_signature() {
+    // Test that JSON output includes signature field for functions
+    hug_cmd()
+        .args(["functions", "tree-hugger/lib/tests/fixtures/sample.rs", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"signature\""))
+        .stdout(predicate::str::contains("\"parameters\""));
+}
+
+#[test]
+fn test_json_signature_has_parameter_names() {
+    // Test that function signatures include parameter names
+    hug_cmd()
+        .args(["functions", "tree-hugger/lib/tests/fixtures/sample.rs", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"name\": \"name\""));
+}
+
+#[test]
+fn test_plain_flag_with_json_flag() {
+    // Test that --json takes precedence over --plain (produces JSON)
+    hug_cmd()
+        .args([
+            "symbols",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--plain",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"root_dir\""));
+}

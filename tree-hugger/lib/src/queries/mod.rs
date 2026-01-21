@@ -32,8 +32,10 @@ impl fmt::Display for QueryKind {
     }
 }
 
-static QUERY_CACHE: OnceLock<Mutex<HashMap<(ProgrammingLanguage, QueryKind), Arc<Query>>>> =
-    OnceLock::new();
+/// Cache type for compiled tree-sitter queries.
+type QueryCache = Mutex<HashMap<(ProgrammingLanguage, QueryKind), Arc<Query>>>;
+
+static QUERY_CACHE: OnceLock<QueryCache> = OnceLock::new();
 
 /// Loads and caches a query for the requested language and kind.
 pub fn query_for(

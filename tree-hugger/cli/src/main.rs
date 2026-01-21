@@ -1,11 +1,14 @@
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
+use owo_colors::{OwoColorize, Style};
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use tree_hugger_lib::{
-    FileSummary, ImportSymbol, PackageSummary, ProgrammingLanguage, SymbolInfo, TreeFile,
-    TreeHuggerError,
+    FileSummary, FunctionSignature, ImportSymbol, PackageSummary, ParameterInfo,
+    ProgrammingLanguage, SymbolInfo, SymbolKind, TreeFile, TreeHuggerError,
 };
 
 #[derive(Parser, Debug)]
@@ -27,6 +30,10 @@ struct Cli {
     #[arg(long, global = true)]
     json: bool,
 
+    /// Disable colors and hyperlinks (plain text output)
+    #[arg(long, global = true)]
+    plain: bool,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -36,6 +43,8 @@ impl Cli {
     fn output_format(&self) -> OutputFormat {
         if self.json {
             OutputFormat::Json
+        } else if self.plain {
+            OutputFormat::Plain
         } else {
             OutputFormat::Pretty
         }
@@ -100,8 +109,65 @@ enum CommandKind {
 
 #[derive(Debug, Clone, Copy)]
 enum OutputFormat {
+    /// Colored output with hyperlinks (default when TTY)
     Pretty,
+    /// Plain text without colors or hyperlinks
+    Plain,
+    /// JSON output
     Json,
+}
+
+/// Configuration for output styling.
+struct OutputConfig {
+    use_colors: bool,
+    use_hyperlinks: bool,
+}
+
+impl OutputConfig {
+    fn new(format: OutputFormat) -> Self {
+        match format {
+            OutputFormat::Pretty => {
+                // Check NO_COLOR environment variable and TTY
+                let no_color = std::env::var("NO_COLOR").is_ok();
+                let is_tty = std::io::stdout().is_terminal();
+                let use_colors = !no_color && is_tty;
+                Self {
+                    use_colors,
+                    use_hyperlinks: use_colors && is_tty,
+                }
+            }
+            OutputFormat::Plain | OutputFormat::Json => Self {
+                use_colors: false,
+                use_hyperlinks: false,
+            },
+        }
+    }
+}
+
+/// Returns the color style for a symbol kind.
+fn style_for_kind(kind: SymbolKind) -> Style {
+    match kind {
+        SymbolKind::Function | SymbolKind::Method => Style::new().green(),
+        SymbolKind::Type | SymbolKind::Class | SymbolKind::Interface => Style::new().magenta(),
+        SymbolKind::Enum => Style::new().cyan(),
+        SymbolKind::Trait => Style::new().yellow(),
+        SymbolKind::Variable | SymbolKind::Parameter => Style::new().blue(),
+        SymbolKind::Field => Style::new().cyan(),
+        SymbolKind::Namespace | SymbolKind::Module => Style::new().yellow(),
+        SymbolKind::Macro => Style::new().red(),
+        SymbolKind::Constant => Style::new().bright_blue(),
+        SymbolKind::Unknown => Style::new(),
+    }
+}
+
+/// Creates an OSC8 hyperlink for a file path with line number.
+fn hyperlink(path: &Path, line: usize, text: &str) -> String {
+    let path_str = path.to_string_lossy();
+    let encoded = utf8_percent_encode(&path_str, NON_ALPHANUMERIC);
+    format!(
+        "\x1b]8;;file://{}#L{}\x1b\\{}\x1b]8;;\x1b\\",
+        encoded, line, text
+    )
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
@@ -151,6 +217,8 @@ fn main() -> Result<(), TreeHuggerError> {
     let cli = Cli::parse();
     let language = cli.language.map(ProgrammingLanguage::from);
     let inputs = cli.command.inputs();
+    let output_format = cli.output_format();
+    let output_config = OutputConfig::new(output_format);
 
     let root_dir = current_dir()?;
     let files = collect_files(&root_dir, inputs, &cli.ignore, language)?;
@@ -163,7 +231,7 @@ fn main() -> Result<(), TreeHuggerError> {
         summaries.push(summary);
     }
 
-    match cli.output_format() {
+    match output_format {
         OutputFormat::Json => {
             let package_language = language
                 .or_else(|| summaries.first().map(|summary| summary.language))
@@ -182,9 +250,9 @@ fn main() -> Result<(), TreeHuggerError> {
                 })?;
             println!("{json}");
         }
-        OutputFormat::Pretty => {
+        OutputFormat::Pretty | OutputFormat::Plain => {
             for summary in summaries {
-                render_summary(&summary, command_kind);
+                render_summary(&summary, command_kind, &output_config);
             }
         }
     }
@@ -302,44 +370,199 @@ fn summarize_file(
     Ok(summary)
 }
 
-fn render_summary(summary: &FileSummary, command: CommandKind) {
-    println!("{} ({})", summary.file.display(), summary.language);
+fn render_summary(summary: &FileSummary, command: CommandKind, config: &OutputConfig) {
+    // Render file header with optional hyperlink
+    let file_display = summary.file.display().to_string();
+    let header = if config.use_hyperlinks {
+        hyperlink(&summary.file, 1, &file_display)
+    } else {
+        file_display
+    };
+
+    if config.use_colors {
+        println!(
+            "{} ({})",
+            header.bold(),
+            summary.language.to_string().dimmed()
+        );
+    } else {
+        println!("{} ({})", header, summary.language);
+    }
 
     match command {
-        CommandKind::Imports => render_imports(&summary.imports),
-        CommandKind::Exports => render_symbols(&summary.exports),
+        CommandKind::Imports => render_imports(&summary.imports, config),
+        CommandKind::Exports => render_symbols(&summary.exports, config),
         CommandKind::Functions | CommandKind::Types | CommandKind::Symbols => {
-            render_symbols(&summary.symbols)
+            render_symbols(&summary.symbols, config)
         }
     }
 
     println!();
 }
 
-fn render_symbols(symbols: &[SymbolInfo]) {
+fn render_symbols(symbols: &[SymbolInfo], config: &OutputConfig) {
     if symbols.is_empty() {
-        println!("  (no symbols)");
+        if config.use_colors {
+            println!("  {}", "(no symbols)".dimmed());
+        } else {
+            println!("  (no symbols)");
+        }
         return;
     }
 
     for symbol in symbols {
-        println!(
-            "  - {} {} [{}:{}]",
-            symbol.kind, symbol.name, symbol.range.start_line, symbol.range.start_column
-        );
+        let location = format!("[{}:{}]", symbol.range.start_line, symbol.range.start_column);
+        let location_display = if config.use_hyperlinks {
+            hyperlink(&symbol.file, symbol.range.start_line, &location)
+        } else {
+            location
+        };
+
+        // Format symbol name with signature for functions/methods
+        let name_with_sig = format_symbol_name(symbol, symbol.language);
+
+        if config.use_colors {
+            let kind_style = style_for_kind(symbol.kind);
+            println!(
+                "  - {} {} {}",
+                symbol.kind.to_string().style(kind_style),
+                name_with_sig.bold(),
+                location_display.dimmed()
+            );
+        } else {
+            println!("  - {} {} {}", symbol.kind, name_with_sig, location_display);
+        }
     }
 }
 
-fn render_imports(imports: &[ImportSymbol]) {
+/// Formats a symbol name with its signature for function-like symbols.
+///
+/// For functions/methods: `name(param1: T1, param2: T2) -> ReturnType`
+/// For other symbols: just the name
+fn format_symbol_name(symbol: &SymbolInfo, language: ProgrammingLanguage) -> String {
+    if !symbol.kind.is_function() {
+        return symbol.name.clone();
+    }
+
+    match &symbol.signature {
+        Some(sig) => format_function_signature(&symbol.name, sig, language),
+        None => symbol.name.clone(),
+    }
+}
+
+/// Formats a function signature like: `name(param1: T1, param2: T2) -> ReturnType`
+fn format_function_signature(
+    name: &str,
+    sig: &FunctionSignature,
+    language: ProgrammingLanguage,
+) -> String {
+    let params = format_parameters(&sig.parameters, language);
+    let return_part = format_return_type(&sig.return_type, language);
+
+    format!("{name}({params}){return_part}")
+}
+
+/// Formats function parameters as a comma-separated list.
+fn format_parameters(params: &[ParameterInfo], language: ProgrammingLanguage) -> String {
+    params
+        .iter()
+        .map(|p| format_parameter(p, language))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Formats a single parameter.
+fn format_parameter(param: &ParameterInfo, language: ProgrammingLanguage) -> String {
+    let mut result = String::new();
+
+    // Variadic prefix
+    if param.is_variadic {
+        match language {
+            ProgrammingLanguage::Python => result.push('*'),
+            ProgrammingLanguage::Go => result.push_str("..."),
+            ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
+                result.push_str("...");
+            }
+            _ => {}
+        }
+    }
+
+    result.push_str(&param.name);
+
+    // Type annotation
+    if let Some(ty) = &param.type_annotation {
+        match language {
+            ProgrammingLanguage::Go => {
+                // Go: `name type`
+                result.push(' ');
+                result.push_str(ty);
+            }
+            _ => {
+                // Most languages: `name: type`
+                result.push_str(": ");
+                result.push_str(ty);
+            }
+        }
+    }
+
+    // Default value
+    if let Some(default) = &param.default_value {
+        result.push_str(" = ");
+        result.push_str(default);
+    }
+
+    result
+}
+
+/// Formats the return type with appropriate syntax.
+fn format_return_type(return_type: &Option<String>, language: ProgrammingLanguage) -> String {
+    match return_type {
+        Some(ty) => {
+            match language {
+                ProgrammingLanguage::Go => {
+                    // Go: ` type` (space before type, no arrow)
+                    format!(" {ty}")
+                }
+                ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript => {
+                    // TypeScript: `: type`
+                    format!(": {ty}")
+                }
+                _ => {
+                    // Rust, Python: ` -> type`
+                    format!(" -> {ty}")
+                }
+            }
+        }
+        None => String::new(),
+    }
+}
+
+fn render_imports(imports: &[ImportSymbol], config: &OutputConfig) {
     if imports.is_empty() {
-        println!("  (no imports)");
+        if config.use_colors {
+            println!("  {}", "(no imports)".dimmed());
+        } else {
+            println!("  (no imports)");
+        }
         return;
     }
 
     for import in imports {
-        println!(
-            "  - {} [{}:{}]",
-            import.name, import.range.start_line, import.range.start_column
-        );
+        let location = format!("[{}:{}]", import.range.start_line, import.range.start_column);
+        let location_display = if config.use_hyperlinks {
+            hyperlink(&import.file, import.range.start_line, &location)
+        } else {
+            location
+        };
+
+        if config.use_colors {
+            println!(
+                "  - {} {}",
+                import.name.cyan(),
+                location_display.dimmed()
+            );
+        } else {
+            println!("  - {} {}", import.name, location_display);
+        }
     }
 }

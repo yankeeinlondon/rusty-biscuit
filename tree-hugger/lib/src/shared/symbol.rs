@@ -96,7 +96,7 @@ impl ProgrammingLanguage {
     pub fn from_extension(extension: &str) -> Option<Self> {
         let ext = extension.to_ascii_lowercase();
 
-        for language in [
+        [
             Self::Rust,
             Self::JavaScript,
             Self::TypeScript,
@@ -113,17 +113,14 @@ impl ProgrammingLanguage {
             Self::Swift,
             Self::Scala,
             Self::Lua,
-        ] {
-            if language
+        ]
+        .into_iter()
+        .find(|language| {
+            language
                 .extensions()
                 .iter()
                 .any(|candidate| candidate.eq_ignore_ascii_case(&ext))
-            {
-                return Some(language);
-            }
-        }
-
-        None
+        })
     }
 
     /// Detects the language from a filesystem path.
@@ -265,6 +262,76 @@ pub struct CodeBlock {
     pub snippet: Option<String>,
 }
 
+/// Information about a function or method parameter.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParameterInfo {
+    /// The parameter name.
+    pub name: String,
+    /// The type annotation, if present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_annotation: Option<String>,
+    /// The default value expression, if present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<String>,
+    /// Whether this is a variadic/rest parameter.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub is_variadic: bool,
+}
+
+impl ParameterInfo {
+    /// Creates a new parameter with only a name.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            type_annotation: None,
+            default_value: None,
+            is_variadic: false,
+        }
+    }
+
+    /// Creates a new parameter with a name and type.
+    pub fn with_type(name: impl Into<String>, type_annotation: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            type_annotation: Some(type_annotation.into()),
+            default_value: None,
+            is_variadic: false,
+        }
+    }
+}
+
+/// Signature information for functions and methods.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionSignature {
+    /// The list of parameters.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<ParameterInfo>,
+    /// The return type, if present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub return_type: Option<String>,
+}
+
+impl Default for FunctionSignature {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FunctionSignature {
+    /// Creates an empty function signature.
+    pub fn new() -> Self {
+        Self {
+            parameters: Vec::new(),
+            return_type: None,
+        }
+    }
+
+    /// Returns true if the signature has no information.
+    pub fn is_empty(&self) -> bool {
+        self.parameters.is_empty() && self.return_type.is_none()
+    }
+}
+
 /// A symbol extracted from a file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolInfo {
@@ -273,6 +340,12 @@ pub struct SymbolInfo {
     pub range: CodeRange,
     pub language: ProgrammingLanguage,
     pub file: PathBuf,
+    /// Documentation comment associated with the symbol.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_comment: Option<String>,
+    /// Function/method signature information.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature: Option<FunctionSignature>,
 }
 
 /// An imported symbol reference.

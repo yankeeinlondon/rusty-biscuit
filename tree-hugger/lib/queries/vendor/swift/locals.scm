@@ -1,8 +1,9 @@
 (import_declaration
   (identifier) @local.definition.import)
 
+; Functions - capture full node for signature extraction
 (function_declaration
-  name: (simple_identifier) @local.definition.function)
+  name: (simple_identifier) @local.definition.function) @local.definition.function.context
 
 ; Scopes
 [

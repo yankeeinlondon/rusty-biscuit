@@ -1,15 +1,18 @@
 ; Scopes
 ;-------
+; Classes - capture full node for context
 ((class_declaration
-  name: (name) @local.definition.type) @local.scope
+  name: (name) @local.definition.type) @local.scope @local.definition.type.context
   (#set! definition.type.scope "parent"))
 
+; Methods - capture full node for signature extraction
 ((method_declaration
-  name: (name) @local.definition.method) @local.scope
+  name: (name) @local.definition.method) @local.scope @local.definition.method.context
   (#set! definition.method.scope "parent"))
 
+; Functions - capture full node for signature extraction
 ((function_definition
-  name: (name) @local.definition.function) @local.scope
+  name: (name) @local.definition.function) @local.scope @local.definition.function.context
   (#set! definition.function.scope "parent"))
 
 (anonymous_function

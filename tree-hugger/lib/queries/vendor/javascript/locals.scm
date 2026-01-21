@@ -61,7 +61,7 @@
     (property_identifier)
     (private_property_identifier)
   ] @local.definition.function
-  (#set! definition.var.scope parent))
+  (#set! definition.var.scope parent)) @local.definition.function.context
 
 ; this.foo()
 (member_expression

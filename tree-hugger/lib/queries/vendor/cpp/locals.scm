@@ -21,15 +21,16 @@
   name: (qualified_identifier
     name: (type_identifier) @local.definition.type))
 
+; Class definitions - capture full node for context
 (class_specifier
-  name: (type_identifier) @local.definition.type)
+  name: (type_identifier) @local.definition.type) @local.definition.type.context
 
 (concept_definition
-  name: (identifier) @local.definition.type)
+  name: (identifier) @local.definition.type) @local.definition.type.context
 
 (class_specifier
   name: (qualified_identifier
-    name: (type_identifier) @local.definition.type))
+    name: (type_identifier) @local.definition.type)) @local.definition.type.context
 
 (alias_declaration
   name: (type_identifier) @local.definition.type)
@@ -52,20 +53,20 @@
 ((namespace_identifier) @local.reference
   (#set! reference.kind "namespace"))
 
-; Function definitions
+; Function definitions - capture full node for context
 (template_function
-  name: (identifier) @local.definition.function) @local.scope
+  name: (identifier) @local.definition.function) @local.scope @local.definition.function.context
 
 (template_method
-  name: (field_identifier) @local.definition.method) @local.scope
+  name: (field_identifier) @local.definition.method) @local.scope @local.definition.method.context
 
 (function_declarator
   declarator: (qualified_identifier
-    name: (identifier) @local.definition.function)) @local.scope
+    name: (identifier) @local.definition.function)) @local.scope @local.definition.function.context
 
 (field_declaration
   declarator: (function_declarator
-    (field_identifier) @local.definition.method))
+    (field_identifier) @local.definition.method)) @local.definition.method.context
 
 (lambda_expression) @local.scope
 

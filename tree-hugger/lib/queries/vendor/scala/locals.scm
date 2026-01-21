@@ -11,12 +11,14 @@
 (identifier) @local.reference
 
 ; Definitions
+; Function declarations - capture full node for context
 (function_declaration
-  name: (identifier) @local.definition.function)
+  name: (identifier) @local.definition.function) @local.definition.function.context
 
+; Function definitions - capture full node for signature extraction
 (function_definition
   name: (identifier) @local.definition.function
-  (#set! definition.var.scope parent))
+  (#set! definition.var.scope parent)) @local.definition.function.context
 
 (parameter
   name: (identifier) @local.definition.parameter)
