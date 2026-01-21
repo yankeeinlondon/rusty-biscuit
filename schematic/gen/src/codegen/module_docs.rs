@@ -224,6 +224,8 @@ mod tests {
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
             }],
+            module_path: None,
+            request_suffix: None,
         }
     }
 

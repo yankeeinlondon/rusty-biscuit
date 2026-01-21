@@ -25,6 +25,8 @@ pub fn make_api(name: &str, base_url: &str, auth: AuthStrategy, env_auth: Vec<St
         env_username: None,
         headers: vec![],
         endpoints: vec![],
+        module_path: None,
+        request_suffix: None,
     }
 }
 
@@ -45,6 +47,8 @@ pub fn make_api_with_endpoint(
         env_username: None,
         headers: vec![],
         endpoints: vec![endpoint],
+        module_path: None,
+        request_suffix: None,
     }
 }
 
@@ -93,6 +97,8 @@ pub fn make_simple_api() -> RestApi {
             response: ApiResponse::json_type("ListItemsResponse"),
             headers: vec![],
         }],
+        module_path: None,
+        request_suffix: None,
     }
 }
 
@@ -141,6 +147,8 @@ pub fn make_complex_api() -> RestApi {
                 headers: vec![],
             },
         ],
+        module_path: None,
+        request_suffix: None,
     }
 }
 

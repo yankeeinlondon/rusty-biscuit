@@ -28,10 +28,62 @@ use quote::{format_ident, quote};
 use schematic_define::RestApi;
 
 use crate::codegen::{
-    ModuleDocBuilder, generate_api_struct, generate_error_type, generate_request_enum,
-    generate_request_method, generate_request_struct,
+    ModuleDocBuilder, generate_api_struct, generate_error_type, generate_request_enum_with_suffix,
+    generate_request_method, generate_request_struct_with_options,
 };
 use crate::errors::GeneratorError;
+use crate::inference::infer_module_path;
+
+/// Returns the module path for the given API.
+///
+/// Uses `api.module_path` if set, otherwise attempts to infer from the API name.
+/// Falls back to `api.name.to_lowercase()` if inference returns None.
+///
+/// ## Resolution Order
+///
+/// 1. Explicit `module_path` (highest priority)
+/// 2. Inferred from CamelCase name (e.g., "OllamaNative" -> "ollama")
+/// 3. Lowercase API name (fallback)
+///
+/// ## Examples
+///
+/// ```ignore
+/// // Explicit module_path takes precedence
+/// let api = RestApi { name: "HuggingFaceHub".to_string(), module_path: Some("huggingface".to_string()), ... };
+/// assert_eq!(get_module_path(&api), "huggingface");
+///
+/// // Inferred from CamelCase
+/// let api = RestApi { name: "OllamaNative".to_string(), module_path: None, ... };
+/// assert_eq!(get_module_path(&api), "ollama");
+///
+/// // Fallback to lowercase
+/// let api = RestApi { name: "OpenAI".to_string(), module_path: None, ... };
+/// // Inference returns "open", fallback returns "openai"
+/// ```
+fn get_module_path(api: &RestApi) -> String {
+    api.module_path.clone().unwrap_or_else(|| {
+        infer_module_path(&api.name).unwrap_or_else(|| api.name.to_lowercase())
+    })
+}
+
+/// Returns the request suffix for the given API.
+///
+/// Uses `api.request_suffix` if set, otherwise defaults to `"Request"`.
+///
+/// ## Examples
+///
+/// ```ignore
+/// let api = RestApi { request_suffix: None, ... };
+/// assert_eq!(get_request_suffix(&api), "Request");
+///
+/// let api = RestApi { request_suffix: Some("Params".to_string()), ... };
+/// assert_eq!(get_request_suffix(&api), "Params");
+/// ```
+fn get_request_suffix(api: &RestApi) -> String {
+    api.request_suffix
+        .clone()
+        .unwrap_or_else(|| "Request".to_string())
+}
 
 /// Assembles the shared module code (shared.rs).
 ///
@@ -75,13 +127,18 @@ pub fn assemble_shared_module() -> TokenStream {
 ///
 /// A TokenStream containing the API module code.
 pub fn assemble_api_module(api: &RestApi) -> TokenStream {
-    let api_name_lower = api.name.to_lowercase();
+    let api_name_lower = get_module_path(api);
+    let suffix = get_request_suffix(api);
 
     // Generate request structs for each endpoint
-    let request_structs: TokenStream = api.endpoints.iter().map(generate_request_struct).collect();
+    let request_structs: TokenStream = api
+        .endpoints
+        .iter()
+        .map(|ep| generate_request_struct_with_options(ep, &suffix, Some(&api_name_lower)))
+        .collect();
 
     // Generate request enum
-    let request_enum = generate_request_enum(api);
+    let request_enum = generate_request_enum_with_suffix(api, &suffix);
 
     // Generate API struct
     let api_struct = generate_api_struct(api);
@@ -137,7 +194,7 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
     let module_decls: Vec<_> = apis
         .iter()
         .map(|api| {
-            let module_name = format_ident!("{}", api.name.to_lowercase());
+            let module_name = format_ident!("{}", get_module_path(api));
             quote! {
                 pub mod #module_name;
             }
@@ -189,7 +246,7 @@ pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
     let api_reexports: Vec<_> = apis
         .iter()
         .map(|api| {
-            let module_name = format_ident!("{}", api.name.to_lowercase());
+            let module_name = format_ident!("{}", get_module_path(api));
             let client_name = format_ident!("{}", api.name);
             let request_enum = format_ident!("{}Request", api.name);
 
@@ -203,7 +260,7 @@ pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
     let definitions_reexports: Vec<_> = apis
         .iter()
         .map(|api| {
-            let module_name = format_ident!("{}", api.name.to_lowercase());
+            let module_name = format_ident!("{}", get_module_path(api));
             quote! {
                 pub use schematic_definitions::#module_name::*;
             }
@@ -414,7 +471,7 @@ pub fn generate_and_write_all(
         let tokens = assemble_api_module(api);
         let file = validate_code(&tokens)?;
         let formatted = format_code(&file);
-        let filename = format!("{}.rs", api.name.to_lowercase());
+        let filename = format!("{}.rs", get_module_path(api));
         api_modules.push((filename, formatted));
     }
 
@@ -475,6 +532,8 @@ mod tests {
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
             }],
+            module_path: None,
+            request_suffix: None,
         }
     }
 
@@ -517,6 +576,8 @@ mod tests {
                     headers: vec![],
                 },
             ],
+            module_path: None,
+            request_suffix: None,
         }
     }
 
@@ -790,7 +851,8 @@ mod tests {
         let returned = generate_and_write(&api, temp_dir.path(), false).unwrap();
 
         // The returned content should match the API module file, not lib.rs
-        let api_module_path = temp_dir.path().join("testapi.rs");
+        // Note: "TestApi" has "Api" suffix, so it infers to "test"
+        let api_module_path = temp_dir.path().join("test.rs");
         let file_content = fs::read_to_string(api_module_path).unwrap();
 
         assert_eq!(returned, file_content);
@@ -855,6 +917,8 @@ mod tests {
                     response: ApiResponse::json_type("TestResponse"),
                     headers: vec![],
                 }],
+                module_path: None,
+                request_suffix: None,
             };
 
             let temp_dir = TempDir::new().unwrap();
@@ -899,6 +963,8 @@ mod tests {
             env_username: None,
             headers: vec![],
             endpoints,
+            module_path: None,
+            request_suffix: None,
         };
 
         let temp_dir = TempDir::new().unwrap();
@@ -928,6 +994,8 @@ mod tests {
             env_username: None,
             headers: vec![],
             endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
         };
 
         let temp_dir = TempDir::new().unwrap();

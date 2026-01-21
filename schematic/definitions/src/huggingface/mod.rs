@@ -350,6 +350,8 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 headers: vec![],
             },
         ],
+        module_path: None,
+        request_suffix: None,
     }
 }
 

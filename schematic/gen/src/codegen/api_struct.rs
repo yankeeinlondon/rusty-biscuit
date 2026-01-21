@@ -279,6 +279,8 @@ mod tests {
             env_username: None,
             headers: vec![],
             endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
         }
     }
 
@@ -405,6 +407,8 @@ mod tests {
             env_username: None,
             headers: vec![],
             endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
         };
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -427,6 +431,8 @@ mod tests {
             env_username: None,
             headers: vec![],
             endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
         };
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -448,6 +454,8 @@ mod tests {
             env_username: Some("BASIC_USER".to_string()),
             headers: vec![],
             endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
         };
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
@@ -578,6 +586,8 @@ mod tests {
                 ("X-Custom-Header".to_string(), "custom-value".to_string()),
             ],
             endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
         };
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");

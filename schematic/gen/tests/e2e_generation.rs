@@ -9,6 +9,7 @@ use tempfile::TempDir;
 
 use schematic_definitions::openai::define_openai_api;
 use schematic_gen::cargo_gen::write_cargo_toml;
+use schematic_gen::infer_module_path;
 use schematic_gen::output::generate_and_write;
 
 /// Tests that generated code compiles successfully.
@@ -189,6 +190,8 @@ fn generate_code_for_various_api_configurations() {
                 response: ApiResponse::json_type("RootResponse"),
                 headers: vec![],
             }],
+            module_path: None,
+            request_suffix: None,
         },
         // API with all HTTP methods
         RestApi {
@@ -247,6 +250,8 @@ fn generate_code_for_various_api_configurations() {
                     headers: vec![],
                 },
             ],
+            module_path: None,
+            request_suffix: None,
         },
         // API with multiple path parameters
         RestApi {
@@ -267,6 +272,8 @@ fn generate_code_for_various_api_configurations() {
                 response: ApiResponse::json_type("Item"),
                 headers: vec![],
             }],
+            module_path: None,
+            request_suffix: None,
         },
     ];
 
@@ -289,12 +296,18 @@ fn generate_code_for_various_api_configurations() {
             api.name
         );
 
-        // Check the API module file (e.g., simpleapi.rs, allmethods.rs)
-        let api_module_path = src_dir.join(format!("{}.rs", api.name.to_lowercase()));
+        // Check the API module file (e.g., simple.rs, allmethods.rs)
+        // Use the same inference logic as production code
+        let module_name = api
+            .module_path
+            .clone()
+            .or_else(|| infer_module_path(&api.name))
+            .unwrap_or_else(|| api.name.to_lowercase());
+        let api_module_path = src_dir.join(format!("{}.rs", module_name));
         assert!(
             api_module_path.exists(),
             "{}.rs should exist for API '{}'",
-            api.name.to_lowercase(),
+            module_name,
             api.name
         );
 

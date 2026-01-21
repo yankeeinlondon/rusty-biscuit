@@ -102,6 +102,8 @@ pub enum RestMethod {
 ///             headers: vec![],
 ///         },
 ///     ],
+///     module_path: None,
+///     request_suffix: None,
 /// };
 ///
 /// assert_eq!(api.name, "SimpleApi");
@@ -146,6 +148,17 @@ pub struct RestApi {
     pub headers: Vec<(String, String)>,
     /// All endpoints defined for this API.
     pub endpoints: Vec<Endpoint>,
+    /// Custom module path for generated code (defaults to `api.name.to_lowercase()`).
+    ///
+    /// This allows APIs to specify a different module name than the default
+    /// lowercase version of the API name. For example, an API named "HuggingFaceHub"
+    /// might want to use "huggingface" instead of "huggingfacehub".
+    pub module_path: Option<String>,
+    /// Custom suffix for generated request structs (defaults to "Request").
+    ///
+    /// This allows APIs to customize the naming of request structs. For example,
+    /// using "Params" would generate `ListModelsParams` instead of `ListModelsRequest`.
+    pub request_suffix: Option<String>,
 }
 
 /// A single API endpoint definition.

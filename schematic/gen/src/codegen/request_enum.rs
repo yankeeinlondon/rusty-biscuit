@@ -7,11 +7,27 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use schematic_define::RestApi;
 
+/// Default suffix for request struct names.
+const DEFAULT_REQUEST_SUFFIX: &str = "Request";
+
 /// Generates the request enum for an API.
+///
+/// Uses the default "Request" suffix for struct names.
+/// For a custom suffix, use [`generate_request_enum_with_suffix`].
+pub fn generate_request_enum(api: &RestApi) -> TokenStream {
+    generate_request_enum_with_suffix(api, DEFAULT_REQUEST_SUFFIX)
+}
+
+/// Generates the request enum for an API with a custom suffix.
 ///
 /// Creates an enum with one variant per endpoint, plus:
 /// - `into_parts()` method that delegates to inner request structs
 /// - `From<XxxRequest>` impl for each variant
+///
+/// ## Arguments
+///
+/// * `api` - The REST API definition
+/// * `suffix` - The suffix to use for request struct names (e.g., "Request", "Params")
 ///
 /// ## Examples
 ///
@@ -43,19 +59,19 @@ use schematic_define::RestApi;
 /// }
 /// // ... individual From impls for each request struct
 /// ```
-pub fn generate_request_enum(api: &RestApi) -> TokenStream {
+pub fn generate_request_enum_with_suffix(api: &RestApi, suffix: &str) -> TokenStream {
     let enum_name = format_ident!("{}Request", api.name);
     let enum_doc = format!(" Request enum for {} API.", api.name);
     let enum_doc_detail = " Each variant wraps a strongly-typed request struct.";
 
     // Generate enum variants
-    let variants = generate_enum_variants(api);
+    let variants = generate_enum_variants(api, suffix);
 
     // Generate into_parts match arms
     let match_arms = generate_match_arms(api);
 
     // Generate individual From implementations
-    let from_impls = generate_from_impls(api, &enum_name);
+    let from_impls = generate_from_impls(api, &enum_name, suffix);
 
     quote! {
         #[doc = #enum_doc]
@@ -86,10 +102,10 @@ pub fn generate_request_enum(api: &RestApi) -> TokenStream {
 }
 
 /// Generates enum variant declarations.
-fn generate_enum_variants(api: &RestApi) -> TokenStream {
+fn generate_enum_variants(api: &RestApi, suffix: &str) -> TokenStream {
     let variants = api.endpoints.iter().map(|endpoint| {
         let variant_name = format_ident!("{}", endpoint.id);
-        let struct_name = format_ident!("{}Request", endpoint.id);
+        let struct_name = format_ident!("{}{}", endpoint.id, suffix);
         // Add leading space for proper /// formatting
         let doc = format!(" {}", endpoint.description);
 
@@ -116,10 +132,14 @@ fn generate_match_arms(api: &RestApi) -> TokenStream {
 }
 
 /// Generates individual `From` implementations for each request struct.
-fn generate_from_impls(api: &RestApi, enum_name: &proc_macro2::Ident) -> TokenStream {
+fn generate_from_impls(
+    api: &RestApi,
+    enum_name: &proc_macro2::Ident,
+    suffix: &str,
+) -> TokenStream {
     let impls = api.endpoints.iter().map(|endpoint| {
         let variant_name = format_ident!("{}", endpoint.id);
-        let struct_name = format_ident!("{}Request", endpoint.id);
+        let struct_name = format_ident!("{}{}", endpoint.id, suffix);
 
         quote! {
             impl From<#struct_name> for #enum_name {
@@ -150,6 +170,8 @@ mod tests {
             env_username: None,
             headers: vec![],
             endpoints,
+            module_path: None,
+            request_suffix: None,
         }
     }
 

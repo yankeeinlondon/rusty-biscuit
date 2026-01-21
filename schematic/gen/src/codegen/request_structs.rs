@@ -9,6 +9,9 @@ use schematic_define::Endpoint;
 
 use crate::parser::extract_path_params;
 
+/// Default suffix for request struct names.
+const DEFAULT_REQUEST_SUFFIX: &str = "Request";
+
 /// Generates a request struct for the given endpoint.
 ///
 /// The generated struct includes:
@@ -45,9 +48,40 @@ use crate::parser::extract_path_params;
 /// }
 /// ```
 pub fn generate_request_struct(endpoint: &Endpoint) -> TokenStream {
+    generate_request_struct_with_suffix(endpoint, DEFAULT_REQUEST_SUFFIX)
+}
+
+/// Generates a request struct for the given endpoint with a custom suffix.
+///
+/// This variant allows specifying a custom suffix instead of the default "Request".
+/// For example, using "Params" would generate `ListModelsParams` instead of `ListModelsRequest`.
+///
+/// ## Arguments
+///
+/// * `endpoint` - The endpoint to generate a request struct for
+/// * `suffix` - The suffix to append to the endpoint ID (e.g., "Request", "Params")
+pub fn generate_request_struct_with_suffix(endpoint: &Endpoint, suffix: &str) -> TokenStream {
+    generate_request_struct_with_options(endpoint, suffix, None)
+}
+
+/// Generates a request struct for the given endpoint with full configuration.
+///
+/// This variant allows specifying both the suffix and the module path for use imports.
+///
+/// ## Arguments
+///
+/// * `endpoint` - The endpoint to generate a request struct for
+/// * `suffix` - The suffix to append to the endpoint ID (e.g., "Request", "Params")
+/// * `module_path` - Optional module path for use in examples (e.g., "openai")
+pub fn generate_request_struct_with_options(
+    endpoint: &Endpoint,
+    suffix: &str,
+    module_path: Option<&str>,
+) -> TokenStream {
     use schematic_define::ApiRequest;
 
-    let struct_name = format_ident!("{}Request", endpoint.id);
+    let struct_name = format_ident!("{}{}", endpoint.id, suffix);
+    let struct_name_str = format!("{}{}", endpoint.id, suffix);
     let path_params = extract_path_params(&endpoint.path);
     // Only JSON requests have a typed body field
     let has_body = matches!(&endpoint.request, Some(ApiRequest::Json(_)));
@@ -75,8 +109,15 @@ pub fn generate_request_struct(endpoint: &Endpoint) -> TokenStream {
     // Generate into_parts method
     let into_parts = generate_into_parts(endpoint, &path_params, &method_str);
 
-    // Generate doc comment (leading space for proper /// formatting)
-    let doc_comment = format!(" Request for {} endpoint.", endpoint.id);
+    // Generate doc comments with example section
+    let doc_lines = generate_doc_comment_with_example(
+        &endpoint.id,
+        &struct_name_str,
+        &path_params,
+        has_body,
+        body_type_name,
+        module_path,
+    );
 
     // Combine all fields
     let all_fields = if has_body {
@@ -89,7 +130,7 @@ pub fn generate_request_struct(endpoint: &Endpoint) -> TokenStream {
     };
 
     quote! {
-        #[doc = #doc_comment]
+        #(#[doc = #doc_lines])*
         #derives
         pub struct #struct_name {
             #all_fields
@@ -103,6 +144,95 @@ pub fn generate_request_struct(endpoint: &Endpoint) -> TokenStream {
             #into_parts
         }
     }
+}
+
+/// Generates doc comment lines with an example section.
+///
+/// The example shows how to instantiate the request struct:
+/// - For structs with no required fields: uses `Default::default()`
+/// - For structs with path params only: uses `new()` with params
+/// - For structs with body: uses `new()` with body (and optional params)
+///
+/// ## Arguments
+///
+/// * `endpoint_id` - The endpoint identifier (e.g., "CreateChatCompletion")
+/// * `struct_name` - The full struct name (e.g., "CreateChatCompletionRequest")
+/// * `path_params` - List of path parameter names
+/// * `has_body` - Whether the struct has a body field
+/// * `body_type` - The body type name, if any
+/// * `module_path` - Optional module path for imports (e.g., "openai")
+///
+/// ## Returns
+///
+/// A vector of doc comment lines (each with leading space for proper `///` formatting).
+fn generate_doc_comment_with_example(
+    endpoint_id: &str,
+    struct_name: &str,
+    path_params: &[&str],
+    has_body: bool,
+    body_type: Option<&str>,
+    module_path: Option<&str>,
+) -> Vec<String> {
+    let mut lines = vec![format!(" Request for `{}` endpoint.", endpoint_id)];
+
+    // Add blank line before example section
+    lines.push(String::new());
+    lines.push(" ## Example".to_string());
+    lines.push(String::new());
+    lines.push(" ```ignore".to_string());
+
+    // Build the module path for use statement
+    let mod_path = module_path.unwrap_or("api");
+
+    // Generate appropriate example based on struct configuration
+    if has_body {
+        let body_ty = body_type.unwrap_or("Body");
+
+        // Import both the request struct and body type
+        lines.push(format!(
+            " use schematic_schema::{mod_path}::{{{struct_name}, {body_ty}}};"
+        ));
+        lines.push(String::new());
+
+        // Show body construction with ..Default::default() pattern
+        lines.push(format!(" let body = {body_ty} {{"));
+        lines.push("     // ... set required fields ...".to_string());
+        lines.push("     ..Default::default()".to_string());
+        lines.push(" };".to_string());
+
+        // Show request construction
+        if path_params.is_empty() {
+            lines.push(format!(" let request = {struct_name}::new(body);"));
+        } else {
+            // Include path params in new() call
+            let param_args: Vec<String> = path_params
+                .iter()
+                .map(|p| format!("\"{p}_value\""))
+                .collect();
+            let args = param_args.join(", ");
+            lines.push(format!(" let request = {struct_name}::new({args}, body);"));
+        }
+    } else if !path_params.is_empty() {
+        // Path params only - use new()
+        lines.push(format!(" use schematic_schema::{mod_path}::{struct_name};"));
+        lines.push(String::new());
+
+        let param_args: Vec<String> = path_params
+            .iter()
+            .map(|p| format!("\"{p}_value\""))
+            .collect();
+        let args = param_args.join(", ");
+        lines.push(format!(" let request = {struct_name}::new({args});"));
+    } else {
+        // No required fields - use default()
+        lines.push(format!(" use schematic_schema::{mod_path}::{struct_name};"));
+        lines.push(String::new());
+        lines.push(format!(" let request = {struct_name}::default();"));
+    }
+
+    lines.push(" ```".to_string());
+
+    lines
 }
 
 /// Generates field declarations for path parameters.
@@ -628,6 +758,166 @@ mod tests {
                 "pub fn new(thread_id: impl Into<String>, message_id: impl Into<String>) -> Self"
             ),
             "Expected new() with multiple impl Into<String> params, got:\n{}",
+            code
+        );
+    }
+
+    // === Example generation tests ===
+
+    #[test]
+    fn generates_example_with_default_for_no_required_fields() {
+        let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should have example section
+        assert!(
+            code.contains("## Example"),
+            "Expected example section, got:\n{}",
+            code
+        );
+        // Should use default() for no required fields
+        assert!(
+            code.contains("ListModelsRequest::default()"),
+            "Expected default() usage for empty struct, got:\n{}",
+            code
+        );
+        // Should be in ignore code block
+        assert!(
+            code.contains("```ignore"),
+            "Expected ignore code fence, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn generates_example_with_new_for_path_params() {
+        let endpoint = make_endpoint("RetrieveModel", RestMethod::Get, "/models/{model}", None);
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should have example section
+        assert!(
+            code.contains("## Example"),
+            "Expected example section, got:\n{}",
+            code
+        );
+        // Should use new() with path param
+        assert!(
+            code.contains("RetrieveModelRequest::new("),
+            "Expected new() usage for path param struct, got:\n{}",
+            code
+        );
+        // Should show model_value placeholder
+        assert!(
+            code.contains("\"model_value\""),
+            "Expected model_value placeholder, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn generates_example_with_body_construction() {
+        let endpoint = make_endpoint(
+            "CreateCompletion",
+            RestMethod::Post,
+            "/completions",
+            Some(ApiRequest::json_type("CreateCompletionBody")),
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should have example section
+        assert!(
+            code.contains("## Example"),
+            "Expected example section, got:\n{}",
+            code
+        );
+        // Should show body type import
+        assert!(
+            code.contains("CreateCompletionBody"),
+            "Expected body type in import, got:\n{}",
+            code
+        );
+        // Should show Default pattern for body
+        assert!(
+            code.contains("..Default::default()"),
+            "Expected ..Default::default() pattern, got:\n{}",
+            code
+        );
+        // Should show body construction
+        assert!(
+            code.contains("let body = CreateCompletionBody {"),
+            "Expected body construction, got:\n{}",
+            code
+        );
+        // Should use new() with body
+        assert!(
+            code.contains("CreateCompletionRequest::new(body)"),
+            "Expected new(body) usage, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn generates_example_with_path_params_and_body() {
+        let endpoint = make_endpoint(
+            "CreateMessage",
+            RestMethod::Post,
+            "/threads/{thread_id}/messages",
+            Some(ApiRequest::json_type("CreateMessageBody")),
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should use new() with path param and body
+        assert!(
+            code.contains("CreateMessageRequest::new(\"thread_id_value\", body)"),
+            "Expected new(thread_id_value, body) usage, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn generates_example_with_custom_module_path() {
+        let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
+        let tokens = generate_request_struct_with_options(&endpoint, "Request", Some("openai"));
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should use custom module path
+        assert!(
+            code.contains("use schematic_schema::openai::ListModelsRequest"),
+            "Expected custom module path, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn generates_example_with_multiple_path_params() {
+        let endpoint = make_endpoint(
+            "GetMessage",
+            RestMethod::Get,
+            "/threads/{thread_id}/messages/{message_id}",
+            None,
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should show both path param values
+        assert!(
+            code.contains("\"thread_id_value\""),
+            "Expected thread_id_value placeholder, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains("\"message_id_value\""),
+            "Expected message_id_value placeholder, got:\n{}",
+            code
+        );
+        // Should have both in new() call
+        assert!(
+            code.contains("GetMessageRequest::new(\"thread_id_value\", \"message_id_value\")"),
+            "Expected new with both params, got:\n{}",
             code
         );
     }

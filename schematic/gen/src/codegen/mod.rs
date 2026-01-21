@@ -39,5 +39,7 @@ pub use api_struct::generate_api_struct;
 pub use client::generate_request_method;
 pub use error::generate_error_type;
 pub use module_docs::ModuleDocBuilder;
-pub use request_enum::generate_request_enum;
-pub use request_structs::generate_request_struct;
+pub use request_enum::{generate_request_enum, generate_request_enum_with_suffix};
+pub use request_structs::{
+    generate_request_struct, generate_request_struct_with_options, generate_request_struct_with_suffix,
+};

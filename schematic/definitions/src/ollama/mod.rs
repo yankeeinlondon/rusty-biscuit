@@ -178,6 +178,8 @@ pub fn define_ollama_native_api() -> RestApi {
                 headers: vec![],
             },
         ],
+        module_path: None,
+        request_suffix: None,
     }
 }
 
@@ -255,6 +257,8 @@ pub fn define_ollama_openai_api() -> RestApi {
                 headers: vec![],
             },
         ],
+        module_path: None,
+        request_suffix: None,
     }
 }
 

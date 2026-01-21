@@ -524,6 +524,8 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 headers: vec![],
             },
         ],
+        module_path: None,
+        request_suffix: None,
     }
 }
 

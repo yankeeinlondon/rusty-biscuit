@@ -47,6 +47,8 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
                 headers: vec![],
             },
         ],
+        module_path: None,
+        request_suffix: None,
     }
 }
 
@@ -71,6 +73,8 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
             response: ApiResponse::json_type("ItemsResponse"),
             headers: vec![],
         }],
+        module_path: None,
+        request_suffix: None,
     }
 }
 

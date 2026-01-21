@@ -68,6 +68,8 @@ pub fn define_openai_api() -> RestApi {
                 headers: vec![],
             },
         ],
+        module_path: None,
+        request_suffix: None,
     }
 }
 

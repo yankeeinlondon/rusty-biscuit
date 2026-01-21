@@ -64,8 +64,14 @@
 pub mod cargo_gen;
 pub mod codegen;
 pub mod errors;
+pub mod inference;
 pub mod output;
 pub mod parser;
+pub mod validation;
+
+pub use inference::infer_module_path;
+
+pub use validation::validate_api;
 
 #[cfg(test)]
 pub mod test_utils;

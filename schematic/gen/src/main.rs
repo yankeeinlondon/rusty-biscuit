@@ -3,8 +3,10 @@
 //! Generates strongly-typed Rust client code from REST API definitions.
 
 use std::path::Path;
+use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
+use colored::Colorize;
 use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
 use schematic_definitions::huggingface::define_huggingface_hub_api;
 use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
@@ -12,15 +14,23 @@ use schematic_definitions::openai::define_openai_api;
 use schematic_gen::cargo_gen::write_cargo_toml;
 use schematic_gen::errors::GeneratorError;
 use schematic_gen::output::generate_and_write;
+use schematic_gen::validate_api;
+
+/// List of available API names for error messages.
+const AVAILABLE_APIS: &str = "openai, elevenlabs, huggingface, ollama-native, ollama-openai";
 
 /// Schematic code generator - transforms API definitions into typed Rust clients
 #[derive(Parser, Debug)]
 #[command(name = "schematic-gen")]
 #[command(author, version, about, long_about = None)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    // Legacy flat arguments for backwards compatibility
     /// API definition to generate code for (e.g., "openai")
-    #[arg(short, long)]
-    api: String,
+    #[arg(short, long, global = true)]
+    api: Option<String>,
 
     /// Output directory for generated code
     #[arg(short, long, default_value = "schematic/schema/src")]
@@ -31,54 +41,243 @@ struct Cli {
     dry_run: bool,
 
     /// Increase verbosity (-v, -vv, -vvv)
-    #[arg(short, long, action = clap::ArgAction::Count)]
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     verbose: u8,
 }
 
-fn main() -> Result<(), GeneratorError> {
-    let cli = Cli::parse();
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Generate Rust client code from an API definition
+    Generate {
+        /// API definition to generate code for (e.g., "openai")
+        #[arg(short, long)]
+        api: String,
 
-    if cli.verbose > 0 {
-        eprintln!("Generating code for API: {}", cli.api);
-        eprintln!("Output directory: {}", cli.output);
-        if cli.dry_run {
+        /// Output directory for generated code
+        #[arg(short, long, default_value = "schematic/schema/src")]
+        output: String,
+
+        /// Print generated code without writing files
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Validate an API definition without generating code
+    Validate {
+        /// API definition to validate (e.g., "openai")
+        #[arg(short, long)]
+        api: String,
+    },
+}
+
+/// Resolves an API name to its definition.
+fn resolve_api(name: &str) -> Result<schematic_define::RestApi, GeneratorError> {
+    match name {
+        "openai" => Ok(define_openai_api()),
+        "elevenlabs" => Ok(define_elevenlabs_rest_api()),
+        "huggingface" => Ok(define_huggingface_hub_api()),
+        "ollama-native" => Ok(define_ollama_native_api()),
+        "ollama-openai" => Ok(define_ollama_openai_api()),
+        other => Err(GeneratorError::ConfigError(format!(
+            "Unknown API: '{}'. Available APIs: {}",
+            other, AVAILABLE_APIS
+        ))),
+    }
+}
+
+/// Runs validation on an API and prints colored results.
+///
+/// ## Returns
+///
+/// `true` if validation passed, `false` if it failed.
+fn run_validation(api: &schematic_define::RestApi, verbose: u8) -> bool {
+    if verbose > 0 {
+        eprintln!(
+            "{} Validating API: {} ({} endpoints)",
+            "...".dimmed(),
+            api.name,
+            api.endpoints.len()
+        );
+    }
+
+    match validate_api(api) {
+        Ok(()) => {
+            println!(
+                "{} Request suffix format",
+                "  [PASS]".green().bold()
+            );
+            println!(
+                "{} No naming collisions detected",
+                "  [PASS]".green().bold()
+            );
+            println!();
+            println!(
+                "{} All validation checks passed for '{}'",
+                "[OK]".green().bold(),
+                api.name
+            );
+            true
+        }
+        Err(err) => {
+            match &err {
+                GeneratorError::InvalidRequestSuffix { suffix, reason } => {
+                    println!(
+                        "{} Request suffix '{}': {}",
+                        "  [FAIL]".red().bold(),
+                        suffix,
+                        reason
+                    );
+                }
+                GeneratorError::NamingCollision {
+                    endpoint_id,
+                    body_type,
+                    suggestion,
+                } => {
+                    println!(
+                        "{} Request suffix format",
+                        "  [PASS]".green().bold()
+                    );
+                    println!(
+                        "{} Naming collision in endpoint '{}'",
+                        "  [FAIL]".red().bold(),
+                        endpoint_id
+                    );
+                    println!(
+                        "         Body type '{}' conflicts with generated request struct",
+                        body_type.yellow()
+                    );
+                    println!(
+                        "         {} Rename to '{}'",
+                        "Suggestion:".cyan(),
+                        suggestion.green()
+                    );
+                }
+                _ => {
+                    println!("{} {}", "  [FAIL]".red().bold(), err);
+                }
+            }
+            println!();
+            println!(
+                "{} Validation failed for '{}'",
+                "[ERROR]".red().bold(),
+                api.name
+            );
+            false
+        }
+    }
+}
+
+/// Runs the generate command.
+fn run_generate(
+    api_name: &str,
+    output: &str,
+    dry_run: bool,
+    verbose: u8,
+) -> Result<(), GeneratorError> {
+    let api = resolve_api(api_name)?;
+
+    if verbose > 0 {
+        eprintln!("Generating code for API: {}", api_name);
+        eprintln!("Output directory: {}", output);
+        if dry_run {
             eprintln!("Dry run mode - no files will be written");
         }
     }
 
-    let api = match cli.api.as_str() {
-        "openai" => define_openai_api(),
-        "elevenlabs" => define_elevenlabs_rest_api(),
-        "huggingface" => define_huggingface_hub_api(),
-        "ollama-native" => define_ollama_native_api(),
-        "ollama-openai" => define_ollama_openai_api(),
-        other => {
-            return Err(GeneratorError::ConfigError(format!(
-                "Unknown API: '{}'. Available APIs: openai, elevenlabs, huggingface, ollama-native, ollama-openai",
-                other
-            )));
-        }
-    };
+    // Run validation first
+    println!("{}", "Validating API definition...".dimmed());
+    if !run_validation(&api, verbose) {
+        return Err(GeneratorError::ConfigError(
+            "Validation failed. Fix the issues above before generating code.".to_string(),
+        ));
+    }
+    println!();
 
-    if cli.verbose > 1 {
+    if verbose > 1 {
         eprintln!("API: {} ({} endpoints)", api.name, api.endpoints.len());
         for endpoint in &api.endpoints {
             eprintln!("  - {} {} {}", endpoint.id, endpoint.method, endpoint.path);
         }
     }
 
-    let output_dir = Path::new(&cli.output);
-    generate_and_write(&api, output_dir, cli.dry_run)?;
+    println!("{}", "Generating code...".dimmed());
+    let output_dir = Path::new(output);
+    generate_and_write(&api, output_dir, dry_run)?;
 
     // Generate Cargo.toml in the parent directory of src/
     // The output_dir points to src/, so we need to get its parent for Cargo.toml
     let schema_dir = output_dir.parent().unwrap_or(Path::new("schematic/schema"));
-    write_cargo_toml(schema_dir, cli.dry_run)?;
+    write_cargo_toml(schema_dir, dry_run)?;
 
-    if !cli.dry_run && cli.verbose > 0 {
-        eprintln!("Successfully generated code to {}/lib.rs", cli.output);
-        eprintln!("Successfully generated {}/Cargo.toml", schema_dir.display());
+    if !dry_run {
+        println!(
+            "{} Generated code to {}/lib.rs",
+            "[OK]".green().bold(),
+            output
+        );
+        println!(
+            "{} Generated {}/Cargo.toml",
+            "[OK]".green().bold(),
+            schema_dir.display()
+        );
+    } else {
+        println!("{} Dry run complete (no files written)", "[OK]".green().bold());
     }
 
     Ok(())
+}
+
+/// Runs the validate command.
+fn run_validate(api_name: &str, verbose: u8) -> Result<(), GeneratorError> {
+    let api = resolve_api(api_name)?;
+
+    if run_validation(&api, verbose) {
+        Ok(())
+    } else {
+        Err(GeneratorError::ConfigError(
+            "Validation failed".to_string(),
+        ))
+    }
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+
+    let result = match cli.command {
+        // Explicit subcommand: generate
+        Some(Commands::Generate { api, output, dry_run }) => {
+            run_generate(&api, &output, dry_run, cli.verbose)
+        }
+        // Explicit subcommand: validate
+        Some(Commands::Validate { api }) => {
+            run_validate(&api, cli.verbose)
+        }
+        // No subcommand: backwards-compatible mode (acts like generate)
+        None => {
+            if let Some(api_name) = cli.api {
+                run_generate(&api_name, &cli.output, cli.dry_run, cli.verbose)
+            } else {
+                eprintln!(
+                    "{} Missing required argument: --api <NAME>",
+                    "[ERROR]".red().bold()
+                );
+                eprintln!();
+                eprintln!("Usage:");
+                eprintln!("  schematic-gen --api <NAME> [OPTIONS]");
+                eprintln!("  schematic-gen generate --api <NAME> [OPTIONS]");
+                eprintln!("  schematic-gen validate --api <NAME>");
+                eprintln!();
+                eprintln!("Available APIs: {}", AVAILABLE_APIS);
+                return ExitCode::from(2);
+            }
+        }
+    };
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("{} {}", "[ERROR]".red().bold(), err);
+            ExitCode::FAILURE
+        }
+    }
 }
