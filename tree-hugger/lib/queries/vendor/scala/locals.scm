@@ -20,6 +20,22 @@
   name: (identifier) @local.definition.function
   (#set! definition.var.scope parent)) @local.definition.function.context
 
+; Classes - capture full node for context
+(class_definition
+  name: (identifier) @local.definition.class) @local.definition.class.context
+
+; Traits (Scala's interfaces) - capture full node for context
+(trait_definition
+  name: (identifier) @local.definition.trait) @local.definition.trait.context
+
+; Objects (Scala singletons/modules) - capture full node for context
+(object_definition
+  name: (identifier) @local.definition.module) @local.definition.module.context
+
+; Enums (Scala 3) - capture full node for context
+(enum_definition
+  name: (identifier) @local.definition.enum) @local.definition.enum.context
+
 (parameter
   name: (identifier) @local.definition.parameter)
 

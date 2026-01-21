@@ -332,6 +332,123 @@ impl FunctionSignature {
     }
 }
 
+/// Information about a struct or class field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldInfo {
+    /// The field name.
+    pub name: String,
+    /// The type annotation, if present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_annotation: Option<String>,
+    /// Documentation comment for the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_comment: Option<String>,
+}
+
+impl FieldInfo {
+    /// Creates a new field with only a name.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            type_annotation: None,
+            doc_comment: None,
+        }
+    }
+
+    /// Creates a new field with a name and type.
+    pub fn with_type(name: impl Into<String>, type_annotation: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            type_annotation: Some(type_annotation.into()),
+            doc_comment: None,
+        }
+    }
+}
+
+/// Information about an enum variant.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VariantInfo {
+    /// The variant name.
+    pub name: String,
+    /// For tuple variants, the field types.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tuple_fields: Vec<String>,
+    /// For struct variants, the named fields.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub struct_fields: Vec<FieldInfo>,
+    /// Documentation comment for the variant.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_comment: Option<String>,
+}
+
+impl VariantInfo {
+    /// Creates a unit variant (no payload).
+    pub fn unit(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            tuple_fields: Vec::new(),
+            struct_fields: Vec::new(),
+            doc_comment: None,
+        }
+    }
+
+    /// Creates a tuple variant with field types.
+    pub fn tuple(name: impl Into<String>, fields: Vec<String>) -> Self {
+        Self {
+            name: name.into(),
+            tuple_fields: fields,
+            struct_fields: Vec::new(),
+            doc_comment: None,
+        }
+    }
+
+    /// Creates a struct variant with named fields.
+    pub fn with_fields(name: impl Into<String>, fields: Vec<FieldInfo>) -> Self {
+        Self {
+            name: name.into(),
+            tuple_fields: Vec::new(),
+            struct_fields: fields,
+            doc_comment: None,
+        }
+    }
+}
+
+/// Metadata for type definitions (structs, enums, interfaces, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypeMetadata {
+    /// For structs/classes: the list of fields.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<FieldInfo>,
+    /// For enums: the list of variants.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub variants: Vec<VariantInfo>,
+    /// Generic type parameters (e.g., T, U in Container<T, U>).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub type_parameters: Vec<String>,
+}
+
+impl Default for TypeMetadata {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TypeMetadata {
+    /// Creates empty type metadata.
+    pub fn new() -> Self {
+        Self {
+            fields: Vec::new(),
+            variants: Vec::new(),
+            type_parameters: Vec::new(),
+        }
+    }
+
+    /// Returns true if the metadata has no information.
+    pub fn is_empty(&self) -> bool {
+        self.fields.is_empty() && self.variants.is_empty() && self.type_parameters.is_empty()
+    }
+}
+
 /// A symbol extracted from a file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolInfo {
@@ -346,6 +463,9 @@ pub struct SymbolInfo {
     /// Function/method signature information.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<FunctionSignature>,
+    /// Type metadata (fields, variants, etc.) for type-like symbols.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_metadata: Option<TypeMetadata>,
 }
 
 /// An imported symbol reference.

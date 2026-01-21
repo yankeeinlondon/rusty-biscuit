@@ -7,8 +7,9 @@ use ignore::overrides::OverrideBuilder;
 use owo_colors::{OwoColorize, Style};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use tree_hugger_lib::{
-    FileSummary, FunctionSignature, ImportSymbol, PackageSummary, ParameterInfo,
-    ProgrammingLanguage, SymbolInfo, SymbolKind, TreeFile, TreeHuggerError,
+    FieldInfo, FileSummary, FunctionSignature, ImportSymbol, PackageSummary, ParameterInfo,
+    ProgrammingLanguage, SymbolInfo, SymbolKind, TreeFile, TreeHuggerError, TypeMetadata,
+    VariantInfo,
 };
 
 #[derive(Parser, Debug)]
@@ -435,19 +436,27 @@ fn render_symbols(symbols: &[SymbolInfo], config: &OutputConfig) {
     }
 }
 
-/// Formats a symbol name with its signature for function-like symbols.
+/// Formats a symbol name with its signature/metadata.
 ///
 /// For functions/methods: `name(param1: T1, param2: T2) -> ReturnType`
+/// For types: `name { field1: T1, field2: T2 }` or `name { Variant1, Variant2 }`
 /// For other symbols: just the name
 fn format_symbol_name(symbol: &SymbolInfo, language: ProgrammingLanguage) -> String {
-    if !symbol.kind.is_function() {
-        return symbol.name.clone();
+    if symbol.kind.is_function() {
+        return match &symbol.signature {
+            Some(sig) => format_function_signature(&symbol.name, sig, language),
+            None => symbol.name.clone(),
+        };
     }
 
-    match &symbol.signature {
-        Some(sig) => format_function_signature(&symbol.name, sig, language),
-        None => symbol.name.clone(),
+    if symbol.kind.is_type() {
+        return match &symbol.type_metadata {
+            Some(meta) => format_type_signature(&symbol.name, meta, language),
+            None => symbol.name.clone(),
+        };
     }
+
+    symbol.name.clone()
 }
 
 /// Formats a function signature like: `name(param1: T1, param2: T2) -> ReturnType`
@@ -534,6 +543,87 @@ fn format_return_type(return_type: &Option<String>, language: ProgrammingLanguag
             }
         }
         None => String::new(),
+    }
+}
+
+/// Formats a type signature showing its composition.
+///
+/// For structs: `name { field1: T1, field2: T2 }`
+/// For enums: `name { Variant1, Variant2(T), Variant3 { f: T } }`
+fn format_type_signature(
+    name: &str,
+    meta: &TypeMetadata,
+    language: ProgrammingLanguage,
+) -> String {
+    let mut result = name.to_string();
+
+    // Add generic type parameters if present
+    if !meta.type_parameters.is_empty() {
+        result.push('<');
+        result.push_str(&meta.type_parameters.join(", "));
+        result.push('>');
+    }
+
+    // Format based on whether it has fields (struct-like) or variants (enum-like)
+    if !meta.variants.is_empty() {
+        let variants = format_variants(&meta.variants);
+        result.push_str(&format!(" {{ {variants} }}"));
+    } else if !meta.fields.is_empty() {
+        let fields = format_fields(&meta.fields, language);
+        result.push_str(&format!(" {{ {fields} }}"));
+    }
+
+    result
+}
+
+/// Formats struct fields for display.
+fn format_fields(fields: &[FieldInfo], language: ProgrammingLanguage) -> String {
+    fields
+        .iter()
+        .map(|f| format_field(f, language))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Formats a single field.
+fn format_field(field: &FieldInfo, language: ProgrammingLanguage) -> String {
+    match &field.type_annotation {
+        Some(ty) => match language {
+            ProgrammingLanguage::Go => format!("{} {}", field.name, ty),
+            _ => format!("{}: {}", field.name, ty),
+        },
+        None => field.name.clone(),
+    }
+}
+
+/// Formats enum variants for display.
+fn format_variants(variants: &[VariantInfo]) -> String {
+    variants
+        .iter()
+        .map(format_variant)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Formats a single enum variant.
+fn format_variant(variant: &VariantInfo) -> String {
+    if !variant.tuple_fields.is_empty() {
+        // Tuple variant: Variant(T1, T2)
+        format!("{}({})", variant.name, variant.tuple_fields.join(", "))
+    } else if !variant.struct_fields.is_empty() {
+        // Struct variant: Variant { field: T }
+        let fields: Vec<String> = variant
+            .struct_fields
+            .iter()
+            .map(|f| match &f.type_annotation {
+                Some(ty) => format!("{}: {}", f.name, ty),
+                None => f.name.clone(),
+            })
+            .collect();
+        format!("{} {{ {} }}", variant.name, fields.join(", "))
+    } else {
+        // Unit variant
+        variant.name.clone()
     }
 }
 

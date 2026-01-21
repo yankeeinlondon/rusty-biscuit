@@ -55,8 +55,9 @@
 (struct_item
   name: (type_identifier) @local.definition.type) @local.definition.type.context
 
+; Enums (separate from types for distinction)
 (enum_item
-  name: (type_identifier) @local.definition.type) @local.definition.type.context
+  name: (type_identifier) @local.definition.enum) @local.definition.enum.context
 
 ; Traits
 (trait_item

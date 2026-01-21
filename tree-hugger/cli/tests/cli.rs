@@ -93,12 +93,15 @@ fn test_symbols_json_output() {
 #[test]
 fn test_symbols_pretty_output_default() {
     // Regression test: symbols command without --json should produce pretty output
+    // Note: Pretty output now includes type composition like `{ field: Type }`
+    // so we check for the language marker and that it's NOT JSON format
     hug_cmd()
         .args(["symbols", "tree-hugger/cli/src/main.rs"])
         .assert()
         .success()
         .stdout(predicate::str::contains("(Rust)"))
-        .stdout(predicate::str::contains("{").not());
+        // Check it's not JSON - JSON would have "root_dir" field
+        .stdout(predicate::str::contains("\"root_dir\"").not());
 }
 
 // ============================================================================

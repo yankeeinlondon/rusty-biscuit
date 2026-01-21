@@ -36,7 +36,23 @@
 
 ; Classes - capture full node for context
 (class_declaration
-  name: (identifier) @local.definition) @local.definition.type.context
+  name: (identifier) @local.definition.class) @local.definition.class.context
+
+; Structs - capture full node for context
+(struct_declaration
+  name: (identifier) @local.definition.type) @local.definition.type.context
+
+; Interfaces - capture full node for context
+(interface_declaration
+  name: (identifier) @local.definition.interface) @local.definition.interface.context
+
+; Enums - capture full node for context
+(enum_declaration
+  name: (identifier) @local.definition.enum) @local.definition.enum.context
+
+; Records - capture full node for context (C# 9+)
+(record_declaration
+  name: (identifier) @local.definition.type) @local.definition.type.context
 
 ; References
 (identifier) @local.reference

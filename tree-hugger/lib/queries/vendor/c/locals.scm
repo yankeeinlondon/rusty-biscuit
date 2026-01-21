@@ -23,11 +23,12 @@
 (declaration
   declarator: (identifier) @local.definition.var)
 
+; Enum definitions - capture full node for context
 (enum_specifier
-  name: (_) @local.definition.type
+  name: (_) @local.definition.enum
   (enumerator_list
     (enumerator
-      name: (identifier) @local.definition.var)))
+      name: (identifier) @local.definition.var))) @local.definition.enum.context
 
 ; Type / Struct / Enum
 (field_declaration

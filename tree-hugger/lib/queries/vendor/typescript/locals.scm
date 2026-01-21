@@ -38,6 +38,6 @@
 (type_alias_declaration
   name: (type_identifier) @local.definition.type) @local.definition.type.context
 
-; Enum declarations - capture full node
+; Enum declarations - capture full node (separate from types for distinction)
 (enum_declaration
-  name: (identifier) @local.definition.type) @local.definition.type.context
+  name: (identifier) @local.definition.enum) @local.definition.enum.context

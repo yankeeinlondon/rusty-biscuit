@@ -6,8 +6,9 @@ use tree_sitter::{Node, Parser, QueryCursor, StreamingIterator};
 use crate::error::TreeHuggerError;
 use crate::queries::{QueryKind, query_for};
 use crate::shared::{
-    CodeBlock, CodeRange, DiagnosticSeverity, FunctionSignature, ImportSymbol, LintDiagnostic,
-    ParameterInfo, ProgrammingLanguage, SymbolInfo, SymbolKind, SyntaxDiagnostic,
+    CodeBlock, CodeRange, DiagnosticSeverity, FieldInfo, FunctionSignature, ImportSymbol,
+    LintDiagnostic, ParameterInfo, ProgrammingLanguage, SymbolInfo, SymbolKind, SyntaxDiagnostic,
+    TypeMetadata, VariantInfo,
 };
 
 /// Represents a parsed source file backed by tree-sitter.
@@ -285,17 +286,22 @@ impl TreeFile {
                     .map(str::to_string)
                     .unwrap_or_default();
 
-                // Extract signature and doc comment if we have a context node
-                let (signature, doc_comment) = if let Some(ctx) = context_node {
+                // Extract metadata based on symbol kind
+                let (signature, type_metadata, doc_comment) = if let Some(ctx) = context_node {
                     let sig = if kind.is_function() {
                         extract_signature(ctx, self.language, &self.source)
                     } else {
                         None
                     };
+                    let type_meta = if kind.is_type() {
+                        extract_type_metadata(ctx, self.language, &self.source)
+                    } else {
+                        None
+                    };
                     let doc = extract_doc_comment(ctx, self.language, &self.source);
-                    (sig, doc)
+                    (sig, type_meta, doc)
                 } else {
-                    (None, None)
+                    (None, None, None)
                 };
 
                 symbols.push((
@@ -307,6 +313,7 @@ impl TreeFile {
                         file: self.file.clone(),
                         doc_comment,
                         signature,
+                        type_metadata,
                     },
                     capture.node,
                 ));
@@ -458,7 +465,11 @@ fn extract_parameters(
     let mut cursor = params_node.walk();
 
     for child in params_node.children(&mut cursor) {
-        if let Some(param) = extract_single_parameter(child, language, source) {
+        // Go needs special handling: a single parameter_declaration can define
+        // multiple parameters (e.g., `a, b int` defines both `a` and `b`)
+        if language == ProgrammingLanguage::Go {
+            parameters.extend(extract_go_parameters(child, source));
+        } else if let Some(param) = extract_single_parameter(child, language, source) {
             parameters.push(param);
         }
     }
@@ -467,6 +478,9 @@ fn extract_parameters(
 }
 
 /// Extracts a single parameter from a parameter node.
+///
+/// Note: Go is handled separately in `extract_parameters` using `extract_go_parameters`
+/// because Go allows multiple identifiers per declaration (e.g., `a, b int`).
 fn extract_single_parameter(
     node: Node<'_>,
     language: ProgrammingLanguage,
@@ -477,10 +491,10 @@ fn extract_single_parameter(
     match language {
         ProgrammingLanguage::Rust => extract_rust_parameter(node, source),
         ProgrammingLanguage::Python => extract_python_parameter(node, source),
-        ProgrammingLanguage::Go => extract_go_parameter(node, source),
         ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
             extract_js_parameter(node, kind, source)
         }
+        // Go is handled specially in extract_parameters
         _ => None,
     }
 }
@@ -500,10 +514,8 @@ fn extract_rust_parameter(node: Node<'_>, source: &str) -> Option<ParameterInfo>
         .and_then(|n| n.utf8_text(source.as_bytes()).ok())
         .map(|s| s.to_string())?;
 
-    let type_annotation = find_child_by_kind(node, "type_identifier")
-        .or_else(|| find_child_by_kind(node, "reference_type"))
-        .or_else(|| find_child_by_kind(node, "generic_type"))
-        .or_else(|| find_child_by_kind(node, "scoped_type_identifier"))
+    // Find the type annotation - could be various type node kinds
+    let type_annotation = find_rust_type_node(node)
         .and_then(|n| n.utf8_text(source.as_bytes()).ok())
         .map(|s| s.to_string());
 
@@ -574,45 +586,62 @@ fn extract_python_parameter(node: Node<'_>, source: &str) -> Option<ParameterInf
     })
 }
 
-fn extract_go_parameter(node: Node<'_>, source: &str) -> Option<ParameterInfo> {
+/// Extracts Go parameters from a parameter_declaration node.
+///
+/// Go allows multiple identifiers to share a type: `a, b int` creates two parameters.
+/// This function returns all parameters from a single declaration.
+fn extract_go_parameters(node: Node<'_>, source: &str) -> Vec<ParameterInfo> {
     let kind = node.kind();
 
     let is_variadic = kind == "variadic_parameter_declaration";
-    let node_kind = if is_variadic {
-        "variadic_parameter_declaration"
-    } else if kind == "parameter_declaration" {
-        "parameter_declaration"
-    } else {
-        return None;
-    };
-
-    if node.kind() != node_kind {
-        return None;
+    if kind != "parameter_declaration" && kind != "variadic_parameter_declaration" {
+        return Vec::new();
     }
 
-    let name = find_child_by_kind(node, "identifier")
-        .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-        .map(|s| s.to_string())?;
-
-    let type_annotation = find_child_by_kind(node, "type_identifier")
-        .or_else(|| find_child_by_kind(node, "pointer_type"))
-        .or_else(|| find_child_by_kind(node, "slice_type"))
-        .or_else(|| find_child_by_kind(node, "array_type"))
-        .or_else(|| find_child_by_kind(node, "map_type"))
-        .or_else(|| find_child_by_kind(node, "channel_type"))
-        .or_else(|| find_child_by_kind(node, "function_type"))
-        .or_else(|| find_child_by_kind(node, "interface_type"))
-        .or_else(|| find_child_by_kind(node, "struct_type"))
-        .or_else(|| find_child_by_kind(node, "qualified_type"))
+    // Find the type annotation (shared by all identifiers in this declaration)
+    let type_annotation = find_go_type_node(node)
         .and_then(|n| n.utf8_text(source.as_bytes()).ok())
         .map(|s| s.to_string());
 
-    Some(ParameterInfo {
-        name,
-        type_annotation,
-        default_value: None,
-        is_variadic,
-    })
+    // Collect all identifiers in this declaration
+    let mut cursor = node.walk();
+    let mut params = Vec::new();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() == "identifier"
+            && let Ok(name) = child.utf8_text(source.as_bytes())
+        {
+            params.push(ParameterInfo {
+                name: name.to_string(),
+                type_annotation: type_annotation.clone(),
+                default_value: None,
+                is_variadic,
+            });
+        }
+    }
+
+    params
+}
+
+/// Finds a Go type node among the children.
+fn find_go_type_node(node: Node<'_>) -> Option<Node<'_>> {
+    const GO_TYPE_KINDS: &[&str] = &[
+        "type_identifier",
+        "pointer_type",
+        "slice_type",
+        "array_type",
+        "map_type",
+        "channel_type",
+        "function_type",
+        "interface_type",
+        "struct_type",
+        "qualified_type",
+        "generic_type",
+    ];
+
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .find(|child| GO_TYPE_KINDS.contains(&child.kind()))
 }
 
 fn extract_js_parameter(node: Node<'_>, kind: &str, source: &str) -> Option<ParameterInfo> {
@@ -1041,4 +1070,632 @@ fn find_nth_child_by_kind<'a>(node: Node<'a>, kind: &str, n: usize) -> Option<No
     node.children(&mut cursor)
         .filter(|child| child.kind() == kind)
         .nth(n)
+}
+
+/// Finds a Rust type node among the children of a parameter or other node.
+///
+/// Rust has many type node kinds: primitive_type, type_identifier, reference_type,
+/// generic_type, tuple_type, array_type, function_type, etc.
+fn find_rust_type_node(node: Node<'_>) -> Option<Node<'_>> {
+    const RUST_TYPE_KINDS: &[&str] = &[
+        "primitive_type",
+        "type_identifier",
+        "reference_type",
+        "generic_type",
+        "scoped_type_identifier",
+        "tuple_type",
+        "array_type",
+        "slice_type",
+        "pointer_type",
+        "function_type",
+        "unit_type",
+        "never_type",
+        "bounded_type",
+        "dynamic_type",
+        "abstract_type",
+        "macro_invocation", // For macro-generated types
+    ];
+
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .find(|child| RUST_TYPE_KINDS.contains(&child.kind()))
+}
+
+// ============================================================================
+// Type metadata extraction
+// ============================================================================
+
+/// Extracts metadata from a type definition node (struct, enum, interface, etc.).
+fn extract_type_metadata(
+    node: Node<'_>,
+    language: ProgrammingLanguage,
+    source: &str,
+) -> Option<TypeMetadata> {
+    let node_kind = node.kind();
+
+    match language {
+        ProgrammingLanguage::Rust => extract_rust_type_metadata(node, node_kind, source),
+        ProgrammingLanguage::TypeScript => extract_typescript_type_metadata(node, node_kind, source),
+        ProgrammingLanguage::Go => extract_go_type_metadata(node, node_kind, source),
+        ProgrammingLanguage::Python => extract_python_type_metadata(node, node_kind, source),
+        _ => None,
+    }
+}
+
+/// Extracts type metadata from Rust struct_item or enum_item nodes.
+fn extract_rust_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+    let mut metadata = TypeMetadata::new();
+
+    // Extract generic type parameters
+    // Try by field name first (the proper tree-sitter way)
+    if let Some(type_params) = node.child_by_field_name("type_parameters") {
+        metadata.type_parameters = extract_rust_type_parameters(type_params, source);
+    } else if let Some(type_params) = find_child_by_kind(node, "type_parameters") {
+        // Fallback to kind-based search
+        metadata.type_parameters = extract_rust_type_parameters(type_params, source);
+    }
+
+    match node_kind {
+        "struct_item" => {
+            // Check for field_declaration_list (normal struct) or ordered_field_declaration_list (tuple struct)
+            if let Some(field_list) = find_child_by_kind(node, "field_declaration_list") {
+                metadata.fields = extract_rust_struct_fields(field_list, source);
+            } else if let Some(tuple_fields) = find_child_by_kind(node, "ordered_field_declaration_list")
+            {
+                // Tuple struct: struct Point(i32, i32)
+                metadata.fields = extract_rust_tuple_struct_fields(tuple_fields, source);
+            }
+        }
+        "enum_item" => {
+            if let Some(variant_list) = find_child_by_kind(node, "enum_variant_list") {
+                metadata.variants = extract_rust_enum_variants(variant_list, source);
+            }
+        }
+        _ => {}
+    }
+
+    if metadata.is_empty() {
+        None
+    } else {
+        Some(metadata)
+    }
+}
+
+/// Extracts generic type parameters from Rust type_parameters node.
+fn extract_rust_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut params = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "type_identifier" | "lifetime" => {
+                if let Ok(text) = child.utf8_text(source.as_bytes()) {
+                    params.push(text.to_string());
+                }
+            }
+            // type_parameter is the wrapper node for a single generic type param
+            "type_parameter" => {
+                // The name field contains the type identifier
+                if let Some(name) = child.child_by_field_name("name") {
+                    if let Ok(text) = name.utf8_text(source.as_bytes()) {
+                        params.push(text.to_string());
+                    }
+                } else if let Some(ident) = find_child_by_kind(child, "type_identifier") {
+                    if let Ok(text) = ident.utf8_text(source.as_bytes()) {
+                        params.push(text.to_string());
+                    }
+                }
+            }
+            "lifetime_parameter" => {
+                if let Some(lifetime) = child.child_by_field_name("lifetime")
+                    .or_else(|| find_child_by_kind(child, "lifetime"))
+                {
+                    if let Ok(text) = lifetime.utf8_text(source.as_bytes()) {
+                        params.push(text.to_string());
+                    }
+                }
+            }
+            "constrained_type_parameter" | "optional_type_parameter" => {
+                // Get the type identifier from the constrained parameter
+                if let Some(ident) = find_child_by_kind(child, "type_identifier") {
+                    if let Ok(text) = ident.utf8_text(source.as_bytes()) {
+                        params.push(text.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    params
+}
+
+/// Extracts fields from a Rust field_declaration_list.
+fn extract_rust_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "field_declaration" {
+            continue;
+        }
+
+        let name = find_child_by_kind(child, "field_identifier")
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        let type_annotation = find_rust_type_node(child)
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        let doc_comment = extract_doc_comment(child, ProgrammingLanguage::Rust, source);
+
+        if let Some(name) = name {
+            fields.push(FieldInfo {
+                name,
+                type_annotation,
+                doc_comment,
+            });
+        }
+    }
+
+    fields
+}
+
+/// Extracts fields from a Rust tuple struct (ordered_field_declaration_list).
+fn extract_rust_tuple_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+    let mut index = 0;
+
+    for child in node.children(&mut cursor) {
+        // Look for type nodes directly as children
+        if RUST_TYPE_KINDS.contains(&child.kind()) {
+            let type_annotation = child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.to_string());
+
+            fields.push(FieldInfo {
+                name: index.to_string(),
+                type_annotation,
+                doc_comment: None,
+            });
+            index += 1;
+        }
+    }
+
+    fields
+}
+
+/// List of Rust type node kinds (used for tuple struct field extraction).
+const RUST_TYPE_KINDS: &[&str] = &[
+    "primitive_type",
+    "type_identifier",
+    "reference_type",
+    "generic_type",
+    "scoped_type_identifier",
+    "tuple_type",
+    "array_type",
+    "slice_type",
+    "pointer_type",
+    "function_type",
+    "unit_type",
+    "never_type",
+    "bounded_type",
+    "dynamic_type",
+    "abstract_type",
+    "macro_invocation",
+];
+
+/// Extracts variants from a Rust enum_variant_list.
+fn extract_rust_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
+    let mut variants = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "enum_variant" {
+            continue;
+        }
+
+        let name = find_child_by_kind(child, "identifier")
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        let doc_comment = extract_doc_comment(child, ProgrammingLanguage::Rust, source);
+
+        if let Some(name) = name {
+            let mut variant = VariantInfo::unit(&name);
+            variant.doc_comment = doc_comment;
+
+            // Check for tuple variant: Variant(Type1, Type2)
+            if let Some(tuple_fields) = find_child_by_kind(child, "ordered_field_declaration_list") {
+                variant.tuple_fields = extract_rust_variant_tuple_fields(tuple_fields, source);
+            }
+
+            // Check for struct variant: Variant { field: Type }
+            if let Some(field_list) = find_child_by_kind(child, "field_declaration_list") {
+                variant.struct_fields = extract_rust_struct_fields(field_list, source);
+            }
+
+            variants.push(variant);
+        }
+    }
+
+    variants
+}
+
+/// Extracts tuple field types from an enum variant.
+fn extract_rust_variant_tuple_fields(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if RUST_TYPE_KINDS.contains(&child.kind()) {
+            if let Ok(text) = child.utf8_text(source.as_bytes()) {
+                fields.push(text.to_string());
+            }
+        }
+    }
+
+    fields
+}
+
+/// Extracts type metadata from TypeScript interface or type_alias_declaration.
+fn extract_typescript_type_metadata(
+    node: Node<'_>,
+    node_kind: &str,
+    source: &str,
+) -> Option<TypeMetadata> {
+    let mut metadata = TypeMetadata::new();
+
+    // Extract generic type parameters
+    if let Some(type_params) = find_child_by_kind(node, "type_parameters") {
+        metadata.type_parameters = extract_typescript_type_parameters(type_params, source);
+    }
+
+    match node_kind {
+        "interface_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "interface_body")
+                .or_else(|| find_child_by_kind(node, "object_type"))
+            {
+                metadata.fields = extract_typescript_interface_fields(body, source);
+            }
+        }
+        "type_alias_declaration" => {
+            // Type aliases can be object types or other types
+            if let Some(object_type) = find_child_by_kind(node, "object_type") {
+                metadata.fields = extract_typescript_interface_fields(object_type, source);
+            }
+        }
+        "class_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "class_body") {
+                metadata.fields = extract_typescript_class_fields(body, source);
+            }
+        }
+        "enum_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "enum_body") {
+                metadata.variants = extract_typescript_enum_variants(body, source);
+            }
+        }
+        _ => {}
+    }
+
+    if metadata.is_empty() {
+        None
+    } else {
+        Some(metadata)
+    }
+}
+
+/// Extracts generic type parameters from TypeScript type_parameters node.
+fn extract_typescript_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut params = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() == "type_parameter" {
+            if let Some(name) = find_child_by_kind(child, "type_identifier") {
+                if let Ok(text) = name.utf8_text(source.as_bytes()) {
+                    params.push(text.to_string());
+                }
+            }
+        }
+    }
+
+    params
+}
+
+/// Extracts fields from TypeScript interface_body or object_type.
+fn extract_typescript_interface_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        if kind != "property_signature" && kind != "public_field_definition" {
+            continue;
+        }
+
+        let name = find_child_by_kind(child, "property_identifier")
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        let type_annotation = find_child_by_kind(child, "type_annotation")
+            .and_then(|ta| ta.child(1)) // Skip the colon
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        if let Some(name) = name {
+            fields.push(FieldInfo {
+                name,
+                type_annotation,
+                doc_comment: None,
+            });
+        }
+    }
+
+    fields
+}
+
+/// Extracts fields from TypeScript class_body.
+fn extract_typescript_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        if kind != "public_field_definition" && kind != "property_definition" {
+            continue;
+        }
+
+        let name = find_child_by_kind(child, "property_identifier")
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        let type_annotation = find_child_by_kind(child, "type_annotation")
+            .and_then(|ta| ta.child(1))
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        if let Some(name) = name {
+            fields.push(FieldInfo {
+                name,
+                type_annotation,
+                doc_comment: None,
+            });
+        }
+    }
+
+    fields
+}
+
+/// Extracts variants from TypeScript enum_body.
+fn extract_typescript_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
+    let mut variants = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "enum_assignment" && child.kind() != "property_identifier" {
+            continue;
+        }
+
+        let name = if child.kind() == "enum_assignment" {
+            find_child_by_kind(child, "property_identifier")
+                .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                .map(|s| s.to_string())
+        } else {
+            child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string())
+        };
+
+        if let Some(name) = name {
+            variants.push(VariantInfo::unit(name));
+        }
+    }
+
+    variants
+}
+
+/// Extracts type metadata from Go type_spec nodes.
+fn extract_go_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+    if node_kind != "type_spec" && node_kind != "type_declaration" {
+        return None;
+    }
+
+    // For type_declaration, find the type_spec inside
+    let type_spec = if node_kind == "type_declaration" {
+        find_child_by_kind(node, "type_spec")?
+    } else {
+        node
+    };
+
+    let mut metadata = TypeMetadata::new();
+
+    // Extract type parameters if present
+    if let Some(type_params) = find_child_by_kind(type_spec, "type_parameter_list") {
+        metadata.type_parameters = extract_go_type_parameters(type_params, source);
+    }
+
+    // Check for struct type
+    if let Some(struct_type) = find_child_by_kind(type_spec, "struct_type") {
+        if let Some(field_list) = find_child_by_kind(struct_type, "field_declaration_list") {
+            metadata.fields = extract_go_struct_fields(field_list, source);
+        }
+    }
+
+    // Check for interface type
+    if let Some(interface_type) = find_child_by_kind(type_spec, "interface_type") {
+        metadata.fields = extract_go_interface_methods(interface_type, source);
+    }
+
+    if metadata.is_empty() {
+        None
+    } else {
+        Some(metadata)
+    }
+}
+
+/// Extracts type parameters from Go type_parameter_list.
+fn extract_go_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut params = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() == "type_parameter_declaration" {
+            // Get all identifiers in this declaration
+            let mut inner_cursor = child.walk();
+            for inner in child.children(&mut inner_cursor) {
+                if inner.kind() == "identifier" {
+                    if let Ok(text) = inner.utf8_text(source.as_bytes()) {
+                        params.push(text.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    params
+}
+
+/// Extracts fields from Go struct field_declaration_list.
+fn extract_go_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "field_declaration" {
+            continue;
+        }
+
+        // Go allows multiple identifiers per field declaration: `a, b int`
+        let type_annotation = find_go_type_node(child)
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        let mut inner_cursor = child.walk();
+        for inner in child.children(&mut inner_cursor) {
+            if inner.kind() == "field_identifier" {
+                if let Ok(name) = inner.utf8_text(source.as_bytes()) {
+                    fields.push(FieldInfo {
+                        name: name.to_string(),
+                        type_annotation: type_annotation.clone(),
+                        doc_comment: None,
+                    });
+                }
+            }
+        }
+    }
+
+    fields
+}
+
+/// Extracts method signatures from Go interface_type.
+fn extract_go_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() == "method_spec" {
+            let name = find_child_by_kind(child, "field_identifier")
+                .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                .map(|s| s.to_string());
+
+            // Get the full method signature as the "type"
+            let type_annotation = child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.to_string());
+
+            if let Some(name) = name {
+                fields.push(FieldInfo {
+                    name,
+                    type_annotation,
+                    doc_comment: None,
+                });
+            }
+        }
+    }
+
+    fields
+}
+
+/// Extracts type metadata from Python class_definition.
+fn extract_python_type_metadata(
+    node: Node<'_>,
+    node_kind: &str,
+    source: &str,
+) -> Option<TypeMetadata> {
+    if node_kind != "class_definition" {
+        return None;
+    }
+
+    let mut metadata = TypeMetadata::new();
+
+    // Check for class body
+    if let Some(body) = find_child_by_kind(node, "block") {
+        metadata.fields = extract_python_class_fields(body, source);
+    }
+
+    if metadata.is_empty() {
+        None
+    } else {
+        Some(metadata)
+    }
+}
+
+/// Extracts fields from Python class body.
+fn extract_python_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            // Annotated assignment: name: str = "value"
+            "expression_statement" => {
+                if let Some(assignment) = find_child_by_kind(child, "assignment") {
+                    // Check for type annotation
+                    if let Some(type_node) = find_child_by_kind(assignment, "type") {
+                        let name = assignment
+                            .child(0)
+                            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                            .map(|s| s.to_string());
+
+                        let type_annotation = type_node
+                            .utf8_text(source.as_bytes())
+                            .ok()
+                            .map(|s| s.to_string());
+
+                        if let Some(name) = name {
+                            fields.push(FieldInfo {
+                                name,
+                                type_annotation,
+                                doc_comment: None,
+                            });
+                        }
+                    }
+                }
+            }
+            // Typed assignment without value: name: str
+            "typed_assignment_statement" => {
+                let name = find_child_by_kind(child, "identifier")
+                    .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                    .map(|s| s.to_string());
+
+                let type_annotation = find_child_by_kind(child, "type")
+                    .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                    .map(|s| s.to_string());
+
+                if let Some(name) = name {
+                    fields.push(FieldInfo {
+                        name,
+                        type_annotation,
+                        doc_comment: None,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fields
 }

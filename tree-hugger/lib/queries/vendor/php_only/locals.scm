@@ -2,8 +2,23 @@
 ;-------
 ; Classes - capture full node for context
 ((class_declaration
-  name: (name) @local.definition.type) @local.scope @local.definition.type.context
-  (#set! definition.type.scope "parent"))
+  name: (name) @local.definition.class) @local.scope @local.definition.class.context
+  (#set! definition.class.scope "parent"))
+
+; Interfaces - capture full node for context
+((interface_declaration
+  name: (name) @local.definition.interface) @local.scope @local.definition.interface.context
+  (#set! definition.interface.scope "parent"))
+
+; Traits - capture full node for context
+((trait_declaration
+  name: (name) @local.definition.trait) @local.scope @local.definition.trait.context
+  (#set! definition.trait.scope "parent"))
+
+; Enums (PHP 8.1+) - capture full node for context
+((enum_declaration
+  name: (name) @local.definition.enum) @local.scope @local.definition.enum.context
+  (#set! definition.enum.scope "parent"))
 
 ; Methods - capture full node for signature extraction
 ((method_declaration
