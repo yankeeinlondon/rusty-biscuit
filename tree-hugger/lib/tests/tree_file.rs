@@ -2054,10 +2054,11 @@ fn extracts_typescript_import_source() -> Result<(), TreeHuggerError> {
 #[test]
 fn extracts_typescript_aliased_import() -> Result<(), TreeHuggerError> {
     // Regression test: TypeScript aliased imports should capture original name and alias
+    // Tests: `import { readFile as read, writeFile as write } from "fs/promises"`
     let tree_file = TreeFile::new(fixture_path("imports.ts"))?;
     let imports = tree_file.imported_symbols()?;
 
-    // Find the aliased import: `import { readFile as read } from "fs/promises"`
+    // Test first aliased import: readFile as read
     let read = imports
         .iter()
         .find(|i| i.name == "read")
@@ -2077,6 +2078,70 @@ fn extracts_typescript_aliased_import() -> Result<(), TreeHuggerError> {
         read.alias.as_deref(),
         Some("read"),
         "Aliased import should have alias"
+    );
+
+    // Test second aliased import: writeFile as write
+    let write = imports
+        .iter()
+        .find(|i| i.name == "write")
+        .expect("should find 'write' alias import");
+
+    assert_eq!(
+        write.source.as_deref(),
+        Some("fs/promises"),
+        "Second aliased import should have same source"
+    );
+    assert_eq!(
+        write.original_name.as_deref(),
+        Some("writeFile"),
+        "Second aliased import should have original name"
+    );
+    assert_eq!(
+        write.alias.as_deref(),
+        Some("write"),
+        "Second aliased import should have alias"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_multiple_imports_from_same_source() -> Result<(), TreeHuggerError> {
+    // Regression test: Multiple symbols imported from the same source should all
+    // have the correct source. Tests: `import { join, resolve } from "path"`
+    let tree_file = TreeFile::new(fixture_path("imports.ts"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    let join = imports
+        .iter()
+        .find(|i| i.name == "join")
+        .expect("should find 'join' import");
+
+    let resolve = imports
+        .iter()
+        .find(|i| i.name == "resolve")
+        .expect("should find 'resolve' import");
+
+    // Both should have the same source
+    assert_eq!(
+        join.source.as_deref(),
+        Some("path"),
+        "First import should have source"
+    );
+    assert_eq!(
+        resolve.source.as_deref(),
+        Some("path"),
+        "Second import should have same source"
+    );
+
+    // Neither should have alias (they're not aliased)
+    assert!(
+        join.alias.is_none(),
+        "Non-aliased import should not have alias"
+    );
+    assert!(
+        resolve.alias.is_none(),
+        "Non-aliased import should not have alias"
     );
 
     Ok(())
@@ -2116,7 +2181,7 @@ fn extracts_typescript_namespace_import() -> Result<(), TreeHuggerError> {
 #[test]
 fn extracts_python_import_source() -> Result<(), TreeHuggerError> {
     // Regression test: Python imports should have source module extracted
-    let tree_file = TreeFile::new(fixture_path("sample.py"))?;
+    let tree_file = TreeFile::new(fixture_path("imports.py"))?;
     let imports = tree_file.imported_symbols()?;
 
     // Find the simple import: `import os`
@@ -2131,16 +2196,99 @@ fn extracts_python_import_source() -> Result<(), TreeHuggerError> {
         "Python simple import should have source (same as name)"
     );
 
-    // Find the from import: `from typing import Optional`
+    Ok(())
+}
+
+#[test]
+fn extracts_python_aliased_import() -> Result<(), TreeHuggerError> {
+    // Regression test: Python aliased imports should capture original and alias
+    // Tests: `import numpy as np` and `from collections import OrderedDict as OD`
+    let tree_file = TreeFile::new(fixture_path("imports.py"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    // Test `import numpy as np`
+    let np = imports
+        .iter()
+        .find(|i| i.name == "np")
+        .expect("should find np alias import");
+
+    assert_eq!(
+        np.source.as_deref(),
+        Some("numpy"),
+        "Aliased module import should have original module as source"
+    );
+    assert_eq!(
+        np.original_name.as_deref(),
+        Some("numpy"),
+        "Aliased module import should have original name"
+    );
+    assert_eq!(
+        np.alias.as_deref(),
+        Some("np"),
+        "Aliased module import should have alias"
+    );
+
+    // Test `from collections import OrderedDict as OD`
+    let od = imports
+        .iter()
+        .find(|i| i.name == "OD")
+        .expect("should find OD alias import");
+
+    assert_eq!(
+        od.source.as_deref(),
+        Some("collections"),
+        "Aliased from import should have module as source"
+    );
+    assert_eq!(
+        od.original_name.as_deref(),
+        Some("OrderedDict"),
+        "Aliased from import should have original name"
+    );
+    assert_eq!(
+        od.alias.as_deref(),
+        Some("OD"),
+        "Aliased from import should have alias"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_python_multiple_imports_from_same_source() -> Result<(), TreeHuggerError> {
+    // Regression test: Multiple symbols from same source should all have correct source
+    // Tests: `from typing import Optional, List`
+    let tree_file = TreeFile::new(fixture_path("imports.py"))?;
+    let imports = tree_file.imported_symbols()?;
+
     let optional = imports
         .iter()
         .find(|i| i.name == "Optional")
         .expect("should find Optional import");
 
+    let list = imports
+        .iter()
+        .find(|i| i.name == "List")
+        .expect("should find List import");
+
     assert_eq!(
         optional.source.as_deref(),
         Some("typing"),
-        "Python from import should have source module"
+        "First import should have source"
+    );
+    assert_eq!(
+        list.source.as_deref(),
+        Some("typing"),
+        "Second import should have same source"
+    );
+
+    // Neither should have alias
+    assert!(
+        optional.alias.is_none(),
+        "Non-aliased import should not have alias"
+    );
+    assert!(
+        list.alias.is_none(),
+        "Non-aliased import should not have alias"
     );
 
     Ok(())

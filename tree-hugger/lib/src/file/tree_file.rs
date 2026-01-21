@@ -312,32 +312,17 @@ impl TreeFile {
         let import_stmt = find_ancestor_by_kind(node, "import_statement")
             .or_else(|| find_ancestor_by_kind(node, "import_from_statement"));
 
-        if let Some(stmt) = import_stmt {
-            if stmt.kind() == "import_from_statement" {
-                // from X import Y - extract X as the source
-                if let Some(module_node) = stmt.child_by_field_name("module_name") {
-                    source = module_node
-                        .utf8_text(self.source.as_bytes())
-                        .ok()
-                        .map(|s| s.to_string());
-                }
-            } else {
-                // import X - the module is the source
-                // For `import os`, the source is "os" (same as name)
-                source = Some(name.to_string());
-            }
-        }
-
-        // Check for aliased import (aliased_import)
+        // Check for aliased import (aliased_import) - do this first to get the correct module name
         let parent = node.parent();
         if let Some(p) = parent {
             if p.kind() == "aliased_import" {
-                // from X import Y as Z
+                // This handles both:
+                // - `import X as Y` (name field is module, alias field is local name)
+                // - `from M import X as Y` (name field is original symbol, alias field is local name)
                 if let Some(name_node) = p.child_by_field_name("name") {
                     let orig = name_node
                         .utf8_text(self.source.as_bytes())
                         .unwrap_or_default();
-                    // The capture is the alias
                     if let Some(alias_node) = p.child_by_field_name("alias") {
                         let al = alias_node
                             .utf8_text(self.source.as_bytes())
@@ -345,8 +330,34 @@ impl TreeFile {
                         if name == al {
                             original_name = Some(extract_dotted_name(orig));
                             alias = Some(al.to_string());
+
+                            // For `import X as Y`, the source is X (the module name)
+                            if let Some(stmt) = &import_stmt {
+                                if stmt.kind() == "import_statement" {
+                                    source = Some(orig.to_string());
+                                }
+                            }
                         }
                     }
+                }
+            }
+        }
+
+        // Set source if not already set by aliased import handling
+        if source.is_none() {
+            if let Some(stmt) = import_stmt {
+                if stmt.kind() == "import_from_statement" {
+                    // from X import Y - extract X as the source
+                    if let Some(module_node) = stmt.child_by_field_name("module_name") {
+                        source = module_node
+                            .utf8_text(self.source.as_bytes())
+                            .ok()
+                            .map(|s| s.to_string());
+                    }
+                } else {
+                    // import X - the module is the source
+                    // For `import os`, the source is "os" (same as name)
+                    source = Some(name.to_string());
                 }
             }
         }
