@@ -99,8 +99,10 @@ async fn main() -> Result<(), SchematicError> {
 - **Proper error handling**: `MissingCredential` errors instead of silent failures
 - **Path parameters**: `{param}` syntax in paths become struct fields with `impl Into<String>` for ergonomic usage
 - **Multiple response types**: JSON, Text, Binary, and Empty responses
-- **Per-API modules**: Each API gets its own module file
+- **Per-API modules**: Each API gets its own module file with configurable paths
 - **Prelude exports**: Convenient imports via `use schematic_*::prelude::*`
+- **Validation**: Pre-generation checks for naming collisions and configuration errors
+- **Doc examples**: Generated request structs include usage examples in doc comments
 
 ## Building
 
@@ -115,8 +117,22 @@ just -f schematic/justfile test
 just -f schematic/justfile lint
 # Generate API clients
 just -f schematic/justfile generate
+# Validate API definitions (without generating)
+schematic-gen validate --api openai
 # Full workflow: generate and verify
 just -f schematic/justfile full
+```
+
+### CLI Subcommands
+
+The `schematic-gen` CLI supports two subcommands:
+
+```bash
+# Validate an API definition
+schematic-gen validate --api openai
+
+# Generate client code (validates first)
+schematic-gen generate --api openai --output ./output
 ```
 
 ## License

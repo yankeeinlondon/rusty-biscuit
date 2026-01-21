@@ -13,9 +13,13 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 
 ## Available APIs
 
-| API | Module | Definition Function | Description |
-|-----|--------|---------------------|-------------|
-| OpenAI | `openai` | `define_openai_api()` | OpenAI Models API (list, retrieve, delete models) |
+| API | Module | Definition Function | Endpoints | Description |
+|-----|--------|---------------------|-----------|-------------|
+| OpenAI | `openai` | `define_openai_api()` | 3 | OpenAI Models API (list, retrieve, delete models) |
+| HuggingFace Hub | `huggingface` | `define_huggingface_hub_api()` | 26 | Hugging Face Hub API (models, datasets, spaces, repos) |
+| Ollama Native | `ollama` | `define_ollama_native_api()` | 11 | Ollama local inference API (generate, chat, embeddings) |
+| Ollama OpenAI | `ollama` | `define_ollama_openai_api()` | 4 | Ollama OpenAI-compatible API |
+| ElevenLabs | `elevenlabs` | `define_elevenlabs_api()` | 42 | ElevenLabs TTS API (voices, text-to-speech, audio) |
 
 ## Usage
 
@@ -45,6 +49,25 @@ use schematic_definitions::openai::{define_openai_api, Model, ListModelsResponse
 let api = define_openai_api();
 assert_eq!(api.name, "OpenAI");
 assert_eq!(api.base_url, "https://api.openai.com/v1");
+```
+
+```rust
+use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
+
+let native_api = define_ollama_native_api();
+assert_eq!(native_api.name, "OllamaNative");
+assert_eq!(native_api.endpoints.len(), 11);
+
+let openai_api = define_ollama_openai_api();
+assert_eq!(openai_api.name, "OllamaOpenAI");
+```
+
+```rust
+use schematic_definitions::elevenlabs::define_elevenlabs_api;
+
+let api = define_elevenlabs_api();
+assert_eq!(api.name, "ElevenLabs");
+assert_eq!(api.endpoints.len(), 42);
 ```
 
 ## OpenAI API

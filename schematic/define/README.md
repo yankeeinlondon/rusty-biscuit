@@ -14,7 +14,7 @@ The definition process is intentionally **data-driven**: you describe *what* the
 
 | Type | Purpose |
 |------|---------|
-| `RestApi` | Complete API definition with base URL, auth, and endpoints |
+| `RestApi` | Complete API definition with base URL, auth, endpoints, and codegen options |
 | `Endpoint` | Single endpoint with method, path, request/response schemas |
 | `RestMethod` | HTTP methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS) |
 | `AuthStrategy` | Authentication configuration (Bearer, API Key, Basic, None) |
@@ -139,6 +139,41 @@ Err(SchematicError::MissingCredential {
     env_vars: vec!["OPENAI_API_KEY".to_string(), "OPENAI_KEY".to_string()],
 })
 ```
+
+## Code Generation Options
+
+`RestApi` includes optional fields to customize generated code:
+
+### Module Path
+
+By default, the generated module uses the lowercased API name. Override with `module_path`:
+
+```rust
+let api = RestApi {
+    name: "OllamaOpenAI".to_string(),
+    module_path: Some("ollama".to_string()),  // Use "ollama" instead of "ollamaopenai"
+    // ...
+};
+```
+
+This is useful when:
+- Multiple APIs share a definitions module (e.g., `OllamaNative` and `OllamaOpenAI` both in `ollama/`)
+- The API name doesn't match the desired module name
+
+### Request Suffix
+
+By default, generated wrapper structs use the "Request" suffix (e.g., `ListModelsRequest`). Customize with `request_suffix`:
+
+```rust
+let api = RestApi {
+    name: "MyApi".to_string(),
+    request_suffix: Some("Req".to_string()),  // Use "Req" instead of "Request"
+    // ...
+};
+// Generates: ListModelsReq, CreateUserReq, etc.
+```
+
+**Note**: The suffix must be alphanumeric. Invalid suffixes (containing spaces, hyphens, etc.) will cause a validation error.
 
 ## Request Types
 

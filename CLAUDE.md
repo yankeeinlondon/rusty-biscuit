@@ -25,10 +25,11 @@ dockhand/
 ├── research/         # AI-powered library research tools
 │   ├── cli/          # Binary: `research`
 │   └── lib/          # Core research library
-├── schematic/        # Schema generation for API's and other schema
-│   ├── define/        # Tooling to Schema definition
-│   └── gen/          # Generation code to take definition code -> schema code
-│   └── schema/       # Generated schemas
+├── schematic/        # Schema generation for REST API clients
+│   ├── define/       # API definition primitives (RestApi, Endpoint, AuthStrategy)
+│   ├── definitions/  # Pre-built API definitions (OpenAI, Ollama, ElevenLabs, HuggingFace)
+│   ├── gen/          # Code generator CLI with validate/generate subcommands
+│   └── schema/       # Generated API clients (auto-generated, do not edit)
 ├── sniff/
 │   ├── cli/          # Binary: `sniff`
 │   └── lib/          # Hardware, Network, OS, and package manager discovery
@@ -108,7 +109,33 @@ The `biscuit/codegen` module provides AST-based code manipulation:
 - Validates injection points before modification
 - Prevents duplicate injections via semantic analysis
 
-#### 5. Tree-sitter Symbol Extraction (Tree Hugger)
+#### 5. REST API Client Generation (Schematic)
+
+The `schematic` package provides type-safe REST API client generation:
+
+**Definition → Generation → Client:**
+- `schematic-define`: Primitives for describing APIs (`RestApi`, `Endpoint`, `AuthStrategy`)
+- `schematic-definitions`: Pre-built API definitions (OpenAI, HuggingFace, Ollama, ElevenLabs)
+- `schematic-gen`: Code generator CLI with `validate` and `generate` subcommands
+- `schematic-schema`: Generated API clients ready for consumption
+
+**Key CLI Commands:**
+```bash
+# Validate an API definition
+schematic-gen validate --api openai
+
+# Generate client code
+schematic-gen generate --api openai --output schematic/schema/src
+
+# Regenerate all APIs
+just -f schematic/justfile generate
+```
+
+**Configuration Options:**
+- `module_path`: Override generated module name (for multi-API modules)
+- `request_suffix`: Customize wrapper struct suffix (default: "Request")
+
+#### 6. Tree-sitter Symbol Extraction (Tree Hugger)
 
 The `tree-hugger` package provides multi-language symbol extraction using Tree-sitter:
 

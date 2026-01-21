@@ -29,27 +29,59 @@ cargo build -p schematic-gen --release
 
 ## CLI Usage
 
+The CLI provides two subcommands: `generate` and `validate`.
+
 ```bash
 # Generate code for the OpenAI API
-schematic-gen --api openai --output schematic/schema/src
+schematic-gen generate --api openai --output schematic/schema/src
+
+# Validate an API definition (without generating code)
+schematic-gen validate --api openai
 
 # Dry run (print generated code without writing files)
-schematic-gen --api openai --dry-run
+schematic-gen generate --api openai --dry-run
 
 # Verbose output
-schematic-gen --api openai -v      # Basic info
-schematic-gen --api openai -vv     # Endpoint details
-schematic-gen --api openai -vvv    # Full debug output
+schematic-gen generate --api openai -v      # Basic info
+schematic-gen generate --api openai -vv     # Endpoint details
+schematic-gen generate --api openai -vvv    # Full debug output
+
+# Legacy syntax (backwards compatible - runs generate)
+schematic-gen --api openai --output schematic/schema/src
 ```
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `generate` | Generate API client code (runs validation first) |
+| `validate` | Validate API definition without generating code |
 
 ### Options
 
 | Flag | Description |
 |------|-------------|
-| `-a, --api <NAME>` | API definition to generate (e.g., `openai`) |
+| `-a, --api <NAME>` | API definition to generate/validate (e.g., `openai`) |
 | `-o, --output <DIR>` | Output directory for generated code (default: `schematic/schema/src`) |
 | `--dry-run` | Print generated code without writing files |
 | `-v, --verbose` | Increase verbosity level |
+
+### Validation
+
+The `validate` subcommand checks for:
+
+- **Naming collisions**: Ensures body type names don't conflict with generated wrapper struct names
+- **Request suffix format**: Validates custom `request_suffix` is alphanumeric
+
+```bash
+$ schematic-gen validate --api openai
+  [PASS] Request suffix format
+  [PASS] No naming collisions detected
+
+[OK] All validation checks passed for 'OpenAI'
+```
+
+Validation runs automatically before generation. If validation fails, generation is aborted with a descriptive error message.
 
 ## Library Usage
 
@@ -180,29 +212,70 @@ API Name: "OpenAI"     → Module: openai.rs    → Import: schematic_definition
 API Name: "ElevenLabs" → Module: elevenlabs.rs → Import: schematic_definitions::elevenlabs::*
 ```
 
-**Multi-API modules require manual fixups**. If you define multiple APIs in a single definitions module:
+#### Module Path Configuration
+
+You can override the default module path derivation using `RestApi::module_path`:
+
+```rust
+let api = RestApi {
+    name: "OllamaOpenAI".to_string(),
+    module_path: Some("ollama".to_string()),  // Use "ollama" instead of "ollamaopenai"
+    // ...
+};
+```
+
+#### Automatic Path Inference
+
+For API names with recognized suffixes, the generator can infer the module path:
+
+| API Name | Inferred Module |
+|----------|-----------------|
+| `OllamaNative` | `ollama` (strips "Native" suffix) |
+| `HTTPClient` | `http` (strips "Client" suffix) |
+| `MyService` | `my` (strips "Service" suffix) |
+
+Explicit `module_path` always takes precedence over inference.
+
+**Multi-API modules require explicit configuration**. If you define multiple APIs in a single definitions module, set `module_path` explicitly:
 
 ```rust
 // definitions/src/ollama/mod.rs defines both:
-// - OllamaNative (API name)
-// - OllamaOpenAI (API name)
+pub fn define_ollama_native_api() -> RestApi {
+    RestApi {
+        name: "OllamaNative".to_string(),
+        module_path: Some("ollama".to_string()),  // Explicit path
+        // ...
+    }
+}
 
-// Generator creates:
-pub use schematic_definitions::ollamanative::*;  // ← Wrong path!
-pub use schematic_definitions::ollamaopenai::*;  // ← Wrong path!
-
-// Manual fix needed:
-pub use schematic_definitions::ollama::*;        // ← Correct path
+pub fn define_ollama_openai_api() -> RestApi {
+    RestApi {
+        name: "OllamaOpenAI".to_string(),
+        module_path: Some("ollama".to_string()),  // Same module
+        // ...
+    }
+}
 ```
 
 ### Wrapper Struct Generation
 
-For each endpoint, the generator creates a wrapper struct named `{EndpointId}Request`:
+For each endpoint, the generator creates a wrapper struct named `{EndpointId}{Suffix}`:
 
 ```
 Endpoint ID: "Generate"      → struct GenerateRequest { ... }
 Endpoint ID: "ListModels"    → struct ListModelsRequest { ... }
 Endpoint ID: "CreateChat"    → struct CreateChatRequest { ... }
+```
+
+The suffix defaults to "Request" but can be customized via `RestApi::request_suffix`:
+
+```rust
+let api = RestApi {
+    name: "MyApi".to_string(),
+    request_suffix: Some("Req".to_string()),  // Use "Req" instead of "Request"
+    // ...
+};
+// Generates: struct GenerateReq, struct ListModelsReq, etc.
 ```
 
 **Important**: Body types in your definitions must use different names (conventionally `*Body` suffix) to avoid recursive struct definitions. See [schematic-define naming conventions](../define/README.md#naming-conventions).
@@ -247,7 +320,15 @@ pub enum SchematicError {
 // Request Structs (one per endpoint)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/// Request for ListModels endpoint.
+/// Request for `ListModels` endpoint.
+///
+/// ## Example
+///
+/// ```ignore
+/// use schematic_schema::openai::ListModelsRequest;
+///
+/// let request = ListModelsRequest::default();
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct ListModelsRequest {}
 
@@ -614,6 +695,24 @@ Generator error types (used by the generator itself):
 | `WriteError` | Failed to write output file |
 | `OutputDirNotFound` | Output directory doesn't exist |
 | `ConfigError` | Invalid configuration |
+| `NamingCollision` | Body type name conflicts with generated wrapper struct |
+| `InvalidRequestSuffix` | Custom request suffix contains invalid characters |
+
+### `validation`
+
+Pre-generation validation functions:
+
+| Function | Description |
+|----------|-------------|
+| `validate_api(&api)` | Validates naming collisions and request suffix format |
+
+### `inference`
+
+Module path inference utilities:
+
+| Function | Description |
+|----------|-------------|
+| `infer_module_path(&name)` | Infers module path from API name (for recognized suffixes) |
 
 Generated runtime error types (`SchematicError`):
 

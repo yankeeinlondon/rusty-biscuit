@@ -63,18 +63,43 @@ async fn main() -> Result<(), schematic_schema::openai::SchematicError> {
 
 ## Available APIs
 
-| API | Module | Client Struct | Auth |
-|-----|--------|---------------|------|
-| OpenAI | `openai` | `OpenAI` | Bearer token (`OPENAI_API_KEY`) |
+| API | Module | Client Struct | Endpoints | Auth |
+|-----|--------|---------------|-----------|------|
+| OpenAI | `openai` | `OpenAI` | 3 | Bearer token (`OPENAI_API_KEY`) |
+| HuggingFace Hub | `huggingface` | `HuggingFaceHub` | 26 | Bearer token (`HUGGINGFACE_API_KEY`) |
+| Ollama Native | `ollama` | `OllamaNative` | 11 | None (local) |
+| Ollama OpenAI | `ollamaopenai` | `OllamaOpenAI` | 4 | None (local) |
+| ElevenLabs | `elevenlabs` | `ElevenLabs` | 42 | API Key (`ELEVEN_LABS_API_KEY`) |
 
 ## Prelude Exports
 
 The prelude (`schematic_schema::prelude`) exports:
 
-- **Client structs**: `OpenAI`
-- **Request enums**: `OpenAIRequest`
+- **Client structs**: `OpenAI`, `HuggingFaceHub`, `OllamaNative`, `OllamaOpenAI`, `ElevenLabs`
+- **Request enums**: `OpenAIRequest`, `HuggingFaceHubRequest`, etc.
 - **Error type**: `SchematicError`
-- **Response types**: `Model`, `ListModelsResponse`, `DeleteModelResponse` (from definitions)
+- **Response types**: `Model`, `ListModelsResponse`, etc. (from definitions)
+
+## Generated Documentation
+
+All request structs include doc comments with usage examples:
+
+```rust
+/// Request for `ListModels` endpoint.
+///
+/// ## Example
+///
+/// ```ignore
+/// use schematic_schema::openai::ListModelsRequest;
+///
+/// let request = ListModelsRequest::default();
+/// ```
+pub struct ListModelsRequest {}
+```
+
+Examples show the appropriate construction pattern:
+- `default()` for requests with no required fields
+- `new(...)` for requests with required path parameters or body
 
 ## Client Configuration
 
