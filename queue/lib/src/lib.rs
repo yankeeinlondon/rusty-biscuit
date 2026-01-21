@@ -8,7 +8,7 @@
 //!
 //! - [`ScheduledTask`] - A task scheduled for future execution
 //! - [`ExecutionTarget`] - Where to run the task (pane, window, background)
-//! - [`TaskStatus`] - Current status of a task (pending, running, completed, failed)
+//! - [`TaskStatus`] - Current status of a task (pending, running, completed, cancelled, failed)
 //!
 //! ## Task Execution
 //!
@@ -42,5 +42,5 @@ pub use error::HistoryError;
 pub use executor::{TaskEvent, TaskExecutor};
 pub use history::{HistoryStore, JsonFileStore};
 pub use parse::{parse_at_time, parse_delay};
-pub use terminal::{TerminalCapabilities, TerminalDetector, TerminalKind};
+pub use terminal::{TerminalCapabilities, TerminalDetector, TerminalKind, TuiLayoutResult};
 pub use types::{ExecutionTarget, ScheduledTask, TaskStatus};

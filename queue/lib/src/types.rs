@@ -27,6 +27,8 @@ pub enum TaskStatus {
     Running,
     /// Task completed successfully.
     Completed,
+    /// Task was cancelled before execution.
+    Cancelled,
     /// Task failed with an error.
     Failed {
         /// The error message describing why the task failed.
@@ -94,6 +96,11 @@ impl ScheduledTask {
         self.status = TaskStatus::Completed;
     }
 
+    /// Marks the task as cancelled.
+    pub fn mark_cancelled(&mut self) {
+        self.status = TaskStatus::Cancelled;
+    }
+
     /// Marks the task as failed with the given error.
     pub fn mark_failed(&mut self, error: impl Into<String>) {
         self.status = TaskStatus::Failed {
@@ -119,6 +126,11 @@ impl ScheduledTask {
     /// Returns true if the task has failed.
     pub fn is_failed(&self) -> bool {
         matches!(self.status, TaskStatus::Failed { .. })
+    }
+
+    /// Returns true if the task was cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self.status, TaskStatus::Cancelled)
     }
 }
 
@@ -162,6 +174,9 @@ mod tests {
         let json = serde_json::to_string(&TaskStatus::Completed).unwrap();
         assert_eq!(json, r#"{"status":"completed"}"#);
 
+        let json = serde_json::to_string(&TaskStatus::Cancelled).unwrap();
+        assert_eq!(json, r#"{"status":"cancelled"}"#);
+
         let json = serde_json::to_string(&TaskStatus::Failed {
             error: "oops".to_string(),
         })
@@ -179,6 +194,9 @@ mod tests {
 
         let status: TaskStatus = serde_json::from_str(r#"{"status":"completed"}"#).unwrap();
         assert_eq!(status, TaskStatus::Completed);
+
+        let status: TaskStatus = serde_json::from_str(r#"{"status":"cancelled"}"#).unwrap();
+        assert_eq!(status, TaskStatus::Cancelled);
 
         let status: TaskStatus =
             serde_json::from_str(r#"{"status":"failed","error":"oops"}"#).unwrap();
@@ -231,6 +249,9 @@ mod tests {
 
         task.mark_completed();
         assert!(task.is_completed());
+
+        task.mark_cancelled();
+        assert!(task.is_cancelled());
 
         task.mark_failed("something went wrong");
         assert!(task.is_failed());

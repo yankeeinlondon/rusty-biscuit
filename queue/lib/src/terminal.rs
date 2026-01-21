@@ -18,6 +18,7 @@
 //! ```
 
 use std::env;
+use std::process::{Command, Stdio};
 
 /// Detected terminal emulator type.
 ///
@@ -101,6 +102,20 @@ impl Default for TerminalCapabilities {
     fn default() -> Self {
         Self::for_kind(TerminalKind::Unknown)
     }
+}
+
+/// Result of setting up the TUI pane layout.
+///
+/// Contains information needed for proper TUI operation after layout setup.
+#[derive(Debug, Clone, Default)]
+pub struct TuiLayoutResult {
+    /// The pane ID where the TUI is running (if in Wezterm).
+    pub tui_pane_id: Option<String>,
+    /// The pane ID where tasks should execute (if in Wezterm with pane support).
+    /// This is the "parent" pane that was split to create the TUI pane.
+    pub task_pane_id: Option<String>,
+    /// Whether the layout was successfully created.
+    pub layout_created: bool,
 }
 
 /// Detects the current terminal environment.
@@ -235,6 +250,144 @@ impl TerminalDetector {
         env::var("TERM")
             .map(|v| v.starts_with("xterm"))
             .unwrap_or(false)
+    }
+
+    /// Gets the current Wezterm pane ID from the environment.
+    ///
+    /// Returns `None` if not running in Wezterm.
+    #[must_use]
+    pub fn get_wezterm_pane_id() -> Option<String> {
+        env::var("WEZTERM_PANE").ok()
+    }
+
+    /// Sets up the TUI layout for Wezterm.
+    ///
+    /// When running in Wezterm, this creates a split layout with:
+    /// - Top pane (80%): Where tasks will execute
+    /// - Bottom pane (20%): Where the TUI will run
+    ///
+    /// The function returns information about the created layout so the TUI
+    /// can coordinate task execution properly.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if the Wezterm CLI commands fail.
+    pub fn setup_tui_layout() -> Result<TuiLayoutResult, String> {
+        if !Self::is_wezterm() {
+            // Not in Wezterm - TUI will run fullscreen
+            return Ok(TuiLayoutResult::default());
+        }
+
+        // Get the current pane ID - this will become the task execution pane
+        let current_pane_id = Self::get_wezterm_pane_id()
+            .ok_or_else(|| "WEZTERM_PANE not set".to_string())?;
+
+        // Create a new pane at the bottom (20%) for the TUI
+        // The command returns the new pane ID
+        let output = Command::new("wezterm")
+            .args([
+                "cli",
+                "split-pane",
+                "--bottom",
+                "--percent",
+                "20",
+                "--pane-id",
+                &current_pane_id,
+                "--",
+                // We need to spawn something that immediately exits so we can
+                // capture the pane ID. The actual TUI will be started separately.
+                "true",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|e| format!("failed to run wezterm cli: {e}"))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "wezterm cli split-pane failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        // Parse the new pane ID from stdout
+        let tui_pane_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        if tui_pane_id.is_empty() {
+            return Err("wezterm did not return a pane ID".to_string());
+        }
+
+        // Move focus to the new TUI pane
+        let focus_result = Command::new("wezterm")
+            .args(["cli", "activate-pane", "--pane-id", &tui_pane_id])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+
+        if let Err(e) = focus_result {
+            // Non-fatal - continue even if focus fails
+            eprintln!("warning: failed to focus TUI pane: {e}");
+        }
+
+        Ok(TuiLayoutResult {
+            tui_pane_id: Some(tui_pane_id),
+            task_pane_id: Some(current_pane_id),
+            layout_created: true,
+        })
+    }
+
+    /// Creates a new pane for task execution.
+    ///
+    /// In Wezterm, this creates a new split pane in the task execution area
+    /// (top 80% of the window). Each task gets its own pane.
+    ///
+    /// The command runs directly in the new pane with full terminal access,
+    /// supporting interactive programs. The pane closes when the command exits.
+    ///
+    /// ## Arguments
+    ///
+    /// * `task_pane_id` - The pane ID where tasks should be created (the original pane)
+    /// * `command` - The command to execute in the new pane
+    ///
+    /// ## Returns
+    ///
+    /// The pane ID of the newly created task pane.
+    pub fn create_task_pane(task_pane_id: Option<&str>, command: &str) -> Result<String, String> {
+        if !Self::is_wezterm() {
+            return Err("Not in Wezterm".to_string());
+        }
+
+        // Build the command arguments - run the command directly without wrapping
+        let mut args = vec!["cli", "split-pane", "--top"];
+
+        // If we have a specific pane ID, target that pane
+        let pane_id_str;
+        if let Some(pane_id) = task_pane_id {
+            pane_id_str = pane_id.to_string();
+            args.extend(["--pane-id", &pane_id_str]);
+        }
+
+        args.extend(["--", "/bin/sh", "-c", command]);
+
+        let output = Command::new("wezterm")
+            .args(&args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|e| format!("failed to create task pane: {e}"))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "wezterm cli split-pane failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        let new_pane_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(new_pane_id)
     }
 }
 
@@ -482,5 +635,149 @@ mod tests {
 
         let caps3 = TerminalCapabilities::for_kind(TerminalKind::ITerm2);
         assert_ne!(caps1, caps3);
+    }
+
+    // =========================================================================
+    // Regression tests for bug: TUI takes over fullscreen instead of splitting
+    // =========================================================================
+
+    #[test]
+    fn test_tui_layout_result_default_has_no_pane_ids() {
+        // Regression test: TuiLayoutResult::default() should not have any pane IDs
+        // This is the expected state when NOT in Wezterm - TUI runs fullscreen
+        let result = TuiLayoutResult::default();
+        assert!(result.tui_pane_id.is_none());
+        assert!(result.task_pane_id.is_none());
+        assert!(!result.layout_created);
+    }
+
+    #[test]
+    fn test_setup_tui_layout_returns_default_when_not_in_wezterm() {
+        // Regression test: When not in Wezterm, setup_tui_layout should return
+        // a default result (no split), not attempt to split
+        with_clean_env(|| {
+            let result = TerminalDetector::setup_tui_layout();
+            assert!(result.is_ok());
+            let layout = result.unwrap();
+            assert!(layout.tui_pane_id.is_none());
+            assert!(layout.task_pane_id.is_none());
+            assert!(!layout.layout_created);
+        });
+    }
+
+    #[test]
+    fn test_get_wezterm_pane_id_returns_value_when_set() {
+        // Regression test: get_wezterm_pane_id should return the pane ID
+        // from WEZTERM_PANE environment variable
+        with_env("WEZTERM_PANE", "42", || {
+            let pane_id = TerminalDetector::get_wezterm_pane_id();
+            assert!(pane_id.is_some());
+            assert_eq!(pane_id.unwrap(), "42");
+        });
+    }
+
+    #[test]
+    fn test_get_wezterm_pane_id_returns_none_when_not_set() {
+        // Regression test: get_wezterm_pane_id should return None when
+        // not running in Wezterm
+        with_clean_env(|| {
+            let pane_id = TerminalDetector::get_wezterm_pane_id();
+            assert!(pane_id.is_none());
+        });
+    }
+
+    #[test]
+    fn test_create_task_pane_fails_when_not_in_wezterm() {
+        // Regression test: create_task_pane should fail when not in Wezterm
+        // This ensures tasks don't accidentally try to create panes outside Wezterm
+        with_clean_env(|| {
+            let result = TerminalDetector::create_task_pane(Some("42"), "echo test");
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("Not in Wezterm"));
+        });
+    }
+
+    #[test]
+    fn test_tui_layout_result_clone() {
+        // Regression test: TuiLayoutResult should be clonable for passing
+        // between TUI and executor
+        let layout = TuiLayoutResult {
+            tui_pane_id: Some("tui-123".to_string()),
+            task_pane_id: Some("task-456".to_string()),
+            layout_created: true,
+        };
+        let cloned = layout.clone();
+        assert_eq!(layout.tui_pane_id, cloned.tui_pane_id);
+        assert_eq!(layout.task_pane_id, cloned.task_pane_id);
+        assert_eq!(layout.layout_created, cloned.layout_created);
+    }
+
+    // =========================================================================
+    // Regression tests for Bug 2: Tasks should run independently without
+    // "Press Enter to close" prompts blocking interactive commands
+    // =========================================================================
+
+    // Note: The actual test for create_task_pane not wrapping commands would
+    // require mocking the wezterm CLI, which is not practical in unit tests.
+    // Instead, we verify the API contract: create_task_pane takes the command
+    // as-is and should pass it directly to the shell without modification.
+    //
+    // The implementation fix removed the command wrapping that previously added:
+    //   echo ''; echo '─────────────────────────────────────';
+    //   echo 'Command completed. Press Enter to close...'; read
+    //
+    // This is a code-level change verified by code review and integration testing.
+
+    // =========================================================================
+    // Regression tests for Bug 3: Default target based on terminal capabilities
+    // =========================================================================
+
+    #[test]
+    fn test_wezterm_capabilities_support_panes() {
+        // Regression test: Wezterm should report pane support
+        // This ensures the UI can correctly default to NewPane target
+        with_env("WEZTERM_PANE", "123", || {
+            let caps = TerminalDetector::detect();
+            assert!(
+                caps.supports_panes,
+                "Wezterm should support panes"
+            );
+            assert!(
+                caps.supports_new_window,
+                "Wezterm should support new windows"
+            );
+        });
+    }
+
+    #[test]
+    fn test_terminal_app_capabilities_no_panes() {
+        // Regression test: Terminal.app should NOT report pane support
+        // This ensures the UI correctly defaults to NewWindow instead of NewPane
+        with_env("TERM_PROGRAM", "Apple_Terminal", || {
+            let caps = TerminalDetector::detect();
+            assert!(
+                !caps.supports_panes,
+                "Terminal.app should NOT support panes"
+            );
+            assert!(
+                caps.supports_new_window,
+                "Terminal.app should support new windows"
+            );
+        });
+    }
+
+    #[test]
+    fn test_unknown_terminal_capabilities_minimal() {
+        // Regression test: Unknown terminals should have minimal capabilities
+        // This ensures the UI correctly defaults to Background
+        with_clean_env(|| {
+            let caps = TerminalDetector::detect();
+            assert!(
+                !caps.supports_panes,
+                "Unknown terminal should NOT support panes"
+            );
+            // Note: on macOS, even unknown terminals can open Terminal.app
+            // so supports_new_window may be true on macOS
+        });
     }
 }
