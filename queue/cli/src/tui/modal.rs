@@ -34,6 +34,22 @@ pub trait Modal {
     fn height_percent(&self) -> u16 {
         40
     }
+
+    /// Get the minimum width in rows.
+    ///
+    /// This ensures the modal has enough space for its content even in small
+    /// terminal windows. Returns 0 (no minimum) by default.
+    fn min_width(&self) -> u16 {
+        0
+    }
+
+    /// Get the minimum height in rows.
+    ///
+    /// This ensures the modal has enough space for its content even in small
+    /// terminal windows (e.g., Wezterm split panes). Returns 0 (no minimum) by default.
+    fn min_height(&self) -> u16 {
+        0
+    }
 }
 
 /// Renders a modal overlay centered on the screen.
@@ -49,7 +65,13 @@ pub trait Modal {
 /// * `modal` - The modal implementation to render
 /// * `main_area` - The parent area to center within (typically `frame.area()`)
 pub fn render_modal(frame: &mut Frame, modal: &impl Modal, main_area: Rect) {
-    let modal_area = centered_rect(modal.width_percent(), modal.height_percent(), main_area);
+    let modal_area = centered_rect_with_min(
+        modal.width_percent(),
+        modal.height_percent(),
+        modal.min_width(),
+        modal.min_height(),
+        main_area,
+    );
 
     // Step 1: Clear the modal area (essential for proper overlay)
     frame.render_widget(Clear, modal_area);
@@ -68,14 +90,36 @@ pub fn render_modal(frame: &mut Frame, modal: &impl Modal, main_area: Rect) {
 }
 
 /// Calculate a centered rectangle with the given percentage of parent size.
+#[cfg(test)]
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::vertical([Constraint::Percentage(percent_y)])
-        .flex(Flex::Center)
-        .split(area);
+    centered_rect_with_min(percent_x, percent_y, 0, 0, area)
+}
 
-    Layout::horizontal([Constraint::Percentage(percent_x)])
-        .flex(Flex::Center)
-        .split(vertical[0])[0]
+/// Calculate a centered rectangle with percentage sizing and minimum dimensions.
+///
+/// The final size is the larger of:
+/// - The percentage of the parent area
+/// - The minimum dimensions (capped at the parent area size)
+fn centered_rect_with_min(
+    percent_x: u16,
+    percent_y: u16,
+    min_width: u16,
+    min_height: u16,
+    area: Rect,
+) -> Rect {
+    // Calculate percentage-based dimensions
+    let percent_width = (area.width as u32 * percent_x as u32 / 100) as u16;
+    let percent_height = (area.height as u32 * percent_y as u32 / 100) as u16;
+
+    // Apply minimums (capped at parent size)
+    let width = percent_width.max(min_width).min(area.width);
+    let height = percent_height.max(min_height).min(area.height);
+
+    // Center the rectangle
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+
+    Rect::new(x, y, width, height)
 }
 
 /// Confirm quit dialog asking the user to confirm before exiting.
@@ -176,5 +220,90 @@ mod tests {
         let modal = TestModal;
         assert_eq!(modal.width_percent(), 60);
         assert_eq!(modal.height_percent(), 40);
+    }
+
+    #[test]
+    fn modal_trait_has_default_min_dimensions() {
+        struct TestModal;
+        impl Modal for TestModal {
+            fn render(&self, _frame: &mut Frame, _area: Rect) {}
+            fn title(&self) -> &str {
+                "Test"
+            }
+        }
+
+        let modal = TestModal;
+        assert_eq!(modal.min_width(), 0);
+        assert_eq!(modal.min_height(), 0);
+    }
+
+    // =========================================================================
+    // Regression tests for small pane modal rendering
+    // Bug: TUI in Wezterm split pane (20%) couldn't fit input modal with 0 tasks
+    // =========================================================================
+
+    #[test]
+    fn centered_rect_with_min_applies_minimum_height() {
+        // Simulate a small Wezterm pane: 80 cols x 5 rows
+        let small_pane = Rect::new(0, 0, 80, 5);
+
+        // 60% of 5 rows = 3 rows, but minimum is 18
+        // Should be capped at parent size (5)
+        let rect = centered_rect_with_min(60, 60, 0, 18, small_pane);
+
+        assert_eq!(rect.height, 5, "Height should be capped at parent height");
+        assert_eq!(rect.y, 0, "Should start at top when filling parent");
+    }
+
+    #[test]
+    fn centered_rect_with_min_applies_minimum_width() {
+        let small_pane = Rect::new(0, 0, 20, 50);
+
+        // 60% of 20 = 12, but minimum is 40
+        // Should be capped at parent size (20)
+        let rect = centered_rect_with_min(60, 60, 40, 0, small_pane);
+
+        assert_eq!(rect.width, 20, "Width should be capped at parent width");
+        assert_eq!(rect.x, 0, "Should start at left when filling parent");
+    }
+
+    #[test]
+    fn centered_rect_with_min_uses_percentage_when_larger_than_min() {
+        let large_pane = Rect::new(0, 0, 100, 50);
+
+        // 60% of 50 = 30, which is larger than min 18
+        let rect = centered_rect_with_min(60, 60, 0, 18, large_pane);
+
+        assert_eq!(rect.height, 30, "Should use percentage when larger than min");
+        assert_eq!(rect.y, 10, "Should be centered: (50 - 30) / 2 = 10");
+    }
+
+    #[test]
+    fn centered_rect_with_min_centers_when_min_applied() {
+        // Parent is larger than minimum
+        let pane = Rect::new(0, 0, 80, 30);
+
+        // 60% of 30 = 18, min is also 18, so no change
+        // But let's use 10% to trigger minimum
+        let rect = centered_rect_with_min(10, 10, 40, 20, pane);
+
+        // 10% of 80 = 8, min 40 applies -> width = 40
+        // 10% of 30 = 3, min 20 applies -> height = 20
+        assert_eq!(rect.width, 40);
+        assert_eq!(rect.height, 20);
+
+        // Center: (80 - 40) / 2 = 20, (30 - 20) / 2 = 5
+        assert_eq!(rect.x, 20);
+        assert_eq!(rect.y, 5);
+    }
+
+    #[test]
+    fn centered_rect_with_min_zero_acts_like_original() {
+        let parent = Rect::new(0, 0, 100, 50);
+
+        let with_min = centered_rect_with_min(60, 40, 0, 0, parent);
+        let without_min = centered_rect(60, 40, parent);
+
+        assert_eq!(with_min, without_min);
     }
 }

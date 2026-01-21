@@ -1,6 +1,14 @@
 //! Application state for the TUI.
 
-use queue_lib::{ScheduledTask, TaskEvent, TaskExecutor};
+use queue_lib::{
+    HistoryStore,
+    JsonFileStore,
+    ScheduledTask,
+    TaskEvent,
+    TaskExecutor,
+    TerminalCapabilities,
+    TerminalDetector,
+};
 use ratatui::widgets::TableState;
 use tokio::sync::mpsc;
 
@@ -46,6 +54,12 @@ pub struct App {
     pub input_modal: Option<InputModal>,
     /// History modal state (present when HistoryModal mode is active).
     pub history_modal: Option<HistoryModal>,
+    /// Terminal capabilities - determines available execution targets.
+    pub capabilities: TerminalCapabilities,
+    /// History store for persisting tasks (optional for test isolation).
+    pub history_store: Option<JsonFileStore>,
+    /// Next task ID to allocate for new tasks.
+    pub next_task_id: u64,
 }
 
 impl Default for App {
@@ -56,6 +70,9 @@ impl Default for App {
 
 impl App {
     /// Creates a new application state with default values.
+    ///
+    /// Detects terminal capabilities at startup to determine which
+    /// execution targets are available (panes, windows, background).
     pub fn new() -> Self {
         let mut table_state = TableState::default();
         table_state.select(Some(0));
@@ -70,6 +87,9 @@ impl App {
             table_state,
             input_modal: None,
             history_modal: None,
+            capabilities: TerminalDetector::detect(),
+            history_store: None,
+            next_task_id: 1,
         }
     }
 
@@ -84,6 +104,20 @@ impl App {
         self
     }
 
+    /// Adds a history store for persisting tasks.
+    pub fn with_history_store(mut self, store: JsonFileStore) -> Self {
+        let next_task_id = match store.load_all() {
+            Ok(tasks) => tasks.iter().map(|task| task.id).max().unwrap_or(0).saturating_add(1),
+            Err(err) => {
+                tracing::warn!(error = %err, "Failed to load history for task IDs");
+                self.next_task_id
+            }
+        };
+        self.history_store = Some(store);
+        self.next_task_id = next_task_id.max(self.next_task_id);
+        self
+    }
+
     /// Schedules a task for execution with the executor.
     ///
     /// If no executor is configured, the task is added but not scheduled.
@@ -91,7 +125,46 @@ impl App {
         if let Some(ref executor) = self.executor {
             executor.schedule(task.clone());
         }
+        self.save_history(&task);
         self.tasks.push(task);
+        if let Some(next_id) = self.tasks.iter().map(|t| t.id).max().and_then(|id| id.checked_add(1)) {
+            self.next_task_id = self.next_task_id.max(next_id);
+        }
+    }
+
+    /// Allocates the next task ID.
+    pub fn alloc_task_id(&mut self) -> u64 {
+        let id = self.next_task_id;
+        self.next_task_id = self.next_task_id.saturating_add(1);
+        id
+    }
+
+    /// Updates an existing task and reschedules if pending.
+    pub fn update_task(
+        &mut self,
+        task_id: u64,
+        command: String,
+        scheduled_at: chrono::DateTime<chrono::Utc>,
+        target: queue_lib::ExecutionTarget,
+    ) -> bool {
+        if let Some(task) = self.tasks.iter_mut().find(|t| t.id == task_id) {
+            let was_pending = task.is_pending();
+            task.command = command;
+            task.scheduled_at = scheduled_at;
+            task.target = target;
+
+            if was_pending {
+                if let Some(ref executor) = self.executor {
+                    executor.cancel_task(task_id);
+                    executor.schedule(task.clone());
+                }
+            }
+
+            self.update_history(task);
+            true
+        } else {
+            false
+        }
     }
 
     /// Cancels a pending task by removing it from the list.
@@ -100,7 +173,12 @@ impl App {
     /// cancelled, false if the task was not found or not pending.
     pub fn cancel_task(&mut self, id: u64) -> bool {
         if let Some(pos) = self.tasks.iter().position(|t| t.id == id && t.is_pending()) {
-            self.tasks.remove(pos);
+            let mut task = self.tasks.remove(pos);
+            if let Some(ref executor) = self.executor {
+                executor.cancel_task(id);
+            }
+            task.mark_cancelled();
+            self.update_history(&task);
             // Adjust selection if needed
             if self.selected_index >= self.tasks.len() && !self.tasks.is_empty() {
                 self.selected_index = self.tasks.len() - 1;
@@ -139,7 +217,24 @@ impl App {
             TaskEvent::StatusChanged { id, status } => {
                 if let Some(task) = self.tasks.iter_mut().find(|t| t.id == id) {
                     task.status = status;
+                    self.update_history(task);
                 }
+            }
+        }
+    }
+
+    fn save_history(&self, task: &ScheduledTask) {
+        if let Some(ref store) = self.history_store {
+            if let Err(err) = store.save(task) {
+                tracing::warn!(error = %err, "Failed to persist task history");
+            }
+        }
+    }
+
+    fn update_history(&self, task: &ScheduledTask) {
+        if let Some(ref store) = self.history_store {
+            if let Err(err) = store.update(task) {
+                tracing::warn!(error = %err, "Failed to update task history");
             }
         }
     }

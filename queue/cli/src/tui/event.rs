@@ -90,12 +90,12 @@ fn handle_normal_mode(app: &mut App, key: KeyCode) {
 
         // Mode switching
         KeyCode::Char('n') | KeyCode::Char('N') => {
-            app.input_modal = Some(InputModal::new());
+            app.input_modal = Some(InputModal::new(app.capabilities.clone()));
             app.mode = AppMode::InputModal;
         }
         KeyCode::Char('e') | KeyCode::Char('E') => {
             if let Some(task) = app.selected_task().cloned() {
-                app.input_modal = Some(InputModal::for_edit(&task));
+                app.input_modal = Some(InputModal::for_edit(&task, app.capabilities.clone()));
                 app.mode = AppMode::InputModal;
             }
         }
@@ -199,15 +199,11 @@ fn handle_input_modal(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
                 };
 
                 if let Some(task_id) = modal.editing_task_id {
-                    // Update existing task
-                    if let Some(task) = app.tasks.iter_mut().find(|t| t.id == task_id) {
-                        task.command = modal.command.clone();
-                        task.scheduled_at = scheduled_at;
-                        task.target = modal.target;
-                    }
+                    // Update existing task and reschedule if needed
+                    app.update_task(task_id, modal.command.clone(), scheduled_at, modal.target);
                 } else {
                     // Create new task and schedule it with the executor
-                    let id = app.tasks.iter().map(|t| t.id).max().unwrap_or(0) + 1;
+                    let id = app.alloc_task_id();
                     let task = queue_lib::ScheduledTask::new(
                         id,
                         modal.command.clone(),
@@ -312,7 +308,7 @@ fn handle_history_modal(app: &mut App, key: KeyCode) {
         KeyCode::Enter => {
             // Open input modal with the selected command pre-filled
             if let Some(task) = modal.selected_task().cloned() {
-                let mut input = InputModal::new();
+                let mut input = InputModal::new(app.capabilities.clone());
                 input.command = task.command;
                 input.cursor_pos = input.command.len();
                 app.input_modal = Some(input);
@@ -323,7 +319,7 @@ fn handle_history_modal(app: &mut App, key: KeyCode) {
         KeyCode::Char('n') | KeyCode::Char('N') => {
             // Open input modal with the selected command as template for a new task
             if let Some(task) = modal.selected_task().cloned() {
-                let mut input = InputModal::new();
+                let mut input = InputModal::new(app.capabilities.clone());
                 input.command = task.command;
                 input.cursor_pos = input.command.len();
                 // Use same target as the historical task
@@ -340,9 +336,19 @@ fn handle_history_modal(app: &mut App, key: KeyCode) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use queue_lib::{TerminalCapabilities, TerminalKind};
 
     fn input(app: &mut App, key: KeyCode) {
         handle_input(app, key, KeyModifiers::NONE);
+    }
+
+    /// Creates capabilities for a terminal with pane support (like Wezterm).
+    fn wezterm_caps() -> TerminalCapabilities {
+        TerminalCapabilities {
+            kind: TerminalKind::Wezterm,
+            supports_panes: true,
+            supports_new_window: true,
+        }
     }
 
     #[test]
@@ -467,7 +473,7 @@ mod tests {
     #[test]
     fn input_modal_escape_clears_modal() {
         let mut app = App::new();
-        app.input_modal = Some(InputModal::new());
+        app.input_modal = Some(InputModal::new(wezterm_caps()));
         app.mode = AppMode::InputModal;
 
         input(&mut app, KeyCode::Esc);
@@ -478,7 +484,7 @@ mod tests {
     #[test]
     fn input_modal_tab_cycles_fields() {
         let mut app = App::new();
-        app.input_modal = Some(InputModal::new());
+        app.input_modal = Some(InputModal::new(wezterm_caps()));
         app.mode = AppMode::InputModal;
 
         assert_eq!(
@@ -495,7 +501,7 @@ mod tests {
     #[test]
     fn input_modal_enter_creates_task_on_valid_input() {
         let mut app = App::new();
-        let mut modal = InputModal::new();
+        let mut modal = InputModal::new(wezterm_caps());
         modal.command = "echo hello".to_string();
         modal.schedule_value = "15m".to_string();
         modal.schedule_type = ScheduleType::AfterDelay;
@@ -512,7 +518,7 @@ mod tests {
     #[test]
     fn input_modal_enter_shows_error_on_invalid_input() {
         let mut app = App::new();
-        app.input_modal = Some(InputModal::new()); // Empty command
+        app.input_modal = Some(InputModal::new(wezterm_caps())); // Empty command
         app.mode = AppMode::InputModal;
 
         input(&mut app, KeyCode::Enter);
@@ -533,7 +539,7 @@ mod tests {
     #[test]
     fn input_modal_escape_returns_to_normal() {
         let mut app = App::new();
-        app.input_modal = Some(InputModal::new());
+        app.input_modal = Some(InputModal::new(wezterm_caps()));
         app.mode = AppMode::InputModal;
         input(&mut app, KeyCode::Esc);
         assert_eq!(app.mode, AppMode::Normal);

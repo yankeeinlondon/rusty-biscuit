@@ -151,6 +151,9 @@ fn task_style(task: &ScheduledTask) -> Style {
         TaskStatus::Completed => Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::ITALIC | Modifier::DIM),
+        TaskStatus::Cancelled => Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM),
         TaskStatus::Running => Style::default()
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD),
@@ -207,6 +210,7 @@ fn format_status(status: &TaskStatus) -> &'static str {
         TaskStatus::Pending => "pending",
         TaskStatus::Running => "running",
         TaskStatus::Completed => "done",
+        TaskStatus::Cancelled => "cancelled",
         TaskStatus::Failed { .. } => "failed",
     }
 }
@@ -295,6 +299,7 @@ mod tests {
         assert_eq!(format_status(&TaskStatus::Pending), "pending");
         assert_eq!(format_status(&TaskStatus::Running), "running");
         assert_eq!(format_status(&TaskStatus::Completed), "done");
+        assert_eq!(format_status(&TaskStatus::Cancelled), "cancelled");
         assert_eq!(
             format_status(&TaskStatus::Failed {
                 error: "test".to_string()
@@ -362,6 +367,24 @@ mod tests {
         task.mark_failed("error");
         let style = task_style(&task);
         assert_eq!(style, Style::default().fg(Color::Red));
+    }
+
+    #[test]
+    fn task_style_cancelled_is_dimmed() {
+        let mut task = ScheduledTask::new(
+            1,
+            "test".to_string(),
+            Utc::now(),
+            ExecutionTarget::default(),
+        );
+        task.mark_cancelled();
+        let style = task_style(&task);
+        assert_eq!(
+            style,
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM)
+        );
     }
 
     #[test]

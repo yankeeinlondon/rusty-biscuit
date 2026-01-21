@@ -1,6 +1,6 @@
 //! Input modal for creating and editing scheduled tasks.
 
-use queue_lib::{parse_at_time, parse_delay, ExecutionTarget, ScheduledTask};
+use queue_lib::{parse_at_time, parse_delay, ExecutionTarget, ScheduledTask, TerminalCapabilities};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Style},
@@ -38,23 +38,39 @@ pub struct InputModal {
     pub active_field: InputField,
     pub error_message: Option<String>,
     pub editing_task_id: Option<u64>,
+    /// Terminal capabilities - determines which execution targets are available.
+    pub capabilities: TerminalCapabilities,
 }
 
 impl InputModal {
-    pub fn new() -> Self {
+    /// Creates a new input modal with default target based on terminal capabilities.
+    ///
+    /// - In Wezterm: default to NewPane (pane support available)
+    /// - In other terminals with window support: default to NewWindow
+    /// - Otherwise: default to Background
+    pub fn new(capabilities: TerminalCapabilities) -> Self {
+        let default_target = if capabilities.supports_panes {
+            ExecutionTarget::NewPane
+        } else if capabilities.supports_new_window {
+            ExecutionTarget::NewWindow
+        } else {
+            ExecutionTarget::Background
+        };
+
         Self {
             command: String::new(),
             cursor_pos: 0,
             schedule_type: ScheduleType::default(),
             schedule_value: String::new(),
-            target: ExecutionTarget::default(),
+            target: default_target,
             active_field: InputField::default(),
             error_message: None,
             editing_task_id: None,
+            capabilities,
         }
     }
 
-    pub fn for_edit(task: &ScheduledTask) -> Self {
+    pub fn for_edit(task: &ScheduledTask, capabilities: TerminalCapabilities) -> Self {
         Self {
             command: task.command.clone(),
             cursor_pos: task.command.len(),
@@ -64,6 +80,7 @@ impl InputModal {
             active_field: InputField::Command,
             error_message: None,
             editing_task_id: Some(task.id),
+            capabilities,
         }
     }
 
@@ -97,12 +114,31 @@ impl InputModal {
         };
     }
 
-    /// Cycle through execution targets.
+    /// Cycle through execution targets based on terminal capabilities.
+    ///
+    /// Only cycles through targets that are actually supported:
+    /// - NewPane: only in terminals with pane support (Wezterm, iTerm2)
+    /// - NewWindow: only in terminals with window support
+    /// - Background: always available
     pub fn cycle_target(&mut self) {
         self.target = match self.target {
-            ExecutionTarget::NewPane => ExecutionTarget::NewWindow,
+            ExecutionTarget::NewPane => {
+                if self.capabilities.supports_new_window {
+                    ExecutionTarget::NewWindow
+                } else {
+                    ExecutionTarget::Background
+                }
+            }
             ExecutionTarget::NewWindow => ExecutionTarget::Background,
-            ExecutionTarget::Background => ExecutionTarget::NewPane,
+            ExecutionTarget::Background => {
+                if self.capabilities.supports_panes {
+                    ExecutionTarget::NewPane
+                } else if self.capabilities.supports_new_window {
+                    ExecutionTarget::NewWindow
+                } else {
+                    ExecutionTarget::Background
+                }
+            }
         };
     }
 
@@ -176,12 +212,6 @@ impl InputModal {
     }
 }
 
-impl Default for InputModal {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Modal for InputModal {
     fn title(&self) -> &str {
         if self.editing_task_id.is_some() {
@@ -194,8 +224,18 @@ impl Modal for InputModal {
     fn width_percent(&self) -> u16 {
         70
     }
+
     fn height_percent(&self) -> u16 {
         60
+    }
+
+    /// Minimum height to ensure the modal renders properly in small panes.
+    ///
+    /// The input modal requires at least 18 rows:
+    /// - 16 rows for content (4 fields × 3 rows + 2 error + 2 help)
+    /// - 2 rows for border
+    fn min_height(&self) -> u16 {
+        18
     }
 
     fn render(&self, frame: &mut Frame, area: Rect) {
@@ -383,10 +423,38 @@ fn render_selector_field(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use queue_lib::TerminalKind;
+
+    /// Creates capabilities for a terminal with pane support (like Wezterm).
+    fn wezterm_caps() -> TerminalCapabilities {
+        TerminalCapabilities {
+            kind: TerminalKind::Wezterm,
+            supports_panes: true,
+            supports_new_window: true,
+        }
+    }
+
+    /// Creates capabilities for a terminal with window support only (like Terminal.app).
+    fn terminal_app_caps() -> TerminalCapabilities {
+        TerminalCapabilities {
+            kind: TerminalKind::TerminalApp,
+            supports_panes: false,
+            supports_new_window: true,
+        }
+    }
+
+    /// Creates capabilities for an unknown terminal (background only).
+    fn unknown_caps() -> TerminalCapabilities {
+        TerminalCapabilities {
+            kind: TerminalKind::Unknown,
+            supports_panes: false,
+            supports_new_window: false,
+        }
+    }
 
     #[test]
-    fn new_modal_has_defaults() {
-        let modal = InputModal::new();
+    fn new_modal_defaults_to_new_pane_in_wezterm() {
+        let modal = InputModal::new(wezterm_caps());
         assert!(modal.command.is_empty());
         assert_eq!(modal.active_field, InputField::Command);
         assert_eq!(modal.schedule_type, ScheduleType::AtTime);
@@ -395,8 +463,20 @@ mod tests {
     }
 
     #[test]
+    fn new_modal_defaults_to_new_window_in_terminal_app() {
+        let modal = InputModal::new(terminal_app_caps());
+        assert_eq!(modal.target, ExecutionTarget::NewWindow);
+    }
+
+    #[test]
+    fn new_modal_defaults_to_background_in_unknown_terminal() {
+        let modal = InputModal::new(unknown_caps());
+        assert_eq!(modal.target, ExecutionTarget::Background);
+    }
+
+    #[test]
     fn next_field_cycles_through_all_fields() {
-        let mut modal = InputModal::new();
+        let mut modal = InputModal::new(wezterm_caps());
         assert_eq!(modal.active_field, InputField::Command);
         modal.next_field();
         assert_eq!(modal.active_field, InputField::ScheduleType);
@@ -410,7 +490,7 @@ mod tests {
 
     #[test]
     fn handle_char_appends_to_command() {
-        let mut modal = InputModal::new();
+        let mut modal = InputModal::new(wezterm_caps());
         modal.handle_char('h');
         modal.handle_char('i');
         assert_eq!(modal.command, "hi");
@@ -418,7 +498,7 @@ mod tests {
 
     #[test]
     fn handle_backspace_removes_char() {
-        let mut modal = InputModal::new();
+        let mut modal = InputModal::new(wezterm_caps());
         modal.command = "hello".to_string();
         modal.cursor_pos = 5;
         modal.handle_backspace();
@@ -427,7 +507,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_empty_command() {
-        let mut modal = InputModal::new();
+        let mut modal = InputModal::new(wezterm_caps());
         modal.schedule_value = "15m".to_string();
         assert!(modal.validate().is_err());
         assert!(modal.error_message.is_some());
@@ -435,7 +515,7 @@ mod tests {
 
     #[test]
     fn validate_accepts_valid_input() {
-        let mut modal = InputModal::new();
+        let mut modal = InputModal::new(wezterm_caps());
         modal.command = "echo hi".to_string();
         modal.schedule_value = "15m".to_string();
         modal.schedule_type = ScheduleType::AfterDelay;
@@ -444,7 +524,7 @@ mod tests {
 
     #[test]
     fn toggle_schedule_type_cycles() {
-        let mut modal = InputModal::new();
+        let mut modal = InputModal::new(wezterm_caps());
         assert_eq!(modal.schedule_type, ScheduleType::AtTime);
         modal.toggle_schedule_type();
         assert_eq!(modal.schedule_type, ScheduleType::AfterDelay);
@@ -453,8 +533,8 @@ mod tests {
     }
 
     #[test]
-    fn cycle_target_cycles_all_targets() {
-        let mut modal = InputModal::new();
+    fn cycle_target_cycles_all_targets_in_wezterm() {
+        let mut modal = InputModal::new(wezterm_caps());
         assert_eq!(modal.target, ExecutionTarget::NewPane);
         modal.cycle_target();
         assert_eq!(modal.target, ExecutionTarget::NewWindow);
@@ -462,5 +542,46 @@ mod tests {
         assert_eq!(modal.target, ExecutionTarget::Background);
         modal.cycle_target();
         assert_eq!(modal.target, ExecutionTarget::NewPane);
+    }
+
+    #[test]
+    fn cycle_target_skips_new_pane_in_terminal_app() {
+        let mut modal = InputModal::new(terminal_app_caps());
+        assert_eq!(modal.target, ExecutionTarget::NewWindow);
+        modal.cycle_target();
+        assert_eq!(modal.target, ExecutionTarget::Background);
+        modal.cycle_target();
+        // Should cycle back to NewWindow, skipping NewPane
+        assert_eq!(modal.target, ExecutionTarget::NewWindow);
+    }
+
+    #[test]
+    fn cycle_target_stays_on_background_in_unknown_terminal() {
+        let mut modal = InputModal::new(unknown_caps());
+        assert_eq!(modal.target, ExecutionTarget::Background);
+        modal.cycle_target();
+        // Should stay on Background since nothing else is supported
+        assert_eq!(modal.target, ExecutionTarget::Background);
+    }
+
+    // =========================================================================
+    // Regression test for small pane modal rendering
+    // Bug: TUI in Wezterm split pane (20%) couldn't fit input modal with 0 tasks
+    // =========================================================================
+
+    #[test]
+    fn input_modal_has_minimum_height_for_small_panes() {
+        use crate::tui::modal::Modal;
+
+        let modal = InputModal::new(wezterm_caps());
+
+        // The modal needs at least 18 rows:
+        // - 16 rows for content (4 fields × 3 rows + 2 error + 2 help)
+        // - 2 rows for border
+        assert_eq!(
+            modal.min_height(),
+            18,
+            "InputModal should have min_height of 18 for small pane support"
+        );
     }
 }

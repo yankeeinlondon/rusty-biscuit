@@ -196,6 +196,7 @@ impl Modal for HistoryModal {
             .map(|task| {
                 let status_char = match task.status {
                     TaskStatus::Completed => "✓",
+                    TaskStatus::Cancelled => "×",
                     TaskStatus::Failed { .. } => "✗",
                     TaskStatus::Running => "▶",
                     TaskStatus::Pending => "○",
@@ -206,6 +207,9 @@ impl Modal for HistoryModal {
                         format!("{} ", status_char),
                         match task.status {
                             TaskStatus::Completed => Style::default().fg(Color::Green),
+                            TaskStatus::Cancelled => Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::DIM),
                             TaskStatus::Failed { .. } => Style::default().fg(Color::Red),
                             TaskStatus::Running => Style::default().fg(Color::Yellow),
                             TaskStatus::Pending => Style::default().fg(Color::DarkGray),
