@@ -21,6 +21,7 @@ RestApi {
 ```
 
 Generated code would use:
+
 ```rust
 pub use schematic_definitions::ollama::*;  // Uses module_path instead of lowercased name
 ```
@@ -57,6 +58,7 @@ for endpoint in &api.endpoints {
 **Proposed Solutions**:
 
 **Option A**: Make Default optional via `RestApi` configuration:
+
 ```rust
 RestApi {
     generate_defaults: false,  // Don't generate Default for wrapper structs
@@ -65,6 +67,7 @@ RestApi {
 ```
 
 **Option B**: Generate builder pattern instead:
+
 ```rust
 // Instead of Default:
 impl GenerateRequest {
