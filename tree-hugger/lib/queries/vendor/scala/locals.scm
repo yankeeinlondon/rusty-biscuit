@@ -65,3 +65,7 @@
     (enumerator
       (tuple_pattern
         (identifier) @local.definition.var))))
+
+; Imports
+(import_declaration
+  (identifier) @local.definition.import)

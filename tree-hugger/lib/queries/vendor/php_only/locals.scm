@@ -58,9 +58,10 @@
     (variable_name
       (name) @local.definition.field)))
 
+; Imports (use statements)
 (namespace_use_clause
   (qualified_name
-    (name) @local.definition.type))
+    (name) @local.definition.import))
 
 ; References
 ;------------

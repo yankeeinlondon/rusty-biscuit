@@ -2019,3 +2019,363 @@ fn detects_csharp_static_methods() -> Result<(), TreeHuggerError> {
 
     Ok(())
 }
+
+// ============================================================================
+// Regression tests for import metadata extraction
+// Bug: Imports only showed symbol names without source module or alias info.
+// Example: "- com [1:9]" instead of "- com from com.example [1:9]"
+// ============================================================================
+
+#[test]
+fn extracts_typescript_import_source() -> Result<(), TreeHuggerError> {
+    // Regression test: TypeScript imports should have source module extracted
+    let tree_file = TreeFile::new(fixture_path("imports.ts"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    // Find the simple import: `import { readFile } from "fs"`
+    let read_file = imports
+        .iter()
+        .find(|i| i.name == "readFile" && i.range.start_line == 4)
+        .expect("should find readFile import");
+
+    assert_eq!(
+        read_file.source.as_deref(),
+        Some("fs"),
+        "TypeScript import source should be extracted"
+    );
+    assert!(
+        read_file.alias.is_none(),
+        "Non-aliased import should not have alias"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_typescript_aliased_import() -> Result<(), TreeHuggerError> {
+    // Regression test: TypeScript aliased imports should capture original name and alias
+    let tree_file = TreeFile::new(fixture_path("imports.ts"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    // Find the aliased import: `import { readFile as read } from "fs/promises"`
+    let read = imports
+        .iter()
+        .find(|i| i.name == "read")
+        .expect("should find 'read' alias import");
+
+    assert_eq!(
+        read.source.as_deref(),
+        Some("fs/promises"),
+        "Aliased import should have source"
+    );
+    assert_eq!(
+        read.original_name.as_deref(),
+        Some("readFile"),
+        "Aliased import should have original name"
+    );
+    assert_eq!(
+        read.alias.as_deref(),
+        Some("read"),
+        "Aliased import should have alias"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_typescript_namespace_import() -> Result<(), TreeHuggerError> {
+    // Regression test: TypeScript namespace imports should be captured
+    let tree_file = TreeFile::new(fixture_path("imports.ts"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    // Find the namespace import: `import * as path from "path"`
+    let path = imports
+        .iter()
+        .find(|i| i.name == "path" && i.original_name.as_deref() == Some("*"))
+        .expect("should find namespace import");
+
+    assert_eq!(
+        path.source.as_deref(),
+        Some("path"),
+        "Namespace import should have source"
+    );
+    assert_eq!(
+        path.original_name.as_deref(),
+        Some("*"),
+        "Namespace import should have '*' as original name"
+    );
+    assert_eq!(
+        path.alias.as_deref(),
+        Some("path"),
+        "Namespace import should have alias"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_python_import_source() -> Result<(), TreeHuggerError> {
+    // Regression test: Python imports should have source module extracted
+    let tree_file = TreeFile::new(fixture_path("sample.py"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    // Find the simple import: `import os`
+    let os = imports
+        .iter()
+        .find(|i| i.name == "os")
+        .expect("should find os import");
+
+    assert_eq!(
+        os.source.as_deref(),
+        Some("os"),
+        "Python simple import should have source (same as name)"
+    );
+
+    // Find the from import: `from typing import Optional`
+    let optional = imports
+        .iter()
+        .find(|i| i.name == "Optional")
+        .expect("should find Optional import");
+
+    assert_eq!(
+        optional.source.as_deref(),
+        Some("typing"),
+        "Python from import should have source module"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_rust_import_source() -> Result<(), TreeHuggerError> {
+    // Regression test: Rust use statements should have source module extracted
+    let tree_file = TreeFile::new(fixture_path("imports.rs"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    // Find: `use std::collections::HashMap`
+    let hash_map = imports
+        .iter()
+        .find(|i| i.name == "HashMap")
+        .expect("should find HashMap import");
+
+    assert_eq!(
+        hash_map.source.as_deref(),
+        Some("std::collections"),
+        "Rust use should have module path as source"
+    );
+
+    // Find: `use std::process::{Child, Command, Stdio}`
+    let child = imports
+        .iter()
+        .find(|i| i.name == "Child")
+        .expect("should find Child import");
+
+    assert_eq!(
+        child.source.as_deref(),
+        Some("std::process"),
+        "Rust grouped use should have module path as source"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_rust_aliased_import() -> Result<(), TreeHuggerError> {
+    // Regression test: Rust aliased imports should capture original name
+    let tree_file = TreeFile::new(fixture_path("imports.rs"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    // Find: `use std::io::Read as IoRead`
+    let io_read = imports
+        .iter()
+        .find(|i| i.name == "IoRead")
+        .expect("should find IoRead alias import");
+
+    assert!(
+        io_read.source.is_some(),
+        "Aliased Rust import should have source"
+    );
+    assert!(
+        io_read.original_name.is_some(),
+        "Aliased Rust import should have original name"
+    );
+    assert_eq!(
+        io_read.alias.as_deref(),
+        Some("IoRead"),
+        "Aliased Rust import should have alias"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_javascript_import_source() -> Result<(), TreeHuggerError> {
+    // Regression test: JavaScript imports should have source module extracted
+    let tree_file = TreeFile::new(fixture_path("sample.js"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    let read_file = imports
+        .iter()
+        .find(|i| i.name == "readFile")
+        .expect("should find readFile import");
+
+    assert_eq!(
+        read_file.source.as_deref(),
+        Some("fs"),
+        "JavaScript import source should be extracted"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_go_import_source() -> Result<(), TreeHuggerError> {
+    // Regression test: Go imports should have source path extracted
+    let tree_file = TreeFile::new(fixture_path("imports.go"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    // Find simple import: `import "fmt"`
+    let fmt = imports
+        .iter()
+        .find(|i| i.name == "fmt")
+        .expect("should find fmt import");
+
+    assert_eq!(
+        fmt.source.as_deref(),
+        Some("fmt"),
+        "Go simple import should have source"
+    );
+
+    // Find import from grouped imports
+    let os = imports
+        .iter()
+        .find(|i| i.name == "os")
+        .expect("should find os import");
+
+    assert_eq!(
+        os.source.as_deref(),
+        Some("os"),
+        "Go grouped import should have source"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_go_aliased_import() -> Result<(), TreeHuggerError> {
+    // Regression test: Go aliased imports should capture alias and original
+    let tree_file = TreeFile::new(fixture_path("imports.go"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    // Find aliased import: `import alias "path/filepath"`
+    let alias = imports
+        .iter()
+        .find(|i| i.name == "alias")
+        .expect("should find alias import");
+
+    assert_eq!(
+        alias.source.as_deref(),
+        Some("path/filepath"),
+        "Aliased Go import should have source"
+    );
+    assert_eq!(
+        alias.original_name.as_deref(),
+        Some("filepath"),
+        "Aliased Go import should have original name"
+    );
+    assert_eq!(
+        alias.alias.as_deref(),
+        Some("alias"),
+        "Aliased Go import should have alias"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_java_import_source() -> Result<(), TreeHuggerError> {
+    // Regression test: Java imports should have package path extracted
+    let tree_file = TreeFile::new(fixture_path("imports.java"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    // Find: `import java.util.List`
+    let list = imports
+        .iter()
+        .find(|i| i.name == "List")
+        .expect("should find List import");
+
+    assert_eq!(
+        list.source.as_deref(),
+        Some("java.util"),
+        "Java import should have package path as source"
+    );
+
+    // Verify package declarations are filtered out (no 'com', 'example', 'test')
+    assert!(
+        !imports.iter().any(|i| i.name == "com" || i.name == "example" || i.name == "test"),
+        "Java package declarations should not be captured as imports"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_java_wildcard_import() -> Result<(), TreeHuggerError> {
+    // Regression test: Java wildcard imports should be marked as such
+    let tree_file = TreeFile::new(fixture_path("imports.java"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    // Find: `import java.io.*`
+    let io_wildcard = imports
+        .iter()
+        .find(|i| i.source.as_deref() == Some("java.io") && i.original_name.as_deref() == Some("*"))
+        .expect("should find wildcard import");
+
+    assert_eq!(
+        io_wildcard.original_name.as_deref(),
+        Some("*"),
+        "Java wildcard import should have '*' as original name"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_swift_import_source() -> Result<(), TreeHuggerError> {
+    // Regression test: Swift imports should have module name as source
+    let tree_file = TreeFile::new(fixture_path("imports.swift"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    let foundation = imports
+        .iter()
+        .find(|i| i.name == "Foundation")
+        .expect("should find Foundation import");
+
+    assert_eq!(
+        foundation.source.as_deref(),
+        Some("Foundation"),
+        "Swift import should have module name as source"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_php_import_source() -> Result<(), TreeHuggerError> {
+    // Regression test: PHP use statements should have namespace as source
+    let tree_file = TreeFile::new(fixture_path("imports.php"))?;
+    let imports = tree_file.imported_symbols()?;
+
+    // Find: `use App\Models\User`
+    let user = imports
+        .iter()
+        .find(|i| i.name == "User")
+        .expect("should find User import");
+
+    assert!(
+        user.source.is_some(),
+        "PHP use statement should have source"
+    );
+
+    Ok(())
+}

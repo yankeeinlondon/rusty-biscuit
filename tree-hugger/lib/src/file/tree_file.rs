@@ -107,18 +107,38 @@ impl TreeFile {
                     continue;
                 }
 
-                let name = capture
-                    .node
+                let node = capture.node;
+
+                // Skip imports that should be filtered out (e.g., package declarations,
+                // intermediate path components in Java/C#)
+                if self.should_skip_import(node, self.language) {
+                    continue;
+                }
+
+                let mut name = node
                     .utf8_text(self.source.as_bytes())
                     .map(str::to_string)
                     .unwrap_or_default();
 
+                // For Go, if the captured node is a string literal (import path),
+                // extract the package name from the path
+                if self.language == ProgrammingLanguage::Go && name.starts_with('"') {
+                    let path = name.trim_matches('"');
+                    name = path.rsplit('/').next().unwrap_or(path).to_string();
+                }
+
+                // Extract import metadata by traversing the AST
+                let (source, original_name, alias) =
+                    self.extract_import_metadata(node, &name, self.language);
+
                 imports.push(ImportSymbol {
                     name,
-                    range: range_for_node(capture.node),
+                    original_name,
+                    alias,
+                    range: range_for_node(node),
                     language: self.language,
                     file: self.file.clone(),
-                    source: None,
+                    source,
                 });
             }
 
@@ -126,6 +146,482 @@ impl TreeFile {
         }
 
         Ok(imports)
+    }
+
+    /// Determines if an import capture should be skipped.
+    ///
+    /// This filters out:
+    /// - Package/namespace declarations (Java, C#)
+    /// - Intermediate path components (only keep the final imported symbol)
+    /// - Duplicate captures for aliased imports (Go)
+    fn should_skip_import(&self, node: Node, language: ProgrammingLanguage) -> bool {
+        match language {
+            ProgrammingLanguage::Go => {
+                // For Go, if this is a path capture (string literal) but the import_spec
+                // has a real alias (not blank identifier "_"), skip the path capture
+                if node.kind() == "interpreted_string_literal" {
+                    if let Some(import_spec) = find_ancestor_by_kind(node, "import_spec") {
+                        if let Some(name_node) = import_spec.child_by_field_name("name") {
+                            // Only skip if the alias is a real package_identifier, not blank "_"
+                            if name_node.kind() == "package_identifier" {
+                                return true; // Skip path when there's a real alias
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            ProgrammingLanguage::Java => {
+                // Skip if inside package_declaration
+                if find_ancestor_by_kind(node, "package_declaration").is_some() {
+                    return true;
+                }
+                // For Java imports, only keep the final identifier in the path
+                // We need to find the outermost scoped_identifier and check if this node
+                // is its rightmost identifier
+                if let Some(import_decl) = find_ancestor_by_kind(node, "import_declaration") {
+                    // Find the direct scoped_identifier child of import_declaration
+                    for child in import_decl.children(&mut import_decl.walk()) {
+                        if child.kind() == "scoped_identifier" {
+                            // Get the rightmost identifier (the "name" field)
+                            if let Some(name_node) = child.child_by_field_name("name") {
+                                // Only keep this import if it's the rightmost identifier
+                                return name_node.id() != node.id();
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            ProgrammingLanguage::CSharp => {
+                // Skip if inside namespace_declaration (not using_directive)
+                if find_ancestor_by_kind(node, "namespace_declaration").is_some()
+                    && find_ancestor_by_kind(node, "using_directive").is_none()
+                {
+                    return true;
+                }
+                // For C# using directives, only keep the final identifier
+                if let Some(using_decl) = find_ancestor_by_kind(node, "using_directive") {
+                    // Find the direct qualified_name child
+                    for child in using_decl.children(&mut using_decl.walk()) {
+                        if child.kind() == "qualified_name" {
+                            if let Some(name_node) = child.child_by_field_name("name") {
+                                return name_node.id() != node.id();
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Extracts import metadata by traversing the AST from the captured import node.
+    ///
+    /// Returns (source, original_name, alias).
+    fn extract_import_metadata(
+        &self,
+        node: Node,
+        name: &str,
+        language: ProgrammingLanguage,
+    ) -> (Option<String>, Option<String>, Option<String>) {
+        match language {
+            ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript => {
+                self.extract_ecma_import_metadata(node, name)
+            }
+            ProgrammingLanguage::Python => self.extract_python_import_metadata(node, name),
+            ProgrammingLanguage::Rust => self.extract_rust_import_metadata(node, name),
+            ProgrammingLanguage::Go => self.extract_go_import_metadata(node, name),
+            ProgrammingLanguage::Java => self.extract_java_import_metadata(node),
+            ProgrammingLanguage::CSharp => self.extract_csharp_import_metadata(node),
+            ProgrammingLanguage::Php => self.extract_php_import_metadata(node),
+            ProgrammingLanguage::Scala => self.extract_scala_import_metadata(node, name),
+            ProgrammingLanguage::Swift => self.extract_swift_import_metadata(node),
+            _ => (None, None, None),
+        }
+    }
+
+    /// Extracts import metadata for JavaScript/TypeScript.
+    /// Handles: `import { foo } from "module"`, `import { foo as bar } from "module"`,
+    /// `import * as ns from "module"`, `import foo from "module"`.
+    fn extract_ecma_import_metadata(
+        &self,
+        node: Node,
+        name: &str,
+    ) -> (Option<String>, Option<String>, Option<String>) {
+        let mut source = None;
+        let mut original_name = None;
+        let mut alias = None;
+
+        // Find the import_statement ancestor
+        let import_stmt = find_ancestor_by_kind(node, "import_statement");
+        if let Some(stmt) = import_stmt {
+            // Find the source (string node)
+            source = stmt
+                .child_by_field_name("source")
+                .and_then(|n| n.utf8_text(self.source.as_bytes()).ok())
+                .map(|s| s.trim_matches('"').trim_matches('\'').to_string());
+        }
+
+        // Check if this is an aliased import (import_specifier with name and alias)
+        let parent = node.parent();
+        if let Some(p) = parent {
+            if p.kind() == "import_specifier" {
+                // import { original as alias } from "module"
+                if let Some(name_node) = p.child_by_field_name("name") {
+                    if let Some(alias_node) = p.child_by_field_name("alias") {
+                        let orig = name_node
+                            .utf8_text(self.source.as_bytes())
+                            .unwrap_or_default()
+                            .to_string();
+                        let al = alias_node
+                            .utf8_text(self.source.as_bytes())
+                            .unwrap_or_default()
+                            .to_string();
+
+                        // The captured node is the alias (what's defined locally)
+                        if name == al {
+                            original_name = Some(orig);
+                            alias = Some(al);
+                        }
+                    }
+                }
+            } else if p.kind() == "namespace_import" {
+                // import * as ns from "module"
+                alias = Some(name.to_string());
+                original_name = Some("*".to_string());
+            }
+        }
+
+        (source, original_name, alias)
+    }
+
+    /// Extracts import metadata for Python.
+    /// Handles: `import os`, `from typing import Optional`, `from x import y as z`.
+    fn extract_python_import_metadata(
+        &self,
+        node: Node,
+        name: &str,
+    ) -> (Option<String>, Option<String>, Option<String>) {
+        let mut source = None;
+        let mut original_name = None;
+        let mut alias = None;
+
+        // Find import_statement or import_from_statement ancestor
+        let import_stmt = find_ancestor_by_kind(node, "import_statement")
+            .or_else(|| find_ancestor_by_kind(node, "import_from_statement"));
+
+        if let Some(stmt) = import_stmt {
+            if stmt.kind() == "import_from_statement" {
+                // from X import Y - extract X as the source
+                if let Some(module_node) = stmt.child_by_field_name("module_name") {
+                    source = module_node
+                        .utf8_text(self.source.as_bytes())
+                        .ok()
+                        .map(|s| s.to_string());
+                }
+            } else {
+                // import X - the module is the source
+                // For `import os`, the source is "os" (same as name)
+                source = Some(name.to_string());
+            }
+        }
+
+        // Check for aliased import (aliased_import)
+        let parent = node.parent();
+        if let Some(p) = parent {
+            if p.kind() == "aliased_import" {
+                // from X import Y as Z
+                if let Some(name_node) = p.child_by_field_name("name") {
+                    let orig = name_node
+                        .utf8_text(self.source.as_bytes())
+                        .unwrap_or_default();
+                    // The capture is the alias
+                    if let Some(alias_node) = p.child_by_field_name("alias") {
+                        let al = alias_node
+                            .utf8_text(self.source.as_bytes())
+                            .unwrap_or_default();
+                        if name == al {
+                            original_name = Some(extract_dotted_name(orig));
+                            alias = Some(al.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        (source, original_name, alias)
+    }
+
+    /// Extracts import metadata for Rust.
+    /// Handles: `use std::io`, `use std::io::{Read, Write}`, `use foo as bar`.
+    fn extract_rust_import_metadata(
+        &self,
+        node: Node,
+        name: &str,
+    ) -> (Option<String>, Option<String>, Option<String>) {
+        let mut source = None;
+        let mut original_name = None;
+        let mut alias = None;
+
+        // Find use_declaration ancestor
+        let use_decl = find_ancestor_by_kind(node, "use_declaration");
+        if let Some(decl) = use_decl {
+            // Extract the full use path
+            if let Some(arg) = decl.child_by_field_name("argument") {
+                source = self.extract_rust_use_path(arg, name);
+            }
+        }
+
+        // Check for use_as_clause (use foo as bar)
+        let parent = node.parent();
+        if let Some(p) = parent {
+            if p.kind() == "use_as_clause" {
+                // The captured node is the alias
+                if let Some(path_node) = p.child_by_field_name("path") {
+                    let orig = path_node
+                        .utf8_text(self.source.as_bytes())
+                        .unwrap_or_default()
+                        .to_string();
+                    original_name = Some(orig);
+                    alias = Some(name.to_string());
+                }
+            }
+        }
+
+        (source, original_name, alias)
+    }
+
+    /// Extracts the full path for a Rust use statement.
+    fn extract_rust_use_path(&self, node: Node, _target_name: &str) -> Option<String> {
+        // Get the full path text
+        let text = node.utf8_text(self.source.as_bytes()).ok()?;
+
+        // Extract module path (everything before the last ::)
+        // For `std::io::Read`, the source is `std::io`
+        // For `std::process::{Child, Command}`, the source is `std::process`
+        if let Some(last_sep) = text.rfind("::") {
+            let path = &text[..last_sep];
+            // Remove any use_list braces
+            let cleaned = path.trim_end_matches('{').trim();
+            if !cleaned.is_empty() {
+                return Some(cleaned.to_string());
+            }
+        }
+
+        // For simple imports like `use foo`, the name is the source
+        Some(text.to_string())
+    }
+
+    /// Extracts import metadata for Go.
+    /// Handles: `import "fmt"`, `import alias "fmt"`.
+    fn extract_go_import_metadata(
+        &self,
+        node: Node,
+        name: &str,
+    ) -> (Option<String>, Option<String>, Option<String>) {
+        let mut source = None;
+        let mut alias = None;
+        let mut original_name = None;
+
+        // Find import_spec ancestor
+        let import_spec = find_ancestor_by_kind(node, "import_spec");
+        if let Some(spec) = import_spec {
+            // Get the path (string literal)
+            if let Some(path_node) = spec.child_by_field_name("path") {
+                let path_text = path_node
+                    .utf8_text(self.source.as_bytes())
+                    .unwrap_or_default();
+                source = Some(path_text.trim_matches('"').to_string());
+            }
+
+            // Check if there's an alias (name field)
+            if let Some(name_node) = spec.child_by_field_name("name") {
+                let alias_text = name_node
+                    .utf8_text(self.source.as_bytes())
+                    .unwrap_or_default();
+                if alias_text == name {
+                    alias = Some(name.to_string());
+                    // Original name is derived from the path
+                    if let Some(src) = &source {
+                        original_name = src.rsplit('/').next().map(|s| s.to_string());
+                    }
+                }
+            }
+        }
+
+        (source, original_name, alias)
+    }
+
+    /// Extracts import metadata for Java.
+    /// Handles: `import com.example.Foo`, `import static java.lang.Math.PI`, `import java.io.*`.
+    fn extract_java_import_metadata(&self, node: Node) -> (Option<String>, Option<String>, Option<String>) {
+        let mut source = None;
+        let mut original_name = None;
+        let mut alias = None;
+
+        // Find import_declaration ancestor
+        let import_decl = find_ancestor_by_kind(node, "import_declaration");
+        if let Some(decl) = import_decl {
+            // Check if this is a wildcard import (has asterisk child)
+            let is_wildcard = decl
+                .children(&mut decl.walk())
+                .any(|c| c.kind() == "asterisk");
+
+            // Get the full import path from scoped_identifier
+            for child in decl.children(&mut decl.walk()) {
+                if child.kind() == "scoped_identifier" {
+                    let full_path = child
+                        .utf8_text(self.source.as_bytes())
+                        .unwrap_or_default();
+
+                    if is_wildcard {
+                        // For wildcard imports like `import java.io.*`
+                        // The source is the entire path, and the import represents "*"
+                        source = Some(full_path.to_string());
+                        original_name = Some("*".to_string());
+                        alias = Some(node.utf8_text(self.source.as_bytes()).unwrap_or_default().to_string());
+                    } else {
+                        // Extract package path (everything before the last dot)
+                        // For `java.util.List`, source is `java.util`
+                        if let Some(last_dot) = full_path.rfind('.') {
+                            source = Some(full_path[..last_dot].to_string());
+                        } else {
+                            source = Some(full_path.to_string());
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        (source, original_name, alias)
+    }
+
+    /// Extracts import metadata for C#.
+    /// Handles: `using System.IO`.
+    fn extract_csharp_import_metadata(&self, node: Node) -> (Option<String>, Option<String>, Option<String>) {
+        let mut source = None;
+
+        // Find using_directive ancestor
+        let using_decl = find_ancestor_by_kind(node, "using_directive");
+        if let Some(decl) = using_decl {
+            // Get the namespace
+            for child in decl.children(&mut decl.walk()) {
+                if child.kind() == "qualified_name" || child.kind() == "identifier" {
+                    source = child
+                        .utf8_text(self.source.as_bytes())
+                        .ok()
+                        .map(|s| s.to_string());
+                    break;
+                }
+            }
+        }
+
+        (source, None, None)
+    }
+
+    /// Extracts import metadata for PHP.
+    /// Handles: `use App\Models\User`, `use App\Models\User as UserModel`.
+    fn extract_php_import_metadata(&self, node: Node) -> (Option<String>, Option<String>, Option<String>) {
+        let mut source = None;
+        let mut alias = None;
+        let mut original_name = None;
+
+        // Find namespace_use_clause ancestor
+        let use_clause = find_ancestor_by_kind(node, "namespace_use_clause");
+        if let Some(clause) = use_clause {
+            // Get the qualified name
+            for child in clause.children(&mut clause.walk()) {
+                if child.kind() == "qualified_name" || child.kind() == "name" {
+                    source = child
+                        .utf8_text(self.source.as_bytes())
+                        .ok()
+                        .map(|s| s.to_string());
+                }
+                if child.kind() == "namespace_aliasing_clause" {
+                    // Has an alias
+                    if let Some(alias_node) = child.child_by_field_name("alias") {
+                        alias = alias_node
+                            .utf8_text(self.source.as_bytes())
+                            .ok()
+                            .map(|s| s.to_string());
+                        // Original name is the last part of the qualified name
+                        if let Some(src) = &source {
+                            original_name = src.rsplit('\\').next().map(|s| s.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        (source, original_name, alias)
+    }
+
+    /// Extracts import metadata for Scala.
+    /// Handles: `import scala.io._`, `import java.util.{List => JList}`.
+    fn extract_scala_import_metadata(
+        &self,
+        node: Node,
+        name: &str,
+    ) -> (Option<String>, Option<String>, Option<String>) {
+        let mut source = None;
+        let mut alias = None;
+        let mut original_name = None;
+
+        // Find import_declaration ancestor
+        let import_decl = find_ancestor_by_kind(node, "import_declaration");
+        if let Some(decl) = import_decl {
+            // Extract the full import path
+            let import_text = decl
+                .utf8_text(self.source.as_bytes())
+                .unwrap_or_default();
+            // Parse out the package path (skip "import " prefix)
+            if import_text.contains('.') && import_text.len() > 7 {
+                source = Some(import_text[7..].trim().to_string());
+            }
+        }
+
+        // Check for renamed import (import_selectors with rename)
+        let parent = node.parent();
+        if let Some(p) = parent {
+            if p.kind() == "renamed_identifier" {
+                if let Some(name_node) = p.child(0) {
+                    let orig = name_node
+                        .utf8_text(self.source.as_bytes())
+                        .unwrap_or_default()
+                        .to_string();
+                    original_name = Some(orig);
+                    alias = Some(name.to_string());
+                }
+            }
+        }
+
+        (source, original_name, alias)
+    }
+
+    /// Extracts import metadata for Swift.
+    /// Handles: `import Foundation`, `import UIKit`.
+    fn extract_swift_import_metadata(&self, node: Node) -> (Option<String>, Option<String>, Option<String>) {
+        let mut source = None;
+
+        // Find import_declaration ancestor
+        let import_decl = find_ancestor_by_kind(node, "import_declaration");
+        if let Some(decl) = import_decl {
+            // Get the module identifier
+            for child in decl.children(&mut decl.walk()) {
+                if child.kind() == "identifier" {
+                    source = child
+                        .utf8_text(self.source.as_bytes())
+                        .ok()
+                        .map(|s| s.to_string());
+                    break;
+                }
+            }
+        }
+
+        (source, None, None)
     }
 
     /// Provides the list of symbols exported by this file.
@@ -2153,6 +2649,23 @@ fn clean_jsdoc_comment(comment: &str) -> String {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Finds an ancestor node with the given kind by walking up the parent chain.
+fn find_ancestor_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == kind {
+            return Some(parent);
+        }
+        current = parent.parent();
+    }
+    None
+}
+
+/// Extracts the last component of a dotted name (e.g., "foo.bar.baz" -> "baz").
+fn extract_dotted_name(name: &str) -> String {
+    name.rsplit('.').next().unwrap_or(name).to_string()
 }
 
 /// Finds the first child node with the given kind.

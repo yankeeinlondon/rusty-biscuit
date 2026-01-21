@@ -522,10 +522,21 @@ pub struct SymbolInfo {
 /// An imported symbol reference.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportSymbol {
+    /// The local name used in the file (the name you write when referencing the import).
     pub name: String,
+    /// The original name from the source module (before aliasing).
+    /// If not aliased, this is the same as `name`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_name: Option<String>,
+    /// The alias if the import was renamed (e.g., `foo as bar` has alias `bar`).
+    /// Only present when an explicit alias was used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
     pub range: CodeRange,
     pub language: ProgrammingLanguage,
     pub file: PathBuf,
+    /// The source module path (e.g., `"fs"`, `"typing"`, `"std::io"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
 }
 

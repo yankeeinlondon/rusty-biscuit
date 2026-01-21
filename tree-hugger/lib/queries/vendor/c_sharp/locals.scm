@@ -54,6 +54,13 @@
 (record_declaration
   name: (identifier) @local.definition.type) @local.definition.type.context
 
+; Imports (using directives)
+(using_directive
+  (qualified_name) @local.definition.import)
+
+(using_directive
+  (identifier) @local.definition.import)
+
 ; References
 (identifier) @local.reference
 

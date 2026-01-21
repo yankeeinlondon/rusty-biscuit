@@ -48,9 +48,23 @@
 (package_clause
   (package_identifier) @local.definition.namespace)
 
+; Imports in grouped imports (import_spec_list)
 (import_spec_list
   (import_spec
-    name: (package_identifier) @local.definition.namespace))
+    name: (package_identifier) @local.definition.import))
+
+(import_spec_list
+  (import_spec
+    path: (interpreted_string_literal) @local.definition.import))
+
+; Single import declarations
+(import_declaration
+  (import_spec
+    name: (package_identifier) @local.definition.import))
+
+(import_declaration
+  (import_spec
+    path: (interpreted_string_literal) @local.definition.import))
 
 ; Call references
 ((call_expression

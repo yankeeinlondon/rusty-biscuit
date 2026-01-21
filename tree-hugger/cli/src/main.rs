@@ -768,16 +768,61 @@ fn render_imports(imports: &[ImportSymbol], config: &OutputConfig) {
             location
         };
 
+        // Format the import display: name [from source] [as alias]
+        let import_display = format_import_display(import);
+
         if config.use_colors {
             println!(
                 "  - {} {}",
-                import.name.cyan(),
+                import_display.cyan(),
                 location_display.dimmed()
             );
         } else {
-            println!("  - {} {}", import.name, location_display);
+            println!("  - {} {}", import_display, location_display);
         }
     }
+}
+
+/// Formats an import for display, showing source and alias information.
+///
+/// Examples:
+/// - `readFile from "fs"` - simple import with source
+/// - `bar from "module" (originally foo)` - aliased import
+/// - `* as ns from "module"` - namespace import
+fn format_import_display(import: &ImportSymbol) -> String {
+    let mut result = import.name.clone();
+
+    // Add source information
+    if let Some(source) = &import.source {
+        result.push_str(" from ");
+        // Determine if source looks like a path/module or a package
+        if source.contains('/') || source.contains('\\') || source.contains("::") || source.contains('.') {
+            result.push_str(source);
+        } else {
+            result.push('"');
+            result.push_str(source);
+            result.push('"');
+        }
+    }
+
+    // Add alias information if present (shows what the original name was)
+    if let Some(original) = &import.original_name {
+        if original != &import.name && original != "*" {
+            result.push_str(" (originally ");
+            result.push_str(original);
+            result.push(')');
+        } else if original == "*" {
+            // Namespace import: show as `* as name from "source"`
+            result = format!("* as {}", import.name);
+            if let Some(source) = &import.source {
+                result.push_str(" from \"");
+                result.push_str(source);
+                result.push('"');
+            }
+        }
+    }
+
+    result
 }
 
 /// Extracts class summaries from a file.
