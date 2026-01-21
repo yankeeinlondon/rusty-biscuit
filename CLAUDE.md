@@ -22,6 +22,9 @@ dockhand/
 │   └── service/      # Server to abstract AI pipelining functionality (FUTURE)
 ├── biscuit/          # Common utilities (providers, tools, TTS, codegen)
 ├── darkmatter/       # Binary: `md` (markdown terminal renderer)
+├── queue/            # TUI command scheduler
+│   ├── cli/          # Binary: `queue` (TUI application)
+│   └── lib/          # Core library (types, persistence, execution, terminal detection)
 ├── research/         # AI-powered library research tools
 │   ├── cli/          # Binary: `research`
 │   └── lib/          # Core research library
@@ -150,6 +153,32 @@ The `tree-hugger` package provides multi-language symbol extraction using Tree-s
 3. Bug fixes require regression tests that would fail without the fix
 4. Run `cargo test -p tree-hugger-lib` to verify all language tests pass
 
+#### 7. Queue TUI Command Scheduler
+
+The `queue` package provides a terminal-based task scheduler with async execution:
+
+**Architecture:**
+- **queue-lib**: Core library with data types, persistence, execution engine, terminal detection
+- **queue-cli**: ratatui-based TUI with modal forms and event handling
+
+**Key Components:**
+- **Terminal Detection**: Auto-detects 8 terminal types (Wezterm, iTerm2, Terminal.app, GNOME, etc.)
+- **Execution Targets**: NewPane (Wezterm), NewWindow (native terminal), Background (detached)
+- **Persistence**: JSONL file storage with cross-platform file locking (`~/.queue-history.jsonl`)
+- **Async Execution**: tokio-based task scheduling with mpsc event channels
+
+**Wezterm Split Workflow:**
+When running in Wezterm, Queue creates a split layout:
+- Top 80%: Task execution area (commands run in new splits here)
+- Bottom 20%: TUI control pane (schedule and monitor tasks)
+
+**Documentation Navigation:**
+| Document | Purpose |
+|----------|---------|
+| `queue/README.md` | High-level overview, quick start, key features |
+| `queue/lib/README.md` | Data types, persistence API, executor, terminal detection |
+| `queue/cli/README.md` | TUI architecture, keyboard shortcuts, modal system |
+
 ### Local Skills
 
 This repository has local Claude Code skills in `.claude/skills/`:
@@ -222,6 +251,10 @@ cargo test -p shared --lib providers::base::tests::test_has_provider_api_key_wit
 # Tree Hugger tests (16 languages - critical for cross-language coverage)
 cargo test -p tree-hugger-lib
 cargo test -p tree-hugger-cli
+
+# Queue tests
+cargo test -p queue-lib
+cargo test -p queue-cli
 ```
 
 ### Installing Binaries
@@ -233,6 +266,7 @@ just install
 # Install specific binary
 just -f research/justfile install    # Installs `research`
 just -f so-you-say/justfile install  # Installs `speak`
+cargo install --path queue/cli       # Installs `queue`
 ```
 
 ### Running in Development
@@ -255,6 +289,7 @@ just -f so-you-say/justfile lint
 
 # Or use cargo clippy directly
 cargo clippy -p shared
+cargo clippy -p queue-lib -p queue-cli
 cargo clippy --workspace
 ```
 
