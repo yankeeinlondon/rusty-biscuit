@@ -164,11 +164,19 @@ pub enum TaskEvent {
 | `NewWindow` | `execute_in_window()` | Opens terminal-specific window (see table below) |
 | `Background` | `execute_background()` | Spawns detached process via `/bin/sh -c` |
 
+**Interactive Shell Persistence:**
+
+For `NewPane` and `NewWindow` targets, commands are wrapped to keep the terminal alive after execution. The pattern `command; exec $SHELL` runs the user's command then starts an interactive shell, allowing:
+- User interaction with command output
+- Follow-up commands in the same terminal
+- Natural exit when the user closes the terminal
+
 **Terminal-Specific Window Commands:**
 
 | Terminal | Method |
 |----------|--------|
 | Wezterm | `wezterm cli spawn` |
+| Ghostty | `ghostty -e` (spawned, non-blocking) |
 | iTerm2 | AppleScript via `osascript` |
 | Terminal.app | AppleScript via `osascript` |
 | GNOME Terminal | `gnome-terminal -- /bin/sh -c` |
@@ -190,12 +198,13 @@ Detected terminal types.
 |---------|---------------------|----------|
 | `Wezterm` | `WEZTERM_PANE` | 1 (highest) |
 | `ITerm2` | `ITERM_SESSION_ID` | 2 |
-| `GnomeTerminal` | `GNOME_TERMINAL_SCREEN` or `VTE_VERSION` | 3 |
-| `Konsole` | `KONSOLE_VERSION` | 4 |
-| `Xfce4Terminal` | `COLORTERM=xfce4-terminal` | 5 |
-| `TerminalApp` | `TERM_PROGRAM=Apple_Terminal` | 6 |
-| `Xterm` | `TERM=xterm*` | 7 |
-| `Unknown` | (fallback) | 8 (lowest) |
+| `Ghostty` | `TERM_PROGRAM=ghostty` | 3 |
+| `GnomeTerminal` | `GNOME_TERMINAL_SCREEN` or `VTE_VERSION` | 4 |
+| `Konsole` | `KONSOLE_VERSION` | 5 |
+| `Xfce4Terminal` | `COLORTERM=xfce4-terminal` | 6 |
+| `TerminalApp` | `TERM_PROGRAM=Apple_Terminal` | 7 |
+| `Xterm` | `TERM=xterm*` | 8 |
+| `Unknown` | (fallback) | 9 (lowest) |
 
 ### TerminalCapabilities
 
@@ -215,6 +224,7 @@ pub struct TerminalCapabilities {
 |----------|:-----:|:------:|
 | Wezterm | Yes | Yes |
 | iTerm2 | Yes | Yes |
+| Ghostty | No | Yes |
 | Terminal.app | No | Yes |
 | GNOME Terminal | No | Yes |
 | Konsole | No | Yes |

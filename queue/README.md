@@ -60,6 +60,7 @@ Commands execute in the most appropriate environment based on detected terminal:
 |----------------|----------------|:------------:|
 | Wezterm        | New Pane       | Yes          |
 | iTerm2         | New Pane       | Yes          |
+| Ghostty        | New Window     | No           |
 | Terminal.app   | New Window     | No           |
 | GNOME Terminal | New Window     | No           |
 | Konsole        | New Window     | No           |
