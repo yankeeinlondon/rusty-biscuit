@@ -7,6 +7,12 @@
 //! Each API is available as a separate module with its client struct,
 //! request types, and response types re-exported from definitions.
 //!
+//! - [`openai`] - OpenAI Models API
+//! - [`elevenlabs`] - ElevenLabs TTS API
+//! - [`huggingfacehub`] - Hugging Face Hub API
+//! - [`ollamanative`] - Ollama native API (`/api/*` endpoints)
+//! - [`ollamaopenai`] - Ollama OpenAI-compatible API (`/v1/*` endpoints)
+//!
 //! ## Quick Start
 //!
 //! Use the prelude for convenient imports:
@@ -18,4 +24,6 @@ pub mod shared;
 pub mod prelude;
 pub mod elevenlabs;
 pub mod huggingfacehub;
+pub mod ollamanative;
+pub mod ollamaopenai;
 pub mod openai;

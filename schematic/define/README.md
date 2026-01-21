@@ -538,6 +538,42 @@ assert_eq!(openai.endpoints.len(), 3);
 
 See the [schematic-definitions README](../definitions/README.md) for available APIs.
 
+## Naming Conventions
+
+### Body Type Naming
+
+When defining request body types, use a `*Body` suffix to avoid collisions with generated wrapper structs:
+
+```rust
+// ✗ BAD: Collides with generated wrapper struct
+pub struct GenerateRequest { ... }  // Definition type
+// Generated: pub struct GenerateRequest { body: GenerateRequest } ← Recursive!
+
+// ✓ GOOD: Uses *Body suffix
+pub struct GenerateBody { ... }  // Definition type
+// Generated: pub struct GenerateRequest { body: GenerateBody } ← Works!
+```
+
+The generator creates `{EndpointId}Request` wrapper structs for each endpoint. If your body type uses the same name, you'll get a recursive struct that won't compile.
+
+**Convention**: Name body types as `{EndpointId}Body` (e.g., `GenerateBody`, `CreateChatBody`, `EmbedBody`).
+
+### Required Derives for Body Types
+
+All request body types **must** derive `Default`:
+
+```rust
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct GenerateBody {
+    pub model: String,   // Empty string by default
+    pub prompt: String,  // Empty string by default
+}
+```
+
+The generated wrapper structs implement `Default` and call `Default::default()` on the body type. Without this derive, generated code won't compile.
+
+**Note**: A default with empty strings may be invalid for the API, but it's valid Rust. The API will return an error at runtime, not compile time.
+
 ## Schema with Module Paths
 
 For types in specific modules, use `Schema::with_path`:

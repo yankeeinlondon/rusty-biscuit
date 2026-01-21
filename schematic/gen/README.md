@@ -169,6 +169,44 @@ schema/src/
 └── openai.rs      # OpenAI API client code
 ```
 
+## Generator Conventions & Assumptions
+
+### Module Naming
+
+The generator assumes **1 API = 1 module** with matching names (lowercased):
+
+```
+API Name: "OpenAI"     → Module: openai.rs    → Import: schematic_definitions::openai::*
+API Name: "ElevenLabs" → Module: elevenlabs.rs → Import: schematic_definitions::elevenlabs::*
+```
+
+**Multi-API modules require manual fixups**. If you define multiple APIs in a single definitions module:
+
+```rust
+// definitions/src/ollama/mod.rs defines both:
+// - OllamaNative (API name)
+// - OllamaOpenAI (API name)
+
+// Generator creates:
+pub use schematic_definitions::ollamanative::*;  // ← Wrong path!
+pub use schematic_definitions::ollamaopenai::*;  // ← Wrong path!
+
+// Manual fix needed:
+pub use schematic_definitions::ollama::*;        // ← Correct path
+```
+
+### Wrapper Struct Generation
+
+For each endpoint, the generator creates a wrapper struct named `{EndpointId}Request`:
+
+```
+Endpoint ID: "Generate"      → struct GenerateRequest { ... }
+Endpoint ID: "ListModels"    → struct ListModelsRequest { ... }
+Endpoint ID: "CreateChat"    → struct CreateChatRequest { ... }
+```
+
+**Important**: Body types in your definitions must use different names (conventionally `*Body` suffix) to avoid recursive struct definitions. See [schematic-define naming conventions](../define/README.md#naming-conventions).
+
 ## Generated Code Structure
 
 For an API named "OpenAI" with three endpoints, the generator produces:

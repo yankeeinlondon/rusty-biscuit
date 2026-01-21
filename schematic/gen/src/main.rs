@@ -7,6 +7,7 @@ use std::path::Path;
 use clap::Parser;
 use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
 use schematic_definitions::huggingface::define_huggingface_hub_api;
+use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
 use schematic_definitions::openai::define_openai_api;
 use schematic_gen::cargo_gen::write_cargo_toml;
 use schematic_gen::errors::GeneratorError;
@@ -49,9 +50,11 @@ fn main() -> Result<(), GeneratorError> {
         "openai" => define_openai_api(),
         "elevenlabs" => define_elevenlabs_rest_api(),
         "huggingface" => define_huggingface_hub_api(),
+        "ollama-native" => define_ollama_native_api(),
+        "ollama-openai" => define_ollama_openai_api(),
         other => {
             return Err(GeneratorError::ConfigError(format!(
-                "Unknown API: '{}'. Available APIs: openai, elevenlabs, huggingface",
+                "Unknown API: '{}'. Available APIs: openai, elevenlabs, huggingface, ollama-native, ollama-openai",
                 other
             )));
         }
