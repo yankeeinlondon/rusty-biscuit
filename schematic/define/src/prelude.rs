@@ -19,6 +19,8 @@
 //!     env_username: None,
 //!     headers: vec![],
 //!     endpoints: vec![],
+//!     module_path: None,
+//!     request_suffix: None,
 //! };
 //! ```
 //!

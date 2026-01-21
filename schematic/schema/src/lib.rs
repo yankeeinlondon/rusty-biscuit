@@ -16,4 +16,8 @@
 //! ```
 pub mod shared;
 pub mod prelude;
+pub mod elevenlabs;
+pub mod huggingface;
+pub mod ollama;
+pub mod ollamaopenai;
 pub mod openai;

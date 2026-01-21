@@ -56,6 +56,8 @@
 //!             headers: vec![],
 //!         },
 //!     ],
+//!     module_path: None,
+//!     request_suffix: None,
 //! };
 //!
 //! assert_eq!(api.name, "OpenAI");
