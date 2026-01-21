@@ -557,6 +557,28 @@ pub struct ImportSymbol {
     pub source: Option<String>,
 }
 
+/// A reference to a symbol (identifier usage).
+///
+/// Represents a usage of an identifier in the code, distinct from its definition.
+/// Used for semantic analysis to track which symbols are actually used.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReferencedSymbol {
+    /// The name of the referenced identifier.
+    pub name: String,
+    /// The location of this reference in the source.
+    pub range: CodeRange,
+    /// The programming language of the file.
+    pub language: ProgrammingLanguage,
+    /// The file containing this reference.
+    pub file: PathBuf,
+    /// Whether this is a qualified reference (e.g., `foo.bar`, `module::symbol`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub is_qualified: bool,
+    /// The qualifier prefix for qualified references (e.g., `foo` in `foo.bar`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qualifier: Option<String>,
+}
+
 /// A lint diagnostic captured from the source file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LintDiagnostic {

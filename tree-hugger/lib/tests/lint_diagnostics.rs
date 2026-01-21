@@ -11,24 +11,9 @@ fn create_temp_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
     path
 }
 
-#[test]
-fn test_rust_lint_todo_comment() {
-    let dir = TempDir::new().unwrap();
-    let path = create_temp_file(
-        &dir,
-        "test.rs",
-        r#"// TODO: fix this
-fn main() {}
-"#,
-    );
-
-    let tree_file = TreeFile::new(&path).unwrap();
-    let diagnostics = tree_file.lint_diagnostics();
-
-    assert!(!diagnostics.is_empty(), "Expected TODO comment diagnostic");
-    assert_eq!(diagnostics[0].rule, Some("todo-comment".to_string()));
-    assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Info);
-}
+// ============================================================================
+// Rust Pattern Rules
+// ============================================================================
 
 #[test]
 fn test_rust_lint_unwrap_call() {
@@ -46,45 +31,296 @@ fn test_rust_lint_unwrap_call() {
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
 
-    assert!(!diagnostics.is_empty(), "Expected unwrap call diagnostic");
-    let unwrap_diagnostic = diagnostics.iter().find(|d| d.rule.as_deref() == Some("unwrap-call"));
+    let unwrap_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("unwrap-call"));
     assert!(unwrap_diagnostic.is_some(), "Expected unwrap-call rule");
+    assert_eq!(
+        unwrap_diagnostic.unwrap().severity,
+        DiagnosticSeverity::Warning
+    );
 }
 
 #[test]
-fn test_javascript_lint_todo_comment() {
+fn test_rust_lint_expect_call() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn main() {
+    let x: Option<i32> = Some(42);
+    let _ = x.expect("should work");
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let expect_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("expect-call"));
+    assert!(expect_diagnostic.is_some(), "Expected expect-call rule");
+}
+
+#[test]
+fn test_rust_lint_dbg_macro() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn main() {
+    let x = 42;
+    dbg!(x);
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let dbg_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("dbg-macro"));
+    assert!(dbg_diagnostic.is_some(), "Expected dbg-macro rule");
+}
+
+// ============================================================================
+// JavaScript/TypeScript Pattern Rules
+// ============================================================================
+
+#[test]
+fn test_javascript_lint_debugger_statement() {
     let dir = TempDir::new().unwrap();
     let path = create_temp_file(
         &dir,
         "test.js",
-        r#"// TODO: implement this
-function foo() {}
+        r#"function foo() {
+    debugger;
+    return 1;
+}
 "#,
     );
 
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
 
-    assert!(!diagnostics.is_empty(), "Expected TODO comment diagnostic for JavaScript");
+    let debugger_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("debugger-statement"));
+    assert!(
+        debugger_diagnostic.is_some(),
+        "Expected debugger-statement rule"
+    );
 }
 
 #[test]
-fn test_python_lint_todo_comment() {
+fn test_javascript_lint_eval_call() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.js",
+        r#"function foo() {
+    eval("console.log('hello')");
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let eval_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("eval-call"));
+    assert!(eval_diagnostic.is_some(), "Expected eval-call rule");
+}
+
+#[test]
+fn test_typescript_lint_debugger_statement() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.ts",
+        r#"function foo(): void {
+    debugger;
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let debugger_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("debugger-statement"));
+    assert!(
+        debugger_diagnostic.is_some(),
+        "Expected debugger-statement rule for TypeScript"
+    );
+}
+
+// ============================================================================
+// Python Pattern Rules
+// ============================================================================
+
+#[test]
+fn test_python_lint_eval_call() {
     let dir = TempDir::new().unwrap();
     let path = create_temp_file(
         &dir,
         "test.py",
-        r#"# TODO: implement this
-def foo():
-    pass
+        r#"def foo():
+    eval("print('hello')")
 "#,
     );
 
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
 
-    assert!(!diagnostics.is_empty(), "Expected TODO comment diagnostic for Python");
+    let eval_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("eval-call"));
+    assert!(
+        eval_diagnostic.is_some(),
+        "Expected eval-call rule for Python"
+    );
 }
+
+#[test]
+fn test_python_lint_exec_call() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.py",
+        r#"def foo():
+    exec("x = 1")
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let exec_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("exec-call"));
+    assert!(
+        exec_diagnostic.is_some(),
+        "Expected exec-call rule for Python"
+    );
+}
+
+#[test]
+fn test_python_lint_breakpoint_call() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.py",
+        r#"def foo():
+    breakpoint()
+    return 1
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let breakpoint_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("breakpoint-call"));
+    assert!(
+        breakpoint_diagnostic.is_some(),
+        "Expected breakpoint-call rule for Python"
+    );
+}
+
+// ============================================================================
+// Ignore Directives
+// ============================================================================
+
+#[test]
+fn test_ignore_directive_line() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn main() {
+    let x: Option<i32> = Some(42);
+    // tree-hugger-ignore: unwrap-call
+    let _ = x.unwrap();
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let unwrap_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("unwrap-call"));
+    assert!(
+        unwrap_diagnostic.is_none(),
+        "unwrap-call should be ignored by directive"
+    );
+}
+
+#[test]
+fn test_ignore_directive_file() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"// tree-hugger-ignore-file: unwrap-call
+fn main() {
+    let x: Option<i32> = Some(42);
+    let _ = x.unwrap();
+    let _ = x.unwrap();
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let unwrap_diagnostics: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.rule.as_deref() == Some("unwrap-call"))
+        .collect();
+    assert!(
+        unwrap_diagnostics.is_empty(),
+        "All unwrap-call diagnostics should be ignored by file directive"
+    );
+}
+
+#[test]
+fn test_ignore_directive_all() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn main() {
+    // tree-hugger-ignore
+    let _ = value.unwrap();
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    // Line 3 should be completely ignored
+    let line3_diagnostics: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.range.start_line == 3)
+        .collect();
+    assert!(
+        line3_diagnostics.is_empty(),
+        "All diagnostics on line 3 should be ignored"
+    );
+}
+
+// ============================================================================
+// Source Context
+// ============================================================================
 
 #[test]
 fn test_lint_source_context() {
@@ -92,21 +328,105 @@ fn test_lint_source_context() {
     let path = create_temp_file(
         &dir,
         "test.rs",
-        r#"// TODO: fix this bug
-fn main() {}
+        r#"fn main() {
+    let x = Some(1);
+    x.unwrap();
+}
 "#,
     );
 
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
 
-    assert!(!diagnostics.is_empty());
-    let diagnostic = &diagnostics[0];
+    let unwrap_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("unwrap-call"));
+    assert!(unwrap_diagnostic.is_some());
 
-    // Should have source context
+    let diagnostic = unwrap_diagnostic.unwrap();
     assert!(diagnostic.context.is_some());
     let context = diagnostic.context.as_ref().unwrap();
 
-    // Context should contain the comment text
-    assert!(context.line_text.contains("TODO"));
+    // Context should contain the unwrap call
+    assert!(context.line_text.contains("unwrap"));
+}
+
+// ============================================================================
+// PHP Pattern Rules
+// ============================================================================
+
+#[test]
+fn test_php_lint_eval_call() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.php",
+        r#"<?php
+function foo() {
+    eval("$x = 1;");
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let eval_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("eval-call"));
+    assert!(eval_diagnostic.is_some(), "Expected eval-call rule for PHP");
+}
+
+// ============================================================================
+// No False Positives Tests
+// ============================================================================
+
+#[test]
+fn test_no_false_positive_unwrap_or() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn main() {
+    let x: Option<i32> = Some(42);
+    let _ = x.unwrap_or(0);
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let unwrap_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("unwrap-call"));
+    assert!(
+        unwrap_diagnostic.is_none(),
+        "unwrap_or should not trigger unwrap-call"
+    );
+}
+
+#[test]
+fn test_no_false_positive_eval_identifier() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.js",
+        r#"function foo() {
+    const eval_result = 1;
+    return eval_result;
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let eval_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("eval-call"));
+    assert!(
+        eval_diagnostic.is_none(),
+        "eval as identifier should not trigger eval-call"
+    );
 }

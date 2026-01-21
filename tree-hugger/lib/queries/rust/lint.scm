@@ -1,10 +1,6 @@
 ; Rust lint rules
 ; Capture names follow @diagnostic.{rule-id} convention
 
-; Detect TODO/FIXME comments
-((line_comment) @diagnostic.todo-comment
- (#match? @diagnostic.todo-comment "TODO|FIXME"))
-
 ; Detect unwrap() calls
 (call_expression
   function: (field_expression
@@ -16,3 +12,8 @@
   function: (field_expression
     field: (field_identifier) @_method2)
   (#eq? @_method2 "expect")) @diagnostic.expect-call
+
+; Detect dbg!() macro calls
+(macro_invocation
+  macro: (identifier) @_macro
+  (#eq? @_macro "dbg")) @diagnostic.dbg-macro

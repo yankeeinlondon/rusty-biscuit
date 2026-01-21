@@ -16,6 +16,8 @@ pub enum QueryKind {
     Lint,
     Syntax,
     DeadCode,
+    /// Captures all identifier references (usages) in a file.
+    References,
 }
 
 impl fmt::Display for QueryKind {
@@ -27,6 +29,7 @@ impl fmt::Display for QueryKind {
             Self::Lint => "lint",
             Self::Syntax => "syntax",
             Self::DeadCode => "dead_code",
+            Self::References => "references",
         };
         formatter.write_str(label)
     }
@@ -85,6 +88,13 @@ fn resolve_query_text(
     // Lint queries come from language-specific directories
     if kind == QueryKind::Lint {
         return Ok(lint_query_by_name(language.query_name())
+            .unwrap_or("")
+            .to_string());
+    }
+
+    // References queries come from language-specific directories
+    if kind == QueryKind::References {
+        return Ok(references_query_by_name(language.query_name())
             .unwrap_or("")
             .to_string());
     }
@@ -199,16 +209,46 @@ fn lint_query_by_name(name: &str) -> Option<&'static str> {
     }
 }
 
+/// Loads references query for a language from the language-specific directory.
+fn references_query_by_name(name: &str) -> Option<&'static str> {
+    match name {
+        "rust" => Some(include_str!("../../queries/rust/references.scm")),
+        "javascript" => Some(include_str!("../../queries/javascript/references.scm")),
+        "typescript" => Some(include_str!("../../queries/typescript/references.scm")),
+        "go" => Some(include_str!("../../queries/go/references.scm")),
+        "python" => Some(include_str!("../../queries/python/references.scm")),
+        "java" => Some(include_str!("../../queries/java/references.scm")),
+        "php" => Some(include_str!("../../queries/php/references.scm")),
+        "perl" => Some(include_str!("../../queries/perl/references.scm")),
+        "bash" => Some(include_str!("../../queries/bash/references.scm")),
+        "zsh" => Some(include_str!("../../queries/zsh/references.scm")),
+        "c" => Some(include_str!("../../queries/c/references.scm")),
+        "cpp" => Some(include_str!("../../queries/cpp/references.scm")),
+        "c_sharp" => Some(include_str!("../../queries/c_sharp/references.scm")),
+        "swift" => Some(include_str!("../../queries/swift/references.scm")),
+        "scala" => Some(include_str!("../../queries/scala/references.scm")),
+        "lua" => Some(include_str!("../../queries/lua/references.scm")),
+        _ => None,
+    }
+}
+
 use crate::shared::DiagnosticSeverity;
 
 /// Maps rule IDs to their severity level.
 pub fn severity_for_rule(rule_id: &str) -> DiagnosticSeverity {
     match rule_id {
-        // Error-level rules
-        "unreachable-code" | "invalid-syntax" | "undefined-variable" => DiagnosticSeverity::Error,
-        // Warning-level rules
-        "unused-variable" | "shadowed-variable" | "unwrap-call" | "empty-block"
-        | "deprecated-syntax" => DiagnosticSeverity::Warning,
+        // Error-level rules (semantic)
+        "unreachable-code" | "invalid-syntax" | "undefined-variable" | "undefined-symbol" => {
+            DiagnosticSeverity::Error
+        }
+        // Warning-level rules (semantic)
+        "unused-variable" | "shadowed-variable" | "unused-symbol" | "unused-import"
+        | "dead-code" => DiagnosticSeverity::Warning,
+        // Warning-level rules (pattern)
+        "unwrap-call" | "expect-call" | "dbg-macro" | "eval-call" | "exec-call"
+        | "debugger-statement" | "breakpoint-call" | "deprecated-syntax" => {
+            DiagnosticSeverity::Warning
+        }
         // Default to info
         _ => DiagnosticSeverity::Info,
     }
@@ -217,16 +257,24 @@ pub fn severity_for_rule(rule_id: &str) -> DiagnosticSeverity {
 /// Generates a human-readable message for a lint rule.
 pub fn format_rule_message(rule_id: &str) -> String {
     match rule_id {
-        "todo-comment" => "TODO/FIXME comment found".to_string(),
-        "empty-block" => "Empty code block".to_string(),
+        // Semantic rules
+        "undefined-symbol" => "Reference to undefined symbol".to_string(),
+        "unused-symbol" => "Symbol defined but never used".to_string(),
+        "unused-import" => "Imported symbol is never used".to_string(),
+        "dead-code" => "Unreachable code after unconditional exit".to_string(),
+        // Pattern rules
+        "unwrap-call" => "Explicit unwrap() call".to_string(),
+        "expect-call" => "Explicit expect() call".to_string(),
+        "dbg-macro" => "Debug macro dbg!() call".to_string(),
+        "eval-call" => "Use of eval() is discouraged".to_string(),
+        "exec-call" => "Use of exec() is discouraged".to_string(),
+        "debugger-statement" => "Debugger statement found".to_string(),
+        "breakpoint-call" => "Breakpoint call found".to_string(),
+        // Legacy rules (kept for compatibility)
         "unused-variable" => "Potentially unused variable".to_string(),
         "shadowed-variable" => "Variable shadows outer binding".to_string(),
-        "unwrap-call" => "Explicit unwrap() call".to_string(),
         "unreachable-code" => "Unreachable code detected".to_string(),
         "deprecated-syntax" => "Deprecated syntax".to_string(),
-        "debug-print" => "Debug print statement".to_string(),
-        "fixme-comment" => "FIXME comment found".to_string(),
-        "hack-comment" => "HACK comment found".to_string(),
         _ => format!("Lint rule: {rule_id}"),
     }
 }

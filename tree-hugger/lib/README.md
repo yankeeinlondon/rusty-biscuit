@@ -145,6 +145,79 @@ fn distinguishes_rust_struct_from_enum() -> Result<(), TreeHuggerError> {
 }
 ```
 
+## Lint Diagnostics
+
+Tree Hugger provides semantic and pattern-based lint diagnostics for all 16 supported languages.
+
+### Getting Diagnostics
+
+```rust
+use tree_hugger_lib::TreeFile;
+
+let file = TreeFile::new("src/main.rs")?;
+let diagnostics = file.lint_diagnostics();
+
+for d in diagnostics {
+    println!("{}: {} ({})", d.range.start_line, d.message, d.severity);
+}
+```
+
+### Semantic Rules
+
+These rules analyze symbol definitions, imports, and references:
+
+| Rule | Severity | Description |
+|------|----------|-------------|
+| `undefined-symbol` | Error | Reference to a symbol not defined, imported, or builtin |
+| `unused-symbol` | Warning | Symbol defined but never referenced or exported |
+| `unused-import` | Warning | Imported symbol never used in the file |
+| `dead-code` | Warning | Code after unconditional return/throw/panic |
+
+### Pattern Rules
+
+Language-specific pattern matching rules:
+
+| Language | Rule | Description |
+|----------|------|-------------|
+| **Rust** | `unwrap-call` | Explicit `.unwrap()` call |
+| **Rust** | `expect-call` | Explicit `.expect()` call |
+| **Rust** | `dbg-macro` | Debug macro `dbg!()` usage |
+| **JavaScript/TypeScript** | `debugger-statement` | `debugger;` statement |
+| **JavaScript/TypeScript** | `eval-call` | Usage of `eval()` |
+| **Python** | `eval-call` | Usage of `eval()` |
+| **Python** | `exec-call` | Usage of `exec()` |
+| **Python** | `breakpoint-call` | Usage of `breakpoint()` |
+| **PHP** | `eval-call` | Usage of `eval()` |
+
+### Ignore Directives
+
+Suppress diagnostics with comments:
+
+```rust
+// tree-hugger-ignore: unwrap-call
+let value = option.unwrap();  // This unwrap is not reported
+
+// tree-hugger-ignore
+let risky = data.unwrap();    // All rules ignored on next line
+
+// tree-hugger-ignore-file: unused-import
+// Ignores unused-import for the entire file
+```
+
+Supported comment styles: `//`, `#`, `--`, `;`
+
+### Builtin Detection
+
+Semantic rules avoid false positives by recognizing language builtins:
+
+```rust
+use tree_hugger_lib::{is_builtin, ProgrammingLanguage};
+
+assert!(is_builtin(ProgrammingLanguage::Rust, "Option"));
+assert!(is_builtin(ProgrammingLanguage::Python, "print"));
+assert!(is_builtin(ProgrammingLanguage::JavaScript, "console"));
+```
+
 ## Known Limitations
 
 ### Swift Type Distinction

@@ -1,12 +1,5 @@
 ; Bash lint rules
 ; Capture names follow @diagnostic.{rule-id} convention
 
-; Detect TODO/FIXME comments
-((comment) @diagnostic.todo-comment
- (#match? @diagnostic.todo-comment "TODO|FIXME"))
-
-; Detect echo statements (potential debug prints)
-(command
-  name: (command_name
-    (word) @_cmd)
-  (#eq? @_cmd "echo")) @diagnostic.debug-print
+; No pattern-based rules for Bash
+; Semantic checks (unused-symbol, undefined-symbol) are handled in code

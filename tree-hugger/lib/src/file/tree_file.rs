@@ -7,8 +7,8 @@ use crate::error::TreeHuggerError;
 use crate::queries::{QueryKind, format_rule_message, query_for, severity_for_rule};
 use crate::shared::{
     CodeBlock, CodeRange, DiagnosticSeverity, FieldInfo, FunctionSignature, ImportSymbol,
-    LintDiagnostic, ParameterInfo, ProgrammingLanguage, SourceContext, SymbolInfo, SymbolKind,
-    SyntaxDiagnostic, TypeMetadata, VariantInfo, Visibility,
+    LintDiagnostic, ParameterInfo, ProgrammingLanguage, ReferencedSymbol, SourceContext,
+    SymbolInfo, SymbolKind, SyntaxDiagnostic, TypeMetadata, VariantInfo, Visibility,
 };
 
 /// Represents a parsed source file backed by tree-sitter.
@@ -148,6 +148,188 @@ impl TreeFile {
         }
 
         Ok(imports)
+    }
+
+    /// Provides the list of symbol references in this file.
+    ///
+    /// References are identifier usages (not definitions) that refer to
+    /// symbols defined elsewhere (locally, imported, or builtin).
+    ///
+    /// ## Returns
+    /// Returns all identifier references detected by tree-sitter queries.
+    ///
+    /// ## Errors
+    /// Returns an error if query compilation fails.
+    pub fn referenced_symbols(&self) -> Result<Vec<ReferencedSymbol>, TreeHuggerError> {
+        let query = query_for(self.language, QueryKind::References)?;
+
+        // Empty query means no reference rules defined for this language
+        if query.pattern_count() == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut cursor = QueryCursor::new();
+        let root = self.tree.root_node();
+        let capture_names = query.capture_names();
+        let mut references = Vec::new();
+        let mut seen_ranges = std::collections::HashSet::new();
+
+        let mut matches = cursor.matches(query.as_ref(), root, self.source.as_bytes());
+        matches.advance();
+
+        while let Some(query_match) = matches.get() {
+            for capture in query_match.captures {
+                let capture_name = capture_names
+                    .get(capture.index as usize)
+                    .copied()
+                    .unwrap_or_default();
+
+                // Only process @reference captures
+                if capture_name != "reference" {
+                    continue;
+                }
+
+                let node = capture.node;
+                let range = range_for_node(node);
+
+                // Deduplicate based on byte range (same node captured multiple times)
+                let range_key = (range.start_byte, range.end_byte);
+                if !seen_ranges.insert(range_key) {
+                    continue;
+                }
+
+                let name = node
+                    .utf8_text(self.source.as_bytes())
+                    .map(str::to_string)
+                    .unwrap_or_default();
+
+                // Skip empty names
+                if name.is_empty() {
+                    continue;
+                }
+
+                // Detect if this is a qualified reference
+                let (is_qualified, qualifier) = self.detect_qualified_reference(node);
+
+                references.push(ReferencedSymbol {
+                    name,
+                    range,
+                    language: self.language,
+                    file: self.file.clone(),
+                    is_qualified,
+                    qualifier,
+                });
+            }
+
+            matches.advance();
+        }
+
+        Ok(references)
+    }
+
+    /// Detects if a node is part of a qualified reference.
+    ///
+    /// Returns (is_qualified, qualifier) where qualifier is the prefix
+    /// (e.g., `foo` in `foo.bar` or `module` in `module::symbol`).
+    fn detect_qualified_reference(&self, node: Node) -> (bool, Option<String>) {
+        let parent = match node.parent() {
+            Some(p) => p,
+            None => return (false, None),
+        };
+
+        // Check for various qualified access patterns by language
+        match self.language {
+            ProgrammingLanguage::Rust => {
+                // Check for scoped_identifier (module::symbol)
+                if parent.kind() == "scoped_identifier" {
+                    if let Some(path_node) = parent.child_by_field_name("path") {
+                        if path_node.id() != node.id() {
+                            let qualifier = path_node
+                                .utf8_text(self.source.as_bytes())
+                                .ok()
+                                .map(String::from);
+                            return (true, qualifier);
+                        }
+                    }
+                }
+                // Check for field_expression (object.field)
+                if parent.kind() == "field_expression" {
+                    if let Some(value_node) = parent.child_by_field_name("value") {
+                        if value_node.id() != node.id() {
+                            let qualifier = value_node
+                                .utf8_text(self.source.as_bytes())
+                                .ok()
+                                .map(String::from);
+                            return (true, qualifier);
+                        }
+                    }
+                }
+            }
+            ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
+                // Check for member_expression (object.property)
+                if parent.kind() == "member_expression" {
+                    if let Some(object_node) = parent.child_by_field_name("object") {
+                        if object_node.id() != node.id() {
+                            let qualifier = object_node
+                                .utf8_text(self.source.as_bytes())
+                                .ok()
+                                .map(String::from);
+                            return (true, qualifier);
+                        }
+                    }
+                }
+            }
+            ProgrammingLanguage::Python => {
+                // Check for attribute (object.attr)
+                if parent.kind() == "attribute" {
+                    if let Some(object_node) = parent.child_by_field_name("object") {
+                        if object_node.id() != node.id() {
+                            let qualifier = object_node
+                                .utf8_text(self.source.as_bytes())
+                                .ok()
+                                .map(String::from);
+                            return (true, qualifier);
+                        }
+                    }
+                }
+            }
+            ProgrammingLanguage::Go => {
+                // Check for selector_expression (package.Symbol)
+                if parent.kind() == "selector_expression" {
+                    if let Some(operand_node) = parent.child_by_field_name("operand") {
+                        if operand_node.id() != node.id() {
+                            let qualifier = operand_node
+                                .utf8_text(self.source.as_bytes())
+                                .ok()
+                                .map(String::from);
+                            return (true, qualifier);
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Generic check for field access patterns
+                let kind = parent.kind();
+                if kind.contains("member") || kind.contains("field") || kind.contains("selector") {
+                    // Try to find the object/base child
+                    let child_count = parent.named_child_count();
+                    for i in 0..child_count {
+                        if let Some(child) = parent.named_child(i as u32) {
+                            if child.id() != node.id() {
+                                let qualifier = child
+                                    .utf8_text(self.source.as_bytes())
+                                    .ok()
+                                    .map(String::from);
+                                return (true, qualifier);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        (false, None)
     }
 
     /// Determines if an import capture should be skipped.
@@ -708,18 +890,40 @@ impl TreeFile {
 
     /// Provides lint diagnostics for this file.
     ///
-    /// ## Returns
-    /// Returns lint diagnostics when query patterns are available.
-    /// Provides lint diagnostics for this file.
+    /// Combines pattern-based and semantic lint checks:
+    /// - Pattern checks: Query-based rules from lint.scm files
+    /// - Semantic checks: undefined-symbol, unused-symbol, unused-import
     ///
-    /// Executes tree-sitter lint queries and returns diagnostics for matched
-    /// patterns. Each capture name starting with `diagnostic.` is treated as
-    /// a lint rule, with the rule ID extracted from the capture name suffix.
+    /// Respects ignore directives in comments:
+    /// - `// tree-hugger-ignore: rule1, rule2` - Ignore specific rules on next line
+    /// - `// tree-hugger-ignore` - Ignore all rules on next line
+    /// - `// tree-hugger-ignore-file: rule1` - Ignore rule for entire file
     ///
     /// ## Returns
-    /// Returns lint diagnostics found by the lint query for this language.
-    /// Returns an empty Vec if no lint query is available.
+    /// Returns all lint diagnostics found by pattern and semantic analysis,
+    /// filtered by ignore directives.
     pub fn lint_diagnostics(&self) -> Vec<LintDiagnostic> {
+        use crate::ignore_directives::IgnoreDirectives;
+
+        let mut diagnostics = Vec::new();
+
+        // Run pattern-based diagnostics
+        diagnostics.extend(self.run_pattern_diagnostics());
+
+        // Run semantic diagnostics
+        diagnostics.extend(self.run_semantic_diagnostics());
+
+        // Parse ignore directives and filter diagnostics
+        let ignores = IgnoreDirectives::parse(&self.source);
+        if ignores.has_directives() {
+            diagnostics.retain(|d| !ignores.should_ignore(d.range.start_line, d.rule.as_deref()));
+        }
+
+        diagnostics
+    }
+
+    /// Runs pattern-based lint checks from lint.scm query files.
+    fn run_pattern_diagnostics(&self) -> Vec<LintDiagnostic> {
         let query = match query_for(self.language, QueryKind::Lint) {
             Ok(q) => q,
             Err(_) => return Vec::new(),
@@ -762,6 +966,324 @@ impl TreeFile {
             }
 
             matches.advance();
+        }
+
+        diagnostics
+    }
+
+    /// Runs semantic lint checks for undefined/unused symbols.
+    fn run_semantic_diagnostics(&self) -> Vec<LintDiagnostic> {
+        let mut diagnostics = Vec::new();
+
+        // Gather all necessary data for semantic analysis
+        let definitions = match self.symbols() {
+            Ok(s) => s,
+            Err(_) => return diagnostics,
+        };
+
+        let imports = match self.imported_symbols() {
+            Ok(i) => i,
+            Err(_) => return diagnostics,
+        };
+
+        let exports = match self.exported_symbols() {
+            Ok(e) => e,
+            Err(_) => return diagnostics,
+        };
+
+        let references = match self.referenced_symbols() {
+            Ok(r) => r,
+            Err(_) => return diagnostics,
+        };
+
+        // Build lookup sets
+        let defined_names: std::collections::HashSet<&str> =
+            definitions.iter().map(|s| s.name.as_str()).collect();
+        let imported_names: std::collections::HashSet<&str> =
+            imports.iter().map(|i| i.name.as_str()).collect();
+        let exported_names: std::collections::HashSet<&str> =
+            exports.iter().map(|e| e.name.as_str()).collect();
+        let referenced_names: std::collections::HashSet<&str> =
+            references.iter().map(|r| r.name.as_str()).collect();
+
+        // Check for undefined symbols
+        diagnostics.extend(self.check_undefined_symbols(
+            &references,
+            &defined_names,
+            &imported_names,
+        ));
+
+        // Check for unused symbols
+        diagnostics.extend(self.check_unused_symbols(
+            &definitions,
+            &exported_names,
+            &referenced_names,
+        ));
+
+        // Check for unused imports
+        diagnostics.extend(self.check_unused_imports(&imports, &referenced_names));
+
+        // Check for dead code
+        diagnostics.extend(self.check_dead_code());
+
+        diagnostics
+    }
+
+    /// Checks for code that follows unconditional exit statements.
+    fn check_dead_code(&self) -> Vec<LintDiagnostic> {
+        use crate::dead_code::{find_dead_code_after, is_terminal_statement};
+
+        let mut diagnostics = Vec::new();
+        let root = self.tree.root_node();
+        let mut stack = vec![root];
+        let mut seen_dead: std::collections::HashSet<(usize, usize)> =
+            std::collections::HashSet::new();
+
+        // Walk the entire AST looking for terminal statements
+        while let Some(node) = stack.pop() {
+            if is_terminal_statement(node, self.language) {
+                // Find dead code after this terminal
+                for dead_node in find_dead_code_after(node, self.language) {
+                    let range = range_for_node(dead_node);
+
+                    // Avoid duplicate diagnostics
+                    let location = (range.start_byte, range.end_byte);
+                    if !seen_dead.insert(location) {
+                        continue;
+                    }
+
+                    // Build context
+                    let line_text = self
+                        .source
+                        .lines()
+                        .nth(range.start_line.saturating_sub(1))
+                        .unwrap_or("")
+                        .to_string();
+
+                    let underline_column = range.start_column.saturating_sub(1);
+                    let underline_length = range.end_column.saturating_sub(range.start_column).max(1);
+
+                    diagnostics.push(LintDiagnostic {
+                        message: "Unreachable code after unconditional exit".to_string(),
+                        range,
+                        severity: severity_for_rule("dead-code"),
+                        rule: Some("dead-code".to_string()),
+                        context: Some(SourceContext {
+                            line_text,
+                            underline_column,
+                            underline_length,
+                        }),
+                    });
+                }
+            }
+
+            // Continue traversing
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                stack.push(child);
+            }
+        }
+
+        diagnostics
+    }
+
+    /// Checks for references to symbols that are not defined, imported, or builtin.
+    fn check_undefined_symbols(
+        &self,
+        references: &[ReferencedSymbol],
+        defined_names: &std::collections::HashSet<&str>,
+        imported_names: &std::collections::HashSet<&str>,
+    ) -> Vec<LintDiagnostic> {
+        use crate::builtins::is_builtin;
+
+        let mut diagnostics = Vec::new();
+        let mut seen_undefined: std::collections::HashSet<(usize, usize)> =
+            std::collections::HashSet::new();
+
+        for reference in references {
+            let name = reference.name.as_str();
+
+            // Skip if the reference is qualified (e.g., foo.bar - we only check 'foo')
+            if reference.is_qualified {
+                continue;
+            }
+
+            // Skip if defined locally
+            if defined_names.contains(name) {
+                continue;
+            }
+
+            // Skip if imported
+            if imported_names.contains(name) {
+                continue;
+            }
+
+            // Skip if it's a language builtin
+            if is_builtin(self.language, name) {
+                continue;
+            }
+
+            // Skip common patterns that are likely valid:
+            // - Single character identifiers (often loop variables, etc.)
+            // - Identifiers starting with uppercase (often type references from other modules)
+            // - Identifiers starting with underscore (intentionally unused)
+            if name.len() == 1 || name.starts_with('_') {
+                continue;
+            }
+
+            // Avoid duplicate diagnostics for the same location
+            let location = (reference.range.start_byte, reference.range.end_byte);
+            if !seen_undefined.insert(location) {
+                continue;
+            }
+
+            // Build context from range
+            let line_text = self
+                .source
+                .lines()
+                .nth(reference.range.start_line.saturating_sub(1))
+                .unwrap_or("")
+                .to_string();
+
+            let underline_column = reference.range.start_column.saturating_sub(1);
+            let underline_length = reference
+                .range
+                .end_column
+                .saturating_sub(reference.range.start_column)
+                .max(1);
+
+            diagnostics.push(LintDiagnostic {
+                message: format!("Reference to undefined symbol '{}'", name),
+                range: reference.range.clone(),
+                severity: severity_for_rule("undefined-symbol"),
+                rule: Some("undefined-symbol".to_string()),
+                context: Some(SourceContext {
+                    line_text,
+                    underline_column,
+                    underline_length,
+                }),
+            });
+        }
+
+        diagnostics
+    }
+
+    /// Checks for definitions that are neither exported nor referenced.
+    fn check_unused_symbols(
+        &self,
+        definitions: &[SymbolInfo],
+        exported_names: &std::collections::HashSet<&str>,
+        referenced_names: &std::collections::HashSet<&str>,
+    ) -> Vec<LintDiagnostic> {
+        let mut diagnostics = Vec::new();
+
+        for definition in definitions {
+            let name = definition.name.as_str();
+
+            // Skip if exported
+            if exported_names.contains(name) {
+                continue;
+            }
+
+            // Skip if referenced
+            if referenced_names.contains(name) {
+                continue;
+            }
+
+            // Skip symbols starting with underscore (intentionally unused)
+            if name.starts_with('_') {
+                continue;
+            }
+
+            // Skip certain symbol kinds that are typically used implicitly
+            // (e.g., trait implementations, macros)
+            if matches!(definition.kind, SymbolKind::Trait | SymbolKind::Macro) {
+                continue;
+            }
+
+            // Build context from range
+            let line_text = self
+                .source
+                .lines()
+                .nth(definition.range.start_line.saturating_sub(1))
+                .unwrap_or("")
+                .to_string();
+
+            let underline_column = definition.range.start_column.saturating_sub(1);
+            let underline_length = definition
+                .range
+                .end_column
+                .saturating_sub(definition.range.start_column)
+                .max(1);
+
+            diagnostics.push(LintDiagnostic {
+                message: format!("Symbol '{}' is defined but never used", name),
+                range: definition.range.clone(),
+                severity: severity_for_rule("unused-symbol"),
+                rule: Some("unused-symbol".to_string()),
+                context: Some(SourceContext {
+                    line_text,
+                    underline_column,
+                    underline_length,
+                }),
+            });
+        }
+
+        diagnostics
+    }
+
+    /// Checks for imports that are never referenced.
+    fn check_unused_imports(
+        &self,
+        imports: &[ImportSymbol],
+        referenced_names: &std::collections::HashSet<&str>,
+    ) -> Vec<LintDiagnostic> {
+        let mut diagnostics = Vec::new();
+
+        for import in imports {
+            let name = import.name.as_str();
+
+            // Skip if referenced
+            if referenced_names.contains(name) {
+                continue;
+            }
+
+            // Skip namespace imports (import * as x) - check for common patterns
+            if name == "*" || name.contains("*") {
+                continue;
+            }
+
+            // Skip imports starting with underscore (intentionally unused)
+            if name.starts_with('_') {
+                continue;
+            }
+
+            // Build context from range
+            let line_text = self
+                .source
+                .lines()
+                .nth(import.range.start_line.saturating_sub(1))
+                .unwrap_or("")
+                .to_string();
+
+            let underline_column = import.range.start_column.saturating_sub(1);
+            let underline_length = import
+                .range
+                .end_column
+                .saturating_sub(import.range.start_column)
+                .max(1);
+
+            diagnostics.push(LintDiagnostic {
+                message: format!("Imported symbol '{}' is never used", name),
+                range: import.range.clone(),
+                severity: severity_for_rule("unused-import"),
+                rule: Some("unused-import".to_string()),
+                context: Some(SourceContext {
+                    line_text,
+                    underline_column,
+                    underline_length,
+                }),
+            });
         }
 
         diagnostics
