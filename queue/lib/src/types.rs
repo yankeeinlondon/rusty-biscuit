@@ -3,6 +3,21 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// How the task was scheduled - affects display in the WHEN column.
+///
+/// - `AtTime`: User specified a clock time (e.g., "7:00am"). Shows the time
+///   until within 1 minute of execution, then switches to countdown.
+/// - `AfterDelay`: User specified a duration (e.g., "15m"). Always shows
+///   countdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleKind {
+    /// Scheduled at a specific time (e.g., "7:00am").
+    AtTime,
+    /// Scheduled after a delay (e.g., "15m").
+    AfterDelay,
+}
+
 /// Where to execute a scheduled task.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,6 +66,16 @@ pub struct ScheduledTask {
     pub status: TaskStatus,
     /// When the task was created.
     pub created_at: DateTime<Utc>,
+    /// How the task was scheduled (time vs duration).
+    ///
+    /// This affects display: time-based schedules show the clock time until
+    /// within 1 minute, then switch to countdown. Duration-based schedules
+    /// always show countdown.
+    ///
+    /// `None` for backwards compatibility with tasks created before this field
+    /// existed - treated as `AfterDelay` (countdown display).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule_kind: Option<ScheduleKind>,
 }
 
 impl ScheduledTask {
@@ -83,6 +108,46 @@ impl ScheduledTask {
             target,
             status: TaskStatus::Pending,
             created_at: Utc::now(),
+            schedule_kind: None,
+        }
+    }
+
+    /// Creates a new pending task with a specific schedule kind.
+    ///
+    /// Use this when you know whether the task was scheduled at a specific
+    /// time or after a delay, so the WHEN column can display appropriately.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use queue_lib::{ScheduledTask, ExecutionTarget, ScheduleKind};
+    /// use chrono::Utc;
+    ///
+    /// // Task scheduled at a specific time - will show "07:00" in WHEN column
+    /// let task = ScheduledTask::with_schedule_kind(
+    ///     1,
+    ///     "echo hello".to_string(),
+    ///     Utc::now(),
+    ///     ExecutionTarget::NewPane,
+    ///     ScheduleKind::AtTime,
+    /// );
+    /// assert_eq!(task.schedule_kind, Some(ScheduleKind::AtTime));
+    /// ```
+    pub fn with_schedule_kind(
+        id: u64,
+        command: String,
+        scheduled_at: DateTime<Utc>,
+        target: ExecutionTarget,
+        schedule_kind: ScheduleKind,
+    ) -> Self {
+        Self {
+            id,
+            command,
+            scheduled_at,
+            target,
+            status: TaskStatus::Pending,
+            created_at: Utc::now(),
+            schedule_kind: Some(schedule_kind),
         }
     }
 

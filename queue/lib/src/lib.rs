@@ -43,4 +43,4 @@ pub use executor::{TaskEvent, TaskExecutor};
 pub use history::{HistoryStore, JsonFileStore};
 pub use parse::{parse_at_time, parse_delay};
 pub use terminal::{TerminalCapabilities, TerminalDetector, TerminalKind, TuiLayoutResult};
-pub use types::{ExecutionTarget, ScheduledTask, TaskStatus};
+pub use types::{ExecutionTarget, ScheduleKind, ScheduledTask, TaskStatus};

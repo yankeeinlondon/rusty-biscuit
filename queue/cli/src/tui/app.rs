@@ -146,6 +146,7 @@ impl App {
         command: String,
         scheduled_at: chrono::DateTime<chrono::Utc>,
         target: queue_lib::ExecutionTarget,
+        schedule_kind: queue_lib::ScheduleKind,
     ) -> bool {
         let (updated_task, should_reschedule) = if let Some(task) =
             self.tasks.iter_mut().find(|t| t.id == task_id)
@@ -154,6 +155,7 @@ impl App {
             task.command = command;
             task.scheduled_at = scheduled_at;
             task.target = target;
+            task.schedule_kind = Some(schedule_kind);
             (task.clone(), was_pending)
         } else {
             return false;

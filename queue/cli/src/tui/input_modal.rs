@@ -274,6 +274,28 @@ impl Modal for InputModal {
 }
 
 impl InputModal {
+    /// Calculate the number of rows needed for the command field in compact mode.
+    ///
+    /// Returns 2 rows minimum, expanding to 3-4 for longer commands based on
+    /// how many lines the text wraps to at the available width.
+    fn calculate_command_rows(&self, area_width: u16) -> u16 {
+        const MIN_ROWS: u16 = 2;
+        const MAX_ROWS: u16 = 4;
+
+        // Account for label width (" Command   : " = 1 space + 10 label + ": " = 13 chars)
+        let content_width = area_width.saturating_sub(COMPACT_LABEL_WIDTH as u16 + 3);
+        if content_width == 0 {
+            return MIN_ROWS;
+        }
+
+        // Calculate lines needed for the command text.
+        // Add 1 for the cursor when active.
+        let text_len = self.command.len() + 1;
+        let lines_needed = ((text_len as f32) / (content_width as f32)).ceil() as u16;
+
+        lines_needed.clamp(MIN_ROWS, MAX_ROWS)
+    }
+
     fn render_full(&self, frame: &mut Frame, area: Rect) {
         let error_height = if self.error_message.is_some() { 1 } else { 0 };
         let chunks = Layout::vertical([
@@ -354,19 +376,25 @@ impl InputModal {
 
     fn render_compact(&self, frame: &mut Frame, area: Rect) {
         let error_height = if self.error_message.is_some() { 1 } else { 0 };
+
+        // Calculate command field height based on content length.
+        // Minimum 2 rows, expand to 3-4 for longer commands.
+        let command_rows = self.calculate_command_rows(area.width);
+
         let chunks = Layout::vertical([
-            Constraint::Length(1), // Command
-            Constraint::Length(1), // Schedule type
-            Constraint::Length(1), // Schedule value
-            Constraint::Length(1), // Target
+            Constraint::Length(1),            // Spacer (blank line before Command)
+            Constraint::Length(command_rows), // Command (2-4 rows)
+            Constraint::Length(1),            // Schedule type
+            Constraint::Length(1),            // Schedule value
+            Constraint::Length(1),            // Target
             Constraint::Length(error_height),
             Constraint::Min(1), // Help
         ])
         .split(area);
 
-        render_compact_text_field(
+        render_compact_multiline_text_field(
             frame,
-            chunks[0],
+            chunks[1],
             "Command",
             &self.command,
             None,
@@ -380,7 +408,7 @@ impl InputModal {
         };
         render_compact_selector_field(
             frame,
-            chunks[1],
+            chunks[2],
             "Schedule",
             schedule_type_text,
             self.active_field == InputField::ScheduleType,
@@ -392,7 +420,7 @@ impl InputModal {
         };
         render_compact_text_field(
             frame,
-            chunks[2],
+            chunks[3],
             "When",
             &self.schedule_value,
             Some(placeholder),
@@ -407,7 +435,7 @@ impl InputModal {
         };
         render_compact_selector_field(
             frame,
-            chunks[3],
+            chunks[4],
             "Execute in",
             target_text,
             self.active_field == InputField::Target,
@@ -417,13 +445,13 @@ impl InputModal {
             let error_para = Paragraph::new(error.as_str())
                 .style(Style::default().fg(Color::Red))
                 .alignment(Alignment::Center);
-            frame.render_widget(error_para, chunks[4]);
+            frame.render_widget(error_para, chunks[5]);
         }
 
         let help = Paragraph::new("Tab: Next field | Enter: Submit | Esc: Cancel")
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
-        frame.render_widget(help, chunks[5]);
+        frame.render_widget(help, chunks[6]);
     }
 }
 
@@ -583,6 +611,95 @@ fn render_compact_text_field(
     };
 
     frame.render_widget(Paragraph::new(line), area);
+}
+
+/// Renders a compact text field that can span multiple rows for longer content.
+///
+/// The first row shows the label and beginning of the value. Subsequent rows
+/// continue the value text (indented to align with the first row's value).
+fn render_compact_multiline_text_field(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    value: &str,
+    placeholder: Option<&str>,
+    is_active: bool,
+    cursor_pos: Option<usize>,
+) {
+    let label_style = if is_active {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+    let value_style = if is_active {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+
+    // Label prefix: " Command   : " (1 space + label + ": ")
+    let label_text = format!("{label:<width$}: ", width = COMPACT_LABEL_WIDTH);
+    let label_prefix = format!(" {label_text}");
+    let label_prefix_len = label_prefix.len();
+
+    // Continuation indent (spaces to align with value start)
+    let indent = " ".repeat(label_prefix_len);
+
+    // Calculate content width (area width minus the label prefix)
+    let content_width = (area.width as usize).saturating_sub(label_prefix_len);
+    if content_width == 0 {
+        return;
+    }
+
+    // Get display value with cursor if active
+    let display_value = if value.is_empty() {
+        if is_active {
+            "|".to_string()
+        } else if let Some(ph) = placeholder {
+            ph.to_string()
+        } else {
+            String::new()
+        }
+    } else if is_active {
+        insert_cursor(value, cursor_pos)
+    } else {
+        value.to_string()
+    };
+
+    let is_placeholder = value.is_empty() && !is_active && placeholder.is_some();
+    let text_style = if is_placeholder {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        value_style
+    };
+
+    // Split the display value into chunks that fit within content_width
+    let mut lines: Vec<Line> = Vec::new();
+    let mut remaining = display_value.as_str();
+
+    // First line includes the label
+    let first_chunk_len = remaining.len().min(content_width);
+    let (first_chunk, rest) = remaining.split_at(first_chunk_len);
+    lines.push(Line::from(vec![
+        Span::styled(label_prefix.clone(), label_style),
+        Span::styled(first_chunk.to_string(), text_style),
+    ]));
+    remaining = rest;
+
+    // Subsequent lines are indented
+    while !remaining.is_empty() {
+        let chunk_len = remaining.len().min(content_width);
+        let (chunk, rest) = remaining.split_at(chunk_len);
+        lines.push(Line::from(vec![
+            Span::raw(indent.clone()),
+            Span::styled(chunk.to_string(), text_style),
+        ]));
+        remaining = rest;
+    }
+
+    // Render as a paragraph (which handles multiple lines)
+    let para = Paragraph::new(lines);
+    frame.render_widget(para, area);
 }
 
 fn render_compact_selector_field(
@@ -788,5 +905,65 @@ mod tests {
             12,
             "InputModal should have min_height of 12 for small pane support"
         );
+    }
+
+    // =========================================================================
+    // Regression tests for compact layout vertical balance
+    // Bug: Compact modal had no spacer before Command field and Command was
+    // only 1 row regardless of content length. Fixed to add spacer and allow
+    // Command field to expand from 2-4 rows based on content.
+    // =========================================================================
+
+    #[test]
+    fn compact_command_rows_returns_minimum_for_empty_command() {
+        let modal = InputModal::new(wezterm_caps());
+        // Simulate a 80-column width
+        let rows = modal.calculate_command_rows(80);
+        assert_eq!(rows, 2, "Empty command should get minimum 2 rows");
+    }
+
+    #[test]
+    fn compact_command_rows_returns_minimum_for_short_command() {
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.command = "echo hello".to_string();
+        let rows = modal.calculate_command_rows(80);
+        assert_eq!(rows, 2, "Short command should get minimum 2 rows");
+    }
+
+    #[test]
+    fn compact_command_rows_expands_for_long_command() {
+        let mut modal = InputModal::new(wezterm_caps());
+        // Create a command that needs ~3 rows at 80 cols
+        // Label takes ~13 chars, so content width is ~67
+        // 67 * 2 = 134 chars for 2 rows, so 135+ needs 3 rows
+        modal.command = "x".repeat(140);
+        let rows = modal.calculate_command_rows(80);
+        assert_eq!(rows, 3, "Long command should expand to 3 rows");
+    }
+
+    #[test]
+    fn compact_command_rows_caps_at_maximum() {
+        let mut modal = InputModal::new(wezterm_caps());
+        // Create a very long command that would need 5+ rows
+        modal.command = "x".repeat(500);
+        let rows = modal.calculate_command_rows(80);
+        assert_eq!(rows, 4, "Very long command should cap at 4 rows");
+    }
+
+    #[test]
+    fn compact_command_rows_handles_narrow_terminal() {
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.command = "echo test".to_string();
+        // Very narrow terminal (15 - 13 label = ~2 content width)
+        // "echo test" (9 chars) + cursor (1) = 10 chars / 2 = 5 rows, capped to 4
+        let rows = modal.calculate_command_rows(15);
+        assert_eq!(rows, 4, "Narrow terminal should expand rows to fit content (capped at max)");
+    }
+
+    #[test]
+    fn compact_command_rows_handles_zero_width() {
+        let modal = InputModal::new(wezterm_caps());
+        let rows = modal.calculate_command_rows(0);
+        assert_eq!(rows, 2, "Zero width should return minimum 2 rows");
     }
 }

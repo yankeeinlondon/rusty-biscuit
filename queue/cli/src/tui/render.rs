@@ -44,7 +44,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             }
         }
         AppMode::HistoryModal => {
-            if let Some(ref history_modal) = app.history_modal {
+            if let Some(history_modal) = app.history_modal.as_mut() {
+                history_modal.update_layout(frame.area().height);
                 render_modal(frame, history_modal, frame.area());
             }
         }
@@ -164,18 +165,39 @@ fn task_style(task: &ScheduledTask) -> Style {
 
 /// Formats a scheduled time as a human-readable relative or absolute string.
 ///
-/// For pending tasks, shows relative time (e.g., "in 5m", "in 1h 30m").
+/// For pending tasks:
+/// - `AtTime` schedule: Shows clock time (e.g., "07:00") until within 1 minute,
+///   then switches to countdown (e.g., "in 30s")
+/// - `AfterDelay` schedule (or legacy tasks): Always shows countdown
+///
 /// For completed/running tasks, shows the absolute time when scheduled (HH:MM).
 fn format_schedule(task: &ScheduledTask) -> String {
+    use queue_lib::ScheduleKind;
+
     let now = Utc::now();
     let duration = task.scheduled_at.signed_duration_since(now);
 
     // For non-pending tasks, show the scheduled time as HH:MM
     if !task.is_pending() {
-        return task.scheduled_at.with_timezone(&chrono::Local).format("%H:%M").to_string();
+        return task
+            .scheduled_at
+            .with_timezone(&chrono::Local)
+            .format("%H:%M")
+            .to_string();
     }
 
-    // For pending tasks, show relative time
+    // For pending tasks scheduled at a specific time, show the time
+    // until we're within 1 minute, then switch to countdown for precision
+    if task.schedule_kind == Some(ScheduleKind::AtTime) && duration.num_seconds() >= 60 {
+        return task
+            .scheduled_at
+            .with_timezone(&chrono::Local)
+            .format("%H:%M")
+            .to_string();
+    }
+
+    // For delay-based schedules (or legacy tasks without schedule_kind),
+    // show relative countdown
     if duration.num_seconds() < 0 {
         // Task is overdue but still pending - show as "now"
         "now".to_string()
@@ -285,6 +307,82 @@ mod tests {
         task.mark_running();
         let result = format_schedule(&task);
         assert!(result.contains(":"), "Expected HH:MM format, got: {}", result);
+    }
+
+    // =========================================================================
+    // Regression tests for schedule_kind display behavior
+    // Bug: Tasks scheduled at a specific time (e.g., "7:00am") were showing
+    // countdown ("in 3h 15m") instead of the time ("07:00") until the last
+    // minute. Duration-based schedules should always show countdown.
+    // =========================================================================
+
+    fn make_task_with_schedule_kind(
+        scheduled_at: chrono::DateTime<Utc>,
+        schedule_kind: Option<queue_lib::ScheduleKind>,
+    ) -> ScheduledTask {
+        let mut task = ScheduledTask::new(1, "test".to_string(), scheduled_at, ExecutionTarget::default());
+        task.schedule_kind = schedule_kind;
+        task
+    }
+
+    #[test]
+    fn format_schedule_at_time_shows_clock_time_when_far() {
+        // Task scheduled "at time" should show the clock time when > 1 minute away
+        use queue_lib::ScheduleKind;
+
+        let task = make_task_with_schedule_kind(
+            Utc::now() + Duration::hours(2),
+            Some(ScheduleKind::AtTime),
+        );
+        let result = format_schedule(&task);
+
+        // Should show time format like "14:30", not "in 2h 0m"
+        assert!(result.contains(":"), "AtTime schedule should show clock time, got: {}", result);
+        assert!(!result.starts_with("in "), "AtTime schedule should not show countdown, got: {}", result);
+    }
+
+    #[test]
+    fn format_schedule_at_time_shows_countdown_when_close() {
+        // Task scheduled "at time" should switch to countdown when < 1 minute away
+        use queue_lib::ScheduleKind;
+
+        let task = make_task_with_schedule_kind(
+            Utc::now() + Duration::seconds(30),
+            Some(ScheduleKind::AtTime),
+        );
+        let result = format_schedule(&task);
+
+        // Should show countdown "in 30s" for precision in the final minute
+        assert!(result.starts_with("in "), "AtTime schedule should show countdown when close, got: {}", result);
+        assert!(result.ends_with("s"), "Should show seconds when < 1 minute, got: {}", result);
+    }
+
+    #[test]
+    fn format_schedule_after_delay_always_shows_countdown() {
+        // Task scheduled with delay should always show countdown
+        use queue_lib::ScheduleKind;
+
+        let task = make_task_with_schedule_kind(
+            Utc::now() + Duration::hours(2),
+            Some(ScheduleKind::AfterDelay),
+        );
+        let result = format_schedule(&task);
+
+        // Should show countdown "in 2h 0m"
+        assert!(result.starts_with("in "), "AfterDelay schedule should show countdown, got: {}", result);
+    }
+
+    #[test]
+    fn format_schedule_legacy_task_shows_countdown() {
+        // Legacy tasks (schedule_kind = None) should show countdown for backwards compatibility
+        let task = make_task_with_schedule_kind(
+            Utc::now() + Duration::hours(2),
+            None,
+        );
+        let result = format_schedule(&task);
+
+        // Should show countdown "in 2h 0m" (legacy behavior)
+        assert!(result.starts_with("in "), "Legacy task should show countdown, got: {}", result);
     }
 
     #[test]

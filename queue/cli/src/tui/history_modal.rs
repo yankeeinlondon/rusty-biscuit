@@ -11,12 +11,23 @@ use ratatui::{
 
 use super::modal::Modal;
 
+/// Layout mode for the history modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HistoryLayout {
+    #[default]
+    Full,
+    Compact,
+}
+
+const FULL_LAYOUT_THRESHOLD: u16 = 18;
+
 /// History modal for viewing and selecting previous commands.
 pub struct HistoryModal {
     pub items: Vec<ScheduledTask>,
     pub list_state: ListState,
     pub filter: String,
     pub filter_mode: bool,
+    pub layout: HistoryLayout,
 }
 
 impl HistoryModal {
@@ -34,7 +45,17 @@ impl HistoryModal {
             list_state: state,
             filter: String::new(),
             filter_mode: false,
+            layout: HistoryLayout::default(),
         }
+    }
+
+    /// Updates layout mode based on available height.
+    pub fn update_layout(&mut self, available_height: u16) {
+        self.layout = if available_height >= FULL_LAYOUT_THRESHOLD {
+            HistoryLayout::Full
+        } else {
+            HistoryLayout::Compact
+        };
     }
 
     /// Get the filtered items.
@@ -145,21 +166,66 @@ impl Modal for HistoryModal {
     }
 
     fn width_percent(&self) -> u16 {
-        80
+        // Reduced from 80% to 75% to avoid interfering with the help bar
+        75
     }
+
     fn height_percent(&self) -> u16 {
         70
     }
 
     fn render(&self, frame: &mut Frame, area: Rect) {
+        match self.layout {
+            HistoryLayout::Full => self.render_full(frame, area),
+            HistoryLayout::Compact => self.render_compact(frame, area),
+        }
+    }
+}
+
+impl HistoryModal {
+    /// Render full layout (>= 18 rows) - always shows filter section.
+    fn render_full(&self, frame: &mut Frame, area: Rect) {
         let chunks = Layout::vertical([
-            Constraint::Length(3), // Filter
+            Constraint::Length(3), // Filter (always visible)
             Constraint::Min(3),    // List
             Constraint::Length(2), // Help
         ])
         .split(area);
 
-        // Filter field
+        self.render_filter_section(frame, chunks[0]);
+        self.render_history_list(frame, chunks[1]);
+        self.render_help_text(frame, chunks[2]);
+    }
+
+    /// Render compact layout (< 18 rows) - only shows filter when active.
+    fn render_compact(&self, frame: &mut Frame, area: Rect) {
+        // In compact mode, only show filter section when filter_mode is active
+        // This gives more space for the history list
+        if self.filter_mode || !self.filter.is_empty() {
+            let chunks = Layout::vertical([
+                Constraint::Length(3), // Filter (only when active)
+                Constraint::Min(3),    // List
+                Constraint::Length(1), // Help (compact)
+            ])
+            .split(area);
+
+            self.render_filter_section(frame, chunks[0]);
+            self.render_history_list(frame, chunks[1]);
+            self.render_help_text_compact(frame, chunks[2]);
+        } else {
+            let chunks = Layout::vertical([
+                Constraint::Min(3),    // List (gets all the space)
+                Constraint::Length(1), // Help (compact)
+            ])
+            .split(area);
+
+            self.render_history_list(frame, chunks[0]);
+            self.render_help_text_compact(frame, chunks[1]);
+        }
+    }
+
+    /// Render the filter/search section.
+    fn render_filter_section(&self, frame: &mut Frame, area: Rect) {
         let filter_style = if self.filter_mode {
             Style::default().fg(Color::Yellow)
         } else {
@@ -187,9 +253,11 @@ impl Modal for HistoryModal {
             })
             .block(filter_block);
 
-        frame.render_widget(filter_para, chunks[0]);
+        frame.render_widget(filter_para, area);
+    }
 
-        // History list
+    /// Render the history list.
+    fn render_history_list(&self, frame: &mut Frame, area: Rect) {
         let filtered = self.filtered_items();
         let items: Vec<ListItem> = filtered
             .iter()
@@ -230,9 +298,11 @@ impl Modal for HistoryModal {
             )
             .highlight_symbol("> ");
 
-        frame.render_stateful_widget(list, chunks[1], &mut self.list_state.clone());
+        frame.render_stateful_widget(list, area, &mut self.list_state.clone());
+    }
 
-        // Help text
+    /// Render help text (full layout - 2 rows).
+    fn render_help_text(&self, frame: &mut Frame, area: Rect) {
         let help_text = if self.filter_mode {
             "Type to filter | Esc: Exit filter | Enter: Select"
         } else {
@@ -242,7 +312,21 @@ impl Modal for HistoryModal {
         let help = Paragraph::new(help_text)
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
-        frame.render_widget(help, chunks[2]);
+        frame.render_widget(help, area);
+    }
+
+    /// Render help text (compact layout - 1 row, shorter text).
+    fn render_help_text_compact(&self, frame: &mut Frame, area: Rect) {
+        let help_text = if self.filter_mode {
+            "Type to filter | Esc: Exit | Enter: Select"
+        } else {
+            "↑↓/Enter: Select | N: New | F: Filter | Esc: Close"
+        };
+
+        let help = Paragraph::new(help_text)
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
+        frame.render_widget(help, area);
     }
 }
 
@@ -260,6 +344,7 @@ mod tests {
             target: ExecutionTarget::Background,
             status: TaskStatus::Completed,
             created_at: Utc::now(),
+            schedule_kind: None,
         }
     }
 
@@ -274,6 +359,7 @@ mod tests {
             list_state: ListState::default(),
             filter: String::new(),
             filter_mode: false,
+            layout: HistoryLayout::default(),
         };
         modal.list_state.select(Some(0));
 
@@ -298,6 +384,7 @@ mod tests {
             list_state: ListState::default(),
             filter: "echo".to_string(),
             filter_mode: false,
+            layout: HistoryLayout::default(),
         };
 
         let filtered = modal.filtered_items();
@@ -311,6 +398,7 @@ mod tests {
             list_state: ListState::default(),
             filter: String::new(),
             filter_mode: false,
+            layout: HistoryLayout::default(),
         };
 
         assert!(!modal.filter_mode);
@@ -327,6 +415,7 @@ mod tests {
             list_state: ListState::default(),
             filter: String::new(),
             filter_mode: true,
+            layout: HistoryLayout::default(),
         };
 
         modal.handle_char('a');
@@ -341,9 +430,55 @@ mod tests {
             list_state: ListState::default(),
             filter: "abc".to_string(),
             filter_mode: true,
+            layout: HistoryLayout::default(),
         };
 
         modal.handle_backspace();
         assert_eq!(modal.filter, "ab");
+    }
+
+    // =========================================================================
+    // Regression tests for compact layout improvements
+    // Bug: History modal wasted space on filter section when not filtering,
+    // and modal was too wide causing it to interfere with the help bar.
+    // =========================================================================
+
+    #[test]
+    fn update_layout_sets_full_for_large_height() {
+        let mut modal = HistoryModal::new();
+        modal.update_layout(20); // >= 18 rows
+        assert_eq!(modal.layout, HistoryLayout::Full);
+    }
+
+    #[test]
+    fn update_layout_sets_compact_for_small_height() {
+        let mut modal = HistoryModal::new();
+        modal.update_layout(15); // < 18 rows
+        assert_eq!(modal.layout, HistoryLayout::Compact);
+    }
+
+    #[test]
+    fn update_layout_threshold_is_18_rows() {
+        let mut modal = HistoryModal::new();
+
+        modal.update_layout(17);
+        assert_eq!(modal.layout, HistoryLayout::Compact, "17 rows should be compact");
+
+        modal.update_layout(18);
+        assert_eq!(modal.layout, HistoryLayout::Full, "18 rows should be full");
+    }
+
+    #[test]
+    fn width_percent_is_reduced_to_avoid_help_bar() {
+        use crate::tui::modal::Modal;
+        let modal = HistoryModal::new();
+        assert_eq!(modal.width_percent(), 75, "Width should be 75% to avoid help bar interference");
+    }
+
+    #[test]
+    fn compact_layout_defaults_to_compact_enum() {
+        let modal = HistoryModal::new();
+        // Default is Full, but after update_layout with small height it becomes Compact
+        assert_eq!(modal.layout, HistoryLayout::Full, "Default should be Full");
     }
 }

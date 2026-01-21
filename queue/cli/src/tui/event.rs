@@ -205,22 +205,34 @@ fn handle_input_modal(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
                     }
                 };
 
+                let schedule_kind = match modal.schedule_type {
+                    ScheduleType::AtTime => queue_lib::ScheduleKind::AtTime,
+                    ScheduleType::AfterDelay => queue_lib::ScheduleKind::AfterDelay,
+                };
+
                 Some((
                     modal.editing_task_id,
                     modal.command.clone(),
                     scheduled_at,
                     modal.target,
+                    schedule_kind,
                 ))
             } else {
                 None
             };
 
-            if let Some((editing_task_id, command, scheduled_at, target)) = action {
+            if let Some((editing_task_id, command, scheduled_at, target, schedule_kind)) = action {
                 if let Some(task_id) = editing_task_id {
-                    app.update_task(task_id, command, scheduled_at, target);
+                    app.update_task(task_id, command, scheduled_at, target, schedule_kind);
                 } else {
                     let id = app.alloc_task_id();
-                    let task = queue_lib::ScheduledTask::new(id, command, scheduled_at, target);
+                    let task = queue_lib::ScheduledTask::with_schedule_kind(
+                        id,
+                        command,
+                        scheduled_at,
+                        target,
+                        schedule_kind,
+                    );
                     app.schedule_task(task);
                 }
 
@@ -347,6 +359,7 @@ fn handle_history_modal(app: &mut App, key: KeyCode) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::history_modal::HistoryLayout;
     use queue_lib::{TerminalCapabilities, TerminalKind};
 
     fn input(app: &mut App, key: KeyCode) {
@@ -582,6 +595,7 @@ mod tests {
             list_state: ListState::default(),
             filter: String::new(),
             filter_mode: false,
+            layout: HistoryLayout::default(),
         });
         app.mode = AppMode::HistoryModal;
 
@@ -608,6 +622,7 @@ mod tests {
                     target: ExecutionTarget::Background,
                     status: TaskStatus::Completed,
                     created_at: Utc::now(),
+                    schedule_kind: None,
                 },
                 ScheduledTask {
                     id: 2,
@@ -616,11 +631,13 @@ mod tests {
                     target: ExecutionTarget::Background,
                     status: TaskStatus::Completed,
                     created_at: Utc::now(),
+                    schedule_kind: None,
                 },
             ],
             list_state: state,
             filter: String::new(),
             filter_mode: false,
+            layout: HistoryLayout::default(),
         });
         app.mode = AppMode::HistoryModal;
 
@@ -650,10 +667,12 @@ mod tests {
                 target: ExecutionTarget::Background,
                 status: TaskStatus::Completed,
                 created_at: Utc::now(),
+                schedule_kind: None,
             }],
             list_state: state,
             filter: String::new(),
             filter_mode: false,
+            layout: HistoryLayout::default(),
         });
         app.mode = AppMode::HistoryModal;
 
@@ -675,6 +694,7 @@ mod tests {
             list_state: ListState::default(),
             filter: String::new(),
             filter_mode: false,
+            layout: HistoryLayout::default(),
         });
         app.mode = AppMode::HistoryModal;
 
