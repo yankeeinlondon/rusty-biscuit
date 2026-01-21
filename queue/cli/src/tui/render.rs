@@ -66,7 +66,7 @@ fn render_task_table(app: &mut App, frame: &mut Frame, area: Rect) {
         let style = task_style(task);
         Row::new([
             Cell::from(task.id.to_string()),
-            Cell::from(format_schedule(&task.scheduled_at)),
+            Cell::from(format_schedule(task)),
             Cell::from(task.command.as_str()),
             Cell::from(format_target(&task.target)),
             Cell::from(format_status(&task.status)),
@@ -160,12 +160,25 @@ fn task_style(task: &ScheduledTask) -> Style {
 }
 
 /// Formats a scheduled time as a human-readable relative or absolute string.
-fn format_schedule(scheduled_at: &chrono::DateTime<chrono::Utc>) -> String {
+///
+/// For pending tasks, shows relative time (e.g., "in 5m", "in 1h 30m").
+/// For completed/running tasks, shows the absolute time when scheduled (HH:MM).
+fn format_schedule(task: &ScheduledTask) -> String {
     let now = Utc::now();
-    let duration = scheduled_at.signed_duration_since(now);
+    let duration = task.scheduled_at.signed_duration_since(now);
 
+    // For non-pending tasks, show the scheduled time as HH:MM
+    if !task.is_pending() {
+        return task.scheduled_at.with_timezone(&chrono::Local).format("%H:%M").to_string();
+    }
+
+    // For pending tasks, show relative time
     if duration.num_seconds() < 0 {
-        "past".to_string()
+        // Task is overdue but still pending - show as "now"
+        "now".to_string()
+    } else if duration.num_seconds() < 60 {
+        // Less than a minute - show seconds
+        format!("in {}s", duration.num_seconds())
     } else if duration.num_hours() < 1 {
         format!("in {}m", duration.num_minutes())
     } else if duration.num_hours() < 24 {
@@ -175,14 +188,14 @@ fn format_schedule(scheduled_at: &chrono::DateTime<chrono::Utc>) -> String {
             duration.num_minutes() % 60
         )
     } else {
-        scheduled_at.format("%b %d %H:%M").to_string()
+        task.scheduled_at.format("%b %d %H:%M").to_string()
     }
 }
 
 /// Formats an execution target as a short label.
 fn format_target(target: &ExecutionTarget) -> &'static str {
     match target {
-        ExecutionTarget::NewPane => "pane",
+        ExecutionTarget::NewPane => "new pane",
         ExecutionTarget::NewWindow => "window",
         ExecutionTarget::Background => "bg",
     }
@@ -203,40 +216,76 @@ mod tests {
     use super::*;
     use chrono::{Duration, Utc};
 
-    #[test]
-    fn format_schedule_past_time() {
-        let past = Utc::now() - Duration::hours(1);
-        assert_eq!(format_schedule(&past), "past");
+    fn make_pending_task(scheduled_at: chrono::DateTime<Utc>) -> ScheduledTask {
+        ScheduledTask::new(1, "test".to_string(), scheduled_at, ExecutionTarget::default())
     }
 
     #[test]
-    fn format_schedule_under_one_hour() {
-        let future = Utc::now() + Duration::minutes(30);
-        let result = format_schedule(&future);
+    fn format_schedule_pending_past_shows_now() {
+        // Regression test: pending task scheduled in the past should show "now", not "in 0m"
+        let task = make_pending_task(Utc::now() - Duration::hours(1));
+        assert_eq!(format_schedule(&task), "now");
+    }
+
+    #[test]
+    fn format_schedule_pending_under_one_minute_shows_seconds() {
+        // Regression test: pending task < 1 minute away should show seconds, not "in 0m"
+        let task = make_pending_task(Utc::now() + Duration::seconds(30));
+        let result = format_schedule(&task);
+        assert!(result.starts_with("in "));
+        assert!(result.ends_with("s"));
+    }
+
+    #[test]
+    fn format_schedule_pending_under_one_hour() {
+        let task = make_pending_task(Utc::now() + Duration::minutes(30));
+        let result = format_schedule(&task);
         assert!(result.starts_with("in "));
         assert!(result.ends_with("m"));
         assert!(!result.contains("h"));
     }
 
     #[test]
-    fn format_schedule_under_24_hours() {
-        let future = Utc::now() + Duration::hours(5) + Duration::minutes(15);
-        let result = format_schedule(&future);
+    fn format_schedule_pending_under_24_hours() {
+        let task = make_pending_task(Utc::now() + Duration::hours(5) + Duration::minutes(15));
+        let result = format_schedule(&task);
         assert!(result.contains("h"));
         assert!(result.contains("m"));
     }
 
     #[test]
-    fn format_schedule_over_24_hours() {
-        let future = Utc::now() + Duration::days(2);
-        let result = format_schedule(&future);
+    fn format_schedule_pending_over_24_hours() {
+        let task = make_pending_task(Utc::now() + Duration::days(2));
+        let result = format_schedule(&task);
         // Should be absolute format like "Jan 23 14:30"
         assert!(!result.starts_with("in "));
     }
 
     #[test]
+    fn format_schedule_completed_shows_hh_mm() {
+        // Regression test: completed tasks should show HH:MM, not "past"
+        let mut task = make_pending_task(Utc::now() - Duration::hours(1));
+        task.mark_completed();
+        let result = format_schedule(&task);
+        // Should be HH:MM format (e.g., "14:30")
+        assert!(result.contains(":"), "Expected HH:MM format, got: {}", result);
+        assert!(!result.starts_with("in "));
+        assert_ne!(result, "past");
+        assert_ne!(result, "now");
+    }
+
+    #[test]
+    fn format_schedule_running_shows_hh_mm() {
+        // Running tasks should also show the scheduled time
+        let mut task = make_pending_task(Utc::now() - Duration::minutes(5));
+        task.mark_running();
+        let result = format_schedule(&task);
+        assert!(result.contains(":"), "Expected HH:MM format, got: {}", result);
+    }
+
+    #[test]
     fn format_target_values() {
-        assert_eq!(format_target(&ExecutionTarget::NewPane), "pane");
+        assert_eq!(format_target(&ExecutionTarget::NewPane), "new pane");
         assert_eq!(format_target(&ExecutionTarget::NewWindow), "window");
         assert_eq!(format_target(&ExecutionTarget::Background), "bg");
     }
