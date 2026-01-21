@@ -69,6 +69,12 @@ pub struct RetrieveModelRequest {
     pub model: String,
 }
 impl RetrieveModelRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(model: impl Into<String>) -> Self {
+        Self { model: model.into() }
+    }
+}
+impl RetrieveModelRequest {
     /// Converts the request into (method, path, body, headers) parts.
     ///
     /// ## Returns
@@ -98,6 +104,12 @@ impl RetrieveModelRequest {
 pub struct DeleteModelRequest {
     /// Path parameter: model
     pub model: String,
+}
+impl DeleteModelRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(model: impl Into<String>) -> Self {
+        Self { model: model.into() }
+    }
 }
 impl DeleteModelRequest {
     /// Converts the request into (method, path, body, headers) parts.

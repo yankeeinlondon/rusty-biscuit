@@ -266,6 +266,11 @@ pub struct RetrieveModelRequest {
 }
 
 impl RetrieveModelRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(model: impl Into<String>) -> Self {
+        Self { model: model.into() }
+    }
+
     pub fn into_parts(self) -> (&'static str, String, Option<String>) {
         let path = format!("/models/{}", self.model);
         ("GET", path, None)
@@ -327,12 +332,17 @@ use schematic_schema::{OpenAI, RetrieveModelRequest, ListModelsResponse, Model};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = OpenAI::new();
 
-    // List all models
+    // List all models (no path params - use Default)
     let models: ListModelsResponse = client
         .request(ListModelsRequest::default())
         .await?;
 
-    // Retrieve a specific model
+    // Retrieve a specific model - type-safe construction with new()
+    let model: Model = client
+        .request(RetrieveModelRequest::new("gpt-4"))
+        .await?;
+
+    // Alternative: struct literal (still works for flexibility)
     let model: Model = client
         .request(RetrieveModelRequest {
             model: "gpt-4".to_string(),
@@ -461,43 +471,92 @@ Endpoint {
     ...
 }
 
-// Generated struct
+// Generated struct with new() constructor
 pub struct GetMessageRequest {
     pub thread_id: String,
     pub message_id: String,
 }
 
 impl GetMessageRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(thread_id: impl Into<String>, message_id: impl Into<String>) -> Self {
+        Self {
+            thread_id: thread_id.into(),
+            message_id: message_id.into(),
+        }
+    }
+
     pub fn into_parts(self) -> (&'static str, String, Option<String>) {
         let path = format!("/threads/{}/messages/{}", self.thread_id, self.message_id);
         ("GET", path, None)
     }
 }
+
+// Usage
+let request = GetMessageRequest::new("thread-123", "msg-456");
 ```
 
 ## Request Bodies
 
-Endpoints with request bodies get a `body` field:
+Endpoints with request bodies get a `body` field and a `new()` constructor:
 
 ```rust
 // API definition
 Endpoint {
-    request: Some(Schema::new("CreateCompletionRequest")),
+    request: Some(ApiRequest::json_type("CreateCompletionBody")),
     ...
 }
 
-// Generated struct
+// Generated struct with new() constructor
 #[derive(Debug, Clone)]
 pub struct CreateCompletionRequest {
-    pub body: CreateCompletionRequest,  // The body type from schema
+    pub body: CreateCompletionBody,  // The body type from schema
 }
 
 impl CreateCompletionRequest {
+    /// Creates a new request with the required body.
+    pub fn new(body: CreateCompletionBody) -> Self {
+        Self { body }
+    }
+
     pub fn into_parts(self) -> (&'static str, String, Option<String>) {
         let path = "/completions".to_string();
         ("POST", path, serde_json::to_string(&self.body).ok())
     }
 }
+
+// Usage - type-safe construction
+let request = CreateCompletionRequest::new(CreateCompletionBody {
+    model: "gpt-4".to_string(),
+    prompt: "Hello".to_string(),
+    ..Default::default()
+});
+```
+
+For endpoints with both path parameters and a body:
+
+```rust
+// POST /threads/{thread_id}/messages with JSON body
+pub struct CreateMessageRequest {
+    pub thread_id: String,
+    pub body: CreateMessageBody,
+}
+
+impl CreateMessageRequest {
+    /// Creates a new request with required path parameters and body.
+    pub fn new(thread_id: impl Into<String>, body: CreateMessageBody) -> Self {
+        Self {
+            thread_id: thread_id.into(),
+            body,
+        }
+    }
+}
+
+// Usage
+let request = CreateMessageRequest::new("thread-123", CreateMessageBody {
+    content: "Hello!".to_string(),
+    ..Default::default()
+});
 ```
 
 ## Module Reference

@@ -53,6 +53,12 @@ pub fn generate_request_struct(endpoint: &Endpoint) -> TokenStream {
     let has_body = matches!(&endpoint.request, Some(ApiRequest::Json(_)));
     let method_str = endpoint.method.to_string();
 
+    // Extract body type name for new() constructor
+    let body_type_name = match &endpoint.request {
+        Some(ApiRequest::Json(schema)) => Some(schema.type_name.as_str()),
+        _ => None,
+    };
+
     // Generate struct fields
     let param_fields = generate_param_fields(&path_params);
     let body_field = generate_body_field(endpoint);
@@ -62,6 +68,9 @@ pub fn generate_request_struct(endpoint: &Endpoint) -> TokenStream {
 
     // Generate Default impl if we have a body (manual impl needed)
     let default_impl = generate_default_impl(&struct_name, &path_params, has_body);
+
+    // Generate new() constructor for type-safe construction
+    let new_impl = generate_new_impl(&struct_name, &path_params, has_body, body_type_name);
 
     // Generate into_parts method
     let into_parts = generate_into_parts(endpoint, &path_params, &method_str);
@@ -87,6 +96,8 @@ pub fn generate_request_struct(endpoint: &Endpoint) -> TokenStream {
         }
 
         #default_impl
+
+        #new_impl
 
         impl #struct_name {
             #into_parts
@@ -167,6 +178,67 @@ fn generate_default_impl(
                 }
             }
         }
+    }
+}
+
+/// Generates a `new()` constructor for the request struct.
+///
+/// The constructor requires all path parameters and the body (if present),
+/// providing compile-time enforcement of required fields.
+///
+/// ## Returns
+///
+/// - For structs with path params or body: `impl` block with `new()` method
+/// - For empty structs (no params, no body): empty `TokenStream` (use `Default`)
+fn generate_new_impl(
+    struct_name: &proc_macro2::Ident,
+    path_params: &[&str],
+    has_body: bool,
+    body_type: Option<&str>,
+) -> TokenStream {
+    let params: Vec<_> = path_params
+        .iter()
+        .map(|p| {
+            let name = format_ident!("{}", p);
+            quote! { #name: impl Into<String> }
+        })
+        .collect();
+
+    let field_inits: Vec<_> = path_params
+        .iter()
+        .map(|p| {
+            let name = format_ident!("{}", p);
+            quote! { #name: #name.into() }
+        })
+        .collect();
+
+    if has_body {
+        let body_ty = format_ident!("{}", body_type.unwrap());
+        quote! {
+            impl #struct_name {
+                /// Creates a new request with the required path parameters and body.
+                pub fn new(#(#params,)* body: #body_ty) -> Self {
+                    Self {
+                        #(#field_inits,)*
+                        body,
+                    }
+                }
+            }
+        }
+    } else if !path_params.is_empty() {
+        quote! {
+            impl #struct_name {
+                /// Creates a new request with the required path parameters.
+                pub fn new(#(#params),*) -> Self {
+                    Self {
+                        #(#field_inits,)*
+                    }
+                }
+            }
+        }
+    } else {
+        // No params, no body - new() is just Default
+        quote! {}
     }
 }
 
@@ -465,5 +537,98 @@ mod tests {
                 expected_str
             );
         }
+    }
+
+    #[test]
+    fn generates_new_for_path_param_only() {
+        let endpoint = make_endpoint("GetModel", RestMethod::Get, "/models/{model}", None);
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        assert!(
+            code.contains("pub fn new(model: impl Into<String>) -> Self"),
+            "Expected new() with impl Into<String> param, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains("model: model.into()"),
+            "Expected model.into() field init, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn generates_new_for_path_param_and_body() {
+        let endpoint = make_endpoint(
+            "CreateMessage",
+            RestMethod::Post,
+            "/threads/{thread_id}/messages",
+            Some(ApiRequest::json_type("CreateMessageBody")),
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        assert!(
+            code.contains("pub fn new(thread_id: impl Into<String>, body: CreateMessageBody) -> Self"),
+            "Expected new() with path param and body, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains("thread_id: thread_id.into()"),
+            "Expected thread_id.into() field init, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn generates_new_for_body_only() {
+        let endpoint = make_endpoint(
+            "CreateCompletion",
+            RestMethod::Post,
+            "/completions",
+            Some(ApiRequest::json_type("CreateCompletionBody")),
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        assert!(
+            code.contains("pub fn new(body: CreateCompletionBody) -> Self"),
+            "Expected new() with body only, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn skips_new_for_empty_request() {
+        let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // No new() needed - Default suffices
+        assert!(
+            !code.contains("pub fn new("),
+            "Expected no new() for empty request, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn generates_new_with_multiple_path_params() {
+        let endpoint = make_endpoint(
+            "GetMessage",
+            RestMethod::Get,
+            "/threads/{thread_id}/messages/{message_id}",
+            None,
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        assert!(
+            code.contains(
+                "pub fn new(thread_id: impl Into<String>, message_id: impl Into<String>) -> Self"
+            ),
+            "Expected new() with multiple impl Into<String> params, got:\n{}",
+            code
+        );
     }
 }

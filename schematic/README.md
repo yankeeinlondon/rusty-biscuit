@@ -65,12 +65,19 @@ use schematic_schema::prelude::*;
 async fn main() -> Result<(), SchematicError> {
     let client = OpenAI::new()?;
 
-    // List all models
+    // List all models (no required params - use Default)
     let models: ListModelsResponse = client
         .request(ListModelsRequest::default())
         .await?;
 
     println!("Found {} models", models.data.len());
+
+    // Retrieve a specific model - type-safe construction with new()
+    let model: Model = client
+        .request(RetrieveModelRequest::new("gpt-4"))
+        .await?;
+
+    println!("Model: {}", model.id);
     Ok(())
 }
 ```
@@ -86,10 +93,11 @@ async fn main() -> Result<(), SchematicError> {
 
 ## Key Features
 
-- **Type-safe requests**: Each endpoint gets a strongly-typed request struct
+- **Type-safe requests**: Each endpoint gets a strongly-typed request struct with `new()` constructors
+- **Compile-time enforcement**: Required path parameters and bodies are enforced via `new()` constructors
 - **Automatic authentication**: Bearer, API Key, and Basic auth with env var fallback chains
 - **Proper error handling**: `MissingCredential` errors instead of silent failures
-- **Path parameters**: `{param}` syntax in paths become struct fields
+- **Path parameters**: `{param}` syntax in paths become struct fields with `impl Into<String>` for ergonomic usage
 - **Multiple response types**: JSON, Text, Binary, and Empty responses
 - **Per-API modules**: Each API gets its own module file
 - **Prelude exports**: Convenient imports via `use schematic_*::prelude::*`
