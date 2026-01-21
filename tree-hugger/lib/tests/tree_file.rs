@@ -1048,3 +1048,423 @@ fn distinguishes_go_types() -> Result<(), TreeHuggerError> {
 
     Ok(())
 }
+
+// ============================================================================
+// Type metadata extraction regression tests
+// Bug: Types were showing without field/variant information (e.g., "type Point"
+// instead of "type Point { x: int, y: int }").
+// ============================================================================
+
+#[test]
+fn extracts_java_type_metadata() -> Result<(), TreeHuggerError> {
+    // Regression test: Java classes should have field metadata
+    let tree_file = TreeFile::new(fixture_path("types.java"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Class should have fields
+    let point = symbols
+        .iter()
+        .find(|s| s.name == "Point")
+        .expect("should find Point class");
+    let meta = point
+        .type_metadata
+        .as_ref()
+        .expect("Point should have type_metadata");
+    assert!(meta.fields.len() >= 2, "Point should have at least 2 fields");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "x"),
+        "Point should have field x"
+    );
+    assert!(
+        meta.fields.iter().any(|f| f.name == "y"),
+        "Point should have field y"
+    );
+
+    // Enum should have variants
+    let status = symbols
+        .iter()
+        .find(|s| s.name == "Status")
+        .expect("should find Status enum");
+    let meta = status
+        .type_metadata
+        .as_ref()
+        .expect("Status should have type_metadata");
+    assert!(
+        meta.variants.len() >= 3,
+        "Status should have at least 3 variants"
+    );
+    assert!(
+        meta.variants.iter().any(|v| v.name == "SUCCESS"),
+        "Status should have SUCCESS variant"
+    );
+
+    // Record should have fields (components)
+    let person = symbols
+        .iter()
+        .find(|s| s.name == "Person")
+        .expect("should find Person record");
+    let meta = person
+        .type_metadata
+        .as_ref()
+        .expect("Person should have type_metadata");
+    assert!(meta.fields.len() >= 2, "Person should have at least 2 fields");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "name"),
+        "Person should have field name"
+    );
+    assert!(
+        meta.fields.iter().any(|f| f.name == "age"),
+        "Person should have field age"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_c_type_metadata() -> Result<(), TreeHuggerError> {
+    // Regression test: C structs should have field metadata
+    let tree_file = TreeFile::new(fixture_path("types.c"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Struct should have fields
+    let point = symbols
+        .iter()
+        .find(|s| s.name == "Point" && s.kind == tree_hugger_lib::SymbolKind::Type)
+        .expect("should find Point struct");
+    let meta = point
+        .type_metadata
+        .as_ref()
+        .expect("Point should have type_metadata");
+    assert!(meta.fields.len() >= 2, "Point should have at least 2 fields");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "x"),
+        "Point should have field x"
+    );
+
+    // Enum should have variants
+    let status = symbols
+        .iter()
+        .find(|s| s.name == "Status")
+        .expect("should find Status enum");
+    let meta = status
+        .type_metadata
+        .as_ref()
+        .expect("Status should have type_metadata");
+    assert!(
+        meta.variants.len() >= 3,
+        "Status should have at least 3 variants"
+    );
+    assert!(
+        meta.variants.iter().any(|v| v.name == "SUCCESS"),
+        "Status should have SUCCESS variant"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_cpp_type_metadata() -> Result<(), TreeHuggerError> {
+    // Regression test: C++ classes/structs should have field metadata
+    let tree_file = TreeFile::new(fixture_path("types.cpp"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Struct should have fields
+    let point = symbols
+        .iter()
+        .find(|s| s.name == "Point")
+        .expect("should find Point struct");
+    let meta = point
+        .type_metadata
+        .as_ref()
+        .expect("Point should have type_metadata");
+    assert!(meta.fields.len() >= 2, "Point should have at least 2 fields");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "x"),
+        "Point should have field x"
+    );
+
+    // Class should have fields
+    let greeter = symbols
+        .iter()
+        .find(|s| s.name == "Greeter")
+        .expect("should find Greeter class");
+    let meta = greeter
+        .type_metadata
+        .as_ref()
+        .expect("Greeter should have type_metadata");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "prefix"),
+        "Greeter should have field prefix"
+    );
+
+    // Enum should have variants
+    let status = symbols
+        .iter()
+        .find(|s| s.name == "Status")
+        .expect("should find Status enum");
+    let meta = status
+        .type_metadata
+        .as_ref()
+        .expect("Status should have type_metadata");
+    assert!(
+        meta.variants.len() >= 3,
+        "Status should have at least 3 variants"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_csharp_type_metadata() -> Result<(), TreeHuggerError> {
+    // Regression test: C# types should have field/variant metadata
+    let tree_file = TreeFile::new(fixture_path("types.cs"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Struct should have fields
+    let point = symbols
+        .iter()
+        .find(|s| s.name == "Point")
+        .expect("should find Point struct");
+    let meta = point
+        .type_metadata
+        .as_ref()
+        .expect("Point should have type_metadata");
+    assert!(meta.fields.len() >= 2, "Point should have at least 2 fields");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "X"),
+        "Point should have field X"
+    );
+
+    // Enum should have variants
+    let status = symbols
+        .iter()
+        .find(|s| s.name == "Status")
+        .expect("should find Status enum");
+    let meta = status
+        .type_metadata
+        .as_ref()
+        .expect("Status should have type_metadata");
+    assert!(
+        meta.variants.len() >= 3,
+        "Status should have at least 3 variants"
+    );
+    assert!(
+        meta.variants.iter().any(|v| v.name == "Success"),
+        "Status should have Success variant"
+    );
+
+    // Interface should have method signatures
+    let service = symbols
+        .iter()
+        .find(|s| s.name == "IGreetingService")
+        .expect("should find IGreetingService interface");
+    let meta = service
+        .type_metadata
+        .as_ref()
+        .expect("IGreetingService should have type_metadata");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "Greet"),
+        "IGreetingService should have Greet method"
+    );
+
+    // Record should have fields
+    let person = symbols
+        .iter()
+        .find(|s| s.name == "Person")
+        .expect("should find Person record");
+    let meta = person
+        .type_metadata
+        .as_ref()
+        .expect("Person should have type_metadata");
+    assert!(meta.fields.len() >= 2, "Person should have at least 2 fields");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "Name"),
+        "Person should have field Name"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_swift_type_metadata() -> Result<(), TreeHuggerError> {
+    // Regression test: Swift types should have field metadata
+    let tree_file = TreeFile::new(fixture_path("types.swift"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Struct should have fields
+    let point = symbols
+        .iter()
+        .find(|s| s.name == "Point")
+        .expect("should find Point struct");
+    let meta = point
+        .type_metadata
+        .as_ref()
+        .expect("Point should have type_metadata");
+    assert!(meta.fields.len() >= 2, "Point should have at least 2 fields");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "x"),
+        "Point should have field x"
+    );
+
+    // Class should have fields
+    let greeter = symbols
+        .iter()
+        .find(|s| s.name == "Greeter")
+        .expect("should find Greeter class");
+    let meta = greeter
+        .type_metadata
+        .as_ref()
+        .expect("Greeter should have type_metadata");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "prefix"),
+        "Greeter should have field prefix"
+    );
+
+    // Protocol should have method signatures
+    let service = symbols
+        .iter()
+        .find(|s| s.name == "GreetingService")
+        .expect("should find GreetingService protocol");
+    let meta = service
+        .type_metadata
+        .as_ref()
+        .expect("GreetingService should have type_metadata");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "greet"),
+        "GreetingService should have greet method"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_scala_type_metadata() -> Result<(), TreeHuggerError> {
+    // Regression test: Scala types should have field/method metadata
+    let tree_file = TreeFile::new(fixture_path("types.scala"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Class should have parameters as fields
+    let point = symbols
+        .iter()
+        .find(|s| s.name == "Point")
+        .expect("should find Point class");
+    let meta = point
+        .type_metadata
+        .as_ref()
+        .expect("Point should have type_metadata");
+    assert!(
+        meta.fields.len() >= 2,
+        "Point should have at least 2 class parameters"
+    );
+    assert!(
+        meta.fields.iter().any(|f| f.name == "x"),
+        "Point should have parameter x"
+    );
+
+    // Trait should have method signatures
+    let greeter = symbols
+        .iter()
+        .find(|s| s.name == "Greeter")
+        .expect("should find Greeter trait");
+    let meta = greeter
+        .type_metadata
+        .as_ref()
+        .expect("Greeter should have type_metadata");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "greet"),
+        "Greeter should have greet method"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_php_type_metadata() -> Result<(), TreeHuggerError> {
+    // Regression test: PHP types should have field/variant metadata
+    let tree_file = TreeFile::new(fixture_path("types.php"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Class should have fields
+    let greeter = symbols
+        .iter()
+        .find(|s| s.name == "Greeter")
+        .expect("should find Greeter class");
+    let meta = greeter
+        .type_metadata
+        .as_ref()
+        .expect("Greeter should have type_metadata");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "prefix"),
+        "Greeter should have field prefix"
+    );
+
+    // Interface should have method signatures
+    let service = symbols
+        .iter()
+        .find(|s| s.name == "GreetingService")
+        .expect("should find GreetingService interface");
+    let meta = service
+        .type_metadata
+        .as_ref()
+        .expect("GreetingService should have type_metadata");
+    assert!(
+        meta.fields.iter().any(|f| f.name == "greet"),
+        "GreetingService should have greet method"
+    );
+
+    // Enum should have variants
+    let status = symbols
+        .iter()
+        .find(|s| s.name == "Status")
+        .expect("should find Status enum");
+    let meta = status
+        .type_metadata
+        .as_ref()
+        .expect("Status should have type_metadata");
+    assert!(
+        meta.variants.len() >= 3,
+        "Status should have at least 3 variants"
+    );
+    assert!(
+        meta.variants.iter().any(|v| v.name == "Success"),
+        "Status should have Success variant"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn c_enum_not_duplicated() -> Result<(), TreeHuggerError> {
+    // Regression test: C enums should only appear once, not duplicated per enumerator
+    let tree_file = TreeFile::new(fixture_path("types.c"))?;
+    let symbols = tree_file.symbols()?;
+
+    let status_count = symbols.iter().filter(|s| s.name == "Status").count();
+    assert_eq!(
+        status_count, 1,
+        "C enum should only appear once, not duplicated (found {status_count})"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn cpp_enum_not_duplicated() -> Result<(), TreeHuggerError> {
+    // Regression test: C++ enums should only appear once, not duplicated per enumerator
+    let tree_file = TreeFile::new(fixture_path("types.cpp"))?;
+    let symbols = tree_file.symbols()?;
+
+    let status_count = symbols.iter().filter(|s| s.name == "Status").count();
+    assert_eq!(
+        status_count, 1,
+        "C++ enum should only appear once, not duplicated (found {status_count})"
+    );
+
+    let color_count = symbols.iter().filter(|s| s.name == "Color").count();
+    assert_eq!(
+        color_count, 1,
+        "C++ enum class should only appear once, not duplicated (found {color_count})"
+    );
+
+    Ok(())
+}

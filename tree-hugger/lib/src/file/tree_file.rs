@@ -1118,6 +1118,13 @@ fn extract_type_metadata(
         ProgrammingLanguage::TypeScript => extract_typescript_type_metadata(node, node_kind, source),
         ProgrammingLanguage::Go => extract_go_type_metadata(node, node_kind, source),
         ProgrammingLanguage::Python => extract_python_type_metadata(node, node_kind, source),
+        ProgrammingLanguage::Java => extract_java_type_metadata(node, node_kind, source),
+        ProgrammingLanguage::C => extract_c_type_metadata(node, node_kind, source),
+        ProgrammingLanguage::Cpp => extract_cpp_type_metadata(node, node_kind, source),
+        ProgrammingLanguage::CSharp => extract_csharp_type_metadata(node, node_kind, source),
+        ProgrammingLanguage::Swift => extract_swift_type_metadata(node, node_kind, source),
+        ProgrammingLanguage::Scala => extract_scala_type_metadata(node, node_kind, source),
+        ProgrammingLanguage::Php => extract_php_type_metadata(node, node_kind, source),
         _ => None,
     }
 }
@@ -1698,4 +1705,1053 @@ fn extract_python_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
     }
 
     fields
+}
+
+// ============================================================================
+// Java type metadata extraction
+// ============================================================================
+
+/// Extracts type metadata from Java class, enum, record, or interface declarations.
+fn extract_java_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+    let mut metadata = TypeMetadata::new();
+
+    // Extract generic type parameters
+    if let Some(type_params) = find_child_by_kind(node, "type_parameters") {
+        metadata.type_parameters = extract_java_type_parameters(type_params, source);
+    }
+
+    match node_kind {
+        "class_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "class_body") {
+                metadata.fields = extract_java_class_fields(body, source);
+            }
+        }
+        "enum_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "enum_body") {
+                metadata.variants = extract_java_enum_variants(body, source);
+            }
+        }
+        "record_declaration" => {
+            // Record components are in formal_parameters
+            if let Some(params) = find_child_by_kind(node, "formal_parameters") {
+                metadata.fields = extract_java_record_components(params, source);
+            }
+        }
+        "interface_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "interface_body") {
+                metadata.fields = extract_java_interface_methods(body, source);
+            }
+        }
+        _ => {}
+    }
+
+    if metadata.is_empty() {
+        None
+    } else {
+        Some(metadata)
+    }
+}
+
+/// Extracts generic type parameters from Java type_parameters node.
+fn extract_java_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut params = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() == "type_parameter" {
+            if let Some(ident) = find_child_by_kind(child, "type_identifier") {
+                if let Ok(text) = ident.utf8_text(source.as_bytes()) {
+                    params.push(text.to_string());
+                }
+            }
+        }
+    }
+
+    params
+}
+
+/// Extracts fields from Java class_body.
+fn extract_java_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "field_declaration" {
+            continue;
+        }
+
+        // Get the type
+        let type_annotation = find_java_type_node(child)
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        // Get all variable declarators (handles `int x, y;`)
+        let mut inner_cursor = child.walk();
+        for inner in child.children(&mut inner_cursor) {
+            if inner.kind() == "variable_declarator" {
+                if let Some(name_node) = find_child_by_kind(inner, "identifier") {
+                    if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                        fields.push(FieldInfo {
+                            name: name.to_string(),
+                            type_annotation: type_annotation.clone(),
+                            doc_comment: None,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    fields
+}
+
+/// Finds a type node in a Java declaration.
+fn find_java_type_node(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .find(|child| JAVA_TYPE_KINDS.contains(&child.kind()))
+}
+
+/// List of Java type node kinds.
+const JAVA_TYPE_KINDS: &[&str] = &[
+    "integral_type",
+    "floating_point_type",
+    "boolean_type",
+    "void_type",
+    "type_identifier",
+    "scoped_type_identifier",
+    "generic_type",
+    "array_type",
+];
+
+/// Extracts variants from Java enum_body.
+fn extract_java_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
+    let mut variants = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "enum_constant" {
+            continue;
+        }
+
+        if let Some(name_node) = find_child_by_kind(child, "identifier") {
+            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                variants.push(VariantInfo::unit(name));
+            }
+        }
+    }
+
+    variants
+}
+
+/// Extracts record components from Java formal_parameters.
+fn extract_java_record_components(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "formal_parameter" {
+            continue;
+        }
+
+        let type_annotation = find_java_type_node(child)
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        if let Some(name_node) = find_child_by_kind(child, "identifier") {
+            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                fields.push(FieldInfo {
+                    name: name.to_string(),
+                    type_annotation,
+                    doc_comment: None,
+                });
+            }
+        }
+    }
+
+    fields
+}
+
+/// Extracts method signatures from Java interface_body.
+fn extract_java_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "method_declaration" {
+            continue;
+        }
+
+        if let Some(name_node) = find_child_by_kind(child, "identifier") {
+            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                // Get the full method signature as the "type"
+                let type_annotation = child
+                    .utf8_text(source.as_bytes())
+                    .ok()
+                    .map(|s| s.trim().to_string());
+
+                fields.push(FieldInfo {
+                    name: name.to_string(),
+                    type_annotation,
+                    doc_comment: None,
+                });
+            }
+        }
+    }
+
+    fields
+}
+
+// ============================================================================
+// C type metadata extraction
+// ============================================================================
+
+/// Extracts type metadata from C struct or enum declarations.
+fn extract_c_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+    let mut metadata = TypeMetadata::new();
+
+    match node_kind {
+        "struct_specifier" => {
+            if let Some(field_list) = find_child_by_kind(node, "field_declaration_list") {
+                metadata.fields = extract_c_struct_fields(field_list, source);
+            }
+        }
+        "enum_specifier" => {
+            if let Some(enumerator_list) = find_child_by_kind(node, "enumerator_list") {
+                metadata.variants = extract_c_enum_variants(enumerator_list, source);
+            }
+        }
+        "type_definition" => {
+            // For typedef struct { ... } Name; we look for struct_specifier inside
+            if let Some(struct_spec) = find_child_by_kind(node, "struct_specifier") {
+                if let Some(field_list) = find_child_by_kind(struct_spec, "field_declaration_list") {
+                    metadata.fields = extract_c_struct_fields(field_list, source);
+                }
+            }
+        }
+        _ => {}
+    }
+
+    if metadata.is_empty() {
+        None
+    } else {
+        Some(metadata)
+    }
+}
+
+/// Extracts fields from C field_declaration_list.
+fn extract_c_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "field_declaration" {
+            continue;
+        }
+
+        // Get the type (first type-like child)
+        let type_annotation = find_c_type_node(child)
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        // Get field identifiers
+        let mut inner_cursor = child.walk();
+        for inner in child.children(&mut inner_cursor) {
+            if inner.kind() == "field_identifier" {
+                if let Ok(name) = inner.utf8_text(source.as_bytes()) {
+                    fields.push(FieldInfo {
+                        name: name.to_string(),
+                        type_annotation: type_annotation.clone(),
+                        doc_comment: None,
+                    });
+                }
+            }
+        }
+    }
+
+    fields
+}
+
+/// Finds a type node in a C declaration.
+fn find_c_type_node(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .find(|child| C_TYPE_KINDS.contains(&child.kind()))
+}
+
+/// List of C type node kinds.
+const C_TYPE_KINDS: &[&str] = &[
+    "primitive_type",
+    "type_identifier",
+    "sized_type_specifier",
+    "struct_specifier",
+    "enum_specifier",
+    "union_specifier",
+    // C++ types
+    "qualified_identifier",
+    "template_type",
+];
+
+/// Extracts variants from C enumerator_list.
+fn extract_c_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
+    let mut variants = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "enumerator" {
+            continue;
+        }
+
+        if let Some(name_node) = find_child_by_kind(child, "identifier") {
+            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                variants.push(VariantInfo::unit(name));
+            }
+        }
+    }
+
+    variants
+}
+
+// ============================================================================
+// C++ type metadata extraction
+// ============================================================================
+
+/// Extracts type metadata from C++ class, struct, or enum declarations.
+fn extract_cpp_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+    let mut metadata = TypeMetadata::new();
+
+    match node_kind {
+        "class_specifier" | "struct_specifier" => {
+            if let Some(field_list) = find_child_by_kind(node, "field_declaration_list") {
+                metadata.fields = extract_cpp_class_fields(field_list, source);
+            }
+        }
+        "enum_specifier" => {
+            if let Some(enumerator_list) = find_child_by_kind(node, "enumerator_list") {
+                metadata.variants = extract_c_enum_variants(enumerator_list, source);
+            }
+        }
+        _ => {}
+    }
+
+    if metadata.is_empty() {
+        None
+    } else {
+        Some(metadata)
+    }
+}
+
+/// Extracts fields from C++ field_declaration_list.
+fn extract_cpp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "field_declaration" {
+            continue;
+        }
+
+        // Skip method declarations (they have function_declarator)
+        if find_child_by_kind(child, "function_declarator").is_some() {
+            continue;
+        }
+
+        // Get the type
+        let type_annotation = find_c_type_node(child)
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        // Get field identifiers
+        let mut inner_cursor = child.walk();
+        for inner in child.children(&mut inner_cursor) {
+            if inner.kind() == "field_identifier" {
+                if let Ok(name) = inner.utf8_text(source.as_bytes()) {
+                    fields.push(FieldInfo {
+                        name: name.to_string(),
+                        type_annotation: type_annotation.clone(),
+                        doc_comment: None,
+                    });
+                }
+            }
+        }
+    }
+
+    fields
+}
+
+// ============================================================================
+// C# type metadata extraction
+// ============================================================================
+
+/// Extracts type metadata from C# class, struct, enum, interface, or record declarations.
+fn extract_csharp_type_metadata(
+    node: Node<'_>,
+    node_kind: &str,
+    source: &str,
+) -> Option<TypeMetadata> {
+    let mut metadata = TypeMetadata::new();
+
+    // Extract generic type parameters
+    if let Some(type_params) = find_child_by_kind(node, "type_parameter_list") {
+        metadata.type_parameters = extract_csharp_type_parameters(type_params, source);
+    }
+
+    match node_kind {
+        "class_declaration" | "struct_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "declaration_list") {
+                metadata.fields = extract_csharp_class_fields(body, source);
+            }
+        }
+        "enum_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "enum_member_declaration_list") {
+                metadata.variants = extract_csharp_enum_variants(body, source);
+            }
+        }
+        "interface_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "declaration_list") {
+                metadata.fields = extract_csharp_interface_methods(body, source);
+            }
+        }
+        "record_declaration" => {
+            // Record parameters are in parameter_list
+            if let Some(params) = find_child_by_kind(node, "parameter_list") {
+                metadata.fields = extract_csharp_record_parameters(params, source);
+            }
+        }
+        _ => {}
+    }
+
+    if metadata.is_empty() {
+        None
+    } else {
+        Some(metadata)
+    }
+}
+
+/// Extracts generic type parameters from C# type_parameter_list.
+fn extract_csharp_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut params = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() == "type_parameter" {
+            if let Some(ident) = find_child_by_kind(child, "identifier") {
+                if let Ok(text) = ident.utf8_text(source.as_bytes()) {
+                    params.push(text.to_string());
+                }
+            }
+        }
+    }
+
+    params
+}
+
+/// Extracts fields from C# declaration_list (class/struct body).
+fn extract_csharp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "field_declaration" {
+            continue;
+        }
+
+        // Get the type from variable_declaration
+        let type_annotation = find_child_by_kind(child, "variable_declaration")
+            .and_then(|vd| find_csharp_type_node(vd))
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        // Get variable declarators
+        if let Some(var_decl) = find_child_by_kind(child, "variable_declaration") {
+            let mut inner_cursor = var_decl.walk();
+            for inner in var_decl.children(&mut inner_cursor) {
+                if inner.kind() == "variable_declarator" {
+                    if let Some(ident) = find_child_by_kind(inner, "identifier") {
+                        if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+                            fields.push(FieldInfo {
+                                name: name.to_string(),
+                                type_annotation: type_annotation.clone(),
+                                doc_comment: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fields
+}
+
+/// Finds a type node in a C# variable_declaration.
+fn find_csharp_type_node(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .find(|child| CSHARP_TYPE_KINDS.contains(&child.kind()))
+}
+
+/// List of C# type node kinds.
+const CSHARP_TYPE_KINDS: &[&str] = &[
+    "predefined_type",
+    "identifier",
+    "qualified_name",
+    "generic_name",
+    "array_type",
+    "nullable_type",
+    "tuple_type",
+];
+
+/// Extracts variants from C# enum_member_declaration_list.
+fn extract_csharp_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
+    let mut variants = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "enum_member_declaration" {
+            continue;
+        }
+
+        if let Some(name_node) = find_child_by_kind(child, "identifier") {
+            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                variants.push(VariantInfo::unit(name));
+            }
+        }
+    }
+
+    variants
+}
+
+/// Extracts method signatures from C# interface declaration_list.
+fn extract_csharp_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "method_declaration" {
+            continue;
+        }
+
+        if let Some(name_node) = find_child_by_kind(child, "identifier") {
+            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                // Get the full method signature as the "type"
+                let type_annotation = child
+                    .utf8_text(source.as_bytes())
+                    .ok()
+                    .map(|s| s.trim().to_string());
+
+                fields.push(FieldInfo {
+                    name: name.to_string(),
+                    type_annotation,
+                    doc_comment: None,
+                });
+            }
+        }
+    }
+
+    fields
+}
+
+/// Extracts parameters from C# record parameter_list.
+fn extract_csharp_record_parameters(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "parameter" {
+            continue;
+        }
+
+        let type_annotation = find_csharp_type_node(child)
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        if let Some(name_node) = find_child_by_kind(child, "identifier") {
+            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                fields.push(FieldInfo {
+                    name: name.to_string(),
+                    type_annotation,
+                    doc_comment: None,
+                });
+            }
+        }
+    }
+
+    fields
+}
+
+// ============================================================================
+// Swift type metadata extraction
+// ============================================================================
+
+/// Extracts type metadata from Swift class, struct, enum, or protocol declarations.
+fn extract_swift_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+    let mut metadata = TypeMetadata::new();
+
+    // Extract generic type parameters
+    if let Some(type_params) = find_child_by_kind(node, "type_parameters") {
+        metadata.type_parameters = extract_swift_type_parameters(type_params, source);
+    }
+
+    match node_kind {
+        "class_declaration" => {
+            // Swift uses class_declaration for struct, class, and enum
+            // Check for class_body to determine actual type
+            if let Some(body) = find_child_by_kind(node, "class_body") {
+                // Check if this is an enum by looking for enum_entry nodes
+                let mut cursor = body.walk();
+                let has_enum_entries = body
+                    .children(&mut cursor)
+                    .any(|child| child.kind() == "enum_entry");
+
+                if has_enum_entries {
+                    metadata.variants = extract_swift_enum_cases(body, source);
+                } else {
+                    metadata.fields = extract_swift_class_fields(body, source);
+                }
+            }
+        }
+        "protocol_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "protocol_body") {
+                metadata.fields = extract_swift_protocol_methods(body, source);
+            }
+        }
+        _ => {}
+    }
+
+    if metadata.is_empty() {
+        None
+    } else {
+        Some(metadata)
+    }
+}
+
+/// Extracts generic type parameters from Swift type_parameters.
+fn extract_swift_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut params = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() == "type_parameter" {
+            if let Some(ident) = find_child_by_kind(child, "type_identifier") {
+                if let Ok(text) = ident.utf8_text(source.as_bytes()) {
+                    params.push(text.to_string());
+                }
+            }
+        }
+    }
+
+    params
+}
+
+/// Extracts fields from Swift class_body.
+fn extract_swift_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "property_declaration" {
+            continue;
+        }
+
+        // Get pattern (contains the name)
+        if let Some(pattern) = find_child_by_kind(child, "pattern") {
+            if let Some(ident) = find_child_by_kind(pattern, "simple_identifier") {
+                if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+                    // Get type annotation
+                    let type_annotation = find_child_by_kind(child, "type_annotation")
+                        .and_then(|ta| ta.child(1)) // Skip colon
+                        .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                        .map(|s| s.to_string());
+
+                    fields.push(FieldInfo {
+                        name: name.to_string(),
+                        type_annotation,
+                        doc_comment: None,
+                    });
+                }
+            }
+        }
+    }
+
+    fields
+}
+
+/// Extracts enum cases from Swift class_body (for enums).
+fn extract_swift_enum_cases(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
+    let mut variants = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        // Try multiple possible node types for Swift enum cases
+        let kind = child.kind();
+        if kind == "enum_entry" || kind == "enum_case_pattern" {
+            if let Some(ident) = find_child_by_kind(child, "simple_identifier") {
+                if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+                    variants.push(VariantInfo::unit(name));
+                }
+            }
+        } else if kind == "switch_entry" {
+            // Swift switch/case patterns
+            let mut inner_cursor = child.walk();
+            for inner in child.children(&mut inner_cursor) {
+                if inner.kind() == "simple_identifier" {
+                    if let Ok(name) = inner.utf8_text(source.as_bytes()) {
+                        variants.push(VariantInfo::unit(name));
+                    }
+                }
+            }
+        }
+    }
+
+    variants
+}
+
+/// Extracts method requirements from Swift protocol_body.
+fn extract_swift_protocol_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "protocol_function_declaration" {
+            continue;
+        }
+
+        if let Some(ident) = find_child_by_kind(child, "simple_identifier") {
+            if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+                // Get the full method signature
+                let type_annotation = child
+                    .utf8_text(source.as_bytes())
+                    .ok()
+                    .map(|s| s.trim().to_string());
+
+                fields.push(FieldInfo {
+                    name: name.to_string(),
+                    type_annotation,
+                    doc_comment: None,
+                });
+            }
+        }
+    }
+
+    fields
+}
+
+// ============================================================================
+// Scala type metadata extraction
+// ============================================================================
+
+/// Extracts type metadata from Scala class, trait, object, or enum definitions.
+fn extract_scala_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+    let mut metadata = TypeMetadata::new();
+
+    // Extract generic type parameters
+    if let Some(type_params) = find_child_by_kind(node, "type_parameters") {
+        metadata.type_parameters = extract_scala_type_parameters(type_params, source);
+    }
+
+    match node_kind {
+        "class_definition" => {
+            // Class parameters are in class_parameters
+            if let Some(params) = find_child_by_kind(node, "class_parameters") {
+                metadata.fields = extract_scala_class_parameters(params, source);
+            }
+        }
+        "trait_definition" => {
+            // Traits can have method declarations in template_body
+            if let Some(body) = find_child_by_kind(node, "template_body") {
+                metadata.fields = extract_scala_trait_methods(body, source);
+            }
+        }
+        "object_definition" => {
+            // Objects can have members in template_body
+            if let Some(body) = find_child_by_kind(node, "template_body") {
+                metadata.fields = extract_scala_object_members(body, source);
+            }
+        }
+        "enum_definition" => {
+            if let Some(body) = find_child_by_kind(node, "enum_body") {
+                metadata.variants = extract_scala_enum_cases(body, source);
+            }
+        }
+        _ => {}
+    }
+
+    if metadata.is_empty() {
+        None
+    } else {
+        Some(metadata)
+    }
+}
+
+/// Extracts generic type parameters from Scala type_parameters.
+fn extract_scala_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut params = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        // Look for identifiers inside type parameters
+        if child.kind() == "identifier" {
+            if let Ok(text) = child.utf8_text(source.as_bytes()) {
+                params.push(text.to_string());
+            }
+        }
+    }
+
+    params
+}
+
+/// Extracts class parameters from Scala class_parameters.
+fn extract_scala_class_parameters(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "class_parameter" {
+            continue;
+        }
+
+        if let Some(ident) = find_child_by_kind(child, "identifier") {
+            if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+                // Get type annotation (after colon)
+                let type_annotation = find_child_by_kind(child, "type_identifier")
+                    .or_else(|| find_child_by_kind(child, "generic_type"))
+                    .or_else(|| find_child_by_kind(child, "compound_type"))
+                    .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                    .map(|s| s.to_string());
+
+                fields.push(FieldInfo {
+                    name: name.to_string(),
+                    type_annotation,
+                    doc_comment: None,
+                });
+            }
+        }
+    }
+
+    fields
+}
+
+/// Extracts method declarations from Scala trait template_body.
+fn extract_scala_trait_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        if kind != "function_declaration" && kind != "function_definition" {
+            continue;
+        }
+
+        if let Some(ident) = find_child_by_kind(child, "identifier") {
+            if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+                // Get the full method signature
+                let type_annotation = child
+                    .utf8_text(source.as_bytes())
+                    .ok()
+                    .map(|s| s.trim().to_string());
+
+                fields.push(FieldInfo {
+                    name: name.to_string(),
+                    type_annotation,
+                    doc_comment: None,
+                });
+            }
+        }
+    }
+
+    fields
+}
+
+/// Extracts members from Scala object template_body.
+fn extract_scala_object_members(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        let kind = child.kind();
+        if kind != "function_definition" && kind != "val_definition" && kind != "var_definition" {
+            continue;
+        }
+
+        // For function definitions
+        if kind == "function_definition" {
+            if let Some(ident) = find_child_by_kind(child, "identifier") {
+                if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+                    let type_annotation = child
+                        .utf8_text(source.as_bytes())
+                        .ok()
+                        .map(|s| s.trim().to_string());
+
+                    fields.push(FieldInfo {
+                        name: name.to_string(),
+                        type_annotation,
+                        doc_comment: None,
+                    });
+                }
+            }
+        }
+    }
+
+    fields
+}
+
+/// Extracts enum cases from Scala enum_body.
+fn extract_scala_enum_cases(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
+    let mut variants = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "simple_enum_case" && child.kind() != "enum_case_definitions" {
+            continue;
+        }
+
+        if child.kind() == "simple_enum_case" {
+            if let Some(ident) = find_child_by_kind(child, "identifier") {
+                if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+                    variants.push(VariantInfo::unit(name));
+                }
+            }
+        } else {
+            // enum_case_definitions can contain multiple cases
+            let mut inner_cursor = child.walk();
+            for inner in child.children(&mut inner_cursor) {
+                if inner.kind() == "identifier" {
+                    if let Ok(name) = inner.utf8_text(source.as_bytes()) {
+                        variants.push(VariantInfo::unit(name));
+                    }
+                }
+            }
+        }
+    }
+
+    variants
+}
+
+// ============================================================================
+// PHP type metadata extraction
+// ============================================================================
+
+/// Extracts type metadata from PHP class, interface, trait, or enum declarations.
+fn extract_php_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+    let mut metadata = TypeMetadata::new();
+
+    match node_kind {
+        "class_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "declaration_list") {
+                metadata.fields = extract_php_class_fields(body, source);
+            }
+        }
+        "interface_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "declaration_list") {
+                metadata.fields = extract_php_interface_methods(body, source);
+            }
+        }
+        "trait_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "declaration_list") {
+                metadata.fields = extract_php_class_fields(body, source);
+            }
+        }
+        "enum_declaration" => {
+            if let Some(body) = find_child_by_kind(node, "enum_declaration_list") {
+                metadata.variants = extract_php_enum_cases(body, source);
+            }
+        }
+        _ => {}
+    }
+
+    if metadata.is_empty() {
+        None
+    } else {
+        Some(metadata)
+    }
+}
+
+/// Extracts fields from PHP class declaration_list.
+fn extract_php_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "property_declaration" {
+            continue;
+        }
+
+        // Get type if present
+        let type_annotation = find_child_by_kind(child, "named_type")
+            .or_else(|| find_child_by_kind(child, "primitive_type"))
+            .or_else(|| find_child_by_kind(child, "optional_type"))
+            .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+            .map(|s| s.to_string());
+
+        // Get property elements
+        let mut inner_cursor = child.walk();
+        for inner in child.children(&mut inner_cursor) {
+            if inner.kind() == "property_element" {
+                if let Some(var_name) = find_child_by_kind(inner, "variable_name") {
+                    if let Some(name_node) = find_child_by_kind(var_name, "name") {
+                        if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                            fields.push(FieldInfo {
+                                name: name.to_string(),
+                                type_annotation: type_annotation.clone(),
+                                doc_comment: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fields
+}
+
+/// Extracts method signatures from PHP interface declaration_list.
+fn extract_php_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
+    let mut fields = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "method_declaration" {
+            continue;
+        }
+
+        if let Some(name_node) = find_child_by_kind(child, "name") {
+            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                // Get the full method signature
+                let type_annotation = child
+                    .utf8_text(source.as_bytes())
+                    .ok()
+                    .map(|s| s.trim().to_string());
+
+                fields.push(FieldInfo {
+                    name: name.to_string(),
+                    type_annotation,
+                    doc_comment: None,
+                });
+            }
+        }
+    }
+
+    fields
+}
+
+/// Extracts enum cases from PHP enum_declaration_list.
+fn extract_php_enum_cases(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
+    let mut variants = Vec::new();
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if child.kind() != "enum_case" {
+            continue;
+        }
+
+        if let Some(name_node) = find_child_by_kind(child, "name") {
+            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                variants.push(VariantInfo::unit(name));
+            }
+        }
+    }
+
+    variants
 }
