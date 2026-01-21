@@ -87,11 +87,14 @@ impl InputModal {
     }
 
     pub fn for_edit(task: &ScheduledTask, capabilities: TerminalCapabilities) -> Self {
+        // Convert UTC to local time for display - the reverse of the conversion
+        // done in event.rs when submitting the form (local → UTC).
+        let local_time = task.scheduled_at.with_timezone(&chrono::Local);
         Self {
             command: task.command.clone(),
             cursor_pos: task.command.len(),
             schedule_type: ScheduleType::AtTime,
-            schedule_value: task.scheduled_at.format("%H:%M").to_string(),
+            schedule_value: local_time.format("%H:%M").to_string(),
             target: task.target,
             active_field: InputField::Command,
             layout: InputLayout::default(),
@@ -965,5 +968,62 @@ mod tests {
         let modal = InputModal::new(wezterm_caps());
         let rows = modal.calculate_command_rows(0);
         assert_eq!(rows, 2, "Zero width should return minimum 2 rows");
+    }
+
+    // =========================================================================
+    // Regression test for UTC-to-local time conversion in edit modal
+    // Bug: Task scheduled for 15:00 local time (stored as 23:00 UTC for UTC-8)
+    // displayed as 23:00 in edit modal instead of 15:00.
+    // Fix: Convert UTC back to local time before displaying in the form.
+    // =========================================================================
+
+    #[test]
+    fn for_edit_displays_local_time_not_utc() {
+        use chrono::Local;
+
+        // Create a task with a specific UTC time
+        let task = queue_lib::ScheduledTask::new(
+            1,
+            "echo hello".to_string(),
+            chrono::Utc::now(),
+            queue_lib::ExecutionTarget::Background,
+        );
+
+        let modal = InputModal::for_edit(&task, wezterm_caps());
+
+        // The schedule_value should match the local time, not UTC
+        // We verify this by converting the task's UTC time to local and formatting
+        let expected_local_time = task.scheduled_at.with_timezone(&Local);
+        let expected_value = expected_local_time.format("%H:%M").to_string();
+
+        assert_eq!(
+            modal.schedule_value, expected_value,
+            "Edit modal should display local time, not UTC. \
+             Task UTC: {}, Expected local: {}, Got: {}",
+            task.scheduled_at.format("%H:%M"),
+            expected_value,
+            modal.schedule_value
+        );
+    }
+
+    #[test]
+    fn for_edit_preserves_task_properties() {
+        use chrono::Utc;
+
+        let task = queue_lib::ScheduledTask::new(
+            42,
+            "cargo build --release".to_string(),
+            Utc::now(),
+            queue_lib::ExecutionTarget::NewWindow,
+        );
+
+        let modal = InputModal::for_edit(&task, wezterm_caps());
+
+        assert_eq!(modal.command, "cargo build --release");
+        assert_eq!(modal.cursor_pos, task.command.len());
+        assert_eq!(modal.target, queue_lib::ExecutionTarget::NewWindow);
+        assert_eq!(modal.editing_task_id, Some(42));
+        assert_eq!(modal.schedule_type, ScheduleType::AtTime);
+        assert_eq!(modal.active_field, InputField::Command);
     }
 }
