@@ -24,17 +24,29 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, library_
 
-- [shared](./shared) _v0.1.0_
+ - [shared](./shared) _v0.1.0_
 
-    _Shared utilities and tools._
+     _Shared utilities and tools._
 
-    _Tags: workspace, library_
+     _Tags: workspace, library_
 
-- [tui](./tui) _v0.1.0_
+ - [tui](./tui) _v0.1.0_
 
-    _Terminal user interface module._
+     _Terminal user interface module._
 
-    _Tags: workspace, tui_
+     _Tags: workspace, tui_
+
+- [tree-hugger-lib](./tree-hugger/lib) _v0.1.0_
+
+     _Tree-sitter based library for symbol and diagnostic extraction._
+
+     _Tags: workspace, library_
+
+- [tree-hugger-cli](./tree-hugger/cli) _v0.1.0_
+
+     _CLI tool for exploring symbols, imports, and exports._
+
+     _Tags: workspace, cli_
 
 ## Production Dependencies
 
@@ -111,6 +123,126 @@ This is a Rust workspace with the following modules:
     _Library providing platform-specific standard directories for config, cache, and data on Linux, Windows, and macOS._
 
     _Tags: filesystem, directories, paths_
+
+### Hashing
+
+- [biscuit-hash](./biscuit-hash) _v0.1.0_
+
+    _Local library providing xxHash content hashing for file fingerprinting._
+
+    _Tags: hashing, xxhash, local_
+
+### Git
+
+- [ignore](https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore) _v0.4_
+
+    _Glob matching library with .gitignore support for file filtering._
+
+    _Tags: git, ignore, glob_
+
+### Parsing
+
+- [tree-sitter](https://github.com/tree-sitter/tree-sitter) _v0.26.3_
+
+    _Incremental parsing system for creating syntax trees of source code._
+
+    _Tags: parsing, syntax-tree, incremental_
+
+- [tree-sitter-rust](https://github.com/tree-sitter/tree-sitter-rust) _v0.24.0_
+
+    _Rust grammar for tree-sitter._
+
+    _Tags: parsing, rust, grammar_
+
+- [tree-sitter-javascript](https://github.com/tree-sitter/tree-sitter-javascript) _v0.25.0_
+
+    _JavaScript grammar for tree-sitter._
+
+    _Tags: parsing, javascript, grammar_
+
+- [tree-sitter-typescript](https://github.com/tree-sitter/tree-sitter-typescript) _v0.23.2_
+
+    _TypeScript grammar for tree-sitter._
+
+    _Tags: parsing, typescript, grammar_
+
+- [tree-sitter-go](https://github.com/tree-sitter/tree-sitter-go) _v0.25.0_
+
+    _Go grammar for tree-sitter._
+
+    _Tags: parsing, go, grammar_
+
+- [tree-sitter-python](https://github.com/tree-sitter/tree-sitter-python) _v0.25.0_
+
+    _Python grammar for tree-sitter._
+
+    _Tags: parsing, python, grammar_
+
+- [tree-sitter-java](https://github.com/tree-sitter/tree-sitter-java) _v0.23.5_
+
+    _Java grammar for tree-sitter._
+
+    _Tags: parsing, java, grammar_
+
+- [tree-sitter-php](https://github.com/tree-sitter/tree-sitter-php) _v0.24.2_
+
+    _PHP grammar for tree-sitter._
+
+    _Tags: parsing, php, grammar_
+
+- [tree-sitter-perl](https://github.com/ganezdragon/tree-sitter-perl) _v1.1.2_
+
+    _Perl grammar for tree-sitter._
+
+    _Tags: parsing, perl, grammar_
+
+- [tree-sitter-bash](https://github.com/tree-sitter/tree-sitter-bash) _v0.25.1_
+
+    _Bash grammar for tree-sitter._
+
+    _Tags: parsing, bash, grammar_
+
+- [tree-sitter-zsh](https://github.com/zsh-users/tree-sitter-zsh) _v0.52.0_
+
+    _Zsh grammar for tree-sitter._
+
+    _Tags: parsing, zsh, grammar_
+
+- [tree-sitter-c](https://github.com/tree-sitter/tree-sitter-c) _v0.24.1_
+
+    _C grammar for tree-sitter._
+
+    _Tags: parsing, c, grammar_
+
+- [tree-sitter-cpp](https://github.com/tree-sitter/tree-sitter-cpp) _v0.23.4_
+
+    _C++ grammar for tree-sitter._
+
+    _Tags: parsing, cpp, grammar_
+
+- [tree-sitter-c-sharp](https://github.com/tree-sitter/tree-sitter-c-sharp) _v0.23.1_
+
+    _C# grammar for tree-sitter._
+
+    _Tags: parsing, c-sharp, grammar_
+
+- [tree-sitter-swift](https://github.com/alex-pinkus/tree-sitter-swift) _v0.7.1_
+
+    _Swift grammar for tree-sitter._
+
+    _Tags: parsing, swift, grammar_
+
+- [tree-sitter-scala](https://github.com/tree-sitter/tree-sitter-scala) _v0.24.0_
+
+    _Scala grammar for tree-sitter._
+
+    _Tags: parsing, scala, grammar_
+
+- [tree-sitter-lua](https://github.com/Azganoth/tree-sitter-lua) _v0.4.1_
+
+    _Lua grammar for tree-sitter._
+
+    _Tags: parsing, lua, grammar_
 
 ### HTTP & Web
 
