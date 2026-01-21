@@ -1,0 +1,17 @@
+[package]
+name = "queue-lib"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+dirs = "6.0"
+fs2 = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = { version = "1.48.0", features = ["process", "rt", "sync", "time"] }
+
+[dev-dependencies]
+tempfile = "3.15"
+tokio = { version = "1.48.0", features = ["macros", "rt", "test-util"] }

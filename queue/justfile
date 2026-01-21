@@ -2,54 +2,45 @@ set dotenv-load
 set positional-arguments
 
 BOLD := '\033[1m'
-ITALIC := '\033[3m'
 RESET := '\033[0m'
-YELLOW2 := '\033[38;5;3m'
-BLACK := '\033[30m'
-RED := '\033[31m'
-GREEN := '\033[32m'
-YELLOW := '\033[33m'
-BLUE := '\033[34m'
-MAGENTA := '\033[35m'
-CYAN := '\033[36m'
-WHITE := '\033[37m'
 
 default:
+    @echo "{{BOLD}}Queue CLI and Library{{RESET}}"
     @echo
-    @echo "Queue"
-    @echo "------------------------------------"
-    @echo ""
     @just --list | grep -v 'default'
+
+# build library and CLI
+build *args="":
+    @echo "Building ..."
+    @echo
+    @cargo build -p queue-lib {{args}}
+    @cargo build -p queue-cli {{args}}
     @echo
 
-# build research modules (cli, lib)
-build *args="":
-    @echo ""
-    @echo "Build Queue CLI"
-    @echo "--------------------"
-    @echo ""
-    @cargo build -p queue {{args}}
-
-# run tests across research modules
+# test library and CLI
 test *args="":
+    @echo "Testing {{BOLD}}Library{{RESET}} code"
     @echo ""
-    @echo "Testing Queue CLI"
-    @echo "----------------------"
+    @cargo test -p queue-lib {{args}}
     @echo ""
-    @cargo test -p queue {{args}}
+    @echo "Testing {{BOLD}}CLI{{RESET}} code"
+    @echo ""
+    @cargo test -p queue-cli {{args}}
 
+# lint with clippy
 lint *args="":
-    @echo ""
-    @echo "Linting Queue CLI"
-    @echo "----------------------"
-    @echo ""
-    @cargo clippy
+    @cargo clippy -p queue-lib -p queue-cli {{args}}
 
-# install the `research` binary into the executable path
-install:
-    @cargo build --release -p queue
-    @cargo install --path "." --locked
+# install latest release version of CLI
+install *args="":
+    @cargo install --path cli {{args}}
 
-# run the debug release of the Research CLI
+# build and show the docs for the library code
+docs:
+    @echo "Building and then showing latest docs for the library code"
+    @echo ""
+    @cargo doc -p queue-lib --open
+
+# run the debug release of the Queue CLI
 cli *args="":
-    @cargo run -p so-you-say -- {{args}}
+    @cargo run -p queue-cli -- {{args}}

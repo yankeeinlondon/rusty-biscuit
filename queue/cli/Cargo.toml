@@ -1,12 +1,25 @@
 [package]
-name = "queue"
+name = "queue-cli"
 version = "0.1.0"
 edition = "2024"
+
+[[bin]]
+name = "queue"
+path = "src/main.rs"
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.5.54", features = ["derive"] }
+queue-lib = { path = "../lib" }
 thiserror = "2.0"
-tokio = { version = "1.48.0", features = ["macros", "process", "rt-multi-thread", "time"] }
+tokio = { version = "1.48.0", features = ["macros", "process", "rt-multi-thread", "time", "sync"] }
 tracing = "0.1"
+
+# TUI
+crossterm = "0.29"
+ratatui = "0.30"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
