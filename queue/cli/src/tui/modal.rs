@@ -14,6 +14,8 @@ use ratatui::{
     Frame,
 };
 
+use super::PANEL_BG;
+
 /// Trait for modal dialogs.
 ///
 /// Implement this trait to create custom modal dialogs that can be rendered
@@ -80,7 +82,7 @@ pub fn render_modal(frame: &mut Frame, modal: &impl Modal, main_area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(" {} ", modal.title()))
-        .style(Style::default().bg(Color::DarkGray));
+        .style(Style::default().bg(PANEL_BG));
 
     let inner = block.inner(modal_area);
     frame.render_widget(block, modal_area);
@@ -136,6 +138,10 @@ impl Modal for ConfirmQuitDialog {
 
     fn height_percent(&self) -> u16 {
         20
+    }
+
+    fn min_height(&self) -> u16 {
+        7
     }
 
     fn render(&self, frame: &mut Frame, area: Rect) {

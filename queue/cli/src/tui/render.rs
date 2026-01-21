@@ -14,6 +14,7 @@ use ratatui::{
 
 use super::app::{App, AppMode};
 use super::modal::{render_modal, ConfirmQuitDialog};
+use super::PANEL_BG;
 
 /// Renders the entire application UI.
 ///
@@ -37,7 +38,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
             render_modal(frame, &ConfirmQuitDialog, frame.area());
         }
         AppMode::InputModal => {
-            if let Some(ref input_modal) = app.input_modal {
+            if let Some(input_modal) = app.input_modal.as_mut() {
+                input_modal.update_layout(frame.area().height);
                 render_modal(frame, input_modal, frame.area());
             }
         }
@@ -94,7 +96,7 @@ fn render_task_table(app: &mut App, frame: &mut Frame, area: Rect) {
 fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
     let (bg_color, shortcuts) = match app.mode {
         AppMode::Normal => (
-            Color::DarkGray,
+            PANEL_BG,
             vec![
                 ("Q", "Quit"),
                 ("N", "New"),
@@ -114,11 +116,11 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             vec![("Enter", "Remove Selected"), ("Esc", "Cancel")],
         ),
         AppMode::ConfirmQuit => (
-            Color::DarkGray,
+            PANEL_BG,
             vec![("Y", "Yes, Quit"), ("N", "No, Stay")],
         ),
         AppMode::InputModal | AppMode::HistoryModal => {
-            (Color::DarkGray, vec![("Esc", "Back")])
+            (PANEL_BG, vec![("Esc", "Back")])
         }
     };
 
@@ -148,11 +150,9 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
 /// Returns the appropriate style for a task based on its status.
 fn task_style(task: &ScheduledTask) -> Style {
     match task.status {
-        TaskStatus::Completed => Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::ITALIC | Modifier::DIM),
+        TaskStatus::Completed => Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
         TaskStatus::Cancelled => Style::default()
-            .fg(Color::DarkGray)
+            .fg(Color::Gray)
             .add_modifier(Modifier::DIM),
         TaskStatus::Running => Style::default()
             .fg(Color::Yellow)
@@ -350,9 +350,7 @@ mod tests {
         let style = task_style(&task);
         assert_eq!(
             style,
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::ITALIC | Modifier::DIM)
+            Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC)
         );
     }
 
@@ -381,9 +379,7 @@ mod tests {
         let style = task_style(&task);
         assert_eq!(
             style,
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM)
+            Style::default().fg(Color::Gray).add_modifier(Modifier::DIM)
         );
     }
 

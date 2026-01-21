@@ -126,6 +126,7 @@ fn spawn_tui_in_split_pane(cli: &Cli) -> Result<(), QueueError> {
     // Get current pane ID for targeting the split
     let current_pane = TerminalDetector::get_wezterm_pane_id()
         .ok_or_else(|| QueueError::SpawnPane("WEZTERM_PANE not set".to_string()))?;
+    let task_pane_id = current_pane.clone();
 
     let tui_rows = match terminal::size() {
         Ok((_cols, rows)) => {
@@ -147,6 +148,8 @@ fn spawn_tui_in_split_pane(cli: &Cli) -> Result<(), QueueError> {
         "--pane-id".to_string(),
         current_pane,
         "--".to_string(),
+        "env".to_string(),
+        format!("QUEUE_TASK_PANE_ID={}", task_pane_id),
         exe.to_string_lossy().to_string(),
     ];
     wezterm_args.extend(args);
@@ -274,8 +277,10 @@ fn run_tui(initial_task: Option<ScheduledTask>) -> Result<(), QueueError> {
     if TerminalDetector::is_wezterm()
         && let Some(ref executor) = app.executor
     {
+        let parent_pane = std::env::var("QUEUE_TASK_PANE_ID").ok();
         let current_pane = TerminalDetector::get_wezterm_pane_id();
-        executor.set_task_pane_id_sync(current_pane);
+        let task_pane = parent_pane.or(current_pane);
+        executor.set_task_pane_id_sync(task_pane);
     }
 
     // Add initial task if provided

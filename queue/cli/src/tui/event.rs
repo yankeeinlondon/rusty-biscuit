@@ -73,7 +73,15 @@ fn handle_normal_mode(app: &mut App, key: KeyCode) {
     match key {
         // Quit commands
         KeyCode::Char('q') | KeyCode::Char('Q') => {
-            app.mode = AppMode::ConfirmQuit;
+            let has_active_tasks = app
+                .tasks
+                .iter()
+                .any(|task| task.is_pending() || task.is_running());
+            if has_active_tasks {
+                app.mode = AppMode::ConfirmQuit;
+            } else {
+                app.should_quit = true;
+            }
         }
         KeyCode::Esc => {
             // Immediate exit without confirmation
@@ -357,9 +365,24 @@ mod tests {
     #[test]
     fn normal_mode_q_triggers_confirm_quit() {
         let mut app = App::new();
+        use chrono::Utc;
+        use queue_lib::{ExecutionTarget, ScheduledTask};
+        app.tasks.push(ScheduledTask::new(
+            1,
+            "a".into(),
+            Utc::now(),
+            ExecutionTarget::default(),
+        ));
         input(&mut app, KeyCode::Char('q'));
         assert_eq!(app.mode, AppMode::ConfirmQuit);
         assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn normal_mode_q_exits_without_active_tasks() {
+        let mut app = App::new();
+        input(&mut app, KeyCode::Char('q'));
+        assert!(app.should_quit);
     }
 
     #[test]

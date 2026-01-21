@@ -28,6 +28,8 @@ use std::process::{Command, Stdio};
 pub enum TerminalKind {
     /// WezTerm - feature-rich terminal with pane support
     Wezterm,
+    /// Ghostty - modern GPU-accelerated terminal
+    Ghostty,
     /// macOS Terminal.app
     TerminalApp,
     /// iTerm2 - macOS terminal with pane support
@@ -50,6 +52,7 @@ impl TerminalKind {
     pub const fn display_name(&self) -> &'static str {
         match self {
             Self::Wezterm => "WezTerm",
+            Self::Ghostty => "Ghostty",
             Self::TerminalApp => "Terminal.app",
             Self::ITerm2 => "iTerm2",
             Self::GnomeTerminal => "GNOME Terminal",
@@ -81,6 +84,7 @@ impl TerminalCapabilities {
     fn for_kind(kind: TerminalKind) -> Self {
         let (supports_panes, supports_new_window) = match kind {
             TerminalKind::Wezterm => (true, true),
+            TerminalKind::Ghostty => (false, true),
             TerminalKind::ITerm2 => (true, true),
             TerminalKind::TerminalApp => (false, true),
             TerminalKind::GnomeTerminal => (false, true),
@@ -162,6 +166,11 @@ impl TerminalDetector {
             return TerminalKind::ITerm2;
         }
 
+        // Ghostty sets TERM_PROGRAM=ghostty
+        if Self::is_ghostty() {
+            return TerminalKind::Ghostty;
+        }
+
         // GNOME Terminal sets GNOME_TERMINAL_SCREEN or VTE_VERSION
         if Self::is_gnome_terminal() {
             return TerminalKind::GnomeTerminal;
@@ -239,6 +248,16 @@ impl TerminalDetector {
     pub fn is_terminal_app() -> bool {
         env::var("TERM_PROGRAM")
             .map(|v| v == "Apple_Terminal")
+            .unwrap_or(false)
+    }
+
+    /// Checks if running in Ghostty.
+    ///
+    /// Ghostty sets `TERM_PROGRAM=ghostty`.
+    #[must_use]
+    pub fn is_ghostty() -> bool {
+        env::var("TERM_PROGRAM")
+            .map(|v| v.eq_ignore_ascii_case("ghostty"))
             .unwrap_or(false)
     }
 
@@ -560,6 +579,17 @@ mod tests {
     }
 
     #[test]
+    fn test_ghostty_detection() {
+        with_env("TERM_PROGRAM", "ghostty", || {
+            assert!(TerminalDetector::is_ghostty());
+            let caps = TerminalDetector::detect();
+            assert_eq!(caps.kind, TerminalKind::Ghostty);
+            assert!(!caps.supports_panes);
+            assert!(caps.supports_new_window);
+        });
+    }
+
+    #[test]
     fn test_xterm_detection() {
         with_env("TERM", "xterm-256color", || {
             assert!(TerminalDetector::is_xterm());
@@ -621,6 +651,7 @@ mod tests {
     #[test]
     fn test_terminal_kind_display_name() {
         assert_eq!(TerminalKind::Wezterm.display_name(), "WezTerm");
+        assert_eq!(TerminalKind::Ghostty.display_name(), "Ghostty");
         assert_eq!(TerminalKind::TerminalApp.display_name(), "Terminal.app");
         assert_eq!(TerminalKind::ITerm2.display_name(), "iTerm2");
         assert_eq!(TerminalKind::GnomeTerminal.display_name(), "GNOME Terminal");

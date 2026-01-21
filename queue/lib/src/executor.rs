@@ -246,8 +246,9 @@ impl TaskExecutor {
     /// If a `task_pane_id` is provided, the pane is created by splitting that
     /// specific pane. This ensures tasks don't interfere with the TUI.
     ///
-    /// The command runs directly in the new pane with full terminal access,
-    /// supporting interactive programs. The pane closes when the command exits.
+    /// The command runs in the new pane with full terminal access, supporting
+    /// interactive programs. After the command completes, an interactive shell
+    /// takes over so the pane stays open for user interaction.
     ///
     /// If not running in Wezterm, falls back to opening a new window.
     ///
@@ -261,7 +262,7 @@ impl TaskExecutor {
             return Self::execute_in_window(command).await;
         }
 
-        // Build command arguments - run the command directly without wrapping
+        // Build command arguments
         let mut args = vec!["cli", "split-pane", "--top"];
 
         // If we have a specific task pane ID, target that pane
@@ -270,7 +271,12 @@ impl TaskExecutor {
             args.extend(["--pane-id", pane_id]);
         }
 
-        args.extend(["--", "/bin/sh", "-c", command]);
+        // Wrap command to keep the shell alive after execution.
+        // This runs the user's command, then replaces the process with an
+        // interactive shell so the pane stays open for user interaction.
+        let wrapped_command = Self::wrap_command_for_interactive_shell(command);
+
+        args.extend(["--", "/bin/sh", "-c", &wrapped_command]);
 
         let status = Command::new("wezterm")
             .args(&args)
@@ -291,8 +297,12 @@ impl TaskExecutor {
     /// Executes a command in a new terminal window.
     ///
     /// Detects the current terminal emulator and uses the appropriate method
-    /// to open a new window. Supports:
+    /// to open a new window. The command runs and then an interactive shell
+    /// takes over so the window stays open for user interaction.
+    ///
+    /// Supports:
     /// - Wezterm (spawn new tab)
+    /// - Ghostty (new window)
     /// - iTerm2 (AppleScript)
     /// - Terminal.app (AppleScript)
     /// - GNOME Terminal
@@ -302,19 +312,49 @@ impl TaskExecutor {
     async fn execute_in_window(command: &str) -> Result<(), String> {
         let caps = TerminalDetector::detect();
 
+        // Wrap command to keep shell alive for interactive use after command completes
+        let wrapped_command = Self::wrap_command_for_interactive_shell(command);
+
         let result = match caps.kind {
             TerminalKind::Wezterm => {
                 // Wezterm: open new tab
                 Command::new("wezterm")
-                    .args(["cli", "spawn", "--", "/bin/sh", "-c", command])
+                    .args(["cli", "spawn", "--", "/bin/sh", "-c", &wrapped_command])
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
                     .status()
                     .await
             }
+            TerminalKind::Ghostty => {
+                // Ghostty: spawn new window. Use spawn() instead of status() because
+                // Ghostty's -e flag runs the command and exits when done. We want to
+                // spawn the process and return immediately.
+                let spawn_result = Command::new("ghostty")
+                    .args(["-e", "/bin/sh", "-c", &wrapped_command])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn();
+                match spawn_result {
+                    Ok(_) => return Ok(()),
+                    Err(_) => {
+                        // Ghostty CLI not found, fall back to Terminal.app on macOS
+                        #[cfg(target_os = "macos")]
+                        {
+                            Self::execute_in_terminal_app_status(command).await
+                        }
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            // On non-macOS, return the original error
+                            return Err("ghostty command not found".to_string());
+                        }
+                    }
+                }
+            }
             TerminalKind::ITerm2 => {
-                // iTerm2: use osascript
+                // iTerm2: use osascript to write text to a new window.
+                // The write text approach naturally keeps the shell alive.
                 let script = format!(
                     r#"tell application "iTerm2"
                         create window with default profile
@@ -333,25 +373,12 @@ impl TaskExecutor {
                     .await
             }
             TerminalKind::TerminalApp => {
-                // macOS Terminal.app
-                let script = format!(
-                    r#"tell application "Terminal"
-                        do script "{}"
-                        activate
-                    end tell"#,
-                    command.replace('\\', "\\\\").replace('"', "\\\"")
-                );
-                Command::new("osascript")
-                    .args(["-e", &script])
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status()
-                    .await
+                // macOS Terminal.app - do script naturally keeps shell alive
+                Self::execute_in_terminal_app_status(command).await
             }
             TerminalKind::GnomeTerminal => {
                 Command::new("gnome-terminal")
-                    .args(["--", "/bin/sh", "-c", command])
+                    .args(["--", "/bin/sh", "-c", &wrapped_command])
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
@@ -360,7 +387,7 @@ impl TaskExecutor {
             }
             TerminalKind::Konsole => {
                 Command::new("konsole")
-                    .args(["-e", "/bin/sh", "-c", command])
+                    .args(["-e", "/bin/sh", "-c", &wrapped_command])
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
@@ -368,8 +395,10 @@ impl TaskExecutor {
                     .await
             }
             TerminalKind::Xfce4Terminal => {
+                // Xfce4 terminal takes the full command, so we need to wrap it ourselves
+                let xfce_command = format!("/bin/sh -c '{}'", wrapped_command.replace('\'', "'\\''"));
                 Command::new("xfce4-terminal")
-                    .args(["-e", command])
+                    .args(["-e", &xfce_command])
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
@@ -377,9 +406,8 @@ impl TaskExecutor {
                     .await
             }
             TerminalKind::Xterm => {
-                // XTerm
                 Command::new("xterm")
-                    .args(["-e", "/bin/sh", "-c", command])
+                    .args(["-e", "/bin/sh", "-c", &wrapped_command])
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
@@ -391,27 +419,13 @@ impl TaskExecutor {
                 #[cfg(target_os = "macos")]
                 {
                     // macOS: use Terminal.app via osascript
-                    let script = format!(
-                        r#"tell application "Terminal"
-                            do script "{}"
-                            activate
-                        end tell"#,
-                        command.replace('\\', "\\\\").replace('"', "\\\"")
-                    );
-                    Command::new("osascript")
-                        .args(["-e", &script])
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .status()
-                        .await
+                    Self::execute_in_terminal_app_status(command).await
                 }
                 #[cfg(not(target_os = "macos"))]
                 {
                     // Linux/other: try common terminal emulators in order
-                    // Try xterm first, then x-terminal-emulator (Debian/Ubuntu default)
                     let xterm_result = Command::new("xterm")
-                        .args(["-e", "/bin/sh", "-c", command])
+                        .args(["-e", "/bin/sh", "-c", &wrapped_command])
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
                         .stderr(Stdio::null())
@@ -423,7 +437,7 @@ impl TaskExecutor {
                     } else {
                         // Fallback to x-terminal-emulator on Debian/Ubuntu
                         Command::new("x-terminal-emulator")
-                            .args(["-e", "/bin/sh", "-c", command])
+                            .args(["-e", "/bin/sh", "-c", &wrapped_command])
                             .stdin(Stdio::null())
                             .stdout(Stdio::null())
                             .stderr(Stdio::null())
@@ -455,6 +469,37 @@ impl TaskExecutor {
             .map_err(|e| e.to_string())?;
 
         Ok(())
+    }
+
+    async fn execute_in_terminal_app_status(
+        command: &str,
+    ) -> Result<std::process::ExitStatus, std::io::Error> {
+        let script = format!(
+            r#"tell application "Terminal"
+                do script "{}"
+                activate
+            end tell"#,
+            command.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        Command::new("osascript")
+            .args(["-e", &script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+    }
+
+    /// Wraps a command to keep the shell alive after execution.
+    ///
+    /// This ensures that when a command is run in a new pane or window,
+    /// the terminal stays open for user interaction after the command completes.
+    /// The command runs, then `exec $SHELL` replaces the process with an
+    /// interactive shell.
+    fn wrap_command_for_interactive_shell(command: &str) -> String {
+        // Get user's preferred shell, defaulting to /bin/sh
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        format!("{}; exec {}", command, shell)
     }
 }
 
@@ -718,21 +763,78 @@ mod tests {
     }
 
     // =========================================================================
-    // Regression tests for Bug 2: Tasks should run independently
+    // Regression tests for Bug: Pane/window closes immediately after command
     // =========================================================================
-
-    // Note: The execute_in_pane function no longer wraps commands with
-    // "Press Enter to close" prompts. This allows interactive commands to
-    // work properly in new panes. The fix removed the command wrapping that
-    // would have blocked interactive programs.
     //
-    // This is verified by code review - the wrapped_command variable that
-    // previously contained the "Press Enter" wrapper has been removed.
+    // Root cause: Commands were run as `/bin/sh -c "command"` which exits
+    // immediately after the command completes, closing the pane/window before
+    // the user can see the output.
+    //
+    // Fix: Commands are now wrapped with `; exec $SHELL` to keep the shell
+    // alive after the command completes, allowing user interaction.
+
+    #[test]
+    fn wrap_command_for_interactive_shell_appends_exec_shell() {
+        // Regression test: The wrapper should append "; exec $SHELL" to keep
+        // the terminal alive after the command completes
+        let command = "echo hello";
+        let wrapped = TaskExecutor::wrap_command_for_interactive_shell(command);
+
+        // Should contain the original command
+        assert!(wrapped.contains("echo hello"), "wrapped command should contain original: {wrapped}");
+
+        // Should contain exec and shell
+        assert!(wrapped.contains("; exec"), "wrapped command should contain '; exec': {wrapped}");
+    }
+
+    #[test]
+    fn wrap_command_for_interactive_shell_uses_shell_env() {
+        // Regression test: The wrapper should use the user's shell from $SHELL
+        // environment variable, falling back to /bin/sh
+        let command = "ls -la";
+        let wrapped = TaskExecutor::wrap_command_for_interactive_shell(command);
+
+        // Should be in format "command; exec $SHELL_PATH"
+        assert!(
+            wrapped.starts_with("ls -la; exec "),
+            "wrapped command format incorrect: {wrapped}"
+        );
+    }
+
+    #[test]
+    fn wrap_command_handles_complex_commands() {
+        // Regression test: Complex commands with pipes, quotes, etc. should work
+        let command = "echo 'hello world' | grep hello && echo done";
+        let wrapped = TaskExecutor::wrap_command_for_interactive_shell(command);
+
+        assert!(
+            wrapped.starts_with(command),
+            "wrapped command should preserve original: {wrapped}"
+        );
+        assert!(
+            wrapped.contains("; exec"),
+            "wrapped command should append exec: {wrapped}"
+        );
+    }
 
     // =========================================================================
-    // Regression tests for Bug 4: Task execution in non-Wezterm terminals
+    // Regression tests for Bug: Ghostty shows error after command completes
     // =========================================================================
+    //
+    // Root cause: Ghostty's -e flag runs the command and waits for it to complete.
+    // When we used .status().await, we blocked until Ghostty exited, and Ghostty
+    // would show an error if the command completed too quickly.
+    //
+    // Fix: Use .spawn() instead of .status() for Ghostty to launch the process
+    // and return immediately without waiting.
+    //
+    // This is verified by code review - the Ghostty branch now uses spawn()
+    // and returns Ok(()) immediately after successful spawn.
 
+    // =========================================================================
+    // Regression tests for Bug: Task execution in non-Wezterm terminals
+    // =========================================================================
+    //
     // Note: execute_in_window() now has proper fallback behavior for
     // TerminalKind::Unknown on macOS. Previously it would try to use `xterm`
     // which doesn't exist on macOS, causing all task executions to fail.

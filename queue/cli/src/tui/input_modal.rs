@@ -4,6 +4,7 @@ use queue_lib::{parse_at_time, parse_delay, ExecutionTarget, ScheduledTask, Term
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
@@ -18,6 +19,14 @@ pub enum InputField {
     ScheduleType,
     ScheduleValue,
     Target,
+}
+
+/// Layout mode for the input modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InputLayout {
+    #[default]
+    Full,
+    Compact,
 }
 
 /// Schedule type selection.
@@ -36,11 +45,17 @@ pub struct InputModal {
     pub schedule_value: String,
     pub target: ExecutionTarget,
     pub active_field: InputField,
+    pub layout: InputLayout,
     pub error_message: Option<String>,
     pub editing_task_id: Option<u64>,
     /// Terminal capabilities - determines which execution targets are available.
     pub capabilities: TerminalCapabilities,
 }
+
+const FULL_LAYOUT_THRESHOLD: u16 = 18;
+const FULL_MODAL_MIN_HEIGHT: u16 = 16;
+const COMPACT_MODAL_MIN_HEIGHT: u16 = 12;
+const COMPACT_LABEL_WIDTH: usize = 10;
 
 impl InputModal {
     /// Creates a new input modal with default target based on terminal capabilities.
@@ -64,6 +79,7 @@ impl InputModal {
             schedule_value: String::new(),
             target: default_target,
             active_field: InputField::default(),
+            layout: InputLayout::default(),
             error_message: None,
             editing_task_id: None,
             capabilities,
@@ -78,10 +94,20 @@ impl InputModal {
             schedule_value: task.scheduled_at.format("%H:%M").to_string(),
             target: task.target,
             active_field: InputField::Command,
+            layout: InputLayout::default(),
             error_message: None,
             editing_task_id: Some(task.id),
             capabilities,
         }
+    }
+
+    /// Updates layout mode based on available height.
+    pub fn update_layout(&mut self, available_height: u16) {
+        self.layout = if available_height >= FULL_LAYOUT_THRESHOLD {
+            InputLayout::Full
+        } else {
+            InputLayout::Compact
+        };
     }
 
     /// Move to next field (Tab).
@@ -222,7 +248,7 @@ impl Modal for InputModal {
     }
 
     fn width_percent(&self) -> u16 {
-        70
+        75
     }
 
     fn height_percent(&self) -> u16 {
@@ -231,22 +257,32 @@ impl Modal for InputModal {
 
     /// Minimum height to ensure the modal renders properly in small panes.
     ///
-    /// The input modal requires at least 18 rows:
-    /// - 16 rows for content (4 fields × 3 rows + 2 error + 2 help)
-    /// - 2 rows for border
+    /// The compact layout supports 12 rows so it fits in small panes.
     fn min_height(&self) -> u16 {
-        18
+        match self.layout {
+            InputLayout::Full => FULL_MODAL_MIN_HEIGHT,
+            InputLayout::Compact => COMPACT_MODAL_MIN_HEIGHT,
+        }
     }
 
     fn render(&self, frame: &mut Frame, area: Rect) {
+        match self.layout {
+            InputLayout::Full => self.render_full(frame, area),
+            InputLayout::Compact => self.render_compact(frame, area),
+        }
+    }
+}
+
+impl InputModal {
+    fn render_full(&self, frame: &mut Frame, area: Rect) {
+        let error_height = if self.error_message.is_some() { 1 } else { 0 };
         let chunks = Layout::vertical([
             Constraint::Length(3), // Command
             Constraint::Length(3), // Schedule type
             Constraint::Length(3), // Schedule value
             Constraint::Length(3), // Target
-            Constraint::Length(2), // Error message
-            Constraint::Min(0),    // Spacer
-            Constraint::Length(2), // Help
+            Constraint::Length(error_height),
+            Constraint::Min(1), // Help
         ])
         .split(area);
 
@@ -313,7 +349,81 @@ impl Modal for InputModal {
         let help = Paragraph::new("Tab: Next field | Enter: Submit | Esc: Cancel")
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
-        frame.render_widget(help, chunks[6]);
+        frame.render_widget(help, chunks[5]);
+    }
+
+    fn render_compact(&self, frame: &mut Frame, area: Rect) {
+        let error_height = if self.error_message.is_some() { 1 } else { 0 };
+        let chunks = Layout::vertical([
+            Constraint::Length(1), // Command
+            Constraint::Length(1), // Schedule type
+            Constraint::Length(1), // Schedule value
+            Constraint::Length(1), // Target
+            Constraint::Length(error_height),
+            Constraint::Min(1), // Help
+        ])
+        .split(area);
+
+        render_compact_text_field(
+            frame,
+            chunks[0],
+            "Command",
+            &self.command,
+            None,
+            self.active_field == InputField::Command,
+            Some(self.cursor_pos),
+        );
+
+        let schedule_type_text = match self.schedule_type {
+            ScheduleType::AtTime => "At time",
+            ScheduleType::AfterDelay => "After delay",
+        };
+        render_compact_selector_field(
+            frame,
+            chunks[1],
+            "Schedule",
+            schedule_type_text,
+            self.active_field == InputField::ScheduleType,
+        );
+
+        let placeholder = match self.schedule_type {
+            ScheduleType::AtTime => "e.g., 7:00am or 19:30",
+            ScheduleType::AfterDelay => "e.g., 15m, 2h, or 30s",
+        };
+        render_compact_text_field(
+            frame,
+            chunks[2],
+            "When",
+            &self.schedule_value,
+            Some(placeholder),
+            self.active_field == InputField::ScheduleValue,
+            None,
+        );
+
+        let target_text = match self.target {
+            ExecutionTarget::NewPane => "New pane",
+            ExecutionTarget::NewWindow => "New window",
+            ExecutionTarget::Background => "Background",
+        };
+        render_compact_selector_field(
+            frame,
+            chunks[3],
+            "Execute in",
+            target_text,
+            self.active_field == InputField::Target,
+        );
+
+        if let Some(ref error) = self.error_message {
+            let error_para = Paragraph::new(error.as_str())
+                .style(Style::default().fg(Color::Red))
+                .alignment(Alignment::Center);
+            frame.render_widget(error_para, chunks[4]);
+        }
+
+        let help = Paragraph::new("Tab: Next field | Enter: Submit | Esc: Cancel")
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
+        frame.render_widget(help, chunks[5]);
     }
 }
 
@@ -376,16 +486,21 @@ fn render_text_field_with_placeholder(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let (text, text_style) = if value.is_empty() {
-        (placeholder, Style::default().fg(Color::DarkGray))
-    } else {
-        (value, Style::default())
-    };
-
-    let display = if is_active && !value.is_empty() {
-        format!("{}|", value)
+    let is_placeholder = value.is_empty() && !is_active;
+    let text = if value.is_empty() { placeholder } else { value };
+    let display = if is_active {
+        if value.is_empty() {
+            "|".to_string()
+        } else {
+            format!("{}|", value)
+        }
     } else {
         text.to_string()
+    };
+    let text_style = if is_placeholder {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default()
     };
 
     let para = Paragraph::new(display).style(text_style);
@@ -418,6 +533,97 @@ fn render_selector_field(
 
     let para = Paragraph::new(format!("{}{}{}", arrows, value, arrows_end));
     frame.render_widget(para, inner);
+}
+
+fn render_compact_text_field(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    value: &str,
+    placeholder: Option<&str>,
+    is_active: bool,
+    cursor_pos: Option<usize>,
+) {
+    let label_style = if is_active {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+    let value_style = if is_active {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+    let label_text = format!("{label:<width$}: ", width = COMPACT_LABEL_WIDTH);
+
+    let line = if value.is_empty() {
+        if is_active {
+            Line::from(vec![
+                Span::styled(format!(" {label_text}"), label_style),
+                Span::styled("|", value_style),
+            ])
+        } else if let Some(placeholder) = placeholder {
+            Line::from(vec![
+                Span::styled(format!(" {label_text}"), label_style),
+                Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
+            ])
+        } else {
+            Line::from(vec![Span::styled(format!(" {label_text}"), label_style)])
+        }
+    } else {
+        let display_value = if is_active {
+            insert_cursor(value, cursor_pos)
+        } else {
+            value.to_string()
+        };
+        Line::from(vec![
+            Span::styled(format!(" {label_text}"), label_style),
+            Span::styled(display_value, value_style),
+        ])
+    };
+
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn render_compact_selector_field(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    value: &str,
+    is_active: bool,
+) {
+    let label_style = if is_active {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+    let value_style = if is_active {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+    let label_text = format!("{label:<width$}: ", width = COMPACT_LABEL_WIDTH);
+    let display_value = if is_active {
+        format!("< {} >", value)
+    } else {
+        value.to_string()
+    };
+
+    let line = Line::from(vec![
+        Span::styled(format!(" {label_text}"), label_style),
+        Span::styled(display_value, value_style),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn insert_cursor(value: &str, cursor_pos: Option<usize>) -> String {
+    match cursor_pos {
+        Some(pos) => {
+            let (before, after) = value.split_at(pos.min(value.len()));
+            format!("{before}|{after}")
+        }
+        None => format!("{value}|"),
+    }
 }
 
 #[cfg(test)]
@@ -573,15 +779,14 @@ mod tests {
     fn input_modal_has_minimum_height_for_small_panes() {
         use crate::tui::modal::Modal;
 
-        let modal = InputModal::new(wezterm_caps());
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.update_layout(12);
 
-        // The modal needs at least 18 rows:
-        // - 16 rows for content (4 fields × 3 rows + 2 error + 2 help)
-        // - 2 rows for border
+        // The compact modal fits within 12 rows.
         assert_eq!(
             modal.min_height(),
-            18,
-            "InputModal should have min_height of 18 for small pane support"
+            12,
+            "InputModal should have min_height of 12 for small pane support"
         );
     }
 }
