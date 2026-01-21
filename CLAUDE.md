@@ -33,6 +33,9 @@ dockhand/
 │   ├── cli/          # Binary: `sniff`
 │   └── lib/          # Hardware, Network, OS, and package manager discovery
 ├── so-you-say/       # Binary: `speak` (TTS CLI)
+├── tree-hugger/      # Tree-sitter symbol extraction
+│   ├── cli/          # Binary: `hug` (symbol/import/export CLI)
+│   └── lib/          # Symbol extraction library (16 languages)
 └── tui/              # Future: ratatui-based interactive chat
 ```
 
@@ -105,6 +108,21 @@ The `biscuit/codegen` module provides AST-based code manipulation:
 - Validates injection points before modification
 - Prevents duplicate injections via semantic analysis
 
+#### 5. Tree-sitter Symbol Extraction (Tree Hugger)
+
+The `tree-hugger` package provides multi-language symbol extraction using Tree-sitter:
+
+- **16 supported languages**: Rust, TypeScript, JavaScript, Go, Python, Java, C#, C, C++, Swift, Scala, PHP, Perl, Bash, Zsh, Lua
+- **Symbol kind distinction**: Differentiates struct vs enum, class vs interface, trait vs module
+- **Rich metadata**: Extracts doc comments, function signatures, type parameters, struct fields, enum variants
+- **Query vendoring**: Uses `nvim-treesitter` query files in `lib/queries/vendor/<lang>/locals.scm`
+
+**IMPORTANT - Cross-Language Test Coverage**: When modifying tree-sitter queries or symbol extraction:
+1. Every language with type constructs must have type distinction tests
+2. All typed languages need `types.*` fixture files exercising their type system
+3. Bug fixes require regression tests that would fail without the fix
+4. Run `cargo test -p tree-hugger-lib` to verify all language tests pass
+
 ### Local Skills
 
 This repository has local Claude Code skills in `.claude/skills/`:
@@ -173,6 +191,10 @@ cargo test -p research-lib --lib
 
 # Run a single test
 cargo test -p shared --lib providers::base::tests::test_has_provider_api_key_with_set_env_var
+
+# Tree Hugger tests (16 languages - critical for cross-language coverage)
+cargo test -p tree-hugger-lib
+cargo test -p tree-hugger-cli
 ```
 
 ### Installing Binaries
