@@ -4056,6 +4056,7 @@ dependencies = [
  "chrono",
  "clap 4.5.54",
  "crossterm 0.29.0",
+ "dirs 6.0.0",
  "predicates",
  "queue-lib",
  "ratatui",
@@ -6294,6 +6295,7 @@ dependencies = [
  "owo-colors",
  "percent-encoding",
  "predicates",
+ "serde",
  "serde_json",
  "tree-hugger-lib",
 ]

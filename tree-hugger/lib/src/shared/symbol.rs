@@ -236,6 +236,11 @@ impl SymbolKind {
             Self::Type | Self::Class | Self::Interface | Self::Enum | Self::Trait
         )
     }
+
+    /// Returns true for class-like symbols that can have members.
+    pub fn is_class(self) -> bool {
+        matches!(self, Self::Class | Self::Type)
+    }
 }
 
 impl fmt::Display for SymbolKind {
@@ -337,6 +342,9 @@ pub struct FunctionSignature {
     /// The visibility/access modifier (public, protected, private).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visibility: Option<Visibility>,
+    /// Whether this is a static method or associated function.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub is_static: bool,
 }
 
 impl Default for FunctionSignature {
@@ -352,12 +360,16 @@ impl FunctionSignature {
             parameters: Vec::new(),
             return_type: None,
             visibility: None,
+            is_static: false,
         }
     }
 
     /// Returns true if the signature has no information.
     pub fn is_empty(&self) -> bool {
-        self.parameters.is_empty() && self.return_type.is_none() && self.visibility.is_none()
+        self.parameters.is_empty()
+            && self.return_type.is_none()
+            && self.visibility.is_none()
+            && !self.is_static
     }
 }
 
@@ -372,6 +384,12 @@ pub struct FieldInfo {
     /// Documentation comment for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc_comment: Option<String>,
+    /// The visibility/access modifier (public, protected, private).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<Visibility>,
+    /// Whether this is a static field.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub is_static: bool,
 }
 
 impl FieldInfo {
@@ -381,6 +399,8 @@ impl FieldInfo {
             name: name.into(),
             type_annotation: None,
             doc_comment: None,
+            visibility: None,
+            is_static: false,
         }
     }
 
@@ -390,6 +410,8 @@ impl FieldInfo {
             name: name.into(),
             type_annotation: Some(type_annotation.into()),
             doc_comment: None,
+            visibility: None,
+            is_static: false,
         }
     }
 }

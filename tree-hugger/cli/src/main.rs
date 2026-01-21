@@ -11,6 +11,7 @@ use tree_hugger_lib::{
     ProgrammingLanguage, SymbolInfo, SymbolKind, TreeFile, TreeHuggerError, TypeMetadata,
     VariantInfo,
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -60,6 +61,26 @@ struct CommonArgs {
     inputs: Vec<String>,
 }
 
+/// Arguments for the classes command
+#[derive(clap::Args, Debug, Clone)]
+struct ClassArgs {
+    /// Glob patterns for files to include
+    #[arg(value_name = "GLOB", num_args = 1..)]
+    inputs: Vec<String>,
+
+    /// Filter by class name
+    #[arg(long, short = 'n')]
+    name: Option<String>,
+
+    /// Show only static members
+    #[arg(long)]
+    static_only: bool,
+
+    /// Show only instance members
+    #[arg(long)]
+    instance_only: bool,
+}
+
 #[derive(Subcommand, Debug, Clone)]
 enum Command {
     /// List functions in the file(s)
@@ -72,6 +93,8 @@ enum Command {
     Exports(CommonArgs),
     /// List imported symbols in the file(s)
     Imports(CommonArgs),
+    /// List classes and their members
+    Classes(ClassArgs),
 }
 
 impl Command {
@@ -83,6 +106,7 @@ impl Command {
             | Self::Symbols(args)
             | Self::Exports(args)
             | Self::Imports(args) => &args.inputs,
+            Self::Classes(args) => &args.inputs,
         }
     }
 
@@ -94,18 +118,43 @@ impl Command {
             Self::Symbols(_) => CommandKind::Symbols,
             Self::Exports(_) => CommandKind::Exports,
             Self::Imports(_) => CommandKind::Imports,
+            Self::Classes(args) => CommandKind::Classes {
+                name_filter: args.name.clone(),
+                static_only: args.static_only,
+                instance_only: args.instance_only,
+            },
         }
     }
 }
 
 /// The kind of command being executed (without the arguments).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum CommandKind {
     Functions,
     Types,
     Symbols,
     Exports,
     Imports,
+    Classes {
+        name_filter: Option<String>,
+        static_only: bool,
+        instance_only: bool,
+    },
+}
+
+/// Summary of a class with its members partitioned by static/instance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ClassSummary {
+    /// The class symbol
+    pub class: SymbolInfo,
+    /// Static methods
+    pub static_methods: Vec<SymbolInfo>,
+    /// Instance methods
+    pub instance_methods: Vec<SymbolInfo>,
+    /// Static fields
+    pub static_fields: Vec<FieldInfo>,
+    /// Instance fields
+    pub instance_fields: Vec<FieldInfo>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -225,10 +274,54 @@ fn main() -> Result<(), TreeHuggerError> {
     let files = collect_files(&root_dir, inputs, &cli.ignore, language)?;
 
     let command_kind = cli.command.kind();
+
+    // Handle classes command separately due to different output structure
+    if let CommandKind::Classes {
+        name_filter,
+        static_only,
+        instance_only,
+    } = &command_kind
+    {
+        let mut all_class_summaries: Vec<(PathBuf, ProgrammingLanguage, Vec<ClassSummary>)> =
+            Vec::new();
+
+        for file in files {
+            let tree_file = TreeFile::with_language(&file, language)?;
+            let class_summaries = extract_class_summaries(
+                &tree_file,
+                name_filter.as_deref(),
+                *static_only,
+                *instance_only,
+            )?;
+            if !class_summaries.is_empty() {
+                all_class_summaries.push((tree_file.file.clone(), tree_file.language, class_summaries));
+            }
+        }
+
+        match output_format {
+            OutputFormat::Json => {
+                let json =
+                    serde_json::to_string_pretty(&all_class_summaries).map_err(|source| {
+                        TreeHuggerError::Io {
+                            path: PathBuf::from("<stdout>"),
+                            source: std::io::Error::other(source),
+                        }
+                    })?;
+                println!("{json}");
+            }
+            OutputFormat::Pretty | OutputFormat::Plain => {
+                for (file, lang, summaries) in all_class_summaries {
+                    render_class_summaries(&file, lang, &summaries, &output_config);
+                }
+            }
+        }
+        return Ok(());
+    }
+
     let mut summaries = Vec::new();
     for file in files {
         let tree_file = TreeFile::with_language(&file, language)?;
-        let summary = summarize_file(&tree_file, command_kind)?;
+        let summary = summarize_file(&tree_file, &command_kind)?;
         summaries.push(summary);
     }
 
@@ -253,7 +346,7 @@ fn main() -> Result<(), TreeHuggerError> {
         }
         OutputFormat::Pretty | OutputFormat::Plain => {
             for summary in summaries {
-                render_summary(&summary, command_kind, &output_config);
+                render_summary(&summary, &command_kind, &output_config);
             }
         }
     }
@@ -325,7 +418,7 @@ fn collect_files(
 
 fn summarize_file(
     tree_file: &TreeFile,
-    command: CommandKind,
+    command: &CommandKind,
 ) -> Result<FileSummary, TreeHuggerError> {
     let mut summary = FileSummary {
         file: tree_file.file.clone(),
@@ -366,12 +459,15 @@ fn summarize_file(
         CommandKind::Imports => {
             summary.imports = tree_file.imported_symbols()?;
         }
+        CommandKind::Classes { .. } => {
+            // Classes are handled separately in main()
+        }
     }
 
     Ok(summary)
 }
 
-fn render_summary(summary: &FileSummary, command: CommandKind, config: &OutputConfig) {
+fn render_summary(summary: &FileSummary, command: &CommandKind, config: &OutputConfig) {
     // Render file header with optional hyperlink
     let file_display = summary.file.display().to_string();
     let header = if config.use_hyperlinks {
@@ -395,6 +491,9 @@ fn render_summary(summary: &FileSummary, command: CommandKind, config: &OutputCo
         CommandKind::Exports => render_symbols(&summary.exports, config),
         CommandKind::Functions | CommandKind::Types | CommandKind::Symbols => {
             render_symbols(&summary.symbols, config)
+        }
+        CommandKind::Classes { .. } => {
+            // Classes are rendered separately
         }
     }
 
@@ -677,6 +776,267 @@ fn render_imports(imports: &[ImportSymbol], config: &OutputConfig) {
             );
         } else {
             println!("  - {} {}", import.name, location_display);
+        }
+    }
+}
+
+/// Extracts class summaries from a file.
+fn extract_class_summaries(
+    tree_file: &TreeFile,
+    name_filter: Option<&str>,
+    static_only: bool,
+    instance_only: bool,
+) -> Result<Vec<ClassSummary>, TreeHuggerError> {
+    let all_symbols = tree_file.symbols()?;
+
+    // Find all class-like symbols, sorted by line number
+    let mut classes: Vec<&SymbolInfo> = all_symbols
+        .iter()
+        .filter(|s| s.kind.is_class())
+        .filter(|s| match name_filter {
+            Some(filter) => s.name.contains(filter),
+            None => true,
+        })
+        .collect();
+    classes.sort_by_key(|s| s.range.start_line);
+
+    // Find all methods, sorted by line number
+    let mut methods: Vec<&SymbolInfo> = all_symbols
+        .iter()
+        .filter(|s| s.kind == SymbolKind::Method)
+        .collect();
+    methods.sort_by_key(|s| s.range.start_line);
+
+    let mut result = Vec::new();
+
+    for (i, class) in classes.iter().enumerate() {
+        // Determine the range for this class's methods:
+        // From the class declaration line to the next class declaration (or EOF)
+        let class_start = class.range.start_line;
+        let class_end = if i + 1 < classes.len() {
+            classes[i + 1].range.start_line
+        } else {
+            usize::MAX
+        };
+
+        // Get methods that belong to this class (between this class and the next)
+        let class_methods: Vec<&SymbolInfo> = methods
+            .iter()
+            .filter(|m| {
+                m.range.start_line > class_start && m.range.start_line < class_end
+            })
+            .copied()
+            .collect();
+
+        // Partition methods into static and instance
+        let mut static_methods = Vec::new();
+        let mut instance_methods = Vec::new();
+
+        for method in class_methods {
+            let is_static = method
+                .signature
+                .as_ref()
+                .map(|s| s.is_static)
+                .unwrap_or(false);
+            if is_static {
+                static_methods.push(method.clone());
+            } else {
+                instance_methods.push(method.clone());
+            }
+        }
+
+        // Get fields from type metadata
+        let mut static_fields = Vec::new();
+        let mut instance_fields = Vec::new();
+
+        if let Some(meta) = &class.type_metadata {
+            for field in &meta.fields {
+                if field.is_static {
+                    static_fields.push(field.clone());
+                } else {
+                    instance_fields.push(field.clone());
+                }
+            }
+        }
+
+        // Apply filters
+        if static_only {
+            instance_methods.clear();
+            instance_fields.clear();
+        }
+        if instance_only {
+            static_methods.clear();
+            static_fields.clear();
+        }
+
+        result.push(ClassSummary {
+            class: (*class).clone(),
+            static_methods,
+            instance_methods,
+            static_fields,
+            instance_fields,
+        });
+    }
+
+    Ok(result)
+}
+
+/// Renders class summaries for a file.
+fn render_class_summaries(
+    file: &Path,
+    language: ProgrammingLanguage,
+    summaries: &[ClassSummary],
+    config: &OutputConfig,
+) {
+    // Render file header
+    let file_display = file.display().to_string();
+    let header = if config.use_hyperlinks {
+        hyperlink(file, 1, &file_display)
+    } else {
+        file_display
+    };
+
+    if config.use_colors {
+        println!(
+            "{} ({})",
+            header.bold(),
+            language.to_string().dimmed()
+        );
+    } else {
+        println!("{} ({})", header, language);
+    }
+
+    for summary in summaries {
+        render_class_summary(summary, language, config);
+    }
+
+    println!();
+}
+
+/// Renders a single class summary.
+fn render_class_summary(summary: &ClassSummary, language: ProgrammingLanguage, config: &OutputConfig) {
+    let class = &summary.class;
+    let location = format!("[{}:{}]", class.range.start_line, class.range.start_column);
+    let location_display = if config.use_hyperlinks {
+        hyperlink(&class.file, class.range.start_line, &location)
+    } else {
+        location
+    };
+
+    if config.use_colors {
+        println!(
+            "  {} {} {}",
+            class.kind.to_string().magenta(),
+            class.name.bold(),
+            location_display.dimmed()
+        );
+    } else {
+        println!("  {} {} {}", class.kind, class.name, location_display);
+    }
+
+    // Render static methods
+    if !summary.static_methods.is_empty() {
+        render_member_section("Static Methods", &summary.static_methods, language, config, true);
+    }
+
+    // Render instance methods
+    if !summary.instance_methods.is_empty() {
+        render_member_section("Instance Methods", &summary.instance_methods, language, config, true);
+    }
+
+    // Render static fields
+    if !summary.static_fields.is_empty() {
+        render_field_section("Static Fields", &summary.static_fields, language, config);
+    }
+
+    // Render instance fields
+    if !summary.instance_fields.is_empty() {
+        render_field_section("Instance Fields", &summary.instance_fields, language, config);
+    }
+}
+
+/// Renders a section of methods.
+fn render_member_section(
+    title: &str,
+    methods: &[SymbolInfo],
+    language: ProgrammingLanguage,
+    config: &OutputConfig,
+    _is_method: bool,
+) {
+    if config.use_colors {
+        println!("    {} ({})", title.yellow(), methods.len());
+    } else {
+        println!("    {} ({})", title, methods.len());
+    }
+
+    for method in methods {
+        let location = format!("[{}:{}]", method.range.start_line, method.range.start_column);
+        let location_display = if config.use_hyperlinks {
+            hyperlink(&method.file, method.range.start_line, &location)
+        } else {
+            location
+        };
+
+        let name_with_sig = format_symbol_name(method, language);
+
+        // Get visibility
+        let visibility = method
+            .signature
+            .as_ref()
+            .and_then(|sig| sig.visibility.as_ref());
+
+        if config.use_colors {
+            let vis_str = match visibility {
+                Some(vis) => format!("{} ", vis.to_string().italic()),
+                None => String::new(),
+            };
+            println!(
+                "      - {}{} {}",
+                vis_str,
+                name_with_sig.green(),
+                location_display.dimmed()
+            );
+        } else {
+            let vis_str = match visibility {
+                Some(vis) => format!("{} ", vis),
+                None => String::new(),
+            };
+            println!("      - {}{} {}", vis_str, name_with_sig, location_display);
+        }
+    }
+}
+
+/// Renders a section of fields.
+fn render_field_section(
+    title: &str,
+    fields: &[FieldInfo],
+    language: ProgrammingLanguage,
+    config: &OutputConfig,
+) {
+    if config.use_colors {
+        println!("    {} ({})", title.yellow(), fields.len());
+    } else {
+        println!("    {} ({})", title, fields.len());
+    }
+
+    for field in fields {
+        let field_display = format_field(field, language);
+
+        // Get visibility
+        let visibility = field.visibility.as_ref();
+
+        if config.use_colors {
+            let vis_str = match visibility {
+                Some(vis) => format!("{} ", vis.to_string().italic()),
+                None => String::new(),
+            };
+            println!("      - {}{}", vis_str, field_display.cyan());
+        } else {
+            let vis_str = match visibility {
+                Some(vis) => format!("{} ", vis),
+                None => String::new(),
+            };
+            println!("      - {}{}", vis_str, field_display);
         }
     }
 }

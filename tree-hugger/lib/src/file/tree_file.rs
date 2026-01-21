@@ -421,8 +421,9 @@ fn extract_signature(
     let parameters = extract_parameters(node, language, source);
     let return_type = extract_return_type(node, language, source);
     let visibility = extract_visibility(node, language, source);
+    let is_static = extract_is_static(node, language, source);
 
-    if parameters.is_empty() && return_type.is_none() && visibility.is_none() {
+    if parameters.is_empty() && return_type.is_none() && visibility.is_none() && !is_static {
         return None;
     }
 
@@ -430,6 +431,7 @@ fn extract_signature(
         parameters,
         return_type,
         visibility,
+        is_static,
     })
 }
 
@@ -936,6 +938,187 @@ fn extract_swift_visibility(node: Node<'_>, source: &str) -> Option<Visibility> 
         }
     }
     None
+}
+
+/// Extracts whether a function/method is static.
+fn extract_is_static(node: Node<'_>, language: ProgrammingLanguage, source: &str) -> bool {
+    match language {
+        ProgrammingLanguage::Java | ProgrammingLanguage::CSharp => {
+            extract_java_csharp_is_static(node, source)
+        }
+        ProgrammingLanguage::TypeScript | ProgrammingLanguage::JavaScript => {
+            extract_ts_is_static(node)
+        }
+        ProgrammingLanguage::Php => extract_php_is_static(node),
+        ProgrammingLanguage::Python => extract_python_is_static(node, source),
+        ProgrammingLanguage::Swift => extract_swift_is_static(node, source),
+        ProgrammingLanguage::Scala => extract_scala_is_static(node),
+        ProgrammingLanguage::Cpp => extract_cpp_is_static(node, source),
+        ProgrammingLanguage::Rust => extract_rust_is_static(node, source),
+        // Go, C, and other languages don't have static methods in the same way
+        _ => false,
+    }
+}
+
+/// Checks if a Java or C# method has the `static` modifier.
+fn extract_java_csharp_is_static(node: Node<'_>, source: &str) -> bool {
+    // Java: modifiers child containing "static"
+    if let Some(modifiers) = find_child_by_kind(node, "modifiers") {
+        let mut cursor = modifiers.walk();
+        for child in modifiers.children(&mut cursor) {
+            if let Ok(text) = child.utf8_text(source.as_bytes()) {
+                if text == "static" {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // C#: direct modifier child containing "static"
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "modifier" {
+            if let Ok(text) = child.utf8_text(source.as_bytes()) {
+                if text == "static" {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Checks if a TypeScript/JavaScript method has the `static` keyword.
+fn extract_ts_is_static(node: Node<'_>) -> bool {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "static" {
+            return true;
+        }
+    }
+    false
+}
+
+/// Checks if a PHP method has the `static_modifier`.
+fn extract_php_is_static(node: Node<'_>) -> bool {
+    find_child_by_kind(node, "static_modifier").is_some()
+}
+
+/// Checks if a Python method has @staticmethod or @classmethod decorator.
+fn extract_python_is_static(node: Node<'_>, source: &str) -> bool {
+    // Look at the decorated_definition parent if exists
+    if let Some(parent) = node.parent() {
+        if parent.kind() == "decorated_definition" {
+            let mut cursor = parent.walk();
+            for child in parent.children(&mut cursor) {
+                if child.kind() == "decorator" {
+                    if let Ok(text) = child.utf8_text(source.as_bytes()) {
+                        if text.contains("staticmethod") || text.contains("classmethod") {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Checks if a Swift method has `static` or `class` modifier.
+fn extract_swift_is_static(node: Node<'_>, source: &str) -> bool {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "modifiers" {
+            let mut mod_cursor = child.walk();
+            for modifier in child.children(&mut mod_cursor) {
+                if let Ok(text) = modifier.utf8_text(source.as_bytes()) {
+                    if text == "static" || text == "class" {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Checks if a Scala method is inside an object (companion object).
+fn extract_scala_is_static(node: Node<'_>) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "object_definition" {
+            return true;
+        }
+        // Stop if we hit a class definition
+        if parent.kind() == "class_definition" {
+            return false;
+        }
+        current = parent.parent();
+    }
+    false
+}
+
+/// Checks if a C++ method has the `static` specifier.
+fn extract_cpp_is_static(node: Node<'_>, source: &str) -> bool {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "storage_class_specifier" {
+            if let Ok(text) = child.utf8_text(source.as_bytes()) {
+                if text == "static" {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Checks if a Rust method is an associated function (no self parameter).
+fn extract_rust_is_static(node: Node<'_>, source: &str) -> bool {
+    // A Rust method is "static" (associated function) if it doesn't have self parameter
+    // Only applies to methods inside impl blocks
+    if !is_inside_impl_block(node) {
+        return false;
+    }
+
+    // Look for parameters node
+    if let Some(params) = find_child_by_kind(node, "parameters") {
+        let mut cursor = params.walk();
+        for child in params.children(&mut cursor) {
+            // Check for self_parameter
+            if child.kind() == "self_parameter" {
+                return false;
+            }
+            // Check for `self` in the first parameter
+            if child.kind() == "parameter" {
+                if let Some(pattern) = find_child_by_kind(child, "identifier") {
+                    if let Ok(text) = pattern.utf8_text(source.as_bytes()) {
+                        if text == "self" {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        // Has parameters but no self -> associated function
+        return true;
+    }
+
+    // No parameters at all means it's an associated function
+    true
+}
+
+/// Checks if a Rust function is inside an impl block.
+fn is_inside_impl_block(node: Node<'_>) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "impl_item" {
+            return true;
+        }
+        current = parent.parent();
+    }
+    false
 }
 
 /// Extracts return type from Rust function_item.
@@ -2172,6 +2355,8 @@ fn extract_rust_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                 name,
                 type_annotation,
                 doc_comment,
+                visibility: None,
+                is_static: false,
             });
         }
     }
@@ -2197,6 +2382,8 @@ fn extract_rust_tuple_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldIn
                 name: index.to_string(),
                 type_annotation,
                 doc_comment: None,
+                visibility: None,
+                is_static: false,
             });
             index += 1;
         }
@@ -2368,6 +2555,8 @@ fn extract_typescript_interface_fields(node: Node<'_>, source: &str) -> Vec<Fiel
                 name,
                 type_annotation,
                 doc_comment: None,
+                visibility: None,
+                is_static: false,
             });
         }
     }
@@ -2395,11 +2584,17 @@ fn extract_typescript_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInf
             .and_then(|n| n.utf8_text(source.as_bytes()).ok())
             .map(|s| s.to_string());
 
+        // Extract visibility and static modifiers
+        let visibility = extract_ts_visibility(child, source);
+        let is_static = extract_ts_is_static(child);
+
         if let Some(name) = name {
             fields.push(FieldInfo {
                 name,
                 type_annotation,
                 doc_comment: None,
+                visibility,
+                is_static,
             });
         }
     }
@@ -2517,6 +2712,8 @@ fn extract_go_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                         name: name.to_string(),
                         type_annotation: type_annotation.clone(),
                         doc_comment: None,
+                        visibility: None,
+                        is_static: false,
                     });
                 }
             }
@@ -2548,6 +2745,8 @@ fn extract_go_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo> 
                     name,
                     type_annotation,
                     doc_comment: None,
+                    visibility: None,
+                    is_static: false,
                 });
             }
         }
@@ -2607,6 +2806,8 @@ fn extract_python_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                                 name,
                                 type_annotation,
                                 doc_comment: None,
+                                visibility: None,
+                                is_static: false,
                             });
                         }
                     }
@@ -2627,6 +2828,8 @@ fn extract_python_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                         name,
                         type_annotation,
                         doc_comment: None,
+                        visibility: None,
+                        is_static: false,
                     });
                 }
             }
@@ -2715,6 +2918,10 @@ fn extract_java_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
             .and_then(|n| n.utf8_text(source.as_bytes()).ok())
             .map(|s| s.to_string());
 
+        // Extract visibility and static modifier
+        let visibility = extract_java_visibility(child, source);
+        let is_static = extract_java_csharp_is_static(child, source);
+
         // Get all variable declarators (handles `int x, y;`)
         let mut inner_cursor = child.walk();
         for inner in child.children(&mut inner_cursor) {
@@ -2725,6 +2932,8 @@ fn extract_java_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                             name: name.to_string(),
                             type_annotation: type_annotation.clone(),
                             doc_comment: None,
+                            visibility,
+                            is_static,
                         });
                     }
                 }
@@ -2794,6 +3003,8 @@ fn extract_java_record_components(node: Node<'_>, source: &str) -> Vec<FieldInfo
                     name: name.to_string(),
                     type_annotation,
                     doc_comment: None,
+                    visibility: Some(Visibility::Public), // Record components are implicitly public
+                    is_static: false,
                 });
             }
         }
@@ -2824,6 +3035,8 @@ fn extract_java_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo
                     name: name.to_string(),
                     type_annotation,
                     doc_comment: None,
+                    visibility: Some(Visibility::Public), // Interface members are implicitly public
+                    is_static: false,
                 });
             }
         }
@@ -2893,6 +3106,8 @@ fn extract_c_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                         name: name.to_string(),
                         type_annotation: type_annotation.clone(),
                         doc_comment: None,
+                        visibility: None, // C doesn't have visibility modifiers
+                        is_static: false,
                     });
                 }
             }
@@ -2976,7 +3191,23 @@ fn extract_cpp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
     let mut fields = Vec::new();
     let mut cursor = node.walk();
 
+    // Track current visibility section (C++ uses access specifiers at section level)
+    let mut current_visibility: Option<Visibility> = None;
+
     for child in node.children(&mut cursor) {
+        // Update visibility for access specifiers
+        if child.kind() == "access_specifier" {
+            if let Ok(text) = child.utf8_text(source.as_bytes()) {
+                current_visibility = match text.trim_end_matches(':') {
+                    "public" => Some(Visibility::Public),
+                    "protected" => Some(Visibility::Protected),
+                    "private" => Some(Visibility::Private),
+                    _ => None,
+                };
+            }
+            continue;
+        }
+
         if child.kind() != "field_declaration" {
             continue;
         }
@@ -2991,6 +3222,9 @@ fn extract_cpp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
             .and_then(|n| n.utf8_text(source.as_bytes()).ok())
             .map(|s| s.to_string());
 
+        // Check for static specifier
+        let is_static = extract_cpp_is_static(child, source);
+
         // Get field identifiers
         let mut inner_cursor = child.walk();
         for inner in child.children(&mut inner_cursor) {
@@ -3000,6 +3234,8 @@ fn extract_cpp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                         name: name.to_string(),
                         type_annotation: type_annotation.clone(),
                         doc_comment: None,
+                        visibility: current_visibility,
+                        is_static,
                     });
                 }
             }
@@ -3092,6 +3328,10 @@ fn extract_csharp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
             .and_then(|n| n.utf8_text(source.as_bytes()).ok())
             .map(|s| s.to_string());
 
+        // Extract visibility and static modifier
+        let visibility = extract_csharp_visibility(child, source);
+        let is_static = extract_java_csharp_is_static(child, source);
+
         // Get variable declarators
         if let Some(var_decl) = find_child_by_kind(child, "variable_declaration") {
             let mut inner_cursor = var_decl.walk();
@@ -3103,6 +3343,8 @@ fn extract_csharp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                                 name: name.to_string(),
                                 type_annotation: type_annotation.clone(),
                                 doc_comment: None,
+                                visibility,
+                                is_static,
                             });
                         }
                     }
@@ -3174,6 +3416,8 @@ fn extract_csharp_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldIn
                     name: name.to_string(),
                     type_annotation,
                     doc_comment: None,
+                    visibility: Some(Visibility::Public), // Interface members are implicitly public
+                    is_static: false,
                 });
             }
         }
@@ -3202,6 +3446,8 @@ fn extract_csharp_record_parameters(node: Node<'_>, source: &str) -> Vec<FieldIn
                     name: name.to_string(),
                     type_annotation,
                     doc_comment: None,
+                    visibility: Some(Visibility::Public), // Record parameters are implicitly public
+                    is_static: false,
                 });
             }
         }
@@ -3294,10 +3540,16 @@ fn extract_swift_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                         .and_then(|n| n.utf8_text(source.as_bytes()).ok())
                         .map(|s| s.to_string());
 
+                    // Extract visibility and static modifier
+                    let visibility = extract_swift_visibility(child, source);
+                    let is_static = extract_swift_is_static(child, source);
+
                     fields.push(FieldInfo {
                         name: name.to_string(),
                         type_annotation,
                         doc_comment: None,
+                        visibility,
+                        is_static,
                     });
                 }
             }
@@ -3359,6 +3611,8 @@ fn extract_swift_protocol_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo
                     name: name.to_string(),
                     type_annotation,
                     doc_comment: None,
+                    visibility: None, // Protocol methods don't have visibility
+                    is_static: false,
                 });
             }
         }
@@ -3454,6 +3708,8 @@ fn extract_scala_class_parameters(node: Node<'_>, source: &str) -> Vec<FieldInfo
                     name: name.to_string(),
                     type_annotation,
                     doc_comment: None,
+                    visibility: None, // Scala class parameters don't have explicit visibility
+                    is_static: false,
                 });
             }
         }
@@ -3485,6 +3741,8 @@ fn extract_scala_trait_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                     name: name.to_string(),
                     type_annotation,
                     doc_comment: None,
+                    visibility: None, // Scala trait methods don't have explicit visibility
+                    is_static: false,
                 });
             }
         }
@@ -3517,6 +3775,8 @@ fn extract_scala_object_members(node: Node<'_>, source: &str) -> Vec<FieldInfo> 
                         name: name.to_string(),
                         type_annotation,
                         doc_comment: None,
+                        visibility: None,
+                        is_static: true, // Object members are effectively static
                     });
                 }
             }
@@ -3614,6 +3874,10 @@ fn extract_php_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
             .and_then(|n| n.utf8_text(source.as_bytes()).ok())
             .map(|s| s.to_string());
 
+        // Extract visibility and static modifier
+        let visibility = extract_php_visibility(child, source);
+        let is_static = extract_php_is_static(child);
+
         // Get property elements
         let mut inner_cursor = child.walk();
         for inner in child.children(&mut inner_cursor) {
@@ -3625,6 +3889,8 @@ fn extract_php_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                                 name: name.to_string(),
                                 type_annotation: type_annotation.clone(),
                                 doc_comment: None,
+                                visibility,
+                                is_static,
                             });
                         }
                     }
@@ -3658,6 +3924,8 @@ fn extract_php_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo>
                     name: name.to_string(),
                     type_annotation,
                     doc_comment: None,
+                    visibility: Some(Visibility::Public), // Interface methods are implicitly public
+                    is_static: false,
                 });
             }
         }

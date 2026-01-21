@@ -1932,3 +1932,90 @@ fn extracts_javascript_arrow_function_signatures() -> Result<(), TreeHuggerError
 
     Ok(())
 }
+
+// ============================================================================
+// Static method detection tests
+// These tests ensure is_static is correctly detected for methods in various languages.
+// ============================================================================
+
+#[test]
+fn detects_java_static_methods() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("signatures.java"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Find the static method printGreeting
+    let print_greeting = symbols
+        .iter()
+        .find(|s| s.name == "printGreeting")
+        .expect("should find printGreeting method");
+
+    let sig = print_greeting
+        .signature
+        .as_ref()
+        .expect("should have signature");
+    assert!(
+        sig.is_static,
+        "printGreeting should be marked as static"
+    );
+
+    // Find the instance method greet
+    let greet = symbols
+        .iter()
+        .find(|s| s.name == "greet")
+        .expect("should find greet method");
+
+    let sig = greet.signature.as_ref().expect("should have signature");
+    assert!(
+        !sig.is_static,
+        "greet should not be marked as static"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn detects_csharp_static_methods() -> Result<(), TreeHuggerError> {
+    let tree_file = TreeFile::new(fixture_path("signatures.cs"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Find the static method PrintGreeting (inside Greeter class, line 32)
+    let print_greeting = symbols
+        .iter()
+        .find(|s| s.name == "PrintGreeting" && s.range.start_line > 30)
+        .expect("should find PrintGreeting method");
+
+    let sig = print_greeting
+        .signature
+        .as_ref()
+        .expect("should have signature");
+    assert!(
+        sig.is_static,
+        "PrintGreeting should be marked as static"
+    );
+
+    // Find the instance method Greet inside Greeter class (line 20, not the static one at line 4)
+    let greet = symbols
+        .iter()
+        .find(|s| s.name == "Greet" && s.range.start_line > 15 && s.range.start_line < 25)
+        .expect("should find Greet method");
+
+    let sig = greet.signature.as_ref().expect("should have signature");
+    assert!(
+        !sig.is_static,
+        "instance Greet should not be marked as static"
+    );
+
+    // Also check the top-level static function at line 4
+    let top_level_greet = symbols
+        .iter()
+        .find(|s| s.name == "Greet" && s.range.start_line < 10)
+        .expect("should find top-level Greet function");
+
+    let sig = top_level_greet.signature.as_ref().expect("should have signature");
+    assert!(
+        sig.is_static,
+        "top-level Greet function should be marked as static"
+    );
+
+    Ok(())
+}

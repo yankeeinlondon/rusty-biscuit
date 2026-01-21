@@ -342,3 +342,112 @@ fn test_plain_flag_with_json_flag() {
         .success()
         .stdout(predicate::str::contains("\"root_dir\""));
 }
+
+// ============================================================================
+// Classes command tests
+// ============================================================================
+
+#[test]
+fn test_classes_command_help() {
+    hug_cmd()
+        .args(["classes", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("List classes and their members"));
+}
+
+#[test]
+fn test_classes_command_json_output() {
+    // Test that classes command with --json produces JSON output with class structure
+    hug_cmd()
+        .args([
+            "classes",
+            "tree-hugger/lib/tests/fixtures/signatures.java",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"class\""))
+        .stdout(predicate::str::contains("\"static_methods\""))
+        .stdout(predicate::str::contains("\"instance_methods\""));
+}
+
+#[test]
+fn test_classes_command_pretty_output() {
+    // Test that classes command without --json produces pretty output
+    hug_cmd()
+        .args([
+            "classes",
+            "tree-hugger/lib/tests/fixtures/signatures.java",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(Java)"))
+        .stdout(predicate::str::contains("Signatures"));
+}
+
+#[test]
+fn test_classes_command_name_filter() {
+    // Test --name filter
+    hug_cmd()
+        .args([
+            "classes",
+            "tree-hugger/lib/tests/fixtures/signatures.java",
+            "--name",
+            "Signatures",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"Signatures\""));
+}
+
+#[test]
+fn test_classes_command_static_only_filter() {
+    // Test --static-only filter
+    hug_cmd()
+        .args([
+            "classes",
+            "tree-hugger/lib/tests/fixtures/signatures.java",
+            "--static-only",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"static_methods\""))
+        // Should have empty instance_methods array
+        .stdout(predicate::str::contains("\"instance_methods\": []"));
+}
+
+#[test]
+fn test_classes_command_instance_only_filter() {
+    // Test --instance-only filter
+    hug_cmd()
+        .args([
+            "classes",
+            "tree-hugger/lib/tests/fixtures/signatures.java",
+            "--instance-only",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"instance_methods\""))
+        // Should have empty static_methods array
+        .stdout(predicate::str::contains("\"static_methods\": []"));
+}
+
+#[test]
+fn test_classes_command_csharp() {
+    // Test classes command with C# file
+    hug_cmd()
+        .args([
+            "classes",
+            "tree-hugger/lib/tests/fixtures/signatures.cs",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"class\""))
+        .stdout(predicate::str::contains("\"Greeter\""));
+}
