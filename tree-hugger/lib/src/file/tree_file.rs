@@ -801,22 +801,37 @@ fn extract_ts_visibility(node: Node<'_>, source: &str) -> Option<Visibility> {
 ///   identifier
 ///   ...
 /// ```
+///
+/// In Java, interface members are implicitly public and cannot have explicit
+/// visibility modifiers. This function infers `Public` for members declared
+/// inside an interface.
 fn extract_java_visibility(node: Node<'_>, source: &str) -> Option<Visibility> {
-    let modifiers = find_child_by_kind(node, "modifiers")?;
-    let mut cursor = modifiers.walk();
-    for child in modifiers.children(&mut cursor) {
-        let text = child.utf8_text(source.as_bytes()).ok()?;
-        match text {
-            "public" => return Some(Visibility::Public),
-            "protected" => return Some(Visibility::Protected),
-            "private" => return Some(Visibility::Private),
-            _ => continue,
+    if let Some(modifiers) = find_child_by_kind(node, "modifiers") {
+        let mut cursor = modifiers.walk();
+        for child in modifiers.children(&mut cursor) {
+            let text = child.utf8_text(source.as_bytes()).ok()?;
+            match text {
+                "public" => return Some(Visibility::Public),
+                "protected" => return Some(Visibility::Protected),
+                "private" => return Some(Visibility::Private),
+                _ => continue,
+            }
         }
     }
+
+    // Java interface members are implicitly public
+    if is_inside_interface(node) {
+        return Some(Visibility::Public);
+    }
+
     None
 }
 
 /// Extracts visibility from C# method_declaration.
+///
+/// In C#, interface members are implicitly public and cannot have explicit
+/// visibility modifiers. This function infers `Public` for members declared
+/// inside an interface.
 fn extract_csharp_visibility(node: Node<'_>, source: &str) -> Option<Visibility> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -831,6 +846,12 @@ fn extract_csharp_visibility(node: Node<'_>, source: &str) -> Option<Visibility>
             }
         }
     }
+
+    // C# interface members are implicitly public
+    if is_inside_interface(node) {
+        return Some(Visibility::Public);
+    }
+
     None
 }
 
@@ -1963,6 +1984,22 @@ fn find_nth_child_by_kind<'a>(node: Node<'a>, kind: &str, n: usize) -> Option<No
     node.children(&mut cursor)
         .filter(|child| child.kind() == kind)
         .nth(n)
+}
+
+/// Checks if a node is inside an interface declaration.
+///
+/// Walks up the parent chain to find `interface_declaration` ancestors.
+/// Used to infer implicit public visibility for interface members in
+/// languages like C# and Java.
+fn is_inside_interface(node: Node<'_>) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "interface_declaration" {
+            return true;
+        }
+        current = parent.parent();
+    }
+    false
 }
 
 /// Finds a Rust type node among the children of a parameter or other node.

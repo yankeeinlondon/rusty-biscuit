@@ -1792,6 +1792,56 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
     Ok(())
 }
 
+#[test]
+fn infers_csharp_interface_method_visibility() -> Result<(), TreeHuggerError> {
+    // C# interface members are implicitly public
+    let tree_file = TreeFile::new(fixture_path("types.cs"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Find the interface method (line 19)
+    let interface_method = symbols
+        .iter()
+        .find(|s| s.name == "Greet" && s.kind == tree_hugger_lib::SymbolKind::Method && s.range.start_line == 19)
+        .expect("should find Greet method in interface");
+
+    let sig = interface_method
+        .signature
+        .as_ref()
+        .expect("interface method should have signature");
+    assert_eq!(
+        sig.visibility,
+        Some(tree_hugger_lib::Visibility::Public),
+        "C# interface method should have inferred Public visibility"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn infers_java_interface_method_visibility() -> Result<(), TreeHuggerError> {
+    // Java interface members are implicitly public
+    let tree_file = TreeFile::new(fixture_path("types.java"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Find the interface method (line 18)
+    let interface_method = symbols
+        .iter()
+        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Method && s.range.start_line == 18)
+        .expect("should find greet method in interface");
+
+    let sig = interface_method
+        .signature
+        .as_ref()
+        .expect("interface method should have signature");
+    assert_eq!(
+        sig.visibility,
+        Some(tree_hugger_lib::Visibility::Public),
+        "Java interface method should have inferred Public visibility"
+    );
+
+    Ok(())
+}
+
 // ============================================================================
 // Arrow function extraction tests
 // ============================================================================
