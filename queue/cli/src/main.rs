@@ -1,92 +1,135 @@
 mod tui;
 
-use std::process::{ExitStatus, Stdio};
-use std::time::Duration;
-
-use chrono::{DateTime, Duration as ChronoDuration, Local, NaiveTime, TimeZone};
-use clap::{ArgGroup, Parser};
-use queue_lib::{parse_at_time, parse_delay};
+use chrono::{Duration as ChronoDuration, Local, NaiveTime, TimeZone, Utc};
+use clap::Parser;
+use queue_lib::{parse_at_time, parse_delay, ExecutionTarget, ScheduledTask};
 use thiserror::Error;
-use tokio::process::Command;
-use tracing::{info, warn};
-use tracing_subscriber::EnvFilter;
 
 use crate::tui::{run_app, App};
 
-/// Queue commands for later execution.
+/// Queue commands for later execution with an interactive TUI.
+///
+/// All invocations open the TUI. Use --at or --in to pre-schedule a task.
 ///
 /// Examples:
-///   queue --tui                              # Launch interactive TUI
-///   queue --at 7:00am "so-you-say 'hi'"
-///   queue --in 15m "echo 'hi'"
-///   queue --at 7:00am "echo 'good morning'" --fg
+///   queue                                    # Open TUI
+///   queue --at 7:00am "echo 'good morning'"  # Open TUI with pre-scheduled task
+///   queue --in 15m "echo 'reminder'"         # Open TUI with task in 15 minutes
 #[derive(Debug, Parser)]
 #[command(name = "queue")]
-#[command(about = "Queue commands for later execution", long_about = None)]
-#[command(group(
-    ArgGroup::new("mode")
-        .required(true)
-        .multiple(false)
-        .args(["tui_mode", "at", "in_delay"])
-))]
+#[command(version)]
+#[command(about = "Queue commands for later execution with an interactive TUI")]
 struct Cli {
-    /// Launch the interactive TUI.
-    #[arg(long = "tui", id = "tui_mode")]
-    tui: bool,
-
     /// Schedule the command for the next occurrence of a time.
-    #[arg(long, value_parser = parse_at_time, value_name = "TIME")]
+    #[arg(long, value_parser = parse_at_time, value_name = "TIME", conflicts_with = "in_delay")]
     at: Option<NaiveTime>,
 
-    /// Schedule the command to run after a delay.
-    #[arg(long = "in", value_parser = parse_delay, value_name = "DELAY")]
+    /// Schedule the command to run after a delay (e.g., 15m, 2h30m).
+    #[arg(long = "in", value_parser = parse_delay, value_name = "DELAY", conflicts_with = "at")]
     in_delay: Option<ChronoDuration>,
 
-    /// Run the command in the foreground and wait for completion.
-    #[arg(long)]
-    fg: bool,
-
-    /// Enable INFO-level logging.
+    /// Enable debug logging to ~/.queue-debug.log.
     #[arg(long)]
     debug: bool,
 
-    /// The raw shell command to schedule.
-    #[arg(value_name = "COMMAND", required_unless_present = "tui_mode")]
+    /// The shell command to schedule (required with --at or --in).
+    #[arg(value_name = "COMMAND", required_if_eq_any = [("at", ""), ("in_delay", "")])]
     command: Option<String>,
 }
 
 #[derive(Debug, Error)]
 enum QueueError {
-    #[error("failed to convert schedule to a duration")]
-    InvalidSchedule,
-
-    #[error("failed to start command: {0}")]
-    CommandStart(#[from] std::io::Error),
-
-    #[error("command exited with status {0}")]
-    CommandFailed(ExitStatus),
-
     #[error("TUI error: {0}")]
     TuiError(std::io::Error),
+
+    #[error("debug log error: {0}")]
+    DebugLogError(std::io::Error),
 }
 
 fn main() -> Result<(), QueueError> {
     let cli = Cli::parse();
 
-    if cli.tui {
-        run_tui()
-    } else {
-        init_tracing(cli.debug);
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create tokio runtime")
-            .block_on(run(cli))
+    // Set up debug logging if requested
+    if cli.debug {
+        init_debug_logging()?;
     }
+
+    // Build the initial task if --at or --in was provided
+    let initial_task = build_initial_task(&cli);
+
+    run_tui(initial_task)
+}
+
+/// Builds an initial task from CLI arguments.
+fn build_initial_task(cli: &Cli) -> Option<ScheduledTask> {
+    let command = cli.command.as_ref()?;
+    let now = Local::now();
+
+    let scheduled_at = match (cli.at, cli.in_delay) {
+        (Some(time), None) => {
+            // Schedule for the specified time
+            let today = now.date_naive();
+            let mut scheduled = today.and_time(time);
+
+            // If the time is in the past, schedule for tomorrow
+            if scheduled <= now.naive_local() {
+                scheduled += ChronoDuration::days(1);
+            }
+
+            Local
+                .from_local_datetime(&scheduled)
+                .single()
+                .map(|dt| dt.with_timezone(&Utc))
+        }
+        (None, Some(delay)) => {
+            // Schedule after the delay
+            Some((now + delay).with_timezone(&Utc))
+        }
+        _ => None,
+    }?;
+
+    Some(ScheduledTask::new(
+        1,
+        command.clone(),
+        scheduled_at,
+        ExecutionTarget::default(),
+    ))
+}
+
+/// Initializes debug logging to ~/.queue-debug.log.
+fn init_debug_logging() -> Result<(), QueueError> {
+    use std::fs::OpenOptions;
+    use tracing_subscriber::EnvFilter;
+
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    let log_path = home.join(".queue-debug.log");
+
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(QueueError::DebugLogError)?;
+
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::new("debug"))
+        .with_writer(file)
+        .with_ansi(false)
+        .init();
+
+    Ok(())
 }
 
 /// Runs the TUI application with proper terminal setup and cleanup.
-fn run_tui() -> Result<(), QueueError> {
+fn run_tui(initial_task: Option<ScheduledTask>) -> Result<(), QueueError> {
+    // Build a tokio runtime for the executor
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+
+    // Enter the runtime context for the executor to spawn tasks
+    let _guard = runtime.enter();
+
     // Set up panic hook for terminal cleanup
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -97,8 +140,14 @@ fn run_tui() -> Result<(), QueueError> {
     // Initialize terminal
     let mut terminal = ratatui::init();
 
-    // Create app and run
-    let mut app = App::new();
+    // Create app with executor
+    let mut app = App::new().with_executor();
+
+    // Add initial task if provided
+    if let Some(task) = initial_task {
+        app.schedule_task(task);
+    }
+
     let result = run_app(&mut terminal, &mut app);
 
     // Restore terminal
@@ -107,156 +156,75 @@ fn run_tui() -> Result<(), QueueError> {
     result.map_err(QueueError::TuiError)
 }
 
-fn init_tracing(debug: bool) {
-    let filter = if debug { "info" } else { "warn" };
-
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new(filter))
-        .init();
-}
-
-#[tracing::instrument(skip(cli))]
-async fn run(cli: Cli) -> Result<(), QueueError> {
-    // command is guaranteed to be Some when not in TUI mode (due to required_unless_present)
-    let command = cli.command.as_ref().expect("command required in CLI mode");
-
-    let scheduled_at = schedule_time(&cli)?;
-    let now = Local::now();
-    let wait_duration = scheduled_at.signed_duration_since(now);
-    let wait_duration = wait_duration
-        .to_std()
-        .map_err(|_| QueueError::InvalidSchedule)?;
-
-    info!(scheduled_at = %scheduled_at, "scheduled command");
-
-    if cli.fg {
-        if !wait_duration.is_zero() {
-            info!(
-                wait_seconds = wait_duration.as_secs(),
-                "waiting for schedule"
-            );
-            tokio::time::sleep(wait_duration).await;
-        }
-
-        run_command_foreground(command).await
-    } else {
-        run_command_background(command, wait_duration)
-    }
-}
-
-fn schedule_time(cli: &Cli) -> Result<DateTime<Local>, QueueError> {
-    let now = Local::now();
-
-    match (cli.at, cli.in_delay) {
-        (Some(time), None) => schedule_for_time(now, time),
-        (None, Some(delay)) => Ok(now + delay),
-        _ => Err(QueueError::InvalidSchedule),
-    }
-}
-
-fn schedule_for_time(now: DateTime<Local>, time: NaiveTime) -> Result<DateTime<Local>, QueueError> {
-    let today = now.date_naive();
-    let mut scheduled = today.and_time(time);
-
-    if scheduled <= now.naive_local() {
-        scheduled += ChronoDuration::days(1);
-    }
-
-    Local
-        .from_local_datetime(&scheduled)
-        .single()
-        .ok_or(QueueError::InvalidSchedule)
-}
-
-#[tracing::instrument(skip(command), fields(command = %command))]
-async fn run_command_foreground(command: &str) -> Result<(), QueueError> {
-    let mut child = Command::new("/bin/sh")
-        .arg("-c")
-        .arg(command)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-
-    let status = child.wait().await?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(QueueError::CommandFailed(status))
-    }
-}
-
-#[tracing::instrument(skip(command), fields(command = %command))]
-fn run_command_background(command: &str, wait_duration: Duration) -> Result<(), QueueError> {
-    let shell_command = if wait_duration.is_zero() {
-        format!("exec {command}")
-    } else {
-        let wait_seconds = wait_duration.as_secs_f64();
-        format!("sleep {wait_seconds:.3}; exec {command}")
-    };
-
-    let child = Command::new("/bin/sh")
-        .arg("-c")
-        .arg(shell_command)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-
-    if let Some(pid) = child.id() {
-        info!(pid, "spawned background command");
-    } else {
-        warn!("spawned background command without pid");
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn clap_requires_mode_argument() {
-        // Neither --tui nor --at/--in provided
-        let result = Cli::try_parse_from(["queue", "echo hi"]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn clap_rejects_multiple_modes() {
-        let result = Cli::try_parse_from(["queue", "--at", "7:00am", "--in", "15m", "echo hi"]);
-        assert!(result.is_err());
-
-        let result = Cli::try_parse_from(["queue", "--tui", "--at", "7:00am"]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn clap_accepts_tui_mode() {
-        let result = Cli::try_parse_from(["queue", "--tui"]);
+    fn clap_accepts_no_args() {
+        // Plain `queue` opens TUI with no pre-scheduled task
+        let result = Cli::try_parse_from(["queue"]);
         assert!(result.is_ok());
         let cli = result.unwrap();
-        assert!(cli.tui);
+        assert!(cli.at.is_none());
+        assert!(cli.in_delay.is_none());
         assert!(cli.command.is_none());
     }
 
     #[test]
-    fn clap_requires_command_for_schedule_mode() {
-        let result = Cli::try_parse_from(["queue", "--at", "7:00am"]);
-        assert!(result.is_err());
-
-        let result = Cli::try_parse_from(["queue", "--in", "15m"]);
+    fn clap_rejects_conflicting_schedule_modes() {
+        // Cannot specify both --at and --in
+        let result = Cli::try_parse_from(["queue", "--at", "7:00am", "--in", "15m", "echo hi"]);
         assert!(result.is_err());
     }
 
     #[test]
-    fn clap_accepts_schedule_with_command() {
+    fn clap_accepts_at_with_command() {
         let result = Cli::try_parse_from(["queue", "--at", "7:00am", "echo hi"]);
         assert!(result.is_ok());
         let cli = result.unwrap();
-        assert!(!cli.tui);
+        assert!(cli.at.is_some());
         assert_eq!(cli.command, Some("echo hi".to_string()));
+    }
+
+    #[test]
+    fn clap_accepts_in_with_command() {
+        let result = Cli::try_parse_from(["queue", "--in", "15m", "echo hi"]);
+        assert!(result.is_ok());
+        let cli = result.unwrap();
+        assert!(cli.in_delay.is_some());
+        assert_eq!(cli.command, Some("echo hi".to_string()));
+    }
+
+    #[test]
+    fn clap_accepts_debug_flag() {
+        let result = Cli::try_parse_from(["queue", "--debug"]);
+        assert!(result.is_ok());
+        let cli = result.unwrap();
+        assert!(cli.debug);
+    }
+
+    #[test]
+    fn build_initial_task_returns_none_without_schedule() {
+        let cli = Cli::try_parse_from(["queue"]).unwrap();
+        assert!(build_initial_task(&cli).is_none());
+    }
+
+    #[test]
+    fn build_initial_task_returns_task_with_at() {
+        let cli = Cli::try_parse_from(["queue", "--at", "7:00am", "echo hello"]).unwrap();
+        let task = build_initial_task(&cli);
+        assert!(task.is_some());
+        let task = task.unwrap();
+        assert_eq!(task.command, "echo hello");
+    }
+
+    #[test]
+    fn build_initial_task_returns_task_with_in() {
+        let cli = Cli::try_parse_from(["queue", "--in", "15m", "echo hello"]).unwrap();
+        let task = build_initial_task(&cli);
+        assert!(task.is_some());
+        let task = task.unwrap();
+        assert_eq!(task.command, "echo hello");
     }
 }

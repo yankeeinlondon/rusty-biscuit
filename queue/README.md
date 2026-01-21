@@ -1,43 +1,123 @@
 # Queue
 
-A CLI which queues jobs to be started at some future time.
+A TUI-based command scheduler that queues jobs for later execution.
 
-Example usage:
+## Installation
 
 ```sh
-# run the command `so-you-say 'hi'` at 7:00am
-queue --at 7:00am "so-you-say 'hi'"
-# run the command `echo 'hi'` in 15 minutes
-queue --in 15m "so-you-say 'hi'"
-# run the shell command `echo 'hi'` in 15 minutes; keep in the foreground
-queue --in 15m "echo 'good morning'" --fg
+cargo install --path cli
 ```
 
-All queued commands share the current terminal's STDOUT and STDERR. By default the scheduler returns control immediately and runs the command in the background at the scheduled time; use `--fg` to wait for completion. Times are interpreted in the local timezone. Use `--debug` to emit INFO-level logs; default logging is WARN only.
+## Usage
 
-## `--at` switch
+All invocations open an interactive TUI. You can optionally pre-schedule a task from the command line:
 
-The `--at` switch takes:
+```sh
+# Open the TUI with an empty task list
+queue
 
-- a `time` (for example `7:00am`, `07:00`, or `19:30`)
-- and a `command` parameter
+# Open the TUI with a task scheduled for 7:00am
+queue --at 7:00am "so-you-say 'good morning'"
 
-## `--in` switch
+# Open the TUI with a task scheduled in 15 minutes
+queue --in 15m "echo 'reminder'"
+```
 
-The `--in` switch takes:
+### Flags
 
-- a `delay` which can be in seconds, minutes, hours, or days
-- a `command` parameter
+| Flag | Description |
+|------|-------------|
+| `--at TIME` | Pre-schedule a command for a specific time |
+| `--in DELAY` | Pre-schedule a command after a delay |
+| `--debug` | Enable debug logging to `~/.queue-debug.log` |
+| `--version` | Display version and exit |
+| `--help` | Display help and exit |
 
-Delay units are:
+## TUI Keyboard Shortcuts
 
-- if no unit is specified it is defaulted to minutes
-- seconds represented by `s`
-- minutes represented by `m`
-- hours represented by `h`
-- days represented by `d`
+### Main Window
 
-You can add a space between the numeric value and the unit:
+| Key | Action |
+|-----|--------|
+| `Q` | Quit (with confirmation) |
+| `Esc` | Quit immediately |
+| `N` | New task (opens input modal) |
+| `E` | Edit selected task |
+| `R` | Remove mode |
+| `X` | Cancel selected pending task |
+| `H` | History (opens history modal) |
+| `↑` / `k` | Select previous task |
+| `↓` / `j` | Select next task |
 
-- `1m` and `1 m` are both 1 minute delays
+### Input Modal
 
+| Key | Action |
+|-----|--------|
+| `Tab` | Next field |
+| `Shift+Tab` | Previous field |
+| `Enter` | Submit form |
+| `Esc` | Cancel |
+| `Space` | Toggle selector fields |
+| `←` / `→` | Move cursor / toggle selectors |
+
+### History Modal
+
+| Key | Action |
+|-----|--------|
+| `↑` / `k` | Select previous |
+| `↓` / `j` | Select next |
+| `Enter` | Use selected command |
+| `N` | Create new task from selected |
+| `F` / `/` | Filter mode |
+| `Esc` | Close modal |
+
+## Time Formats
+
+The `--at` flag accepts:
+
+- 12-hour format: `7:00am`, `11:30pm`
+- 24-hour format: `19:30`, `07:00`
+
+## Delay Formats
+
+The `--in` flag accepts delays with optional units:
+
+| Unit | Example | Description |
+|------|---------|-------------|
+| (none) | `15` | 15 minutes (default) |
+| `s` | `30s` | 30 seconds |
+| `m` | `5m` | 5 minutes |
+| `h` | `2h` | 2 hours |
+| `d` | `1d` | 1 day |
+
+## Execution Targets
+
+Tasks can execute in different environments:
+
+- **Pane**: Opens in a new Wezterm pane (default in Wezterm)
+- **Window**: Opens in a new terminal window (Terminal.app, iTerm2, etc.)
+- **Background**: Runs detached (no terminal output)
+
+## Architecture
+
+The queue package is split into two crates:
+
+- **queue-lib**: Core library with data types, persistence, and execution
+- **queue-cli**: TUI application and CLI interface
+
+## Development
+
+```sh
+# Build
+cargo build -p queue-cli
+
+# Test
+cargo test -p queue-lib
+cargo test -p queue-cli
+
+# Lint
+cargo clippy -p queue-lib -p queue-cli
+
+# Generate documentation
+cargo doc -p queue-lib -p queue-cli --no-deps
+```

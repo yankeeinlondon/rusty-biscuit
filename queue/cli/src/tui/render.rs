@@ -100,6 +100,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
                 ("N", "New"),
                 ("E", "Edit"),
                 ("R", "Remove"),
+                ("X", "Cancel"),
                 ("H", "History"),
                 ("\u{2191}\u{2193}", "Navigate"),
             ],
@@ -312,5 +313,95 @@ mod tests {
         task.mark_failed("error");
         let style = task_style(&task);
         assert_eq!(style, Style::default().fg(Color::Red));
+    }
+
+    #[test]
+    fn render_produces_output_with_empty_task_list() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not fail");
+
+        let buffer = terminal.backend().buffer();
+        // Verify the header is rendered
+        let first_row = buffer
+            .content
+            .iter()
+            .take(80)
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(first_row.contains("Tasks"));
+    }
+
+    #[test]
+    fn render_shows_tasks_in_table() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tasks.push(ScheduledTask::new(
+            1,
+            "echo hello".to_string(),
+            Utc::now() + Duration::minutes(15),
+            ExecutionTarget::Background,
+        ));
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not fail");
+
+        // Convert buffer to string for inspection
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        assert!(content.contains("echo hello"));
+        assert!(content.contains("bg"));
+    }
+
+    #[test]
+    fn render_shows_footer_shortcuts() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not fail");
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        // Footer should show keyboard shortcuts
+        assert!(content.contains("Quit"));
+        assert!(content.contains("New"));
+        assert!(content.contains("Navigate"));
+    }
+
+    #[test]
+    fn render_shows_confirm_quit_modal() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.mode = AppMode::ConfirmQuit;
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not fail");
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        assert!(content.contains("Quit"));
     }
 }

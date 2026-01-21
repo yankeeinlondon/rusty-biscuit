@@ -173,4 +173,71 @@ mod tests {
         assert!(parse_delay("").is_err());
         assert!(parse_delay("   ").is_err());
     }
+
+    #[test]
+    fn parse_at_time_accepts_pm_times() {
+        let time = parse_at_time("11:30pm").expect("valid time");
+        assert_eq!(time, NaiveTime::from_hms_opt(23, 30, 0).expect("time"));
+
+        let time = parse_at_time("7:30pm").expect("valid time");
+        assert_eq!(time, NaiveTime::from_hms_opt(19, 30, 0).expect("time"));
+    }
+
+    #[test]
+    fn parse_at_time_accepts_midnight_and_noon() {
+        let time = parse_at_time("12:00am").expect("valid time");
+        assert_eq!(time, NaiveTime::from_hms_opt(0, 0, 0).expect("time"));
+
+        let time = parse_at_time("12:00pm").expect("valid time");
+        assert_eq!(time, NaiveTime::from_hms_opt(12, 0, 0).expect("time"));
+    }
+
+    #[test]
+    fn parse_at_time_trims_whitespace() {
+        let time = parse_at_time("  7:00am  ").expect("valid time");
+        assert_eq!(time, NaiveTime::from_hms_opt(7, 0, 0).expect("time"));
+    }
+
+    #[test]
+    fn parse_at_time_is_case_insensitive() {
+        let time = parse_at_time("7:00AM").expect("valid time");
+        assert_eq!(time, NaiveTime::from_hms_opt(7, 0, 0).expect("time"));
+
+        let time = parse_at_time("7:00Pm").expect("valid time");
+        assert_eq!(time, NaiveTime::from_hms_opt(19, 0, 0).expect("time"));
+    }
+
+    #[test]
+    fn parse_at_time_rejects_invalid() {
+        assert!(parse_at_time("invalid").is_err());
+        assert!(parse_at_time("25:00").is_err());
+        assert!(parse_at_time("13:00am").is_err());
+    }
+
+    #[test]
+    fn parse_delay_trims_whitespace() {
+        let delay = parse_delay("  15m  ").expect("valid delay");
+        assert_eq!(delay, ChronoDuration::minutes(15));
+    }
+
+    #[test]
+    fn parse_delay_is_case_insensitive() {
+        let delay = parse_delay("15M").expect("valid delay");
+        assert_eq!(delay, ChronoDuration::minutes(15));
+
+        let delay = parse_delay("2H").expect("valid delay");
+        assert_eq!(delay, ChronoDuration::hours(2));
+    }
+
+    #[test]
+    fn parse_delay_handles_large_values() {
+        let delay = parse_delay("1000").expect("valid delay");
+        assert_eq!(delay, ChronoDuration::minutes(1000));
+    }
+
+    #[test]
+    fn parse_delay_rejects_no_number() {
+        assert!(parse_delay("m").is_err());
+        assert!(parse_delay("h").is_err());
+    }
 }

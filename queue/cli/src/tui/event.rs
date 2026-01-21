@@ -107,6 +107,16 @@ fn handle_normal_mode(app: &mut App, key: KeyCode) {
             app.mode = AppMode::HistoryModal;
         }
 
+        // Cancel selected pending task
+        KeyCode::Char('x') | KeyCode::Char('X') => {
+            if let Some(task) = app.selected_task() {
+                let task_id = task.id;
+                if task.is_pending() {
+                    app.cancel_task(task_id);
+                }
+            }
+        }
+
         _ => {}
     }
 }
@@ -196,7 +206,7 @@ fn handle_input_modal(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
                         task.target = modal.target;
                     }
                 } else {
-                    // Create new task
+                    // Create new task and schedule it with the executor
                     let id = app.tasks.iter().map(|t| t.id).max().unwrap_or(0) + 1;
                     let task = queue_lib::ScheduledTask::new(
                         id,
@@ -204,7 +214,7 @@ fn handle_input_modal(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
                         scheduled_at,
                         modal.target,
                     );
-                    app.tasks.push(task);
+                    app.schedule_task(task);
                 }
 
                 app.input_modal = None;
@@ -639,5 +649,38 @@ mod tests {
         assert!(!app.history_modal.as_ref().unwrap().filter_mode);
         input(&mut app, KeyCode::Char('f'));
         assert!(app.history_modal.as_ref().unwrap().filter_mode);
+    }
+
+    #[test]
+    fn normal_mode_x_cancels_pending_task() {
+        use chrono::Utc;
+        use queue_lib::{ExecutionTarget, ScheduledTask};
+
+        let mut app = App::new();
+        app.tasks = vec![
+            ScheduledTask::new(1, "a".into(), Utc::now(), ExecutionTarget::default()),
+            ScheduledTask::new(2, "b".into(), Utc::now(), ExecutionTarget::default()),
+        ];
+        app.selected_index = 1;
+        app.table_state.select(Some(1));
+
+        assert_eq!(app.tasks.len(), 2);
+        input(&mut app, KeyCode::Char('x'));
+        assert_eq!(app.tasks.len(), 1);
+        assert_eq!(app.tasks[0].id, 1); // Task 2 was removed
+    }
+
+    #[test]
+    fn normal_mode_x_does_not_cancel_running_task() {
+        use chrono::Utc;
+        use queue_lib::{ExecutionTarget, ScheduledTask};
+
+        let mut app = App::new();
+        let mut task = ScheduledTask::new(1, "a".into(), Utc::now(), ExecutionTarget::default());
+        task.mark_running();
+        app.tasks.push(task);
+
+        input(&mut app, KeyCode::Char('x'));
+        assert_eq!(app.tasks.len(), 1); // Task not cancelled
     }
 }

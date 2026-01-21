@@ -1,6 +1,6 @@
 //! Application state for the TUI.
 
-use queue_lib::{ScheduledTask, TaskStatus};
+use queue_lib::{ScheduledTask, TaskEvent, TaskExecutor};
 use ratatui::widgets::TableState;
 use tokio::sync::mpsc;
 
@@ -13,7 +13,7 @@ pub enum AppMode {
     /// Normal mode - standard navigation and commands.
     #[default]
     Normal,
-    /// Edit mode - modifying a selected task (Phase 7b).
+    /// Edit mode - modifying a selected task.
     #[allow(dead_code)]
     EditMode,
     /// Remove mode - confirming task removal.
@@ -24,22 +24,6 @@ pub enum AppMode {
     HistoryModal,
     /// Confirm quit - awaiting Y/N to exit.
     ConfirmQuit,
-}
-
-/// Events from the task executor to update TUI state.
-///
-/// Used in Phase 7b for TUI-Executor integration.
-#[allow(dead_code)]
-pub enum TaskEvent {
-    /// A task's status has changed.
-    StatusChanged {
-        /// The task ID.
-        id: u64,
-        /// The new status.
-        status: TaskStatus,
-    },
-    /// A new task was added.
-    TaskAdded(ScheduledTask),
 }
 
 /// TUI application state.
@@ -54,6 +38,8 @@ pub struct App {
     pub should_quit: bool,
     /// Receiver for task events from the executor.
     pub event_rx: Option<mpsc::Receiver<TaskEvent>>,
+    /// Task executor for scheduling tasks.
+    pub executor: Option<TaskExecutor>,
     /// State for the task table widget (tracks selection for rendering).
     pub table_state: TableState,
     /// Input modal state (present when InputModal mode is active).
@@ -80,17 +66,50 @@ impl App {
             selected_index: 0,
             should_quit: false,
             event_rx: None,
+            executor: None,
             table_state,
             input_modal: None,
             history_modal: None,
         }
     }
 
-    /// Sets the event receiver for task updates (Phase 7b).
-    #[allow(dead_code)]
-    pub fn with_event_receiver(mut self, rx: mpsc::Receiver<TaskEvent>) -> Self {
+    /// Initializes the app with an executor and event channel.
+    ///
+    /// This sets up the task execution infrastructure for scheduling
+    /// and receiving status updates.
+    pub fn with_executor(mut self) -> Self {
+        let (tx, rx) = mpsc::channel(100);
         self.event_rx = Some(rx);
+        self.executor = Some(TaskExecutor::new(tx));
         self
+    }
+
+    /// Schedules a task for execution with the executor.
+    ///
+    /// If no executor is configured, the task is added but not scheduled.
+    pub fn schedule_task(&mut self, task: ScheduledTask) {
+        if let Some(ref executor) = self.executor {
+            executor.schedule(task.clone());
+        }
+        self.tasks.push(task);
+    }
+
+    /// Cancels a pending task by removing it from the list.
+    ///
+    /// Only pending tasks can be cancelled. Returns true if the task was
+    /// cancelled, false if the task was not found or not pending.
+    pub fn cancel_task(&mut self, id: u64) -> bool {
+        if let Some(pos) = self.tasks.iter().position(|t| t.id == id && t.is_pending()) {
+            self.tasks.remove(pos);
+            // Adjust selection if needed
+            if self.selected_index >= self.tasks.len() && !self.tasks.is_empty() {
+                self.selected_index = self.tasks.len() - 1;
+                self.table_state.select(Some(self.selected_index));
+            }
+            true
+        } else {
+            false
+        }
     }
 
     /// Selects the next task in the list (wraps around).
@@ -122,9 +141,6 @@ impl App {
                     task.status = status;
                 }
             }
-            TaskEvent::TaskAdded(task) => {
-                self.tasks.push(task);
-            }
         }
     }
 }
@@ -133,7 +149,7 @@ impl App {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use queue_lib::ExecutionTarget;
+    use queue_lib::{ExecutionTarget, TaskStatus};
 
     fn make_task(id: u64, command: &str) -> ScheduledTask {
         ScheduledTask::new(
@@ -247,14 +263,65 @@ mod tests {
     }
 
     #[test]
-    fn handle_task_added_appends_task() {
+    fn schedule_task_adds_to_list() {
         let mut app = App::new();
         assert!(app.tasks.is_empty());
 
         let task = make_task(1, "new task");
-        app.handle_task_event(TaskEvent::TaskAdded(task));
+        app.schedule_task(task);
 
         assert_eq!(app.tasks.len(), 1);
         assert_eq!(app.tasks[0].command, "new task");
+    }
+
+    #[test]
+    fn cancel_task_removes_pending_task() {
+        let mut app = App::new();
+        app.tasks = vec![make_task(1, "a"), make_task(2, "b"), make_task(3, "c")];
+
+        assert!(app.cancel_task(2));
+        assert_eq!(app.tasks.len(), 2);
+        assert!(app.tasks.iter().all(|t| t.id != 2));
+    }
+
+    #[test]
+    fn cancel_task_returns_false_for_unknown_id() {
+        let mut app = App::new();
+        app.tasks = vec![make_task(1, "a")];
+
+        assert!(!app.cancel_task(999));
+        assert_eq!(app.tasks.len(), 1);
+    }
+
+    #[test]
+    fn cancel_task_adjusts_selection() {
+        let mut app = App::new();
+        app.tasks = vec![make_task(1, "a"), make_task(2, "b")];
+        app.selected_index = 1;
+        app.table_state.select(Some(1));
+
+        assert!(app.cancel_task(2));
+        // Selection should adjust to the last valid index
+        assert_eq!(app.selected_index, 0);
+        assert_eq!(app.table_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn cancel_task_fails_for_non_pending() {
+        let mut app = App::new();
+        let mut task = make_task(1, "a");
+        task.mark_running();
+        app.tasks.push(task);
+
+        // Cannot cancel a running task
+        assert!(!app.cancel_task(1));
+        assert_eq!(app.tasks.len(), 1);
+    }
+
+    #[test]
+    fn with_executor_sets_up_channel() {
+        let app = App::new().with_executor();
+        assert!(app.event_rx.is_some());
+        assert!(app.executor.is_some());
     }
 }
