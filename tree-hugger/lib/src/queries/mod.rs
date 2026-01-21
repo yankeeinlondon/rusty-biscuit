@@ -77,11 +77,16 @@ fn resolve_query_text(
     language: ProgrammingLanguage,
     kind: QueryKind,
 ) -> Result<String, TreeHuggerError> {
-    if matches!(
-        kind,
-        QueryKind::Lint | QueryKind::Syntax | QueryKind::DeadCode
-    ) {
+    // Syntax and DeadCode queries are not yet implemented
+    if matches!(kind, QueryKind::Syntax | QueryKind::DeadCode) {
         return Ok(String::new());
+    }
+
+    // Lint queries come from language-specific directories
+    if kind == QueryKind::Lint {
+        return Ok(lint_query_by_name(language.query_name())
+            .unwrap_or("")
+            .to_string());
     }
 
     let mut visited = HashSet::new();
@@ -168,5 +173,60 @@ fn vendor_locals_by_name(name: &str) -> Option<&'static str> {
         "ecma" => Some(include_str!("../../queries/vendor/ecma/locals.scm")),
         "php_only" => Some(include_str!("../../queries/vendor/php_only/locals.scm")),
         _ => None,
+    }
+}
+
+/// Loads lint query for a language from the language-specific directory.
+fn lint_query_by_name(name: &str) -> Option<&'static str> {
+    match name {
+        "rust" => Some(include_str!("../../queries/rust/lint.scm")),
+        "javascript" => Some(include_str!("../../queries/javascript/lint.scm")),
+        "typescript" => Some(include_str!("../../queries/typescript/lint.scm")),
+        "go" => Some(include_str!("../../queries/go/lint.scm")),
+        "python" => Some(include_str!("../../queries/python/lint.scm")),
+        "java" => Some(include_str!("../../queries/java/lint.scm")),
+        "php" => Some(include_str!("../../queries/php/lint.scm")),
+        "perl" => Some(include_str!("../../queries/perl/lint.scm")),
+        "bash" => Some(include_str!("../../queries/bash/lint.scm")),
+        "zsh" => Some(include_str!("../../queries/zsh/lint.scm")),
+        "c" => Some(include_str!("../../queries/c/lint.scm")),
+        "cpp" => Some(include_str!("../../queries/cpp/lint.scm")),
+        "c_sharp" => Some(include_str!("../../queries/c_sharp/lint.scm")),
+        "swift" => Some(include_str!("../../queries/swift/lint.scm")),
+        "scala" => Some(include_str!("../../queries/scala/lint.scm")),
+        "lua" => Some(include_str!("../../queries/lua/lint.scm")),
+        _ => None,
+    }
+}
+
+use crate::shared::DiagnosticSeverity;
+
+/// Maps rule IDs to their severity level.
+pub fn severity_for_rule(rule_id: &str) -> DiagnosticSeverity {
+    match rule_id {
+        // Error-level rules
+        "unreachable-code" | "invalid-syntax" | "undefined-variable" => DiagnosticSeverity::Error,
+        // Warning-level rules
+        "unused-variable" | "shadowed-variable" | "unwrap-call" | "empty-block"
+        | "deprecated-syntax" => DiagnosticSeverity::Warning,
+        // Default to info
+        _ => DiagnosticSeverity::Info,
+    }
+}
+
+/// Generates a human-readable message for a lint rule.
+pub fn format_rule_message(rule_id: &str) -> String {
+    match rule_id {
+        "todo-comment" => "TODO/FIXME comment found".to_string(),
+        "empty-block" => "Empty code block".to_string(),
+        "unused-variable" => "Potentially unused variable".to_string(),
+        "shadowed-variable" => "Variable shadows outer binding".to_string(),
+        "unwrap-call" => "Explicit unwrap() call".to_string(),
+        "unreachable-code" => "Unreachable code detected".to_string(),
+        "deprecated-syntax" => "Deprecated syntax".to_string(),
+        "debug-print" => "Debug print statement".to_string(),
+        "fixme-comment" => "FIXME comment found".to_string(),
+        "hack-comment" => "HACK comment found".to_string(),
+        _ => format!("Lint rule: {rule_id}"),
     }
 }

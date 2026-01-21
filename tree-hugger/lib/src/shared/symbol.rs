@@ -285,6 +285,20 @@ pub struct CodeRange {
     pub end_byte: usize,
 }
 
+/// Context for displaying diagnostic source location.
+///
+/// Stores the line text and underline position for rendering diagnostics
+/// with visual markers pointing to the problematic code.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceContext {
+    /// The full line of source text containing the diagnostic.
+    pub line_text: String,
+    /// Zero-based column offset where the underline starts.
+    pub underline_column: usize,
+    /// Length of the underline (matched text).
+    pub underline_length: usize,
+}
+
 /// A code block captured from a file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodeBlock {
@@ -549,7 +563,11 @@ pub struct LintDiagnostic {
     pub message: String,
     pub range: CodeRange,
     pub severity: DiagnosticSeverity,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rule: Option<String>,
+    /// Source context for displaying the diagnostic with visual markers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<SourceContext>,
 }
 
 /// A syntax diagnostic derived from parse errors.

@@ -12,24 +12,24 @@ tree-hugger
 
 ## Supported Languages
 
-| Language   | Functions | Types | Imports | Exports | Type Distinction |
-|------------|:---------:|:-----:|:-------:|:-------:|------------------|
-| Rust       | Yes | Yes | Yes | Yes | struct, enum, trait |
-| TypeScript | Yes | Yes | Yes | Yes | type, interface, enum, class |
-| JavaScript | Yes | Yes | Yes | Yes | class |
-| Go         | Yes | Yes | Yes | - | type (struct/interface) |
-| Python     | Yes | Yes | Yes | - | class |
-| Java       | Yes | Yes | Yes | - | class, enum, record |
-| C#         | Yes | Yes | - | - | class, struct, interface, enum, record |
-| C          | Yes | Yes | - | - | struct, enum |
-| C++        | Yes | Yes | - | - | class, struct, enum |
-| Swift      | Yes | Yes | Yes | - | type, interface (protocol) |
-| Scala      | Yes | Yes | - | - | class, trait, module, enum |
-| PHP        | Yes | Yes | - | - | class, interface, trait, enum |
-| Perl       | Yes | - | - | - | (minimal support) |
-| Bash       | Yes | - | - | - | - |
-| Zsh        | Yes | - | - | - | - |
-| Lua        | Yes | - | - | - | - |
+| Language   | Functions | Types | Imports | Exports | Type Distinction                       |
+|------------|:---------:|:-----:|:-------:|:-------:|----------------------------------------|
+| Rust       | Yes       | Yes   | Yes     | Yes     | struct, enum, trait                    |
+| TypeScript | Yes       | Yes   | Yes     | Yes     | type, interface, enum, class           |
+| JavaScript | Yes       | Yes   | Yes     | Yes     | class                                  |
+| Go         | Yes       | Yes   | Yes     | -       | type (struct/interface)                |
+| Python     | Yes       | Yes   | Yes     | -       | class                                  |
+| Java       | Yes       | Yes   | Yes     | -       | class, enum, record                    |
+| C#         | Yes       | Yes   | -       | -       | class, struct, interface, enum, record |
+| C          | Yes       | Yes   | -       | -       | struct, enum                           |
+| C++        | Yes       | Yes   | -       | -       | class, struct, enum                    |
+| Swift      | Yes       | Yes   | Yes     | -       | type, interface (protocol)             |
+| Scala      | Yes       | Yes   | -       | -       | class, trait, module, enum             |
+| PHP        | Yes       | Yes   | -       | -       | class, interface, trait, enum          |
+| Perl       | Yes       | -     | -       | -       | (minimal support)                      |
+| Bash       | Yes       | -     | -       | -       | -                                      |
+| Zsh        | Yes       | -     | -       | -       | -                                      |
+| Lua        | Yes       | -     | -       | -       | -                                      |
 
 ## Symbol Kinds
 
@@ -128,18 +128,18 @@ Each `FileSummary` includes:
 Tree Hugger vendors `nvim-treesitter` query files in `tree-hugger/lib/queries/vendor/<lang>/` and uses
 `locals.scm` for symbol discovery and imports. Captures follow a naming scheme including:
 
-| Capture | SymbolKind |
-|---------|------------|
-| `@local.definition.function` | Function |
-| `@local.definition.method` | Method |
-| `@local.definition.type` | Type |
-| `@local.definition.class` | Class |
-| `@local.definition.interface` | Interface |
-| `@local.definition.enum` | Enum |
-| `@local.definition.trait` | Trait |
-| `@local.definition.module` | Module |
-| `@local.definition.namespace` | Namespace |
-| `@local.definition.import` | (imports) |
+| Capture                       | SymbolKind |
+|-------------------------------|------------|
+| `@local.definition.function`  | Function   |
+| `@local.definition.method`    | Method     |
+| `@local.definition.type`      | Type       |
+| `@local.definition.class`     | Class      |
+| `@local.definition.interface` | Interface  |
+| `@local.definition.enum`      | Enum       |
+| `@local.definition.trait`     | Trait      |
+| `@local.definition.module`    | Module     |
+| `@local.definition.namespace` | Namespace  |
+| `@local.definition.import`    | (imports)  |
 
 Additional languages may be added by vendoring the corresponding `locals.scm` file. Currently,
 Perl lacks an upstream `locals.scm`, so symbol extraction for Perl is minimal until a query is added.
@@ -153,8 +153,8 @@ Tree Hugger maintains comprehensive test coverage across all supported languages
 **IMPORTANT:** When modifying tree-sitter queries or symbol extraction logic, ensure tests cover:
 
 1. **Type distinction tests** - Verify that different type constructs (struct vs enum, class vs interface) are correctly identified with distinct `SymbolKind` values
-2. **Cross-language parity** - All typed languages should have fixture files that exercise their type system features
-3. **Regression tests** - Any bug fix should include a test that would catch the bug if it recurs
+1. **Cross-language parity** - All typed languages should have fixture files that exercise their type system features
+1. **Regression tests** - Any bug fix should include a test that would catch the bug if it recurs
 
 ### Running Tests
 

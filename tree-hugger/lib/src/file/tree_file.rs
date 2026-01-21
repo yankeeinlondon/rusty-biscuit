@@ -4,11 +4,11 @@ use biscuit_hash::xx_hash;
 use tree_sitter::{Node, Parser, QueryCursor, StreamingIterator};
 
 use crate::error::TreeHuggerError;
-use crate::queries::{QueryKind, query_for};
+use crate::queries::{QueryKind, format_rule_message, query_for, severity_for_rule};
 use crate::shared::{
     CodeBlock, CodeRange, DiagnosticSeverity, FieldInfo, FunctionSignature, ImportSymbol,
-    LintDiagnostic, ParameterInfo, ProgrammingLanguage, SymbolInfo, SymbolKind, SyntaxDiagnostic,
-    TypeMetadata, VariantInfo, Visibility,
+    LintDiagnostic, ParameterInfo, ProgrammingLanguage, SourceContext, SymbolInfo, SymbolKind,
+    SyntaxDiagnostic, TypeMetadata, VariantInfo, Visibility,
 };
 
 /// Represents a parsed source file backed by tree-sitter.
@@ -710,8 +710,89 @@ impl TreeFile {
     ///
     /// ## Returns
     /// Returns lint diagnostics when query patterns are available.
+    /// Provides lint diagnostics for this file.
+    ///
+    /// Executes tree-sitter lint queries and returns diagnostics for matched
+    /// patterns. Each capture name starting with `diagnostic.` is treated as
+    /// a lint rule, with the rule ID extracted from the capture name suffix.
+    ///
+    /// ## Returns
+    /// Returns lint diagnostics found by the lint query for this language.
+    /// Returns an empty Vec if no lint query is available.
     pub fn lint_diagnostics(&self) -> Vec<LintDiagnostic> {
-        Vec::new()
+        let query = match query_for(self.language, QueryKind::Lint) {
+            Ok(q) => q,
+            Err(_) => return Vec::new(),
+        };
+
+        // Empty query means no lint rules defined for this language
+        if query.pattern_count() == 0 {
+            return Vec::new();
+        }
+
+        let mut cursor = QueryCursor::new();
+        let root = self.tree.root_node();
+        let capture_names = query.capture_names();
+        let mut diagnostics = Vec::new();
+
+        let mut matches = cursor.matches(query.as_ref(), root, self.source.as_bytes());
+        matches.advance();
+
+        while let Some(query_match) = matches.get() {
+            for capture in query_match.captures {
+                let capture_name = capture_names
+                    .get(capture.index as usize)
+                    .copied()
+                    .unwrap_or_default();
+
+                // Only process captures with "diagnostic." prefix
+                if let Some(rule_id) = capture_name.strip_prefix("diagnostic.") {
+                    let node = capture.node;
+                    let range = range_for_node(node);
+                    let context = self.build_source_context(&node);
+
+                    diagnostics.push(LintDiagnostic {
+                        message: format_rule_message(rule_id),
+                        range,
+                        severity: severity_for_rule(rule_id),
+                        rule: Some(rule_id.to_string()),
+                        context: Some(context),
+                    });
+                }
+            }
+
+            matches.advance();
+        }
+
+        diagnostics
+    }
+
+    /// Builds source context for a node to enable visual diagnostic display.
+    fn build_source_context(&self, node: &Node<'_>) -> SourceContext {
+        let start = node.start_position();
+        let end = node.end_position();
+
+        // Get the line containing the node start
+        let line_text = self
+            .source
+            .lines()
+            .nth(start.row)
+            .unwrap_or("")
+            .to_string();
+
+        // Calculate underline length (handle multi-line by capping to end of first line)
+        let underline_length = if start.row == end.row {
+            end.column.saturating_sub(start.column).max(1)
+        } else {
+            // Multi-line: underline to end of first line
+            line_text.len().saturating_sub(start.column).max(1)
+        };
+
+        SourceContext {
+            line_text,
+            underline_column: start.column,
+            underline_length,
+        }
     }
 
     /// Provides syntax diagnostics for this file.

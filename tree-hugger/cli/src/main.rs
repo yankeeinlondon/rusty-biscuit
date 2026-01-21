@@ -8,9 +8,9 @@ use ignore::overrides::OverrideBuilder;
 use owo_colors::{OwoColorize, Style};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use tree_hugger_lib::{
-    FieldInfo, FileSummary, FunctionSignature, ImportSymbol, PackageSummary, ParameterInfo,
-    ProgrammingLanguage, SymbolInfo, SymbolKind, TreeFile, TreeHuggerError, TypeMetadata,
-    VariantInfo,
+    DiagnosticSeverity, FieldInfo, FileSummary, FunctionSignature, ImportSymbol, LintDiagnostic,
+    PackageSummary, ParameterInfo, ProgrammingLanguage, SourceContext, SymbolInfo, SymbolKind,
+    TreeFile, TreeHuggerError, TypeMetadata, VariantInfo,
 };
 use serde::{Deserialize, Serialize};
 
@@ -96,6 +96,8 @@ enum Command {
     Imports(CommonArgs),
     /// List classes and their members
     Classes(ClassArgs),
+    /// Run lint diagnostics on the file(s)
+    Lint(CommonArgs),
 }
 
 impl Command {
@@ -106,7 +108,8 @@ impl Command {
             | Self::Types(args)
             | Self::Symbols(args)
             | Self::Exports(args)
-            | Self::Imports(args) => &args.inputs,
+            | Self::Imports(args)
+            | Self::Lint(args) => &args.inputs,
             Self::Classes(args) => &args.inputs,
         }
     }
@@ -119,6 +122,7 @@ impl Command {
             Self::Symbols(_) => CommandKind::Symbols,
             Self::Exports(_) => CommandKind::Exports,
             Self::Imports(_) => CommandKind::Imports,
+            Self::Lint(_) => CommandKind::Lint,
             Self::Classes(args) => CommandKind::Classes {
                 name_filter: args.name.clone(),
                 static_only: args.static_only,
@@ -136,6 +140,7 @@ enum CommandKind {
     Symbols,
     Exports,
     Imports,
+    Lint,
     Classes {
         name_filter: Option<String>,
         static_only: bool,
@@ -487,6 +492,9 @@ fn summarize_file(
         CommandKind::Imports => {
             summary.imports = tree_file.imported_symbols()?;
         }
+        CommandKind::Lint => {
+            // Lint diagnostics are already populated above
+        }
         CommandKind::Classes { .. } => {
             // Classes are handled separately in main()
         }
@@ -525,6 +533,7 @@ fn render_summary(
         CommandKind::Functions | CommandKind::Types | CommandKind::Symbols => {
             render_symbols(&summary.symbols, config)
         }
+        CommandKind::Lint => render_lint_diagnostics(&summary.lint, &summary.file, config),
         CommandKind::Classes { .. } => {
             // Classes are rendered separately
         }
@@ -780,6 +789,130 @@ fn format_variant(variant: &VariantInfo) -> String {
     } else {
         // Unit variant
         variant.name.clone()
+    }
+}
+
+/// Returns the color style for a diagnostic severity.
+fn style_for_severity(severity: DiagnosticSeverity) -> Style {
+    match severity {
+        DiagnosticSeverity::Error => Style::new().red().bold(),
+        DiagnosticSeverity::Warning => Style::new().yellow(),
+        DiagnosticSeverity::Info => Style::new().blue(),
+    }
+}
+
+/// Renders lint diagnostics with source context.
+fn render_lint_diagnostics(diagnostics: &[LintDiagnostic], file: &Path, config: &OutputConfig) {
+    if diagnostics.is_empty() {
+        if config.use_colors {
+            println!("  {}", "(no lint diagnostics)".dimmed());
+        } else {
+            println!("  (no lint diagnostics)");
+        }
+        return;
+    }
+
+    for diagnostic in diagnostics {
+        render_lint_diagnostic(diagnostic, file, config);
+    }
+}
+
+/// Renders a single lint diagnostic with source context.
+fn render_lint_diagnostic(diagnostic: &LintDiagnostic, file: &Path, config: &OutputConfig) {
+    let severity_label = match diagnostic.severity {
+        DiagnosticSeverity::Error => "error",
+        DiagnosticSeverity::Warning => "warning",
+        DiagnosticSeverity::Info => "info",
+    };
+
+    let rule_display = diagnostic
+        .rule
+        .as_ref()
+        .map(|r| format!(" [{}]", r))
+        .unwrap_or_default();
+
+    // Location line: "  --> file:line:col"
+    let location = format!(
+        "{}:{}:{}",
+        file.display(),
+        diagnostic.range.start_line,
+        diagnostic.range.start_column
+    );
+
+    let location_display = if config.use_hyperlinks {
+        hyperlink(file, diagnostic.range.start_line, &location)
+    } else {
+        location
+    };
+
+    if config.use_colors {
+        let severity_style = style_for_severity(diagnostic.severity);
+        println!(
+            "{}{}: {}",
+            severity_label.style(severity_style),
+            rule_display.dimmed(),
+            diagnostic.message
+        );
+        println!("  {} {}", "-->".blue(), location_display);
+    } else {
+        println!("{}{}: {}", severity_label, rule_display, diagnostic.message);
+        println!("  --> {}", location_display);
+    }
+
+    // Render source context if available
+    if let Some(context) = &diagnostic.context {
+        render_source_context(context, diagnostic.range.start_line, config);
+    }
+
+    println!();
+}
+
+/// Renders the source context with underline marker.
+fn render_source_context(context: &SourceContext, line_number: usize, config: &OutputConfig) {
+    let line_num_width = line_number.to_string().len().max(4);
+
+    if config.use_colors {
+        // Empty gutter line
+        println!("{:>width$} {}", "", "|".blue(), width = line_num_width);
+
+        // Source line
+        println!(
+            "{:>width$} {} {}",
+            line_number.to_string().blue(),
+            "|".blue(),
+            context.line_text,
+            width = line_num_width
+        );
+
+        // Underline line
+        let padding = " ".repeat(context.underline_column);
+        let underline = "^".repeat(context.underline_length.max(1));
+        println!(
+            "{:>width$} {} {}{}",
+            "",
+            "|".blue(),
+            padding,
+            underline.yellow(),
+            width = line_num_width
+        );
+    } else {
+        // Plain text version
+        println!("{:>width$} |", "", width = line_num_width);
+        println!(
+            "{:>width$} | {}",
+            line_number,
+            context.line_text,
+            width = line_num_width
+        );
+        let padding = " ".repeat(context.underline_column);
+        let underline = "^".repeat(context.underline_length.max(1));
+        println!(
+            "{:>width$} | {}{}",
+            "",
+            padding,
+            underline,
+            width = line_num_width
+        );
     }
 }
 
