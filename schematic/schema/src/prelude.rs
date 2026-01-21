@@ -15,23 +15,5 @@
 //! }
 //! ```
 pub use crate::shared::SchematicError;
-
-// OpenAI
 pub use crate::openai::{OpenAI, OpenAIRequest};
 pub use schematic_definitions::openai::*;
-
-// ElevenLabs
-pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};
-pub use schematic_definitions::elevenlabs::*;
-
-// Hugging Face Hub
-pub use crate::huggingfacehub::{HuggingFaceHub, HuggingFaceHubRequest};
-pub use schematic_definitions::huggingface::*;
-
-// Ollama Native
-pub use crate::ollamanative::{OllamaNative, OllamaNativeRequest};
-pub use schematic_definitions::ollama::*;
-
-// Ollama OpenAI-compatible
-pub use crate::ollamaopenai::{OllamaOpenAI, OllamaOpenAIRequest};
-// Types already re-exported from ollama module above

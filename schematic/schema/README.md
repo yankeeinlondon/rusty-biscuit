@@ -51,11 +51,9 @@ use schematic_schema::openai::{
 async fn main() -> Result<(), schematic_schema::openai::SchematicError> {
     let client = OpenAI::new()?;
 
-    // Retrieve a specific model
+    // Retrieve a specific model - type-safe construction with new()
     let gpt4: Model = client
-        .request(RetrieveModelRequest {
-            model: "gpt-4".to_string(),
-        })
+        .request(RetrieveModelRequest::new("gpt-4"))
         .await?;
 
     println!("Model {} created at {}", gpt4.id, gpt4.created);
