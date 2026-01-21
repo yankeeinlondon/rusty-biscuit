@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-serde = "1.0.228"
+biscuit-hash = { path = "../../biscuit-hash" }
+ignore = "0.4"
+serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0"
 tree-sitter = "0.26.3"
 tree-sitter-bash = "0.25.1"
 tree-sitter-c = "0.24.1"
@@ -22,3 +25,6 @@ tree-sitter-scala = "0.24.0"
 tree-sitter-swift = "0.7.1"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-zsh = "0.52.0"
+
+[dev-dependencies]
+tempfile = "3.15"

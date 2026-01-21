@@ -1,0 +1,3 @@
+greet() {
+    echo "hi"
+}

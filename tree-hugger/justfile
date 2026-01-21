@@ -43,3 +43,7 @@ cli_docs:
     @echo "Building and then showing latest docs for the tree-hugger CLI"
     @echo ""
     @cargo doc -p tree-hugger-lib --open
+
+# run the latest debug build of the CLI
+hug *args="":
+    @cargo run -p tree-hugger-cli -- {{args}}
