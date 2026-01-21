@@ -356,8 +356,8 @@ if poll(Duration::from_millis(50))? {
 1. User runs `queue` command
 2. CLI detects Wezterm via `WEZTERM_PANE` env var
 3. Creates split layout:
-   - **Top 80%:** Original pane (task execution area)
-   - **Bottom 20%:** New pane for TUI
+   - **Top ~80%:** Original pane (task execution area)
+   - **Bottom max(12 rows, 20%):** New pane for TUI
 4. Spawns `queue --tui-pane` in bottom pane
 5. Passes task pane ID to executor
 

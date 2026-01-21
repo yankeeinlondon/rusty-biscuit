@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 
 use chrono::{Duration as ChronoDuration, Local, NaiveTime, TimeZone, Utc};
 use clap::Parser;
+use crossterm::terminal;
 use queue_lib::{
     parse_at_time,
     parse_delay,
@@ -85,8 +86,8 @@ fn main() -> Result<(), QueueError> {
 /// Spawns the TUI in a new bottom pane and exits.
 ///
 /// This creates the split layout:
-/// - Top pane (80%): User's original shell (remains interactive)
-/// - Bottom pane (20%): The TUI
+/// - Top pane (~80%): User's original shell (remains interactive)
+/// - Bottom pane (max(12 rows, 20%)): The TUI
 fn spawn_tui_in_split_pane(cli: &Cli) -> Result<(), QueueError> {
     // Build the command to run in the new pane
     let exe = std::env::current_exe()
@@ -126,13 +127,23 @@ fn spawn_tui_in_split_pane(cli: &Cli) -> Result<(), QueueError> {
     let current_pane = TerminalDetector::get_wezterm_pane_id()
         .ok_or_else(|| QueueError::SpawnPane("WEZTERM_PANE not set".to_string()))?;
 
-    // Build wezterm CLI command to create a bottom pane (20%) running the TUI
+    let tui_rows = match terminal::size() {
+        Ok((_cols, rows)) => {
+            let percent_rows = rows.saturating_mul(20) / 100;
+            let desired = percent_rows.max(12);
+            let max_rows = rows.saturating_sub(1).max(1);
+            desired.min(max_rows)
+        }
+        Err(_) => 12,
+    };
+
+    // Build wezterm CLI command to create a bottom pane running the TUI
     let mut wezterm_args = vec![
         "cli".to_string(),
         "split-pane".to_string(),
         "--bottom".to_string(),
-        "--percent".to_string(),
-        "20".to_string(),
+        "--cells".to_string(),
+        tui_rows.to_string(),
         "--pane-id".to_string(),
         current_pane,
         "--".to_string(),

@@ -73,11 +73,11 @@ When running in Wezterm, Queue creates an optimized layout:
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
 │                                                                  │
-│                    Task Execution Area (80%)                     │
+│                   Task Execution Area (~80%)                    │
 │                    Commands run here in splits                   │
 │                                                                  │
 ├──────────────────────────────────────────────────────────────────┤
-│                    TUI Control Pane (20%)                        │
+│            TUI Control Pane (max(12 rows, 20%))                  │
 │                    Schedule and monitor tasks                    │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -124,6 +124,8 @@ See [cli/README.md](cli/README.md) for complete keyboard reference.
 ## Data Storage
 
 Tasks persist to `~/.queue-history.jsonl` in JSONL format:
+
+Duplicate commands are de-duplicated, keeping the most recent entry.
 
 ```json
 {"id":1,"command":"make build","scheduled_at":"2024-01-15T10:00:00Z","target":"new_pane","status":{"status":"completed"},"created_at":"2024-01-15T09:55:00Z"}

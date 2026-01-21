@@ -80,6 +80,8 @@ JSONL file-based implementation with cross-platform file locking.
 
 **Format:** One JSON object per line (JSONL)
 
+**Deduplication:** When saving, entries with the same command are de-duplicated and the most recent entry is preserved.
+
 ```json
 {"id":1,"command":"echo hello","scheduled_at":"2024-01-15T10:00:00Z","target":"new_pane","status":{"status":"completed"},"created_at":"2024-01-15T09:55:00Z"}
 {"id":2,"command":"make build","scheduled_at":"2024-01-15T11:00:00Z","target":"new_window","status":{"status":"pending"},"created_at":"2024-01-15T10:30:00Z"}
@@ -240,8 +242,8 @@ Result of Wezterm layout setup.
 
 ```rust
 pub struct TuiLayoutResult {
-    pub tui_pane_id: Option<String>,   // Bottom 20%
-    pub task_pane_id: Option<String>,  // Top 80%
+    pub tui_pane_id: Option<String>,   // Bottom max(12 rows, 20%)
+    pub task_pane_id: Option<String>,  // Top ~80%
     pub layout_created: bool,
 }
 ```

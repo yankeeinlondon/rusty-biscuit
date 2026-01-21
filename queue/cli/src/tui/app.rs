@@ -147,24 +147,27 @@ impl App {
         scheduled_at: chrono::DateTime<chrono::Utc>,
         target: queue_lib::ExecutionTarget,
     ) -> bool {
-        if let Some(task) = self.tasks.iter_mut().find(|t| t.id == task_id) {
+        let (updated_task, should_reschedule) = if let Some(task) =
+            self.tasks.iter_mut().find(|t| t.id == task_id)
+        {
             let was_pending = task.is_pending();
             task.command = command;
             task.scheduled_at = scheduled_at;
             task.target = target;
-
-            if was_pending {
-                if let Some(ref executor) = self.executor {
-                    executor.cancel_task(task_id);
-                    executor.schedule(task.clone());
-                }
-            }
-
-            self.update_history(task);
-            true
+            (task.clone(), was_pending)
         } else {
-            false
+            return false;
+        };
+
+        if should_reschedule {
+            if let Some(ref executor) = self.executor {
+                let _ = executor.cancel_task(task_id);
+                executor.schedule(updated_task.clone());
+            }
         }
+
+        self.update_history(&updated_task);
+        true
     }
 
     /// Cancels a pending task by removing it from the list.
@@ -173,10 +176,16 @@ impl App {
     /// cancelled, false if the task was not found or not pending.
     pub fn cancel_task(&mut self, id: u64) -> bool {
         if let Some(pos) = self.tasks.iter().position(|t| t.id == id && t.is_pending()) {
-            let mut task = self.tasks.remove(pos);
-            if let Some(ref executor) = self.executor {
-                executor.cancel_task(id);
+            let cancelled = match self.executor.as_ref() {
+                Some(executor) => executor.cancel_task(id),
+                None => true,
+            };
+
+            if !cancelled {
+                return false;
             }
+
+            let mut task = self.tasks.remove(pos);
             task.mark_cancelled();
             self.update_history(&task);
             // Adjust selection if needed
@@ -215,9 +224,16 @@ impl App {
     pub fn handle_task_event(&mut self, event: TaskEvent) {
         match event {
             TaskEvent::StatusChanged { id, status } => {
-                if let Some(task) = self.tasks.iter_mut().find(|t| t.id == id) {
+                let updated_task = if let Some(task) = self.tasks.iter_mut().find(|t| t.id == id)
+                {
                     task.status = status;
-                    self.update_history(task);
+                    Some(task.clone())
+                } else {
+                    None
+                };
+
+                if let Some(task) = updated_task {
+                    self.update_history(&task);
                 }
             }
         }

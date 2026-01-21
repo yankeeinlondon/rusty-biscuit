@@ -263,8 +263,8 @@ impl TerminalDetector {
     /// Sets up the TUI layout for Wezterm.
     ///
     /// When running in Wezterm, this creates a split layout with:
-    /// - Top pane (80%): Where tasks will execute
-    /// - Bottom pane (20%): Where the TUI will run
+    /// - Top pane (~80%): Where tasks will execute
+    /// - Bottom pane (max(12 rows, 20%)): Where the TUI will run
     ///
     /// The function returns information about the created layout so the TUI
     /// can coordinate task execution properly.
@@ -282,15 +282,26 @@ impl TerminalDetector {
         let current_pane_id = Self::get_wezterm_pane_id()
             .ok_or_else(|| "WEZTERM_PANE not set".to_string())?;
 
-        // Create a new pane at the bottom (20%) for the TUI
+        let tui_rows = match env::var("LINES").ok().and_then(|value| value.parse::<u16>().ok()) {
+            Some(rows) => {
+                let percent_rows = rows.saturating_mul(20) / 100;
+                let desired = percent_rows.max(12);
+                let max_rows = rows.saturating_sub(1).max(1);
+                desired.min(max_rows)
+            }
+            None => 12,
+        };
+        let tui_rows_arg = tui_rows.to_string();
+
+        // Create a new pane at the bottom for the TUI
         // The command returns the new pane ID
         let output = Command::new("wezterm")
             .args([
                 "cli",
                 "split-pane",
                 "--bottom",
-                "--percent",
-                "20",
+                "--cells",
+                &tui_rows_arg,
                 "--pane-id",
                 &current_pane_id,
                 "--",

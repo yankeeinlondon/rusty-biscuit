@@ -2,11 +2,12 @@
 //!
 //! These tests verify end-to-end CLI behavior using assert_cmd.
 
+use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 use predicates::prelude::*;
 
 fn queue_cmd() -> Command {
-    Command::cargo_bin("queue").unwrap()
+    cargo_bin_cmd!("queue")
 }
 
 #[test]

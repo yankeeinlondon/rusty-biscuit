@@ -4,8 +4,9 @@
 //! scheduled tasks. The primary implementation uses JSONL (newline-delimited JSON)
 //! files with file locking for concurrent access safety.
 
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 use fs2::FileExt;
@@ -98,18 +99,10 @@ impl JsonFileStore {
         }
         Ok(())
     }
-}
 
-impl HistoryStore for JsonFileStore {
-    fn load_all(&self) -> Result<Vec<ScheduledTask>, HistoryError> {
-        if !self.path.exists() {
-            return Ok(Vec::new());
-        }
-
-        let file = File::open(&self.path)?;
-        file.lock_shared().map_err(|_| HistoryError::Lock)?;
-
-        let reader = BufReader::new(&file);
+    fn load_tasks(file: &mut File) -> Result<Vec<ScheduledTask>, HistoryError> {
+        file.seek(SeekFrom::Start(0))?;
+        let reader = BufReader::new(file.try_clone()?);
         let mut tasks = Vec::new();
 
         for line in reader.lines() {
@@ -121,19 +114,70 @@ impl HistoryStore for JsonFileStore {
             tasks.push(task);
         }
 
+        Ok(tasks)
+    }
+
+    fn rewrite_tasks(file: &mut File, tasks: &[ScheduledTask]) -> Result<(), HistoryError> {
+        file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
+
+        let mut writer = BufWriter::new(file);
+        for task in tasks {
+            let json = serde_json::to_string(task)?;
+            writeln!(writer, "{json}")?;
+        }
+        writer.flush()?;
+        Ok(())
+    }
+
+    fn dedupe_tasks(tasks: Vec<ScheduledTask>) -> Vec<ScheduledTask> {
+        let mut latest: HashMap<String, ScheduledTask> = HashMap::new();
+
+        for task in tasks {
+            match latest.get(&task.command) {
+                Some(existing)
+                    if task.created_at < existing.created_at
+                        || (task.created_at == existing.created_at && task.id <= existing.id) =>
+                {
+                    continue;
+                }
+                _ => {
+                    latest.insert(task.command.clone(), task);
+                }
+            }
+        }
+
+        let mut deduped: Vec<ScheduledTask> = latest.into_values().collect();
+        deduped.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+        deduped
+    }
+}
+
+impl HistoryStore for JsonFileStore {
+    fn load_all(&self) -> Result<Vec<ScheduledTask>, HistoryError> {
+        if !self.path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut file = File::open(&self.path)?;
+        file.lock_shared().map_err(|_| HistoryError::Lock)?;
+
+        let tasks = Self::load_tasks(&mut file)?;
+
         file.unlock().map_err(|_| HistoryError::Lock)?;
         Ok(tasks)
     }
 
     fn save(&self, task: &ScheduledTask) -> Result<(), HistoryError> {
         self.ensure_file_exists()?;
-
-        let mut file = OpenOptions::new().append(true).open(&self.path)?;
+        let mut file = OpenOptions::new().read(true).write(true).open(&self.path)?;
 
         file.lock_exclusive().map_err(|_| HistoryError::Lock)?;
 
-        let json = serde_json::to_string(task)?;
-        writeln!(file, "{json}")?;
+        let mut tasks = Self::load_tasks(&mut file)?;
+        tasks.push(task.clone());
+        let tasks = Self::dedupe_tasks(tasks);
+        Self::rewrite_tasks(&mut file, &tasks)?;
 
         file.unlock().map_err(|_| HistoryError::Lock)?;
         Ok(())
@@ -142,40 +186,30 @@ impl HistoryStore for JsonFileStore {
     fn update(&self, task: &ScheduledTask) -> Result<(), HistoryError> {
         self.ensure_file_exists()?;
 
-        let file = OpenOptions::new()
+        let mut file = OpenOptions::new()
             .read(true)
             .write(true)
             .open(&self.path)?;
 
         file.lock_exclusive().map_err(|_| HistoryError::Lock)?;
 
-        // Read all tasks
-        let reader = BufReader::new(&file);
-        let mut tasks = Vec::new();
+        let mut tasks = Self::load_tasks(&mut file)?;
+        let mut updated = false;
 
-        for line in reader.lines() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            let existing: ScheduledTask = serde_json::from_str(&line)?;
+        for existing in &mut tasks {
             if existing.id == task.id {
-                tasks.push(task.clone());
-            } else {
-                tasks.push(existing);
+                *existing = task.clone();
+                updated = true;
+                break;
             }
         }
 
-        // Rewrite the file
-        let mut file = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(&self.path)?;
-
-        for t in &tasks {
-            let json = serde_json::to_string(t)?;
-            writeln!(file, "{json}")?;
+        if !updated {
+            tasks.push(task.clone());
         }
+
+        let tasks = Self::dedupe_tasks(tasks);
+        Self::rewrite_tasks(&mut file, &tasks)?;
 
         file.unlock().map_err(|_| HistoryError::Lock)?;
         Ok(())

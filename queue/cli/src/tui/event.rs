@@ -173,8 +173,7 @@ fn handle_input_modal(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
             modal.prev_field();
         }
         KeyCode::Enter => {
-            if modal.validate().is_ok() {
-                // Create or update the task
+            let action = if modal.validate().is_ok() {
                 let scheduled_at = match modal.schedule_type {
                     ScheduleType::AtTime => {
                         use chrono::{Local, TimeZone, Utc};
@@ -198,18 +197,22 @@ fn handle_input_modal(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
                     }
                 };
 
-                if let Some(task_id) = modal.editing_task_id {
-                    // Update existing task and reschedule if needed
-                    app.update_task(task_id, modal.command.clone(), scheduled_at, modal.target);
+                Some((
+                    modal.editing_task_id,
+                    modal.command.clone(),
+                    scheduled_at,
+                    modal.target,
+                ))
+            } else {
+                None
+            };
+
+            if let Some((editing_task_id, command, scheduled_at, target)) = action {
+                if let Some(task_id) = editing_task_id {
+                    app.update_task(task_id, command, scheduled_at, target);
                 } else {
-                    // Create new task and schedule it with the executor
                     let id = app.alloc_task_id();
-                    let task = queue_lib::ScheduledTask::new(
-                        id,
-                        modal.command.clone(),
-                        scheduled_at,
-                        modal.target,
-                    );
+                    let task = queue_lib::ScheduledTask::new(id, command, scheduled_at, target);
                     app.schedule_task(task);
                 }
 
