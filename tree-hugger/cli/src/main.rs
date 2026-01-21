@@ -1,11 +1,12 @@
 use std::io::IsTerminal;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
 use owo_colors::{OwoColorize, Style};
-use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use tree_hugger_lib::{
     FieldInfo, FileSummary, FunctionSignature, ImportSymbol, PackageSummary, ParameterInfo,
     ProgrammingLanguage, SymbolInfo, SymbolKind, TreeFile, TreeHuggerError, TypeMetadata,
@@ -212,12 +213,38 @@ fn style_for_kind(kind: SymbolKind) -> Style {
 
 /// Creates an OSC8 hyperlink for a file path with line number.
 fn hyperlink(path: &Path, line: usize, text: &str) -> String {
-    let path_str = path.to_string_lossy();
-    let encoded = utf8_percent_encode(&path_str, NON_ALPHANUMERIC);
+    const FILE_URL_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC.remove(b'/').remove(b':');
+    let absolute_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|root| root.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    let path_str = absolute_path.to_string_lossy();
+    let encoded = utf8_percent_encode(&path_str, FILE_URL_ENCODE_SET);
     format!(
         "\x1b]8;;file://{}#L{}\x1b\\{}\x1b]8;;\x1b\\",
         encoded, line, text
     )
+}
+
+fn find_repo_root(start: &Path) -> Option<PathBuf> {
+    for ancestor in start.ancestors() {
+        if ancestor.join(".git").is_dir() {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
+
+fn display_path(path: &Path, root: Option<&Path>) -> String {
+    if let Some(root) = root {
+        if let Ok(relative) = path.strip_prefix(root) {
+            return relative.display().to_string();
+        }
+    }
+    path.display().to_string()
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
@@ -271,6 +298,7 @@ fn main() -> Result<(), TreeHuggerError> {
     let output_config = OutputConfig::new(output_format);
 
     let root_dir = current_dir()?;
+    let display_root = find_repo_root(&root_dir);
     let files = collect_files(&root_dir, inputs, &cli.ignore, language)?;
 
     let command_kind = cli.command.kind();
@@ -311,7 +339,7 @@ fn main() -> Result<(), TreeHuggerError> {
             }
             OutputFormat::Pretty | OutputFormat::Plain => {
                 for (file, lang, summaries) in all_class_summaries {
-                    render_class_summaries(&file, lang, &summaries, &output_config);
+                    render_class_summaries(&file, lang, &summaries, &output_config, display_root.as_deref());
                 }
             }
         }
@@ -346,7 +374,7 @@ fn main() -> Result<(), TreeHuggerError> {
         }
         OutputFormat::Pretty | OutputFormat::Plain => {
             for summary in summaries {
-                render_summary(&summary, &command_kind, &output_config);
+                render_summary(&summary, &command_kind, &output_config, display_root.as_deref());
             }
         }
     }
@@ -467,9 +495,14 @@ fn summarize_file(
     Ok(summary)
 }
 
-fn render_summary(summary: &FileSummary, command: &CommandKind, config: &OutputConfig) {
+fn render_summary(
+    summary: &FileSummary,
+    command: &CommandKind,
+    config: &OutputConfig,
+    display_root: Option<&Path>,
+) {
     // Render file header with optional hyperlink
-    let file_display = summary.file.display().to_string();
+    let file_display = display_path(&summary.file, display_root);
     let header = if config.use_hyperlinks {
         hyperlink(&summary.file, 1, &file_display)
     } else {
@@ -760,16 +793,17 @@ fn render_imports(imports: &[ImportSymbol], config: &OutputConfig) {
         return;
     }
 
-    for import in imports {
-        let location = format!("[{}:{}]", import.range.start_line, import.range.start_column);
+    let groups = group_imports(imports);
+    for group in groups {
+        let group = dedupe_import_group(&group);
+        let (location, start_line) = format_import_locations(&group);
         let location_display = if config.use_hyperlinks {
-            hyperlink(&import.file, import.range.start_line, &location)
+            hyperlink(&group[0].file, start_line, &location)
         } else {
             location
         };
 
-        // Format the import display: name [from source] [as alias]
-        let import_display = format_import_display(import);
+        let import_display = format_import_group_display(&group);
 
         if config.use_colors {
             println!(
@@ -783,46 +817,318 @@ fn render_imports(imports: &[ImportSymbol], config: &OutputConfig) {
     }
 }
 
-/// Formats an import for display, showing source and alias information.
-///
-/// Examples:
-/// - `readFile from "fs"` - simple import with source
-/// - `bar from "module" (originally foo)` - aliased import
-/// - `* as ns from "module"` - namespace import
-fn format_import_display(import: &ImportSymbol) -> String {
-    let mut result = import.name.clone();
-
-    // Add source information
-    if let Some(source) = &import.source {
-        result.push_str(" from ");
-        // Determine if source looks like a path/module or a package
-        if source.contains('/') || source.contains('\\') || source.contains("::") || source.contains('.') {
-            result.push_str(source);
-        } else {
-            result.push('"');
-            result.push_str(source);
-            result.push('"');
-        }
+fn group_imports(imports: &[ImportSymbol]) -> Vec<Vec<&ImportSymbol>> {
+    let mut groups: BTreeMap<(usize, usize), Vec<&ImportSymbol>> = BTreeMap::new();
+    for import in imports {
+        let key = import
+            .statement_range
+            .as_ref()
+            .map(|range| (range.start_line, range.start_column))
+            .unwrap_or((import.range.start_line, import.range.start_column));
+        groups.entry(key).or_default().push(import);
     }
 
-    // Add alias information if present (shows what the original name was)
-    if let Some(original) = &import.original_name {
-        if original != &import.name && original != "*" {
-            result.push_str(" (originally ");
-            result.push_str(original);
-            result.push(')');
-        } else if original == "*" {
-            // Namespace import: show as `* as name from "source"`
-            result = format!("* as {}", import.name);
-            if let Some(source) = &import.source {
-                result.push_str(" from \"");
-                result.push_str(source);
-                result.push('"');
+    let mut result = Vec::new();
+    for (_, mut group) in groups {
+        group.sort_by_key(|import| (import.range.start_line, import.range.start_column));
+        result.push(group);
+    }
+
+    result
+}
+
+fn dedupe_import_group<'a>(imports: &'a [&'a ImportSymbol]) -> Vec<&'a ImportSymbol> {
+    let mut alias_originals = HashSet::new();
+    for import in imports {
+        if import.alias.is_some() {
+            if let Some(original) = import.original_name.as_deref() {
+                alias_originals.insert((import.source.as_deref(), original));
             }
         }
     }
 
+    let mut result = Vec::new();
+    for import in imports {
+        let is_alias_shadow = import.alias.is_none()
+            && import.original_name.is_none()
+            && alias_originals.contains(&(import.source.as_deref(), import.name.as_str()));
+        if is_alias_shadow {
+            continue;
+        }
+        result.push(*import);
+    }
+
     result
+}
+
+fn format_import_locations(imports: &[&ImportSymbol]) -> (String, usize) {
+    let mut positions: Vec<(usize, usize)> = imports
+        .iter()
+        .map(|import| (import.range.start_line, import.range.start_column))
+        .collect();
+    positions.sort();
+
+    let (first_line, _) = positions.first().copied().unwrap_or((1, 1));
+    let location = if positions.iter().all(|(line, _)| *line == first_line) {
+        let columns = positions
+            .iter()
+            .map(|(_, column)| column.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("[{}:{}]", first_line, columns)
+    } else {
+        let entries = positions
+            .iter()
+            .map(|(line, column)| format!("{}:{}", line, column))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("[{}]", entries)
+    };
+
+    (location, first_line)
+}
+
+fn format_import_group_display(imports: &[&ImportSymbol]) -> String {
+    let language = imports
+        .first()
+        .map(|import| import.language)
+        .unwrap_or(ProgrammingLanguage::Rust);
+    match language {
+        ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
+            format_ecma_import_group(imports)
+        }
+        ProgrammingLanguage::Python => format_python_import_group(imports),
+        ProgrammingLanguage::Rust => format_rust_import_group(imports),
+        ProgrammingLanguage::Go => format_go_import_group(imports),
+        ProgrammingLanguage::Java => format_java_import_group(imports),
+        ProgrammingLanguage::CSharp => format_csharp_import_group(imports),
+        ProgrammingLanguage::Php => format_php_import_group(imports),
+        ProgrammingLanguage::Scala => format_scala_import_group(imports),
+        ProgrammingLanguage::Swift => format_swift_import_group(imports),
+        _ => format_generic_import_group(imports),
+    }
+}
+
+fn format_ecma_import_group(imports: &[&ImportSymbol]) -> String {
+    let source = imports.first().and_then(|import| import.source.as_deref());
+    let is_namespace = imports.len() == 1
+        && imports[0]
+            .original_name
+            .as_deref()
+            .is_some_and(|name| name == "*");
+
+    if is_namespace {
+        let alias = &imports[0].name;
+        if let Some(source) = source {
+            return format!("import * as {} from \"{}\"", alias, source);
+        }
+        return format!("import * as {}", alias);
+    }
+
+    let specs = imports
+        .iter()
+        .map(|import| {
+            if let Some(alias) = import.alias.as_deref() {
+                let original = import.original_name.as_deref().unwrap_or(&import.name);
+                format!("{} as {}", original, alias)
+            } else {
+                import.name.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    if let Some(source) = source {
+        format!("import {{ {} }} from \"{}\"", specs, source)
+    } else {
+        format!("import {{ {} }}", specs)
+    }
+}
+
+fn format_python_import_group(imports: &[&ImportSymbol]) -> String {
+    let sources: HashSet<&str> = imports
+        .iter()
+        .filter_map(|import| import.source.as_deref())
+        .collect();
+
+    let specs = |import: &ImportSymbol| {
+        if let Some(alias) = import.alias.as_deref() {
+            let original = import.original_name.as_deref().unwrap_or(&import.name);
+            format!("{} as {}", original, alias)
+        } else {
+            import.name.clone()
+        }
+    };
+
+    if sources.len() == 1 {
+        let source = *sources.iter().next().unwrap();
+        let is_import_stmt = imports.iter().all(|import| {
+            import.source.as_deref() == Some(source)
+                && (import.name == source
+                    || import.original_name.as_deref() == Some(source))
+        });
+        let spec_list = imports.iter().map(|import| specs(import)).collect::<Vec<_>>().join(", ");
+        if is_import_stmt {
+            format!("import {}", spec_list)
+        } else {
+            format!("from {} import {}", source, spec_list)
+        }
+    } else {
+        let spec_list = imports.iter().map(|import| specs(import)).collect::<Vec<_>>().join(", ");
+        format!("import {}", spec_list)
+    }
+}
+
+fn format_rust_import_group(imports: &[&ImportSymbol]) -> String {
+    let source = imports.first().and_then(|import| import.source.as_deref());
+    let specs = imports
+        .iter()
+        .map(|import| {
+            if let Some(alias) = import.alias.as_deref() {
+                let original = import.original_name.as_deref().unwrap_or(&import.name);
+                let stripped = source
+                    .and_then(|src| original.strip_prefix(&format!("{}::", src)))
+                    .unwrap_or(original);
+                format!("{} as {}", stripped, alias)
+            } else {
+                import.name.clone()
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if let Some(source) = source {
+        if specs.len() == 1 {
+            let spec = &specs[0];
+            if spec.contains("::") {
+                format!("use {}", spec)
+            } else {
+                format!("use {}::{}", source, spec)
+            }
+        } else {
+            format!("use {}::{{{}}}", source, specs.join(", "))
+        }
+    } else {
+        format!("use {}", specs.join(", "))
+    }
+}
+
+fn format_go_import_group(imports: &[&ImportSymbol]) -> String {
+    let specs = imports
+        .iter()
+        .map(|import| {
+            let path = import.source.as_deref().unwrap_or(&import.name);
+            let quoted = format!("\"{}\"", path);
+            if let Some(alias) = import.alias.as_deref() {
+                format!("{} {}", alias, quoted)
+            } else {
+                quoted
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!("import {}", specs)
+}
+
+fn format_java_import_group(imports: &[&ImportSymbol]) -> String {
+    let specs = imports
+        .iter()
+        .map(|import| {
+            if import.original_name.as_deref() == Some("*") {
+                if let Some(source) = import.source.as_deref() {
+                    format!("{}.*", source)
+                } else {
+                    "*".to_string()
+                }
+            } else if let Some(source) = import.source.as_deref() {
+                format!("{}.{}", source, import.name)
+            } else {
+                import.name.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!("import {}", specs)
+}
+
+fn format_csharp_import_group(imports: &[&ImportSymbol]) -> String {
+    let specs = imports
+        .iter()
+        .map(|import| {
+            import
+                .source
+                .as_deref()
+                .unwrap_or(&import.name)
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!("using {}", specs)
+}
+
+fn format_php_import_group(imports: &[&ImportSymbol]) -> String {
+    let specs = imports
+        .iter()
+        .map(|import| {
+            let base = import.source.as_deref().unwrap_or(&import.name);
+            if let Some(alias) = import.alias.as_deref() {
+                format!("{} as {}", base, alias)
+            } else {
+                base.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!("use {}", specs)
+}
+
+fn format_scala_import_group(imports: &[&ImportSymbol]) -> String {
+    if let Some(source) = imports.first().and_then(|import| import.source.as_deref()) {
+        return format!("import {}", source);
+    }
+
+    let specs = imports
+        .iter()
+        .map(|import| {
+            if let Some(alias) = import.alias.as_deref() {
+                let original = import.original_name.as_deref().unwrap_or(&import.name);
+                format!("{} => {}", original, alias)
+            } else {
+                import.name.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!("import {}", specs)
+}
+
+fn format_swift_import_group(imports: &[&ImportSymbol]) -> String {
+    let specs = imports
+        .iter()
+        .map(|import| {
+            import
+                .source
+                .as_deref()
+                .unwrap_or(&import.name)
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!("import {}", specs)
+}
+
+fn format_generic_import_group(imports: &[&ImportSymbol]) -> String {
+    let specs = imports
+        .iter()
+        .map(|import| import.name.clone())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("import {}", specs)
 }
 
 /// Extracts class summaries from a file.
@@ -932,9 +1238,10 @@ fn render_class_summaries(
     language: ProgrammingLanguage,
     summaries: &[ClassSummary],
     config: &OutputConfig,
+    display_root: Option<&Path>,
 ) {
     // Render file header
-    let file_display = file.display().to_string();
+    let file_display = display_path(file, display_root);
     let header = if config.use_hyperlinks {
         hyperlink(file, 1, &file_display)
     } else {

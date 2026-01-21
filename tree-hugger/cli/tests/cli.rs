@@ -451,3 +451,43 @@ fn test_classes_command_csharp() {
         .stdout(predicate::str::contains("\"class\""))
         .stdout(predicate::str::contains("\"Greeter\""));
 }
+
+// ============================================================================
+// Imports command grouping tests
+// ============================================================================
+
+#[test]
+fn test_imports_typescript_grouped_output() {
+    hug_cmd()
+        .args([
+            "imports",
+            "tree-hugger/lib/tests/fixtures/imports.ts",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "tree-hugger/lib/tests/fixtures/imports.ts (TypeScript)",
+        ))
+        .stdout(predicate::str::contains(
+            "- import { readFile as read, writeFile as write } from \"fs/promises\" [7:22, 41]",
+        ));
+}
+
+#[test]
+fn test_imports_rust_grouped_output() {
+    hug_cmd()
+        .args([
+            "imports",
+            "tree-hugger/lib/tests/fixtures/imports.rs",
+            "--plain",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "tree-hugger/lib/tests/fixtures/imports.rs (Rust)",
+        ))
+        .stdout(predicate::str::contains(
+            "- use std::process::{Child, Command, Stdio}",
+        ));
+}

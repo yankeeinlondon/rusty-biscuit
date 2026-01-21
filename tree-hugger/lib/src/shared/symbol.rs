@@ -533,6 +533,9 @@ pub struct ImportSymbol {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
     pub range: CodeRange,
+    /// The range of the full import statement (used for grouping).
+    #[serde(skip)]
+    pub statement_range: Option<CodeRange>,
     pub language: ProgrammingLanguage,
     pub file: PathBuf,
     /// The source module path (e.g., `"fs"`, `"typing"`, `"std::io"`).

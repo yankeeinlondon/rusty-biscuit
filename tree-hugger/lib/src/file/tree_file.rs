@@ -130,12 +130,14 @@ impl TreeFile {
                 // Extract import metadata by traversing the AST
                 let (source, original_name, alias) =
                     self.extract_import_metadata(node, &name, self.language);
+                let statement_range = self.import_statement_range(node, self.language);
 
                 imports.push(ImportSymbol {
                     name,
                     original_name,
                     alias,
                     range: range_for_node(node),
+                    statement_range,
                     language: self.language,
                     file: self.file.clone(),
                     source,
@@ -240,6 +242,28 @@ impl TreeFile {
             ProgrammingLanguage::Swift => self.extract_swift_import_metadata(node),
             _ => (None, None, None),
         }
+    }
+
+    /// Returns the range of the full import statement for grouping.
+    fn import_statement_range(&self, node: Node, language: ProgrammingLanguage) -> Option<CodeRange> {
+        let statement = match language {
+            ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
+                find_ancestor_by_kind(node, "import_statement")
+            }
+            ProgrammingLanguage::Python => {
+                find_ancestor_by_kinds(node, &["import_from_statement", "import_statement"])
+            }
+            ProgrammingLanguage::Rust => find_ancestor_by_kind(node, "use_declaration"),
+            ProgrammingLanguage::Go => find_ancestor_by_kind(node, "import_declaration"),
+            ProgrammingLanguage::Java => find_ancestor_by_kind(node, "import_declaration"),
+            ProgrammingLanguage::CSharp => find_ancestor_by_kind(node, "using_directive"),
+            ProgrammingLanguage::Php => find_ancestor_by_kind(node, "namespace_use_declaration"),
+            ProgrammingLanguage::Scala => find_ancestor_by_kind(node, "import_declaration"),
+            ProgrammingLanguage::Swift => find_ancestor_by_kind(node, "import_declaration"),
+            _ => None,
+        };
+
+        statement.map(range_for_node)
     }
 
     /// Extracts import metadata for JavaScript/TypeScript.
@@ -2667,6 +2691,18 @@ fn find_ancestor_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
     let mut current = node.parent();
     while let Some(parent) = current {
         if parent.kind() == kind {
+            return Some(parent);
+        }
+        current = parent.parent();
+    }
+    None
+}
+
+/// Finds the closest ancestor matching any of the provided kinds.
+fn find_ancestor_by_kinds<'a>(node: Node<'a>, kinds: &[&str]) -> Option<Node<'a>> {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if kinds.iter().any(|kind| parent.kind() == *kind) {
             return Some(parent);
         }
         current = parent.parent();
