@@ -459,7 +459,7 @@ fn format_symbol_name(symbol: &SymbolInfo, language: ProgrammingLanguage) -> Str
     symbol.name.clone()
 }
 
-/// Formats a function signature like: `name(param1: T1, param2: T2) -> ReturnType`
+/// Formats a function signature like: `[visibility] name(param1: T1, param2: T2) -> ReturnType`
 fn format_function_signature(
     name: &str,
     sig: &FunctionSignature,
@@ -468,7 +468,13 @@ fn format_function_signature(
     let params = format_parameters(&sig.parameters, language);
     let return_part = format_return_type(&sig.return_type, language);
 
-    format!("{name}({params}){return_part}")
+    // Add visibility prefix if present
+    let visibility_part = match &sig.visibility {
+        Some(vis) => format!("{vis} "),
+        None => String::new(),
+    };
+
+    format!("{visibility_part}{name}({params}){return_part}")
 }
 
 /// Formats function parameters as a comma-separated list.

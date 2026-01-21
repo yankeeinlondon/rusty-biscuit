@@ -1468,3 +1468,417 @@ fn cpp_enum_not_duplicated() -> Result<(), TreeHuggerError> {
 
     Ok(())
 }
+
+// ============================================================================
+// Regression tests for consistent function signature extraction across languages
+// Bug: Function signatures were only extracted for Rust, TypeScript, Go, Python.
+// Other languages (PHP, Java, C, C++, C#, Swift, Scala) showed only names.
+// ============================================================================
+
+#[test]
+fn extracts_php_function_signature() -> Result<(), TreeHuggerError> {
+    // Regression test: PHP functions should have parameters and return types extracted
+    let tree_file = TreeFile::new(fixture_path("signatures.php"))?;
+    let symbols = tree_file.symbols()?;
+
+    let greet = symbols
+        .iter()
+        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .expect("should find greet function");
+
+    let sig = greet.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("string"),
+        "PHP function return type should be extracted"
+    );
+
+    // Check parameters
+    assert!(!sig.parameters.is_empty(), "should have parameters");
+    assert_eq!(sig.parameters[0].name, "name");
+    assert_eq!(
+        sig.parameters[0].type_annotation.as_deref(),
+        Some("string"),
+        "PHP parameter type should be extracted"
+    );
+
+    // Check default value
+    assert!(sig.parameters.len() >= 2, "should have multiple parameters");
+    assert_eq!(
+        sig.parameters[1].default_value.as_deref(),
+        Some("25"),
+        "PHP default value should be extracted"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_java_function_signature() -> Result<(), TreeHuggerError> {
+    // Regression test: Java methods should have parameters and return types extracted
+    let tree_file = TreeFile::new(fixture_path("signatures.java"))?;
+    let symbols = tree_file.symbols()?;
+
+    let greet = symbols
+        .iter()
+        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Method)
+        .expect("should find greet method");
+
+    let sig = greet.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("String"),
+        "Java method return type should be extracted"
+    );
+
+    // Check parameters
+    assert!(!sig.parameters.is_empty(), "should have parameters");
+    assert_eq!(sig.parameters[0].name, "name");
+    assert_eq!(
+        sig.parameters[0].type_annotation.as_deref(),
+        Some("String"),
+        "Java parameter type should be extracted"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_c_function_signature() -> Result<(), TreeHuggerError> {
+    // Regression test: C functions should have parameters and return types extracted
+    let tree_file = TreeFile::new(fixture_path("signatures.c"))?;
+    let symbols = tree_file.symbols()?;
+
+    let add = symbols
+        .iter()
+        .find(|s| s.name == "add" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .expect("should find add function");
+
+    let sig = add.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("int"),
+        "C function return type should be extracted"
+    );
+
+    // Check parameters
+    assert_eq!(sig.parameters.len(), 2, "should have 2 parameters");
+    assert_eq!(sig.parameters[0].name, "a");
+    assert_eq!(
+        sig.parameters[0].type_annotation.as_deref(),
+        Some("int"),
+        "C parameter type should be extracted"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_cpp_function_signature() -> Result<(), TreeHuggerError> {
+    // Regression test: C++ functions should have parameters and return types extracted
+    let tree_file = TreeFile::new(fixture_path("signatures.cpp"))?;
+    let symbols = tree_file.symbols()?;
+
+    let add = symbols
+        .iter()
+        .find(|s| s.name == "add" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .expect("should find add function");
+
+    let sig = add.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("int"),
+        "C++ function return type should be extracted"
+    );
+
+    // Check parameters
+    assert_eq!(sig.parameters.len(), 2, "should have 2 parameters");
+    assert_eq!(sig.parameters[0].name, "a");
+    assert_eq!(sig.parameters[1].name, "b");
+
+    Ok(())
+}
+
+#[test]
+fn extracts_csharp_function_signature() -> Result<(), TreeHuggerError> {
+    // Regression test: C# methods should have parameters and return types extracted
+    let tree_file = TreeFile::new(fixture_path("signatures.cs"))?;
+    let symbols = tree_file.symbols()?;
+
+    let greet = symbols
+        .iter()
+        .find(|s| s.name == "Greet" && s.kind == tree_hugger_lib::SymbolKind::Method)
+        .expect("should find Greet method");
+
+    let sig = greet.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("string"),
+        "C# method return type should be extracted"
+    );
+
+    // Check parameters
+    assert!(!sig.parameters.is_empty(), "should have parameters");
+    assert_eq!(sig.parameters[0].name, "name");
+    assert_eq!(
+        sig.parameters[0].type_annotation.as_deref(),
+        Some("string"),
+        "C# parameter type should be extracted"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_swift_function_signature() -> Result<(), TreeHuggerError> {
+    // Regression test: Swift functions should have parameters and return types extracted
+    let tree_file = TreeFile::new(fixture_path("signatures.swift"))?;
+    let symbols = tree_file.symbols()?;
+
+    let greet = symbols
+        .iter()
+        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .expect("should find greet function");
+
+    let sig = greet.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("String"),
+        "Swift function return type should be extracted"
+    );
+
+    // Check parameters
+    assert!(!sig.parameters.is_empty(), "should have parameters");
+    assert_eq!(sig.parameters[0].name, "name");
+    assert_eq!(
+        sig.parameters[0].type_annotation.as_deref(),
+        Some("String"),
+        "Swift parameter type should be extracted"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_scala_function_signature() -> Result<(), TreeHuggerError> {
+    // Regression test: Scala functions should have parameters and return types extracted
+    let tree_file = TreeFile::new(fixture_path("signatures.scala"))?;
+    let symbols = tree_file.symbols()?;
+
+    let greet = symbols
+        .iter()
+        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .expect("should find greet function");
+
+    let sig = greet.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("String"),
+        "Scala function return type should be extracted"
+    );
+
+    // Check parameters
+    assert!(!sig.parameters.is_empty(), "should have parameters");
+    assert_eq!(sig.parameters[0].name, "name");
+    assert_eq!(
+        sig.parameters[0].type_annotation.as_deref(),
+        Some("String"),
+        "Scala parameter type should be extracted"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_scala_default_parameters() -> Result<(), TreeHuggerError> {
+    // Regression test: Scala default parameter values should be extracted
+    let tree_file = TreeFile::new(fixture_path("signatures.scala"))?;
+    let symbols = tree_file.symbols()?;
+
+    let greet_with_prefix = symbols
+        .iter()
+        .find(|s| s.name == "greetWithPrefix")
+        .expect("should find greetWithPrefix function");
+
+    let sig = greet_with_prefix
+        .signature
+        .as_ref()
+        .expect("should have signature");
+
+    assert!(sig.parameters.len() >= 2, "should have 2 parameters");
+    assert_eq!(
+        sig.parameters[1].default_value.as_deref(),
+        Some("\"Hello\""),
+        "Scala default value should be extracted"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_swift_multiple_parameters() -> Result<(), TreeHuggerError> {
+    // Regression test: Swift functions with multiple parameters should extract all
+    let tree_file = TreeFile::new(fixture_path("signatures.swift"))?;
+    let symbols = tree_file.symbols()?;
+
+    let greet_with_age = symbols
+        .iter()
+        .find(|s| s.name == "greetWithAge")
+        .expect("should find greetWithAge function");
+
+    let sig = greet_with_age
+        .signature
+        .as_ref()
+        .expect("should have signature");
+
+    assert_eq!(sig.parameters.len(), 2, "should have 2 parameters");
+    assert_eq!(sig.parameters[0].name, "name");
+    assert_eq!(sig.parameters[0].type_annotation.as_deref(), Some("String"));
+    assert_eq!(sig.parameters[1].name, "age");
+    assert_eq!(sig.parameters[1].type_annotation.as_deref(), Some("Int"));
+
+    Ok(())
+}
+
+// ============================================================================
+// Visibility modifier extraction tests
+// ============================================================================
+
+#[test]
+fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
+    // Regression test: TypeScript methods should have visibility modifiers extracted
+    let tree_file = TreeFile::new(fixture_path("arrows.ts"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Find the public greet method
+    let public_greet = symbols
+        .iter()
+        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function && s.range.start_line == 32)
+        .expect("should find public greet method");
+
+    let sig = public_greet.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.visibility,
+        Some(tree_hugger_lib::Visibility::Public),
+        "TypeScript public method should have Public visibility"
+    );
+
+    // Find the protected formatName method
+    let protected_method = symbols
+        .iter()
+        .find(|s| s.name == "formatName")
+        .expect("should find protected formatName method");
+
+    let sig = protected_method.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.visibility,
+        Some(tree_hugger_lib::Visibility::Protected),
+        "TypeScript protected method should have Protected visibility"
+    );
+
+    // Find the private log method
+    let private_method = symbols
+        .iter()
+        .find(|s| s.name == "log")
+        .expect("should find private log method");
+
+    let sig = private_method.signature.as_ref().expect("should have signature");
+    assert_eq!(
+        sig.visibility,
+        Some(tree_hugger_lib::Visibility::Private),
+        "TypeScript private method should have Private visibility"
+    );
+
+    Ok(())
+}
+
+// ============================================================================
+// Arrow function extraction tests
+// ============================================================================
+
+#[test]
+fn extracts_typescript_arrow_function_signatures() -> Result<(), TreeHuggerError> {
+    // Regression test: TypeScript arrow functions should have signatures extracted
+    let tree_file = TreeFile::new(fixture_path("arrows.ts"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Find the greet arrow function (line 2)
+    let greet = symbols
+        .iter()
+        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function && s.range.start_line == 2)
+        .expect("should find greet arrow function");
+
+    let sig = greet.signature.as_ref().expect("arrow function should have signature");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("string"),
+        "Arrow function return type should be extracted"
+    );
+    assert!(!sig.parameters.is_empty(), "Arrow function should have parameters");
+    assert_eq!(sig.parameters[0].name, "name");
+    assert_eq!(sig.parameters[0].type_annotation.as_deref(), Some("string"));
+
+    Ok(())
+}
+
+#[test]
+fn extracts_typescript_arrow_function_with_multiple_params() -> Result<(), TreeHuggerError> {
+    // Regression test: Arrow functions with multiple parameters
+    let tree_file = TreeFile::new(fixture_path("arrows.ts"))?;
+    let symbols = tree_file.symbols()?;
+
+    let add = symbols
+        .iter()
+        .find(|s| s.name == "add" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .expect("should find add arrow function");
+
+    let sig = add.signature.as_ref().expect("should have signature");
+    assert_eq!(sig.parameters.len(), 2, "should have 2 parameters");
+    assert_eq!(sig.parameters[0].name, "a");
+    assert_eq!(sig.parameters[0].type_annotation.as_deref(), Some("number"));
+    assert_eq!(sig.parameters[1].name, "b");
+    assert_eq!(sig.parameters[1].type_annotation.as_deref(), Some("number"));
+
+    Ok(())
+}
+
+#[test]
+fn extracts_typescript_arrow_function_with_rest_params() -> Result<(), TreeHuggerError> {
+    // Regression test: Arrow functions with rest parameters
+    let tree_file = TreeFile::new(fixture_path("arrows.ts"))?;
+    let symbols = tree_file.symbols()?;
+
+    let sum = symbols
+        .iter()
+        .find(|s| s.name == "sum" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .expect("should find sum arrow function");
+
+    let sig = sum.signature.as_ref().expect("should have signature");
+    assert!(!sig.parameters.is_empty(), "should have parameters");
+    assert_eq!(sig.parameters[0].name, "numbers");
+    assert!(
+        sig.parameters[0].is_variadic,
+        "rest parameter should be marked as variadic"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn extracts_javascript_arrow_function_signatures() -> Result<(), TreeHuggerError> {
+    // Regression test: JavaScript arrow functions should have signatures extracted
+    let tree_file = TreeFile::new(fixture_path("arrows.js"))?;
+    let symbols = tree_file.symbols()?;
+
+    // Find the greet arrow function
+    let greet = symbols
+        .iter()
+        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function && s.range.start_line == 2)
+        .expect("should find greet arrow function");
+
+    let sig = greet.signature.as_ref().expect("arrow function should have signature");
+    assert!(!sig.parameters.is_empty(), "Arrow function should have parameters");
+    assert_eq!(sig.parameters[0].name, "name");
+
+    Ok(())
+}

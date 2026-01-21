@@ -41,8 +41,10 @@
   (property_identifier) @local.definition.function
   (#set! definition.var.scope parent)) @local.definition.function.context
 
-; Arrow functions - capture full node for signature extraction
-(arrow_function) @local.definition.function.context
+; Arrow functions assigned to variables - capture name and use arrow function as context
+(variable_declarator
+  name: (identifier) @local.definition.function
+  value: (arrow_function) @local.definition.function.context)
 
 ; References
 ;------------

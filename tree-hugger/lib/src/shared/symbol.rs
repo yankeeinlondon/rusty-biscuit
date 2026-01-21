@@ -198,6 +198,31 @@ pub enum SymbolKind {
     Unknown,
 }
 
+/// Visibility/access modifier for a symbol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Visibility {
+    /// Public access (e.g., `public` in Java/C#/TS, `pub` in Rust)
+    Public,
+    /// Protected access (e.g., `protected` in Java/C#/TS)
+    Protected,
+    /// Private access (e.g., `private` in Java/C#/TS)
+    Private,
+    /// Package-private/internal access (e.g., default in Java, `internal` in C#)
+    Internal,
+}
+
+impl fmt::Display for Visibility {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            Self::Public => "public",
+            Self::Protected => "protected",
+            Self::Private => "private",
+            Self::Internal => "internal",
+        };
+        formatter.write_str(label)
+    }
+}
+
 impl SymbolKind {
     /// Returns true for function-like symbols.
     pub fn is_function(self) -> bool {
@@ -309,6 +334,9 @@ pub struct FunctionSignature {
     /// The return type, if present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_type: Option<String>,
+    /// The visibility/access modifier (public, protected, private).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<Visibility>,
 }
 
 impl Default for FunctionSignature {
@@ -323,12 +351,13 @@ impl FunctionSignature {
         Self {
             parameters: Vec::new(),
             return_type: None,
+            visibility: None,
         }
     }
 
     /// Returns true if the signature has no information.
     pub fn is_empty(&self) -> bool {
-        self.parameters.is_empty() && self.return_type.is_none()
+        self.parameters.is_empty() && self.return_type.is_none() && self.visibility.is_none()
     }
 }
 
