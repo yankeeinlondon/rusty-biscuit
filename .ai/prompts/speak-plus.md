@@ -9,6 +9,8 @@ Both have identical signatures but handle error conditions differently.
 
 This functionality is wrapped around the `tts` crate and the original idea was to have a zero dependency way of leveraging what TTS capability the host had on it's system. However, the `tts` crate DOES require dependencies on Linux and possibly Windows too so we're going to move away from the `tts` package.
 
+> The source file `biscuit-speaks/src/old.rs` contains many of the code used in the original/current implementation with ties to the `tts` crate which we're eliminating.
+
 ## Refactoring `biscuit-speaks`
 
 We will refactor with the same goal we had originally in mind: leverage a host's TTS capabilities to provide TTS functionality. However, this time we will add in one cloud provider to allow some additional flexibility.
@@ -48,7 +50,9 @@ The process we'll use to select the TTS provider is:
 The _gender_ of the speaker, the _volume_ at which the speaker speaks, and even the _specific voice_ used are things which are desirable to configure in a TTS:
 
 - Volume and Gender are _relatively_ simple to abstract away from the actual TTS provider providing the service
-    - d
+    - like we did with the current implementation, the `VolumeLevel` enum is how we'll refer to volume
+        - it provides `Soft`, `Normal`, and `Loud` as well as an explicit numeric value
+        - if a TTS services doesn't provide volume control then we'll ignore the enum but where ever we can we'll try to honor the volume settings and map it to the TTS provider
 
 ## Client's of this Library
 
