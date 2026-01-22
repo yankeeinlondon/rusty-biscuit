@@ -241,71 +241,61 @@ impl TreeFile {
         match self.language {
             ProgrammingLanguage::Rust => {
                 // Check for scoped_identifier (module::symbol)
-                if parent.kind() == "scoped_identifier" {
-                    if let Some(path_node) = parent.child_by_field_name("path") {
-                        if path_node.id() != node.id() {
+                if parent.kind() == "scoped_identifier"
+                    && let Some(path_node) = parent.child_by_field_name("path")
+                        && path_node.id() != node.id() {
                             let qualifier = path_node
                                 .utf8_text(self.source.as_bytes())
                                 .ok()
                                 .map(String::from);
                             return (true, qualifier);
                         }
-                    }
-                }
                 // Check for field_expression (object.field)
-                if parent.kind() == "field_expression" {
-                    if let Some(value_node) = parent.child_by_field_name("value") {
-                        if value_node.id() != node.id() {
+                if parent.kind() == "field_expression"
+                    && let Some(value_node) = parent.child_by_field_name("value")
+                        && value_node.id() != node.id() {
                             let qualifier = value_node
                                 .utf8_text(self.source.as_bytes())
                                 .ok()
                                 .map(String::from);
                             return (true, qualifier);
                         }
-                    }
-                }
             }
             ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
                 // Check for member_expression (object.property)
-                if parent.kind() == "member_expression" {
-                    if let Some(object_node) = parent.child_by_field_name("object") {
-                        if object_node.id() != node.id() {
+                if parent.kind() == "member_expression"
+                    && let Some(object_node) = parent.child_by_field_name("object")
+                        && object_node.id() != node.id() {
                             let qualifier = object_node
                                 .utf8_text(self.source.as_bytes())
                                 .ok()
                                 .map(String::from);
                             return (true, qualifier);
                         }
-                    }
-                }
             }
             ProgrammingLanguage::Python => {
                 // Check for attribute (object.attr)
-                if parent.kind() == "attribute" {
-                    if let Some(object_node) = parent.child_by_field_name("object") {
-                        if object_node.id() != node.id() {
+                if parent.kind() == "attribute"
+                    && let Some(object_node) = parent.child_by_field_name("object")
+                        && object_node.id() != node.id() {
                             let qualifier = object_node
                                 .utf8_text(self.source.as_bytes())
                                 .ok()
                                 .map(String::from);
                             return (true, qualifier);
                         }
-                    }
-                }
             }
             ProgrammingLanguage::Go => {
                 // Check for selector_expression (package.Symbol)
-                if parent.kind() == "selector_expression" {
-                    if let Some(operand_node) = parent.child_by_field_name("operand") {
-                        if operand_node.id() != node.id() {
+                if parent.kind() == "selector_expression"
+                    && let Some(operand_node) = parent.child_by_field_name("operand")
+                        && operand_node.id() != node.id() {
                             let qualifier = operand_node
                                 .utf8_text(self.source.as_bytes())
                                 .ok()
                                 .map(String::from);
                             return (true, qualifier);
                         }
-                    }
-                }
             }
             _ => {
                 // Generic check for field access patterns
@@ -343,16 +333,14 @@ impl TreeFile {
             ProgrammingLanguage::Go => {
                 // For Go, if this is a path capture (string literal) but the import_spec
                 // has a real alias (not blank identifier "_"), skip the path capture
-                if node.kind() == "interpreted_string_literal" {
-                    if let Some(import_spec) = find_ancestor_by_kind(node, "import_spec") {
-                        if let Some(name_node) = import_spec.child_by_field_name("name") {
+                if node.kind() == "interpreted_string_literal"
+                    && let Some(import_spec) = find_ancestor_by_kind(node, "import_spec")
+                        && let Some(name_node) = import_spec.child_by_field_name("name") {
                             // Only skip if the alias is a real package_identifier, not blank "_"
                             if name_node.kind() == "package_identifier" {
                                 return true; // Skip path when there's a real alias
                             }
                         }
-                    }
-                }
                 false
             }
             ProgrammingLanguage::Java => {
@@ -388,11 +376,10 @@ impl TreeFile {
                 if let Some(using_decl) = find_ancestor_by_kind(node, "using_directive") {
                     // Find the direct qualified_name child
                     for child in using_decl.children(&mut using_decl.walk()) {
-                        if child.kind() == "qualified_name" {
-                            if let Some(name_node) = child.child_by_field_name("name") {
+                        if child.kind() == "qualified_name"
+                            && let Some(name_node) = child.child_by_field_name("name") {
                                 return name_node.id() != node.id();
                             }
-                        }
                     }
                 }
                 false
@@ -475,8 +462,8 @@ impl TreeFile {
         if let Some(p) = parent {
             if p.kind() == "import_specifier" {
                 // import { original as alias } from "module"
-                if let Some(name_node) = p.child_by_field_name("name") {
-                    if let Some(alias_node) = p.child_by_field_name("alias") {
+                if let Some(name_node) = p.child_by_field_name("name")
+                    && let Some(alias_node) = p.child_by_field_name("alias") {
                         let orig = name_node
                             .utf8_text(self.source.as_bytes())
                             .unwrap_or_default()
@@ -492,7 +479,6 @@ impl TreeFile {
                             alias = Some(al);
                         }
                     }
-                }
             } else if p.kind() == "namespace_import" {
                 // import * as ns from "module"
                 alias = Some(name.to_string());
@@ -520,8 +506,8 @@ impl TreeFile {
 
         // Check for aliased import (aliased_import) - do this first to get the correct module name
         let parent = node.parent();
-        if let Some(p) = parent {
-            if p.kind() == "aliased_import" {
+        if let Some(p) = parent
+            && p.kind() == "aliased_import" {
                 // This handles both:
                 // - `import X as Y` (name field is module, alias field is local name)
                 // - `from M import X as Y` (name field is original symbol, alias field is local name)
@@ -538,20 +524,18 @@ impl TreeFile {
                             alias = Some(al.to_string());
 
                             // For `import X as Y`, the source is X (the module name)
-                            if let Some(stmt) = &import_stmt {
-                                if stmt.kind() == "import_statement" {
+                            if let Some(stmt) = &import_stmt
+                                && stmt.kind() == "import_statement" {
                                     source = Some(orig.to_string());
                                 }
-                            }
                         }
                     }
                 }
             }
-        }
 
         // Set source if not already set by aliased import handling
-        if source.is_none() {
-            if let Some(stmt) = import_stmt {
+        if source.is_none()
+            && let Some(stmt) = import_stmt {
                 if stmt.kind() == "import_from_statement" {
                     // from X import Y - extract X as the source
                     if let Some(module_node) = stmt.child_by_field_name("module_name") {
@@ -566,7 +550,6 @@ impl TreeFile {
                     source = Some(name.to_string());
                 }
             }
-        }
 
         (source, original_name, alias)
     }
@@ -593,8 +576,8 @@ impl TreeFile {
 
         // Check for use_as_clause (use foo as bar)
         let parent = node.parent();
-        if let Some(p) = parent {
-            if p.kind() == "use_as_clause" {
+        if let Some(p) = parent
+            && p.kind() == "use_as_clause" {
                 // The captured node is the alias
                 if let Some(path_node) = p.child_by_field_name("path") {
                     let orig = path_node
@@ -605,7 +588,6 @@ impl TreeFile {
                     alias = Some(name.to_string());
                 }
             }
-        }
 
         (source, original_name, alias)
     }
@@ -802,9 +784,9 @@ impl TreeFile {
 
         // Check for renamed import (import_selectors with rename)
         let parent = node.parent();
-        if let Some(p) = parent {
-            if p.kind() == "renamed_identifier" {
-                if let Some(name_node) = p.child(0) {
+        if let Some(p) = parent
+            && p.kind() == "renamed_identifier"
+                && let Some(name_node) = p.child(0) {
                     let orig = name_node
                         .utf8_text(self.source.as_bytes())
                         .unwrap_or_default()
@@ -812,8 +794,6 @@ impl TreeFile {
                     original_name = Some(orig);
                     alias = Some(name.to_string());
                 }
-            }
-        }
 
         (source, original_name, alias)
     }
@@ -913,8 +893,9 @@ impl TreeFile {
         // Run semantic diagnostics
         diagnostics.extend(self.run_semantic_diagnostics());
 
-        // Parse ignore directives and filter diagnostics
-        let ignores = IgnoreDirectives::parse(&self.source);
+        // Parse ignore directives using tree-sitter (avoids false positives from strings)
+        let ignores =
+            IgnoreDirectives::parse_with_tree(&self.source, &self.tree, self.language);
         if ignores.has_directives() {
             diagnostics.retain(|d| !ignores.should_ignore(d.range.start_line, d.rule.as_deref()));
         }
@@ -1023,6 +1004,13 @@ impl TreeFile {
         // Check for unused imports
         diagnostics.extend(self.check_unused_imports(&imports, &referenced_names));
 
+        // Check for qualified references with undefined qualifiers
+        diagnostics.extend(self.check_qualified_references(
+            &references,
+            &defined_names,
+            &imported_names,
+        ));
+
         // Check for dead code
         diagnostics.extend(self.check_dead_code());
 
@@ -1041,7 +1029,7 @@ impl TreeFile {
 
         // Walk the entire AST looking for terminal statements
         while let Some(node) = stack.pop() {
-            if is_terminal_statement(node, self.language) {
+            if is_terminal_statement(node, self.language, &self.source) {
                 // Find dead code after this terminal
                 for dead_node in find_dead_code_after(node, self.language) {
                     let range = range_for_node(dead_node);
@@ -1052,27 +1040,14 @@ impl TreeFile {
                         continue;
                     }
 
-                    // Build context
-                    let line_text = self
-                        .source
-                        .lines()
-                        .nth(range.start_line.saturating_sub(1))
-                        .unwrap_or("")
-                        .to_string();
-
-                    let underline_column = range.start_column.saturating_sub(1);
-                    let underline_length = range.end_column.saturating_sub(range.start_column).max(1);
+                    let context = self.build_source_context_from_range(&range);
 
                     diagnostics.push(LintDiagnostic {
                         message: "Unreachable code after unconditional exit".to_string(),
                         range,
                         severity: severity_for_rule("dead-code"),
                         rule: Some("dead-code".to_string()),
-                        context: Some(SourceContext {
-                            line_text,
-                            underline_column,
-                            underline_length,
-                        }),
+                        context: Some(context),
                     });
                 }
             }
@@ -1137,31 +1112,14 @@ impl TreeFile {
                 continue;
             }
 
-            // Build context from range
-            let line_text = self
-                .source
-                .lines()
-                .nth(reference.range.start_line.saturating_sub(1))
-                .unwrap_or("")
-                .to_string();
-
-            let underline_column = reference.range.start_column.saturating_sub(1);
-            let underline_length = reference
-                .range
-                .end_column
-                .saturating_sub(reference.range.start_column)
-                .max(1);
+            let context = self.build_source_context_from_range(&reference.range);
 
             diagnostics.push(LintDiagnostic {
                 message: format!("Reference to undefined symbol '{}'", name),
                 range: reference.range.clone(),
                 severity: severity_for_rule("undefined-symbol"),
                 rule: Some("undefined-symbol".to_string()),
-                context: Some(SourceContext {
-                    line_text,
-                    underline_column,
-                    underline_length,
-                }),
+                context: Some(context),
             });
         }
 
@@ -1201,31 +1159,14 @@ impl TreeFile {
                 continue;
             }
 
-            // Build context from range
-            let line_text = self
-                .source
-                .lines()
-                .nth(definition.range.start_line.saturating_sub(1))
-                .unwrap_or("")
-                .to_string();
-
-            let underline_column = definition.range.start_column.saturating_sub(1);
-            let underline_length = definition
-                .range
-                .end_column
-                .saturating_sub(definition.range.start_column)
-                .max(1);
+            let context = self.build_source_context_from_range(&definition.range);
 
             diagnostics.push(LintDiagnostic {
                 message: format!("Symbol '{}' is defined but never used", name),
                 range: definition.range.clone(),
                 severity: severity_for_rule("unused-symbol"),
                 rule: Some("unused-symbol".to_string()),
-                context: Some(SourceContext {
-                    line_text,
-                    underline_column,
-                    underline_length,
-                }),
+                context: Some(context),
             });
         }
 
@@ -1258,63 +1199,140 @@ impl TreeFile {
                 continue;
             }
 
-            // Build context from range
-            let line_text = self
-                .source
-                .lines()
-                .nth(import.range.start_line.saturating_sub(1))
-                .unwrap_or("")
-                .to_string();
-
-            let underline_column = import.range.start_column.saturating_sub(1);
-            let underline_length = import
-                .range
-                .end_column
-                .saturating_sub(import.range.start_column)
-                .max(1);
+            let context = self.build_source_context_from_range(&import.range);
 
             diagnostics.push(LintDiagnostic {
                 message: format!("Imported symbol '{}' is never used", name),
                 range: import.range.clone(),
                 severity: severity_for_rule("unused-import"),
                 rule: Some("unused-import".to_string()),
-                context: Some(SourceContext {
-                    line_text,
-                    underline_column,
-                    underline_length,
-                }),
+                context: Some(context),
             });
         }
 
         diagnostics
     }
 
-    /// Builds source context for a node to enable visual diagnostic display.
-    fn build_source_context(&self, node: &Node<'_>) -> SourceContext {
-        let start = node.start_position();
-        let end = node.end_position();
+    /// Checks for qualified references with undefined qualifiers.
+    ///
+    /// Reports warnings for qualified references (e.g., `unknown_module::function()`)
+    /// where the qualifier is not defined in the file's imports or declarations.
+    ///
+    /// The following qualifiers are skipped (not reported):
+    /// - `self`, `this`, `super`, `Self` - language-specific keywords
+    /// - Single-letter identifiers - likely generic type parameters
+    fn check_qualified_references(
+        &self,
+        references: &[ReferencedSymbol],
+        defined_names: &std::collections::HashSet<&str>,
+        imported_names: &std::collections::HashSet<&str>,
+    ) -> Vec<LintDiagnostic> {
+        use crate::builtins::is_builtin;
 
-        // Get the line containing the node start
+        // Qualifiers to skip (language keywords and common patterns)
+        const SKIP_QUALIFIERS: &[&str] = &["self", "this", "super", "Self"];
+
+        let mut diagnostics = Vec::new();
+        let mut seen_undefined: std::collections::HashSet<(usize, usize)> =
+            std::collections::HashSet::new();
+
+        for reference in references {
+            // Only check qualified references that have a qualifier
+            let qualifier = match &reference.qualifier {
+                Some(q) => q.as_str(),
+                None => continue,
+            };
+
+            // Skip language keywords
+            if SKIP_QUALIFIERS.contains(&qualifier) {
+                continue;
+            }
+
+            // Skip single-letter qualifiers (likely generic type params like T, U, etc.)
+            if qualifier.len() == 1 {
+                continue;
+            }
+
+            // Skip if the qualifier is defined locally
+            if defined_names.contains(qualifier) {
+                continue;
+            }
+
+            // Skip if the qualifier is imported
+            if imported_names.contains(qualifier) {
+                continue;
+            }
+
+            // Skip if it's a language builtin
+            if is_builtin(self.language, qualifier) {
+                continue;
+            }
+
+            // Avoid duplicate diagnostics for the same location
+            let location = (reference.range.start_byte, reference.range.end_byte);
+            if !seen_undefined.insert(location) {
+                continue;
+            }
+
+            // Build context from range
+            let context = self.build_source_context_from_range(&reference.range);
+
+            diagnostics.push(LintDiagnostic {
+                message: format!(
+                    "Reference to undefined module or namespace '{}'",
+                    qualifier
+                ),
+                range: reference.range.clone(),
+                severity: severity_for_rule("undefined-module"),
+                rule: Some("undefined-module".to_string()),
+                context: Some(context),
+            });
+        }
+
+        diagnostics
+    }
+
+    /// Builds source context from a `CodeRange` to enable visual diagnostic display.
+    ///
+    /// This is the primary helper for creating `SourceContext` instances. It handles
+    /// the conversion from 1-indexed `CodeRange` values to 0-indexed source positions.
+    fn build_source_context_from_range(&self, range: &CodeRange) -> SourceContext {
+        // CodeRange uses 1-indexed lines/columns, convert to 0-indexed for nth()
+        let line_index = range.start_line.saturating_sub(1);
+        let underline_column = range.start_column.saturating_sub(1);
+
+        // Get the line containing the range start
         let line_text = self
             .source
             .lines()
-            .nth(start.row)
+            .nth(line_index)
             .unwrap_or("")
             .to_string();
 
         // Calculate underline length (handle multi-line by capping to end of first line)
-        let underline_length = if start.row == end.row {
-            end.column.saturating_sub(start.column).max(1)
+        let underline_length = if range.start_line == range.end_line {
+            range
+                .end_column
+                .saturating_sub(range.start_column)
+                .max(1)
         } else {
             // Multi-line: underline to end of first line
-            line_text.len().saturating_sub(start.column).max(1)
+            line_text.len().saturating_sub(underline_column).max(1)
         };
 
         SourceContext {
             line_text,
-            underline_column: start.column,
+            underline_column,
             underline_length,
         }
+    }
+
+    /// Builds source context for a node to enable visual diagnostic display.
+    ///
+    /// Delegates to `build_source_context_from_range` after converting the node to a range.
+    fn build_source_context(&self, node: &Node<'_>) -> SourceContext {
+        let range = range_for_node(*node);
+        self.build_source_context_from_range(&range)
     }
 
     /// Provides syntax diagnostics for this file.
@@ -1322,22 +1340,33 @@ impl TreeFile {
     /// ## Returns
     /// Returns syntax diagnostics derived from tree-sitter error nodes.
     pub fn syntax_diagnostics(&self) -> Vec<SyntaxDiagnostic> {
-        let mut diagnostics = Vec::new();
         let root = self.tree.root_node();
+
+        // Fast path: if the tree has no errors, skip traversal entirely
+        if !root.has_error() {
+            return Vec::new();
+        }
+
+        let mut diagnostics = Vec::new();
         let mut stack = vec![root];
 
         while let Some(node) = stack.pop() {
             if node.is_error() || node.is_missing() {
+                // For missing nodes, node.kind() returns what was expected (e.g., ";" or "identifier")
                 let message = if node.is_missing() {
-                    "Missing syntax node".to_string()
+                    format!("Missing expected: {}", node.kind())
                 } else {
                     format!("Syntax error: {}", node.kind())
                 };
 
+                let range = range_for_node(node);
+                let context = self.build_source_context_from_range(&range);
+
                 diagnostics.push(SyntaxDiagnostic {
                     message,
-                    range: range_for_node(node),
+                    range,
                     severity: DiagnosticSeverity::Error,
+                    context: Some(context),
                 });
             }
 
@@ -2100,24 +2129,21 @@ fn extract_java_csharp_is_static(node: Node<'_>, source: &str) -> bool {
     if let Some(modifiers) = find_child_by_kind(node, "modifiers") {
         let mut cursor = modifiers.walk();
         for child in modifiers.children(&mut cursor) {
-            if let Ok(text) = child.utf8_text(source.as_bytes()) {
-                if text == "static" {
+            if let Ok(text) = child.utf8_text(source.as_bytes())
+                && text == "static" {
                     return true;
                 }
-            }
         }
     }
 
     // C#: direct modifier child containing "static"
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        if child.kind() == "modifier" {
-            if let Ok(text) = child.utf8_text(source.as_bytes()) {
-                if text == "static" {
+        if child.kind() == "modifier"
+            && let Ok(text) = child.utf8_text(source.as_bytes())
+                && text == "static" {
                     return true;
                 }
-            }
-        }
     }
 
     false
@@ -2142,20 +2168,17 @@ fn extract_php_is_static(node: Node<'_>) -> bool {
 /// Checks if a Python method has @staticmethod or @classmethod decorator.
 fn extract_python_is_static(node: Node<'_>, source: &str) -> bool {
     // Look at the decorated_definition parent if exists
-    if let Some(parent) = node.parent() {
-        if parent.kind() == "decorated_definition" {
+    if let Some(parent) = node.parent()
+        && parent.kind() == "decorated_definition" {
             let mut cursor = parent.walk();
             for child in parent.children(&mut cursor) {
-                if child.kind() == "decorator" {
-                    if let Ok(text) = child.utf8_text(source.as_bytes()) {
-                        if text.contains("staticmethod") || text.contains("classmethod") {
+                if child.kind() == "decorator"
+                    && let Ok(text) = child.utf8_text(source.as_bytes())
+                        && (text.contains("staticmethod") || text.contains("classmethod")) {
                             return true;
                         }
-                    }
-                }
             }
         }
-    }
     false
 }
 
@@ -2166,11 +2189,10 @@ fn extract_swift_is_static(node: Node<'_>, source: &str) -> bool {
         if child.kind() == "modifiers" {
             let mut mod_cursor = child.walk();
             for modifier in child.children(&mut mod_cursor) {
-                if let Ok(text) = modifier.utf8_text(source.as_bytes()) {
-                    if text == "static" || text == "class" {
+                if let Ok(text) = modifier.utf8_text(source.as_bytes())
+                    && (text == "static" || text == "class") {
                         return true;
                     }
-                }
             }
         }
     }
@@ -2197,13 +2219,11 @@ fn extract_scala_is_static(node: Node<'_>) -> bool {
 fn extract_cpp_is_static(node: Node<'_>, source: &str) -> bool {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        if child.kind() == "storage_class_specifier" {
-            if let Ok(text) = child.utf8_text(source.as_bytes()) {
-                if text == "static" {
+        if child.kind() == "storage_class_specifier"
+            && let Ok(text) = child.utf8_text(source.as_bytes())
+                && text == "static" {
                     return true;
                 }
-            }
-        }
     }
     false
 }
@@ -2225,15 +2245,12 @@ fn extract_rust_is_static(node: Node<'_>, source: &str) -> bool {
                 return false;
             }
             // Check for `self` in the first parameter
-            if child.kind() == "parameter" {
-                if let Some(pattern) = find_child_by_kind(child, "identifier") {
-                    if let Ok(text) = pattern.utf8_text(source.as_bytes()) {
-                        if text == "self" {
+            if child.kind() == "parameter"
+                && let Some(pattern) = find_child_by_kind(child, "identifier")
+                    && let Ok(text) = pattern.utf8_text(source.as_bytes())
+                        && text == "self" {
                             return false;
                         }
-                    }
-                }
-            }
         }
         // Has parameters but no self -> associated function
         return true;
@@ -2676,18 +2693,16 @@ fn find_c_param_name(node: Node<'_>, source: &str) -> Option<String> {
         }
 
         // Handle pointer declarator: *name
-        if kind == "pointer_declarator" {
-            if let Some(id) = find_child_by_kind(child, "identifier") {
+        if kind == "pointer_declarator"
+            && let Some(id) = find_child_by_kind(child, "identifier") {
                 return id.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
             }
-        }
 
         // Handle reference declarator: &name
-        if kind == "reference_declarator" {
-            if let Some(id) = find_child_by_kind(child, "identifier") {
+        if kind == "reference_declarator"
+            && let Some(id) = find_child_by_kind(child, "identifier") {
                 return id.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
             }
-        }
     }
 
     None
@@ -2863,11 +2878,10 @@ fn extract_swift_parameters(node: Node<'_>, source: &str) -> Vec<ParameterInfo> 
     let mut cursor = node.walk();
 
     for child in node.children(&mut cursor) {
-        if child.kind() == "parameter" {
-            if let Some(param) = extract_swift_single_parameter(child, source) {
+        if child.kind() == "parameter"
+            && let Some(param) = extract_swift_single_parameter(child, source) {
                 parameters.push(param);
             }
-        }
     }
 
     parameters
@@ -3463,28 +3477,24 @@ fn extract_rust_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
                     if let Ok(text) = name.utf8_text(source.as_bytes()) {
                         params.push(text.to_string());
                     }
-                } else if let Some(ident) = find_child_by_kind(child, "type_identifier") {
-                    if let Ok(text) = ident.utf8_text(source.as_bytes()) {
+                } else if let Some(ident) = find_child_by_kind(child, "type_identifier")
+                    && let Ok(text) = ident.utf8_text(source.as_bytes()) {
                         params.push(text.to_string());
                     }
-                }
             }
             "lifetime_parameter" => {
                 if let Some(lifetime) = child.child_by_field_name("lifetime")
                     .or_else(|| find_child_by_kind(child, "lifetime"))
-                {
-                    if let Ok(text) = lifetime.utf8_text(source.as_bytes()) {
+                    && let Ok(text) = lifetime.utf8_text(source.as_bytes()) {
                         params.push(text.to_string());
                     }
-                }
             }
             "constrained_type_parameter" | "optional_type_parameter" => {
                 // Get the type identifier from the constrained parameter
-                if let Some(ident) = find_child_by_kind(child, "type_identifier") {
-                    if let Ok(text) = ident.utf8_text(source.as_bytes()) {
+                if let Some(ident) = find_child_by_kind(child, "type_identifier")
+                    && let Ok(text) = ident.utf8_text(source.as_bytes()) {
                         params.push(text.to_string());
                     }
-                }
             }
             _ => {}
         }
@@ -3618,11 +3628,10 @@ fn extract_rust_variant_tuple_fields(node: Node<'_>, source: &str) -> Vec<String
     let mut cursor = node.walk();
 
     for child in node.children(&mut cursor) {
-        if RUST_TYPE_KINDS.contains(&child.kind()) {
-            if let Ok(text) = child.utf8_text(source.as_bytes()) {
+        if RUST_TYPE_KINDS.contains(&child.kind())
+            && let Ok(text) = child.utf8_text(source.as_bytes()) {
                 fields.push(text.to_string());
             }
-        }
     }
 
     fields
@@ -3681,13 +3690,11 @@ fn extract_typescript_type_parameters(node: Node<'_>, source: &str) -> Vec<Strin
     let mut cursor = node.walk();
 
     for child in node.children(&mut cursor) {
-        if child.kind() == "type_parameter" {
-            if let Some(name) = find_child_by_kind(child, "type_identifier") {
-                if let Ok(text) = name.utf8_text(source.as_bytes()) {
+        if child.kind() == "type_parameter"
+            && let Some(name) = find_child_by_kind(child, "type_identifier")
+                && let Ok(text) = name.utf8_text(source.as_bytes()) {
                     params.push(text.to_string());
                 }
-            }
-        }
     }
 
     params
@@ -3812,11 +3819,10 @@ fn extract_go_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Op
     }
 
     // Check for struct type
-    if let Some(struct_type) = find_child_by_kind(type_spec, "struct_type") {
-        if let Some(field_list) = find_child_by_kind(struct_type, "field_declaration_list") {
+    if let Some(struct_type) = find_child_by_kind(type_spec, "struct_type")
+        && let Some(field_list) = find_child_by_kind(struct_type, "field_declaration_list") {
             metadata.fields = extract_go_struct_fields(field_list, source);
         }
-    }
 
     // Check for interface type
     if let Some(interface_type) = find_child_by_kind(type_spec, "interface_type") {
@@ -3840,11 +3846,10 @@ fn extract_go_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
             // Get all identifiers in this declaration
             let mut inner_cursor = child.walk();
             for inner in child.children(&mut inner_cursor) {
-                if inner.kind() == "identifier" {
-                    if let Ok(text) = inner.utf8_text(source.as_bytes()) {
+                if inner.kind() == "identifier"
+                    && let Ok(text) = inner.utf8_text(source.as_bytes()) {
                         params.push(text.to_string());
                     }
-                }
             }
         }
     }
@@ -3869,8 +3874,8 @@ fn extract_go_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
 
         let mut inner_cursor = child.walk();
         for inner in child.children(&mut inner_cursor) {
-            if inner.kind() == "field_identifier" {
-                if let Ok(name) = inner.utf8_text(source.as_bytes()) {
+            if inner.kind() == "field_identifier"
+                && let Ok(name) = inner.utf8_text(source.as_bytes()) {
                     fields.push(FieldInfo {
                         name: name.to_string(),
                         type_annotation: type_annotation.clone(),
@@ -3879,7 +3884,6 @@ fn extract_go_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                         is_static: false,
                     });
                 }
-            }
         }
     }
 
@@ -4054,13 +4058,11 @@ fn extract_java_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
     let mut cursor = node.walk();
 
     for child in node.children(&mut cursor) {
-        if child.kind() == "type_parameter" {
-            if let Some(ident) = find_child_by_kind(child, "type_identifier") {
-                if let Ok(text) = ident.utf8_text(source.as_bytes()) {
+        if child.kind() == "type_parameter"
+            && let Some(ident) = find_child_by_kind(child, "type_identifier")
+                && let Ok(text) = ident.utf8_text(source.as_bytes()) {
                     params.push(text.to_string());
                 }
-            }
-        }
     }
 
     params
@@ -4088,9 +4090,9 @@ fn extract_java_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
         // Get all variable declarators (handles `int x, y;`)
         let mut inner_cursor = child.walk();
         for inner in child.children(&mut inner_cursor) {
-            if inner.kind() == "variable_declarator" {
-                if let Some(name_node) = find_child_by_kind(inner, "identifier") {
-                    if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+            if inner.kind() == "variable_declarator"
+                && let Some(name_node) = find_child_by_kind(inner, "identifier")
+                    && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
                         fields.push(FieldInfo {
                             name: name.to_string(),
                             type_annotation: type_annotation.clone(),
@@ -4099,8 +4101,6 @@ fn extract_java_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                             is_static,
                         });
                     }
-                }
-            }
         }
     }
 
@@ -4136,11 +4136,10 @@ fn extract_java_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> 
             continue;
         }
 
-        if let Some(name_node) = find_child_by_kind(child, "identifier") {
-            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+        if let Some(name_node) = find_child_by_kind(child, "identifier")
+            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
                 variants.push(VariantInfo::unit(name));
             }
-        }
     }
 
     variants
@@ -4160,8 +4159,8 @@ fn extract_java_record_components(node: Node<'_>, source: &str) -> Vec<FieldInfo
             .and_then(|n| n.utf8_text(source.as_bytes()).ok())
             .map(|s| s.to_string());
 
-        if let Some(name_node) = find_child_by_kind(child, "identifier") {
-            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+        if let Some(name_node) = find_child_by_kind(child, "identifier")
+            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
                 fields.push(FieldInfo {
                     name: name.to_string(),
                     type_annotation,
@@ -4170,7 +4169,6 @@ fn extract_java_record_components(node: Node<'_>, source: &str) -> Vec<FieldInfo
                     is_static: false,
                 });
             }
-        }
     }
 
     fields
@@ -4186,8 +4184,8 @@ fn extract_java_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo
             continue;
         }
 
-        if let Some(name_node) = find_child_by_kind(child, "identifier") {
-            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+        if let Some(name_node) = find_child_by_kind(child, "identifier")
+            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
                 // Get the full method signature as the "type"
                 let type_annotation = child
                     .utf8_text(source.as_bytes())
@@ -4202,7 +4200,6 @@ fn extract_java_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo
                     is_static: false,
                 });
             }
-        }
     }
 
     fields
@@ -4229,11 +4226,10 @@ fn extract_c_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Opt
         }
         "type_definition" => {
             // For typedef struct { ... } Name; we look for struct_specifier inside
-            if let Some(struct_spec) = find_child_by_kind(node, "struct_specifier") {
-                if let Some(field_list) = find_child_by_kind(struct_spec, "field_declaration_list") {
+            if let Some(struct_spec) = find_child_by_kind(node, "struct_specifier")
+                && let Some(field_list) = find_child_by_kind(struct_spec, "field_declaration_list") {
                     metadata.fields = extract_c_struct_fields(field_list, source);
                 }
-            }
         }
         _ => {}
     }
@@ -4263,8 +4259,8 @@ fn extract_c_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
         // Get field identifiers
         let mut inner_cursor = child.walk();
         for inner in child.children(&mut inner_cursor) {
-            if inner.kind() == "field_identifier" {
-                if let Ok(name) = inner.utf8_text(source.as_bytes()) {
+            if inner.kind() == "field_identifier"
+                && let Ok(name) = inner.utf8_text(source.as_bytes()) {
                     fields.push(FieldInfo {
                         name: name.to_string(),
                         type_annotation: type_annotation.clone(),
@@ -4273,7 +4269,6 @@ fn extract_c_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                         is_static: false,
                     });
                 }
-            }
         }
     }
 
@@ -4310,11 +4305,10 @@ fn extract_c_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
             continue;
         }
 
-        if let Some(name_node) = find_child_by_kind(child, "identifier") {
-            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+        if let Some(name_node) = find_child_by_kind(child, "identifier")
+            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
                 variants.push(VariantInfo::unit(name));
             }
-        }
     }
 
     variants
@@ -4391,8 +4385,8 @@ fn extract_cpp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
         // Get field identifiers
         let mut inner_cursor = child.walk();
         for inner in child.children(&mut inner_cursor) {
-            if inner.kind() == "field_identifier" {
-                if let Ok(name) = inner.utf8_text(source.as_bytes()) {
+            if inner.kind() == "field_identifier"
+                && let Ok(name) = inner.utf8_text(source.as_bytes()) {
                     fields.push(FieldInfo {
                         name: name.to_string(),
                         type_annotation: type_annotation.clone(),
@@ -4401,7 +4395,6 @@ fn extract_cpp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                         is_static,
                     });
                 }
-            }
         }
     }
 
@@ -4463,13 +4456,11 @@ fn extract_csharp_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
     let mut cursor = node.walk();
 
     for child in node.children(&mut cursor) {
-        if child.kind() == "type_parameter" {
-            if let Some(ident) = find_child_by_kind(child, "identifier") {
-                if let Ok(text) = ident.utf8_text(source.as_bytes()) {
+        if child.kind() == "type_parameter"
+            && let Some(ident) = find_child_by_kind(child, "identifier")
+                && let Ok(text) = ident.utf8_text(source.as_bytes()) {
                     params.push(text.to_string());
                 }
-            }
-        }
     }
 
     params
@@ -4499,9 +4490,9 @@ fn extract_csharp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
         if let Some(var_decl) = find_child_by_kind(child, "variable_declaration") {
             let mut inner_cursor = var_decl.walk();
             for inner in var_decl.children(&mut inner_cursor) {
-                if inner.kind() == "variable_declarator" {
-                    if let Some(ident) = find_child_by_kind(inner, "identifier") {
-                        if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+                if inner.kind() == "variable_declarator"
+                    && let Some(ident) = find_child_by_kind(inner, "identifier")
+                        && let Ok(name) = ident.utf8_text(source.as_bytes()) {
                             fields.push(FieldInfo {
                                 name: name.to_string(),
                                 type_annotation: type_annotation.clone(),
@@ -4510,8 +4501,6 @@ fn extract_csharp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                                 is_static,
                             });
                         }
-                    }
-                }
             }
         }
     }
@@ -4547,11 +4536,10 @@ fn extract_csharp_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo
             continue;
         }
 
-        if let Some(name_node) = find_child_by_kind(child, "identifier") {
-            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+        if let Some(name_node) = find_child_by_kind(child, "identifier")
+            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
                 variants.push(VariantInfo::unit(name));
             }
-        }
     }
 
     variants
@@ -4567,8 +4555,8 @@ fn extract_csharp_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldIn
             continue;
         }
 
-        if let Some(name_node) = find_child_by_kind(child, "identifier") {
-            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+        if let Some(name_node) = find_child_by_kind(child, "identifier")
+            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
                 // Get the full method signature as the "type"
                 let type_annotation = child
                     .utf8_text(source.as_bytes())
@@ -4583,7 +4571,6 @@ fn extract_csharp_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldIn
                     is_static: false,
                 });
             }
-        }
     }
 
     fields
@@ -4603,8 +4590,8 @@ fn extract_csharp_record_parameters(node: Node<'_>, source: &str) -> Vec<FieldIn
             .and_then(|n| n.utf8_text(source.as_bytes()).ok())
             .map(|s| s.to_string());
 
-        if let Some(name_node) = find_child_by_kind(child, "identifier") {
-            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+        if let Some(name_node) = find_child_by_kind(child, "identifier")
+            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
                 fields.push(FieldInfo {
                     name: name.to_string(),
                     type_annotation,
@@ -4613,7 +4600,6 @@ fn extract_csharp_record_parameters(node: Node<'_>, source: &str) -> Vec<FieldIn
                     is_static: false,
                 });
             }
-        }
     }
 
     fields
@@ -4671,13 +4657,11 @@ fn extract_swift_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
     let mut cursor = node.walk();
 
     for child in node.children(&mut cursor) {
-        if child.kind() == "type_parameter" {
-            if let Some(ident) = find_child_by_kind(child, "type_identifier") {
-                if let Ok(text) = ident.utf8_text(source.as_bytes()) {
+        if child.kind() == "type_parameter"
+            && let Some(ident) = find_child_by_kind(child, "type_identifier")
+                && let Ok(text) = ident.utf8_text(source.as_bytes()) {
                     params.push(text.to_string());
                 }
-            }
-        }
     }
 
     params
@@ -4694,9 +4678,9 @@ fn extract_swift_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
         }
 
         // Get pattern (contains the name)
-        if let Some(pattern) = find_child_by_kind(child, "pattern") {
-            if let Some(ident) = find_child_by_kind(pattern, "simple_identifier") {
-                if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+        if let Some(pattern) = find_child_by_kind(child, "pattern")
+            && let Some(ident) = find_child_by_kind(pattern, "simple_identifier")
+                && let Ok(name) = ident.utf8_text(source.as_bytes()) {
                     // Get type annotation
                     let type_annotation = find_child_by_kind(child, "type_annotation")
                         .and_then(|ta| ta.child(1)) // Skip colon
@@ -4715,8 +4699,6 @@ fn extract_swift_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                         is_static,
                     });
                 }
-            }
-        }
     }
 
     fields
@@ -4731,20 +4713,18 @@ fn extract_swift_enum_cases(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
         // Try multiple possible node types for Swift enum cases
         let kind = child.kind();
         if kind == "enum_entry" || kind == "enum_case_pattern" {
-            if let Some(ident) = find_child_by_kind(child, "simple_identifier") {
-                if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+            if let Some(ident) = find_child_by_kind(child, "simple_identifier")
+                && let Ok(name) = ident.utf8_text(source.as_bytes()) {
                     variants.push(VariantInfo::unit(name));
                 }
-            }
         } else if kind == "switch_entry" {
             // Swift switch/case patterns
             let mut inner_cursor = child.walk();
             for inner in child.children(&mut inner_cursor) {
-                if inner.kind() == "simple_identifier" {
-                    if let Ok(name) = inner.utf8_text(source.as_bytes()) {
+                if inner.kind() == "simple_identifier"
+                    && let Ok(name) = inner.utf8_text(source.as_bytes()) {
                         variants.push(VariantInfo::unit(name));
                     }
-                }
             }
         }
     }
@@ -4762,8 +4742,8 @@ fn extract_swift_protocol_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo
             continue;
         }
 
-        if let Some(ident) = find_child_by_kind(child, "simple_identifier") {
-            if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+        if let Some(ident) = find_child_by_kind(child, "simple_identifier")
+            && let Ok(name) = ident.utf8_text(source.as_bytes()) {
                 // Get the full method signature
                 let type_annotation = child
                     .utf8_text(source.as_bytes())
@@ -4778,7 +4758,6 @@ fn extract_swift_protocol_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo
                     is_static: false,
                 });
             }
-        }
     }
 
     fields
@@ -4838,11 +4817,10 @@ fn extract_scala_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
 
     for child in node.children(&mut cursor) {
         // Look for identifiers inside type parameters
-        if child.kind() == "identifier" {
-            if let Ok(text) = child.utf8_text(source.as_bytes()) {
+        if child.kind() == "identifier"
+            && let Ok(text) = child.utf8_text(source.as_bytes()) {
                 params.push(text.to_string());
             }
-        }
     }
 
     params
@@ -4858,8 +4836,8 @@ fn extract_scala_class_parameters(node: Node<'_>, source: &str) -> Vec<FieldInfo
             continue;
         }
 
-        if let Some(ident) = find_child_by_kind(child, "identifier") {
-            if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+        if let Some(ident) = find_child_by_kind(child, "identifier")
+            && let Ok(name) = ident.utf8_text(source.as_bytes()) {
                 // Get type annotation (after colon)
                 let type_annotation = find_child_by_kind(child, "type_identifier")
                     .or_else(|| find_child_by_kind(child, "generic_type"))
@@ -4875,7 +4853,6 @@ fn extract_scala_class_parameters(node: Node<'_>, source: &str) -> Vec<FieldInfo
                     is_static: false,
                 });
             }
-        }
     }
 
     fields
@@ -4892,8 +4869,8 @@ fn extract_scala_trait_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
             continue;
         }
 
-        if let Some(ident) = find_child_by_kind(child, "identifier") {
-            if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+        if let Some(ident) = find_child_by_kind(child, "identifier")
+            && let Ok(name) = ident.utf8_text(source.as_bytes()) {
                 // Get the full method signature
                 let type_annotation = child
                     .utf8_text(source.as_bytes())
@@ -4908,7 +4885,6 @@ fn extract_scala_trait_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                     is_static: false,
                 });
             }
-        }
     }
 
     fields
@@ -4926,9 +4902,9 @@ fn extract_scala_object_members(node: Node<'_>, source: &str) -> Vec<FieldInfo> 
         }
 
         // For function definitions
-        if kind == "function_definition" {
-            if let Some(ident) = find_child_by_kind(child, "identifier") {
-                if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+        if kind == "function_definition"
+            && let Some(ident) = find_child_by_kind(child, "identifier")
+                && let Ok(name) = ident.utf8_text(source.as_bytes()) {
                     let type_annotation = child
                         .utf8_text(source.as_bytes())
                         .ok()
@@ -4942,8 +4918,6 @@ fn extract_scala_object_members(node: Node<'_>, source: &str) -> Vec<FieldInfo> 
                         is_static: true, // Object members are effectively static
                     });
                 }
-            }
-        }
     }
 
     fields
@@ -4960,20 +4934,18 @@ fn extract_scala_enum_cases(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
         }
 
         if child.kind() == "simple_enum_case" {
-            if let Some(ident) = find_child_by_kind(child, "identifier") {
-                if let Ok(name) = ident.utf8_text(source.as_bytes()) {
+            if let Some(ident) = find_child_by_kind(child, "identifier")
+                && let Ok(name) = ident.utf8_text(source.as_bytes()) {
                     variants.push(VariantInfo::unit(name));
                 }
-            }
         } else {
             // enum_case_definitions can contain multiple cases
             let mut inner_cursor = child.walk();
             for inner in child.children(&mut inner_cursor) {
-                if inner.kind() == "identifier" {
-                    if let Ok(name) = inner.utf8_text(source.as_bytes()) {
+                if inner.kind() == "identifier"
+                    && let Ok(name) = inner.utf8_text(source.as_bytes()) {
                         variants.push(VariantInfo::unit(name));
                     }
-                }
             }
         }
     }
@@ -5044,10 +5016,10 @@ fn extract_php_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
         // Get property elements
         let mut inner_cursor = child.walk();
         for inner in child.children(&mut inner_cursor) {
-            if inner.kind() == "property_element" {
-                if let Some(var_name) = find_child_by_kind(inner, "variable_name") {
-                    if let Some(name_node) = find_child_by_kind(var_name, "name") {
-                        if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+            if inner.kind() == "property_element"
+                && let Some(var_name) = find_child_by_kind(inner, "variable_name")
+                    && let Some(name_node) = find_child_by_kind(var_name, "name")
+                        && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
                             fields.push(FieldInfo {
                                 name: name.to_string(),
                                 type_annotation: type_annotation.clone(),
@@ -5056,9 +5028,6 @@ fn extract_php_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
                                 is_static,
                             });
                         }
-                    }
-                }
-            }
         }
     }
 
@@ -5075,8 +5044,8 @@ fn extract_php_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo>
             continue;
         }
 
-        if let Some(name_node) = find_child_by_kind(child, "name") {
-            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+        if let Some(name_node) = find_child_by_kind(child, "name")
+            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
                 // Get the full method signature
                 let type_annotation = child
                     .utf8_text(source.as_bytes())
@@ -5091,7 +5060,6 @@ fn extract_php_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo>
                     is_static: false,
                 });
             }
-        }
     }
 
     fields
@@ -5107,11 +5075,10 @@ fn extract_php_enum_cases(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
             continue;
         }
 
-        if let Some(name_node) = find_child_by_kind(child, "name") {
-            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+        if let Some(name_node) = find_child_by_kind(child, "name")
+            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
                 variants.push(VariantInfo::unit(name));
             }
-        }
     }
 
     variants

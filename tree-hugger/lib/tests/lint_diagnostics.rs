@@ -530,3 +530,203 @@ fn test_no_false_positive_eval_identifier() {
         "eval as identifier should not trigger eval-call"
     );
 }
+
+// ============================================================================
+// Undefined Module Tests
+// ============================================================================
+
+#[test]
+fn test_undefined_module_rust_reports_warning() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn main() {
+    let _ = unknown_module::function();
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_module = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-module"));
+    assert!(
+        undefined_module.is_some(),
+        "Expected undefined-module warning for unknown_module::function()"
+    );
+    assert_eq!(
+        undefined_module.unwrap().severity,
+        DiagnosticSeverity::Warning,
+        "undefined-module should be a Warning, not Error"
+    );
+}
+
+#[test]
+fn test_undefined_module_self_not_reported() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"struct Foo;
+impl Foo {
+    fn bar(&self) {
+        self.baz();
+    }
+    fn baz(&self) {}
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let self_diagnostic = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-module")
+            && d.message.contains("'self'")
+    });
+    assert!(
+        self_diagnostic.is_none(),
+        "self.method() should NOT report undefined-module"
+    );
+}
+
+#[test]
+fn test_undefined_module_capital_self_not_reported() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"struct Foo;
+impl Foo {
+    fn new() -> Self {
+        Self
+    }
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let self_diagnostic = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-module")
+            && d.message.contains("'Self'")
+    });
+    assert!(
+        self_diagnostic.is_none(),
+        "Self::new() should NOT report undefined-module"
+    );
+}
+
+#[test]
+fn test_undefined_module_super_not_reported() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"mod outer {
+    fn helper() {}
+    mod inner {
+        fn use_helper() {
+            super::helper();
+        }
+    }
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let super_diagnostic = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-module")
+            && d.message.contains("'super'")
+    });
+    assert!(
+        super_diagnostic.is_none(),
+        "super::something should NOT report undefined-module"
+    );
+}
+
+#[test]
+fn test_undefined_module_single_letter_not_reported() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn generic<T: Clone>(value: T) -> T {
+    T::clone(&value)
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let single_letter_diagnostic = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-module")
+            && d.message.contains("'T'")
+    });
+    assert!(
+        single_letter_diagnostic.is_none(),
+        "Single-letter qualifiers like T should NOT report undefined-module"
+    );
+}
+
+#[test]
+fn test_undefined_module_javascript_this_not_reported() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.js",
+        r#"class Foo {
+    bar() {
+        this.baz();
+    }
+    baz() {}
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let this_diagnostic = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-module")
+            && d.message.contains("'this'")
+    });
+    assert!(
+        this_diagnostic.is_none(),
+        "this.method() should NOT report undefined-module"
+    );
+}
+
+#[test]
+fn test_undefined_module_defined_import_not_reported() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"use std::io;
+
+fn main() {
+    let _ = io::stdout();
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let io_diagnostic = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-module")
+            && d.message.contains("'io'")
+    });
+    assert!(
+        io_diagnostic.is_none(),
+        "Imported modules like 'io' should NOT report undefined-module"
+    );
+}

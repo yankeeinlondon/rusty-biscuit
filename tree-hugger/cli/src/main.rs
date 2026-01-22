@@ -244,11 +244,10 @@ fn find_repo_root(start: &Path) -> Option<PathBuf> {
 }
 
 fn display_path(path: &Path, root: Option<&Path>) -> String {
-    if let Some(root) = root {
-        if let Ok(relative) = path.strip_prefix(root) {
+    if let Some(root) = root
+        && let Ok(relative) = path.strip_prefix(root) {
             return relative.display().to_string();
         }
-    }
     path.display().to_string()
 }
 
@@ -973,11 +972,10 @@ fn group_imports(imports: &[ImportSymbol]) -> Vec<Vec<&ImportSymbol>> {
 fn dedupe_import_group<'a>(imports: &'a [&'a ImportSymbol]) -> Vec<&'a ImportSymbol> {
     let mut alias_originals = HashSet::new();
     for import in imports {
-        if import.alias.is_some() {
-            if let Some(original) = import.original_name.as_deref() {
+        if import.alias.is_some()
+            && let Some(original) = import.original_name.as_deref() {
                 alias_originals.insert((import.source.as_deref(), original));
             }
-        }
     }
 
     let mut result = Vec::new();

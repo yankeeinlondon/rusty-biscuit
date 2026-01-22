@@ -18,6 +18,8 @@ pub enum QueryKind {
     DeadCode,
     /// Captures all identifier references (usages) in a file.
     References,
+    /// Captures comment nodes for ignore directive parsing.
+    Comments,
 }
 
 impl fmt::Display for QueryKind {
@@ -30,6 +32,7 @@ impl fmt::Display for QueryKind {
             Self::Syntax => "syntax",
             Self::DeadCode => "dead_code",
             Self::References => "references",
+            Self::Comments => "comments",
         };
         formatter.write_str(label)
     }
@@ -76,6 +79,16 @@ pub fn query_for(
     Ok(query)
 }
 
+/// Checks if query text is effectively empty (all whitespace or only comments).
+///
+/// Tree-sitter query comments start with `;`, so a file containing only
+/// comment lines and whitespace has no actual query patterns to compile.
+fn is_query_empty(source: &str) -> bool {
+    source
+        .lines()
+        .all(|line| line.trim().is_empty() || line.trim().starts_with(';'))
+}
+
 fn resolve_query_text(
     language: ProgrammingLanguage,
     kind: QueryKind,
@@ -87,16 +100,31 @@ fn resolve_query_text(
 
     // Lint queries come from language-specific directories
     if kind == QueryKind::Lint {
-        return Ok(lint_query_by_name(language.query_name())
-            .unwrap_or("")
-            .to_string());
+        let source = lint_query_by_name(language.query_name()).unwrap_or("");
+        // Return empty string for comment-only lint files to skip Query::new
+        if is_query_empty(source) {
+            return Ok(String::new());
+        }
+        return Ok(source.to_string());
     }
 
     // References queries come from language-specific directories
     if kind == QueryKind::References {
-        return Ok(references_query_by_name(language.query_name())
-            .unwrap_or("")
-            .to_string());
+        let source = references_query_by_name(language.query_name()).unwrap_or("");
+        // Return empty string for comment-only references files to skip Query::new
+        if is_query_empty(source) {
+            return Ok(String::new());
+        }
+        return Ok(source.to_string());
+    }
+
+    // Comments queries come from language-specific directories
+    if kind == QueryKind::Comments {
+        let source = comments_query_by_name(language.query_name()).unwrap_or("");
+        if is_query_empty(source) {
+            return Ok(String::new());
+        }
+        return Ok(source.to_string());
     }
 
     let mut visited = HashSet::new();
@@ -232,6 +260,29 @@ fn references_query_by_name(name: &str) -> Option<&'static str> {
     }
 }
 
+/// Loads comments query for a language from the language-specific directory.
+fn comments_query_by_name(name: &str) -> Option<&'static str> {
+    match name {
+        "rust" => Some(include_str!("../../queries/rust/comments.scm")),
+        "javascript" => Some(include_str!("../../queries/javascript/comments.scm")),
+        "typescript" => Some(include_str!("../../queries/typescript/comments.scm")),
+        "go" => Some(include_str!("../../queries/go/comments.scm")),
+        "python" => Some(include_str!("../../queries/python/comments.scm")),
+        "java" => Some(include_str!("../../queries/java/comments.scm")),
+        "php" => Some(include_str!("../../queries/php/comments.scm")),
+        "perl" => Some(include_str!("../../queries/perl/comments.scm")),
+        "bash" => Some(include_str!("../../queries/bash/comments.scm")),
+        "zsh" => Some(include_str!("../../queries/zsh/comments.scm")),
+        "c" => Some(include_str!("../../queries/c/comments.scm")),
+        "cpp" => Some(include_str!("../../queries/cpp/comments.scm")),
+        "c_sharp" => Some(include_str!("../../queries/c_sharp/comments.scm")),
+        "swift" => Some(include_str!("../../queries/swift/comments.scm")),
+        "scala" => Some(include_str!("../../queries/scala/comments.scm")),
+        "lua" => Some(include_str!("../../queries/lua/comments.scm")),
+        _ => None,
+    }
+}
+
 use crate::shared::DiagnosticSeverity;
 
 /// Maps rule IDs to their severity level.
@@ -243,7 +294,7 @@ pub fn severity_for_rule(rule_id: &str) -> DiagnosticSeverity {
         }
         // Warning-level rules (semantic)
         "unused-variable" | "shadowed-variable" | "unused-symbol" | "unused-import"
-        | "dead-code" => DiagnosticSeverity::Warning,
+        | "dead-code" | "undefined-module" => DiagnosticSeverity::Warning,
         // Warning-level rules (pattern)
         "unwrap-call" | "expect-call" | "dbg-macro" | "eval-call" | "exec-call"
         | "debugger-statement" | "breakpoint-call" | "deprecated-syntax" => {
@@ -262,6 +313,7 @@ pub fn format_rule_message(rule_id: &str) -> String {
         "unused-symbol" => "Symbol defined but never used".to_string(),
         "unused-import" => "Imported symbol is never used".to_string(),
         "dead-code" => "Unreachable code after unconditional exit".to_string(),
+        "undefined-module" => "Reference to undefined module or namespace".to_string(),
         // Pattern rules
         "unwrap-call" => "Explicit unwrap() call".to_string(),
         "expect-call" => "Explicit expect() call".to_string(),
@@ -276,5 +328,60 @@ pub fn format_rule_message(rule_id: &str) -> String {
         "unreachable-code" => "Unreachable code detected".to_string(),
         "deprecated-syntax" => "Deprecated syntax".to_string(),
         _ => format!("Lint rule: {rule_id}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_query_empty_detects_empty_string() {
+        assert!(is_query_empty(""));
+    }
+
+    #[test]
+    fn is_query_empty_detects_whitespace_only() {
+        assert!(is_query_empty("   "));
+        assert!(is_query_empty("\n\n"));
+        assert!(is_query_empty("  \n  \n  "));
+    }
+
+    #[test]
+    fn is_query_empty_detects_comment_only() {
+        assert!(is_query_empty("; comment"));
+        assert!(is_query_empty("; comment\n; another comment"));
+        assert!(is_query_empty(";; double semicolon comment"));
+    }
+
+    #[test]
+    fn is_query_empty_detects_mixed_comments_and_whitespace() {
+        let source = r#"; Bash lint rules
+; Capture names follow @diagnostic.{rule-id} convention
+
+; No pattern-based rules for Bash
+; Semantic checks (unused-symbol, undefined-symbol) are handled in code
+"#;
+        assert!(is_query_empty(source));
+    }
+
+    #[test]
+    fn is_query_empty_rejects_actual_query() {
+        let source = r#"; Rust lint rules
+(call_expression
+  function: (field_expression
+    field: (field_identifier) @_method)
+  (#eq? @_method "unwrap")) @diagnostic.unwrap-call
+"#;
+        assert!(!is_query_empty(source));
+    }
+
+    #[test]
+    fn is_query_empty_rejects_query_with_leading_comments() {
+        let source = r#"; Leading comment
+; Another comment
+(identifier) @diagnostic.test
+"#;
+        assert!(!is_query_empty(source));
     }
 }

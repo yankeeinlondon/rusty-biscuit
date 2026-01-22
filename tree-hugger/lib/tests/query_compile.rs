@@ -151,3 +151,135 @@ fn test_lua_lint_query_compiles() {
         include_str!("../queries/lua/lint.scm")
     );
 }
+
+// =============================================================================
+// Comments Query Compilation Tests
+// =============================================================================
+
+#[test]
+fn test_rust_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::Rust,
+        include_str!("../queries/rust/comments.scm")
+    );
+}
+
+#[test]
+fn test_javascript_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::JavaScript,
+        include_str!("../queries/javascript/comments.scm")
+    );
+}
+
+#[test]
+fn test_typescript_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::TypeScript,
+        include_str!("../queries/typescript/comments.scm")
+    );
+}
+
+#[test]
+fn test_go_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::Go,
+        include_str!("../queries/go/comments.scm")
+    );
+}
+
+#[test]
+fn test_python_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::Python,
+        include_str!("../queries/python/comments.scm")
+    );
+}
+
+#[test]
+fn test_java_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::Java,
+        include_str!("../queries/java/comments.scm")
+    );
+}
+
+#[test]
+fn test_php_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::Php,
+        include_str!("../queries/php/comments.scm")
+    );
+}
+
+#[test]
+fn test_perl_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::Perl,
+        include_str!("../queries/perl/comments.scm")
+    );
+}
+
+#[test]
+fn test_bash_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::Bash,
+        include_str!("../queries/bash/comments.scm")
+    );
+}
+
+#[test]
+fn test_zsh_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::Zsh,
+        include_str!("../queries/zsh/comments.scm")
+    );
+}
+
+#[test]
+fn test_c_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::C,
+        include_str!("../queries/c/comments.scm")
+    );
+}
+
+#[test]
+fn test_cpp_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::Cpp,
+        include_str!("../queries/cpp/comments.scm")
+    );
+}
+
+#[test]
+fn test_csharp_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::CSharp,
+        include_str!("../queries/c_sharp/comments.scm")
+    );
+}
+
+#[test]
+fn test_swift_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::Swift,
+        include_str!("../queries/swift/comments.scm")
+    );
+}
+
+#[test]
+fn test_scala_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::Scala,
+        include_str!("../queries/scala/comments.scm")
+    );
+}
+
+#[test]
+fn test_lua_comments_query_compiles() {
+    test_query_compiles(
+        ProgrammingLanguage::Lua,
+        include_str!("../queries/lua/comments.scm")
+    );
+}

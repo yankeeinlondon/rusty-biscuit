@@ -598,6 +598,9 @@ pub struct SyntaxDiagnostic {
     pub message: String,
     pub range: CodeRange,
     pub severity: DiagnosticSeverity,
+    /// Source context for displaying the diagnostic with visual markers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<SourceContext>,
 }
 
 /// JSON-serializable summary for a single file.

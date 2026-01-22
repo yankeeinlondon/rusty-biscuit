@@ -7,6 +7,33 @@ use tree_sitter::Node;
 
 use crate::shared::ProgrammingLanguage;
 
+/// Rust macros that never return (unconditionally terminate execution).
+const RUST_TERMINAL_MACROS: &[&str] = &["panic", "unreachable", "todo", "unimplemented"];
+
+/// Rust function paths that never return (exit the process).
+const RUST_TERMINAL_FUNCTIONS: &[&str] = &[
+    "process::exit",
+    "std::process::exit",
+    "process::abort",
+    "std::process::abort",
+];
+
+/// Go functions that never return.
+const GO_TERMINAL_FUNCTIONS: &[&str] = &["panic", "os.Exit"];
+
+/// C/C++ functions that never return.
+const C_TERMINAL_FUNCTIONS: &[&str] = &["exit", "abort", "_exit", "_Exit", "quick_exit"];
+
+/// Swift functions that never return.
+const SWIFT_TERMINAL_FUNCTIONS: &[&str] =
+    &["fatalError", "preconditionFailure", "assertionFailure"];
+
+/// Perl functions that never return.
+const PERL_TERMINAL_FUNCTIONS: &[&str] = &["die", "exit"];
+
+/// Lua functions that never return.
+const LUA_TERMINAL_FUNCTIONS: &[&str] = &["error", "os.exit"];
+
 /// Checks if a node represents a terminal statement that never returns.
 ///
 /// Terminal statements unconditionally exit the current scope:
@@ -14,7 +41,13 @@ use crate::shared::ProgrammingLanguage;
 /// - `throw`/`raise` exceptions
 /// - `panic`/`unreachable` calls
 /// - `break`/`continue` in loops
-pub fn is_terminal_statement(node: Node, language: ProgrammingLanguage) -> bool {
+///
+/// ## Arguments
+///
+/// * `node` - The AST node to check
+/// * `language` - The programming language of the source
+/// * `source` - The source text (required for text-based pattern matching)
+pub fn is_terminal_statement(node: Node, language: ProgrammingLanguage, source: &str) -> bool {
     let kind = node.kind();
 
     match language {
@@ -22,7 +55,7 @@ pub fn is_terminal_statement(node: Node, language: ProgrammingLanguage) -> bool 
             matches!(
                 kind,
                 "return_expression" | "break_expression" | "continue_expression"
-            ) || is_rust_panic_macro(node)
+            ) || is_rust_terminal(node, source)
         }
         ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
             matches!(
@@ -40,8 +73,10 @@ pub fn is_terminal_statement(node: Node, language: ProgrammingLanguage) -> bool 
             )
         }
         ProgrammingLanguage::Go => {
-            matches!(kind, "return_statement" | "break_statement" | "continue_statement")
-                || is_go_panic_call(node)
+            matches!(
+                kind,
+                "return_statement" | "break_statement" | "continue_statement"
+            ) || is_go_panic_call(node, source)
         }
         ProgrammingLanguage::Java | ProgrammingLanguage::CSharp => {
             matches!(
@@ -56,7 +91,7 @@ pub fn is_terminal_statement(node: Node, language: ProgrammingLanguage) -> bool 
             matches!(
                 kind,
                 "return_statement" | "break_statement" | "continue_statement"
-            ) || is_c_exit_call(node)
+            ) || is_c_exit_call(node, source)
         }
         ProgrammingLanguage::Swift => {
             matches!(
@@ -65,7 +100,7 @@ pub fn is_terminal_statement(node: Node, language: ProgrammingLanguage) -> bool 
                     | "throw_statement"
                     | "break_statement"
                     | "continue_statement"
-            ) || is_swift_fatal_error(node)
+            ) || is_swift_fatal_error(node, source)
         }
         ProgrammingLanguage::Scala => {
             matches!(
@@ -83,11 +118,14 @@ pub fn is_terminal_statement(node: Node, language: ProgrammingLanguage) -> bool 
             ) || is_php_exit_call(node)
         }
         ProgrammingLanguage::Perl => {
-            matches!(kind, "return_statement" | "last_statement" | "next_statement")
-                || is_perl_die_call(node)
+            matches!(
+                kind,
+                "return_statement" | "last_statement" | "next_statement"
+            ) || is_perl_die_call(node, source)
         }
         ProgrammingLanguage::Lua => {
-            matches!(kind, "return_statement" | "break_statement") || is_lua_error_call(node)
+            matches!(kind, "return_statement" | "break_statement")
+                || is_lua_error_call(node, source)
         }
         ProgrammingLanguage::Bash | ProgrammingLanguage::Zsh => {
             matches!(
@@ -98,36 +136,56 @@ pub fn is_terminal_statement(node: Node, language: ProgrammingLanguage) -> bool 
     }
 }
 
-/// Checks if a Rust node is a panic/unreachable/todo macro call.
-fn is_rust_panic_macro(node: Node) -> bool {
+/// Checks if a Rust node is a terminal statement (panic macro or exit function).
+///
+/// Detects:
+/// - `panic!`, `unreachable!`, `todo!`, `unimplemented!` macros
+/// - `process::exit()`, `std::process::abort()` function calls
+fn is_rust_terminal(node: Node, source: &str) -> bool {
+    is_rust_panic_macro(node, source) || is_rust_exit_call(node, source)
+}
+
+/// Checks if a Rust node is a panic/unreachable/todo/unimplemented macro call.
+fn is_rust_panic_macro(node: Node, source: &str) -> bool {
     if node.kind() != "macro_invocation" {
         return false;
     }
 
-    // Get the macro name
+    // Get the macro name from the "macro" field
     if let Some(macro_node) = node.child_by_field_name("macro") {
-        let macro_name = macro_node.kind();
-        // Look for the identifier inside the macro field
-        if macro_name == "identifier" {
-            // We can't get the text here, but we can check common patterns
-            // The actual check would need source text access
-            return true; // Conservative: treat all macro invocations as potential panics
+        if let Ok(text) = macro_node.utf8_text(source.as_bytes()) {
+            return RUST_TERMINAL_MACROS.contains(&text);
         }
     }
 
     false
 }
 
-/// Checks if a Go node is a panic() call.
-fn is_go_panic_call(node: Node) -> bool {
+/// Checks if a Rust node is a process::exit or process::abort call.
+fn is_rust_exit_call(node: Node, source: &str) -> bool {
+    if node.kind() != "call_expression" {
+        return false;
+    }
+
+    // Get the function being called
+    if let Some(func_node) = node.child_by_field_name("function") {
+        if let Ok(text) = func_node.utf8_text(source.as_bytes()) {
+            return RUST_TERMINAL_FUNCTIONS.contains(&text);
+        }
+    }
+
+    false
+}
+
+/// Checks if a Go node is a panic() or os.Exit() call.
+fn is_go_panic_call(node: Node, source: &str) -> bool {
     if node.kind() != "call_expression" {
         return false;
     }
 
     if let Some(func_node) = node.child_by_field_name("function") {
-        // Check if it's a simple identifier "panic"
-        if func_node.kind() == "identifier" {
-            return true; // Would need source text to verify it's "panic"
+        if let Ok(text) = func_node.utf8_text(source.as_bytes()) {
+            return GO_TERMINAL_FUNCTIONS.contains(&text);
         }
     }
 
@@ -135,29 +193,30 @@ fn is_go_panic_call(node: Node) -> bool {
 }
 
 /// Checks if a C/C++ node is an exit/abort call.
-fn is_c_exit_call(node: Node) -> bool {
+fn is_c_exit_call(node: Node, source: &str) -> bool {
     if node.kind() != "call_expression" {
         return false;
     }
 
     if let Some(func_node) = node.child_by_field_name("function") {
-        if func_node.kind() == "identifier" {
-            return true; // Would need source text to verify it's "exit" or "abort"
+        if let Ok(text) = func_node.utf8_text(source.as_bytes()) {
+            return C_TERMINAL_FUNCTIONS.contains(&text);
         }
     }
 
     false
 }
 
-/// Checks if a Swift node is a fatalError call.
-fn is_swift_fatal_error(node: Node) -> bool {
+/// Checks if a Swift node is a fatalError/preconditionFailure call.
+fn is_swift_fatal_error(node: Node, source: &str) -> bool {
     if node.kind() != "call_expression" {
         return false;
     }
 
+    // Swift uses the first child for function name, not a field
     if let Some(func_node) = node.child(0) {
-        if func_node.kind() == "simple_identifier" {
-            return true; // Would need source text to verify
+        if let Ok(text) = func_node.utf8_text(source.as_bytes()) {
+            return SWIFT_TERMINAL_FUNCTIONS.contains(&text);
         }
     }
 
@@ -166,27 +225,40 @@ fn is_swift_fatal_error(node: Node) -> bool {
 
 /// Checks if a PHP node is an exit/die call.
 fn is_php_exit_call(node: Node) -> bool {
+    // PHP has a dedicated exit_statement node type
     node.kind() == "exit_statement"
 }
 
 /// Checks if a Perl node is a die/exit call.
-fn is_perl_die_call(node: Node) -> bool {
+fn is_perl_die_call(node: Node, source: &str) -> bool {
     if node.kind() != "function_call" {
         return false;
     }
 
-    // Would need source text to verify it's "die" or "exit"
-    true
+    // Get function name (usually the first child)
+    if let Some(func_node) = node.child(0) {
+        if let Ok(text) = func_node.utf8_text(source.as_bytes()) {
+            return PERL_TERMINAL_FUNCTIONS.contains(&text);
+        }
+    }
+
+    false
 }
 
-/// Checks if a Lua node is an error() call.
-fn is_lua_error_call(node: Node) -> bool {
+/// Checks if a Lua node is an error() or os.exit() call.
+fn is_lua_error_call(node: Node, source: &str) -> bool {
     if node.kind() != "function_call" {
         return false;
     }
 
-    // Would need source text to verify it's "error"
-    true
+    // Get function name
+    if let Some(func_node) = node.child(0) {
+        if let Ok(text) = func_node.utf8_text(source.as_bytes()) {
+            return LUA_TERMINAL_FUNCTIONS.contains(&text);
+        }
+    }
+
+    false
 }
 
 /// Finds dead code siblings after a terminal statement.
@@ -265,5 +337,23 @@ mod tests {
         for _lang in languages {
             // Just verify the match arms compile
         }
+    }
+
+    #[test]
+    fn rust_terminal_macros_list() {
+        assert!(RUST_TERMINAL_MACROS.contains(&"panic"));
+        assert!(RUST_TERMINAL_MACROS.contains(&"unreachable"));
+        assert!(RUST_TERMINAL_MACROS.contains(&"todo"));
+        assert!(RUST_TERMINAL_MACROS.contains(&"unimplemented"));
+        // println is NOT a terminal macro
+        assert!(!RUST_TERMINAL_MACROS.contains(&"println"));
+    }
+
+    #[test]
+    fn rust_terminal_functions_list() {
+        assert!(RUST_TERMINAL_FUNCTIONS.contains(&"process::exit"));
+        assert!(RUST_TERMINAL_FUNCTIONS.contains(&"std::process::exit"));
+        assert!(RUST_TERMINAL_FUNCTIONS.contains(&"process::abort"));
+        assert!(RUST_TERMINAL_FUNCTIONS.contains(&"std::process::abort"));
     }
 }
