@@ -119,6 +119,8 @@ Tree Hugger prioritizes comprehensive cross-language test coverage. When working
 
 3. **Regression tests are mandatory** - Bug fixes must include tests that would fail without the fix.
 
+4. **Diagnostics coverage** - Add regression tests for semantic lint rules and syntax diagnostics in `tests/lint_diagnostics.rs` and `tests/tree_file.rs`.
+
 ### Running Tests
 
 ```bash

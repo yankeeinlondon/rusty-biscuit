@@ -319,6 +319,106 @@ fn test_ignore_directive_all() {
 }
 
 // ============================================================================
+// Semantic Lint Rules
+// ============================================================================
+
+#[test]
+fn test_semantic_undefined_symbol_rust() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"fn main() {
+    let _value = missing_value;
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-symbol"));
+    assert!(
+        undefined_diagnostic.is_some(),
+        "Expected undefined-symbol rule"
+    );
+}
+
+#[test]
+fn test_semantic_unused_symbol_rust() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.rs",
+        r#"struct Holder {
+    unused_value: i32,
+}
+
+fn main() {
+    let _ = 1;
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let unused_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("unused-symbol"));
+    assert!(unused_diagnostic.is_some(), "Expected unused-symbol rule");
+}
+
+#[test]
+fn test_semantic_unused_import_go() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.go",
+        r#"package main
+
+import "fmt"
+
+func main() {
+    _ = 1
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let unused_import = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("unused-import"));
+    assert!(unused_import.is_some(), "Expected unused-import rule");
+}
+
+#[test]
+fn test_semantic_dead_code_rust() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.js",
+        r#"function demo() {
+  return;
+  const neverReached = 1;
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let dead_code = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("dead-code"));
+    assert!(dead_code.is_some(), "Expected dead-code rule");
+}
+
+// ============================================================================
 // Source Context
 // ============================================================================
 

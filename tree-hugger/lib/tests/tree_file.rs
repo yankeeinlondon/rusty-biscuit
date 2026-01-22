@@ -1,5 +1,7 @@
+use std::fs;
 use std::path::PathBuf;
 
+use tempfile::TempDir;
 use tree_hugger_lib::{ProgrammingLanguage, TreeFile, TreeHuggerError};
 
 #[test]
@@ -38,6 +40,69 @@ fn parses_all_fixtures() -> Result<(), TreeHuggerError> {
     Ok(())
 }
 
+// ============================================================================
+// Syntax diagnostics
+// ============================================================================
+
+#[test]
+fn reports_rust_syntax_errors() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "invalid.rs",
+        r#"fn main() {
+    let value = 1;
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.syntax_diagnostics();
+    assert!(
+        !diagnostics.is_empty(),
+        "Expected syntax diagnostics for invalid Rust"
+    );
+}
+
+#[test]
+fn reports_javascript_syntax_errors() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "invalid.js",
+        r#"function demo() {
+  if (true) {
+    console.log("oops");
+  }
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.syntax_diagnostics();
+    assert!(
+        !diagnostics.is_empty(),
+        "Expected syntax diagnostics for invalid JavaScript"
+    );
+}
+
+#[test]
+fn reports_python_syntax_errors() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "invalid.py",
+        r#"def demo()
+    return 1
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.syntax_diagnostics();
+    assert!(
+        !diagnostics.is_empty(),
+        "Expected syntax diagnostics for invalid Python"
+    );
+}
+
 #[test]
 fn captures_imports_for_javascript() -> Result<(), TreeHuggerError> {
     let tree_file = TreeFile::new(fixture_path("sample.js"))?;
@@ -60,6 +125,12 @@ fn fixture_path(file: &str) -> PathBuf {
         .join("tests")
         .join("fixtures")
         .join(file)
+}
+
+fn create_temp_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
+    let path = dir.path().join(name);
+    fs::write(&path, content).unwrap();
+    path
 }
 
 // ============================================================================
@@ -144,8 +215,14 @@ fn extracts_typescript_function_signature() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "greetMany")
         .expect("should find greetMany function");
 
-    let sig = greet_many.signature.as_ref().expect("should have signature");
-    assert!(!sig.parameters.is_empty(), "variadic parameter should be captured");
+    let sig = greet_many
+        .signature
+        .as_ref()
+        .expect("should have signature");
+    assert!(
+        !sig.parameters.is_empty(),
+        "variadic parameter should be captured"
+    );
     assert!(
         sig.parameters[0].is_variadic,
         "parameter should be marked as variadic"
@@ -167,7 +244,10 @@ fn extracts_typescript_doc_comments_through_export() -> Result<(), TreeHuggerErr
         .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
         .expect("should find greet function");
 
-    let doc = greet.doc_comment.as_ref().expect("should have doc comment for exported function");
+    let doc = greet
+        .doc_comment
+        .as_ref()
+        .expect("should have doc comment for exported function");
     assert!(
         doc.contains("Greets a person by name"),
         "doc comment should be extracted through export: {doc}"
@@ -207,8 +287,14 @@ fn extracts_python_function_signature() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "greet_many")
         .expect("should find greet_many function");
 
-    let sig = greet_many.signature.as_ref().expect("should have signature");
-    assert!(!sig.parameters.is_empty(), "variadic parameter should be captured");
+    let sig = greet_many
+        .signature
+        .as_ref()
+        .expect("should have signature");
+    assert!(
+        !sig.parameters.is_empty(),
+        "variadic parameter should be captured"
+    );
     assert!(
         sig.parameters[0].is_variadic,
         "parameter should be marked as variadic"
@@ -242,7 +328,10 @@ fn extracts_go_function_signature() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "Greet" && s.kind == tree_hugger_lib::SymbolKind::Method)
         .expect("should find Greet method");
 
-    let sig = method_greet.signature.as_ref().expect("should have signature");
+    let sig = method_greet
+        .signature
+        .as_ref()
+        .expect("should have signature");
     assert!(!sig.parameters.is_empty(), "method should have parameters");
     // The first parameter should be "name", not the receiver "g"
     assert_eq!(
@@ -290,7 +379,11 @@ fn extracts_rust_generic_types() -> Result<(), TreeHuggerError> {
         .expect("should find identity function");
     let sig = identity.signature.as_ref().expect("should have signature");
     assert_eq!(sig.return_type.as_deref(), Some("T"), "generic return type");
-    assert_eq!(sig.parameters[0].type_annotation.as_deref(), Some("T"), "generic param type");
+    assert_eq!(
+        sig.parameters[0].type_annotation.as_deref(),
+        Some("T"),
+        "generic param type"
+    );
 
     // Check complex generic return type
     let try_parse = symbols
@@ -338,7 +431,11 @@ fn extracts_typescript_generic_types() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "identity")
         .expect("should find identity function");
     let sig = identity.signature.as_ref().expect("should have signature");
-    assert_eq!(sig.return_type.as_deref(), Some("T"), "TS generic return type");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("T"),
+        "TS generic return type"
+    );
 
     // Check complex generic types
     let map_array = symbols
@@ -346,7 +443,11 @@ fn extracts_typescript_generic_types() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "mapArray")
         .expect("should find mapArray function");
     let sig = map_array.signature.as_ref().expect("should have signature");
-    assert_eq!(sig.return_type.as_deref(), Some("U[]"), "array generic return type");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("U[]"),
+        "array generic return type"
+    );
     assert_eq!(
         sig.parameters[0].type_annotation.as_deref(),
         Some("T[]"),
@@ -363,7 +464,10 @@ fn extracts_typescript_generic_types() -> Result<(), TreeHuggerError> {
         .iter()
         .find(|s| s.name == "fetchData")
         .expect("should find fetchData function");
-    let sig = fetch_data.signature.as_ref().expect("should have signature");
+    let sig = fetch_data
+        .signature
+        .as_ref()
+        .expect("should have signature");
     assert_eq!(
         sig.return_type.as_deref(),
         Some("Promise<T>"),
@@ -385,7 +489,11 @@ fn extracts_python_generic_types() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "map_list")
         .expect("should find map_list function");
     let sig = map_list.signature.as_ref().expect("should have signature");
-    assert_eq!(sig.return_type.as_deref(), Some("List[U]"), "List generic return");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("List[U]"),
+        "List generic return"
+    );
     assert_eq!(
         sig.parameters[0].type_annotation.as_deref(),
         Some("List[T]"),
@@ -397,7 +505,10 @@ fn extracts_python_generic_types() -> Result<(), TreeHuggerError> {
         .iter()
         .find(|s| s.name == "first_or_none")
         .expect("should find first_or_none function");
-    let sig = first_or_none.signature.as_ref().expect("should have signature");
+    let sig = first_or_none
+        .signature
+        .as_ref()
+        .expect("should have signature");
     assert_eq!(
         sig.return_type.as_deref(),
         Some("Optional[T]"),
@@ -419,14 +530,21 @@ fn extracts_go_generic_types() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "Identity")
         .expect("should find Identity function");
     let sig = identity.signature.as_ref().expect("should have signature");
-    assert_eq!(sig.return_type.as_deref(), Some("T"), "Go generic return type");
+    assert_eq!(
+        sig.return_type.as_deref(),
+        Some("T"),
+        "Go generic return type"
+    );
 
     // Check generic pointer return type
     let new_container = symbols
         .iter()
         .find(|s| s.name == "NewContainer")
         .expect("should find NewContainer function");
-    let sig = new_container.signature.as_ref().expect("should have signature");
+    let sig = new_container
+        .signature
+        .as_ref()
+        .expect("should have signature");
     assert_eq!(
         sig.return_type.as_deref(),
         Some("*Container[T]"),
@@ -503,7 +621,10 @@ fn extracts_rust_enum_variants() -> Result<(), TreeHuggerError> {
         .expect("should have type metadata");
 
     // Should have multiple variants
-    assert!(meta.variants.len() >= 3, "Message should have at least 3 variants");
+    assert!(
+        meta.variants.len() >= 3,
+        "Message should have at least 3 variants"
+    );
 
     // Find specific variants
     let quit = meta.variants.iter().find(|v| v.name == "Quit");
@@ -575,8 +696,14 @@ fn extracts_rust_tuple_struct_fields() -> Result<(), TreeHuggerError> {
         .expect("should have type metadata");
 
     assert_eq!(meta.fields.len(), 2, "Point should have 2 tuple fields");
-    assert_eq!(meta.fields[0].name, "0", "first field should be indexed as 0");
-    assert_eq!(meta.fields[1].name, "1", "second field should be indexed as 1");
+    assert_eq!(
+        meta.fields[0].name, "0",
+        "first field should be indexed as 0"
+    );
+    assert_eq!(
+        meta.fields[1].name, "1",
+        "second field should be indexed as 1"
+    );
     assert!(
         meta.fields[0].type_annotation.is_some(),
         "tuple field types should be captured"
@@ -651,10 +778,7 @@ fn rust_enum_is_included_in_types_filter() -> Result<(), TreeHuggerError> {
     let symbols = tree_file.symbols()?;
 
     // Filter for type-like symbols (what the `hug types` command does)
-    let type_symbols: Vec<_> = symbols
-        .into_iter()
-        .filter(|s| s.kind.is_type())
-        .collect();
+    let type_symbols: Vec<_> = symbols.into_iter().filter(|s| s.kind.is_type()).collect();
 
     // Should find both structs and enums
     assert!(
@@ -959,7 +1083,10 @@ fn distinguishes_scala_types() -> Result<(), TreeHuggerError> {
 
     // Object should be Module
     let default_greeter = symbols.iter().find(|s| s.name == "DefaultGreeter");
-    assert!(default_greeter.is_some(), "should find DefaultGreeter object");
+    assert!(
+        default_greeter.is_some(),
+        "should find DefaultGreeter object"
+    );
     assert_eq!(
         default_greeter.unwrap().kind,
         tree_hugger_lib::SymbolKind::Module,
@@ -1070,7 +1197,10 @@ fn extracts_java_type_metadata() -> Result<(), TreeHuggerError> {
         .type_metadata
         .as_ref()
         .expect("Point should have type_metadata");
-    assert!(meta.fields.len() >= 2, "Point should have at least 2 fields");
+    assert!(
+        meta.fields.len() >= 2,
+        "Point should have at least 2 fields"
+    );
     assert!(
         meta.fields.iter().any(|f| f.name == "x"),
         "Point should have field x"
@@ -1107,7 +1237,10 @@ fn extracts_java_type_metadata() -> Result<(), TreeHuggerError> {
         .type_metadata
         .as_ref()
         .expect("Person should have type_metadata");
-    assert!(meta.fields.len() >= 2, "Person should have at least 2 fields");
+    assert!(
+        meta.fields.len() >= 2,
+        "Person should have at least 2 fields"
+    );
     assert!(
         meta.fields.iter().any(|f| f.name == "name"),
         "Person should have field name"
@@ -1135,7 +1268,10 @@ fn extracts_c_type_metadata() -> Result<(), TreeHuggerError> {
         .type_metadata
         .as_ref()
         .expect("Point should have type_metadata");
-    assert!(meta.fields.len() >= 2, "Point should have at least 2 fields");
+    assert!(
+        meta.fields.len() >= 2,
+        "Point should have at least 2 fields"
+    );
     assert!(
         meta.fields.iter().any(|f| f.name == "x"),
         "Point should have field x"
@@ -1177,7 +1313,10 @@ fn extracts_cpp_type_metadata() -> Result<(), TreeHuggerError> {
         .type_metadata
         .as_ref()
         .expect("Point should have type_metadata");
-    assert!(meta.fields.len() >= 2, "Point should have at least 2 fields");
+    assert!(
+        meta.fields.len() >= 2,
+        "Point should have at least 2 fields"
+    );
     assert!(
         meta.fields.iter().any(|f| f.name == "x"),
         "Point should have field x"
@@ -1229,7 +1368,10 @@ fn extracts_csharp_type_metadata() -> Result<(), TreeHuggerError> {
         .type_metadata
         .as_ref()
         .expect("Point should have type_metadata");
-    assert!(meta.fields.len() >= 2, "Point should have at least 2 fields");
+    assert!(
+        meta.fields.len() >= 2,
+        "Point should have at least 2 fields"
+    );
     assert!(
         meta.fields.iter().any(|f| f.name == "X"),
         "Point should have field X"
@@ -1276,7 +1418,10 @@ fn extracts_csharp_type_metadata() -> Result<(), TreeHuggerError> {
         .type_metadata
         .as_ref()
         .expect("Person should have type_metadata");
-    assert!(meta.fields.len() >= 2, "Person should have at least 2 fields");
+    assert!(
+        meta.fields.len() >= 2,
+        "Person should have at least 2 fields"
+    );
     assert!(
         meta.fields.iter().any(|f| f.name == "Name"),
         "Person should have field Name"
@@ -1300,7 +1445,10 @@ fn extracts_swift_type_metadata() -> Result<(), TreeHuggerError> {
         .type_metadata
         .as_ref()
         .expect("Point should have type_metadata");
-    assert!(meta.fields.len() >= 2, "Point should have at least 2 fields");
+    assert!(
+        meta.fields.len() >= 2,
+        "Point should have at least 2 fields"
+    );
     assert!(
         meta.fields.iter().any(|f| f.name == "x"),
         "Point should have field x"
@@ -1753,10 +1901,17 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
     // Find the public greet method
     let public_greet = symbols
         .iter()
-        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function && s.range.start_line == 32)
+        .find(|s| {
+            s.name == "greet"
+                && s.kind == tree_hugger_lib::SymbolKind::Function
+                && s.range.start_line == 32
+        })
         .expect("should find public greet method");
 
-    let sig = public_greet.signature.as_ref().expect("should have signature");
+    let sig = public_greet
+        .signature
+        .as_ref()
+        .expect("should have signature");
     assert_eq!(
         sig.visibility,
         Some(tree_hugger_lib::Visibility::Public),
@@ -1769,7 +1924,10 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "formatName")
         .expect("should find protected formatName method");
 
-    let sig = protected_method.signature.as_ref().expect("should have signature");
+    let sig = protected_method
+        .signature
+        .as_ref()
+        .expect("should have signature");
     assert_eq!(
         sig.visibility,
         Some(tree_hugger_lib::Visibility::Protected),
@@ -1782,7 +1940,10 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "log")
         .expect("should find private log method");
 
-    let sig = private_method.signature.as_ref().expect("should have signature");
+    let sig = private_method
+        .signature
+        .as_ref()
+        .expect("should have signature");
     assert_eq!(
         sig.visibility,
         Some(tree_hugger_lib::Visibility::Private),
@@ -1801,7 +1962,11 @@ fn infers_csharp_interface_method_visibility() -> Result<(), TreeHuggerError> {
     // Find the interface method (line 19)
     let interface_method = symbols
         .iter()
-        .find(|s| s.name == "Greet" && s.kind == tree_hugger_lib::SymbolKind::Method && s.range.start_line == 19)
+        .find(|s| {
+            s.name == "Greet"
+                && s.kind == tree_hugger_lib::SymbolKind::Method
+                && s.range.start_line == 19
+        })
         .expect("should find Greet method in interface");
 
     let sig = interface_method
@@ -1826,7 +1991,11 @@ fn infers_java_interface_method_visibility() -> Result<(), TreeHuggerError> {
     // Find the interface method (line 18)
     let interface_method = symbols
         .iter()
-        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Method && s.range.start_line == 18)
+        .find(|s| {
+            s.name == "greet"
+                && s.kind == tree_hugger_lib::SymbolKind::Method
+                && s.range.start_line == 18
+        })
         .expect("should find greet method in interface");
 
     let sig = interface_method
@@ -1855,16 +2024,26 @@ fn extracts_typescript_arrow_function_signatures() -> Result<(), TreeHuggerError
     // Find the greet arrow function (line 2)
     let greet = symbols
         .iter()
-        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function && s.range.start_line == 2)
+        .find(|s| {
+            s.name == "greet"
+                && s.kind == tree_hugger_lib::SymbolKind::Function
+                && s.range.start_line == 2
+        })
         .expect("should find greet arrow function");
 
-    let sig = greet.signature.as_ref().expect("arrow function should have signature");
+    let sig = greet
+        .signature
+        .as_ref()
+        .expect("arrow function should have signature");
     assert_eq!(
         sig.return_type.as_deref(),
         Some("string"),
         "Arrow function return type should be extracted"
     );
-    assert!(!sig.parameters.is_empty(), "Arrow function should have parameters");
+    assert!(
+        !sig.parameters.is_empty(),
+        "Arrow function should have parameters"
+    );
     assert_eq!(sig.parameters[0].name, "name");
     assert_eq!(sig.parameters[0].type_annotation.as_deref(), Some("string"));
 
@@ -1923,11 +2102,21 @@ fn extracts_javascript_arrow_function_signatures() -> Result<(), TreeHuggerError
     // Find the greet arrow function
     let greet = symbols
         .iter()
-        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function && s.range.start_line == 2)
+        .find(|s| {
+            s.name == "greet"
+                && s.kind == tree_hugger_lib::SymbolKind::Function
+                && s.range.start_line == 2
+        })
         .expect("should find greet arrow function");
 
-    let sig = greet.signature.as_ref().expect("arrow function should have signature");
-    assert!(!sig.parameters.is_empty(), "Arrow function should have parameters");
+    let sig = greet
+        .signature
+        .as_ref()
+        .expect("arrow function should have signature");
+    assert!(
+        !sig.parameters.is_empty(),
+        "Arrow function should have parameters"
+    );
     assert_eq!(sig.parameters[0].name, "name");
 
     Ok(())
@@ -1953,10 +2142,7 @@ fn detects_java_static_methods() -> Result<(), TreeHuggerError> {
         .signature
         .as_ref()
         .expect("should have signature");
-    assert!(
-        sig.is_static,
-        "printGreeting should be marked as static"
-    );
+    assert!(sig.is_static, "printGreeting should be marked as static");
 
     // Find the instance method greet
     let greet = symbols
@@ -1965,10 +2151,7 @@ fn detects_java_static_methods() -> Result<(), TreeHuggerError> {
         .expect("should find greet method");
 
     let sig = greet.signature.as_ref().expect("should have signature");
-    assert!(
-        !sig.is_static,
-        "greet should not be marked as static"
-    );
+    assert!(!sig.is_static, "greet should not be marked as static");
 
     Ok(())
 }
@@ -1988,10 +2171,7 @@ fn detects_csharp_static_methods() -> Result<(), TreeHuggerError> {
         .signature
         .as_ref()
         .expect("should have signature");
-    assert!(
-        sig.is_static,
-        "PrintGreeting should be marked as static"
-    );
+    assert!(sig.is_static, "PrintGreeting should be marked as static");
 
     // Find the instance method Greet inside Greeter class (line 20, not the static one at line 4)
     let greet = symbols
@@ -2011,7 +2191,10 @@ fn detects_csharp_static_methods() -> Result<(), TreeHuggerError> {
         .find(|s| s.name == "Greet" && s.range.start_line < 10)
         .expect("should find top-level Greet function");
 
-    let sig = top_level_greet.signature.as_ref().expect("should have signature");
+    let sig = top_level_greet
+        .signature
+        .as_ref()
+        .expect("should have signature");
     assert!(
         sig.is_static,
         "top-level Greet function should be marked as static"
@@ -2460,7 +2643,9 @@ fn extracts_java_import_source() -> Result<(), TreeHuggerError> {
 
     // Verify package declarations are filtered out (no 'com', 'example', 'test')
     assert!(
-        !imports.iter().any(|i| i.name == "com" || i.name == "example" || i.name == "test"),
+        !imports
+            .iter()
+            .any(|i| i.name == "com" || i.name == "example" || i.name == "test"),
         "Java package declarations should not be captured as imports"
     );
 

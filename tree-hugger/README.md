@@ -155,6 +155,7 @@ Tree Hugger maintains comprehensive test coverage across all supported languages
 1. **Type distinction tests** - Verify that different type constructs (struct vs enum, class vs interface) are correctly identified with distinct `SymbolKind` values
 1. **Cross-language parity** - All typed languages should have fixture files that exercise their type system features
 1. **Regression tests** - Any bug fix should include a test that would catch the bug if it recurs
+1. **Diagnostics coverage** - Lint and syntax diagnostics should include regression tests for representative languages
 
 ### Running Tests
 
