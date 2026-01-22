@@ -459,6 +459,7 @@ dependencies = [
 name = "biscuit-speaks"
 version = "0.1.0"
 dependencies = [
+ "sniff-lib",
  "thiserror 2.0.17",
  "tracing",
  "tts",

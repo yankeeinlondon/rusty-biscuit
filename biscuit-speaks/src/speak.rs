@@ -10,7 +10,7 @@ use crate::types::VolumeLevel;
 pub struct Speak {
     /// the text which will be spoken
     pub text: String,
-    /// cached audio of cloud based TTS
+    /// cached audio
     audio: Option<Vec<u8>>,
 
     /// the volume which the text should be spoken
@@ -27,5 +27,15 @@ impl Speak {
             volume: VolumeLevel::Normal,
             requested_voice: None,
         }
+    }
+
+    /// Starts generating the audio from the text.
+    ///
+    /// In some cases you may not need or want to
+    /// call this as the TTS process is fast enough
+    /// that any latency it may introduce is deemed
+    /// acceptable.
+    pub fn prepare(self) -> Speak {
+        todo!()
     }
 }

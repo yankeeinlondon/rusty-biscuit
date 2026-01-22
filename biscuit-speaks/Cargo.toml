@@ -12,3 +12,4 @@ tts = "0.26.3"
 thiserror = "2.0"
 tracing = "0.1"
 url = "2.5"
+sniff-lib = { path = "../sniff/lib" }
