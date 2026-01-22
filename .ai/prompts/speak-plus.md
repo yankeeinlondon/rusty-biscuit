@@ -36,8 +36,8 @@ The following environment variables will play a role in which TTS solution and c
 The process we'll use to select the TTS provider is:
 
 - create a force-ranked stack of desired options
-    - these rankings are static by OS
-    - and generally equate to which TTS is better than another
+    - these rankings are static by OS (see `LINUX_TTS_STACK`, `MACOS_TTS_STACK`, `WINDOWS_TTS_STACK`)
+    - and generally equate to which TTS is better than another on that OS
     - exception:
         - the cloud option with ElevenLabs is always ranked last if there is an API Key (and not listed at all if there is no API Key)
         - we do this because use of the API _can_ cost money (although there is a generous free tier) and we want the user to explicitly opt-in to using the API for this reason
@@ -53,6 +53,10 @@ The _gender_ of the speaker, the _volume_ at which the speaker speaks, and even 
     - like we did with the current implementation, the `VolumeLevel` enum is how we'll refer to volume
         - it provides `Soft`, `Normal`, and `Loud` as well as an explicit numeric value
         - if a TTS services doesn't provide volume control then we'll ignore the enum but where ever we can we'll try to honor the volume settings and map it to the TTS provider
+
+## TTS Orchestration via the `Speak` struct
+
+The main way that people will interact through the `biscuit-speaks` library is via the `Speak` struct
 
 ## Client's of this Library
 
