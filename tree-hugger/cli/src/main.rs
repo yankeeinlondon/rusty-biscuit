@@ -8,9 +8,10 @@ use ignore::overrides::OverrideBuilder;
 use owo_colors::{OwoColorize, Style};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use tree_hugger_lib::{
-    DiagnosticSeverity, FieldInfo, FileSummary, FunctionSignature, ImportSymbol, LintDiagnostic,
-    PackageSummary, ParameterInfo, ProgrammingLanguage, SourceContext, SymbolInfo, SymbolKind,
-    TreeFile, TreeHuggerError, TypeMetadata, VariantInfo,
+    Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary, FunctionSignature,
+    ImportSymbol, LintDiagnostic, PackageSummary, ParameterInfo, ProgrammingLanguage,
+    SourceContext, SymbolInfo, SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError,
+    TypeMetadata, VariantInfo,
 };
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +83,22 @@ struct ClassArgs {
     instance_only: bool,
 }
 
+/// Arguments for the lint command
+#[derive(clap::Args, Debug, Clone)]
+struct LintArgs {
+    /// Glob patterns for files to include
+    #[arg(value_name = "GLOB", num_args = 1..)]
+    inputs: Vec<String>,
+
+    /// Show only lint diagnostics (pattern-based and semantic rules)
+    #[arg(long, conflicts_with = "syntax_only")]
+    lint_only: bool,
+
+    /// Show only syntax diagnostics (parse errors)
+    #[arg(long, conflicts_with = "lint_only")]
+    syntax_only: bool,
+}
+
 #[derive(Subcommand, Debug, Clone)]
 enum Command {
     /// List functions in the file(s)
@@ -97,7 +114,7 @@ enum Command {
     /// List classes and their members
     Classes(ClassArgs),
     /// Run lint diagnostics on the file(s)
-    Lint(CommonArgs),
+    Lint(LintArgs),
 }
 
 impl Command {
@@ -108,8 +125,8 @@ impl Command {
             | Self::Types(args)
             | Self::Symbols(args)
             | Self::Exports(args)
-            | Self::Imports(args)
-            | Self::Lint(args) => &args.inputs,
+            | Self::Imports(args) => &args.inputs,
+            Self::Lint(args) => &args.inputs,
             Self::Classes(args) => &args.inputs,
         }
     }
@@ -122,7 +139,10 @@ impl Command {
             Self::Symbols(_) => CommandKind::Symbols,
             Self::Exports(_) => CommandKind::Exports,
             Self::Imports(_) => CommandKind::Imports,
-            Self::Lint(_) => CommandKind::Lint,
+            Self::Lint(args) => CommandKind::Lint {
+                lint_only: args.lint_only,
+                syntax_only: args.syntax_only,
+            },
             Self::Classes(args) => CommandKind::Classes {
                 name_filter: args.name.clone(),
                 static_only: args.static_only,
@@ -140,7 +160,10 @@ enum CommandKind {
     Symbols,
     Exports,
     Imports,
-    Lint,
+    Lint {
+        lint_only: bool,
+        syntax_only: bool,
+    },
     Classes {
         name_filter: Option<String>,
         static_only: bool,
@@ -491,7 +514,7 @@ fn summarize_file(
         CommandKind::Imports => {
             summary.imports = tree_file.imported_symbols()?;
         }
-        CommandKind::Lint => {
+        CommandKind::Lint { .. } => {
             // Lint diagnostics are already populated above
         }
         CommandKind::Classes { .. } => {
@@ -532,7 +555,17 @@ fn render_summary(
         CommandKind::Functions | CommandKind::Types | CommandKind::Symbols => {
             render_symbols(&summary.symbols, config)
         }
-        CommandKind::Lint => render_lint_diagnostics(&summary.lint, &summary.file, config),
+        CommandKind::Lint {
+            lint_only,
+            syntax_only,
+        } => render_diagnostics_filtered(
+            &summary.lint,
+            &summary.syntax,
+            &summary.file,
+            config,
+            *lint_only,
+            *syntax_only,
+        ),
         CommandKind::Classes { .. } => {
             // Classes are rendered separately
         }
@@ -800,72 +833,6 @@ fn style_for_severity(severity: DiagnosticSeverity) -> Style {
     }
 }
 
-/// Renders lint diagnostics with source context.
-fn render_lint_diagnostics(diagnostics: &[LintDiagnostic], file: &Path, config: &OutputConfig) {
-    if diagnostics.is_empty() {
-        if config.use_colors {
-            println!("  {}", "(no lint diagnostics)".dimmed());
-        } else {
-            println!("  (no lint diagnostics)");
-        }
-        return;
-    }
-
-    for diagnostic in diagnostics {
-        render_lint_diagnostic(diagnostic, file, config);
-    }
-}
-
-/// Renders a single lint diagnostic with source context.
-fn render_lint_diagnostic(diagnostic: &LintDiagnostic, file: &Path, config: &OutputConfig) {
-    let severity_label = match diagnostic.severity {
-        DiagnosticSeverity::Error => "error",
-        DiagnosticSeverity::Warning => "warning",
-        DiagnosticSeverity::Info => "info",
-    };
-
-    let rule_display = diagnostic
-        .rule
-        .as_ref()
-        .map(|r| format!(" [{}]", r))
-        .unwrap_or_default();
-
-    // Location line: "  --> file:line:col"
-    let location = format!(
-        "{}:{}:{}",
-        file.display(),
-        diagnostic.range.start_line,
-        diagnostic.range.start_column
-    );
-
-    let location_display = if config.use_hyperlinks {
-        hyperlink(file, diagnostic.range.start_line, &location)
-    } else {
-        location
-    };
-
-    if config.use_colors {
-        let severity_style = style_for_severity(diagnostic.severity);
-        println!(
-            "{}{}: {}",
-            severity_label.style(severity_style),
-            rule_display.dimmed(),
-            diagnostic.message
-        );
-        println!("  {} {}", "-->".blue(), location_display);
-    } else {
-        println!("{}{}: {}", severity_label, rule_display, diagnostic.message);
-        println!("  --> {}", location_display);
-    }
-
-    // Render source context if available
-    if let Some(context) = &diagnostic.context {
-        render_source_context(context, diagnostic.range.start_line, config);
-    }
-
-    println!();
-}
-
 /// Renders the source context with underline marker.
 fn render_source_context(context: &SourceContext, line_number: usize, config: &OutputConfig) {
     let line_num_width = line_number.to_string().len().max(4);
@@ -913,6 +880,120 @@ fn render_source_context(context: &SourceContext, line_number: usize, config: &O
             width = line_num_width
         );
     }
+}
+
+/// Renders diagnostics with optional filtering by kind.
+///
+/// When `lint_only` is true, shows only Lint and Semantic diagnostics.
+/// When `syntax_only` is true, shows only Syntax diagnostics.
+/// When both are false, shows all diagnostics.
+fn render_diagnostics_filtered(
+    lint: &[LintDiagnostic],
+    syntax: &[SyntaxDiagnostic],
+    file: &Path,
+    config: &OutputConfig,
+    lint_only: bool,
+    syntax_only: bool,
+) {
+    // Convert to unified diagnostics
+    let mut diagnostics: Vec<Diagnostic> = Vec::new();
+
+    if !syntax_only {
+        for lint_diag in lint {
+            diagnostics.push(Diagnostic::from_lint(lint_diag.clone()));
+        }
+    }
+
+    if !lint_only {
+        for syntax_diag in syntax {
+            diagnostics.push(Diagnostic::from_syntax(syntax_diag.clone()));
+        }
+    }
+
+    if diagnostics.is_empty() {
+        let label = if lint_only {
+            "(no lint diagnostics)"
+        } else if syntax_only {
+            "(no syntax diagnostics)"
+        } else {
+            "(no diagnostics)"
+        };
+        if config.use_colors {
+            println!("  {}", label.dimmed());
+        } else {
+            println!("  {}", label);
+        }
+        return;
+    }
+
+    for diagnostic in &diagnostics {
+        render_unified_diagnostic(diagnostic, file, config);
+    }
+}
+
+/// Renders a single unified diagnostic with kind indicator.
+fn render_unified_diagnostic(diagnostic: &Diagnostic, file: &Path, config: &OutputConfig) {
+    let severity_label = match diagnostic.severity {
+        DiagnosticSeverity::Error => "error",
+        DiagnosticSeverity::Warning => "warning",
+        DiagnosticSeverity::Info => "info",
+    };
+
+    let kind_label = match diagnostic.kind {
+        DiagnosticKind::Lint => "[lint]",
+        DiagnosticKind::Semantic => "[semantic]",
+        DiagnosticKind::Syntax => "[syntax]",
+    };
+
+    let rule_display = diagnostic
+        .rule
+        .as_ref()
+        .map(|r| format!(" [{}]", r))
+        .unwrap_or_default();
+
+    // Location line: "  --> file:line:col"
+    let location = format!(
+        "{}:{}:{}",
+        file.display(),
+        diagnostic.range.start_line,
+        diagnostic.range.start_column
+    );
+
+    let location_display = if config.use_hyperlinks {
+        hyperlink(file, diagnostic.range.start_line, &location)
+    } else {
+        location
+    };
+
+    if config.use_colors {
+        let severity_style = style_for_severity(diagnostic.severity);
+        let kind_style = match diagnostic.kind {
+            DiagnosticKind::Lint => Style::new().cyan(),
+            DiagnosticKind::Semantic => Style::new().magenta(),
+            DiagnosticKind::Syntax => Style::new().red(),
+        };
+        println!(
+            "{} {}{}: {}",
+            kind_label.style(kind_style),
+            severity_label.style(severity_style),
+            rule_display.dimmed(),
+            diagnostic.message
+        );
+        println!("  {} {}", "-->".blue(), location_display);
+    } else {
+        println!(
+            "{} {}{}: {}",
+            kind_label, severity_label, rule_display, diagnostic.message
+        );
+        println!("  --> {}", location_display);
+    }
+
+    // Render source context if available
+    if let Some(context) = &diagnostic.context {
+        render_source_context(context, diagnostic.range.start_line, config);
+    }
+
+    println!();
 }
 
 fn render_imports(imports: &[ImportSymbol], config: &OutputConfig) {

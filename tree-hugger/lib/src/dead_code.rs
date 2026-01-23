@@ -264,53 +264,65 @@ fn is_lua_error_call(node: Node, source: &str) -> bool {
 /// Finds dead code siblings after a terminal statement.
 ///
 /// Returns nodes that appear after the terminal statement within the same block.
+/// This function walks up the parent chain to find the containing block, then
+/// looks for siblings after the statement containing the terminal expression.
 pub fn find_dead_code_after<'tree>(
     terminal: Node<'tree>,
     _language: ProgrammingLanguage,
 ) -> Vec<Node<'tree>> {
     let mut dead_nodes = Vec::new();
 
-    // Get the parent block
-    let parent = match terminal.parent() {
-        Some(p) => p,
-        None => return dead_nodes,
-    };
+    // Walk up the parent chain to find a block-like container
+    // Keep track of the node that will be the direct child of the block
+    let mut current = terminal;
 
-    // Check if parent is a block-like container
-    let parent_kind = parent.kind();
-    let is_block = parent_kind.contains("block")
-        || parent_kind.contains("body")
-        || parent_kind.contains("compound")
-        || parent_kind == "statement_list"
-        || parent_kind == "source_file";
+    loop {
+        let parent = match current.parent() {
+            Some(p) => p,
+            None => return dead_nodes,
+        };
 
-    if !is_block {
-        return dead_nodes;
-    }
+        let parent_kind = parent.kind();
+        let is_block = parent_kind.contains("block")
+            || parent_kind.contains("body")
+            || parent_kind.contains("compound")
+            || parent_kind == "statement_list"
+            || parent_kind == "source_file";
 
-    // Find siblings after the terminal statement
-    let mut found_terminal = false;
-    let mut cursor = parent.walk();
+        if is_block {
+            // Found the block. 'current' is now the direct child of the block
+            // (e.g., expression_statement that contains the terminal macro_invocation)
+            let mut found_statement = false;
+            let mut cursor = parent.walk();
 
-    for child in parent.children(&mut cursor) {
-        if child.id() == terminal.id() {
-            found_terminal = true;
-            continue;
-        }
+            for child in parent.children(&mut cursor) {
+                if child.id() == current.id() {
+                    found_statement = true;
+                    continue;
+                }
 
-        if found_terminal {
-            // Skip comments and empty nodes
-            let kind = child.kind();
-            if kind.contains("comment") || kind.is_empty() {
-                continue;
+                if found_statement {
+                    // Skip comments, braces, and empty nodes
+                    let kind = child.kind();
+                    if kind.contains("comment")
+                        || kind.is_empty()
+                        || kind == "{"
+                        || kind == "}"
+                    {
+                        continue;
+                    }
+
+                    // This is dead code
+                    dead_nodes.push(child);
+                }
             }
 
-            // This is dead code
-            dead_nodes.push(child);
+            return dead_nodes;
         }
-    }
 
-    dead_nodes
+        // Move up the tree: current becomes the node we just checked
+        current = parent;
+    }
 }
 
 #[cfg(test)]
@@ -355,5 +367,154 @@ mod tests {
         assert!(RUST_TERMINAL_FUNCTIONS.contains(&"std::process::exit"));
         assert!(RUST_TERMINAL_FUNCTIONS.contains(&"process::abort"));
         assert!(RUST_TERMINAL_FUNCTIONS.contains(&"std::process::abort"));
+    }
+
+    #[test]
+    fn test_rust_panic_macro_detected_as_terminal() {
+        use tree_sitter::Parser;
+
+        let source = r#"fn demo() {
+    panic!("error");
+    let x = 1;
+}"#;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        // Find the macro_invocation node
+        fn find_macro(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
+            if node.kind() == "macro_invocation" {
+                return Some(node);
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if let Some(n) = find_macro(child) {
+                    return Some(n);
+                }
+            }
+            None
+        }
+
+        let macro_node = find_macro(tree.root_node()).expect("Should find macro_invocation");
+        assert!(
+            is_terminal_statement(macro_node, ProgrammingLanguage::Rust, source),
+            "panic! should be detected as terminal statement"
+        );
+    }
+
+    #[test]
+    fn test_rust_println_macro_not_terminal() {
+        use tree_sitter::Parser;
+
+        let source = r#"fn demo() {
+    println!("hello");
+    let x = 1;
+}"#;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        fn find_macro(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
+            if node.kind() == "macro_invocation" {
+                return Some(node);
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if let Some(n) = find_macro(child) {
+                    return Some(n);
+                }
+            }
+            None
+        }
+
+        let macro_node = find_macro(tree.root_node()).expect("Should find macro_invocation");
+        assert!(
+            !is_terminal_statement(macro_node, ProgrammingLanguage::Rust, source),
+            "println! should NOT be detected as terminal statement"
+        );
+    }
+
+    #[test]
+    fn test_rust_process_exit_detected_as_terminal() {
+        use tree_sitter::Parser;
+
+        let source = r#"fn demo() {
+    process::exit(1);
+    let x = 1;
+}"#;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        fn find_call(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
+            if node.kind() == "call_expression" {
+                return Some(node);
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if let Some(n) = find_call(child) {
+                    return Some(n);
+                }
+            }
+            None
+        }
+
+        let call_node = find_call(tree.root_node()).expect("Should find call_expression");
+        assert!(
+            is_terminal_statement(call_node, ProgrammingLanguage::Rust, source),
+            "process::exit() should be detected as terminal statement"
+        );
+    }
+
+    #[test]
+    fn test_find_dead_code_after_panic() {
+        use tree_sitter::Parser;
+
+        let source = r#"fn demo() {
+    panic!("error");
+    let x = 1;
+}"#;
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+
+        fn find_macro(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
+            if node.kind() == "macro_invocation" {
+                return Some(node);
+            }
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if let Some(n) = find_macro(child) {
+                    return Some(n);
+                }
+            }
+            None
+        }
+
+        let macro_node = find_macro(tree.root_node()).expect("Should find macro_invocation");
+        let dead_nodes = find_dead_code_after(macro_node, ProgrammingLanguage::Rust);
+
+        assert_eq!(
+            dead_nodes.len(),
+            1,
+            "Should find exactly one dead code statement after panic!"
+        );
+        assert_eq!(
+            dead_nodes[0].kind(),
+            "let_declaration",
+            "Dead code should be the let_declaration"
+        );
     }
 }

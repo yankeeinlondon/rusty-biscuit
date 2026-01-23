@@ -6,9 +6,9 @@ use tree_sitter::{Node, Parser, QueryCursor, StreamingIterator};
 use crate::error::TreeHuggerError;
 use crate::queries::{QueryKind, format_rule_message, query_for, severity_for_rule};
 use crate::shared::{
-    CodeBlock, CodeRange, DiagnosticSeverity, FieldInfo, FunctionSignature, ImportSymbol,
-    LintDiagnostic, ParameterInfo, ProgrammingLanguage, ReferencedSymbol, SourceContext,
-    SymbolInfo, SymbolKind, SyntaxDiagnostic, TypeMetadata, VariantInfo, Visibility,
+    CodeBlock, CodeRange, Diagnostic, DiagnosticSeverity, FieldInfo, FunctionSignature,
+    ImportSymbol, LintDiagnostic, ParameterInfo, ProgrammingLanguage, ReferencedSymbol,
+    SourceContext, SymbolInfo, SymbolKind, SyntaxDiagnostic, TypeMetadata, VariantInfo, Visibility,
 };
 
 /// Represents a parsed source file backed by tree-sitter.
@@ -1374,6 +1374,38 @@ impl TreeFile {
             for child in node.children(&mut cursor) {
                 stack.push(child);
             }
+        }
+
+        diagnostics
+    }
+
+    /// Provides all diagnostics for this file in a unified format.
+    ///
+    /// Combines lint diagnostics (pattern-based and semantic) with syntax
+    /// diagnostics into a single collection. Each diagnostic includes a
+    /// `kind` field indicating its source (`Lint`, `Semantic`, or `Syntax`).
+    ///
+    /// ## Returns
+    /// Returns all diagnostics from lint and syntax analysis.
+    ///
+    /// ## Examples
+    /// ```ignore
+    /// let tree_file = TreeFile::new("example.rs")?;
+    /// for diagnostic in tree_file.diagnostics() {
+    ///     println!("[{}] {}: {}", diagnostic.kind, diagnostic.severity, diagnostic.message);
+    /// }
+    /// ```
+    pub fn diagnostics(&self) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+
+        // Collect lint diagnostics (includes both pattern-based and semantic)
+        for lint in self.lint_diagnostics() {
+            diagnostics.push(Diagnostic::from_lint(lint));
+        }
+
+        // Collect syntax diagnostics
+        for syntax in self.syntax_diagnostics() {
+            diagnostics.push(Diagnostic::from_syntax(syntax));
         }
 
         diagnostics

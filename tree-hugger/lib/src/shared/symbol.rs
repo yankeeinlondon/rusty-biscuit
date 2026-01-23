@@ -603,6 +603,90 @@ pub struct SyntaxDiagnostic {
     pub context: Option<SourceContext>,
 }
 
+/// Categorizes the source of a diagnostic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DiagnosticKind {
+    /// Pattern-based lint rules (e.g., unwrap-call, debugger-statement).
+    Lint,
+    /// Semantic analysis rules (e.g., undefined-symbol, unused-import).
+    Semantic,
+    /// Syntax errors from tree-sitter parsing.
+    Syntax,
+}
+
+impl fmt::Display for DiagnosticKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            Self::Lint => "lint",
+            Self::Semantic => "semantic",
+            Self::Syntax => "syntax",
+        };
+        formatter.write_str(label)
+    }
+}
+
+/// A unified diagnostic combining lint, semantic, and syntax issues.
+///
+/// Provides a single type for all diagnostic output, with a `kind` field
+/// to distinguish the source. Use `TreeFile::diagnostics()` to retrieve
+/// all diagnostics in this unified format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Diagnostic {
+    /// The category of this diagnostic.
+    pub kind: DiagnosticKind,
+    /// A human-readable description of the issue.
+    pub message: String,
+    /// The source location of the diagnostic.
+    pub range: CodeRange,
+    /// The severity level (Info, Warning, Error).
+    pub severity: DiagnosticSeverity,
+    /// The rule identifier (only present for Lint diagnostics).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
+    /// Source context for displaying the diagnostic with visual markers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<SourceContext>,
+}
+
+impl Diagnostic {
+    /// Creates a diagnostic from a lint diagnostic.
+    ///
+    /// Semantic rules (undefined-symbol, unused-symbol, unused-import, dead-code,
+    /// undefined-module) are categorized as `DiagnosticKind::Semantic`, while
+    /// pattern-based rules use `DiagnosticKind::Lint`.
+    pub fn from_lint(lint: LintDiagnostic) -> Self {
+        let kind = match lint.rule.as_deref() {
+            Some("undefined-symbol")
+            | Some("unused-symbol")
+            | Some("unused-import")
+            | Some("dead-code")
+            | Some("undefined-module") => DiagnosticKind::Semantic,
+            _ => DiagnosticKind::Lint,
+        };
+
+        Self {
+            kind,
+            message: lint.message,
+            range: lint.range,
+            severity: lint.severity,
+            rule: lint.rule,
+            context: lint.context,
+        }
+    }
+
+    /// Creates a diagnostic from a syntax diagnostic.
+    pub fn from_syntax(syntax: SyntaxDiagnostic) -> Self {
+        Self {
+            kind: DiagnosticKind::Syntax,
+            message: syntax.message,
+            range: syntax.range,
+            severity: syntax.severity,
+            rule: None,
+            context: syntax.context,
+        }
+    }
+}
+
 /// JSON-serializable summary for a single file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileSummary {
