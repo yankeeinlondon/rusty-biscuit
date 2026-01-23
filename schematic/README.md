@@ -98,11 +98,81 @@ async fn main() -> Result<(), SchematicError> {
 - **Automatic authentication**: Bearer, API Key, and Basic auth with env var fallback chains
 - **Proper error handling**: `MissingCredential` errors instead of silent failures
 - **Path parameters**: `{param}` syntax in paths become struct fields with `impl Into<String>` for ergonomic usage
-- **Multiple response types**: JSON, Text, Binary, and Empty responses
+- **Multiple response types**: JSON, Text, Binary, and Empty responses with type-specific methods
 - **Per-API modules**: Each API gets its own module file with configurable paths
 - **Prelude exports**: Convenient imports via `use schematic_*::prelude::*`
 - **Validation**: Pre-generation checks for naming collisions and configuration errors
 - **Doc examples**: Generated request structs include usage examples in doc comments
+
+## Critical Development Requirements
+
+> **⚠️ IMPORTANT**: Read this section before modifying schematic packages!
+
+### 1. Response Type Verification
+
+The generator produces different methods based on `ApiResponse` types:
+
+| Response Type | Generated Method | Return Type |
+|---------------|------------------|-------------|
+| `ApiResponse::Json(schema)` | `request<T>()` | `Result<T, SchematicError>` |
+| `ApiResponse::Binary` | `request_bytes()` | `Result<bytes::Bytes, SchematicError>` |
+| `ApiResponse::Text` | `request_text()` | `Result<String, SchematicError>` |
+| `ApiResponse::Empty` | `request_empty()` | `Result<(), SchematicError>` |
+
+**When adding endpoints with non-JSON responses:**
+
+1. **Verify the response type is correct** - Binary audio endpoints must use `ApiResponse::Binary`, not `ApiResponse::Json`
+2. **Test the generated code compiles** - Run `cargo check -p schematic-schema`
+3. **Test runtime behavior** - Unit tests only verify syntax, not that `response.bytes()` vs `response.json()` is called correctly
+
+### 2. Module Path Configuration
+
+When defining APIs, the generator assumes: **1 API name → 1 module name → 1 definitions module**
+
+| Scenario | Configuration Required |
+|----------|------------------------|
+| Single API per module | `module_path: None` (auto-inferred) |
+| Multiple APIs sharing one definitions module | **REQUIRES explicit `module_path`** |
+| API name differs from definitions module | **REQUIRES explicit `module_path`** |
+
+**Example - Ollama has two APIs sharing one definitions module:**
+
+```rust
+// ❌ WRONG - Will fail: generates "ollamanative.rs" looking for schematic_definitions::ollamanative
+RestApi { name: "OllamaNative".to_string(), module_path: None, ... }
+
+// ✅ CORRECT - Both use explicit path to shared module
+RestApi { name: "OllamaNative".to_string(), module_path: Some("ollama".to_string()), ... }
+RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string()), ... }
+```
+
+### 3. Testing Requirements
+
+**Current tests verify:**
+- ✅ Generated code is syntactically valid Rust
+- ✅ Code compiles (`cargo check`)
+- ✅ Unit test coverage for individual generators
+
+**Current tests DO NOT verify:**
+- ❌ Runtime behavior (binary responses actually call `.bytes()`)
+- ❌ Integration with real APIs
+- ❌ Module path resolution across multiple APIs
+
+**Before submitting changes:**
+
+```bash
+# 1. Run unit tests
+cargo test -p schematic-define -p schematic-definitions -p schematic-gen
+
+# 2. Regenerate all schemas
+just -f schematic/justfile generate
+
+# 3. Verify generated code compiles
+cargo check -p schematic-schema
+
+# 4. For response type changes, manually verify correct method is generated:
+grep -n "request_bytes\|request_text\|request_empty" schematic/schema/src/*.rs
+```
 
 ## Building
 

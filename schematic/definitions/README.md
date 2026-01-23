@@ -126,6 +126,96 @@ assert!(matches!(api.auth, AuthStrategy::BearerToken { .. }));
 assert_eq!(api.env_auth, vec!["OPENAI_API_KEY"]);
 ```
 
+## Critical Configuration Requirements
+
+> **⚠️ WARNING**: Incorrect configuration here causes runtime failures or compile errors!
+
+### Response Types
+
+Choose the correct `ApiResponse` variant for each endpoint:
+
+| Response Type | When to Use | Generated Method |
+|---------------|-------------|------------------|
+| `ApiResponse::Json(Schema)` | JSON responses (most common) | `request<T>()` |
+| `ApiResponse::Binary` | Audio files, images, ZIP archives | `request_bytes()` |
+| `ApiResponse::Text` | Plain text responses | `request_text()` |
+| `ApiResponse::Empty` | 204 No Content, fire-and-forget | `request_empty()` |
+
+**Common Mistakes:**
+
+```rust
+// ❌ WRONG - Audio endpoints returning binary data
+Endpoint {
+    id: "CreateSpeech".to_string(),
+    response: ApiResponse::json_type("AudioResponse"),  // Will fail at runtime!
+    ...
+}
+
+// ✅ CORRECT
+Endpoint {
+    id: "CreateSpeech".to_string(),
+    response: ApiResponse::Binary,  // Returns bytes::Bytes
+    ...
+}
+```
+
+### Module Path Configuration
+
+The `module_path` field controls where the generator imports types from:
+
+| Scenario | Configuration |
+|----------|---------------|
+| API name matches module name | `module_path: None` (auto-inferred) |
+| API name differs from module | **MUST set `module_path`** |
+| Multiple APIs in one module | **MUST set `module_path` for each** |
+
+**Example - Ollama has two APIs in one module:**
+
+```rust
+// definitions/src/ollama/mod.rs exports both APIs
+
+pub fn define_ollama_native_api() -> RestApi {
+    RestApi {
+        name: "OllamaNative".to_string(),
+        module_path: Some("ollama".to_string()),  // ← REQUIRED
+        ...
+    }
+}
+
+pub fn define_ollama_openai_api() -> RestApi {
+    RestApi {
+        name: "OllamaOpenAI".to_string(),
+        module_path: Some("ollama".to_string()),  // ← REQUIRED
+        ...
+    }
+}
+```
+
+**What happens without explicit `module_path`:**
+
+| API Name | Inferred Path | Actual Module | Result |
+|----------|---------------|---------------|--------|
+| `OllamaNative` | `ollamanative` | `ollama` | ❌ Compile error: `schematic_definitions::ollamanative` not found |
+| `ElevenLabs` | `elevenlabs` | `elevenlabs` | ✅ Works (names match) |
+
+### Verification Checklist
+
+After adding or modifying an API definition:
+
+```bash
+# 1. Generate the code
+cargo run -p schematic-gen -- --api YOUR_API --output schematic/schema/src
+
+# 2. Check for correct response methods
+grep -n "request_bytes\|request_text\|request_empty" schematic/schema/src/YOUR_API.rs
+
+# 3. Verify it compiles
+cargo check -p schematic-schema
+
+# 4. For binary endpoints, verify convenience methods exist
+grep -n "pub async fn create_speech\|pub async fn download" schematic/schema/src/YOUR_API.rs
+```
+
 ## Adding New APIs
 
 To add a new API definition:
@@ -133,8 +223,11 @@ To add a new API definition:
 1. Create a new module directory: `src/{api_name}/`
 2. Add `mod.rs` with the `define_{api_name}_api()` function
 3. Add `types.rs` with response types
-4. Export from `src/lib.rs`
-5. Add to the prelude in `src/prelude.rs`
+4. **Choose correct `ApiResponse` for each endpoint** (see above)
+5. **Set `module_path` if API name differs from module name**
+6. Export from `src/lib.rs`
+7. Add to the prelude in `src/prelude.rs`
+8. **Run verification checklist above**
 
 ### Example Structure
 

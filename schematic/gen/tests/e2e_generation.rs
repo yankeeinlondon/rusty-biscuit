@@ -2,15 +2,23 @@
 //!
 //! These tests exercise the full pipeline from API definition to compiled code.
 //! They are slower than unit tests since they invoke cargo check/clippy.
+//!
+//! ## Test Categories
+//!
+//! 1. **Compilation tests** (`#[ignore]`): Verify generated code compiles with cargo
+//! 2. **Structure tests**: Verify generated files exist and contain expected content
+//! 3. **Response type tests**: Verify correct methods generated for Binary/Text/Empty responses
+//! 4. **Multi-API tests**: Verify multiple APIs generate correctly together
 
 use std::process::Command;
 
 use tempfile::TempDir;
 
+use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
 use schematic_definitions::openai::define_openai_api;
 use schematic_gen::cargo_gen::write_cargo_toml;
 use schematic_gen::infer_module_path;
-use schematic_gen::output::generate_and_write;
+use schematic_gen::output::{generate_and_write, generate_and_write_all};
 
 /// Tests that generated code compiles successfully.
 ///
@@ -317,6 +325,397 @@ fn generate_code_for_various_api_configurations() {
             content.contains(&format!("pub struct {}", api.name)),
             "Should contain API struct for '{}'",
             api.name
+        );
+    }
+}
+
+// =============================================================================
+// Response Type Tests
+// =============================================================================
+// These tests verify that the correct methods are generated for different
+// ApiResponse types. This was a gap that caused runtime failures.
+
+/// Tests that Binary response endpoints generate `request_bytes()` method.
+///
+/// This test catches the bug where all endpoints used `response.json()` regardless
+/// of their declared response type.
+#[test]
+fn binary_response_generates_request_bytes_method() {
+    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+
+    // Note: "BinaryTest" avoids the "Api" suffix which triggers module path inference
+    let api = RestApi {
+        name: "BinaryTest".to_string(),
+        description: "API with binary response".to_string(),
+        base_url: "https://api.binary.com".to_string(),
+        docs_url: None,
+        auth: AuthStrategy::None,
+        env_auth: vec![],
+        env_username: None,
+        headers: vec![],
+        endpoints: vec![Endpoint {
+            id: "GetAudio".to_string(),
+            method: RestMethod::Get,
+            path: "/audio".to_string(),
+            description: "Get audio file".to_string(),
+            request: None,
+            response: ApiResponse::Binary,
+            headers: vec![],
+        }],
+        module_path: None,
+        request_suffix: None,
+    };
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path().join("src");
+
+    generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
+
+    let api_content =
+        std::fs::read_to_string(src_dir.join("binarytest.rs")).expect("Failed to read binarytest.rs");
+
+    // CRITICAL: Must have request_bytes method, NOT just request<T>
+    assert!(
+        api_content.contains("pub async fn request_bytes"),
+        "Binary API must have request_bytes() method"
+    );
+    assert!(
+        api_content.contains("Result<bytes::Bytes, SchematicError>"),
+        "request_bytes must return bytes::Bytes"
+    );
+    assert!(
+        api_content.contains("response.bytes().await"),
+        "request_bytes must call response.bytes()"
+    );
+
+    // Should NOT have generic request<T> method (no JSON endpoints)
+    assert!(
+        !api_content.contains("pub async fn request<T"),
+        "Binary-only API should not have request<T>() method"
+    );
+
+    // Should have convenience method for the binary endpoint
+    assert!(
+        api_content.contains("pub async fn get_audio"),
+        "Should have get_audio convenience method"
+    );
+}
+
+/// Tests that Text response endpoints generate `request_text()` method.
+#[test]
+fn text_response_generates_request_text_method() {
+    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+
+    let api = RestApi {
+        name: "TextTest".to_string(),
+        description: "API with text response".to_string(),
+        base_url: "https://api.text.com".to_string(),
+        docs_url: None,
+        auth: AuthStrategy::None,
+        env_auth: vec![],
+        env_username: None,
+        headers: vec![],
+        endpoints: vec![Endpoint {
+            id: "GetPlainText".to_string(),
+            method: RestMethod::Get,
+            path: "/text".to_string(),
+            description: "Get plain text".to_string(),
+            request: None,
+            response: ApiResponse::Text,
+            headers: vec![],
+        }],
+        module_path: None,
+        request_suffix: None,
+    };
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path().join("src");
+
+    generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
+
+    let api_content =
+        std::fs::read_to_string(src_dir.join("texttest.rs")).expect("Failed to read texttest.rs");
+
+    assert!(
+        api_content.contains("pub async fn request_text"),
+        "Text API must have request_text() method"
+    );
+    assert!(
+        api_content.contains("Result<String, SchematicError>"),
+        "request_text must return String"
+    );
+    assert!(
+        api_content.contains("response.text().await"),
+        "request_text must call response.text()"
+    );
+}
+
+/// Tests that Empty response endpoints generate `request_empty()` method.
+#[test]
+fn empty_response_generates_request_empty_method() {
+    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+
+    let api = RestApi {
+        name: "EmptyTest".to_string(),
+        description: "API with empty response".to_string(),
+        base_url: "https://api.empty.com".to_string(),
+        docs_url: None,
+        auth: AuthStrategy::None,
+        env_auth: vec![],
+        env_username: None,
+        headers: vec![],
+        endpoints: vec![Endpoint {
+            id: "DeleteItem".to_string(),
+            method: RestMethod::Delete,
+            path: "/items/{id}".to_string(),
+            description: "Delete an item".to_string(),
+            request: None,
+            response: ApiResponse::Empty,
+            headers: vec![],
+        }],
+        module_path: None,
+        request_suffix: None,
+    };
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path().join("src");
+
+    generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
+
+    let api_content =
+        std::fs::read_to_string(src_dir.join("emptytest.rs")).expect("Failed to read emptytest.rs");
+
+    assert!(
+        api_content.contains("pub async fn request_empty"),
+        "Empty API must have request_empty() method"
+    );
+    assert!(
+        api_content.contains("Result<(), SchematicError>"),
+        "request_empty must return ()"
+    );
+}
+
+/// Tests that mixed response types generate all appropriate methods.
+#[test]
+fn mixed_response_types_generate_all_methods() {
+    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+
+    let api = RestApi {
+        name: "MixedTest".to_string(),
+        description: "API with mixed response types".to_string(),
+        base_url: "https://api.mixed.com".to_string(),
+        docs_url: None,
+        auth: AuthStrategy::None,
+        env_auth: vec![],
+        env_username: None,
+        headers: vec![],
+        endpoints: vec![
+            Endpoint {
+                id: "GetJson".to_string(),
+                method: RestMethod::Get,
+                path: "/json".to_string(),
+                description: "Get JSON".to_string(),
+                request: None,
+                response: ApiResponse::json_type("JsonResponse"),
+                headers: vec![],
+            },
+            Endpoint {
+                id: "GetBinary".to_string(),
+                method: RestMethod::Get,
+                path: "/binary".to_string(),
+                description: "Get binary".to_string(),
+                request: None,
+                response: ApiResponse::Binary,
+                headers: vec![],
+            },
+            Endpoint {
+                id: "GetText".to_string(),
+                method: RestMethod::Get,
+                path: "/text".to_string(),
+                description: "Get text".to_string(),
+                request: None,
+                response: ApiResponse::Text,
+                headers: vec![],
+            },
+            Endpoint {
+                id: "DeleteItem".to_string(),
+                method: RestMethod::Delete,
+                path: "/item".to_string(),
+                description: "Delete item".to_string(),
+                request: None,
+                response: ApiResponse::Empty,
+                headers: vec![],
+            },
+        ],
+        module_path: None,
+        request_suffix: None,
+    };
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path().join("src");
+
+    generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
+
+    let api_content =
+        std::fs::read_to_string(src_dir.join("mixedtest.rs")).expect("Failed to read mixedtest.rs");
+
+    // Must have ALL four method types
+    assert!(
+        api_content.contains("pub async fn request<T"),
+        "Mixed API must have request<T>() for JSON"
+    );
+    assert!(
+        api_content.contains("pub async fn request_bytes"),
+        "Mixed API must have request_bytes() for Binary"
+    );
+    assert!(
+        api_content.contains("pub async fn request_text"),
+        "Mixed API must have request_text() for Text"
+    );
+    assert!(
+        api_content.contains("pub async fn request_empty"),
+        "Mixed API must have request_empty() for Empty"
+    );
+
+    // Convenience methods for non-JSON endpoints
+    assert!(
+        api_content.contains("pub async fn get_binary"),
+        "Should have get_binary convenience method"
+    );
+    assert!(
+        api_content.contains("pub async fn get_text"),
+        "Should have get_text convenience method"
+    );
+    assert!(
+        api_content.contains("pub async fn delete_item"),
+        "Should have delete_item convenience method"
+    );
+}
+
+/// Tests ElevenLabs API generates correct binary methods for audio endpoints.
+///
+/// This is a regression test for the original bug - ElevenLabs has binary audio
+/// endpoints that were generating JSON deserialization code.
+#[test]
+fn elevenlabs_binary_endpoints_generate_correctly() {
+    let api = define_elevenlabs_rest_api();
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path().join("src");
+
+    generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
+
+    let api_content = std::fs::read_to_string(src_dir.join("elevenlabs.rs"))
+        .expect("Failed to read elevenlabs.rs");
+
+    // Must have request_bytes for binary endpoints
+    assert!(
+        api_content.contains("pub async fn request_bytes"),
+        "ElevenLabs must have request_bytes() method"
+    );
+
+    // Must have request<T> for JSON endpoints
+    assert!(
+        api_content.contains("pub async fn request<T"),
+        "ElevenLabs must have request<T>() method for JSON endpoints"
+    );
+
+    // Convenience methods for known binary endpoints
+    let binary_endpoints = [
+        "create_speech",
+        "stream_speech",
+        "get_voice_sample_audio",
+        "create_sound_effect",
+        "get_history_item_audio",
+        "download_history_items",
+    ];
+
+    for endpoint in binary_endpoints {
+        assert!(
+            api_content.contains(&format!("pub async fn {}", endpoint)),
+            "ElevenLabs must have {} convenience method",
+            endpoint
+        );
+    }
+}
+
+// =============================================================================
+// Multi-API Generation Tests
+// =============================================================================
+
+/// Tests that multiple APIs can be generated together.
+#[test]
+fn multiple_apis_generate_together() {
+    let openai = define_openai_api();
+    let elevenlabs = define_elevenlabs_rest_api();
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let src_dir = temp_dir.path().join("src");
+
+    let apis: Vec<&schematic_define::RestApi> = vec![&openai, &elevenlabs];
+    generate_and_write_all(&apis, &src_dir, false).expect("Failed to generate code for all APIs");
+
+    // Verify both API modules exist
+    assert!(
+        src_dir.join("openai.rs").exists(),
+        "openai.rs should exist"
+    );
+    assert!(
+        src_dir.join("elevenlabs.rs").exists(),
+        "elevenlabs.rs should exist"
+    );
+
+    // Verify lib.rs includes both modules
+    let lib_content = std::fs::read_to_string(src_dir.join("lib.rs")).expect("Failed to read lib.rs");
+    assert!(
+        lib_content.contains("pub mod openai;"),
+        "lib.rs should declare openai module"
+    );
+    assert!(
+        lib_content.contains("pub mod elevenlabs;"),
+        "lib.rs should declare elevenlabs module"
+    );
+
+    // Verify prelude exports both APIs
+    let prelude_content =
+        std::fs::read_to_string(src_dir.join("prelude.rs")).expect("Failed to read prelude.rs");
+    assert!(
+        prelude_content.contains("OpenAI"),
+        "prelude should export OpenAI"
+    );
+    assert!(
+        prelude_content.contains("ElevenLabs"),
+        "prelude should export ElevenLabs"
+    );
+}
+
+/// Tests that multi-API generation compiles successfully.
+#[test]
+#[ignore = "slow: compiles generated code"]
+fn multiple_apis_compile() {
+    let openai = define_openai_api();
+    let elevenlabs = define_elevenlabs_rest_api();
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let schema_dir = temp_dir.path().join("schema");
+    let src_dir = schema_dir.join("src");
+
+    let apis: Vec<&schematic_define::RestApi> = vec![&openai, &elevenlabs];
+    generate_and_write_all(&apis, &src_dir, false).expect("Failed to generate code");
+    write_cargo_toml(&schema_dir, false).expect("Failed to write Cargo.toml");
+
+    let output = Command::new("cargo")
+        .args(["check", "--manifest-path"])
+        .arg(schema_dir.join("Cargo.toml"))
+        .output()
+        .expect("Failed to run cargo check");
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        panic!(
+            "Multi-API generated code failed to compile:\n\nSTDOUT:\n{}\n\nSTDERR:\n{}",
+            stdout, stderr
         );
     }
 }

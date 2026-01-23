@@ -732,6 +732,83 @@ Generated runtime error types (`SchematicError`):
 - **Atomic writes**: Uses temp file + rename to prevent partial writes
 - **No panics**: Production code paths use `Result` types, no `unwrap()`/`expect()`
 
+## Critical Testing Requirements
+
+> **⚠️ WARNING**: The test suite has known gaps! Read this section carefully.
+
+### What Tests Cover
+
+The current test suite verifies:
+
+1. **Syntax validity** - Generated code parses as valid Rust via `syn`
+2. **Formatting** - Output is properly formatted via `prettyplease`
+3. **Individual generators** - Each generator function has unit tests
+4. **Auth strategies** - All authentication patterns generate correct code
+
+### What Tests DO NOT Cover
+
+**Runtime behavior is NOT tested!** Specifically:
+
+1. **Response type handling** - Tests don't verify that `ApiResponse::Binary` endpoints actually call `.bytes()` instead of `.json()`
+2. **Module path resolution** - Tests don't verify that multi-API modules work correctly together
+3. **End-to-end API calls** - No integration tests with real or mocked HTTP servers
+
+### Known Failure Modes
+
+| Scenario | What Goes Wrong | How to Catch It |
+|----------|-----------------|-----------------|
+| Binary endpoint with JSON code | Runtime failure: JSON deserialize of binary data | `grep "request_bytes" generated_file.rs` |
+| Module path mismatch | Compile failure: unresolved import | `cargo check -p schematic-schema` |
+| Multiple APIs same module | Compile failure: duplicate module definitions | `cargo check -p schematic-schema` |
+
+### Required Manual Verification
+
+When modifying response handling or module generation:
+
+```bash
+# 1. Generate code
+cargo run -p schematic-gen -- --api elevenlabs --output schematic/schema/src
+
+# 2. Verify correct methods generated for non-JSON endpoints
+grep -n "pub async fn request" schematic/schema/src/elevenlabs.rs
+# Should see: request<T>, request_bytes, request_text, request_empty (as applicable)
+
+# 3. Verify convenience methods for binary endpoints
+grep -n "pub async fn create_speech\|pub async fn stream_speech" schematic/schema/src/elevenlabs.rs
+
+# 4. Check it compiles
+cargo check -p schematic-schema
+
+# 5. Run tests (necessary but not sufficient!)
+cargo test -p schematic-gen
+```
+
+### Response Type Method Generation
+
+The generator produces different methods based on `ApiResponse`:
+
+| `ApiResponse` Variant | Method Generated | Runtime Call |
+|-----------------------|------------------|--------------|
+| `Json(Schema)` | `request<T>()` | `response.json::<T>()` |
+| `Binary` | `request_bytes()` | `response.bytes()` |
+| `Text` | `request_text()` | `response.text()` |
+| `Empty` | `request_empty()` | (discards body) |
+
+Additionally, non-JSON endpoints get **convenience methods** with specific types:
+
+```rust
+// For Binary endpoint "CreateSpeech"
+pub async fn create_speech(&self, req: CreateSpeechRequest) -> Result<bytes::Bytes, SchematicError>
+```
+
+### Future Work
+
+To close the testing gap, we need:
+
+1. **Runtime behavior tests** - Mock HTTP server returning binary data, verify correct handling
+2. **Multi-API integration tests** - Generate multiple APIs, verify they compile together
+3. **E2E smoke tests** - Optional integration tests against real APIs (gated by feature flag)
+
 ## Dependencies
 
 The generated code requires these runtime dependencies (automatically included in generated `Cargo.toml`):
