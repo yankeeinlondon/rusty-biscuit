@@ -371,21 +371,13 @@ impl Default for OpenAI {
     }
 }
 impl OpenAI {
-    /// Executes an API request.
+    /// Builds and sends an HTTP request, returning the raw response.
     ///
-    /// Takes any request type that can be converted into the request enum
-    /// and returns the deserialized response.
-    ///
-    /// ## Errors
-    ///
-    /// Returns an error if:
-    /// - The HTTP request fails (network error, timeout, etc.)
-    /// - The response indicates a non-success status code
-    /// - The response body cannot be deserialized as JSON
-    pub async fn request<T: serde::de::DeserializeOwned>(
+    /// This is an internal helper method used by the public request methods.
+    async fn build_and_send_request(
         &self,
         request: impl Into<OpenAIRequest>,
-    ) -> Result<T, SchematicError> {
+    ) -> Result<reqwest::Response, SchematicError> {
         let request = request.into();
         let (method, path, body, endpoint_headers) = request.into_parts()?;
         let url = format!("{}{}", self.base_url, path);
@@ -459,8 +451,7 @@ impl OpenAI {
                 body,
             });
         }
-        let result = response.json::<T>().await?;
-        Ok(result)
+        Ok(response)
     }
     /// Merges API-level and endpoint-level headers.
     ///
@@ -483,5 +474,24 @@ impl OpenAI {
             result.push((key.clone(), value.clone()));
         }
         result
+    }
+    /// Executes an API request expecting a JSON response.
+    ///
+    /// Takes any request type that can be converted into the request enum
+    /// and returns the deserialized response.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if:
+    /// - The HTTP request fails (network error, timeout, etc.)
+    /// - The response indicates a non-success status code
+    /// - The response body cannot be deserialized as JSON
+    pub async fn request<T: serde::de::DeserializeOwned>(
+        &self,
+        request: impl Into<OpenAIRequest>,
+    ) -> Result<T, SchematicError> {
+        let response = self.build_and_send_request(request).await?;
+        let result = response.json::<T>().await?;
+        Ok(result)
     }
 }

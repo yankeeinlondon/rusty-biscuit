@@ -902,6 +902,7 @@ dependencies = [
 name = "schematic-schema"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "reqwest",
  "schematic-define",
  "schematic-definitions",

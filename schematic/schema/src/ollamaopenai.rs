@@ -33,7 +33,7 @@
  }
  ```*/
 use serde::{Deserialize, Serialize};
-pub use schematic_definitions::ollama::*;
+pub use schematic_definitions::ollamaopenai::*;
 use crate::shared::SchematicError;
 /// Request for `ChatCompletions` endpoint.
 ///
@@ -468,21 +468,13 @@ impl Default for OllamaOpenAI {
     }
 }
 impl OllamaOpenAI {
-    /// Executes an API request.
+    /// Builds and sends an HTTP request, returning the raw response.
     ///
-    /// Takes any request type that can be converted into the request enum
-    /// and returns the deserialized response.
-    ///
-    /// ## Errors
-    ///
-    /// Returns an error if:
-    /// - The HTTP request fails (network error, timeout, etc.)
-    /// - The response indicates a non-success status code
-    /// - The response body cannot be deserialized as JSON
-    pub async fn request<T: serde::de::DeserializeOwned>(
+    /// This is an internal helper method used by the public request methods.
+    async fn build_and_send_request(
         &self,
         request: impl Into<OllamaOpenAIRequest>,
-    ) -> Result<T, SchematicError> {
+    ) -> Result<reqwest::Response, SchematicError> {
         let request = request.into();
         let (method, path, body, endpoint_headers) = request.into_parts()?;
         let url = format!("{}{}", self.base_url, path);
@@ -556,8 +548,7 @@ impl OllamaOpenAI {
                 body,
             });
         }
-        let result = response.json::<T>().await?;
-        Ok(result)
+        Ok(response)
     }
     /// Merges API-level and endpoint-level headers.
     ///
@@ -580,5 +571,60 @@ impl OllamaOpenAI {
             result.push((key.clone(), value.clone()));
         }
         result
+    }
+    /// Executes an API request expecting a JSON response.
+    ///
+    /// Takes any request type that can be converted into the request enum
+    /// and returns the deserialized response.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if:
+    /// - The HTTP request fails (network error, timeout, etc.)
+    /// - The response indicates a non-success status code
+    /// - The response body cannot be deserialized as JSON
+    pub async fn request<T: serde::de::DeserializeOwned>(
+        &self,
+        request: impl Into<OllamaOpenAIRequest>,
+    ) -> Result<T, SchematicError> {
+        let response = self.build_and_send_request(request).await?;
+        let result = response.json::<T>().await?;
+        Ok(result)
+    }
+    /// Executes an API request expecting a binary response.
+    ///
+    /// Returns the raw bytes of the response body. Use this for endpoints
+    /// that return binary data like audio files, images, or ZIP archives.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if:
+    /// - The HTTP request fails (network error, timeout, etc.)
+    /// - The response indicates a non-success status code
+    pub async fn request_bytes(
+        &self,
+        request: impl Into<OllamaOpenAIRequest>,
+    ) -> Result<bytes::Bytes, SchematicError> {
+        let response = self.build_and_send_request(request).await?;
+        let bytes = response.bytes().await?;
+        Ok(bytes)
+    }
+    /// Convenience method for the `ChatCompletions` endpoint.
+    ///
+    /// Create chat completion (SSE streaming when stream=true)
+    pub async fn chat_completions(
+        &self,
+        request: ChatCompletionsRequest,
+    ) -> Result<bytes::Bytes, SchematicError> {
+        self.request_bytes(request).await
+    }
+    /// Convenience method for the `Completions` endpoint.
+    ///
+    /// Create text completion (SSE streaming when stream=true)
+    pub async fn completions(
+        &self,
+        request: CompletionsRequest,
+    ) -> Result<bytes::Bytes, SchematicError> {
+        self.request_bytes(request).await
     }
 }

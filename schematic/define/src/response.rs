@@ -100,4 +100,65 @@ impl ApiResponse {
     pub fn json_type(type_name: impl Into<String>) -> Self {
         Self::Json(Schema::new(type_name))
     }
+
+    /// Returns true if this is a JSON response.
+    pub fn is_json(&self) -> bool {
+        matches!(self, Self::Json(_))
+    }
+
+    /// Returns true if this is a binary response.
+    pub fn is_binary(&self) -> bool {
+        matches!(self, Self::Binary)
+    }
+
+    /// Returns true if this is a text response.
+    pub fn is_text(&self) -> bool {
+        matches!(self, Self::Text)
+    }
+
+    /// Returns true if this is an empty response.
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_json_returns_true_for_json_response() {
+        let response = ApiResponse::json_type("TestResponse");
+        assert!(response.is_json());
+        assert!(!response.is_binary());
+        assert!(!response.is_text());
+        assert!(!response.is_empty());
+    }
+
+    #[test]
+    fn is_binary_returns_true_for_binary_response() {
+        let response = ApiResponse::Binary;
+        assert!(!response.is_json());
+        assert!(response.is_binary());
+        assert!(!response.is_text());
+        assert!(!response.is_empty());
+    }
+
+    #[test]
+    fn is_text_returns_true_for_text_response() {
+        let response = ApiResponse::Text;
+        assert!(!response.is_json());
+        assert!(!response.is_binary());
+        assert!(response.is_text());
+        assert!(!response.is_empty());
+    }
+
+    #[test]
+    fn is_empty_returns_true_for_empty_response() {
+        let response = ApiResponse::Empty;
+        assert!(!response.is_json());
+        assert!(!response.is_binary());
+        assert!(!response.is_text());
+        assert!(response.is_empty());
+    }
 }

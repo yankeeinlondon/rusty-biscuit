@@ -15,14 +15,9 @@
 //! }
 //! ```
 pub use crate::shared::SchematicError;
+pub use crate::openai::{OpenAI, OpenAIRequest};
 pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};
 pub use crate::huggingface::{HuggingFaceHub, HuggingFaceHubRequest};
-pub use crate::ollama::{OllamaNative, OllamaNativeRequest};
-pub use crate::ollamaopenai::{OllamaOpenAI, OllamaOpenAIRequest};
-pub use crate::openai::{OpenAI, OpenAIRequest};
-// Note: Glob re-exports have type conflicts between APIs (e.g., ListModelsResponse).
-// Import directly from the API-specific modules instead:
-// - schematic_definitions::elevenlabs
-// - schematic_definitions::huggingface
-// - schematic_definitions::ollama
-// - schematic_definitions::openai
+pub use schematic_definitions::openai::*;
+pub use schematic_definitions::elevenlabs::*;
+pub use schematic_definitions::huggingface::*;

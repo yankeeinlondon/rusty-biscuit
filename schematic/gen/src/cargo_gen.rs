@@ -22,6 +22,7 @@ description = "Generated REST API client code from schematic definitions"
 # Do not edit manually - changes will be overwritten.
 
 [dependencies]
+bytes = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 schematic-define = { version = "0.1.0", path = "../define" }
 schematic-definitions = { version = "0.1.0", path = "../definitions" }
@@ -224,6 +225,18 @@ mod tests {
         let features = tokio.get("features").unwrap().as_array().unwrap();
         assert!(features.iter().any(|f| f.as_str() == Some("rt")));
         assert!(features.iter().any(|f| f.as_str() == Some("macros")));
+    }
+
+    #[test]
+    fn generate_cargo_toml_includes_bytes() {
+        let content = generate_cargo_toml();
+        let parsed: toml::Table = toml::from_str(&content).unwrap();
+
+        let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
+        assert!(
+            deps.contains_key("bytes"),
+            "bytes dependency is required for binary responses"
+        );
     }
 
     #[test]

@@ -43,13 +43,21 @@ generate-dry-run:
     @echo ""
     @cargo run -p schematic-gen -- --api openai --dry-run
 
-# generate OpenAI API client code to schematic/schema
+# generate all API clients to schematic/schema
 generate:
     @echo ""
-    @echo "Generating OpenAI API Client"
-    @echo "----------------------------"
+    @echo "Generating All API Clients"
+    @echo "--------------------------"
     @echo ""
-    @cargo run -p schematic-gen -- --api openai --output schema/src -v
+    @cargo run -p schematic-gen -- --api all --output schema/src -v
+
+# generate a single API client to schematic/schema
+generate-one api:
+    @echo ""
+    @echo "Generating {{api}} API Client"
+    @echo "------------------------------"
+    @echo ""
+    @cargo run -p schematic-gen -- --api {{api}} --output schema/src -v
 
 # clean generated schema code
 clean-generated:

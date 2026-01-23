@@ -2893,21 +2893,13 @@ impl Default for ElevenLabs {
     }
 }
 impl ElevenLabs {
-    /// Executes an API request.
+    /// Builds and sends an HTTP request, returning the raw response.
     ///
-    /// Takes any request type that can be converted into the request enum
-    /// and returns the deserialized response.
-    ///
-    /// ## Errors
-    ///
-    /// Returns an error if:
-    /// - The HTTP request fails (network error, timeout, etc.)
-    /// - The response indicates a non-success status code
-    /// - The response body cannot be deserialized as JSON
-    pub async fn request<T: serde::de::DeserializeOwned>(
+    /// This is an internal helper method used by the public request methods.
+    async fn build_and_send_request(
         &self,
         request: impl Into<ElevenLabsRequest>,
-    ) -> Result<T, SchematicError> {
+    ) -> Result<reqwest::Response, SchematicError> {
         let request = request.into();
         let (method, path, body, endpoint_headers) = request.into_parts()?;
         let url = format!("{}{}", self.base_url, path);
@@ -2981,8 +2973,7 @@ impl ElevenLabs {
                 body,
             });
         }
-        let result = response.json::<T>().await?;
-        Ok(result)
+        Ok(response)
     }
     /// Merges API-level and endpoint-level headers.
     ///
@@ -3005,5 +2996,96 @@ impl ElevenLabs {
             result.push((key.clone(), value.clone()));
         }
         result
+    }
+    /// Executes an API request expecting a JSON response.
+    ///
+    /// Takes any request type that can be converted into the request enum
+    /// and returns the deserialized response.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if:
+    /// - The HTTP request fails (network error, timeout, etc.)
+    /// - The response indicates a non-success status code
+    /// - The response body cannot be deserialized as JSON
+    pub async fn request<T: serde::de::DeserializeOwned>(
+        &self,
+        request: impl Into<ElevenLabsRequest>,
+    ) -> Result<T, SchematicError> {
+        let response = self.build_and_send_request(request).await?;
+        let result = response.json::<T>().await?;
+        Ok(result)
+    }
+    /// Executes an API request expecting a binary response.
+    ///
+    /// Returns the raw bytes of the response body. Use this for endpoints
+    /// that return binary data like audio files, images, or ZIP archives.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if:
+    /// - The HTTP request fails (network error, timeout, etc.)
+    /// - The response indicates a non-success status code
+    pub async fn request_bytes(
+        &self,
+        request: impl Into<ElevenLabsRequest>,
+    ) -> Result<bytes::Bytes, SchematicError> {
+        let response = self.build_and_send_request(request).await?;
+        let bytes = response.bytes().await?;
+        Ok(bytes)
+    }
+    /// Convenience method for the `CreateSpeech` endpoint.
+    ///
+    /// Converts text into speech and returns audio
+    pub async fn create_speech(
+        &self,
+        request: CreateSpeechRequest,
+    ) -> Result<bytes::Bytes, SchematicError> {
+        self.request_bytes(request).await
+    }
+    /// Convenience method for the `StreamSpeech` endpoint.
+    ///
+    /// Streams audio as it's generated
+    pub async fn stream_speech(
+        &self,
+        request: StreamSpeechRequest,
+    ) -> Result<bytes::Bytes, SchematicError> {
+        self.request_bytes(request).await
+    }
+    /// Convenience method for the `GetVoiceSampleAudio` endpoint.
+    ///
+    /// Gets audio for a voice sample
+    pub async fn get_voice_sample_audio(
+        &self,
+        request: GetVoiceSampleAudioRequest,
+    ) -> Result<bytes::Bytes, SchematicError> {
+        self.request_bytes(request).await
+    }
+    /// Convenience method for the `CreateSoundEffect` endpoint.
+    ///
+    /// Generates a sound effect from text
+    pub async fn create_sound_effect(
+        &self,
+        request: CreateSoundEffectRequest,
+    ) -> Result<bytes::Bytes, SchematicError> {
+        self.request_bytes(request).await
+    }
+    /// Convenience method for the `GetHistoryItemAudio` endpoint.
+    ///
+    /// Gets audio for a history item
+    pub async fn get_history_item_audio(
+        &self,
+        request: GetHistoryItemAudioRequest,
+    ) -> Result<bytes::Bytes, SchematicError> {
+        self.request_bytes(request).await
+    }
+    /// Convenience method for the `DownloadHistoryItems` endpoint.
+    ///
+    /// Downloads multiple history items as ZIP
+    pub async fn download_history_items(
+        &self,
+        request: DownloadHistoryItemsRequest,
+    ) -> Result<bytes::Bytes, SchematicError> {
+        self.request_bytes(request).await
     }
 }
