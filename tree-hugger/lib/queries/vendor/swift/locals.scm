@@ -15,6 +15,18 @@
 (protocol_declaration
   name: (type_identifier) @local.definition.interface) @local.definition.interface.context
 
+; Function parameters
+(parameter
+  name: (simple_identifier) @local.definition.parameter)
+
+; Enum cases
+(enum_entry
+  name: (simple_identifier) @local.definition.field)
+
+; Property bindings (var/let declarations)
+(pattern
+  bound_identifier: (simple_identifier) @local.definition.var)
+
 ; Scopes
 [
   (statements)

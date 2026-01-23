@@ -1350,3 +1350,149 @@ func hello() int { return 1 }
         );
     }
 }
+
+// ============================================================================
+// Swift False Positive Regression Tests
+// ============================================================================
+
+/// Regression test: Swift function parameters must not be flagged as undefined symbols.
+///
+/// Previously, the query `(simple_identifier) @reference` captured ALL identifiers
+/// including parameter names, causing false positives like:
+///   "Reference to undefined symbol 'name'" for `func greet(name: String)`
+#[test]
+fn test_swift_function_parameter_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.swift",
+        r#"func greet(name: String) -> String {
+    return "Hello, \(name)!"
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_name = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'name'")
+    });
+    assert!(
+        undefined_name.is_none(),
+        "Swift function parameter 'name' should NOT be flagged as undefined"
+    );
+}
+
+/// Regression test: Swift protocol method parameters must not be flagged as undefined.
+#[test]
+fn test_swift_protocol_parameter_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.swift",
+        r#"protocol GreetingService {
+    func greet(name: String) -> String
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_name = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'name'")
+    });
+    assert!(
+        undefined_name.is_none(),
+        "Swift protocol method parameter 'name' should NOT be flagged as undefined"
+    );
+}
+
+/// Regression test: Swift enum cases must not be flagged as undefined.
+#[test]
+fn test_swift_enum_case_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.swift",
+        r#"enum Status {
+    case success
+    case error
+    case pending
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_cases = diagnostics.iter().filter(|d| {
+        d.rule.as_deref() == Some("undefined-symbol")
+            && (d.message.contains("'success'")
+                || d.message.contains("'error'")
+                || d.message.contains("'pending'"))
+    });
+    assert_eq!(
+        undefined_cases.count(),
+        0,
+        "Swift enum cases should NOT be flagged as undefined symbols"
+    );
+}
+
+/// Regression test: Swift class/struct properties must not be flagged as undefined.
+#[test]
+fn test_swift_property_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.swift",
+        r#"class Greeter {
+    var prefix: String = "Hello"
+
+    func greet(name: String) -> String {
+        return "\(prefix), \(name)!"
+    }
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_prefix = diagnostics.iter().find(|d| {
+        d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'prefix'")
+    });
+    assert!(
+        undefined_prefix.is_none(),
+        "Swift class property 'prefix' should NOT be flagged as undefined"
+    );
+}
+
+/// Regression test: Swift struct fields must not be flagged as undefined.
+#[test]
+fn test_swift_struct_field_not_undefined() {
+    let dir = TempDir::new().unwrap();
+    let path = create_temp_file(
+        &dir,
+        "test.swift",
+        r#"struct Point {
+    var x: Int
+    var y: Int
+}
+"#,
+    );
+
+    let tree_file = TreeFile::new(&path).unwrap();
+    let diagnostics = tree_file.lint_diagnostics();
+
+    let undefined_fields = diagnostics.iter().filter(|d| {
+        d.rule.as_deref() == Some("undefined-symbol")
+            && (d.message.contains("'x'") || d.message.contains("'y'"))
+    });
+    assert_eq!(
+        undefined_fields.count(),
+        0,
+        "Swift struct fields 'x' and 'y' should NOT be flagged as undefined"
+    );
+}
