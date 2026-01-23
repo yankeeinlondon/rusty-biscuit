@@ -35,7 +35,15 @@ impl Speak {
     /// call this as the TTS process is fast enough
     /// that any latency it may introduce is deemed
     /// acceptable.
-    pub fn prepare(self) -> Speak {
+    ///
+    /// However, in many cases, it is better to
+    /// stream the audio into cache so that when
+    /// you're ready to
+    pub async fn prepare(self) -> Speak {
+        todo!()
+    }
+
+    pub async fn play(self) -> Result<(), Error> {
         todo!()
     }
 }
