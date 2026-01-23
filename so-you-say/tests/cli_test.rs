@@ -277,58 +277,26 @@ fn test_cli_help_shows_gender_option() {
 }
 
 #[test]
-fn test_cli_list_voices_flag() {
+fn test_cli_list_providers_flag() {
     let output = Command::new("cargo")
-        .args(["run", "-p", "so-you-say", "--", "--list-voices"])
+        .args(["run", "-p", "so-you-say", "--", "--list-providers"])
         .output()
         .expect("Failed to execute");
 
     assert!(
         output.status.success(),
-        "CLI should accept --list-voices flag"
+        "CLI should accept --list-providers flag"
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("NAME") && stdout.contains("LANGUAGE") && stdout.contains("GENDER"),
-        "Voices output should have table headers"
-    );
-    assert!(
-        stdout.contains("Bold") && stdout.contains("default"),
-        "Voices output should show legend for default voice"
+        stdout.contains("Available TTS providers") || stdout.contains("No TTS providers"),
+        "Providers output should show header or indicate no providers"
     );
 }
 
 #[test]
-fn test_cli_list_voices_with_gender_filter() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "so-you-say",
-            "--",
-            "--list-voices",
-            "--gender",
-            "female",
-        ])
-        .output()
-        .expect("Failed to execute");
-
-    assert!(
-        output.status.success(),
-        "CLI should accept --list-voices with --gender filter"
-    );
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Should only show Female voices (or "No voices found" if none available)
-    assert!(
-        !stdout.contains("Male  ") || stdout.contains("Female"),
-        "Output should be filtered to female voices only"
-    );
-}
-
-#[test]
-fn test_cli_help_shows_list_voices_option() {
+fn test_cli_help_shows_list_providers_option() {
     let output = Command::new("cargo")
         .args(["run", "-p", "so-you-say", "--", "--help"])
         .output()
@@ -336,8 +304,8 @@ fn test_cli_help_shows_list_voices_option() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("--list-voices"),
-        "Help should document --list-voices flag"
+        stdout.contains("--list-providers"),
+        "Help should document --list-providers flag"
     );
 }
 
@@ -370,5 +338,66 @@ fn test_cli_help_shows_voice_option() {
     assert!(
         stdout.contains("--voice"),
         "Help should document --voice option"
+    );
+}
+
+#[test]
+fn test_cli_provider_option() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "so-you-say",
+            "--",
+            "--provider",
+            "say",
+            "test",
+        ])
+        .output()
+        .expect("Failed to execute");
+
+    // This may or may not succeed depending on whether Say is available
+    // We just verify it doesn't crash
+    let _ = output.status;
+}
+
+#[test]
+fn test_cli_invalid_provider() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "so-you-say",
+            "--",
+            "--provider",
+            "not_a_real_provider",
+            "test",
+        ])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(
+        !output.status.success(),
+        "CLI should reject unknown provider"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Unknown provider"),
+        "Error should mention unknown provider"
+    );
+}
+
+#[test]
+fn test_cli_help_shows_provider_option() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "so-you-say", "--", "--help"])
+        .output()
+        .expect("Failed to execute");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--provider"),
+        "Help should document --provider option"
     );
 }

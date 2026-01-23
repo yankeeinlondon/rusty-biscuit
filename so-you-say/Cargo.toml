@@ -11,3 +11,4 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }
 biscuit-speaks = { path = "../biscuit-speaks" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

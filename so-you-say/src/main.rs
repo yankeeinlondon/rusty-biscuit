@@ -1,5 +1,6 @@
 use biscuit_speaks::{
-    Gender, SystemVoiceInfo, VoiceConfig, VoiceSelector, available_system_voices,
+    get_available_providers, parse_provider_name, speak_when_able, Gender, HostTtsProvider,
+    TtsConfig, TtsFailoverStrategy, TtsProvider,
 };
 use clap::{Parser, ValueEnum};
 use std::io::{self, Read};
@@ -36,8 +37,11 @@ impl From<GenderArg> for Gender {
 /// // Speak text with a female voice
 /// // so-you-say --gender female Hello world
 ///
-/// // List available voices
-/// // so-you-say --list-voices
+/// // List available TTS providers
+/// // so-you-say --list-providers
+///
+/// // Use a specific TTS provider
+/// // so-you-say --provider say Hello world
 ///
 /// // Speak text from stdin
 /// // echo "Hello world" | so-you-say
@@ -47,9 +51,13 @@ impl From<GenderArg> for Gender {
 #[command(about = "Convert text to speech using system TTS", long_about = None)]
 #[command(version)]
 struct Cli {
-    /// List available system voices and exit
+    /// List available TTS providers and exit
     #[arg(long)]
-    list_voices: bool,
+    list_providers: bool,
+
+    /// Use a specific TTS provider
+    #[arg(long)]
+    provider: Option<String>,
 
     /// Use a specific voice by name
     #[arg(long)]
@@ -64,34 +72,11 @@ struct Cli {
 }
 
 /// Joins multiple arguments into a single string with spaces
-///
-/// # Examples
-///
-/// ```
-/// # use so_you_say::join_args;
-/// let args = vec!["Hello".to_string(), "world".to_string()];
-/// assert_eq!(join_args(args), "Hello world");
-/// ```
 fn join_args(args: Vec<String>) -> String {
     args.join(" ")
 }
 
 /// Reads text from stdin with a 10,000 character limit
-///
-/// # Errors
-///
-/// Returns an error if stdin cannot be read or if input is empty
-///
-/// # Examples
-///
-/// ```no_run
-/// # use so_you_say::read_from_stdin;
-/// # fn main() -> std::io::Result<()> {
-/// let text = read_from_stdin()?;
-/// println!("Read: {}", text);
-/// # Ok(())
-/// # }
-/// ```
 fn read_from_stdin() -> io::Result<String> {
     let mut buffer = String::new();
     let mut handle = io::stdin().take(10_000);
@@ -107,185 +92,62 @@ fn read_from_stdin() -> io::Result<String> {
     Ok(text)
 }
 
-/// Check if a voice ID should be excluded (compact/eloquence voices).
-fn is_excluded_voice(id: &str) -> bool {
-    let lower = id.to_lowercase();
-    lower.contains("compact") || lower.contains("eloquence")
-}
+/// Print available TTS providers
+fn print_providers() {
+    let providers = get_available_providers();
 
-/// Check if a voice is Premium quality (highest on macOS).
-fn is_premium_voice(name: &str) -> bool {
-    name.contains("(Premium)")
-}
-
-/// Check if a voice is Enhanced quality (high on macOS).
-fn is_enhanced_voice(name: &str) -> bool {
-    name.contains("(Enhanced)")
-}
-
-/// Find the best voice matching criteria, preferring Premium > Enhanced > regular.
-fn find_best_voice<'a>(
-    voices: &'a [SystemVoiceInfo],
-    lang_prefix: &str,
-    target_gender: Option<Gender>,
-) -> Option<&'a SystemVoiceInfo> {
-    let matches_criteria = |v: &&SystemVoiceInfo| {
-        !is_excluded_voice(&v.id)
-            && v.language.starts_with(lang_prefix)
-            && (target_gender.is_none() || v.gender == target_gender)
-    };
-
-    // Try Premium first
-    if let Some(voice) = voices
-        .iter()
-        .filter(matches_criteria)
-        .find(|v| is_premium_voice(&v.name))
-    {
-        return Some(voice);
-    }
-
-    // Try Enhanced next
-    if let Some(voice) = voices
-        .iter()
-        .filter(matches_criteria)
-        .find(|v| is_enhanced_voice(&v.name))
-    {
-        return Some(voice);
-    }
-
-    // Fall back to any matching voice
-    voices.iter().find(matches_criteria)
-}
-
-/// Find the default voice ID that would be selected by the voice selection algorithm.
-///
-/// Algorithm matches shared::tts::select_voice:
-/// 1. If gender specified: best quality voice matching language + gender (Premium > Enhanced > regular)
-/// 2. Fallback: best quality voice matching language (any gender)
-/// 3. Final fallback: any English voice
-fn find_default_voice_id(voices: &[SystemVoiceInfo], gender: Option<GenderArg>) -> Option<String> {
-    let lang_prefix = "en";
-
-    // Step 1: Try language + gender filtering with quality preference
-    if let Some(g) = gender {
-        let target_gender = match g {
-            GenderArg::Male => Some(Gender::Male),
-            GenderArg::Female => Some(Gender::Female),
-        };
-        if let Some(voice) = find_best_voice(voices, lang_prefix, target_gender) {
-            return Some(voice.id.clone());
-        }
-    }
-
-    // Step 2: Fall back to language filtering only (any gender) with quality preference
-    if let Some(voice) = find_best_voice(voices, lang_prefix, None) {
-        return Some(voice.id.clone());
-    }
-
-    // Step 3: Final fallback - any English voice
-    voices
-        .iter()
-        .find(|v| v.language.starts_with("en"))
-        .map(|v| v.id.clone())
-}
-
-/// ANSI escape codes for terminal formatting.
-const BOLD: &str = "\x1b[1m";
-const RESET: &str = "\x1b[0m";
-
-/// Print available voices in a formatted table with the default voice highlighted.
-fn print_voices(voices: &[SystemVoiceInfo], filter_gender: Option<GenderArg>) {
-    // Find the default voice ID before filtering
-    let default_id = find_default_voice_id(voices, filter_gender);
-
-    // Filter by gender if specified
-    let filtered: Vec<_> = voices
-        .iter()
-        .filter(|v| match filter_gender {
-            None => true,
-            Some(GenderArg::Male) => v.gender == Some(Gender::Male),
-            Some(GenderArg::Female) => v.gender == Some(Gender::Female),
-        })
-        .collect();
-
-    if filtered.is_empty() {
-        println!("No voices found.");
+    if providers.is_empty() {
+        println!("No TTS providers available on this system.");
         return;
     }
 
-    // Calculate column widths
-    let name_width = filtered
-        .iter()
-        .map(|v| v.name.len())
-        .max()
-        .unwrap_or(4)
-        .max(4);
-    let lang_width = filtered
-        .iter()
-        .map(|v| v.language.len())
-        .max()
-        .unwrap_or(8)
-        .max(8);
+    println!("Available TTS providers:");
+    println!();
 
-    // Print header
-    println!(
-        "{:<name_width$}  {:<lang_width$}  {:<7}  ID",
-        "NAME",
-        "LANGUAGE",
-        "GENDER",
-        name_width = name_width,
-        lang_width = lang_width
-    );
-    println!(
-        "{:-<name_width$}  {:-<lang_width$}  {:-<7}  {:-<40}",
-        "",
-        "",
-        "",
-        "",
-        name_width = name_width,
-        lang_width = lang_width
-    );
-
-    // Print voices (bold for default)
-    for voice in filtered {
-        let is_default = default_id.as_ref() == Some(&voice.id);
-        let (start, end) = if is_default { (BOLD, RESET) } else { ("", "") };
-
-        println!(
-            "{start}{:<name_width$}  {:<lang_width$}  {:<7}  {}{end}",
-            voice.name,
-            voice.language,
-            voice.gender_str(),
-            voice.id,
-            name_width = name_width,
-            lang_width = lang_width,
-            start = start,
-            end = end
-        );
-    }
-
-    // Print legend if a default was found
-    if default_id.is_some() {
-        println!();
-        println!("{}Bold{} = default voice", BOLD, RESET);
+    for provider in providers {
+        match provider {
+            TtsProvider::Host(h) => {
+                let name = match h {
+                    HostTtsProvider::Say => "say (macOS)",
+                    HostTtsProvider::ESpeak => "espeak (eSpeak-NG)",
+                    HostTtsProvider::Piper => "piper (Piper TTS)",
+                    HostTtsProvider::EchoGarden => "echogarden",
+                    HostTtsProvider::Sherpa => "sherpa (Sherpa-ONNX)",
+                    HostTtsProvider::Mimic3 => "mimic3 (Mycroft)",
+                    HostTtsProvider::Festival => "festival",
+                    HostTtsProvider::Gtts => "gtts (Google TTS CLI)",
+                    HostTtsProvider::Sapi => "sapi (Windows)",
+                    HostTtsProvider::KokoroTts => "kokoro (Kokoro TTS)",
+                    HostTtsProvider::Pico2Wave => "pico2wave",
+                    HostTtsProvider::SpdSay => "spd-say (Speech Dispatcher)",
+                    _ => "unknown host provider",
+                };
+                println!("  - {}", name);
+            }
+            TtsProvider::Cloud(c) => {
+                let name = match c {
+                    biscuit_speaks::CloudTtsProvider::ElevenLabs => {
+                        "elevenlabs (ElevenLabs API)"
+                    }
+                    _ => "unknown cloud provider",
+                };
+                println!("  - {} [cloud]", name);
+            }
+            _ => {
+                println!("  - unknown provider");
+            }
+        }
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    // Handle --list-voices flag
-    if cli.list_voices {
-        match available_system_voices() {
-            Ok(voices) => {
-                print_voices(&voices, cli.gender);
-                return Ok(());
-            }
-            Err(e) => {
-                eprintln!("Error: Failed to query system voices: {}", e);
-                std::process::exit(1);
-            }
-        }
+    // Handle --list-providers flag
+    if cli.list_providers {
+        print_providers();
+        return Ok(());
     }
 
     let message = if cli.text.is_empty() {
@@ -296,21 +158,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         join_args(cli.text)
     };
 
-    // Build voice config
-    let mut config = VoiceConfig::new();
+    // Build TTS config
+    let mut config = TtsConfig::new();
 
     // Apply --voice if specified
     if let Some(voice_name) = &cli.voice {
-        config = config.with_voice(VoiceSelector::ByName(voice_name.clone()));
+        config = config.with_voice(voice_name.clone());
     }
 
     // Apply --gender if specified
     if let Some(gender) = cli.gender {
-        config = config.of_gender(gender.into());
+        config = config.with_gender(gender.into());
     }
 
-    // Call the TTS function
-    biscuit_speaks::speak_when_able(&message, &config);
+    // Apply --provider if specified
+    if let Some(provider_name) = &cli.provider {
+        if let Some(provider) = parse_provider_name(provider_name) {
+            config = config.with_failover(TtsFailoverStrategy::SpecificProvider(provider));
+        } else {
+            eprintln!("Error: Unknown provider '{}'", provider_name);
+            eprintln!("Use --list-providers to see available providers");
+            std::process::exit(1);
+        }
+    }
+
+    // Call the async TTS function
+    speak_when_able(&message, &config).await;
 
     Ok(())
 }
