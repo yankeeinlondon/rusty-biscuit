@@ -1,0 +1,128 @@
+[
+  {
+    "priority": 1,
+    "id": "CRITICAL-001",
+    "area": "DEPENDENCY_BLOCKER",
+    "recommendation": "Add tokio to biscuit-speaks Cargo.toml with features [rt, process, sync] BEFORE Phase 1 starts. Current Cargo.toml is missing tokio entirely, blocking all async operations in Phase 3 (CLI spawning) and Phase 4 (HTTP requests).",
+    "affected_phases": ["3", "4", "5", "6"],
+    "estimated_impact": "BLOCKER - Cannot proceed without this",
+    "action": "cargo add tokio -p biscuit-speaks --features rt,process,sync,macros"
+  },
+  {
+    "priority": 2,
+    "id": "CRITICAL-002",
+    "area": "PHASE_RESEQUENCING",
+    "recommendation": "Move Phase 6 (Playback) to run in parallel with Phase 3, 4, 5 instead of after Phase 5. Phase 6 depends only on Phase 1 (Types), not on any provider implementations. Reduces critical path by 3-4 hours.",
+    "affected_phases": ["6"],
+    "current_sequence": "Phase 1 → 2 → 3 → 4 → 5 → [Phase 6] → 7 → 8 → 9",
+    "recommended_sequence": "Phase 1 → (Phase 2 ∥ Phase 6) → (Phase 3 ∥ Phase 4) → Phase 5 → Phase 7 → Phase 8 → Phase 9",
+    "estimated_speedup": "20% (saves 3-4 hours)"
+  },
+  {
+    "priority": 3,
+    "id": "CRITICAL-003",
+    "area": "PHASE_PARALLELIZATION",
+    "recommendation": "Run Phase 3 (Host TTS) and Phase 4 (ElevenLabs) in parallel immediately after Phase 2 completes. Both depend only on Phase 1 (Types) + Phase 2 (Detection). Zero cross-dependencies. Phase 3 spawns CLI commands; Phase 4 calls HTTP API. Different implementations, no shared state conflicts.",
+    "affected_phases": ["3", "4"],
+    "dependency_analysis": "Phase 3 does NOT depend on Phase 4. Phase 4 does NOT depend on Phase 3. Both depend on Phase 1 + 2 only.",
+    "race_condition_risk": "MEDIUM: Both access InstalledTtsClients singleton. Use LazyLock + verify thread-safety.",
+    "estimated_speedup": "50% (4-6 hours sequential → 1 cycle parallel)"
+  },
+  {
+    "priority": 4,
+    "id": "HIGH-001",
+    "area": "PHASE_SPLITTING",
+    "recommendation": "Split Phase 3 (Host TTS with 11 providers) into 3 sub-phases by CLI complexity:\n- Phase 3a (Simple): Say, ESpeak, Festival, Pico2Wave, SpdSay [30 min, parallelizable internally]\n- Phase 3b (Medium): EchoGarden, Sherpa, Gtts [45 min, start after 3a]\n- Phase 3c (Complex): KokoroTts, Mimic3, SAPI [60 min, start after 3b]\nSimple providers follow identical pattern (exec → pipe → collect). Organize as module-per-provider to avoid merge conflicts.",
+    "affected_phases": ["3"],
+    "complexity_breakdown": "Simple (30%): Identical CLI patterns. Medium (35%): Config-driven. Complex (35%): Fine-grained parameters.",
+    "file_structure": "biscuit-speaks/src/providers/{simple,medium,complex}/ with separate files per provider",
+    "estimated_speedup": "40% (Phase 3 only: 2.5 hrs → 1.5 hrs)"
+  },
+  {
+    "priority": 5,
+    "id": "HIGH-002",
+    "area": "PHASE_PARALLELIZATION",
+    "recommendation": "Split Phase 7 (Client Updates) into 3 parallel sub-tasks:\n- Phase 7a: Update so-you-say CLI [2 hrs]\n- Phase 7b: Update research/lib [1.5 hrs]\n- Phase 7c: Update research/cli [1.5 hrs]\nAll 3 packages have separate Cargo.toml files, different source trees, zero cross-dependencies. Only import public API from biscuit-speaks. Safe to run in parallel.",
+    "affected_phases": ["7"],
+    "dependency_verification": "so-you-say does NOT depend on research/lib or research/cli. research/lib does NOT depend on so-you-say or research/cli. research/cli does NOT depend on so-you-say or research/lib.",
+    "race_condition_risk": "ZERO - No shared state, no mutable conflicts.",
+    "estimated_speedup": "60% (sequential 5 hrs → parallel 2 hrs)"
+  },
+  {
+    "priority": 6,
+    "id": "HIGH-003",
+    "area": "TESTING_STRATEGY",
+    "recommendation": "Restructure Phase 9 (Testing) into incremental per-phase unit tests + final integration. Run unit tests after each phase completes instead of waiting for Phase 8. Reduces Phase 9 from 60 min to 20 min. Catches design issues early.",
+    "affected_phases": ["9"],
+    "current_approach": "All testing after Phase 8 completes (60 min, late detection)",
+    "recommended_approach": "Incremental: Phase 1 tests (5 min) → Phase 2 tests (10 min) → Phase 3a-c tests (50 min) → Phase 4 tests (15 min) → Phase 5 tests (20 min) → Phase 7 tests (20 min) → Phase 8 + 9b integration (30 min). Early detection of issues.",
+    "estimated_speedup": "67% (Phase 9 reduction: 60 min → 20 min final)"
+  },
+  {
+    "priority": 7,
+    "id": "MEDIUM-001",
+    "area": "RACE_CONDITION_ANALYSIS",
+    "recommendation": "Before parallelizing Phase 3 & Phase 4, audit InstalledTtsClients singleton initialization in types.rs. Verify: (1) LazyLock properly wraps detection logic, (2) No mutable state after init, (3) Thread-safe concurrent access from tokio tasks. Add test for concurrent access.",
+    "affected_phases": ["3", "4"],
+    "safety_check": "LazyLock<InstalledTtsClients> ensures only one initialization, but verify no additional mutable globals",
+    "test_requirement": "Run detection access from multiple tokio::spawn tasks simultaneously",
+    "mitigation": "Use tokio::sync::Once if needed for additional guarantees"
+  },
+  {
+    "priority": 8,
+    "id": "MEDIUM-002",
+    "area": "DEPENDENCY_MANAGEMENT",
+    "recommendation": "Add missing dependencies to biscuit-speaks/Cargo.toml before Phase 3: reqwest (v0.12 with json feature for ElevenLabs), futures (v0.3 for task coordination), parking_lot (optional v0.12 if team uses across monorepo).",
+    "affected_phases": ["3", "4", "5"],
+    "current_missing": "tokio, reqwest, futures, (optional: parking_lot)",
+    "why_needed": "tokio: async runtime + process spawning (Phase 3-5). reqwest: HTTP client for ElevenLabs (Phase 4). futures: concurrent task utilities. parking_lot: optional high-performance sync.",
+    "action": "cargo add reqwest -p biscuit-speaks --features json,stream && cargo add futures -p biscuit-speaks"
+  },
+  {
+    "priority": 9,
+    "id": "MEDIUM-003",
+    "area": "CODE_ORGANIZATION",
+    "recommendation": "Organize Phase 3 providers into separate module files by tier (providers/{simple/{say,espeak,festival,...},medium/{echogarden,sherpa,gtts},complex/{kokoro_tts,mimic3,sapi}}) to allow parallel development without merge conflicts. Each provider in separate file enables team parallelism.",
+    "affected_phases": ["3"],
+    "conflict_prevention": "File-per-provider avoids concurrent edits to same file when multiple devs implement providers in parallel",
+    "structure": "biscuit-speaks/src/providers/mod.rs (traits) + providers/{tier}/{provider}.rs",
+    "future_benefit": "Easy to add new providers, feature gates per tier possible"
+  },
+  {
+    "priority": 10,
+    "id": "MEDIUM-004",
+    "area": "SINGLETON_SAFETY",
+    "recommendation": "Document and verify that InstalledTtsClients detection happens once per process (lazy initialization via LazyLock, not per-call). This is critical for Phase 2 correctness when Phase 3 & 4 run in parallel. If detection re-runs, concurrent providers may see inconsistent installed software state.",
+    "affected_phases": ["2", "3", "4"],
+    "requirement": "Detection must be idempotent and happen exactly once",
+    "test_case": "Call InstalledTtsClients::get() from 10 concurrent tokio tasks, verify all see same cached result",
+    "documentation": "Add comment in Phase 2 code explaining lazy singleton pattern"
+  },
+  {
+    "priority": 11,
+    "id": "RECOMMENDATION_SUMMARY",
+    "area": "CRITICAL_PATH_OPTIMIZATION",
+    "recommendation": "REVISED CRITICAL PATH: 7 sequential stages instead of 9 phases. Stage 1: Phase 1 (2-4h) → Stage 2: Phase 2 ∥ Phase 6 (2-3h) → Stage 3: Phase 3 ∥ Phase 4 (4-6h) → Stage 4: Phase 5 (3-4h) → Stage 5: Phase 7a ∥ Phase 7b ∥ Phase 7c (2-3h) → Stage 6: Phase 8 + Phase 9a (2h) → Stage 7: Phase 9b (0.5h). Total: 18-24 hours vs original 35-45 hours.",
+    "current_estimate": "35-45 hours (all sequential)",
+    "optimized_estimate": "18-24 hours (parallel stages)",
+    "overall_speedup": "40-50% reduction in total execution time",
+    "parallelism_gains": "Increase parallel opportunities from 2 (Phase 3+4) to 5+ (Phase 2-6, Phase 3a-c, Phase 7a-c, Phase 9a incremental)"
+  },
+  {
+    "priority": 12,
+    "id": "VERIFICATION_CHECKLIST",
+    "area": "PRE_IMPLEMENTATION",
+    "checklist": [
+      "☐ Add tokio to biscuit-speaks Cargo.toml with [rt, process, sync, macros]",
+      "☐ Add reqwest to biscuit-speaks Cargo.toml with [json, stream]",
+      "☐ Add futures to biscuit-speaks Cargo.toml",
+      "☐ Verify LazyLock pattern for InstalledTtsClients in types.rs",
+      "☐ Create biscuit-speaks/src/providers/ directory structure (simple/medium/complex)",
+      "☐ Audit for additional mutable static variables (ensure none exist)",
+      "☐ Create concurrent access test for LazyLock singleton",
+      "☐ Document Phase 6 dependency analysis in code",
+      "☐ Create feature gate structure (optional) for provider tiers",
+      "☐ Review research/lib, research/cli, so-you-say for current biscuit-speaks usage"
+    ]
+  }
+]
