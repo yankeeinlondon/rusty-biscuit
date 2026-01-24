@@ -52,20 +52,21 @@ biscuit_speaks::speak_when_able("Task complete!", &TtsConfig::default()).await;
 
 ### Host Providers (Implemented)
 
-| Provider | Platform | Binary | Notes |
-|----------|----------|--------|-------|
-| Say | macOS | `say` | Built-in macOS TTS |
-| eSpeak | Cross-platform | `espeak-ng` | Open source synthesizer |
+| Provider | Platform       | Binary      | Notes                   |
+|----------|----------------|-------------|-------------------------|
+| Say      | macOS          | `say`       | Built-in macOS TTS      |
+| eSpeak   | Cross-platform | `espeak-ng` | Open source synthesizer |
 
 ### Cloud Providers (Implemented)
 
-| Provider | API Key Env Var | Notes |
-|----------|-----------------|-------|
+| Provider   | API Key Env Var                               | Notes                                 |
+|------------|-----------------------------------------------|---------------------------------------|
 | ElevenLabs | `ELEVEN_LABS_API_KEY` or `ELEVENLABS_API_KEY` | High-quality AI voices, sound effects |
 
 #### ElevenLabs Features
 
 The ElevenLabs provider offers full API access:
+
 - **Text-to-Speech**: Generate high-quality audio from text
 - **Voice Listing**: Query available voices with metadata
 - **Model Listing**: List available TTS models
@@ -75,48 +76,48 @@ The ElevenLabs provider offers full API access:
 
 The following providers are defined in the type system but not yet implemented:
 
-| Provider | Platform | Requirements |
-|----------|----------|--------------|
-| SAPI | Windows | PowerShell with `System.Speech` assembly |
-| Festival | Linux | `festival` binary installed |
-| Pico2Wave | Linux | `pico2wave` binary (SVOX Pico) |
-| Mimic3 | Cross-platform | Mycroft neural TTS, SSML support |
-| KokoroTts | Cross-platform | Model files required |
-| EchoGarden | Cross-platform | Model configuration required |
-| Sherpa | Cross-platform | `SHERPA_MODEL` and `SHERPA_TOKENS` env vars |
-| Gtts | Cross-platform | `gtts-cli`, requires network |
-| SpdSay | Linux | Speech Dispatcher (`spd-say`) |
-| Piper | Cross-platform | Fast local neural TTS with ONNX |
+| Provider   | Platform       | Requirements                                |
+|------------|----------------|---------------------------------------------|
+| SAPI       | Windows        | PowerShell with `System.Speech` assembly    |
+| Festival   | Linux          | `festival` binary installed                 |
+| Pico2Wave  | Linux          | `pico2wave` binary (SVOX Pico)              |
+| Mimic3     | Cross-platform | Mycroft neural TTS, SSML support            |
+| KokoroTts  | Cross-platform | Model files required                        |
+| EchoGarden | Cross-platform | Model configuration required                |
+| Sherpa     | Cross-platform | `SHERPA_MODEL` and `SHERPA_TOKENS` env vars |
+| Gtts       | Cross-platform | `gtts-cli`, requires network                |
+| SpdSay     | Linux          | Speech Dispatcher (`spd-say`)               |
+| Piper      | Cross-platform | Fast local neural TTS with ONNX             |
 
 #### Implementation Requirements for Deferred Providers
 
 - **SAPI (Windows)**: Implement PowerShell script invocation with `Add-Type -AssemblyName System.Speech`. Handle voice selection via `SelectVoice()`.
 
-- **Festival**: Simple CLI wrapper, pipe text to `festival --tts`.
+* **Festival**: Simple CLI wrapper, pipe text to `festival --tts`.
 
-- **Pico2Wave**: Generate WAV file with `pico2wave -w /tmp/output.wav "text"`, then play via audio player.
+* **Pico2Wave**: Generate WAV file with `pico2wave -w /tmp/output.wav "text"`, then play via audio player.
 
-- **Mimic3**: CLI wrapper with SSML support. Requires model download.
+* **Mimic3**: CLI wrapper with SSML support. Requires model download.
 
-- **KokoroTts**: Requires model files and configuration. Supports voice blending syntax (e.g., `af_sarah:60,am_adam:40`).
+* **KokoroTts**: Requires model files and configuration. Supports voice blending syntax (e.g., `af_sarah:60,am_adam:40`).
 
-- **EchoGarden**: Needs model discovery and configuration.
+* **EchoGarden**: Needs model discovery and configuration.
 
-- **Sherpa**: Validate `SHERPA_MODEL` and `SHERPA_TOKENS` environment variables exist and point to valid files.
+* **Sherpa**: Validate `SHERPA_MODEL` and `SHERPA_TOKENS` environment variables exist and point to valid files.
 
-- **Gtts**: HTTP-based Google TTS via CLI. Handle network errors gracefully.
+* **Gtts**: HTTP-based Google TTS via CLI. Handle network errors gracefully.
 
-- **SpdSay**: Simple CLI wrapper for Speech Dispatcher on Linux desktops.
+* **SpdSay**: Simple CLI wrapper for Speech Dispatcher on Linux desktops.
 
-- **Piper**: CLI wrapper for ONNX-based neural TTS. Very fast local inference.
+* **Piper**: CLI wrapper for ONNX-based neural TTS. Very fast local inference.
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `ELEVENLABS_API_KEY` | ElevenLabs API key (preferred) |
-| `ELEVEN_LABS_API_KEY` | ElevenLabs API key (alternative) |
-| `TTS_PROVIDER` | Override default provider selection |
+| Variable              | Description                         |
+|-----------------------|-------------------------------------|
+| `ELEVENLABS_API_KEY`  | ElevenLabs API key (preferred)      |
+| `ELEVEN_LABS_API_KEY` | ElevenLabs API key (alternative)    |
+| `TTS_PROVIDER`        | Override default provider selection |
 
 ## API Overview
 

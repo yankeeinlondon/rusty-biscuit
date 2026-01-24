@@ -75,5 +75,14 @@ In order to avoid having to _re-discover_ a given host's capabilities each time 
 
 We need to add the following providers:
 
-    - `echogarden`
+- `SAPI` (on Windows)
+- `Gtts`
+- `echogarden`
+- `kokoro-tts`
+
+The first two shouldn't be hard.
+
+- SAPI
+    - is always available on Windows
+    - how to calculate the voices installed and/or available will need to be determined
     -
