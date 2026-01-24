@@ -21,7 +21,7 @@ async fn main() {
 
             // Announce completion via TTS
             let message = format!("Research for the {} library has completed", result.topic);
-            biscuit_speaks::speak_when_able(&message, &biscuit_speaks::VoiceConfig::default());
+            biscuit_speaks::speak_when_able(&message, &biscuit_speaks::TtsConfig::default()).await;
         }
         Err(e) => {
             eprintln!("Research failed: {}", e);

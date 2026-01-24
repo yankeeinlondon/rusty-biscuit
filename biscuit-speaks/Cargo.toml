@@ -8,8 +8,13 @@ license = "AGPL-3.0-only"
 name = "biscuit_speaks"
 
 [dependencies]
-tts = "0.26.3"
 thiserror = "2.0"
 tracing = "0.1"
-url = "2.5"
 sniff-lib = { path = "../sniff/lib" }
+tokio = { version = "1", features = ["process", "io-util", "fs"] }
+tempfile = "3"
+which = "8"
+schematic-schema = { path = "../schematic/schema" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "fs"] }
