@@ -24,7 +24,7 @@ use crate::primitives::state::PipelineState;
 /// ]);
 ///
 /// let mut state = PipelineState::new();
-/// let results: Vec<String> = parallel.execute(&mut state);
+/// let results: Vec<String> = parallel.execute(&mut state)?;
 /// ```
 pub struct InParallel<R>
 where
@@ -73,20 +73,33 @@ where
     /// Executes all tasks with read-only state access, collecting their outputs.
     ///
     /// Currently executes sequentially; future versions may use rayon for true parallelism.
-    fn execute(&self, state: &mut PipelineState) -> Self::Output {
-        // Use read-only execution for all parallel tasks
-        // This ensures no race conditions on state access
-        self.tasks
-            .iter()
-            .map(|task| task.execute_readonly(state))
-            .collect()
+    fn execute(
+        &self,
+        state: &mut PipelineState,
+    ) -> Result<Self::Output, crate::primitives::state::StepError> {
+        let mut results = Vec::with_capacity(self.tasks.len());
+
+        for task in &self.tasks {
+            match task.execute_readonly(state) {
+                Ok(output) => results.push(output),
+                Err(error) => state.add_error(error),
+            }
+        }
+
+        Ok(results)
     }
 
-    fn execute_readonly(&self, state: &PipelineState) -> Self::Output {
-        self.tasks
-            .iter()
-            .map(|task| task.execute_readonly(state))
-            .collect()
+    fn execute_readonly(
+        &self,
+        state: &PipelineState,
+    ) -> Result<Self::Output, crate::primitives::state::StepError> {
+        let mut results = Vec::with_capacity(self.tasks.len());
+
+        for task in &self.tasks {
+            results.push(task.execute_readonly(state)?);
+        }
+
+        Ok(results)
     }
 
     fn name(&self) -> &str {
@@ -161,14 +174,20 @@ mod tests {
     impl Runnable for MultiplyStep {
         type Output = i32;
 
-        fn execute(&self, state: &mut PipelineState) -> Self::Output {
+        fn execute(
+            &self,
+            state: &mut PipelineState,
+        ) -> Result<Self::Output, crate::primitives::state::StepError> {
             let multiplier = state.get(MULTIPLIER).copied().unwrap_or(1);
-            self.value * multiplier
+            Ok(self.value * multiplier)
         }
 
-        fn execute_readonly(&self, state: &PipelineState) -> Self::Output {
+        fn execute_readonly(
+            &self,
+            state: &PipelineState,
+        ) -> Result<Self::Output, crate::primitives::state::StepError> {
             let multiplier = state.get(MULTIPLIER).copied().unwrap_or(1);
-            self.value * multiplier
+            Ok(self.value * multiplier)
         }
 
         fn supports_readonly(&self) -> bool {
@@ -192,7 +211,9 @@ mod tests {
         assert_eq!(parallel.len(), 0);
 
         let mut state = PipelineState::new();
-        let results = parallel.execute(&mut state);
+        let results = parallel
+            .execute(&mut state)
+            .expect("parallel should succeed");
         assert!(results.is_empty());
     }
 
@@ -209,7 +230,9 @@ mod tests {
         let mut state = PipelineState::new();
         state.set(MULTIPLIER, 10);
 
-        let results = parallel.execute(&mut state);
+        let results = parallel
+            .execute(&mut state)
+            .expect("parallel should succeed");
 
         assert_eq!(results, vec![10, 20, 30]);
     }
@@ -222,7 +245,9 @@ mod tests {
         state.set(MULTIPLIER, 2);
 
         // Should work with read-only access too
-        let results = parallel.execute_readonly(&state);
+        let results = parallel
+            .execute_readonly(&state)
+            .expect("readonly should succeed");
 
         assert_eq!(results, vec![10, 14]);
     }

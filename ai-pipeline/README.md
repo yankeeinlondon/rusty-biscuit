@@ -44,6 +44,8 @@ We will now discuss the key primitives which this library exposes:
     - or even the most basic, loading in user content (with UserContent)
 - Then we'll look at how atomic operations can be _chained_ and fanned out for _concurrency_.
 
+> **Note:** all primitives are lazy by nature and must implement the `Runnable` trait with `execute(state) -> Result<Output, StepError>`. Agent delegation primitives should also implement `AgentDelegation` to expose `is_interactive` for interactive vs headless execution.
+
 ### Atomic Operations
 
 #### Prompt
@@ -88,6 +90,79 @@ let question = Ask::new(
 
 
 ### Agent Delegation
+
+Agentic delegation operations allow the pipeline's **state** and a **prompt** to be passed into agentic software. The interaction with this software can be either via an interactive CLI session (human-in-loop) or via a non-interactive print/headless run. In both cases the pipeline should:
+
+1. Serialize State into a JSON object.
+2. Provide JSON Schema for the state (and expected output) plus a short instruction on how the agent should read/write state.
+
+#### `AgentDelegation` trait
+
+Agent delegation primitives should extend `Runnable` with an explicit interactivity signal:
+
+```rust
+trait AgentDelegation: Runnable {
+    fn is_interactive(&self) -> bool;
+}
+```
+
+The `is_interactive` flag guides whether the pipeline launches an interactive REPL (human-in-loop) or a print/headless run for the agent.
+
+#### `ClaudeCode` CLI
+
+Claude Code supports two useful modes for delegation.
+
+##### Interactive mode (human-in-loop)
+
+- `claude "initial prompt"` starts a REPL seeded with the initial prompt (use `claude` alone for an empty REPL).
+- The user can answer follow-up questions directly in the terminal.
+- Built-in commands and skills are only available in interactive mode.
+- Exit with `/exit` or `Ctrl+D`.
+
+To capture a machine-readable result after the user exits, run a finalization call that continues the same session and requests structured output:
+
+```bash
+claude -p "Return the final output as JSON matching the schema." \
+  --continue \
+  --output-format json \
+  --json-schema '<schema>'
+```
+
+The JSON response includes `structured_output` (when `--json-schema` is used) or `result` (plain text), plus a `session_id` for audit/logging.
+
+##### Print/headless mode (automation)
+
+- `claude -p "<prompt>"` runs once and exits.
+- `--output-format json` returns `result` plus `session_id`; `--output-format stream-json` emits newline-delimited JSON for streaming.
+- `--include-partial-messages` adds partial streaming events in `stream-json` mode.
+- `--json-schema` validates and returns structured output in `structured_output`.
+- `--continue` / `--resume <session_id>` continue a conversation in a later call.
+- `--session-id <uuid>` lets the pipeline pre-assign a session ID.
+- `--allowedTools` / `--tools` restrict tool access; `--permission-mode` or `--permission-prompt-tool` manage approvals in non-interactive runs.
+- `--append-system-prompt` is the safest way to inject pipeline state and schema while keeping default Claude Code behavior.
+
+##### State update strategy
+
+- Default to schema-validated output (`--json-schema`) and read from `structured_output`.
+- Treat `result` as a fallback only when schema validation is explicitly disabled.
+- Update pipeline state using the same path as the `Prompt` result (string, document, or JSON structure depending on `OutputStructure`).
+
+##### Default CLI invocation (recommended)
+
+```bash
+claude -p "${PROMPT_WITH_STATE}" \
+  --append-system-prompt "Use the provided state JSON and schema." \
+  --output-format json \
+  --json-schema "${OUTPUT_SCHEMA}"
+```
+
+
+#### `OpenCode` CLI
+
+OpenCode should mirror the same contract as Claude Code: initial prompt + state payload in, structured final output out. Use interactive mode for human-in-loop and a follow-up print mode call to capture structured output for state updates.
+
+For OpenCode-specific details, see [OpenCode Agent Delegation](./docs/opencode-agent-delegation.md).
+
 
 
 ### Outputs

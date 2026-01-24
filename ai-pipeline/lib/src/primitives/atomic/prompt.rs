@@ -3,7 +3,7 @@ use std::hash::Hash;
 use std::{collections::HashMap, fs, path::Path};
 
 use crate::primitives::runnable::Runnable;
-use crate::primitives::state::PipelineState;
+use crate::primitives::state::{PipelineState, StepError};
 use crate::{models::model_capability::ModelCapability, utils::datetime::Epoch};
 
 /// Errors that can occur when creating a Prompt from input data.
@@ -362,13 +362,12 @@ where
     /// 2. Call the LLM model with the prompt; providing tools
     ///    a system prompt, and structured output instructions
     ///    if they were added.
-    fn execute(&self, _state: &mut PipelineState) -> Self::Output {
-        todo!("LLM execution not yet implemented")
+    fn execute(&self, _state: &mut PipelineState) -> Result<Self::Output, StepError> {
+        Err(StepError::new(self.name(), "LLM execution not yet implemented").fatal())
     }
 
-    fn execute_readonly(&self, _state: &PipelineState) -> Self::Output {
-        // Prompts can execute in read-only mode since they don't need to write state
-        todo!("LLM execution not yet implemented")
+    fn execute_readonly(&self, _state: &PipelineState) -> Result<Self::Output, StepError> {
+        Err(StepError::new(self.name(), "LLM execution not yet implemented").fatal())
     }
 
     fn name(&self) -> &str {

@@ -65,13 +65,20 @@ Pipeline steps implement the `Runnable` trait, receiving mutable state access du
 pub trait Runnable: Send + Sync {
     type Output: Serialize + Hash + Eq + Send + Sync + 'static;
 
-    fn execute(&self, state: &mut PipelineState) -> Self::Output;
+    fn execute(&self, state: &mut PipelineState) -> Result<Self::Output, StepError>;
+
+    fn execute_readonly(&self, state: &PipelineState) -> Result<Self::Output, StepError>;
+    fn supports_readonly(&self) -> bool { false }
 
     // Optional: declare dependencies for validation
     fn declares_reads(&self) -> &[&'static str] { &[] }
     fn declares_writes(&self) -> &[&'static str] { &[] }
 }
 ```
+
+Returning `Err(StepError)` will be captured by the pipeline executor and stored in `PipelineState`.
+Agent delegation primitives should also implement `AgentDelegation` to signal interactive vs
+headless execution.
 
 ---
 
@@ -157,14 +164,15 @@ let parallel = InParallel::new(vec![
 ]);
 
 // All tasks read the same state snapshot
-// Outputs are collected into Vec<R::Output>
-let results = parallel.execute(&mut state);
+// Outputs are collected into Vec<R::Output> on success
+let results = parallel.execute(&mut state)?;
 ```
 
 This design:
 - Avoids race conditions (no concurrent writes)
 - Keeps it simple (no merge/conflict resolution)
 - Enables true parallelism (read-only refs can be shared across threads)
+- Records read-only task failures in `PipelineState` while still returning successful outputs
 
 ### Composing Parallel Results with State
 
@@ -183,10 +191,11 @@ struct CombineStep;
 impl Runnable for CombineStep {
     type Output = String;
 
-    fn execute(&self, state: &mut PipelineState) -> Self::Output {
-        state.get(FETCHED_VEC)
+    fn execute(&self, state: &mut PipelineState) -> Result<Self::Output, StepError> {
+        Ok(state
+            .get(FETCHED_VEC)
             .map(|data| data.join(" + "))
-            .unwrap_or_default()
+            .unwrap_or_default())
     }
 
     fn declares_reads(&self) -> &[&'static str] { &["fetched_vec"] }
@@ -211,7 +220,7 @@ struct UnpackResultsStep;
 impl Runnable for UnpackResultsStep {
     type Output = ();
 
-    fn execute(&self, state: &mut PipelineState) -> Self::Output {
+    fn execute(&self, state: &mut PipelineState) -> Result<Self::Output, StepError> {
         if let Some(results) = state.get(FETCHED_VEC) {
             if let Some(r) = results.get(0) {
                 state.set(API_1_RESULT, r.clone());
@@ -220,6 +229,7 @@ impl Runnable for UnpackResultsStep {
                 state.set(API_2_RESULT, r.clone());
             }
         }
+        Ok(())
     }
 
     fn declares_reads(&self) -> &[&'static str] { &["fetched_vec"] }
@@ -242,7 +252,7 @@ Both patterns keep the design simple: parallel tasks never write directly to sta
 A basic pipeline that processes user input through multiple steps:
 
 ```rust
-use ai_pipeline::primitives::{Pipeline, PipelineState, StateKey, Runnable};
+use ai_pipeline::primitives::{Pipeline, PipelineState, StateKey, Runnable, StepError};
 
 // Define state keys
 const RAW_INPUT: StateKey<String> = StateKey::new("raw_input");
@@ -254,10 +264,11 @@ struct CleanInputStep;
 impl Runnable for CleanInputStep {
     type Output = String;
 
-    fn execute(&self, state: &mut PipelineState) -> Self::Output {
-        state.get(RAW_INPUT)
+    fn execute(&self, state: &mut PipelineState) -> Result<Self::Output, StepError> {
+        Ok(state
+            .get(RAW_INPUT)
             .map(|s| s.trim().to_lowercase())
-            .unwrap_or_default()
+            .unwrap_or_default())
     }
 
     fn declares_reads(&self) -> &[&'static str] { &["raw_input"] }
@@ -269,9 +280,11 @@ struct GenerateResponseStep;
 impl Runnable for GenerateResponseStep {
     type Output = String;
 
-    fn execute(&self, state: &mut PipelineState) -> Self::Output {
-        let cleaned = state.get(CLEANED).unwrap();
-        format!("You said: {}", cleaned)
+    fn execute(&self, state: &mut PipelineState) -> Result<Self::Output, StepError> {
+        let cleaned = state
+            .get(CLEANED)
+            .ok_or_else(|| StepError::new("GenerateResponse", "missing cleaned input").fatal())?;
+        Ok(format!("You said: {}", cleaned))
     }
 
     fn declares_reads(&self) -> &[&'static str] { &["cleaned"] }
@@ -301,6 +314,8 @@ fn main() {
 A pipeline that gracefully handles failures and provides partial results:
 
 ```rust
+use ai_pipeline::primitives::{Pipeline, PipelineState, Runnable, StateKey, StepError};
+
 const PRIMARY_RESULT: StateKey<String> = StateKey::new("primary");
 const FALLBACK_RESULT: StateKey<String> = StateKey::new("fallback");
 const FINAL_RESULT: StateKey<String> = StateKey::new("final");
@@ -309,10 +324,9 @@ struct PrimaryAPIStep;
 impl Runnable for PrimaryAPIStep {
     type Output = Option<String>;
 
-    fn execute(&self, state: &mut PipelineState) -> Self::Output {
+    fn execute(&self, _state: &mut PipelineState) -> Result<Self::Output, StepError> {
         // Simulate API failure
-        state.add_error(StepError::new("PrimaryAPI", "Service unavailable"));
-        None
+        Err(StepError::new("PrimaryAPI", "Service unavailable"))
     }
 }
 
@@ -320,14 +334,14 @@ struct FallbackStep;
 impl Runnable for FallbackStep {
     type Output = String;
 
-    fn execute(&self, state: &mut PipelineState) -> Self::Output {
+    fn execute(&self, state: &mut PipelineState) -> Result<Self::Output, StepError> {
         // Check if primary succeeded
         if let Some(result) = state.get(PRIMARY_RESULT).and_then(|o| o.as_ref()) {
-            return result.clone();
+            return Ok(result.clone());
         }
 
         // Use fallback
-        "Fallback response".to_string()
+        Ok("Fallback response".to_string())
     }
 }
 
@@ -353,6 +367,7 @@ Fetch data from multiple sources concurrently, then combine:
 
 ```rust
 use ai_pipeline::primitives::grouping::InParallel;
+use ai_pipeline::primitives::{Pipeline, PipelineState, Runnable, StepError};
 
 const FETCHED_DATA: StateKey<Vec<String>> = StateKey::new("fetched");
 const COMBINED: StateKey<String> = StateKey::new("combined");
@@ -364,12 +379,12 @@ struct FetchStep {
 impl Runnable for FetchStep {
     type Output = String;
 
-    fn execute(&self, _state: &mut PipelineState) -> Self::Output {
-        format!("Data from {}", self.source)
+    fn execute(&self, _state: &mut PipelineState) -> Result<Self::Output, StepError> {
+        Ok(format!("Data from {}", self.source))
     }
 
-    fn execute_readonly(&self, _state: &PipelineState) -> Self::Output {
-        format!("Data from {}", self.source)
+    fn execute_readonly(&self, _state: &PipelineState) -> Result<Self::Output, StepError> {
+        Ok(format!("Data from {}", self.source))
     }
 
     fn supports_readonly(&self) -> bool { true }
@@ -379,10 +394,11 @@ struct CombineStep;
 impl Runnable for CombineStep {
     type Output = String;
 
-    fn execute(&self, state: &mut PipelineState) -> Self::Output {
-        state.get(FETCHED_DATA)
+    fn execute(&self, state: &mut PipelineState) -> Result<Self::Output, StepError> {
+        Ok(state
+            .get(FETCHED_DATA)
             .map(|data| data.join(" + "))
-            .unwrap_or_default()
+            .unwrap_or_default())
     }
 
     fn declares_reads(&self) -> &[&'static str] { &["fetched"] }

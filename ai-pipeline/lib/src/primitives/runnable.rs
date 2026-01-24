@@ -6,7 +6,7 @@
 use serde::Serialize;
 use std::hash::Hash;
 
-use super::state::PipelineState;
+use super::state::{PipelineState, StepError};
 
 /// A step in the pipeline that can read/write state during execution.
 ///
@@ -17,7 +17,7 @@ use super::state::PipelineState;
 /// ## Example
 ///
 /// ```ignore
-/// use ai_pipeline::primitives::{Runnable, PipelineState, StateKey};
+/// use ai_pipeline::primitives::{PipelineState, Runnable, StateKey, StepError};
 ///
 /// const INPUT: StateKey<String> = StateKey::new("input");
 ///
@@ -26,10 +26,11 @@ use super::state::PipelineState;
 /// impl Runnable for UppercaseStep {
 ///     type Output = String;
 ///
-///     fn execute(&self, state: &mut PipelineState) -> Self::Output {
-///         state.get(INPUT)
+///     fn execute(&self, state: &mut PipelineState) -> Result<Self::Output, StepError> {
+///         Ok(state
+///             .get(INPUT)
 ///             .map(|s| s.to_uppercase())
-///             .unwrap_or_default()
+///             .unwrap_or_default())
 ///     }
 ///
 ///     fn declares_reads(&self) -> &[&'static str] {
@@ -46,23 +47,17 @@ pub trait Runnable: Send + Sync {
     /// Steps can read from and write to state during execution.
     /// The return value is the step's output, which may optionally
     /// be stored in state by the pipeline executor.
-    fn execute(&self, state: &mut PipelineState) -> Self::Output;
+    ///
+    /// Returning `Err` will add a `StepError` to the pipeline state.
+    fn execute(&self, state: &mut PipelineState) -> Result<Self::Output, StepError>;
 
     /// Executes this step with read-only access to the pipeline state.
     ///
     /// This is used for parallel execution where multiple steps need
-    /// concurrent read access. The default implementation panics;
-    /// steps that support parallel execution should override this.
-    ///
-    /// ## Panics
-    ///
-    /// The default implementation panics. Override this method to support
-    /// parallel execution.
-    fn execute_readonly(&self, _state: &PipelineState) -> Self::Output {
-        panic!(
-            "Step '{}' does not support read-only execution for parallel contexts",
-            self.name()
-        )
+    /// concurrent read access. The default implementation returns a
+    /// fatal error. Steps that support parallel execution should override this.
+    fn execute_readonly(&self, _state: &PipelineState) -> Result<Self::Output, StepError> {
+        Err(StepError::new(self.name(), "step does not support read-only execution").fatal())
     }
 
     /// Returns the name of this step for error reporting and debugging.
@@ -97,6 +92,16 @@ pub trait Runnable: Send + Sync {
     }
 }
 
+/// Trait for primitives that delegate work to an agentic program.
+///
+/// This extends `Runnable` with an explicit interactivity flag so the
+/// pipeline can choose the correct invocation style for tools like
+/// Claude Code or OpenCode.
+pub trait AgentDelegation: Runnable {
+    /// Returns true if the agent should run in interactive mode.
+    fn is_interactive(&self) -> bool;
+}
+
 /// Extension trait providing utility methods for `Runnable` types.
 pub trait RunnableExt: Runnable {
     /// Wraps this runnable to store its output in state under the given key.
@@ -129,14 +134,13 @@ where
 {
     type Output = R::Output;
 
-    fn execute(&self, state: &mut PipelineState) -> Self::Output {
-        let output = self.inner.execute(state);
-        // Store a clone in state, return the original
+    fn execute(&self, state: &mut PipelineState) -> Result<Self::Output, StepError> {
+        let output = self.inner.execute(state)?;
         state.set(self.output_key, output.clone());
-        output
+        Ok(output)
     }
 
-    fn execute_readonly(&self, state: &PipelineState) -> Self::Output {
+    fn execute_readonly(&self, state: &PipelineState) -> Result<Self::Output, StepError> {
         self.inner.execute_readonly(state)
     }
 
@@ -163,18 +167,16 @@ mod tests {
     use crate::primitives::state::StateKey;
 
     const INPUT: StateKey<String> = StateKey::new("input");
-    const OUTPUT: StateKey<String> = StateKey::new("output");
-
     struct EchoStep;
 
     impl Runnable for EchoStep {
         type Output = String;
 
-        fn execute(&self, state: &mut PipelineState) -> Self::Output {
-            state
+        fn execute(&self, state: &mut PipelineState) -> Result<Self::Output, StepError> {
+            Ok(state
                 .get(INPUT)
                 .cloned()
-                .unwrap_or_else(|| "default".to_string())
+                .unwrap_or_else(|| "default".to_string()))
         }
 
         fn declares_reads(&self) -> &[&'static str] {
@@ -191,12 +193,12 @@ mod tests {
     impl Runnable for ReadOnlyStep {
         type Output = i32;
 
-        fn execute(&self, _state: &mut PipelineState) -> Self::Output {
-            42
+        fn execute(&self, _state: &mut PipelineState) -> Result<Self::Output, StepError> {
+            Ok(42)
         }
 
-        fn execute_readonly(&self, _state: &PipelineState) -> Self::Output {
-            42
+        fn execute_readonly(&self, _state: &PipelineState) -> Result<Self::Output, StepError> {
+            Ok(42)
         }
 
         fn supports_readonly(&self) -> bool {
@@ -210,7 +212,7 @@ mod tests {
         state.set(INPUT, "hello".to_string());
 
         let step = EchoStep;
-        let output = step.execute(&mut state);
+        let output = step.execute(&mut state).expect("step should succeed");
 
         assert_eq!(output, "hello");
     }
@@ -220,7 +222,7 @@ mod tests {
         let mut state = PipelineState::new();
 
         let step = EchoStep;
-        let output = step.execute(&mut state);
+        let output = step.execute(&mut state).expect("step should succeed");
 
         assert_eq!(output, "default");
     }
@@ -247,17 +249,24 @@ mod tests {
         let state = PipelineState::new();
         let step = ReadOnlyStep;
 
-        let output = step.execute_readonly(&state);
+        let output = step
+            .execute_readonly(&state)
+            .expect("readonly should succeed");
         assert_eq!(output, 42);
     }
 
     #[test]
-    #[should_panic(expected = "does not support read-only execution")]
-    fn test_execute_readonly_panics_for_unsupported() {
+    fn test_execute_readonly_errors_for_unsupported() {
         let state = PipelineState::new();
         let step = EchoStep;
 
-        step.execute_readonly(&state);
+        let error = step
+            .execute_readonly(&state)
+            .expect_err("should error for unsupported readonly");
+
+        assert!(error.fatal);
+        assert!(error.message.contains("read-only"));
+        assert!(error.step_name.contains("EchoStep"));
     }
 
     #[test]

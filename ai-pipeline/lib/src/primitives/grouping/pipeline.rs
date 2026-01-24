@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use crate::primitives::runnable::Runnable;
-use crate::primitives::state::{PipelineState, StateKey};
+use crate::primitives::state::{PipelineState, StateKey, StepError};
 
 /// A type-erased runnable for heterogeneous pipeline composition.
 ///
@@ -38,9 +38,15 @@ where
     R::Output: Clone,
 {
     fn execute_dyn(&self, state: &mut PipelineState) {
-        let output = self.runnable.execute(state);
-        if let Some(key) = self.output_key {
-            state.set(key, output);
+        match self.runnable.execute(state) {
+            Ok(output) => {
+                if let Some(key) = self.output_key {
+                    state.set(key, output);
+                }
+            }
+            Err(error) => {
+                state.add_error(error);
+            }
         }
     }
 
@@ -268,8 +274,8 @@ mod tests {
     impl Runnable for ProduceStep {
         type Output = String;
 
-        fn execute(&self, _state: &mut PipelineState) -> Self::Output {
-            self.value.clone()
+        fn execute(&self, _state: &mut PipelineState) -> Result<Self::Output, StepError> {
+            Ok(self.value.clone())
         }
 
         fn name(&self) -> &str {
@@ -286,11 +292,11 @@ mod tests {
     impl Runnable for TransformStep {
         type Output = String;
 
-        fn execute(&self, state: &mut PipelineState) -> Self::Output {
-            state
+        fn execute(&self, state: &mut PipelineState) -> Result<Self::Output, StepError> {
+            Ok(state
                 .get(INTERMEDIATE)
                 .map(|s| s.to_uppercase())
-                .unwrap_or_default()
+                .unwrap_or_default())
         }
 
         fn name(&self) -> &str {
@@ -313,13 +319,12 @@ mod tests {
     impl Runnable for FailingStep {
         type Output = ();
 
-        fn execute(&self, state: &mut PipelineState) -> Self::Output {
-            let mut error =
-                crate::primitives::state::StepError::new("FailingStep", "intentional failure");
+        fn execute(&self, _state: &mut PipelineState) -> Result<Self::Output, StepError> {
+            let mut error = StepError::new("FailingStep", "intentional failure");
             if self.fatal {
                 error = error.fatal();
             }
-            state.add_error(error);
+            Err(error)
         }
 
         fn name(&self) -> &str {
