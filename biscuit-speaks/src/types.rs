@@ -44,6 +44,50 @@ impl Default for VolumeLevel {
     }
 }
 
+/// The quality of a specific voice (on a specific provider)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VoiceQuality {
+    Low,
+    Moderate,
+    Good,
+    Excellent,
+    /// avoid using this unless it REALLY is a complete unknown
+    /// in most cases, however, the TTS solution or the TTS model
+    /// being used should be enough to generalize this
+    Unknown
+}
+
+/// The `Voice` struct defines a specific voice on a specific
+/// provider.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Voice {
+    name: String,
+    gender: String,
+    quality: VoiceQuality,
+    languages: Vec<Language>
+}
+
+
+/// `HostTtsCapability` defines the capability of a particular
+/// provider on the Host system.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostTtsCapability {
+    provider: TtsProvider,
+    /// voices which the host already has access to for the given provider
+    voices: Vec<Voice>,
+    /// the voices available for the given provider which are NOT yet installed
+    /// on the local host but can be
+    available_voices: Vec<Voice>
+}
+
+
+/// The `HostTtsCapabilities` documents all of the providers (and their
+/// voice capabilities) on the host. This struct is serialized to disk
+/// to act as a cache for a given host's capabilities.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostTtsCapabilities (Vec<HostTtsCapability>);
+
+
 // ============================================================================
 // Language
 // ============================================================================
@@ -174,7 +218,7 @@ pub enum HostTtsProvider {
 
     /// SVOX Pico TTS (`pico2wave` command).
     /// Lightweight TTS for embedded systems.
-    Pico2Wave,
+    // Pico2Wave,
 
     /// Mimic3 - Mycroft's neural TTS engine.
     /// Supports SSML input.
@@ -210,9 +254,8 @@ impl HostTtsProvider {
             HostTtsProvider::ESpeak => installed.espeak || installed.espeak_ng,
             HostTtsProvider::Sapi => installed.windows_sapi,
             HostTtsProvider::Festival => installed.festival,
-            HostTtsProvider::Pico2Wave => false, // Not yet detected by sniff-lib
             HostTtsProvider::Mimic3 => installed.mimic3,
-            HostTtsProvider::KokoroTts => false, // Not yet detected by sniff-lib
+            HostTtsProvider::KokoroTts => installed.kokoro_tts,
             HostTtsProvider::Gtts => installed.gtts_cli,
             HostTtsProvider::SpdSay => false, // Not yet detected by sniff-lib
             HostTtsProvider::Piper => installed.piper,
@@ -228,13 +271,20 @@ impl HostTtsProvider {
             HostTtsProvider::ESpeak => "espeak-ng",
             HostTtsProvider::Sapi => "powershell",
             HostTtsProvider::Festival => "festival",
-            HostTtsProvider::Pico2Wave => "pico2wave",
             HostTtsProvider::Mimic3 => "mimic3",
             HostTtsProvider::KokoroTts => "kokoro-tts",
             HostTtsProvider::Gtts => "gtts-cli",
             HostTtsProvider::SpdSay => "spd-say",
             HostTtsProvider::Piper => "piper",
         }
+    }
+
+    /// A more thorough check then `is_available()`, to pass the TTS provider must
+    /// not only have the required executable program available on the host but
+    /// the underlying `TtsExecutor`'s `is_ready()` function must evaluate to to
+    /// true.
+    pub fn is_ready(&self) -> bool {
+        todo!()
     }
 }
 
@@ -268,6 +318,14 @@ impl CloudTtsProvider {
         match self {
             CloudTtsProvider::ElevenLabs => &["ELEVENLABS_API_KEY", "ELEVEN_LABS_API_KEY"],
         }
+    }
+
+    /// A more thorough check then `is_available()`, to pass the TTS provider must
+    /// not only have the required executable program available on the host but
+    /// the underlying `TtsExecutor`'s `is_ready()` function must evaluate to to
+    /// true.
+    pub fn is_ready(&self) -> bool {
+        todo!()
     }
 }
 

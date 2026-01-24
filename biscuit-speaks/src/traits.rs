@@ -66,6 +66,8 @@ mod tests {
     }
 
     impl TtsExecutor for MockExecutor {
+        /// Uses the text, and optionally gender/voice/volume settings to generate audio and
+        /// send that audio the host's default audio device.
         async fn speak(&self, _text: &str, _config: &TtsConfig) -> Result<(), TtsError> {
             if self.should_fail {
                 Err(TtsError::ProviderFailed {
