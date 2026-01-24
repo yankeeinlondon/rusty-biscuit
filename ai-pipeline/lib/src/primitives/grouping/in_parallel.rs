@@ -160,12 +160,8 @@ impl<R: Runnable> ParallelBuilder<R> {
 mod tests {
     use super::*;
     use crate::primitives::state::StateKey;
-    use serde::Serialize;
 
     const MULTIPLIER: StateKey<i32> = StateKey::new("multiplier");
-
-    #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
-    struct DoubleOutput(i32);
 
     struct MultiplyStep {
         value: i32,

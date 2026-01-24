@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use crate::primitives::runnable::Runnable;
-use crate::primitives::state::{PipelineState, StateKey, StepError};
+use crate::primitives::state::{PipelineState, StateKey};
 
 /// A type-erased runnable for heterogeneous pipeline composition.
 ///
@@ -258,14 +258,10 @@ impl std::fmt::Debug for Pipeline {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::Serialize;
+    use crate::primitives::state::StepError;
 
-    const INPUT: StateKey<String> = StateKey::new("input");
     const INTERMEDIATE: StateKey<String> = StateKey::new("intermediate");
     const OUTPUT: StateKey<String> = StateKey::new("output");
-
-    #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
-    struct TestOutput(String);
 
     struct ProduceStep {
         value: String,
