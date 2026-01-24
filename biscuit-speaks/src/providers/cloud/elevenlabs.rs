@@ -164,19 +164,29 @@ impl ElevenLabsProvider {
         };
 
         if let Some(gender_label) = gender_label {
-            let voices = self.list_voices().await?;
-            if let Some(voice) = voices
-                .voices
-                .iter()
-                .find(|voice| Self::voice_matches_gender(voice, gender_label))
-            {
-                return Ok(voice.voice_id.clone());
-            }
+            match self.list_voices().await {
+                Ok(voices) => {
+                    if let Some(voice) = voices
+                        .voices
+                        .iter()
+                        .find(|voice| Self::voice_matches_gender(voice, gender_label))
+                    {
+                        return Ok(voice.voice_id.clone());
+                    }
 
-            tracing::warn!(
-                gender = gender_label,
-                "No ElevenLabs voice matched gender, falling back to default"
-            );
+                    tracing::warn!(
+                        gender = gender_label,
+                        "No ElevenLabs voice matched gender, falling back to default"
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        error = ?error,
+                        gender = gender_label,
+                        "Failed to fetch ElevenLabs voices, falling back to default"
+                    );
+                }
+            }
         }
 
         Ok(self.default_voice_id.clone())
