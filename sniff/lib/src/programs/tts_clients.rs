@@ -34,6 +34,8 @@ pub struct InstalledTtsClients {
     pub coqui_tts: bool,
     /// Sherpa-ONNX, streaming and non-streaming speech-to-text and text-to-speech using ONNX. [Website](https://k2-fsa.github.io/sherpa/onnx/index.html)
     pub sherpa_onnx: bool,
+    /// A popular CLI which makes using the Kokoro TTS model very easy. [Website](https://github.com/nazdridoy/kokoro-tts)
+    pub kokoro_tts: bool,
 }
 
 impl InstalledTtsClients {
@@ -74,6 +76,7 @@ impl InstalledTtsClients {
             gtts_cli: has("gtts-cli"),
             coqui_tts: has("tts"),
             sherpa_onnx: any(&["sherpa-onnx-offline-tts", "sherpa-onnx-tts"]),
+            kokoro_tts: has("kokoro_tts")
         }
     }
 
