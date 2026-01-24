@@ -71,7 +71,12 @@ install:
                 echo "Installing from $area..."
                 just -f "$area/justfile" install
             else
-                echo "- no INSTALL command for the area **$area**" >&2
+                if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "build"; then
+                    echo "No INSTALL command for $area, doing release build..."
+                    just -f "$area/justfile" build --release
+                else
+                    echo "- no INSTALL command for the area **$area**" >&2
+                fi
             fi
         else
             echo "- no justfile for the area **$area**" >&2

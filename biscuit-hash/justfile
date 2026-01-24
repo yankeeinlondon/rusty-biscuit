@@ -10,7 +10,7 @@ default:
 build *args="":
     @echo "Building biscuit-hash..."
     @echo
-    @cargo build -p biscuit-hash -- {{args}}
+    @cargo build -p biscuit-hash {{args}}
     @echo
 
 # test library and CLI

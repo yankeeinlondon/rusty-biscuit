@@ -10,8 +10,8 @@ default:
 build *args="":
     @echo "Building ..."
     @echo
-    @cargo build -p sniff-lib -- {{args}}
-    @cargo build -p sniff-cli -- {{args}}
+    @cargo build -p sniff-lib {{args}}
+    @cargo build -p sniff-cli {{args}}
     @echo
 
 # test library and CLI
