@@ -95,7 +95,10 @@ const DEFAULT_REQUEST_SUFFIX: &str = "Request";
 /// the generated wrapper struct name.
 pub fn validate_api(api: &RestApi) -> Result<(), GeneratorError> {
     // Get the effective suffix (custom or default)
-    let suffix = api.request_suffix.as_deref().unwrap_or(DEFAULT_REQUEST_SUFFIX);
+    let suffix = api
+        .request_suffix
+        .as_deref()
+        .unwrap_or(DEFAULT_REQUEST_SUFFIX);
 
     // Check 1: Validate request_suffix is alphanumeric (if provided)
     if let Some(ref custom_suffix) = api.request_suffix {

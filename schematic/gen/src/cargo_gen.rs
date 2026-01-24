@@ -10,7 +10,7 @@ use std::path::Path;
 use crate::errors::GeneratorError;
 use crate::output::write_atomic;
 
-/// Template for the generated Cargo.toml.
+/// Template for the generated Cargo.toml (before substitution).
 const CARGO_TOML_TEMPLATE: &str = r#"[package]
 name = "schematic-schema"
 version = "0.1.0"
@@ -24,8 +24,8 @@ description = "Generated REST API client code from schematic definitions"
 [dependencies]
 bytes = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-schematic-define = { version = "0.1.0", path = "../define" }
-schematic-definitions = { version = "0.1.0", path = "../definitions" }
+schematic-define = { version = "0.1.0", path = "{{DEFINE_PATH}}" }
+schematic-definitions = { version = "0.1.0", path = "{{DEFINITIONS_PATH}}" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
@@ -37,17 +37,36 @@ tokio = { version = "1.43", features = ["rt", "macros"] }
 /// Returns the complete Cargo.toml content as a string, ready to be written
 /// to the schema package directory.
 ///
+/// ## Arguments
+///
+/// * `workspace_root` - Optional path to the workspace root. When provided, uses
+///   absolute paths to the schematic-define and schematic-definitions packages.
+///   When `None`, uses the default relative paths (`../define`, `../definitions`).
+///
 /// ## Examples
 ///
 /// ```
 /// use schematic_gen::cargo_gen::generate_cargo_toml;
 ///
-/// let content = generate_cargo_toml();
+/// // Default relative paths (production use)
+/// let content = generate_cargo_toml(None);
 /// assert!(content.contains("schematic-schema"));
 /// assert!(content.contains("edition = \"2024\""));
+/// assert!(content.contains("path = \"../define\""));
+///
+/// // Absolute paths (for testing)
+/// let content = generate_cargo_toml(Some("/workspace/schematic"));
+/// assert!(content.contains("path = \"/workspace/schematic/define\""));
 /// ```
-pub fn generate_cargo_toml() -> String {
-    CARGO_TOML_TEMPLATE.to_string()
+pub fn generate_cargo_toml(workspace_root: Option<&str>) -> String {
+    let (define_path, definitions_path) = match workspace_root {
+        Some(root) => (format!("{}/define", root), format!("{}/definitions", root)),
+        None => ("../define".to_string(), "../definitions".to_string()),
+    };
+
+    CARGO_TOML_TEMPLATE
+        .replace("{{DEFINE_PATH}}", &define_path)
+        .replace("{{DEFINITIONS_PATH}}", &definitions_path)
 }
 
 /// Writes the Cargo.toml to the output directory.
@@ -59,6 +78,7 @@ pub fn generate_cargo_toml() -> String {
 ///
 /// * `output_dir` - Parent directory for the schema package (not src/)
 /// * `dry_run` - If true, print content instead of writing
+/// * `workspace_root` - Optional path to workspace root for absolute paths (testing)
 ///
 /// ## Examples
 ///
@@ -67,10 +87,13 @@ pub fn generate_cargo_toml() -> String {
 /// use schematic_gen::cargo_gen::write_cargo_toml;
 ///
 /// // Dry run mode - prints to stdout
-/// write_cargo_toml(Path::new("schematic/schema"), true).unwrap();
+/// write_cargo_toml(Path::new("schematic/schema"), true, None).unwrap();
 ///
-/// // Normal mode - writes to file
-/// write_cargo_toml(Path::new("schematic/schema"), false).unwrap();
+/// // Normal mode - writes to file (production)
+/// write_cargo_toml(Path::new("schematic/schema"), false, None).unwrap();
+///
+/// // For tests - use absolute paths to workspace packages
+/// write_cargo_toml(Path::new("/tmp/test/schema"), false, Some("/workspace/schematic")).unwrap();
 /// ```
 ///
 /// ## Errors
@@ -78,8 +101,12 @@ pub fn generate_cargo_toml() -> String {
 /// Returns `GeneratorError::WriteError` if:
 /// - The output directory cannot be created
 /// - The file cannot be written
-pub fn write_cargo_toml(output_dir: &Path, dry_run: bool) -> Result<(), GeneratorError> {
-    let content = generate_cargo_toml();
+pub fn write_cargo_toml(
+    output_dir: &Path,
+    dry_run: bool,
+    workspace_root: Option<&str>,
+) -> Result<(), GeneratorError> {
+    let content = generate_cargo_toml(workspace_root);
 
     if dry_run {
         println!(
@@ -112,7 +139,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_produces_valid_toml() {
-        let content = generate_cargo_toml();
+        let content = generate_cargo_toml(None);
 
         // Parse as TOML to validate syntax
         let parsed: toml::Table =
@@ -125,7 +152,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_has_correct_package_name() {
-        let content = generate_cargo_toml();
+        let content = generate_cargo_toml(None);
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let package = parsed.get("package").unwrap().as_table().unwrap();
@@ -137,7 +164,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_uses_edition_2024() {
-        let content = generate_cargo_toml();
+        let content = generate_cargo_toml(None);
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let package = parsed.get("package").unwrap().as_table().unwrap();
@@ -146,7 +173,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_has_correct_license() {
-        let content = generate_cargo_toml();
+        let content = generate_cargo_toml(None);
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let package = parsed.get("package").unwrap().as_table().unwrap();
@@ -158,7 +185,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_reqwest() {
-        let content = generate_cargo_toml();
+        let content = generate_cargo_toml(None);
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -176,7 +203,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_serde_with_derive() {
-        let content = generate_cargo_toml();
+        let content = generate_cargo_toml(None);
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -190,7 +217,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_serde_json() {
-        let content = generate_cargo_toml();
+        let content = generate_cargo_toml(None);
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -202,7 +229,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_thiserror() {
-        let content = generate_cargo_toml();
+        let content = generate_cargo_toml(None);
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -214,7 +241,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_tokio() {
-        let content = generate_cargo_toml();
+        let content = generate_cargo_toml(None);
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -229,7 +256,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_bytes() {
-        let content = generate_cargo_toml();
+        let content = generate_cargo_toml(None);
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -241,7 +268,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_schematic_define() {
-        let content = generate_cargo_toml();
+        let content = generate_cargo_toml(None);
         let parsed: toml::Table = toml::from_str(&content).unwrap();
 
         let deps = parsed.get("dependencies").unwrap().as_table().unwrap();
@@ -260,7 +287,7 @@ mod tests {
 
     #[test]
     fn generate_cargo_toml_includes_generated_notice() {
-        let content = generate_cargo_toml();
+        let content = generate_cargo_toml(None);
 
         assert!(content.contains("automatically generated"));
         assert!(content.contains("Do not edit manually"));
@@ -273,7 +300,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_dir = temp_dir.path().join("schema");
 
-        let result = write_cargo_toml(&output_dir, true);
+        let result = write_cargo_toml(&output_dir, true, None);
 
         assert!(result.is_ok());
         assert!(!output_dir.join("Cargo.toml").exists());
@@ -284,7 +311,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_dir = temp_dir.path().join("schema");
 
-        let result = write_cargo_toml(&output_dir, false);
+        let result = write_cargo_toml(&output_dir, false, None);
 
         assert!(result.is_ok());
         assert!(output_dir.join("Cargo.toml").exists());
@@ -295,7 +322,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_dir = temp_dir.path().join("nested/deep/schema");
 
-        let result = write_cargo_toml(&output_dir, false);
+        let result = write_cargo_toml(&output_dir, false, None);
 
         assert!(result.is_ok());
         assert!(output_dir.join("Cargo.toml").exists());
@@ -306,12 +333,12 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_dir = temp_dir.path().join("schema");
 
-        write_cargo_toml(&output_dir, false).unwrap();
+        write_cargo_toml(&output_dir, false, None).unwrap();
 
         let content = fs::read_to_string(output_dir.join("Cargo.toml")).unwrap();
 
         // Verify content matches what generate_cargo_toml produces
-        assert_eq!(content, generate_cargo_toml());
+        assert_eq!(content, generate_cargo_toml(None));
     }
 
     #[test]
@@ -325,7 +352,7 @@ mod tests {
         fs::write(&cargo_path, "# old content").unwrap();
 
         // Overwrite with generated content
-        write_cargo_toml(&output_dir, false).unwrap();
+        write_cargo_toml(&output_dir, false, None).unwrap();
 
         let content = fs::read_to_string(&cargo_path).unwrap();
         assert!(content.contains("schematic-schema"));
@@ -337,7 +364,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let output_dir = temp_dir.path().join("schema");
 
-        write_cargo_toml(&output_dir, false).unwrap();
+        write_cargo_toml(&output_dir, false, None).unwrap();
 
         // Check no .tmp file exists
         let temp_path = output_dir.join("Cargo.toml.tmp");
@@ -346,5 +373,21 @@ mod tests {
         // Also check with .rs.tmp extension (the write_atomic pattern)
         let temp_path2 = output_dir.join("Cargo.toml.rs.tmp");
         assert!(!temp_path2.exists());
+    }
+
+    #[test]
+    fn generate_cargo_toml_with_workspace_root_uses_absolute_paths() {
+        let content = generate_cargo_toml(Some("/workspace/schematic"));
+
+        assert!(content.contains("path = \"/workspace/schematic/define\""));
+        assert!(content.contains("path = \"/workspace/schematic/definitions\""));
+    }
+
+    #[test]
+    fn generate_cargo_toml_without_workspace_root_uses_relative_paths() {
+        let content = generate_cargo_toml(None);
+
+        assert!(content.contains("path = \"../define\""));
+        assert!(content.contains("path = \"../definitions\""));
     }
 }

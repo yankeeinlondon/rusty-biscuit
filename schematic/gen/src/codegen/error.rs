@@ -7,6 +7,29 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 
+/// Generates the RequestParts type alias for the complex tuple return type.
+///
+/// This type alias simplifies the `into_parts()` method signature and avoids
+/// clippy's `type_complexity` lint.
+///
+/// The tuple contains:
+/// - HTTP method as a static string (e.g., "GET", "POST")
+/// - URL path with parameters substituted
+/// - Optional JSON body
+/// - Headers as key-value pairs
+pub fn generate_request_parts_type() -> TokenStream {
+    quote! {
+        /// The components of a prepared HTTP request.
+        ///
+        /// This tuple contains all information needed to execute an API request:
+        /// - `0`: HTTP method (e.g., "GET", "POST", "DELETE")
+        /// - `1`: URL path with path parameters substituted
+        /// - `2`: Optional JSON request body
+        /// - `3`: Additional headers as (name, value) pairs
+        pub type RequestParts = (&'static str, String, Option<String>, Vec<(String, String)>);
+    }
+}
+
 /// Generates the SchematicError enum for runtime errors.
 ///
 /// This error type is used by generated API client code and provides variants

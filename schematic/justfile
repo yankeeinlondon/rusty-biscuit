@@ -92,3 +92,10 @@ docs:
     @echo "Documentation for Schematic packages"
     @echo ""
     @cargo doc --workspace --no-deps --open
+
+release:
+    @just lint
+    @just test-e2e
+    @just just build --release
+    @just just full
+    @just docs

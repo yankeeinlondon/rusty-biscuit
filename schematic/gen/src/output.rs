@@ -29,7 +29,7 @@ use schematic_define::RestApi;
 
 use crate::codegen::{
     ModuleDocBuilder, generate_api_struct, generate_error_type, generate_request_enum_with_suffix,
-    generate_request_method, generate_request_struct_with_options,
+    generate_request_method, generate_request_parts_type, generate_request_struct_with_options,
 };
 use crate::errors::GeneratorError;
 use crate::inference::infer_module_path;
@@ -61,9 +61,9 @@ use crate::inference::infer_module_path;
 /// // Inference returns "open", fallback returns "openai"
 /// ```
 fn get_module_path(api: &RestApi) -> String {
-    api.module_path.clone().unwrap_or_else(|| {
-        infer_module_path(&api.name).unwrap_or_else(|| api.name.to_lowercase())
-    })
+    api.module_path
+        .clone()
+        .unwrap_or_else(|| infer_module_path(&api.name).unwrap_or_else(|| api.name.to_lowercase()))
 }
 
 /// Returns the request suffix for the given API.
@@ -90,16 +90,20 @@ fn get_request_suffix(api: &RestApi) -> String {
 /// This function generates code for the shared module, containing:
 /// - Module documentation
 /// - Common error type used by all API clients
+/// - Common type aliases (e.g., `RequestParts`)
 ///
 /// ## Returns
 ///
 /// A TokenStream containing the shared module code.
 pub fn assemble_shared_module() -> TokenStream {
-    // Generate error type
+    // Generate shared types
+    let request_parts_type = generate_request_parts_type();
     let error_type = generate_error_type();
 
     quote! {
         //! Shared types and utilities for generated API clients.
+
+        #request_parts_type
 
         #error_type
     }
@@ -161,8 +165,8 @@ pub fn assemble_api_module(api: &RestApi) -> TokenStream {
         // Re-export response types from definitions so consumers can import from one place
         pub use schematic_definitions::#definitions_module::*;
 
-        // Import shared error type
-        use crate::shared::SchematicError;
+        // Import shared types
+        use crate::shared::{RequestParts, SchematicError};
 
         #request_structs
 
@@ -283,8 +287,8 @@ pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
         //! }
         //! ```
 
-        // Shared error type
-        pub use crate::shared::SchematicError;
+        // Shared types
+        pub use crate::shared::{RequestParts, SchematicError};
 
         // API clients and request types
         #(#api_reexports)*
@@ -710,7 +714,7 @@ mod tests {
         let formatted = format_code(&file);
 
         // All major elements should be present
-        assert!(formatted.contains("use crate::shared::SchematicError"));
+        assert!(formatted.contains("use crate::shared::{RequestParts, SchematicError}"));
         assert!(formatted.contains("pub struct OpenAI"));
         assert!(formatted.contains("pub enum OpenAIRequest"));
     }
@@ -828,11 +832,12 @@ mod tests {
         // Should have all components
         assert!(content.contains("pub struct OpenAI"));
         assert!(content.contains("pub enum OpenAIRequest"));
-        assert!(content.contains("use crate::shared::SchematicError"));
+        assert!(content.contains("use crate::shared::{RequestParts, SchematicError}"));
 
-        // Check shared.rs exists and contains SchematicError
+        // Check shared.rs exists and contains SchematicError and RequestParts
         let shared_path = temp_dir.path().join("shared.rs");
         let shared_content = fs::read_to_string(shared_path).unwrap();
+        assert!(shared_content.contains("pub type RequestParts"));
         assert!(shared_content.contains("pub enum SchematicError"));
 
         // Check lib.rs exists and has module declarations

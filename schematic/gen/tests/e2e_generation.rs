@@ -10,6 +10,7 @@
 //! 3. **Response type tests**: Verify correct methods generated for Binary/Text/Empty responses
 //! 4. **Multi-API tests**: Verify multiple APIs generate correctly together
 
+use std::path::Path;
 use std::process::Command;
 
 use tempfile::TempDir;
@@ -19,6 +20,19 @@ use schematic_definitions::openai::define_openai_api;
 use schematic_gen::cargo_gen::write_cargo_toml;
 use schematic_gen::infer_module_path;
 use schematic_gen::output::{generate_and_write, generate_and_write_all};
+
+/// Returns the absolute path to the schematic workspace directory.
+///
+/// This is needed for e2e tests that compile generated code, so the Cargo.toml
+/// can reference the schematic-define and schematic-definitions packages with
+/// absolute paths.
+fn schematic_workspace_root() -> &'static str {
+    // CARGO_MANIFEST_DIR is `schematic/gen`, parent is `schematic`
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let workspace = Path::new(manifest_dir).parent().unwrap();
+    // Leak the string to get a 'static lifetime (acceptable for tests)
+    Box::leak(workspace.to_str().unwrap().to_string().into_boxed_str())
+}
 
 /// Tests that generated code compiles successfully.
 ///
@@ -37,7 +51,8 @@ fn generated_code_compiles() {
     // Generate the code from OpenAI API definition
     let api = define_openai_api();
     generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
-    write_cargo_toml(&schema_dir, false).expect("Failed to write Cargo.toml");
+    write_cargo_toml(&schema_dir, false, Some(schematic_workspace_root()))
+        .expect("Failed to write Cargo.toml");
 
     // Try to compile with cargo check
     let output = Command::new("cargo")
@@ -73,7 +88,8 @@ fn generated_code_passes_clippy() {
     // Generate the code
     let api = define_openai_api();
     generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
-    write_cargo_toml(&schema_dir, false).expect("Failed to write Cargo.toml");
+    write_cargo_toml(&schema_dir, false, Some(schematic_workspace_root()))
+        .expect("Failed to write Cargo.toml");
 
     // Run cargo clippy with warnings as errors
     let output = Command::new("cargo")
@@ -102,7 +118,8 @@ fn generated_files_exist_and_have_expected_structure() {
 
     let api = define_openai_api();
     generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
-    write_cargo_toml(&schema_dir, false).expect("Failed to write Cargo.toml");
+    write_cargo_toml(&schema_dir, false, Some(schematic_workspace_root()))
+        .expect("Failed to write Cargo.toml");
 
     // Verify files exist
     assert!(
@@ -153,7 +170,7 @@ fn generated_files_exist_and_have_expected_structure() {
     assert!(api_content.contains("OpenAI"));
 
     // Should have all the generated components
-    assert!(api_content.contains("use crate::shared::SchematicError"));
+    assert!(api_content.contains("use crate::shared::{RequestParts, SchematicError}"));
     assert!(api_content.contains("pub struct OpenAI"));
     assert!(api_content.contains("pub enum OpenAIRequest"));
 
@@ -371,8 +388,8 @@ fn binary_response_generates_request_bytes_method() {
 
     generate_and_write(&api, &src_dir, false).expect("Failed to generate code");
 
-    let api_content =
-        std::fs::read_to_string(src_dir.join("binarytest.rs")).expect("Failed to read binarytest.rs");
+    let api_content = std::fs::read_to_string(src_dir.join("binarytest.rs"))
+        .expect("Failed to read binarytest.rs");
 
     // CRITICAL: Must have request_bytes method, NOT just request<T>
     assert!(
@@ -656,17 +673,15 @@ fn multiple_apis_generate_together() {
     generate_and_write_all(&apis, &src_dir, false).expect("Failed to generate code for all APIs");
 
     // Verify both API modules exist
-    assert!(
-        src_dir.join("openai.rs").exists(),
-        "openai.rs should exist"
-    );
+    assert!(src_dir.join("openai.rs").exists(), "openai.rs should exist");
     assert!(
         src_dir.join("elevenlabs.rs").exists(),
         "elevenlabs.rs should exist"
     );
 
     // Verify lib.rs includes both modules
-    let lib_content = std::fs::read_to_string(src_dir.join("lib.rs")).expect("Failed to read lib.rs");
+    let lib_content =
+        std::fs::read_to_string(src_dir.join("lib.rs")).expect("Failed to read lib.rs");
     assert!(
         lib_content.contains("pub mod openai;"),
         "lib.rs should declare openai module"
@@ -702,7 +717,8 @@ fn multiple_apis_compile() {
 
     let apis: Vec<&schematic_define::RestApi> = vec![&openai, &elevenlabs];
     generate_and_write_all(&apis, &src_dir, false).expect("Failed to generate code");
-    write_cargo_toml(&schema_dir, false).expect("Failed to write Cargo.toml");
+    write_cargo_toml(&schema_dir, false, Some(schematic_workspace_root()))
+        .expect("Failed to write Cargo.toml");
 
     let output = Command::new("cargo")
         .args(["check", "--manifest-path"])

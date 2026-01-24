@@ -120,10 +120,7 @@ fn run_validation(api: &schematic_define::RestApi, verbose: u8) -> bool {
 
     match validate_api(api) {
         Ok(()) => {
-            println!(
-                "{} Request suffix format",
-                "  [PASS]".green().bold()
-            );
+            println!("{} Request suffix format", "  [PASS]".green().bold());
             println!(
                 "{} No naming collisions detected",
                 "  [PASS]".green().bold()
@@ -151,10 +148,7 @@ fn run_validation(api: &schematic_define::RestApi, verbose: u8) -> bool {
                     body_type,
                     suggestion,
                 } => {
-                    println!(
-                        "{} Request suffix format",
-                        "  [PASS]".green().bold()
-                    );
+                    println!("{} Request suffix format", "  [PASS]".green().bold());
                     println!(
                         "{} Naming collision in endpoint '{}'",
                         "  [FAIL]".red().bold(),
@@ -229,7 +223,7 @@ fn run_generate(
     // Generate Cargo.toml in the parent directory of src/
     // The output_dir points to src/, so we need to get its parent for Cargo.toml
     let schema_dir = output_dir.parent().unwrap_or(Path::new("schematic/schema"));
-    write_cargo_toml(schema_dir, dry_run)?;
+    write_cargo_toml(schema_dir, dry_run, None)?;
 
     if !dry_run {
         println!(
@@ -243,18 +237,17 @@ fn run_generate(
             schema_dir.display()
         );
     } else {
-        println!("{} Dry run complete (no files written)", "[OK]".green().bold());
+        println!(
+            "{} Dry run complete (no files written)",
+            "[OK]".green().bold()
+        );
     }
 
     Ok(())
 }
 
 /// Runs the generate command for all APIs at once.
-fn run_generate_all(
-    output: &str,
-    dry_run: bool,
-    verbose: u8,
-) -> Result<(), GeneratorError> {
+fn run_generate_all(output: &str, dry_run: bool, verbose: u8) -> Result<(), GeneratorError> {
     let apis = resolve_all_apis();
 
     if verbose > 0 {
@@ -297,7 +290,7 @@ fn run_generate_all(
 
     // Generate Cargo.toml in the parent directory of src/
     let schema_dir = output_dir.parent().unwrap_or(Path::new("schematic/schema"));
-    write_cargo_toml(schema_dir, dry_run)?;
+    write_cargo_toml(schema_dir, dry_run, None)?;
 
     if !dry_run {
         println!(
@@ -312,7 +305,10 @@ fn run_generate_all(
             schema_dir.display()
         );
     } else {
-        println!("{} Dry run complete (no files written)", "[OK]".green().bold());
+        println!(
+            "{} Dry run complete (no files written)",
+            "[OK]".green().bold()
+        );
     }
 
     Ok(())
@@ -325,9 +321,7 @@ fn run_validate(api_name: &str, verbose: u8) -> Result<(), GeneratorError> {
     if run_validation(&api, verbose) {
         Ok(())
     } else {
-        Err(GeneratorError::ConfigError(
-            "Validation failed".to_string(),
-        ))
+        Err(GeneratorError::ConfigError("Validation failed".to_string()))
     }
 }
 
@@ -336,13 +330,13 @@ fn main() -> ExitCode {
 
     let result = match cli.command {
         // Explicit subcommand: generate
-        Some(Commands::Generate { api, output, dry_run }) => {
-            run_generate(&api, &output, dry_run, cli.verbose)
-        }
+        Some(Commands::Generate {
+            api,
+            output,
+            dry_run,
+        }) => run_generate(&api, &output, dry_run, cli.verbose),
         // Explicit subcommand: validate
-        Some(Commands::Validate { api }) => {
-            run_validate(&api, cli.verbose)
-        }
+        Some(Commands::Validate { api }) => run_validate(&api, cli.verbose),
         // No subcommand: backwards-compatible mode (acts like generate)
         None => {
             if let Some(api_name) = cli.api {

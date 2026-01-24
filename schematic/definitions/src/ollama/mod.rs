@@ -85,9 +85,8 @@ pub fn define_ollama_native_api() -> RestApi {
                 id: "Chat".to_string(),
                 method: RestMethod::Post,
                 path: "/api/chat".to_string(),
-                description:
-                    "Generate chat completion from messages (streaming NDJSON by default)"
-                        .to_string(),
+                description: "Generate chat completion from messages (streaming NDJSON by default)"
+                    .to_string(),
                 request: Some(ApiRequest::json_type("ChatBody")),
                 response: ApiResponse::Binary, // Streaming NDJSON
                 headers: vec![],
@@ -124,8 +123,9 @@ pub fn define_ollama_native_api() -> RestApi {
                 id: "PullModel".to_string(),
                 method: RestMethod::Post,
                 path: "/api/pull".to_string(),
-                description: "Pull a model from the Ollama registry (streaming progress by default)"
-                    .to_string(),
+                description:
+                    "Pull a model from the Ollama registry (streaming progress by default)"
+                        .to_string(),
                 request: Some(ApiRequest::json_type("PullModelBody")),
                 response: ApiResponse::Binary, // Streaming progress
                 headers: vec![],
@@ -162,8 +162,8 @@ pub fn define_ollama_native_api() -> RestApi {
                 id: "CreateModel".to_string(),
                 method: RestMethod::Post,
                 path: "/api/create".to_string(),
-                description:
-                    "Create a model from a Modelfile (streaming progress by default)".to_string(),
+                description: "Create a model from a Modelfile (streaming progress by default)"
+                    .to_string(),
                 request: Some(ApiRequest::json_type("CreateModelBody")),
                 response: ApiResponse::Binary, // Streaming progress
                 headers: vec![],
@@ -212,9 +212,7 @@ pub fn define_ollama_openai_api() -> RestApi {
         description: "Ollama OpenAI-compatible REST API for drop-in replacement of OpenAI clients"
             .to_string(),
         base_url: "http://localhost:11434".to_string(),
-        docs_url: Some(
-            "https://github.com/ollama/ollama/blob/main/docs/openai.md".to_string(),
-        ),
+        docs_url: Some("https://github.com/ollama/ollama/blob/main/docs/openai.md".to_string()),
         auth: AuthStrategy::None, // Ollama ignores API keys but accepts them
         env_auth: vec![],
         env_username: None,
@@ -318,11 +316,7 @@ mod tests {
     #[test]
     fn native_embeddings_endpoint() {
         let api = define_ollama_native_api();
-        let endpoint = api
-            .endpoints
-            .iter()
-            .find(|e| e.id == "Embeddings")
-            .unwrap();
+        let endpoint = api.endpoints.iter().find(|e| e.id == "Embeddings").unwrap();
 
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/api/embeddings");
@@ -334,11 +328,7 @@ mod tests {
     #[test]
     fn native_list_models_endpoint() {
         let api = define_ollama_native_api();
-        let endpoint = api
-            .endpoints
-            .iter()
-            .find(|e| e.id == "ListModels")
-            .unwrap();
+        let endpoint = api.endpoints.iter().find(|e| e.id == "ListModels").unwrap();
 
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/api/tags");
@@ -491,11 +481,7 @@ mod tests {
     #[test]
     fn openai_embeddings_endpoint() {
         let api = define_ollama_openai_api();
-        let endpoint = api
-            .endpoints
-            .iter()
-            .find(|e| e.id == "Embeddings")
-            .unwrap();
+        let endpoint = api.endpoints.iter().find(|e| e.id == "Embeddings").unwrap();
 
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/v1/embeddings");
@@ -507,11 +493,7 @@ mod tests {
     #[test]
     fn openai_list_models_endpoint() {
         let api = define_ollama_openai_api();
-        let endpoint = api
-            .endpoints
-            .iter()
-            .find(|e| e.id == "ListModels")
-            .unwrap();
+        let endpoint = api.endpoints.iter().find(|e| e.id == "ListModels").unwrap();
 
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/v1/models");

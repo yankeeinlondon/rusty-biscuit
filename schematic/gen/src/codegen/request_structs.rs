@@ -18,7 +18,7 @@ const DEFAULT_REQUEST_SUFFIX: &str = "Request";
 /// - String fields for each path parameter (e.g., `{model}` becomes `pub model: String`)
 /// - A `body` field if the endpoint has a request schema
 /// - `Default` trait implementation
-/// - `into_parts()` method that returns `(&'static str, String, Option<String>, Vec<(String, String)>)`
+/// - `into_parts()` method that returns `Result<RequestParts, SchematicError>`
 ///
 /// ## Examples
 ///
@@ -41,7 +41,7 @@ const DEFAULT_REQUEST_SUFFIX: &str = "Request";
 /// }
 ///
 /// impl RetrieveModelRequest {
-///     pub fn into_parts(self) -> Result<(&'static str, String, Option<String>, Vec<(String, String)>), SchematicError> {
+///     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
 ///         let path = format!("/models/{}", self.model);
 ///         Ok(("GET", path, None, vec![]))
 ///     }
@@ -408,7 +408,7 @@ fn generate_into_parts(endpoint: &Endpoint, path_params: &[&str], method_str: &s
         ///
         /// Returns `SchematicError::SerializationError` if the request body
         /// fails to serialize to JSON.
-        pub fn into_parts(self) -> Result<(&'static str, String, Option<String>, Vec<(String, String)>), SchematicError> {
+        pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
             #path_format
             Ok((#method_str, path, #body_expr, #headers_init))
         }
@@ -699,7 +699,9 @@ mod tests {
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         assert!(
-            code.contains("pub fn new(thread_id: impl Into<String>, body: CreateMessageBody) -> Self"),
+            code.contains(
+                "pub fn new(thread_id: impl Into<String>, body: CreateMessageBody) -> Self"
+            ),
             "Expected new() with path param and body, got:\n{}",
             code
         );

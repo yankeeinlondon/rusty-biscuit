@@ -43,7 +43,7 @@ pub fn generate_request_enum(api: &RestApi) -> TokenStream {
 /// }
 ///
 /// impl OpenAiRequest {
-///     pub fn into_parts(self) -> Result<(&'static str, String, Option<String>, Vec<(String, String)>), SchematicError> {
+///     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
 ///         match self {
 ///             Self::ListModels(req) => req.into_parts(),
 ///             Self::RetrieveModel(req) => req.into_parts(),
@@ -90,7 +90,7 @@ pub fn generate_request_enum_with_suffix(api: &RestApi, suffix: &str) -> TokenSt
             ///
             /// Returns `SchematicError::SerializationError` if the request body
             /// fails to serialize to JSON.
-            pub fn into_parts(self) -> Result<(&'static str, String, Option<String>, Vec<(String, String)>), SchematicError> {
+            pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
                 match self {
                     #match_arms
                 }
@@ -132,11 +132,7 @@ fn generate_match_arms(api: &RestApi) -> TokenStream {
 }
 
 /// Generates individual `From` implementations for each request struct.
-fn generate_from_impls(
-    api: &RestApi,
-    enum_name: &proc_macro2::Ident,
-    suffix: &str,
-) -> TokenStream {
+fn generate_from_impls(api: &RestApi, enum_name: &proc_macro2::Ident, suffix: &str) -> TokenStream {
     let impls = api.endpoints.iter().map(|endpoint| {
         let variant_name = format_ident!("{}", endpoint.id);
         let struct_name = format_ident!("{}{}", endpoint.id, suffix);
@@ -208,9 +204,7 @@ mod tests {
 
         // Check into_parts method
         assert!(code.contains("fn into_parts(self)") || code.contains("fn into_parts(\n"));
-        assert!(code.contains("Result<"));
-        assert!(code.contains("Vec<(String, String)>"));
-        assert!(code.contains("SchematicError"));
+        assert!(code.contains("Result<RequestParts, SchematicError>"));
         assert!(code.contains("Self::ListItems(req) => req.into_parts()"));
 
         // Check From impl

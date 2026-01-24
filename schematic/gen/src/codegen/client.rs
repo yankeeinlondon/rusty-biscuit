@@ -55,7 +55,8 @@ pub fn generate_request_method(api: &RestApi) -> TokenStream {
     let auth_setup = generate_auth_setup(api);
 
     // Generate shared helper method
-    let build_request_method = generate_build_request_method(&struct_name, &request_enum, &auth_setup);
+    let build_request_method =
+        generate_build_request_method(&struct_name, &request_enum, &auth_setup);
 
     // Generate merge_headers helper
     let merge_headers_method = generate_merge_headers_method();
@@ -950,7 +951,10 @@ mod tests {
     #[test]
     fn to_snake_case_converts_correctly() {
         assert_eq!(to_snake_case("CreateSpeech"), "create_speech");
-        assert_eq!(to_snake_case("GetVoiceSampleAudio"), "get_voice_sample_audio");
+        assert_eq!(
+            to_snake_case("GetVoiceSampleAudio"),
+            "get_voice_sample_audio"
+        );
         assert_eq!(to_snake_case("ListVoices"), "list_voices");
         assert_eq!(to_snake_case("A"), "a");
         assert_eq!(to_snake_case("ABC"), "a_b_c");
