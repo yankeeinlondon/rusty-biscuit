@@ -273,42 +273,21 @@ fn generate_body_field(endpoint: &Endpoint) -> TokenStream {
 }
 
 /// Generates derive attributes for the struct.
-fn generate_derives(has_body: bool) -> TokenStream {
-    if has_body {
-        // With body, we don't derive Default (we implement it manually)
-        quote! { #[derive(Debug, Clone, Serialize, Deserialize)] }
-    } else {
-        // Without body, we can derive Default
-        quote! { #[derive(Debug, Clone, Default, Serialize, Deserialize)] }
-    }
+fn generate_derives(_has_body: bool) -> TokenStream {
+    // Always derive Default - all field types (String, body types) implement Default
+    quote! { #[derive(Debug, Clone, Default, Serialize, Deserialize)] }
 }
 
 /// Generates the Default implementation for structs with a body.
+///
+/// Returns empty TokenStream since Default is now always derived.
 fn generate_default_impl(
-    struct_name: &proc_macro2::Ident,
-    path_params: &[&str],
-    has_body: bool,
+    _struct_name: &proc_macro2::Ident,
+    _path_params: &[&str],
+    _has_body: bool,
 ) -> TokenStream {
-    if !has_body {
-        // Default is derived, no manual impl needed
-        return quote! {};
-    }
-
-    let param_defaults = path_params.iter().map(|param| {
-        let field_name = format_ident!("{}", param);
-        quote! { #field_name: String::new(), }
-    });
-
-    quote! {
-        impl Default for #struct_name {
-            fn default() -> Self {
-                Self {
-                    #(#param_defaults)*
-                    body: Default::default(),
-                }
-            }
-        }
-    }
+    // Default is derived for all structs, no manual impl needed
+    quote! {}
 }
 
 /// Generates a `new()` constructor for the request struct.
@@ -558,9 +537,8 @@ mod tests {
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         assert!(code.contains("pub struct CreateCompletionRequest"));
-        assert!(code.contains("#[derive(Debug, Clone, Serialize, Deserialize)]"));
+        assert!(code.contains("#[derive(Debug, Clone, Default, Serialize, Deserialize)]"));
         assert!(code.contains("pub body: CreateCompletionRequest"));
-        assert!(code.contains("impl Default for CreateCompletionRequest"));
         assert!(code.contains(r#""POST""#));
         assert!(code.contains("serde_json::to_string(&self.body)"));
         assert!(code.contains(".map_err"));
@@ -582,8 +560,7 @@ mod tests {
         assert!(code.contains("pub struct CreateMessageRequest"));
         assert!(code.contains("pub thread_id: String"));
         assert!(code.contains("pub body: CreateMessageRequest"));
-        assert!(code.contains("impl Default for CreateMessageRequest"));
-        assert!(code.contains("thread_id: String::new()"));
+        assert!(code.contains("#[derive(Debug, Clone, Default, Serialize, Deserialize)]"));
     }
 
     #[test]

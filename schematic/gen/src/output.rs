@@ -236,7 +236,11 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
 /// - All API client structs
 /// - All request enums
 /// - Common error type (from shared module)
-/// - Response types from definitions
+///
+/// Note: Response types from definitions are NOT re-exported in the prelude
+/// to avoid ambiguous glob re-exports (e.g., `ModelInfo` exists in multiple APIs).
+/// Import response types from specific API modules instead:
+/// `use schematic_schema::openai::ChatCompletionResponse;`
 ///
 /// ## Arguments
 ///
@@ -260,19 +264,16 @@ pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
         })
         .collect();
 
-    // Re-export response types from definitions
-    let definitions_reexports: Vec<_> = apis
-        .iter()
-        .map(|api| {
-            let module_name = format_ident!("{}", get_module_path(api));
-            quote! {
-                pub use schematic_definitions::#module_name::*;
-            }
-        })
-        .collect();
-
     quote! {
         //! Convenient re-exports for working with generated API clients.
+        //!
+        //! This prelude exports the API clients and request enums. For response types,
+        //! import from the specific API module to avoid naming conflicts:
+        //!
+        //! ```ignore
+        //! use schematic_schema::openai::ChatCompletionResponse;
+        //! use schematic_schema::anthropic::MessageResponse;
+        //! ```
         //!
         //! ## Examples
         //!
@@ -292,9 +293,6 @@ pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
 
         // API clients and request types
         #(#api_reexports)*
-
-        // Response types from definitions
-        #(#definitions_reexports)*
     }
 }
 

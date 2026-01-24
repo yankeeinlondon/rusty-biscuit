@@ -3,7 +3,7 @@
 //! These tests use wiremock to mock HTTP responses and verify
 //! that the generated client makes correct requests.
 
-use schematic_schema::huggingfacehub::{HuggingFaceHub, HuggingFaceHubRequest};
+use schematic_schema::huggingface::{HuggingFaceHub, HuggingFaceHubRequest};
 use schematic_schema::shared::SchematicError;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -53,7 +53,7 @@ async fn test_get_model_path_parameter() {
 
     let client = HuggingFaceHub::with_base_url(&mock_server.uri());
 
-    let mut request: schematic_schema::huggingfacehub::GetModelRequest = Default::default();
+    let mut request: schematic_schema::huggingface::GetModelRequest = Default::default();
     request.repo_id = "bert-base-uncased".to_string();
 
     let request = HuggingFaceHubRequest::GetModel(request);
@@ -65,7 +65,7 @@ async fn test_get_model_path_parameter() {
 /// Test that CreateRepo sends correct request body.
 #[tokio::test]
 async fn test_create_repo_request_body() {
-    use schematic_schema::huggingfacehub::{CreateRepoBody, CreateRepoRequest};
+    use schematic_schema::huggingface::{CreateRepoBody, CreateRepoRequest};
 
     setup_test_env();
     let mock_server = MockServer::start().await;
@@ -137,7 +137,7 @@ async fn test_api_error_handling() {
 
     let client = HuggingFaceHub::with_base_url(&mock_server.uri());
 
-    let mut request: schematic_schema::huggingfacehub::GetModelRequest = Default::default();
+    let mut request: schematic_schema::huggingface::GetModelRequest = Default::default();
     request.repo_id = "nonexistent-model".to_string();
 
     let request = HuggingFaceHubRequest::GetModel(request);

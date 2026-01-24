@@ -606,7 +606,7 @@ impl CreateMessageBody {
 }
 
 /// Request body for the Count Tokens endpoint (POST /v1/messages/count_tokens).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CountTokensBody {
     /// Model identifier.
     pub model: String,
@@ -629,19 +629,6 @@ pub struct CountTokensBody {
     /// Extended thinking configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<ThinkingConfig>,
-}
-
-impl Default for CountTokensBody {
-    fn default() -> Self {
-        Self {
-            model: String::new(),
-            messages: Vec::new(),
-            system: None,
-            tools: None,
-            tool_choice: None,
-            thinking: None,
-        }
-    }
 }
 
 impl CountTokensBody {

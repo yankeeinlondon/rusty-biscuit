@@ -30,6 +30,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
 tokio = { version = "1.43", features = ["rt", "macros"] }
+
+[dev-dependencies]
+wiremock = "0.6"
 "#;
 
 /// Generates the Cargo.toml content for the schema package.

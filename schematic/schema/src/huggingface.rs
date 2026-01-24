@@ -855,15 +855,10 @@ impl GetSpaceFileRequest {
 /// };
 /// let request = CreateRepoRequest::new(body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRepoRequest {
     /// Request body
     pub body: CreateRepoBody,
-}
-impl Default for CreateRepoRequest {
-    fn default() -> Self {
-        Self { body: Default::default() }
-    }
 }
 impl CreateRepoRequest {
     /// Creates a new request with the required path parameters and body.
@@ -912,15 +907,10 @@ impl CreateRepoRequest {
 /// };
 /// let request = DeleteRepoRequest::new(body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteRepoRequest {
     /// Request body
     pub body: DeleteRepoBody,
-}
-impl Default for DeleteRepoRequest {
-    fn default() -> Self {
-        Self { body: Default::default() }
-    }
 }
 impl DeleteRepoRequest {
     /// Creates a new request with the required path parameters and body.
@@ -969,7 +959,7 @@ impl DeleteRepoRequest {
 /// };
 /// let request = UpdateRepoSettingsRequest::new("repo_type_value", "repo_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateRepoSettingsRequest {
     /// Path parameter: repo_type
     pub repo_type: String,
@@ -977,15 +967,6 @@ pub struct UpdateRepoSettingsRequest {
     pub repo_id: String,
     /// Request body
     pub body: UpdateRepoSettingsBody,
-}
-impl Default for UpdateRepoSettingsRequest {
-    fn default() -> Self {
-        Self {
-            repo_type: String::new(),
-            repo_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl UpdateRepoSettingsRequest {
     /// Creates a new request with the required path parameters and body.
@@ -1042,15 +1023,10 @@ impl UpdateRepoSettingsRequest {
 /// };
 /// let request = MoveRepoRequest::new(body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MoveRepoRequest {
     /// Request body
     pub body: MoveRepoBody,
-}
-impl Default for MoveRepoRequest {
-    fn default() -> Self {
-        Self { body: Default::default() }
-    }
 }
 impl MoveRepoRequest {
     /// Creates a new request with the required path parameters and body.

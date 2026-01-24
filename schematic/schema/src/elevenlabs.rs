@@ -90,20 +90,12 @@ use crate::shared::{RequestParts, SchematicError};
 /// };
 /// let request = CreateSpeechRequest::new("voice_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSpeechRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
     pub body: CreateSpeechBody,
-}
-impl Default for CreateSpeechRequest {
-    fn default() -> Self {
-        Self {
-            voice_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl CreateSpeechRequest {
     /// Creates a new request with the required path parameters and body.
@@ -155,20 +147,12 @@ impl CreateSpeechRequest {
 /// };
 /// let request = StreamSpeechRequest::new("voice_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StreamSpeechRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
     pub body: CreateSpeechBody,
-}
-impl Default for StreamSpeechRequest {
-    fn default() -> Self {
-        Self {
-            voice_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl StreamSpeechRequest {
     /// Creates a new request with the required path parameters and body.
@@ -220,20 +204,12 @@ impl StreamSpeechRequest {
 /// };
 /// let request = CreateSpeechWithTimestampsRequest::new("voice_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSpeechWithTimestampsRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
     pub body: CreateSpeechBody,
-}
-impl Default for CreateSpeechWithTimestampsRequest {
-    fn default() -> Self {
-        Self {
-            voice_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl CreateSpeechWithTimestampsRequest {
     /// Creates a new request with the required path parameters and body.
@@ -285,20 +261,12 @@ impl CreateSpeechWithTimestampsRequest {
 /// };
 /// let request = StreamSpeechWithTimestampsRequest::new("voice_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StreamSpeechWithTimestampsRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
     pub body: CreateSpeechBody,
-}
-impl Default for StreamSpeechWithTimestampsRequest {
-    fn default() -> Self {
-        Self {
-            voice_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl StreamSpeechWithTimestampsRequest {
     /// Creates a new request with the required path parameters and body.
@@ -534,20 +502,12 @@ impl GetVoiceSettingsRequest {
 /// };
 /// let request = UpdateVoiceSettingsRequest::new("voice_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateVoiceSettingsRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
     pub body: VoiceSettings,
-}
-impl Default for UpdateVoiceSettingsRequest {
-    fn default() -> Self {
-        Self {
-            voice_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl UpdateVoiceSettingsRequest {
     /// Creates a new request with the required path parameters and body.
@@ -762,7 +722,7 @@ impl ListSharedVoicesRequest {
 /// };
 /// let request = AddSharedVoiceRequest::new("public_user_id_value", "voice_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AddSharedVoiceRequest {
     /// Path parameter: public_user_id
     pub public_user_id: String,
@@ -770,15 +730,6 @@ pub struct AddSharedVoiceRequest {
     pub voice_id: String,
     /// Request body
     pub body: AddSharedVoiceBody,
-}
-impl Default for AddSharedVoiceRequest {
-    fn default() -> Self {
-        Self {
-            public_user_id: String::new(),
-            voice_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl AddSharedVoiceRequest {
     /// Creates a new request with the required path parameters and body.
@@ -835,15 +786,10 @@ impl AddSharedVoiceRequest {
 /// };
 /// let request = CreatePvcVoiceRequest::new(body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreatePvcVoiceRequest {
     /// Request body
     pub body: CreatePvcVoiceBody,
-}
-impl Default for CreatePvcVoiceRequest {
-    fn default() -> Self {
-        Self { body: Default::default() }
-    }
 }
 impl CreatePvcVoiceRequest {
     /// Creates a new request with the required path parameters and body.
@@ -892,20 +838,12 @@ impl CreatePvcVoiceRequest {
 /// };
 /// let request = UpdatePvcVoiceRequest::new("voice_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdatePvcVoiceRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
     pub body: CreatePvcVoiceBody,
-}
-impl Default for UpdatePvcVoiceRequest {
-    fn default() -> Self {
-        Self {
-            voice_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl UpdatePvcVoiceRequest {
     /// Creates a new request with the required path parameters and body.
@@ -957,20 +895,12 @@ impl UpdatePvcVoiceRequest {
 /// };
 /// let request = TrainPvcVoiceRequest::new("voice_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TrainPvcVoiceRequest {
     /// Path parameter: voice_id
     pub voice_id: String,
     /// Request body
     pub body: TrainPvcVoiceBody,
-}
-impl Default for TrainPvcVoiceRequest {
-    fn default() -> Self {
-        Self {
-            voice_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl TrainPvcVoiceRequest {
     /// Creates a new request with the required path parameters and body.
@@ -1022,15 +952,10 @@ impl TrainPvcVoiceRequest {
 /// };
 /// let request = CreateSoundEffectRequest::new(body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSoundEffectRequest {
     /// Request body
     pub body: CreateSoundEffectBody,
-}
-impl Default for CreateSoundEffectRequest {
-    fn default() -> Self {
-        Self { body: Default::default() }
-    }
 }
 impl CreateSoundEffectRequest {
     /// Creates a new request with the required path parameters and body.
@@ -1309,15 +1234,10 @@ impl GetHistoryItemAudioRequest {
 /// };
 /// let request = DownloadHistoryItemsRequest::new(body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DownloadHistoryItemsRequest {
     /// Request body
     pub body: DownloadHistoryBody,
-}
-impl Default for DownloadHistoryItemsRequest {
-    fn default() -> Self {
-        Self { body: Default::default() }
-    }
 }
 impl DownloadHistoryItemsRequest {
     /// Creates a new request with the required path parameters and body.
@@ -1501,20 +1421,12 @@ impl GetResourceRequest {
 /// };
 /// let request = ShareResourceRequest::new("resource_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ShareResourceRequest {
     /// Path parameter: resource_id
     pub resource_id: String,
     /// Request body
     pub body: ShareResourceBody,
-}
-impl Default for ShareResourceRequest {
-    fn default() -> Self {
-        Self {
-            resource_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl ShareResourceRequest {
     /// Creates a new request with the required path parameters and body.
@@ -1566,20 +1478,12 @@ impl ShareResourceRequest {
 /// };
 /// let request = UnshareResourceRequest::new("resource_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnshareResourceRequest {
     /// Path parameter: resource_id
     pub resource_id: String,
     /// Request body
     pub body: UnshareResourceBody,
-}
-impl Default for UnshareResourceRequest {
-    fn default() -> Self {
-        Self {
-            resource_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl UnshareResourceRequest {
     /// Creates a new request with the required path parameters and body.
@@ -1631,20 +1535,12 @@ impl UnshareResourceRequest {
 /// };
 /// let request = CopyResourceToWorkspaceRequest::new("resource_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CopyResourceToWorkspaceRequest {
     /// Path parameter: resource_id
     pub resource_id: String,
     /// Request body
     pub body: CopyResourceBody,
-}
-impl Default for CopyResourceToWorkspaceRequest {
-    fn default() -> Self {
-        Self {
-            resource_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl CopyResourceToWorkspaceRequest {
     /// Creates a new request with the required path parameters and body.
@@ -1773,20 +1669,12 @@ impl ListServiceAccountApiKeysRequest {
 /// };
 /// let request = CreateApiKeyRequest::new("service_account_user_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateApiKeyRequest {
     /// Path parameter: service_account_user_id
     pub service_account_user_id: String,
     /// Request body
     pub body: CreateApiKeyBody,
-}
-impl Default for CreateApiKeyRequest {
-    fn default() -> Self {
-        Self {
-            service_account_user_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl CreateApiKeyRequest {
     /// Creates a new request with the required path parameters and body.
@@ -1843,7 +1731,7 @@ impl CreateApiKeyRequest {
 /// };
 /// let request = UpdateApiKeyRequest::new("service_account_user_id_value", "api_key_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateApiKeyRequest {
     /// Path parameter: service_account_user_id
     pub service_account_user_id: String,
@@ -1851,15 +1739,6 @@ pub struct UpdateApiKeyRequest {
     pub api_key_id: String,
     /// Request body
     pub body: UpdateApiKeyBody,
-}
-impl Default for UpdateApiKeyRequest {
-    fn default() -> Self {
-        Self {
-            service_account_user_id: String::new(),
-            api_key_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl UpdateApiKeyRequest {
     /// Creates a new request with the required path parameters and body.
@@ -2001,15 +1880,10 @@ impl ListWebhooksRequest {
 /// };
 /// let request = CreateWebhookRequest::new(body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateWebhookRequest {
     /// Request body
     pub body: CreateWebhookBody,
-}
-impl Default for CreateWebhookRequest {
-    fn default() -> Self {
-        Self { body: Default::default() }
-    }
 }
 impl CreateWebhookRequest {
     /// Creates a new request with the required path parameters and body.
@@ -2058,20 +1932,12 @@ impl CreateWebhookRequest {
 /// };
 /// let request = UpdateWebhookRequest::new("webhook_id_value", body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateWebhookRequest {
     /// Path parameter: webhook_id
     pub webhook_id: String,
     /// Request body
     pub body: UpdateWebhookBody,
-}
-impl Default for UpdateWebhookRequest {
-    fn default() -> Self {
-        Self {
-            webhook_id: String::new(),
-            body: Default::default(),
-        }
-    }
 }
 impl UpdateWebhookRequest {
     /// Creates a new request with the required path parameters and body.

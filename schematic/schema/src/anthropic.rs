@@ -48,15 +48,10 @@ use crate::shared::{RequestParts, SchematicError};
 /// };
 /// let request = CreateMessageRequest::new(body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateMessageRequest {
     /// Request body
     pub body: CreateMessageBody,
-}
-impl Default for CreateMessageRequest {
-    fn default() -> Self {
-        Self { body: Default::default() }
-    }
 }
 impl CreateMessageRequest {
     /// Creates a new request with the required path parameters and body.
@@ -105,15 +100,10 @@ impl CreateMessageRequest {
 /// };
 /// let request = CountTokensRequest::new(body);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CountTokensRequest {
     /// Request body
     pub body: CountTokensBody,
-}
-impl Default for CountTokensRequest {
-    fn default() -> Self {
-        Self { body: Default::default() }
-    }
 }
 impl CountTokensRequest {
     /// Creates a new request with the required path parameters and body.

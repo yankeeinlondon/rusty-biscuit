@@ -2,6 +2,14 @@
 
 //! Convenient re-exports for working with generated API clients.
 //!
+//! This prelude exports the API clients and request enums. For response types,
+//! import from the specific API module to avoid naming conflicts:
+//!
+//! ```ignore
+//! use schematic_schema::openai::ChatCompletionResponse;
+//! use schematic_schema::anthropic::MessageResponse;
+//! ```
+//!
 //! ## Examples
 //!
 //! ```ignore
@@ -19,7 +27,3 @@ pub use crate::anthropic::{Anthropic, AnthropicRequest};
 pub use crate::openai::{OpenAI, OpenAIRequest};
 pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};
 pub use crate::huggingface::{HuggingFaceHub, HuggingFaceHubRequest};
-pub use schematic_definitions::anthropic::*;
-pub use schematic_definitions::openai::*;
-pub use schematic_definitions::elevenlabs::*;
-pub use schematic_definitions::huggingface::*;
