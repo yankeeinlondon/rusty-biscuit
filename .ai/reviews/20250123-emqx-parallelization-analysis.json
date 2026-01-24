@@ -1,0 +1,287 @@
+{
+  "plan_review": {
+    "title": "EMQX API Integration Parallelization Analysis",
+    "timestamp": "2026-01-23",
+    "phases_current_count": 8,
+    "parallelizable_phases_current": 2
+  },
+  "recommendations": [
+    {
+      "priority": "CRITICAL",
+      "type": "phase_splitting",
+      "title": "Split Phase 4 & 5 into parallel subtasks",
+      "current_state": {
+        "phase_4": "Type Documentation",
+        "phase_5": "Register in Generator",
+        "dependency": "Both depend on Phases 2, 3",
+        "overlap": "Both write to different files - NO CONFLICT"
+      },
+      "detailed_analysis": {
+        "file_access_pattern": {
+          "phase_4_writes": [
+            "schematic/definitions/src/emqx/mod.rs (REST API docs)",
+            "schematic/definitions/src/emqx/types.rs (type documentation)"
+          ],
+          "phase_5_writes": [
+            "schematic/gen/src/main.rs (CLI registration only - in resolve_api function)",
+            "schematic/definitions/src/lib.rs (module export only)"
+          ],
+          "collision_risk": "ZERO - Different files, no shared write paths",
+          "note": "These phases operate on completely separate modules"
+        },
+        "implementation_notes": "Phase 4 focuses on definitions package, Phase 5 focuses on gen package. They are independent and can execute in parallel after Phases 2-3 complete."
+      },
+      "recommendation": "MERGE phases 4 & 5 into a single parallel stage labeled 'API Registration & Documentation' (Phase 4-5 parallel). Assign to same general-purpose subagent for consistency but structure as two independent subtasks that can complete in any order.",
+      "impact": "Reduces critical path from 8 phases to 7 phases. No functional change, pure scheduling optimization."
+    },
+    {
+      "priority": "HIGH",
+      "type": "test_parallelization",
+      "title": "Move unit/integration tests to Phase 5 (parallel with 4-5)",
+      "current_state": {
+        "phase_6": "Tests (depends on 2,3,4)",
+        "issue": "Depends on Phase 4 (Type Documentation) which is now parallelizable with Phase 5"
+      },
+      "detailed_analysis": {
+        "test_strategy": {
+          "unit_tests": {
+            "target": "schematic-definitions types module",
+            "location": "Tests in schematic/definitions/src/emqx/",
+            "independence": "Can compile with just type stubs - no need for full definition",
+            "parallel_opportunity": "Start writing unit tests in Phase 4-5 once types.rs scaffolding exists"
+          },
+          "integration_tests": {
+            "target": "generate_and_write flow",
+            "location": "schematic/gen/tests/",
+            "dependency": "Needs full API definition (Phase 2-3 + registration from Phase 5)",
+            "parallel_opportunity": "Can parallelize with Phase 5 generator registration"
+          },
+          "compilation_tests": {
+            "target": "Generated code compiles",
+            "location": "e2e_generation.rs - already has #[ignore] slow test pattern",
+            "dependency": "Needs Phase 7 (generation complete)",
+            "note": "These MUST stay in Phase 6 (after generation)"
+          }
+        },
+        "current_test_file_structure": "schematic/gen/tests/ has e2e_generation.rs (26k), http_client.rs (16k), path_substitution.rs (13k). All marked with #[ignore] for slow tests - good isolation."
+      },
+      "recommendation": "Split Phase 6 into:\n  - Phase 5b (parallel): Unit tests on types (once types.rs exists from Phase 4)\n  - Phase 6: Integration & E2E tests (after Phase 7 generation complete)\nThis removes the strict 2→3→4 dependency chain for unit testing.",
+      "impact": "Allows testing to start earlier without blocking generation phases. Tests won't block critical path."
+    },
+    {
+      "priority": "MEDIUM",
+      "type": "race_condition_analysis",
+      "title": "File access patterns - Race condition assessment",
+      "detailed_analysis": {
+        "lib_rs_updates": {
+          "files_affected": ["schematic/definitions/src/lib.rs", "schematic/gen/src/main.rs"],
+          "access_type": "SEQUENTIAL WRITES (Phase 2-3 complete before Phase 4-5 start)",
+          "race_condition_risk": "NONE - Phases 4-5 depend on 2-3 completing first",
+          "atomic_guarantee": "File writes use write_atomic (temp file + rename pattern) in cargo_gen.rs:write_cargo_toml and output.rs:write_atomic"
+        },
+        "definitions_module_structure": {
+          "new_emqx_module": "schematic/definitions/src/emqx/",
+          "isolation": "New directory - no shared write paths with other APIs",
+          "existing_apis": ["openai", "elevenlabs", "huggingface", "ollama"],
+          "cargo_toml_generation": "cargo_gen.rs generates static template - no dynamic merging, uses write_atomic for safety",
+          "race_risk_with_cargo_toml": "MEDIUM - If Phase 4-5 and another API generation run in parallel, they both call write_cargo_toml. However, same content is written (template is identical), so idempotent. Safe but worth documenting.",
+          "mitigation": "Cargo.toml generation is idempotent and uses atomic writes. Multiple writers produce identical output, so no corruption risk."
+        },
+        "schema_package_files": {
+          "generated_outputs": ["lib.rs", "shared.rs", "prelude.rs", "{api_name}.rs"],
+          "generation_location": "schematic/gen/src/output.rs:generate_and_write_all",
+          "concurrency_model": "generate_and_write_all writes multiple files sequentially within one call, NOT in parallel",
+          "recommendation": "Do NOT parallelize file writes within generate_and_write_all. Current sequential write + atomic rename pattern is safe and correct."
+        }
+      },
+      "recommendation": "No race conditions detected in proposed parallelization. Current atomic write pattern (write_atomic) is sufficient. Document that Cargo.toml generation is idempotent.",
+      "impact": "Safety verified. Proceed with parallel execution of Phases 4-5."
+    },
+    {
+      "priority": "MEDIUM",
+      "type": "dependency_accuracy",
+      "title": "Verify stated dependencies are correct",
+      "current_state": {
+        "phase_2": "Basic Auth API (no dependencies)",
+        "phase_3": "Bearer Token API (depends on Phase 2)",
+        "phase_4_5": "Documentation & Registration (depends on 2,3)",
+        "issue_found": "Phase 3 might not depend on Phase 2 as strongly as stated"
+      },
+      "detailed_analysis": {
+        "phase_2_produces": {
+          "files": ["schematic/definitions/src/emqx/mod.rs (with auth strategy definition)"],
+          "exports": "define_emqx_api() function with basic auth",
+          "imported_by": "schematic/definitions/src/lib.rs (pub use), schematic/gen/src/main.rs (resolve_api function)"
+        },
+        "phase_3_produces": {
+          "files": ["schematic/definitions/src/emqx/mod.rs (MODIFIED - adds bearer token endpoints)"],
+          "exports": "Enhanced define_emqx_api() or new define_emqx_bearer_api()",
+          "question": "Does Phase 3 modify the same mod.rs file from Phase 2, or create a new variant?"
+        },
+        "dependency_verification": {
+          "scenario_1": "If Phase 3 adds ENDPOINTS to Phase 2's RestApi struct",
+          "answer": "Phase 2 must complete first - Bearer token endpoints need basic definition to extend",
+          "scenario_2": "If Phase 3 creates a SEPARATE API variant (define_emqx_bearer_api vs define_emqx_basic_api)",
+          "answer": "Could potentially parallelize if they create separate definitions",
+          "current_documentation": "Plan states Phase 3 depends on Phase 2, which is likely correct for unified EMQX API with multiple auth strategies"
+        }
+      },
+      "recommendation": "Confirm with team: Does EMQX have one unified API with multiple auth strategies, or separate API variants per auth type? This affects whether Phase 2→3 dependency is strict or loosely coupled.",
+      "assumption_made": "Assuming unified API (Phase 2→3 dependency is correct as stated). Plan is acceptable.",
+      "impact": "No change if assumption is correct. Potential to make Phase 2-3 independent if separate API variants are used (advanced optimization)."
+    },
+    {
+      "priority": "LOW",
+      "type": "documentation_opportunity",
+      "title": "Add execution timeline visualization",
+      "recommendation": "Add Gantt chart to plan documentation showing:\n  - Critical path: Phase 1 → 2 → 3 → 4-5 parallel → 6 → 7 (7 phases total)\n  - Slack time: Phases 4-5 parallel (no slack since they're on critical path)\n  - Test opportunities: Phase 5b for unit tests (optional early execution)",
+      "impact": "Improves visibility for subagent coordination and progress tracking."
+    }
+  ],
+  "optimized_plan": {
+    "title": "Revised Phase Plan with Parallelization",
+    "total_phases": 7,
+    "critical_path_length": 7,
+    "phases": [
+      {
+        "phase": 1,
+        "name": "Type Scaffolding",
+        "subagent": "Explore",
+        "dependencies": "None",
+        "parallelizable": false,
+        "estimated_work": "Create emqx/ directory, types.rs skeleton, mod.rs shell"
+      },
+      {
+        "phase": 2,
+        "name": "Basic Auth API",
+        "subagent": "general-purpose",
+        "dependencies": "Phase 1",
+        "parallelizable": false,
+        "estimated_work": "Define endpoints with basic auth, type definitions"
+      },
+      {
+        "phase": 3,
+        "name": "Bearer Token API",
+        "subagent": "general-purpose",
+        "dependencies": "Phase 2",
+        "parallelizable": false,
+        "estimated_work": "Add bearer token endpoints or create variant definition"
+      },
+      {
+        "phase": "4-5",
+        "name": "API Registration & Documentation (PARALLEL)",
+        "subagent": "general-purpose",
+        "dependencies": "Phase 2, 3",
+        "parallelizable": true,
+        "parallel_subtasks": [
+          {
+            "subtask": "4a",
+            "name": "Type Documentation",
+            "target": "schematic/definitions/src/emqx/",
+            "outputs": "Documentation in mod.rs and types.rs"
+          },
+          {
+            "subtask": "4b",
+            "name": "Register in Generator",
+            "target": "schematic/gen/src/main.rs + schematic/definitions/src/lib.rs",
+            "outputs": "CLI support and module exports"
+          }
+        ],
+        "race_condition_risk": "NONE - different file targets",
+        "note": "Both subtasks can complete in any order. One subagent can handle both, or delegate to sub-specialists."
+      },
+      {
+        "phase": "5",
+        "name": "Tests",
+        "subagent": "feature-tester-rust",
+        "dependencies": "Phase 2, 3, 4-5",
+        "parallelizable": "OPTIONAL - Unit tests (5a) can start during Phase 4-5 if types.rs is complete",
+        "parallelizable_subtasks": [
+          {
+            "subtask": "5a",
+            "name": "Unit Tests (OPTIONAL EARLY)",
+            "target": "schematic/definitions/src/emqx/ tests",
+            "can_start": "During Phase 4-5 (once Phase 1 complete)",
+            "blocking": false
+          },
+          {
+            "subtask": "5b",
+            "name": "Integration Tests",
+            "target": "schematic/gen/tests/",
+            "dependencies": "Phase 4-5 complete",
+            "blocking": true
+          }
+        ]
+      },
+      {
+        "phase": 6,
+        "name": "Generate & Validate",
+        "subagent": "Bash",
+        "dependencies": "Phase 5",
+        "parallelizable": false,
+        "estimated_work": "Run code generation, validate outputs, run cargo check"
+      },
+      {
+        "phase": 7,
+        "name": "Documentation",
+        "subagent": "general-purpose",
+        "dependencies": "Phase 6",
+        "parallelizable": false,
+        "estimated_work": "Final API docs, usage examples, integration guide"
+      }
+    ]
+  },
+  "modules_impacted_analysis": {
+    "schematic/definitions": {
+      "new_file": "emqx/mod.rs",
+      "new_file_2": "emqx/types.rs",
+      "modified_file": "lib.rs (pub mod emqx + pub use define_emqx_api)",
+      "modified_file_2": "prelude.rs (pub use emqx::*)",
+      "write_concurrency": "lib.rs and prelude.rs updates in Phase 4-5b are safe - different from other modules, uses atomic writes"
+    },
+    "schematic/gen": {
+      "modified_file": "src/main.rs",
+      "changes": "Add emqx case to resolve_api() and resolve_all_apis()",
+      "location": "Lines ~74-89 (resolve_api function), lines ~91-104 (resolve_all_apis function)",
+      "write_safety": "Sequential writes to main.rs using text editing (not file i/o races), safe"
+    },
+    "schematic/schema": {
+      "auto_generated": true,
+      "generated_files": ["src/lib.rs (module decl)", "src/emqx.rs (NEW)", "src/shared.rs (unchanged)", "src/prelude.rs (updated re-exports)"],
+      "generation_triggered": "Phase 6 (Generate & Validate) - not concurrent",
+      "write_pattern": "generate_and_write_all() uses sequential atomic writes - correct pattern"
+    }
+  },
+  "package_changes": [],
+  "lessons_learned": [
+    {
+      "resource_type": "FILE_WRITE_SAFETY",
+      "finding": "Current write_atomic pattern in schematic/gen/src/output.rs is excellent - uses temp file + rename for atomicity. No concurrent write improvements needed."
+    },
+    {
+      "resource_type": "PHASE_INDEPENDENCE",
+      "finding": "Phases 4 & 5 (Type Documentation & Register in Generator) are logically independent despite same dependency set. They operate on entirely separate modules (definitions vs gen) with zero file conflicts."
+    },
+    {
+      "resource_type": "CARGO_TOML_GENERATION",
+      "finding": "cargo_gen.rs:generate_cargo_toml() produces static template with write_atomic safety. Multiple concurrent calls produce identical output (idempotent) - safe but suboptimal. No changes needed for correctness."
+    },
+    {
+      "resource_type": "EARLY_TESTING_OPPORTUNITY",
+      "finding": "Unit tests on types can start as soon as Phase 1 (type scaffolding) completes. Phase 4-5 documentation doesn't block type tests. Plan should explicitly mention Phase 5a (unit tests) as optional early-start activity."
+    },
+    {
+      "resource_type": "CLI_REGISTRATION_COMPLEXITY",
+      "finding": "CLI registration in schematic/gen/src/main.rs requires manual addition of resolve_api cases and resolve_all_apis updates. Not automatic - confirm no auto-generation system exists before implementing Phase 4b."
+    }
+  ],
+  "execution_summary": {
+    "critical_path": "1 → 2 → 3 → (4-5 parallel) → 6 → 7",
+    "critical_path_length": "7 phases (vs 8 in original plan)",
+    "parallelization_gain": "1 phase reduction by merging phases 4 & 5",
+    "race_condition_risks": "ZERO - No file collision detected",
+    "atomic_write_guarantee": "YES - All file writes in schematic/gen use write_atomic pattern",
+    "subagent_coordination_effort": "LOW - Phases 4-5 can be single-subagent with two subtasks, or multi-subagent if preferred",
+    "recommended_next_step": "Clarify EMQX API structure (unified vs separate auth variants) to finalize Phase 2-3 dependency strength"
+  }
+}

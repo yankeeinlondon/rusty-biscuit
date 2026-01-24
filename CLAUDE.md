@@ -138,6 +138,35 @@ just -f schematic/justfile generate
 - `module_path`: Override generated module name (for multi-API modules)
 - `request_suffix`: Customize wrapper struct suffix (default: "Request")
 
+**⚠️ CRITICAL - Response Type Selection:**
+
+When defining endpoints, choose the correct `ApiResponse`:
+
+| Response Type | Use For | Generated Method |
+|---------------|---------|------------------|
+| `ApiResponse::Json(schema)` | JSON responses | `request<T>()` |
+| `ApiResponse::Binary` | Audio, images, archives | `request_bytes()` |
+| `ApiResponse::Text` | Plain text | `request_text()` |
+| `ApiResponse::Empty` | 204 No Content | `request_empty()` |
+
+**⚠️ CRITICAL - Module Path for Multi-API Modules:**
+
+When multiple APIs share one definitions module (e.g., Ollama), you MUST set `module_path`:
+
+```rust
+// Both APIs in definitions/src/ollama/mod.rs
+RestApi { name: "OllamaNative".to_string(), module_path: Some("ollama".to_string()), ... }
+RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string()), ... }
+```
+
+**⚠️ CRITICAL - Testing Gap:**
+
+Schematic tests verify **syntax only**, NOT runtime behavior! After modifying:
+1. Run `cargo test -p schematic-gen`
+2. Run `just -f schematic/justfile generate`
+3. Run `cargo check -p schematic-schema`
+4. **Manually verify** correct methods generated: `grep "request_bytes" schematic/schema/src/*.rs`
+
 #### 6. Tree-sitter Symbol Extraction (Tree Hugger)
 
 The `tree-hugger` package provides multi-language symbol extraction using Tree-sitter:
