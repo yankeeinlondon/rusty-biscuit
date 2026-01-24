@@ -76,7 +76,7 @@
  ```*/
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::elevenlabs::*;
-use crate::shared::SchematicError;
+use crate::shared::{RequestParts, SchematicError};
 /// Request for `CreateSpeech` endpoint.
 ///
 /// ## Example
@@ -129,12 +129,7 @@ impl CreateSpeechRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/text-to-speech/{}", self.voice_id);
         Ok((
             "POST",
@@ -199,12 +194,7 @@ impl StreamSpeechRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/text-to-speech/{}/stream", self.voice_id);
         Ok((
             "POST",
@@ -269,12 +259,7 @@ impl CreateSpeechWithTimestampsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/text-to-speech/{}/with-timestamps", self.voice_id);
         Ok((
             "POST",
@@ -339,12 +324,7 @@ impl StreamSpeechWithTimestampsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/v1/text-to-speech/{}/stream/with-timestamps", self.voice_id
         );
@@ -385,12 +365,7 @@ impl ListVoicesRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v2/voices".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -430,12 +405,7 @@ impl GetVoiceRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/voices/{}", self.voice_id);
         Ok(("GET", path, None, vec![]))
     }
@@ -475,12 +445,7 @@ impl DeleteVoiceRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/voices/{}", self.voice_id);
         Ok(("DELETE", path, None, vec![]))
     }
@@ -511,12 +476,7 @@ impl GetDefaultVoiceSettingsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/voices/settings/default".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -556,12 +516,7 @@ impl GetVoiceSettingsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/voices/{}/settings", self.voice_id);
         Ok(("GET", path, None, vec![]))
     }
@@ -618,12 +573,7 @@ impl UpdateVoiceSettingsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/voices/{}/settings/edit", self.voice_id);
         Ok((
             "POST",
@@ -676,12 +626,7 @@ impl GetVoiceSampleAudioRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/v1/voices/{}/samples/{}/audio", self.voice_id, self.sample_id
         );
@@ -728,12 +673,7 @@ impl DeleteVoiceSampleRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/voices/{}/samples/{}", self.voice_id, self.sample_id);
         Ok(("DELETE", path, None, vec![]))
     }
@@ -773,12 +713,7 @@ impl AddVoiceSampleRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/voices/{}/samples", self.voice_id);
         Ok(("POST", path, None, vec![]))
     }
@@ -809,12 +744,7 @@ impl ListSharedVoicesRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/shared-voices".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -879,12 +809,7 @@ impl AddSharedVoiceRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/voices/add/{}/{}", self.public_user_id, self.voice_id);
         Ok((
             "POST",
@@ -941,12 +866,7 @@ impl CreatePvcVoiceRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/voices/pvc".to_string();
         Ok((
             "POST",
@@ -1011,12 +931,7 @@ impl UpdatePvcVoiceRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/voices/pvc/{}", self.voice_id);
         Ok((
             "POST",
@@ -1081,12 +996,7 @@ impl TrainPvcVoiceRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/voices/pvc/{}/train", self.voice_id);
         Ok((
             "POST",
@@ -1143,12 +1053,7 @@ impl CreateSoundEffectRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/sound-generation".to_string();
         Ok((
             "POST",
@@ -1187,12 +1092,7 @@ impl ListModelsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/models".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -1234,12 +1134,7 @@ impl CreateSingleUseTokenRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/single-use-token/{}", self.token_type);
         Ok(("POST", path, None, vec![]))
     }
@@ -1270,12 +1165,7 @@ impl GetHistoryRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/history".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -1317,12 +1207,7 @@ impl GetHistoryItemRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/history/{}", self.history_item_id);
         Ok(("GET", path, None, vec![]))
     }
@@ -1364,12 +1249,7 @@ impl DeleteHistoryItemRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/history/{}", self.history_item_id);
         Ok(("DELETE", path, None, vec![]))
     }
@@ -1411,12 +1291,7 @@ impl GetHistoryItemAudioRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/history/{}/audio", self.history_item_id);
         Ok(("GET", path, None, vec![]))
     }
@@ -1465,12 +1340,7 @@ impl DownloadHistoryItemsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/history/download".to_string();
         Ok((
             "POST",
@@ -1509,12 +1379,7 @@ impl GetUsageStatsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/usage/character-stats".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -1545,12 +1410,7 @@ impl GetUserRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/user".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -1581,12 +1441,7 @@ impl GetUserSubscriptionRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/user/subscription".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -1628,12 +1483,7 @@ impl GetResourceRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/workspace/resources/{}", self.resource_id);
         Ok(("GET", path, None, vec![]))
     }
@@ -1690,12 +1540,7 @@ impl ShareResourceRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/workspace/resources/{}/share", self.resource_id);
         Ok((
             "POST",
@@ -1760,12 +1605,7 @@ impl UnshareResourceRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/workspace/resources/{}/unshare", self.resource_id);
         Ok((
             "POST",
@@ -1830,12 +1670,7 @@ impl CopyResourceToWorkspaceRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/v1/workspace/resources/{}/copy-to-workspace", self.resource_id
         );
@@ -1876,12 +1711,7 @@ impl ListServiceAccountsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/service-accounts".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -1923,12 +1753,7 @@ impl ListServiceAccountApiKeysRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/v1/service-accounts/{}/api-keys", self.service_account_user_id
         );
@@ -1990,12 +1815,7 @@ impl CreateApiKeyRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/v1/service-accounts/{}/api-keys", self.service_account_user_id
         );
@@ -2070,12 +1890,7 @@ impl UpdateApiKeyRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/v1/service-accounts/{}/api-keys/{}", self.service_account_user_id, self
             .api_key_id
@@ -2134,12 +1949,7 @@ impl DeleteApiKeyRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/v1/service-accounts/{}/api-keys/{}", self.service_account_user_id, self
             .api_key_id
@@ -2173,12 +1983,7 @@ impl ListWebhooksRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/workspace/webhooks".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -2227,12 +2032,7 @@ impl CreateWebhookRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/v1/workspace/webhooks".to_string();
         Ok((
             "POST",
@@ -2297,12 +2097,7 @@ impl UpdateWebhookRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/workspace/webhooks/{}", self.webhook_id);
         Ok((
             "PATCH",
@@ -2352,12 +2147,7 @@ impl DeleteWebhookRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/v1/workspace/webhooks/{}", self.webhook_id);
         Ok(("DELETE", path, None, vec![]))
     }
@@ -2460,12 +2250,7 @@ impl ElevenLabsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         match self {
             Self::CreateSpeech(req) => req.into_parts(),
             Self::StreamSpeech(req) => req.into_parts(),

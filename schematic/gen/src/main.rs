@@ -7,7 +7,9 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;
+use schematic_definitions::anthropic::define_anthropic_api;
 use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
+use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
 use schematic_definitions::huggingface::define_huggingface_hub_api;
 use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
 use schematic_definitions::openai::define_openai_api;
@@ -17,7 +19,7 @@ use schematic_gen::output::{generate_and_write, generate_and_write_all};
 use schematic_gen::validate_api;
 
 /// List of available API names for error messages.
-const AVAILABLE_APIS: &str = "openai, elevenlabs, huggingface, ollama-native, ollama-openai, all";
+const AVAILABLE_APIS: &str = "anthropic, openai, elevenlabs, huggingface, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all";
 
 /// Schematic code generator - transforms API definitions into typed Rust clients
 #[derive(Parser, Debug)]
@@ -73,11 +75,14 @@ enum Commands {
 /// Resolves an API name to its definition.
 fn resolve_api(name: &str) -> Result<schematic_define::RestApi, GeneratorError> {
     match name {
+        "anthropic" => Ok(define_anthropic_api()),
         "openai" => Ok(define_openai_api()),
         "elevenlabs" => Ok(define_elevenlabs_rest_api()),
         "huggingface" => Ok(define_huggingface_hub_api()),
         "ollama-native" => Ok(define_ollama_native_api()),
         "ollama-openai" => Ok(define_ollama_openai_api()),
+        "emqx-basic" => Ok(define_emqx_basic_api()),
+        "emqx-bearer" => Ok(define_emqx_bearer_api()),
         "all" => Err(GeneratorError::ConfigError(
             "Use resolve_all_apis() for 'all'".to_string(),
         )),
@@ -90,16 +95,20 @@ fn resolve_api(name: &str) -> Result<schematic_define::RestApi, GeneratorError> 
 
 /// Returns all available API definitions for batch generation.
 ///
-/// Note: Ollama APIs are excluded from "all" because they share a definitions
-/// module, which requires different handling. Generate them individually.
+/// Note: Ollama and EMQX APIs are excluded from "all" because they share definitions
+/// modules (types), which requires different handling. Generate them individually.
 fn resolve_all_apis() -> Vec<schematic_define::RestApi> {
     vec![
+        define_anthropic_api(),
         define_openai_api(),
         define_elevenlabs_rest_api(),
         define_huggingface_hub_api(),
         // Note: Ollama APIs excluded from "all" - generate individually
         // define_ollama_native_api(),
         // define_ollama_openai_api(),
+        // Note: EMQX APIs excluded from "all" - generate individually
+        // define_emqx_basic_api(),
+        // define_emqx_bearer_api(),
     ]
 }
 

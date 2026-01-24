@@ -60,7 +60,7 @@
  ```*/
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::huggingface::*;
-use crate::shared::SchematicError;
+use crate::shared::{RequestParts, SchematicError};
 /// Request for `ListModels` endpoint.
 ///
 /// ## Example
@@ -87,12 +87,7 @@ impl ListModelsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/models".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -132,12 +127,7 @@ impl GetModelRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/models/{}", self.repo_id);
         Ok(("GET", path, None, vec![]))
     }
@@ -182,12 +172,7 @@ impl ListModelFilesRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/models/{}/tree/{}", self.repo_id, self.revision);
         Ok(("GET", path, None, vec![]))
     }
@@ -239,12 +224,7 @@ impl GetModelFileRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/models/{}/blob/{}/{}", self.repo_id, self.revision, self.path
         );
@@ -291,12 +271,7 @@ impl ListModelCommitsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/models/{}/commits/{}", self.repo_id, self.revision);
         Ok(("GET", path, None, vec![]))
     }
@@ -341,12 +316,7 @@ impl GetModelReadmeRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/models/{}/resolve/{}/README.md", self.repo_id, self.revision
         );
@@ -388,12 +358,7 @@ impl ListModelDiscussionsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/models/{}/discussions", self.repo_id);
         Ok(("GET", path, None, vec![]))
     }
@@ -438,12 +403,7 @@ impl GetModelCardRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/models/{}/resolve/{}/model_card.md", self.repo_id, self.revision
         );
@@ -476,12 +436,7 @@ impl ListDatasetsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/datasets".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -521,12 +476,7 @@ impl GetDatasetRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/datasets/{}", self.repo_id);
         Ok(("GET", path, None, vec![]))
     }
@@ -571,12 +521,7 @@ impl ListDatasetFilesRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/datasets/{}/tree/{}", self.repo_id, self.revision);
         Ok(("GET", path, None, vec![]))
     }
@@ -628,12 +573,7 @@ impl GetDatasetFileRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/datasets/{}/blob/{}/{}", self.repo_id, self.revision, self.path
         );
@@ -680,12 +620,7 @@ impl ListDatasetCommitsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/datasets/{}/commits/{}", self.repo_id, self.revision);
         Ok(("GET", path, None, vec![]))
     }
@@ -730,12 +665,7 @@ impl GetDatasetReadmeRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/datasets/{}/resolve/{}/README.md", self.repo_id, self.revision
         );
@@ -768,12 +698,7 @@ impl ListSpacesRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/spaces".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -813,12 +738,7 @@ impl GetSpaceRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/spaces/{}", self.repo_id);
         Ok(("GET", path, None, vec![]))
     }
@@ -863,12 +783,7 @@ impl ListSpaceFilesRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/spaces/{}/tree/{}", self.repo_id, self.revision);
         Ok(("GET", path, None, vec![]))
     }
@@ -920,12 +835,7 @@ impl GetSpaceFileRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
             "/spaces/{}/blob/{}/{}", self.repo_id, self.revision, self.path
         );
@@ -976,12 +886,7 @@ impl CreateRepoRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/repos/create".to_string();
         Ok((
             "POST",
@@ -1038,12 +943,7 @@ impl DeleteRepoRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/repos/delete".to_string();
         Ok((
             "DELETE",
@@ -1116,12 +1016,7 @@ impl UpdateRepoSettingsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/repos/{}/{}/settings", self.repo_type, self.repo_id);
         Ok((
             "PUT",
@@ -1178,12 +1073,7 @@ impl MoveRepoRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/repos/move".to_string();
         Ok((
             "POST",
@@ -1222,12 +1112,7 @@ impl WhoAmIRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/whoami-v2".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -1267,12 +1152,7 @@ impl GetUserRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/users/{}", self.username);
         Ok(("GET", path, None, vec![]))
     }
@@ -1312,12 +1192,7 @@ impl ListUserReposRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/users/{}/repos", self.username);
         Ok(("GET", path, None, vec![]))
     }
@@ -1357,12 +1232,7 @@ impl GetUserCollectionsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/users/{}/collections", self.username);
         Ok(("GET", path, None, vec![]))
     }
@@ -1433,12 +1303,7 @@ impl HuggingFaceHubRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         match self {
             Self::ListModels(req) => req.into_parts(),
             Self::GetModel(req) => req.into_parts(),

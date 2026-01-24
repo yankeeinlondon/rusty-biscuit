@@ -33,7 +33,7 @@
  ```*/
 use serde::{Deserialize, Serialize};
 pub use schematic_definitions::openai::*;
-use crate::shared::SchematicError;
+use crate::shared::{RequestParts, SchematicError};
 /// Request for `ListModels` endpoint.
 ///
 /// ## Example
@@ -60,12 +60,7 @@ impl ListModelsRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/models".to_string();
         Ok(("GET", path, None, vec![]))
     }
@@ -105,12 +100,7 @@ impl RetrieveModelRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/models/{}", self.model);
         Ok(("GET", path, None, vec![]))
     }
@@ -150,12 +140,7 @@ impl DeleteModelRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/models/{}", self.model);
         Ok(("DELETE", path, None, vec![]))
     }
@@ -180,12 +165,7 @@ impl OpenAIRequest {
     ///
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
-    pub fn into_parts(
-        self,
-    ) -> Result<
-        (&'static str, String, Option<String>, Vec<(String, String)>),
-        SchematicError,
-    > {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         match self {
             Self::ListModels(req) => req.into_parts(),
             Self::RetrieveModel(req) => req.into_parts(),

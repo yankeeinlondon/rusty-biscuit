@@ -14,10 +14,12 @@
 //!     Ok(())
 //! }
 //! ```
-pub use crate::shared::SchematicError;
+pub use crate::shared::{RequestParts, SchematicError};
+pub use crate::anthropic::{Anthropic, AnthropicRequest};
 pub use crate::openai::{OpenAI, OpenAIRequest};
 pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};
 pub use crate::huggingface::{HuggingFaceHub, HuggingFaceHubRequest};
+pub use schematic_definitions::anthropic::*;
 pub use schematic_definitions::openai::*;
 pub use schematic_definitions::elevenlabs::*;
 pub use schematic_definitions::huggingface::*;

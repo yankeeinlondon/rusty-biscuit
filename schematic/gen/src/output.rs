@@ -29,7 +29,7 @@ use schematic_define::RestApi;
 
 use crate::codegen::{
     ModuleDocBuilder, generate_api_struct, generate_error_type, generate_request_enum_with_suffix,
-    generate_request_method, generate_request_parts_type, generate_request_struct_with_options,
+    generate_request_method_with_suffix, generate_request_parts_type, generate_request_struct_with_options,
 };
 use crate::errors::GeneratorError;
 use crate::inference::infer_module_path;
@@ -147,8 +147,8 @@ pub fn assemble_api_module(api: &RestApi) -> TokenStream {
     // Generate API struct
     let api_struct = generate_api_struct(api);
 
-    // Generate request method
-    let request_method = generate_request_method(api);
+    // Generate request method with the appropriate suffix
+    let request_method = generate_request_method_with_suffix(api, &suffix);
 
     // Generate rich module documentation
     let module_docs = ModuleDocBuilder::new(api).build();

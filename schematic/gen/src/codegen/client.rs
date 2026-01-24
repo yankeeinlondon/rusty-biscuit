@@ -43,6 +43,14 @@ use schematic_define::RestApi;
 /// }
 /// ```
 pub fn generate_request_method(api: &RestApi) -> TokenStream {
+    generate_request_method_with_suffix(api, "Request")
+}
+
+/// Generates all request methods for the API struct with a custom request suffix.
+///
+/// This is the same as `generate_request_method` but allows specifying a custom
+/// suffix for request struct names (e.g., "BasicRequest" or "BearerRequest").
+pub fn generate_request_method_with_suffix(api: &RestApi, request_suffix: &str) -> TokenStream {
     let struct_name = format_ident!("{}", api.name);
     let request_enum = format_ident!("{}Request", api.name);
 
@@ -87,7 +95,7 @@ pub fn generate_request_method(api: &RestApi) -> TokenStream {
     };
 
     // Generate convenience methods for non-JSON endpoints
-    let convenience_methods = generate_convenience_methods(api);
+    let convenience_methods = generate_convenience_methods(api, request_suffix);
 
     quote! {
         impl #struct_name {
@@ -313,14 +321,14 @@ fn generate_empty_request_method(
 ///     self.request_bytes(req).await
 /// }
 /// ```
-pub fn generate_convenience_methods(api: &RestApi) -> TokenStream {
+pub fn generate_convenience_methods(api: &RestApi, request_suffix: &str) -> TokenStream {
     let methods: Vec<TokenStream> = api
         .endpoints
         .iter()
         .filter(|ep| !ep.response.is_json())
         .map(|ep| {
             let method_name = format_ident!("{}", to_snake_case(&ep.id));
-            let request_struct = format_ident!("{}Request", ep.id);
+            let request_struct = format_ident!("{}{}", ep.id, request_suffix);
             let doc = format!(" Convenience method for the `{}` endpoint.", ep.id);
             let desc_doc = format!(" {}", ep.description);
 
