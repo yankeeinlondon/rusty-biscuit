@@ -14,21 +14,42 @@ use crate::types::AudioFormat;
 // OS-Specific Audio Players
 // ============================================================================
 
-/// Audio players by platform preference.
+/// Audio players by platform preference for WAV/PCM formats.
 #[cfg(target_os = "macos")]
-const AUDIO_PLAYERS: &[&str] = &["afplay"];
+const WAV_PLAYERS: &[&str] = &["afplay"];
 
-/// Audio players by platform preference.
+/// Audio players by platform preference for WAV/PCM formats.
+/// paplay and aplay are preferred for WAV since they're lightweight.
 #[cfg(target_os = "linux")]
-const AUDIO_PLAYERS: &[&str] = &["paplay", "aplay", "play", "mpv", "ffplay"];
+const WAV_PLAYERS: &[&str] = &["paplay", "aplay", "play", "mpv", "ffplay"];
 
-/// Audio players by platform preference.
+/// Audio players by platform preference for WAV/PCM formats.
 #[cfg(target_os = "windows")]
-const AUDIO_PLAYERS: &[&str] = &["powershell"];
+const WAV_PLAYERS: &[&str] = &["powershell"];
 
-/// Fallback for other platforms.
+/// Fallback for other platforms (WAV).
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-const AUDIO_PLAYERS: &[&str] = &["ffplay", "play"];
+const WAV_PLAYERS: &[&str] = &["ffplay", "play"];
+
+/// Audio players that support MP3 format.
+/// On Linux, paplay/aplay do NOT support MP3 - they produce static!
+/// We must use players with codec support (mpv, ffplay, play with MP3 support).
+#[cfg(target_os = "macos")]
+const MP3_PLAYERS: &[&str] = &["afplay"];
+
+/// Audio players that support MP3 format on Linux.
+/// IMPORTANT: paplay and aplay are excluded because they only support WAV/PCM.
+#[cfg(target_os = "linux")]
+const MP3_PLAYERS: &[&str] = &["mpv", "ffplay", "play"];
+
+/// Audio players that support MP3 format on Windows.
+#[cfg(target_os = "windows")]
+const MP3_PLAYERS: &[&str] = &["powershell"];
+
+/// Fallback MP3 players for other platforms.
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+const MP3_PLAYERS: &[&str] = &["mpv", "ffplay", "play"];
+
 
 // ============================================================================
 // Player Detection
@@ -54,7 +75,30 @@ const AUDIO_PLAYERS: &[&str] = &["ffplay", "play"];
 /// }
 /// ```
 pub fn get_audio_player() -> Option<&'static str> {
-    for &player in AUDIO_PLAYERS {
+    get_audio_player_for_format(AudioFormat::Wav)
+}
+
+/// Get an audio player that supports the given format.
+///
+/// This is important on Linux where `paplay` and `aplay` only support
+/// WAV/PCM formats. Trying to play MP3 through them produces static noise.
+///
+/// ## Arguments
+///
+/// * `format` - The audio format to find a player for.
+///
+/// ## Returns
+///
+/// Returns `Some(&str)` with the player name if found, `None` otherwise.
+pub fn get_audio_player_for_format(format: AudioFormat) -> Option<&'static str> {
+    let players = match format {
+        AudioFormat::Mp3 => MP3_PLAYERS,
+        AudioFormat::Wav | AudioFormat::Pcm => WAV_PLAYERS,
+        // For Ogg, use MP3 players since they generally support multiple codecs
+        AudioFormat::Ogg => MP3_PLAYERS,
+    };
+
+    for &player in players {
         if which::which(player).is_ok() {
             return Some(player);
         }
@@ -101,13 +145,15 @@ pub async fn play_audio_bytes(data: &[u8], format: AudioFormat) -> Result<(), Tt
     // Write audio data
     tokio::fs::write(temp_file.path(), data).await?;
 
-    // Play the file
-    play_audio_file(temp_file.path()).await
+    // Play the file with a format-aware player
+    play_audio_file_with_format(temp_file.path(), format).await
 
     // temp_file is automatically cleaned up on drop
 }
 
 /// Play an audio file using the system audio player.
+///
+/// Assumes WAV format. For other formats, use `play_audio_file_with_format`.
 ///
 /// ## Arguments
 ///
@@ -129,11 +175,36 @@ pub async fn play_audio_bytes(data: &[u8], format: AudioFormat) -> Result<(), Tt
 /// play_audio_file(Path::new("/tmp/audio.wav")).await?;
 /// ```
 pub async fn play_audio_file(path: &Path) -> Result<(), TtsError> {
-    let player = get_audio_player().ok_or(TtsError::NoAudioPlayer)?;
+    play_audio_file_with_format(path, AudioFormat::Wav).await
+}
+
+/// Play an audio file using a player that supports the given format.
+///
+/// This is important on Linux where `paplay` and `aplay` only support
+/// WAV/PCM formats. Trying to play MP3 through them produces static noise.
+///
+/// ## Arguments
+///
+/// * `path` - Path to the audio file to play.
+/// * `format` - The audio format of the file.
+///
+/// ## Errors
+///
+/// Returns `TtsError` if:
+/// - No audio player is available for this format
+/// - The player process fails to start
+/// - The player exits with an error
+pub async fn play_audio_file_with_format(path: &Path, format: AudioFormat) -> Result<(), TtsError> {
+    let player = get_audio_player_for_format(format).ok_or(TtsError::NoAudioPlayer)?;
 
     let args = build_player_args(player, path);
 
-    tracing::debug!(player = player, path = %path.display(), "Playing audio file");
+    tracing::debug!(
+        player = player,
+        path = %path.display(),
+        format = ?format,
+        "Playing audio file"
+    );
 
     let output = tokio::process::Command::new(player)
         .args(&args)
@@ -205,8 +276,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_audio_players_not_empty() {
-        assert!(!AUDIO_PLAYERS.is_empty());
+    fn test_wav_players_not_empty() {
+        assert!(!WAV_PLAYERS.is_empty());
+    }
+
+    #[test]
+    fn test_mp3_players_not_empty() {
+        assert!(!MP3_PLAYERS.is_empty());
     }
 
     #[test]
@@ -240,5 +316,52 @@ mod tests {
     #[test]
     fn test_get_audio_player_does_not_panic() {
         let _ = get_audio_player();
+    }
+
+    #[test]
+    fn test_get_audio_player_for_format_does_not_panic() {
+        let _ = get_audio_player_for_format(AudioFormat::Wav);
+        let _ = get_audio_player_for_format(AudioFormat::Mp3);
+        let _ = get_audio_player_for_format(AudioFormat::Ogg);
+        let _ = get_audio_player_for_format(AudioFormat::Pcm);
+    }
+
+    /// Regression test: MP3 playback on Linux should not use paplay/aplay.
+    ///
+    /// Bug: ElevenLabs returns MP3 audio. On Linux, paplay and aplay were
+    /// selected first, but they only support WAV/PCM formats. Playing MP3
+    /// through them produces static noise instead of audio.
+    ///
+    /// Fix: MP3_PLAYERS on Linux excludes paplay and aplay, preferring
+    /// mpv, ffplay, or play (SoX) which support MP3 decoding.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_mp3_players_excludes_paplay_aplay_on_linux() {
+        // paplay and aplay should NOT be in the MP3 player list on Linux
+        assert!(
+            !MP3_PLAYERS.contains(&"paplay"),
+            "paplay should not be in MP3_PLAYERS - it only supports WAV"
+        );
+        assert!(
+            !MP3_PLAYERS.contains(&"aplay"),
+            "aplay should not be in MP3_PLAYERS - it only supports WAV"
+        );
+
+        // mpv and ffplay should be available for MP3
+        assert!(
+            MP3_PLAYERS.contains(&"mpv") || MP3_PLAYERS.contains(&"ffplay"),
+            "MP3_PLAYERS should include mpv or ffplay"
+        );
+    }
+
+    /// Verify that WAV players include the lightweight options on Linux.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_wav_players_includes_paplay_aplay_on_linux() {
+        // For WAV, paplay and aplay should be preferred (they're lightweight)
+        assert!(
+            WAV_PLAYERS.contains(&"paplay") || WAV_PLAYERS.contains(&"aplay"),
+            "WAV_PLAYERS should include paplay or aplay on Linux"
+        );
     }
 }

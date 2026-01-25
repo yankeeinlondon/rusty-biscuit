@@ -692,6 +692,7 @@ pub static LINUX_TTS_STACK: LazyLock<Vec<TtsProvider>> = LazyLock::new(|| {
         TtsProvider::Host(HostTtsProvider::Mimic3),
         TtsProvider::Host(HostTtsProvider::ESpeak),
         TtsProvider::Host(HostTtsProvider::Festival),
+        TtsProvider::Host(HostTtsProvider::Gtts),
         TtsProvider::Host(HostTtsProvider::SpdSay),
         TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
     ]
@@ -706,6 +707,7 @@ pub static MACOS_TTS_STACK: LazyLock<Vec<TtsProvider>> = LazyLock::new(|| {
         TtsProvider::Host(HostTtsProvider::KokoroTts),
         TtsProvider::Host(HostTtsProvider::Sherpa),
         TtsProvider::Host(HostTtsProvider::ESpeak),
+        TtsProvider::Host(HostTtsProvider::Gtts),
         TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
     ]
 });
@@ -719,6 +721,7 @@ pub static WINDOWS_TTS_STACK: LazyLock<Vec<TtsProvider>> = LazyLock::new(|| {
         TtsProvider::Host(HostTtsProvider::KokoroTts),
         TtsProvider::Host(HostTtsProvider::Sherpa),
         TtsProvider::Host(HostTtsProvider::ESpeak),
+        TtsProvider::Host(HostTtsProvider::Gtts),
         TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
     ]
 });
