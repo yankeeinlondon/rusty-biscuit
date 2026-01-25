@@ -47,6 +47,7 @@
 pub mod editors;
 pub mod enums;
 pub mod find_program;
+pub mod headless_audio;
 pub mod pkg_mngrs;
 pub mod schema;
 pub mod terminal_apps;
@@ -57,8 +58,10 @@ use serde::{Deserialize, Serialize};
 
 pub use editors::InstalledEditors;
 pub use enums::{
-    Editor, LanguagePackageManager, OsPackageManager, TerminalApp, TtsClient, Utility,
+    Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager, TerminalApp, TtsClient,
+    Utility,
 };
+pub use headless_audio::InstalledHeadlessAudio;
 pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 pub use terminal_apps::InstalledTerminalApps;
@@ -68,7 +71,7 @@ pub use utilities::InstalledUtilities;
 /// Complete programs detection result.
 ///
 /// Contains detection results for all supported program categories:
-/// editors, utilities, package managers, TTS clients, and terminal apps.
+/// editors, utilities, package managers, TTS clients, terminal apps, and headless audio players.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProgramsInfo {
     /// Text editors and IDEs installed on the system.
@@ -88,6 +91,9 @@ pub struct ProgramsInfo {
 
     /// Terminal emulator applications installed on the system.
     pub terminal_apps: InstalledTerminalApps,
+
+    /// Headless audio players installed on the system.
+    pub headless_audio: InstalledHeadlessAudio,
 }
 
 impl ProgramsInfo {
@@ -102,6 +108,7 @@ impl ProgramsInfo {
             os_package_managers: InstalledOsPackageManagers::new(),
             tts_clients: InstalledTtsClients::new(),
             terminal_apps: InstalledTerminalApps::new(),
+            headless_audio: InstalledHeadlessAudio::new(),
         }
     }
 
@@ -113,5 +120,6 @@ impl ProgramsInfo {
         self.os_package_managers.refresh();
         self.tts_clients.refresh();
         self.terminal_apps.refresh();
+        self.headless_audio.refresh();
     }
 }

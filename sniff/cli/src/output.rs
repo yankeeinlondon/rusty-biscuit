@@ -50,6 +50,8 @@ pub enum OutputFilter {
     TtsClients,
     /// Show only terminal apps (programs subsection)
     TerminalApps,
+    /// Show only headless audio players (programs subsection)
+    HeadlessAudio,
 }
 
 /// Format bytes into human-readable units (KB, MB, GB, TB)
@@ -283,7 +285,8 @@ pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter) {
         | OutputFilter::LanguagePackageManagers
         | OutputFilter::OsPackageManagers
         | OutputFilter::TtsClients
-        | OutputFilter::TerminalApps => {
+        | OutputFilter::TerminalApps
+        | OutputFilter::HeadlessAudio => {
             // These are handled by print_programs_text, should not reach here
             unreachable!("Programs filters should be handled separately")
         }
@@ -1169,7 +1172,8 @@ fn apply_filter_to_json(result: &SniffResult, filter: OutputFilter) -> serde_jso
         | OutputFilter::LanguagePackageManagers
         | OutputFilter::OsPackageManagers
         | OutputFilter::TtsClients
-        | OutputFilter::TerminalApps => {
+        | OutputFilter::TerminalApps
+        | OutputFilter::HeadlessAudio => {
             unreachable!("Programs filters should be handled by print_programs_json")
         }
     }
@@ -1209,6 +1213,9 @@ pub fn print_programs_text(programs: &ProgramsInfo, verbose: u8, filter: OutputF
         OutputFilter::TerminalApps => {
             print_terminal_apps_section(&programs.terminal_apps, verbose);
         }
+        OutputFilter::HeadlessAudio => {
+            print_headless_audio_section(&programs.headless_audio, verbose);
+        }
         _ => {
             // Should not reach here, but print all as fallback
             print_all_programs(programs, verbose);
@@ -1223,6 +1230,7 @@ fn print_all_programs(programs: &ProgramsInfo, verbose: u8) {
     print_os_pkg_mgrs_section(&programs.os_package_managers, verbose);
     print_tts_clients_section(&programs.tts_clients, verbose);
     print_terminal_apps_section(&programs.terminal_apps, verbose);
+    print_headless_audio_section(&programs.headless_audio, verbose);
 }
 
 fn print_editors_section(editors: &sniff_lib::programs::InstalledEditors, verbose: u8) {
@@ -1405,6 +1413,38 @@ fn print_terminal_apps_section(apps: &sniff_lib::programs::InstalledTerminalApps
     println!();
 }
 
+fn print_headless_audio_section(
+    players: &sniff_lib::programs::InstalledHeadlessAudio,
+    verbose: u8,
+) {
+    use sniff_lib::programs::ProgramMetadata;
+
+    println!("=== Headless Audio Players ===");
+    let installed = players.installed();
+    if installed.is_empty() {
+        println!("No headless audio players detected");
+    } else {
+        println!("Installed ({}):", installed.len());
+        for player in &installed {
+            let name = player.display_name();
+            if verbose > 0 {
+                let desc = player.description();
+                println!("  {} - {}", name, desc);
+                if verbose > 1 {
+                    println!("    Website: {}", player.website());
+                    if let Some(path) = players.path(*player) {
+                        println!("    Path: {}", path.display());
+                    }
+                }
+            } else {
+                print!("  {}", name);
+                println!();
+            }
+        }
+    }
+    println!();
+}
+
 /// Print programs information as JSON.
 pub fn print_programs_json(
     programs: &ProgramsInfo,
@@ -1422,6 +1462,7 @@ pub fn print_programs_json(
         OutputFilter::OsPackageManagers => serde_json::to_value(&programs.os_package_managers)?,
         OutputFilter::TtsClients => serde_json::to_value(&programs.tts_clients)?,
         OutputFilter::TerminalApps => serde_json::to_value(&programs.terminal_apps)?,
+        OutputFilter::HeadlessAudio => serde_json::to_value(&programs.headless_audio)?,
         _ => json!({}),
     };
 

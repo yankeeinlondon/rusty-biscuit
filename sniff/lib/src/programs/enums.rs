@@ -758,6 +758,8 @@ pub enum TtsClient {
     GttsCli,
     CoquiTts,
     SherpaOnnx,
+    KokoroTts,
+    Pico2Wave,
 }
 
 /// Metadata lookup table for TTS clients.
@@ -847,6 +849,18 @@ static TTS_CLIENT_INFO: &[ProgramInfo] = &[
         "Sherpa-ONNX",
         "Streaming/non-streaming TTS using ONNX",
         "https://k2-fsa.github.io/sherpa/onnx/",
+    ),
+    ProgramInfo::standard(
+        "kokoro-tts",
+        "Kokoro TTS",
+        "High-quality neural TTS using Kokoro-82M model",
+        "https://github.com/nazdridoy/kokoro-tts",
+    ),
+    ProgramInfo::standard(
+        "pico2wave",
+        "SVOX Pico",
+        "Lightweight TTS for embedded systems",
+        "https://github.com/naggety/picmotts",
     ),
 ];
 
@@ -1021,6 +1035,117 @@ impl ProgramMetadata for TerminalApp {
     }
 }
 
+// ============================================================================
+// Headless Audio Player Enum
+// ============================================================================
+
+/// Headless audio players for CLI/background playback.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    EnumIter,
+    EnumCount,
+    IntoStaticStr,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum HeadlessAudio {
+    Mpv,
+    Ffplay,
+    Vlc,
+    MPlayer,
+    GstreamerGstPlay,
+    Sox,
+    Mpg123,
+    Ogg123,
+    AlsaAplay,
+    PulseaudioPaplay,
+    Pipewire,
+}
+
+/// Metadata lookup table for headless audio players.
+static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
+    ProgramInfo::standard(
+        "mpv",
+        "mpv",
+        "CLI media player for audio-only playback",
+        "https://mpv.io/",
+    ),
+    ProgramInfo::standard(
+        "ffplay",
+        "FFplay",
+        "Minimal CLI player shipped with FFmpeg",
+        "https://www.ffmpeg.org/ffplay.html",
+    ),
+    ProgramInfo::standard(
+        "cvlc",
+        "VLC",
+        "Headless VLC playback via cvlc",
+        "https://wiki.videolan.org/VLC_command-line_help/",
+    ),
+    ProgramInfo::standard(
+        "mplayer",
+        "MPlayer",
+        "Classic CLI-oriented media player",
+        "https://www.mplayerhq.hu/",
+    ),
+    ProgramInfo::standard(
+        "gst-play-1.0",
+        "GStreamer gst-play",
+        "CLI front-end to GStreamer pipelines",
+        "https://gstreamer.freedesktop.org/documentation/tools/gst-play.html",
+    ),
+    ProgramInfo::standard(
+        "play",
+        "SoX play",
+        "Swiss-army knife for audio playback",
+        "https://linux.die.net/man/1/sox",
+    ),
+    ProgramInfo::standard(
+        "mpg123",
+        "mpg123",
+        "Lightweight console MP3 player",
+        "https://www.mpg123.de/",
+    ),
+    ProgramInfo::standard(
+        "ogg123",
+        "ogg123",
+        "CLI player for Ogg/Vorbis files",
+        "https://github.com/xiph/vorbis-tools",
+    ),
+    ProgramInfo::standard(
+        "aplay",
+        "aplay",
+        "ALSA low-level playback utility",
+        "https://linux.die.net/man/1/aplay",
+    ),
+    ProgramInfo::standard(
+        "paplay",
+        "paplay",
+        "Simple PulseAudio playback tool",
+        "https://manpages.ubuntu.com/manpages/trusty/man1/paplay.1.html",
+    ),
+    ProgramInfo::standard(
+        "pw-play",
+        "PipeWire pw-play",
+        "PipeWire CLI playback tool",
+        "https://docs.pipewire.org/page_man_pw-cat_1.html",
+    ),
+];
+
+impl ProgramMetadata for HeadlessAudio {
+    fn info(&self) -> &'static ProgramInfo {
+        &HEADLESS_AUDIO_INFO[*self as usize]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1054,6 +1179,11 @@ mod tests {
     #[test]
     fn test_terminal_app_count_matches_info() {
         assert_eq!(TerminalApp::COUNT, TERMINAL_APP_INFO.len());
+    }
+
+    #[test]
+    fn test_headless_audio_count_matches_info() {
+        assert_eq!(HeadlessAudio::COUNT, HEADLESS_AUDIO_INFO.len());
     }
 
     #[test]

@@ -114,6 +114,10 @@ struct Cli {
     /// Show only terminal apps
     #[arg(long, help_heading = "Programs Flags")]
     terminal_apps: bool,
+
+    /// Show only headless audio players
+    #[arg(long, help_heading = "Programs Flags")]
+    audio: bool,
 }
 
 impl Cli {
@@ -174,6 +178,9 @@ impl Cli {
         }
         if self.terminal_apps {
             flags.push("--terminal-apps");
+        }
+        if self.audio {
+            flags.push("--audio");
         }
 
         flags
@@ -246,6 +253,9 @@ impl Cli {
         if self.terminal_apps {
             return OutputFilter::TerminalApps;
         }
+        if self.audio {
+            return OutputFilter::HeadlessAudio;
+        }
 
         // Top-level section flags
         // When used alone, return specific filter for flattening
@@ -280,6 +290,7 @@ impl Cli {
             || self.os_package_managers
             || self.tts_clients
             || self.terminal_apps
+            || self.audio
     }
 }
 
@@ -422,7 +433,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::LanguagePackageManagers
         | OutputFilter::OsPackageManagers
         | OutputFilter::TtsClients
-        | OutputFilter::TerminalApps => {
+        | OutputFilter::TerminalApps
+        | OutputFilter::HeadlessAudio => {
             unreachable!("Programs mode should be handled before this point")
         }
     }
@@ -568,6 +580,12 @@ mod tests {
         #[test]
         fn single_hardware_flag_is_valid() {
             let cli = parse_args(&["--hardware"]).unwrap();
+            assert!(cli.validate_filter_flags().is_ok());
+        }
+
+        #[test]
+        fn single_audio_flag_is_valid() {
+            let cli = parse_args(&["--audio"]).unwrap();
             assert!(cli.validate_filter_flags().is_ok());
         }
 
