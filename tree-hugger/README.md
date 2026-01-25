@@ -1,3 +1,7 @@
+---
+name: frontmatter
+---
+
 # Tree Hugger
 
 A library (and CLI) for generating diagnostics and symbol summaries across multiple programming languages using Tree-sitter.
