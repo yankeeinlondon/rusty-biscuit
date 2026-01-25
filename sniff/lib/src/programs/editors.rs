@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::error::SniffInstallationError;
 use crate::programs::enums::Editor;
 use crate::programs::find_program::find_programs_parallel;
 use crate::programs::schema::{ProgramError, ProgramMetadata};
+use crate::programs::types::ProgramDetector;
 
 /// Popular text editors and IDEs found on the system.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -180,5 +182,62 @@ impl InstalledEditors {
     pub fn installed(&self) -> Vec<Editor> {
         use strum::IntoEnumIterator;
         Editor::iter().filter(|e| self.is_installed(*e)).collect()
+    }
+}
+
+impl ProgramDetector for InstalledEditors {
+    type Program = Editor;
+
+    fn refresh(&mut self) {
+        *self = Self::new();
+    }
+
+    fn is_installed(&self, program: Self::Program) -> bool {
+        self.is_installed(program)
+    }
+
+    fn path(&self, program: Self::Program) -> Option<PathBuf> {
+        InstalledEditors::path(self, program)
+    }
+
+    fn version(&self, program: Self::Program) -> Result<String, ProgramError> {
+        InstalledEditors::version(self, program)
+    }
+
+    fn website(&self, program: Self::Program) -> &'static str {
+        InstalledEditors::website(self, program)
+    }
+
+    fn description(&self, program: Self::Program) -> &'static str {
+        InstalledEditors::description(self, program)
+    }
+
+    fn installed(&self) -> Vec<Self::Program> {
+        InstalledEditors::installed(self)
+    }
+
+    fn installable(&self, _program: Self::Program) -> bool {
+        // TODO: Phase 4 will implement this based on available package managers
+        false
+    }
+
+    fn install(&self, _program: Self::Program) -> Result<(), SniffInstallationError> {
+        // TODO: Phase 4 will implement installation logic
+        Err(SniffInstallationError::NotInstallableOnOs {
+            pkg: "editor".to_string(),
+            os: "current".to_string(),
+        })
+    }
+
+    fn install_version(
+        &self,
+        _program: Self::Program,
+        _version: &str,
+    ) -> Result<(), SniffInstallationError> {
+        // TODO: Phase 4 will implement versioned installation
+        Err(SniffInstallationError::NotInstallableOnOs {
+            pkg: "editor".to_string(),
+            os: "current".to_string(),
+        })
     }
 }

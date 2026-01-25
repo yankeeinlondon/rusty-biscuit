@@ -118,6 +118,10 @@ struct Cli {
     /// Show only headless audio players
     #[arg(long, help_heading = "Programs Flags")]
     audio: bool,
+
+    /// JSON output format: "simple" (default, backward compatible) or "full" (rich metadata)
+    #[arg(long, value_name = "FORMAT", help_heading = "Programs Flags")]
+    json_format: Option<String>,
 }
 
 impl Cli {
@@ -348,7 +352,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if cli.is_programs_mode() {
         let programs = ProgramsInfo::detect();
         if cli.json {
-            output::print_programs_json(&programs, output_filter)?;
+            let format = cli.json_format.as_deref().unwrap_or("simple");
+            output::print_programs_json(&programs, output_filter, format)?;
         } else {
             output::print_programs_text(&programs, cli.verbose, output_filter);
         }

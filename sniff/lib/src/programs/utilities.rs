@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::error::SniffInstallationError;
 use crate::programs::enums::Utility;
 use crate::programs::find_program::find_programs_parallel;
 use crate::programs::schema::{ProgramError, ProgramMetadata};
+use crate::programs::types::ProgramDetector;
 
 /// Popular modern utility programs found on macOS, Linux, or Windows.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -232,5 +234,59 @@ impl InstalledUtilities {
     pub fn installed(&self) -> Vec<Utility> {
         use strum::IntoEnumIterator;
         Utility::iter().filter(|u| self.is_installed(*u)).collect()
+    }
+}
+
+impl ProgramDetector for InstalledUtilities {
+    type Program = Utility;
+
+    fn refresh(&mut self) {
+        *self = Self::new();
+    }
+
+    fn is_installed(&self, program: Self::Program) -> bool {
+        self.is_installed(program)
+    }
+
+    fn path(&self, program: Self::Program) -> Option<PathBuf> {
+        InstalledUtilities::path(self, program)
+    }
+
+    fn version(&self, program: Self::Program) -> Result<String, ProgramError> {
+        InstalledUtilities::version(self, program)
+    }
+
+    fn website(&self, program: Self::Program) -> &'static str {
+        InstalledUtilities::website(self, program)
+    }
+
+    fn description(&self, program: Self::Program) -> &'static str {
+        InstalledUtilities::description(self, program)
+    }
+
+    fn installed(&self) -> Vec<Self::Program> {
+        InstalledUtilities::installed(self)
+    }
+
+    fn installable(&self, _program: Self::Program) -> bool {
+        false
+    }
+
+    fn install(&self, _program: Self::Program) -> Result<(), SniffInstallationError> {
+        Err(SniffInstallationError::NotInstallableOnOs {
+            pkg: "utility".to_string(),
+            os: "current".to_string(),
+        })
+    }
+
+    fn install_version(
+        &self,
+        _program: Self::Program,
+        _version: &str,
+    ) -> Result<(), SniffInstallationError> {
+        Err(SniffInstallationError::NotInstallableOnOs {
+            pkg: "utility".to_string(),
+            os: "current".to_string(),
+        })
     }
 }

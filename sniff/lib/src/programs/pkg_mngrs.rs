@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::error::SniffInstallationError;
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::find_program::find_programs_parallel;
 use crate::programs::schema::{ProgramError, ProgramMetadata};
+use crate::programs::types::ProgramDetector;
 
 /// Language-specific package managers found on the system.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -153,6 +155,60 @@ impl InstalledLanguagePackageManagers {
     }
 }
 
+impl ProgramDetector for InstalledLanguagePackageManagers {
+    type Program = LanguagePackageManager;
+
+    fn refresh(&mut self) {
+        *self = Self::new();
+    }
+
+    fn is_installed(&self, program: Self::Program) -> bool {
+        self.is_installed(program)
+    }
+
+    fn path(&self, program: Self::Program) -> Option<PathBuf> {
+        InstalledLanguagePackageManagers::path(self, program)
+    }
+
+    fn version(&self, program: Self::Program) -> Result<String, ProgramError> {
+        InstalledLanguagePackageManagers::version(self, program)
+    }
+
+    fn website(&self, program: Self::Program) -> &'static str {
+        InstalledLanguagePackageManagers::website(self, program)
+    }
+
+    fn description(&self, program: Self::Program) -> &'static str {
+        InstalledLanguagePackageManagers::description(self, program)
+    }
+
+    fn installed(&self) -> Vec<Self::Program> {
+        InstalledLanguagePackageManagers::installed(self)
+    }
+
+    fn installable(&self, _program: Self::Program) -> bool {
+        false
+    }
+
+    fn install(&self, _program: Self::Program) -> Result<(), SniffInstallationError> {
+        Err(SniffInstallationError::NotInstallableOnOs {
+            pkg: "package_manager".to_string(),
+            os: "current".to_string(),
+        })
+    }
+
+    fn install_version(
+        &self,
+        _program: Self::Program,
+        _version: &str,
+    ) -> Result<(), SniffInstallationError> {
+        Err(SniffInstallationError::NotInstallableOnOs {
+            pkg: "package_manager".to_string(),
+            os: "current".to_string(),
+        })
+    }
+}
+
 /// OS-level package managers found on the system.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct InstalledOsPackageManagers {
@@ -261,5 +317,59 @@ impl InstalledOsPackageManagers {
         OsPackageManager::iter()
             .filter(|p| self.is_installed(*p))
             .collect()
+    }
+}
+
+impl ProgramDetector for InstalledOsPackageManagers {
+    type Program = OsPackageManager;
+
+    fn refresh(&mut self) {
+        *self = Self::new();
+    }
+
+    fn is_installed(&self, program: Self::Program) -> bool {
+        self.is_installed(program)
+    }
+
+    fn path(&self, program: Self::Program) -> Option<PathBuf> {
+        InstalledOsPackageManagers::path(self, program)
+    }
+
+    fn version(&self, program: Self::Program) -> Result<String, ProgramError> {
+        InstalledOsPackageManagers::version(self, program)
+    }
+
+    fn website(&self, program: Self::Program) -> &'static str {
+        InstalledOsPackageManagers::website(self, program)
+    }
+
+    fn description(&self, program: Self::Program) -> &'static str {
+        InstalledOsPackageManagers::description(self, program)
+    }
+
+    fn installed(&self) -> Vec<Self::Program> {
+        InstalledOsPackageManagers::installed(self)
+    }
+
+    fn installable(&self, _program: Self::Program) -> bool {
+        false
+    }
+
+    fn install(&self, _program: Self::Program) -> Result<(), SniffInstallationError> {
+        Err(SniffInstallationError::NotInstallableOnOs {
+            pkg: "os_package_manager".to_string(),
+            os: "current".to_string(),
+        })
+    }
+
+    fn install_version(
+        &self,
+        _program: Self::Program,
+        _version: &str,
+    ) -> Result<(), SniffInstallationError> {
+        Err(SniffInstallationError::NotInstallableOnOs {
+            pkg: "os_package_manager".to_string(),
+            os: "current".to_string(),
+        })
     }
 }

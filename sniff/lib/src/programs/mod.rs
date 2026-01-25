@@ -50,6 +50,7 @@ pub mod editors;
 pub mod enums;
 pub mod find_program;
 pub mod headless_audio;
+pub mod installer;
 pub mod pkg_mngrs;
 pub mod schema;
 pub mod terminal_apps;
@@ -68,7 +69,10 @@ pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers
 pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 pub use terminal_apps::InstalledTerminalApps;
 pub use tts_clients::InstalledTtsClients;
+pub use types::{InstallationMethod, ProgramDetails, ProgramDetector};
 pub use utilities::InstalledUtilities;
+pub use inventory::{Program, PROGRAM_LOOKUP};
+pub use installer::{execute_install, execute_versioned_install, get_install_command, get_versioned_install_command, InstallOptions, InstallResult};
 
 /// Complete programs detection result.
 ///

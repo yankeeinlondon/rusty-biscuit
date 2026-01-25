@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use crate::error::SniffInstallationError;
 use crate::programs::enums::HeadlessAudio;
 use crate::programs::find_program::find_programs_parallel;
 use crate::programs::schema::{ProgramError, ProgramMetadata};
+use crate::programs::types::ProgramDetector;
 
 /// Headless audio players found on the system.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -136,5 +138,59 @@ impl InstalledHeadlessAudio {
         HeadlessAudio::iter()
             .filter(|p| self.is_installed(*p))
             .collect()
+    }
+}
+
+impl ProgramDetector for InstalledHeadlessAudio {
+    type Program = HeadlessAudio;
+
+    fn refresh(&mut self) {
+        *self = Self::new();
+    }
+
+    fn is_installed(&self, program: Self::Program) -> bool {
+        self.is_installed(program)
+    }
+
+    fn path(&self, program: Self::Program) -> Option<PathBuf> {
+        InstalledHeadlessAudio::path(self, program)
+    }
+
+    fn version(&self, program: Self::Program) -> Result<String, ProgramError> {
+        InstalledHeadlessAudio::version(self, program)
+    }
+
+    fn website(&self, program: Self::Program) -> &'static str {
+        InstalledHeadlessAudio::website(self, program)
+    }
+
+    fn description(&self, program: Self::Program) -> &'static str {
+        InstalledHeadlessAudio::description(self, program)
+    }
+
+    fn installed(&self) -> Vec<Self::Program> {
+        InstalledHeadlessAudio::installed(self)
+    }
+
+    fn installable(&self, _program: Self::Program) -> bool {
+        false
+    }
+
+    fn install(&self, _program: Self::Program) -> Result<(), SniffInstallationError> {
+        Err(SniffInstallationError::NotInstallableOnOs {
+            pkg: "headless_audio".to_string(),
+            os: "current".to_string(),
+        })
+    }
+
+    fn install_version(
+        &self,
+        _program: Self::Program,
+        _version: &str,
+    ) -> Result<(), SniffInstallationError> {
+        Err(SniffInstallationError::NotInstallableOnOs {
+            pkg: "headless_audio".to_string(),
+            os: "current".to_string(),
+        })
     }
 }
