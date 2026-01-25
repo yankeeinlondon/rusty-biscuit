@@ -31,6 +31,36 @@ pub enum SniffError {
     /// Language detection failed for the given reason.
     #[error("Language detection failed: {0}")]
     LanguageDetection(String),
+
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SniffInstallationError {
+
+    #[error("Error installing {pkg} on host using the install command: {cmd}")]
+    InstallationError {
+        pkg: String,
+        cmd: String
+    },
+
+    #[error("The package manager {manager} failed to install {pkg}: {msg}")]
+    PackageManagerFailed {
+        pkg: String,
+        manager: String,
+        msg: String
+    },
+
+    #[error("The package {pkg} is not installable on {os}!")]
+    NotInstallableOnOs {
+        pkg: String,
+        os: String
+    },
+
+    #[error("The package {pkg} requires a package manager ({manager}) which is NOT installed on this computer!")]
+    MissingPackageManager {
+        pkg: String,
+        manager: String,
+    }
 }
 
 /// Convenience Result type for Sniff operations.

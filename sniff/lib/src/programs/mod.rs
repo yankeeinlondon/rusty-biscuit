@@ -44,6 +44,8 @@
 //! - `path()` - Path to the binary if installed
 //! - `version()` - Version string if available
 
+pub mod types;
+pub mod inventory;
 pub mod editors;
 pub mod enums;
 pub mod find_program;
