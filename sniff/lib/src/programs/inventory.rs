@@ -394,8 +394,6 @@ static WEZTERM_INSTALL: &[InstallationMethod] = &[
 static ALL_OS: &[OsType] = &[OsType::MacOS, OsType::Linux, OsType::Windows];
 static UNIX_ONLY: &[OsType] = &[OsType::MacOS, OsType::Linux];
 static MACOS_ONLY: &[OsType] = &[OsType::MacOS];
-static LINUX_ONLY: &[OsType] = &[OsType::Linux];
-static WINDOWS_ONLY: &[OsType] = &[OsType::Windows];
 
 /// Metadata lookup for known programs.
 ///
