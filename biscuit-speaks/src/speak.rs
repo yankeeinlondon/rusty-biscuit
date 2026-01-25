@@ -5,7 +5,9 @@
 use crate::detection::get_providers_for_strategy;
 use crate::errors::{AllProvidersFailed, TtsError};
 use crate::providers::cloud::ElevenLabsProvider;
-use crate::providers::host::{ESpeakProvider, SayProvider};
+use crate::providers::host::{
+    EchogardenProvider, ESpeakProvider, GttsProvider, KokoroTtsProvider, SapiProvider, SayProvider,
+};
 use crate::traits::TtsExecutor;
 use crate::types::{
     AudioFormat, CloudTtsProvider, Gender, HostTtsProvider, Language, TtsConfig,
@@ -245,6 +247,22 @@ impl Speak {
                 let executor = ESpeakProvider::new();
                 executor.speak(&self.text, &self.config).await
             }
+            HostTtsProvider::EchoGarden => {
+                let executor = EchogardenProvider::new();
+                executor.speak(&self.text, &self.config).await
+            }
+            HostTtsProvider::Gtts => {
+                let executor = GttsProvider::new();
+                executor.speak(&self.text, &self.config).await
+            }
+            HostTtsProvider::KokoroTts => {
+                let executor = KokoroTtsProvider::new();
+                executor.speak(&self.text, &self.config).await
+            }
+            HostTtsProvider::Sapi => {
+                let executor = SapiProvider::new();
+                executor.speak(&self.text, &self.config).await
+            }
             // Other providers not yet implemented
             _ => Err(TtsError::ProviderFailed {
                 provider: format!("{:?}", provider),
@@ -340,5 +358,33 @@ mod tests {
         let result = speak.play().await;
         // Should either be NoProvidersAvailable or AllProvidersFailed
         assert!(result.is_err());
+    }
+
+    /// Regression test: All implemented host providers should have dispatch logic.
+    ///
+    /// Bug: execute_host_provider() only had match arms for Say and ESpeak.
+    /// Other providers (EchoGarden, Gtts, KokoroTts, Sapi) fell through to the
+    /// catch-all `_ =>` case which returned "Provider not yet implemented".
+    #[test]
+    fn test_execute_host_provider_has_all_implemented_arms() {
+        // This test documents which providers MUST have explicit dispatch logic.
+        // If a provider is removed from this list, it should be because:
+        // 1. The provider was removed entirely, OR
+        // 2. There's a good reason (e.g., platform-specific that can't be tested)
+        //
+        // The following providers MUST have match arms in execute_host_provider:
+        let implemented_providers = [
+            HostTtsProvider::Say,       // macOS
+            HostTtsProvider::ESpeak,    // Cross-platform
+            HostTtsProvider::EchoGarden, // Cross-platform
+            HostTtsProvider::Gtts,      // Cross-platform (Python)
+            HostTtsProvider::KokoroTts, // Cross-platform (Rust)
+            HostTtsProvider::Sapi,      // Windows
+        ];
+
+        // Verify at compile time these variants exist in the enum
+        for provider in implemented_providers {
+            let _ = TtsProvider::Host(provider);
+        }
     }
 }

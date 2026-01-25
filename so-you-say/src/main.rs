@@ -1,6 +1,6 @@
 use biscuit_speaks::{
-    get_available_providers, parse_provider_name, speak_when_able, Gender, HostTtsProvider,
-    TtsConfig, TtsFailoverStrategy, TtsProvider,
+    get_available_providers, parse_provider_name, speak, Gender, HostTtsProvider, TtsConfig,
+    TtsFailoverStrategy, TtsProvider,
 };
 use clap::{Parser, ValueEnum};
 use std::io::{self, Read};
@@ -183,7 +183,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Call the async TTS function
-    speak_when_able(&message, &config).await;
+    if let Err(e) = speak(&message, &config).await {
+        eprintln!("Error: {:?}", e);
+        std::process::exit(1);
+    }
 
     Ok(())
 }

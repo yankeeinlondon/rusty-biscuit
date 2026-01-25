@@ -34,8 +34,10 @@
 //! - [`traits`] - The `TtsExecutor` trait for provider implementations
 //! - [`speak`] - The main `Speak` struct for TTS operations
 
+pub mod cache;
 pub mod detection;
 pub mod errors;
+pub mod gender_inference;
 pub mod playback;
 pub mod providers;
 pub mod speak;
@@ -43,12 +45,22 @@ pub mod traits;
 pub mod types;
 
 // Re-export main types at crate root for convenience
+pub use cache::{
+    bust_host_capability_cache, populate_cache_for_all_providers, populate_cache_for_provider,
+    read_from_cache, update_provider_in_cache,
+};
 pub use detection::{get_available_providers, get_providers_for_strategy, parse_provider_name};
+pub use gender_inference::infer_gender;
 pub use errors::{AllProvidersFailed, TtsError};
 pub use providers::cloud::ElevenLabsProvider;
+pub use providers::host::{
+    EchogardenEngine, EchogardenProvider, ESpeakProvider, GttsProvider, KokoroTtsProvider,
+    SapiProvider, SayProvider,
+};
 pub use speak::{speak, speak_when_able, Speak};
-pub use traits::TtsExecutor;
+pub use traits::{TtsExecutor, TtsVoiceInventory};
 pub use types::{
-    AudioFormat, CloudTtsProvider, Gender, HostTtsProvider, Language, TtsConfig,
-    TtsFailoverStrategy, TtsProvider, VolumeLevel,
+    AudioFormat, CloudTtsProvider, Gender, HostTtsCapabilities, HostTtsCapability,
+    HostTtsProvider, Language, TtsConfig, TtsFailoverStrategy, TtsProvider, Voice,
+    VoiceQuality, VolumeLevel,
 };

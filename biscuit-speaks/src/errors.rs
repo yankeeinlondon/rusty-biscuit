@@ -144,6 +144,33 @@ pub enum TtsError {
         /// The language that was requested.
         language: String,
     },
+
+    /// Failed to enumerate voices from a provider.
+    #[error("Failed to enumerate voices for '{provider}': {message}")]
+    VoiceEnumerationFailed {
+        /// The provider that failed.
+        provider: String,
+        /// Description of the enumeration failure.
+        message: String,
+    },
+
+    /// Failed to read from the voice capability cache.
+    #[error("Failed to read voice cache from '{path}': {message}")]
+    CacheReadError {
+        /// Path to the cache file.
+        path: String,
+        /// Description of the read error.
+        message: String,
+    },
+
+    /// Failed to write to the voice capability cache.
+    #[error("Failed to write voice cache to '{path}': {message}")]
+    CacheWriteError {
+        /// Path to the cache file.
+        path: String,
+        /// Description of the write error.
+        message: String,
+    },
 }
 
 impl From<std::io::Error> for TtsError {
@@ -255,5 +282,41 @@ mod tests {
         let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
         let tts_error: TtsError = io_error.into();
         assert!(matches!(tts_error, TtsError::IoError { .. }));
+    }
+
+    #[test]
+    fn test_voice_enumeration_failed_display() {
+        let error = TtsError::VoiceEnumerationFailed {
+            provider: "say".into(),
+            message: "process timed out".into(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "Failed to enumerate voices for 'say': process timed out"
+        );
+    }
+
+    #[test]
+    fn test_cache_read_error_display() {
+        let error = TtsError::CacheReadError {
+            path: "/tmp/cache.json".into(),
+            message: "file not found".into(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "Failed to read voice cache from '/tmp/cache.json': file not found"
+        );
+    }
+
+    #[test]
+    fn test_cache_write_error_display() {
+        let error = TtsError::CacheWriteError {
+            path: "/tmp/cache.json".into(),
+            message: "permission denied".into(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "Failed to write voice cache to '/tmp/cache.json': permission denied"
+        );
     }
 }

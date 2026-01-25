@@ -7,6 +7,7 @@
 
 use std::sync::LazyLock;
 
+use serde::{Deserialize, Serialize};
 use sniff_lib::programs::InstalledTtsClients;
 
 // ============================================================================
@@ -44,48 +45,262 @@ impl Default for VolumeLevel {
     }
 }
 
-/// The quality of a specific voice (on a specific provider)
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// The quality of a specific voice (on a specific provider).
+///
+/// Quality is subjective but provides a rough categorization for
+/// comparing voices across different TTS providers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum VoiceQuality {
+    /// Low quality (robotic, limited prosody).
     Low,
+    /// Moderate quality (understandable but artificial).
     Moderate,
+    /// Good quality (natural-sounding with occasional artifacts).
     Good,
+    /// Excellent quality (near-human, minimal artifacts).
     Excellent,
-    /// avoid using this unless it REALLY is a complete unknown
-    /// in most cases, however, the TTS solution or the TTS model
-    /// being used should be enough to generalize this
-    Unknown
+    /// Quality is unknown or cannot be determined.
+    ///
+    /// Avoid using this unless it REALLY is a complete unknown.
+    /// In most cases, the TTS solution or model being used should
+    /// be enough to generalize quality.
+    Unknown,
 }
 
-/// The `Voice` struct defines a specific voice on a specific
-/// provider.
-#[derive(Debug, Clone, PartialEq)]
+/// A specific voice on a specific TTS provider.
+///
+/// `Voice` represents a named voice with associated metadata such as
+/// gender, quality, and supported languages. Each provider may have
+/// multiple voices with different characteristics.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_speaks::types::{Voice, Gender, VoiceQuality, Language};
+///
+/// let voice = Voice::new("Samantha")
+///     .with_gender(Gender::Female)
+///     .with_quality(VoiceQuality::Excellent)
+///     .with_language(Language::English);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Voice {
-    name: String,
-    gender: String,
-    quality: VoiceQuality,
-    languages: Vec<Language>
+    /// The display name of the voice.
+    pub name: String,
+    /// The gender of the voice.
+    pub gender: Gender,
+    /// The quality rating of this voice.
+    pub quality: VoiceQuality,
+    /// Languages supported by this voice.
+    pub languages: Vec<Language>,
+    /// Provider-specific voice identifier (e.g., ElevenLabs voice ID).
+    ///
+    /// Some providers use identifiers that differ from the display name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identifier: Option<String>,
+    /// Priority for voice selection (higher = preferred).
+    ///
+    /// Used when multiple voices match selection criteria.
+    #[serde(default)]
+    pub priority: u8,
+    /// Path to a voice model file, if applicable.
+    ///
+    /// Required for providers like Piper or Sherpa that use local model files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_file: Option<String>,
+}
+
+impl Voice {
+    /// Create a new voice with the given name.
+    ///
+    /// Uses default values for all other fields:
+    /// - `gender`: `Gender::Any`
+    /// - `quality`: `VoiceQuality::Unknown`
+    /// - `languages`: empty
+    /// - `identifier`: `None`
+    /// - `priority`: 0
+    /// - `model_file`: `None`
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            gender: Gender::Any,
+            quality: VoiceQuality::Unknown,
+            languages: Vec::new(),
+            identifier: None,
+            priority: 0,
+            model_file: None,
+        }
+    }
+
+    /// Set the gender of this voice.
+    #[must_use]
+    pub fn with_gender(mut self, gender: Gender) -> Self {
+        self.gender = gender;
+        self
+    }
+
+    /// Set the quality rating of this voice.
+    #[must_use]
+    pub fn with_quality(mut self, quality: VoiceQuality) -> Self {
+        self.quality = quality;
+        self
+    }
+
+    /// Add a supported language to this voice.
+    #[must_use]
+    pub fn with_language(mut self, language: Language) -> Self {
+        self.languages.push(language);
+        self
+    }
+
+    /// Set the supported languages for this voice.
+    #[must_use]
+    pub fn with_languages(mut self, languages: Vec<Language>) -> Self {
+        self.languages = languages;
+        self
+    }
+
+    /// Set the provider-specific identifier.
+    #[must_use]
+    pub fn with_identifier(mut self, identifier: impl Into<String>) -> Self {
+        self.identifier = Some(identifier.into());
+        self
+    }
+
+    /// Set the selection priority.
+    #[must_use]
+    pub fn with_priority(mut self, priority: u8) -> Self {
+        self.priority = priority;
+        self
+    }
+
+    /// Set the model file path.
+    #[must_use]
+    pub fn with_model_file(mut self, path: impl Into<String>) -> Self {
+        self.model_file = Some(path.into());
+        self
+    }
 }
 
 
-/// `HostTtsCapability` defines the capability of a particular
-/// provider on the Host system.
-#[derive(Debug, Clone, PartialEq)]
+/// Capability information for a specific TTS provider on the host system.
+///
+/// `HostTtsCapability` tracks both the currently installed/available voices
+/// and any additional voices that could be installed for a provider.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_speaks::types::{HostTtsCapability, TtsProvider, HostTtsProvider, Voice, Gender, VoiceQuality, Language};
+///
+/// let capability = HostTtsCapability::new(TtsProvider::Host(HostTtsProvider::Say))
+///     .with_voice(Voice::new("Samantha")
+///         .with_gender(Gender::Female)
+///         .with_quality(VoiceQuality::Good));
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HostTtsCapability {
-    provider: TtsProvider,
-    /// voices which the host already has access to for the given provider
-    voices: Vec<Voice>,
-    /// the voices available for the given provider which are NOT yet installed
-    /// on the local host but can be
-    available_voices: Vec<Voice>
+    /// The TTS provider this capability describes.
+    pub provider: TtsProvider,
+    /// Voices currently available (installed) on the host for this provider.
+    pub voices: Vec<Voice>,
+    /// Voices that could be installed but are not yet available locally.
+    ///
+    /// This is useful for providers like macOS `say` where additional
+    /// voices can be downloaded from System Settings.
+    pub available_voices: Vec<Voice>,
 }
 
+impl HostTtsCapability {
+    /// Create a new capability record for a provider.
+    pub fn new(provider: TtsProvider) -> Self {
+        Self {
+            provider,
+            voices: Vec::new(),
+            available_voices: Vec::new(),
+        }
+    }
 
-/// The `HostTtsCapabilities` documents all of the providers (and their
-/// voice capabilities) on the host. This struct is serialized to disk
-/// to act as a cache for a given host's capabilities.
-#[derive(Debug, Clone, PartialEq)]
-pub struct HostTtsCapabilities (Vec<HostTtsCapability>);
+    /// Add an installed voice to this provider's capability.
+    #[must_use]
+    pub fn with_voice(mut self, voice: Voice) -> Self {
+        self.voices.push(voice);
+        self
+    }
+
+    /// Add multiple installed voices.
+    #[must_use]
+    pub fn with_voices(mut self, voices: Vec<Voice>) -> Self {
+        self.voices.extend(voices);
+        self
+    }
+
+    /// Add an available (not yet installed) voice.
+    #[must_use]
+    pub fn with_available_voice(mut self, voice: Voice) -> Self {
+        self.available_voices.push(voice);
+        self
+    }
+
+    /// Add multiple available voices.
+    #[must_use]
+    pub fn with_available_voices(mut self, voices: Vec<Voice>) -> Self {
+        self.available_voices.extend(voices);
+        self
+    }
+}
+
+/// Complete TTS capabilities for a host system.
+///
+/// `HostTtsCapabilities` aggregates capability information from all
+/// TTS providers discovered on the system. This struct is designed
+/// to be serialized to disk as a cache for quick lookup.
+///
+/// ## Caching
+///
+/// The capabilities can be expensive to enumerate (especially for
+/// cloud providers), so this struct supports JSON serialization for
+/// persistent caching.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct HostTtsCapabilities {
+    /// Capability information for each discovered provider.
+    pub providers: Vec<HostTtsCapability>,
+    /// Timestamp when this cache was last updated (Unix epoch seconds).
+    #[serde(default)]
+    pub last_updated: u64,
+}
+
+impl HostTtsCapabilities {
+    /// Create an empty capabilities struct.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a provider's capability information.
+    #[must_use]
+    pub fn with_provider(mut self, capability: HostTtsCapability) -> Self {
+        self.providers.push(capability);
+        self
+    }
+
+    /// Set the last updated timestamp.
+    #[must_use]
+    pub fn with_timestamp(mut self, timestamp: u64) -> Self {
+        self.last_updated = timestamp;
+        self
+    }
+
+    /// Get all installed voices across all providers.
+    pub fn all_voices(&self) -> impl Iterator<Item = &Voice> {
+        self.providers.iter().flat_map(|p| p.voices.iter())
+    }
+
+    /// Find a provider's capability by provider type.
+    pub fn get_provider(&self, provider: &TtsProvider) -> Option<&HostTtsCapability> {
+        self.providers.iter().find(|p| &p.provider == provider)
+    }
+}
 
 
 // ============================================================================
@@ -94,7 +309,8 @@ pub struct HostTtsCapabilities (Vec<HostTtsCapability>);
 
 /// Language preference for voice selection.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Language {
     /// English language (any variant: en-US, en-GB, etc.).
     #[default]
@@ -128,7 +344,8 @@ impl Language {
 
 /// Gender preference for voice selection.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Gender {
     /// Prefer a male voice.
     Male,
@@ -188,7 +405,8 @@ impl AudioFormat {
 ///
 /// These are CLI-based TTS solutions that can be invoked via subprocess.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HostTtsProvider {
     /// macOS built-in speech synthesis (`say` command).
     /// Available on all macOS systems.
@@ -218,7 +436,7 @@ pub enum HostTtsProvider {
 
     /// SVOX Pico TTS (`pico2wave` command).
     /// Lightweight TTS for embedded systems.
-    // Pico2Wave,
+    Pico2Wave,
 
     /// Mimic3 - Mycroft's neural TTS engine.
     /// Supports SSML input.
@@ -259,6 +477,7 @@ impl HostTtsProvider {
             HostTtsProvider::Gtts => installed.gtts_cli,
             HostTtsProvider::SpdSay => false, // Not yet detected by sniff-lib
             HostTtsProvider::Piper => installed.piper,
+            HostTtsProvider::Pico2Wave => installed.pico2wave,
         }
     }
 
@@ -276,6 +495,7 @@ impl HostTtsProvider {
             HostTtsProvider::Gtts => "gtts-cli",
             HostTtsProvider::SpdSay => "spd-say",
             HostTtsProvider::Piper => "piper",
+            HostTtsProvider::Pico2Wave => "pico2wave",
         }
     }
 
@@ -294,7 +514,8 @@ impl HostTtsProvider {
 
 /// Cloud-based TTS providers requiring API keys.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CloudTtsProvider {
     /// ElevenLabs - high quality AI voice synthesis.
     /// Requires `ELEVENLABS_API_KEY` or `ELEVEN_LABS_API_KEY`.
@@ -335,7 +556,8 @@ impl CloudTtsProvider {
 
 /// Unified TTS provider enum combining host and cloud providers.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TtsProvider {
     /// Host-based TTS provider (CLI subprocess).
     Host(HostTtsProvider),
@@ -582,5 +804,277 @@ mod tests {
         assert_eq!(HostTtsProvider::Say.binary_name(), "say");
         assert_eq!(HostTtsProvider::ESpeak.binary_name(), "espeak-ng");
         assert_eq!(HostTtsProvider::Sapi.binary_name(), "powershell");
+    }
+
+    // ========================================================================
+    // Voice tests
+    // ========================================================================
+
+    #[test]
+    fn test_voice_new() {
+        let voice = Voice::new("TestVoice");
+        assert_eq!(voice.name, "TestVoice");
+        assert_eq!(voice.gender, Gender::Any);
+        assert_eq!(voice.quality, VoiceQuality::Unknown);
+        assert!(voice.languages.is_empty());
+        assert!(voice.identifier.is_none());
+        assert_eq!(voice.priority, 0);
+        assert!(voice.model_file.is_none());
+    }
+
+    #[test]
+    fn test_voice_builder() {
+        let voice = Voice::new("Samantha")
+            .with_gender(Gender::Female)
+            .with_quality(VoiceQuality::Excellent)
+            .with_language(Language::English)
+            .with_identifier("voice_123")
+            .with_priority(10)
+            .with_model_file("/path/to/model.onnx");
+
+        assert_eq!(voice.name, "Samantha");
+        assert_eq!(voice.gender, Gender::Female);
+        assert_eq!(voice.quality, VoiceQuality::Excellent);
+        assert_eq!(voice.languages, vec![Language::English]);
+        assert_eq!(voice.identifier, Some("voice_123".into()));
+        assert_eq!(voice.priority, 10);
+        assert_eq!(voice.model_file, Some("/path/to/model.onnx".into()));
+    }
+
+    #[test]
+    fn test_voice_with_languages() {
+        let voice = Voice::new("MultiLang")
+            .with_languages(vec![Language::English, Language::Custom("fr-FR".into())]);
+
+        assert_eq!(voice.languages.len(), 2);
+    }
+
+    #[test]
+    fn test_voice_serialization() {
+        let voice = Voice::new("TestVoice")
+            .with_gender(Gender::Female)
+            .with_quality(VoiceQuality::Good)
+            .with_language(Language::English);
+
+        let json = serde_json::to_string(&voice).unwrap();
+        assert!(json.contains("\"name\":\"TestVoice\""));
+        assert!(json.contains("\"gender\":\"female\""));
+        assert!(json.contains("\"quality\":\"good\""));
+
+        // Roundtrip test
+        let deserialized: Voice = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, voice);
+    }
+
+    #[test]
+    fn test_voice_serialization_skips_none() {
+        let voice = Voice::new("Simple");
+        let json = serde_json::to_string(&voice).unwrap();
+
+        // Optional fields with None should be skipped
+        assert!(!json.contains("identifier"));
+        assert!(!json.contains("model_file"));
+    }
+
+    // ========================================================================
+    // VoiceQuality tests
+    // ========================================================================
+
+    #[test]
+    fn test_voice_quality_serialization() {
+        assert_eq!(serde_json::to_string(&VoiceQuality::Low).unwrap(), "\"low\"");
+        assert_eq!(
+            serde_json::to_string(&VoiceQuality::Excellent).unwrap(),
+            "\"excellent\""
+        );
+        assert_eq!(
+            serde_json::to_string(&VoiceQuality::Unknown).unwrap(),
+            "\"unknown\""
+        );
+    }
+
+    // ========================================================================
+    // Gender tests
+    // ========================================================================
+
+    #[test]
+    fn test_gender_serialization() {
+        assert_eq!(serde_json::to_string(&Gender::Male).unwrap(), "\"male\"");
+        assert_eq!(serde_json::to_string(&Gender::Female).unwrap(), "\"female\"");
+        assert_eq!(serde_json::to_string(&Gender::Any).unwrap(), "\"any\"");
+    }
+
+    // ========================================================================
+    // Language tests
+    // ========================================================================
+
+    #[test]
+    fn test_language_serialization() {
+        assert_eq!(
+            serde_json::to_string(&Language::English).unwrap(),
+            "\"english\""
+        );
+        let custom = Language::Custom("de-DE".into());
+        let json = serde_json::to_string(&custom).unwrap();
+        assert!(json.contains("de-DE"));
+    }
+
+    // ========================================================================
+    // HostTtsProvider tests
+    // ========================================================================
+
+    #[test]
+    fn test_host_provider_serialization() {
+        assert_eq!(
+            serde_json::to_string(&HostTtsProvider::Say).unwrap(),
+            "\"say\""
+        );
+        assert_eq!(
+            serde_json::to_string(&HostTtsProvider::ESpeak).unwrap(),
+            "\"e_speak\""
+        );
+        assert_eq!(
+            serde_json::to_string(&HostTtsProvider::Piper).unwrap(),
+            "\"piper\""
+        );
+    }
+
+    #[test]
+    fn test_cloud_provider_serialization() {
+        assert_eq!(
+            serde_json::to_string(&CloudTtsProvider::ElevenLabs).unwrap(),
+            "\"eleven_labs\""
+        );
+    }
+
+    // ========================================================================
+    // TtsProvider tests
+    // ========================================================================
+
+    #[test]
+    fn test_tts_provider_serialization() {
+        let host_provider = TtsProvider::Host(HostTtsProvider::Say);
+        let json = serde_json::to_string(&host_provider).unwrap();
+        assert!(json.contains("host"));
+        assert!(json.contains("say"));
+
+        let cloud_provider = TtsProvider::Cloud(CloudTtsProvider::ElevenLabs);
+        let json = serde_json::to_string(&cloud_provider).unwrap();
+        assert!(json.contains("cloud"));
+        assert!(json.contains("eleven_labs"));
+    }
+
+    // ========================================================================
+    // HostTtsCapability tests
+    // ========================================================================
+
+    #[test]
+    fn test_host_tts_capability_new() {
+        let cap = HostTtsCapability::new(TtsProvider::Host(HostTtsProvider::Say));
+        assert!(matches!(
+            cap.provider,
+            TtsProvider::Host(HostTtsProvider::Say)
+        ));
+        assert!(cap.voices.is_empty());
+        assert!(cap.available_voices.is_empty());
+    }
+
+    #[test]
+    fn test_host_tts_capability_builder() {
+        let cap = HostTtsCapability::new(TtsProvider::Host(HostTtsProvider::Say))
+            .with_voice(Voice::new("Samantha"))
+            .with_available_voice(Voice::new("Alex"));
+
+        assert_eq!(cap.voices.len(), 1);
+        assert_eq!(cap.voices[0].name, "Samantha");
+        assert_eq!(cap.available_voices.len(), 1);
+        assert_eq!(cap.available_voices[0].name, "Alex");
+    }
+
+    #[test]
+    fn test_host_tts_capability_with_voices() {
+        let cap = HostTtsCapability::new(TtsProvider::Host(HostTtsProvider::Say))
+            .with_voices(vec![Voice::new("V1"), Voice::new("V2")])
+            .with_available_voices(vec![Voice::new("V3")]);
+
+        assert_eq!(cap.voices.len(), 2);
+        assert_eq!(cap.available_voices.len(), 1);
+    }
+
+    #[test]
+    fn test_host_tts_capability_serialization() {
+        let cap = HostTtsCapability::new(TtsProvider::Host(HostTtsProvider::Say))
+            .with_voice(Voice::new("Samantha").with_gender(Gender::Female));
+
+        let json = serde_json::to_string(&cap).unwrap();
+        let deserialized: HostTtsCapability = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, cap);
+    }
+
+    // ========================================================================
+    // HostTtsCapabilities tests
+    // ========================================================================
+
+    #[test]
+    fn test_host_tts_capabilities_new() {
+        let caps = HostTtsCapabilities::new();
+        assert!(caps.providers.is_empty());
+        assert_eq!(caps.last_updated, 0);
+    }
+
+    #[test]
+    fn test_host_tts_capabilities_builder() {
+        let caps = HostTtsCapabilities::new()
+            .with_provider(
+                HostTtsCapability::new(TtsProvider::Host(HostTtsProvider::Say))
+                    .with_voice(Voice::new("Samantha")),
+            )
+            .with_timestamp(1234567890);
+
+        assert_eq!(caps.providers.len(), 1);
+        assert_eq!(caps.last_updated, 1234567890);
+    }
+
+    #[test]
+    fn test_host_tts_capabilities_all_voices() {
+        let caps = HostTtsCapabilities::new()
+            .with_provider(
+                HostTtsCapability::new(TtsProvider::Host(HostTtsProvider::Say))
+                    .with_voices(vec![Voice::new("V1"), Voice::new("V2")]),
+            )
+            .with_provider(
+                HostTtsCapability::new(TtsProvider::Host(HostTtsProvider::ESpeak))
+                    .with_voice(Voice::new("V3")),
+            );
+
+        let all_voices: Vec<_> = caps.all_voices().collect();
+        assert_eq!(all_voices.len(), 3);
+    }
+
+    #[test]
+    fn test_host_tts_capabilities_get_provider() {
+        let caps = HostTtsCapabilities::new()
+            .with_provider(HostTtsCapability::new(TtsProvider::Host(HostTtsProvider::Say)));
+
+        assert!(caps
+            .get_provider(&TtsProvider::Host(HostTtsProvider::Say))
+            .is_some());
+        assert!(caps
+            .get_provider(&TtsProvider::Host(HostTtsProvider::ESpeak))
+            .is_none());
+    }
+
+    #[test]
+    fn test_host_tts_capabilities_serialization() {
+        let caps = HostTtsCapabilities::new()
+            .with_provider(
+                HostTtsCapability::new(TtsProvider::Host(HostTtsProvider::Say))
+                    .with_voice(Voice::new("Test")),
+            )
+            .with_timestamp(1234567890);
+
+        let json = serde_json::to_string_pretty(&caps).unwrap();
+        let deserialized: HostTtsCapabilities = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, caps);
     }
 }
