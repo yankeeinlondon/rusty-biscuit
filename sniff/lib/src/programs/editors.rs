@@ -1,11 +1,53 @@
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::SniffInstallationError;
+use crate::os::detect_os_type;
 use crate::programs::enums::Editor;
 use crate::programs::find_program::find_programs_parallel;
+use crate::programs::installer::{
+    execute_install, execute_versioned_install, method_available, select_best_method,
+    InstallOptions,
+};
 use crate::programs::schema::{ProgramError, ProgramMetadata};
 use crate::programs::types::ProgramDetector;
+use crate::programs::{
+    InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
+};
+
+fn editor_details(editor: Editor) -> Option<&'static crate::programs::ProgramDetails> {
+    let program = match editor {
+        Editor::Vi => Program::Vi,
+        Editor::Vim => Program::Vim,
+        Editor::Neovim => Program::Neovim,
+        Editor::Emacs => Program::Emacs,
+        Editor::XEmacs => Program::XEmacs,
+        Editor::Nano => Program::Nano,
+        Editor::Helix => Program::Helix,
+        Editor::VSCode => Program::VSCode,
+        Editor::VSCodium => Program::VSCodium,
+        Editor::Sublime => Program::Sublime,
+        Editor::Zed => Program::Zed,
+        Editor::Micro => Program::Micro,
+        Editor::Kakoune => Program::Kakoune,
+        Editor::Amp => Program::Amp,
+        Editor::Lapce => Program::Lapce,
+        Editor::PhpStorm => Program::PhpStorm,
+        Editor::IntellijIdea => Program::IntellijIdea,
+        Editor::PyCharm => Program::PyCharm,
+        Editor::WebStorm => Program::WebStorm,
+        Editor::CLion => Program::CLion,
+        Editor::GoLand => Program::GoLand,
+        Editor::Rider => Program::Rider,
+        Editor::TextMate => Program::TextMate,
+        Editor::BBEdit => Program::BBEdit,
+        Editor::Geany => Program::Geany,
+        Editor::Kate => Program::Kate,
+    };
+
+    PROGRAM_LOOKUP.get(&program)
+}
 
 /// Popular text editors and IDEs found on the system.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -216,28 +258,80 @@ impl ProgramDetector for InstalledEditors {
         InstalledEditors::installed(self)
     }
 
-    fn installable(&self, _program: Self::Program) -> bool {
-        // TODO: Phase 4 will implement this based on available package managers
-        false
+    fn installable(&self, program: Self::Program) -> bool {
+        let Some(details) = editor_details(program) else {
+            return false;
+        };
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return false;
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+
+        details
+            .installation_methods
+            .iter()
+            .any(|method| method_available(method, &os_pkg_mgrs, &lang_pkg_mgrs))
     }
 
-    fn install(&self, _program: Self::Program) -> Result<(), SniffInstallationError> {
-        // TODO: Phase 4 will implement installation logic
-        Err(SniffInstallationError::NotInstallableOnOs {
-            pkg: "editor".to_string(),
-            os: "current".to_string(),
-        })
+    fn install(&self, program: Self::Program) -> Result<(), SniffInstallationError> {
+        let details =
+            editor_details(program).ok_or_else(|| SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: "unknown".to_string(),
+            })?;
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: os_type.to_string(),
+            });
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+        let method = select_best_method(details.installation_methods, &os_pkg_mgrs, &lang_pkg_mgrs)
+            .ok_or_else(|| SniffInstallationError::MissingPackageManager {
+                pkg: program.display_name().to_string(),
+                manager: "package manager".to_string(),
+            })?;
+
+        let _result = execute_install(method, &InstallOptions::default())?;
+        Ok(())
     }
 
     fn install_version(
         &self,
-        _program: Self::Program,
-        _version: &str,
+        program: Self::Program,
+        version: &str,
     ) -> Result<(), SniffInstallationError> {
-        // TODO: Phase 4 will implement versioned installation
-        Err(SniffInstallationError::NotInstallableOnOs {
-            pkg: "editor".to_string(),
-            os: "current".to_string(),
-        })
+        let details =
+            editor_details(program).ok_or_else(|| SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: "unknown".to_string(),
+            })?;
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: os_type.to_string(),
+            });
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+        let method = select_best_method(details.installation_methods, &os_pkg_mgrs, &lang_pkg_mgrs)
+            .ok_or_else(|| SniffInstallationError::MissingPackageManager {
+                pkg: program.display_name().to_string(),
+                manager: "package manager".to_string(),
+            })?;
+
+        let _result = execute_versioned_install(method, version, &InstallOptions::default())?;
+        Ok(())
     }
 }

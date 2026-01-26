@@ -1,11 +1,42 @@
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::SniffInstallationError;
+use crate::os::detect_os_type;
 use crate::programs::enums::TtsClient;
 use crate::programs::find_program::find_programs_parallel;
+use crate::programs::installer::{
+    execute_install, execute_versioned_install, method_available, select_best_method,
+    InstallOptions,
+};
 use crate::programs::schema::{ProgramError, ProgramMetadata};
 use crate::programs::types::ProgramDetector;
+use crate::programs::{
+    InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
+};
+
+fn tts_client_details(client: TtsClient) -> Option<&'static crate::programs::ProgramDetails> {
+    let program = match client {
+        TtsClient::Say => Program::Say,
+        TtsClient::Espeak => Program::Espeak,
+        TtsClient::EspeakNg => Program::EspeakNg,
+        TtsClient::Festival => Program::Festival,
+        TtsClient::Mimic => Program::Mimic,
+        TtsClient::Mimic3 => Program::Mimic3,
+        TtsClient::Piper => Program::Piper,
+        TtsClient::Echogarden => Program::Echogarden,
+        TtsClient::Balcon => Program::Balcon,
+        TtsClient::WindowsSapi => Program::WindowsSapi,
+        TtsClient::GttsCli => Program::GttsCli,
+        TtsClient::CoquiTts => Program::CoquiTts,
+        TtsClient::SherpaOnnx => Program::SherpaOnnx,
+        TtsClient::KokoroTts => Program::KokoroTts,
+        TtsClient::Pico2Wave => Program::Pico2Wave,
+    };
+
+    PROGRAM_LOOKUP.get(&program)
+}
 
 /// Popular text-to-speech (TTS) clients found on the system.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -187,26 +218,83 @@ impl ProgramDetector for InstalledTtsClients {
         InstalledTtsClients::installed(self)
     }
 
-    fn installable(&self, _program: Self::Program) -> bool {
-        false
+    fn installable(&self, program: Self::Program) -> bool {
+        let Some(details) = tts_client_details(program) else {
+            return false;
+        };
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return false;
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+
+        details
+            .installation_methods
+            .iter()
+            .any(|method| method_available(method, &os_pkg_mgrs, &lang_pkg_mgrs))
     }
 
-    fn install(&self, _program: Self::Program) -> Result<(), SniffInstallationError> {
-        Err(SniffInstallationError::NotInstallableOnOs {
-            pkg: "tts_client".to_string(),
-            os: "current".to_string(),
-        })
+    fn install(&self, program: Self::Program) -> Result<(), SniffInstallationError> {
+        let details = tts_client_details(program).ok_or_else(|| {
+            SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: "unknown".to_string(),
+            }
+        })?;
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: os_type.to_string(),
+            });
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+        let method = select_best_method(details.installation_methods, &os_pkg_mgrs, &lang_pkg_mgrs)
+            .ok_or_else(|| SniffInstallationError::MissingPackageManager {
+                pkg: program.display_name().to_string(),
+                manager: "package manager".to_string(),
+            })?;
+
+        let _result = execute_install(method, &InstallOptions::default())?;
+        Ok(())
     }
 
     fn install_version(
         &self,
-        _program: Self::Program,
-        _version: &str,
+        program: Self::Program,
+        version: &str,
     ) -> Result<(), SniffInstallationError> {
-        Err(SniffInstallationError::NotInstallableOnOs {
-            pkg: "tts_client".to_string(),
-            os: "current".to_string(),
-        })
+        let details = tts_client_details(program).ok_or_else(|| {
+            SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: "unknown".to_string(),
+            }
+        })?;
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: os_type.to_string(),
+            });
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+        let method = select_best_method(details.installation_methods, &os_pkg_mgrs, &lang_pkg_mgrs)
+            .ok_or_else(|| SniffInstallationError::MissingPackageManager {
+                pkg: program.display_name().to_string(),
+                manager: "package manager".to_string(),
+            })?;
+
+        let _result = execute_versioned_install(method, version, &InstallOptions::default())?;
+        Ok(())
     }
 }
 

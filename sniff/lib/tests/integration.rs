@@ -1,4 +1,4 @@
-use sniff_lib::{SniffConfig, detect, detect_with_config};
+use sniff_lib::{detect, detect_with_config, SniffConfig};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -50,7 +50,7 @@ fn test_detect_completes_in_reasonable_time() {
     let elapsed = start.elapsed();
     // Allow slack for CI environments and package manager detection (PATH scanning)
     assert!(
-        elapsed.as_millis() < 10000,
+        elapsed.as_millis() < 15000,
         "Detection took too long: {:?}",
         elapsed
     );
@@ -289,7 +289,7 @@ fn test_detect_timezone_returns_valid_offset() {
 /// Tests that detect_os_type matches the current platform.
 #[test]
 fn test_detect_os_type_matches_platform() {
-    use sniff_lib::hardware::{OsType, detect_os_type};
+    use sniff_lib::hardware::{detect_os_type, OsType};
 
     let os_type = detect_os_type();
 
@@ -335,7 +335,7 @@ fn test_detect_os_type_matches_platform() {
 #[cfg(target_os = "macos")]
 #[test]
 fn test_macos_package_managers_finds_expected_managers() {
-    use sniff_lib::hardware::{SystemPackageManager, detect_macos_package_managers};
+    use sniff_lib::hardware::{detect_macos_package_managers, SystemPackageManager};
 
     let managers = detect_macos_package_managers();
 

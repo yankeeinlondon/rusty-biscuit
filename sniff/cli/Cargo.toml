@@ -12,6 +12,7 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+shared = { path = "../../biscuit" }
 sniff-lib = { path = "../lib", features = ["network"] }
 strum = { version = "0.27", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

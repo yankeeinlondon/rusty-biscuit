@@ -38,6 +38,44 @@ fn test_text_output() {
 }
 
 #[test]
+fn test_programs_default_text_is_table() {
+    cargo_bin_cmd!("sniff")
+        .args(["--tts-clients"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Name"))
+        .stdout(predicate::str::contains("Installed"));
+}
+
+#[test]
+fn test_markdown_programs_output() {
+    cargo_bin_cmd!("sniff")
+        .args(["--programs", "--markdown"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Name"))
+        .stdout(predicate::str::contains("Installed"));
+}
+
+#[test]
+fn test_markdown_verbose_adds_columns() {
+    cargo_bin_cmd!("sniff")
+        .args(["--programs", "--markdown", "-v"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Binary"))
+        .stdout(predicate::str::contains("Path"));
+}
+
+#[test]
+fn test_markdown_conflicts_with_json() {
+    cargo_bin_cmd!("sniff")
+        .args(["--programs", "--markdown", "--json"])
+        .assert()
+        .failure();
+}
+
+#[test]
 fn test_base_dir_flag() {
     cargo_bin_cmd!("sniff")
         .args(["--base", "."])

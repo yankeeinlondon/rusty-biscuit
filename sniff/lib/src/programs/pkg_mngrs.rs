@@ -1,11 +1,63 @@
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::SniffInstallationError;
+use crate::os::detect_os_type;
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::find_program::find_programs_parallel;
+use crate::programs::installer::{
+    execute_install, execute_versioned_install, method_available, select_best_method,
+    InstallOptions,
+};
 use crate::programs::schema::{ProgramError, ProgramMetadata};
 use crate::programs::types::ProgramDetector;
+use crate::programs::{Program, PROGRAM_LOOKUP};
+
+fn lang_pkg_mgr_details(
+    pkg_mgr: LanguagePackageManager,
+) -> Option<&'static crate::programs::ProgramDetails> {
+    let program = match pkg_mgr {
+        LanguagePackageManager::Npm => Program::Npm,
+        LanguagePackageManager::Pnpm => Program::Pnpm,
+        LanguagePackageManager::Yarn => Program::Yarn,
+        LanguagePackageManager::Bun => Program::Bun,
+        LanguagePackageManager::Cargo => Program::Cargo,
+        LanguagePackageManager::GoModules => Program::GoModules,
+        LanguagePackageManager::Composer => Program::Composer,
+        LanguagePackageManager::SwiftPm => Program::SwiftPm,
+        LanguagePackageManager::Luarocks => Program::Luarocks,
+        LanguagePackageManager::Vcpkg => Program::Vcpkg,
+        LanguagePackageManager::Conan => Program::Conan,
+        LanguagePackageManager::Nuget => Program::Nuget,
+        LanguagePackageManager::Hex => Program::Hex,
+        LanguagePackageManager::Pip => Program::Pip,
+        LanguagePackageManager::Uv => Program::Uv,
+        LanguagePackageManager::Poetry => Program::Poetry,
+        LanguagePackageManager::Cpan => Program::Cpan,
+        LanguagePackageManager::Cpanm => Program::Cpanm,
+    };
+
+    PROGRAM_LOOKUP.get(&program)
+}
+
+fn os_pkg_mgr_details(
+    pkg_mgr: OsPackageManager,
+) -> Option<&'static crate::programs::ProgramDetails> {
+    let program = match pkg_mgr {
+        OsPackageManager::Apt => Program::Apt,
+        OsPackageManager::Nala => Program::Nala,
+        OsPackageManager::Brew => Program::Brew,
+        OsPackageManager::Dnf => Program::Dnf,
+        OsPackageManager::Pacman => Program::Pacman,
+        OsPackageManager::Winget => Program::Winget,
+        OsPackageManager::Chocolatey => Program::Chocolatey,
+        OsPackageManager::Scoop => Program::Scoop,
+        OsPackageManager::Nix => Program::Nix,
+    };
+
+    PROGRAM_LOOKUP.get(&program)
+}
 
 /// Language-specific package managers found on the system.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -186,26 +238,83 @@ impl ProgramDetector for InstalledLanguagePackageManagers {
         InstalledLanguagePackageManagers::installed(self)
     }
 
-    fn installable(&self, _program: Self::Program) -> bool {
-        false
+    fn installable(&self, program: Self::Program) -> bool {
+        let Some(details) = lang_pkg_mgr_details(program) else {
+            return false;
+        };
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return false;
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+
+        details
+            .installation_methods
+            .iter()
+            .any(|method| method_available(method, &os_pkg_mgrs, &lang_pkg_mgrs))
     }
 
-    fn install(&self, _program: Self::Program) -> Result<(), SniffInstallationError> {
-        Err(SniffInstallationError::NotInstallableOnOs {
-            pkg: "package_manager".to_string(),
-            os: "current".to_string(),
-        })
+    fn install(&self, program: Self::Program) -> Result<(), SniffInstallationError> {
+        let details = lang_pkg_mgr_details(program).ok_or_else(|| {
+            SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: "unknown".to_string(),
+            }
+        })?;
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: os_type.to_string(),
+            });
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+        let method = select_best_method(details.installation_methods, &os_pkg_mgrs, &lang_pkg_mgrs)
+            .ok_or_else(|| SniffInstallationError::MissingPackageManager {
+                pkg: program.display_name().to_string(),
+                manager: "package manager".to_string(),
+            })?;
+
+        let _result = execute_install(method, &InstallOptions::default())?;
+        Ok(())
     }
 
     fn install_version(
         &self,
-        _program: Self::Program,
-        _version: &str,
+        program: Self::Program,
+        version: &str,
     ) -> Result<(), SniffInstallationError> {
-        Err(SniffInstallationError::NotInstallableOnOs {
-            pkg: "package_manager".to_string(),
-            os: "current".to_string(),
-        })
+        let details = lang_pkg_mgr_details(program).ok_or_else(|| {
+            SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: "unknown".to_string(),
+            }
+        })?;
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: os_type.to_string(),
+            });
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+        let method = select_best_method(details.installation_methods, &os_pkg_mgrs, &lang_pkg_mgrs)
+            .ok_or_else(|| SniffInstallationError::MissingPackageManager {
+                pkg: program.display_name().to_string(),
+                manager: "package manager".to_string(),
+            })?;
+
+        let _result = execute_versioned_install(method, version, &InstallOptions::default())?;
+        Ok(())
     }
 }
 
@@ -351,25 +460,82 @@ impl ProgramDetector for InstalledOsPackageManagers {
         InstalledOsPackageManagers::installed(self)
     }
 
-    fn installable(&self, _program: Self::Program) -> bool {
-        false
+    fn installable(&self, program: Self::Program) -> bool {
+        let Some(details) = os_pkg_mgr_details(program) else {
+            return false;
+        };
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return false;
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+
+        details
+            .installation_methods
+            .iter()
+            .any(|method| method_available(method, &os_pkg_mgrs, &lang_pkg_mgrs))
     }
 
-    fn install(&self, _program: Self::Program) -> Result<(), SniffInstallationError> {
-        Err(SniffInstallationError::NotInstallableOnOs {
-            pkg: "os_package_manager".to_string(),
-            os: "current".to_string(),
-        })
+    fn install(&self, program: Self::Program) -> Result<(), SniffInstallationError> {
+        let details = os_pkg_mgr_details(program).ok_or_else(|| {
+            SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: "unknown".to_string(),
+            }
+        })?;
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: os_type.to_string(),
+            });
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+        let method = select_best_method(details.installation_methods, &os_pkg_mgrs, &lang_pkg_mgrs)
+            .ok_or_else(|| SniffInstallationError::MissingPackageManager {
+                pkg: program.display_name().to_string(),
+                manager: "package manager".to_string(),
+            })?;
+
+        let _result = execute_install(method, &InstallOptions::default())?;
+        Ok(())
     }
 
     fn install_version(
         &self,
-        _program: Self::Program,
-        _version: &str,
+        program: Self::Program,
+        version: &str,
     ) -> Result<(), SniffInstallationError> {
-        Err(SniffInstallationError::NotInstallableOnOs {
-            pkg: "os_package_manager".to_string(),
-            os: "current".to_string(),
-        })
+        let details = os_pkg_mgr_details(program).ok_or_else(|| {
+            SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: "unknown".to_string(),
+            }
+        })?;
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: os_type.to_string(),
+            });
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+        let method = select_best_method(details.installation_methods, &os_pkg_mgrs, &lang_pkg_mgrs)
+            .ok_or_else(|| SniffInstallationError::MissingPackageManager {
+                pkg: program.display_name().to_string(),
+                manager: "package manager".to_string(),
+            })?;
+
+        let _result = execute_versioned_install(method, version, &InstallOptions::default())?;
+        Ok(())
     }
 }

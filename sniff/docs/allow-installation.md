@@ -7,9 +7,9 @@
 This feature set provides:
 
 - **Type Safety**: All program detection structs now implement the `ProgramDetector` trait
-- **Rich Metadata**: `PROGRAM_LOOKUP` contains metadata for 31 core programs
-- **Installation Support**: Safe installation via package managers with dry-run mode
-- **Enhanced CLI Output**: New `--json-format full` option for rich JSON output
+- **Rich Metadata**: `PROGRAM_LOOKUP` contains metadata for 126 programs across all categories
+- **Installation Support**: Safe installation via package managers with `installable()` checks
+- **Enhanced CLI Output**: `--json-format full` and `--markdown` program tables
 
 ---
 
@@ -49,14 +49,14 @@ pub trait ProgramDetector {
 
 ### Program Inventory ✅
 
-The `Program` enum in `inventory.rs` now has the `Copy` trait and `PROGRAM_LOOKUP` contains metadata for 31 core programs:
+The `Program` enum in `inventory.rs` now has full coverage and `PROGRAM_LOOKUP` contains metadata for 126 programs:
 
-- **Editors (5)**: Vim, Neovim, Helix, VSCode, Zed
-- **Utilities (10)**: ripgrep, bat, fd, fzf, eza, jq, gh, lazygit, delta, starship
-- **Package Managers (6)**: brew, cargo, npm, pnpm, pip, uv
-- **TTS Clients (4)**: say, espeak-ng, piper, sherpa-onnx
-- **Audio Players (3)**: mpv, ffplay, sox
-- **Terminal Apps (3)**: alacritty, kitty, wezterm
+- **Editors (26)**: vi, Vim, Neovim, Helix, VSCode, Zed, JetBrains IDEs, TextMate, BBEdit, and more
+- **Utilities (30)**: ripgrep, bat, fd, fzf, eza, jq, gh, lazygit, delta, starship, and more
+- **Package Managers (27)**: npm, pnpm, yarn, bun, cargo, apt, dnf, winget, nix, and more
+- **TTS Clients (15)**: say, espeak/espeak-ng, piper, sherpa-onnx, gTTS, Kokoro TTS, and more
+- **Audio Players (11)**: mpv, ffplay, sox, vlc, mpg123, pipewire, and more
+- **Terminal Apps (17)**: alacritty, kitty, wezterm, iTerm2, Ghostty, Warp, Windows Terminal, and more
 
 ### Installation Module ✅
 
@@ -101,6 +101,18 @@ sniff --programs --json --json-format full
 - `description`: One-line description
 - `website`: Official URL
 
+**New `--markdown` flag:**
+
+```bash
+# Render program detection as a markdown table
+sniff --programs --markdown
+sniff --programs --markdown -v
+sniff --programs --markdown -vv
+```
+
+Markdown tables include Name, Installed, Description, Website columns and expand
+with Binary/Path and Version at higher verbosity levels.
+
 ---
 
 ## Files Changed
@@ -116,9 +128,9 @@ sniff --programs --json --json-format full
 
 ---
 
-## Future Work
+## Implemented Work
 
-- Add remaining ~120 programs to `PROGRAM_LOOKUP`
-- Implement `installable()` check based on detected OS package managers
-- Add markdown table output for text mode (requires biscuit integration)
-- Add Linux (apt/dnf) and Windows (winget) installation support
+- Added remaining programs to `PROGRAM_LOOKUP` (full coverage)
+- Implemented `installable()` checks based on detected package managers
+- Added markdown table output for text mode via biscuit
+- Added Linux (apt/dnf) and Windows (winget) installation support

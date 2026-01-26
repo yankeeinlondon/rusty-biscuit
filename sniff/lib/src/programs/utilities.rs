@@ -1,11 +1,57 @@
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::SniffInstallationError;
+use crate::os::detect_os_type;
 use crate::programs::enums::Utility;
 use crate::programs::find_program::find_programs_parallel;
+use crate::programs::installer::{
+    execute_install, execute_versioned_install, method_available, select_best_method,
+    InstallOptions,
+};
 use crate::programs::schema::{ProgramError, ProgramMetadata};
 use crate::programs::types::ProgramDetector;
+use crate::programs::{
+    InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
+};
+
+fn utility_details(utility: Utility) -> Option<&'static crate::programs::ProgramDetails> {
+    let program = match utility {
+        Utility::Exa => Program::Exa,
+        Utility::Eza => Program::Eza,
+        Utility::Ripgrep => Program::Ripgrep,
+        Utility::Dust => Program::Dust,
+        Utility::Bat => Program::Bat,
+        Utility::Fd => Program::Fd,
+        Utility::Procs => Program::Procs,
+        Utility::Bottom => Program::Bottom,
+        Utility::Fzf => Program::Fzf,
+        Utility::Zoxide => Program::Zoxide,
+        Utility::Starship => Program::Starship,
+        Utility::Direnv => Program::Direnv,
+        Utility::Jq => Program::Jq,
+        Utility::Delta => Program::Delta,
+        Utility::Tealdeer => Program::Tealdeer,
+        Utility::Lazygit => Program::Lazygit,
+        Utility::Gh => Program::Gh,
+        Utility::Htop => Program::Htop,
+        Utility::Btop => Program::Btop,
+        Utility::Tmux => Program::Tmux,
+        Utility::Zellij => Program::Zellij,
+        Utility::Httpie => Program::Httpie,
+        Utility::Curlie => Program::Curlie,
+        Utility::Mise => Program::Mise,
+        Utility::Hyperfine => Program::Hyperfine,
+        Utility::Tokei => Program::Tokei,
+        Utility::Xh => Program::Xh,
+        Utility::Curl => Program::Curl,
+        Utility::Wget => Program::Wget,
+        Utility::Iperf3 => Program::Iperf3,
+    };
+
+    PROGRAM_LOOKUP.get(&program)
+}
 
 /// Popular modern utility programs found on macOS, Linux, or Windows.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -268,25 +314,80 @@ impl ProgramDetector for InstalledUtilities {
         InstalledUtilities::installed(self)
     }
 
-    fn installable(&self, _program: Self::Program) -> bool {
-        false
+    fn installable(&self, program: Self::Program) -> bool {
+        let Some(details) = utility_details(program) else {
+            return false;
+        };
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return false;
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+
+        details
+            .installation_methods
+            .iter()
+            .any(|method| method_available(method, &os_pkg_mgrs, &lang_pkg_mgrs))
     }
 
-    fn install(&self, _program: Self::Program) -> Result<(), SniffInstallationError> {
-        Err(SniffInstallationError::NotInstallableOnOs {
-            pkg: "utility".to_string(),
-            os: "current".to_string(),
-        })
+    fn install(&self, program: Self::Program) -> Result<(), SniffInstallationError> {
+        let details =
+            utility_details(program).ok_or_else(|| SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: "unknown".to_string(),
+            })?;
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: os_type.to_string(),
+            });
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+        let method = select_best_method(details.installation_methods, &os_pkg_mgrs, &lang_pkg_mgrs)
+            .ok_or_else(|| SniffInstallationError::MissingPackageManager {
+                pkg: program.display_name().to_string(),
+                manager: "package manager".to_string(),
+            })?;
+
+        let _result = execute_install(method, &InstallOptions::default())?;
+        Ok(())
     }
 
     fn install_version(
         &self,
-        _program: Self::Program,
-        _version: &str,
+        program: Self::Program,
+        version: &str,
     ) -> Result<(), SniffInstallationError> {
-        Err(SniffInstallationError::NotInstallableOnOs {
-            pkg: "utility".to_string(),
-            os: "current".to_string(),
-        })
+        let details =
+            utility_details(program).ok_or_else(|| SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: "unknown".to_string(),
+            })?;
+
+        let os_type = detect_os_type();
+        if !details.os_availability.contains(&os_type) {
+            return Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: program.display_name().to_string(),
+                os: os_type.to_string(),
+            });
+        }
+
+        let os_pkg_mgrs = InstalledOsPackageManagers::new();
+        let lang_pkg_mgrs = InstalledLanguagePackageManagers::new();
+        let method = select_best_method(details.installation_methods, &os_pkg_mgrs, &lang_pkg_mgrs)
+            .ok_or_else(|| SniffInstallationError::MissingPackageManager {
+                pkg: program.display_name().to_string(),
+                manager: "package manager".to_string(),
+            })?;
+
+        let _result = execute_versioned_install(method, version, &InstallOptions::default())?;
+        Ok(())
     }
 }

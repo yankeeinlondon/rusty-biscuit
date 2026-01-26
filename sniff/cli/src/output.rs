@@ -1,8 +1,12 @@
+use std::path::Path;
+
+use shared::markdown::Markdown;
+use shared::markdown::output::terminal::{TerminalOptions, for_terminal};
+use shared::render::link::Link;
 use sniff_lib::SniffResult;
 use sniff_lib::filesystem::git::BehindStatus;
 use sniff_lib::hardware::NtpStatus;
 use sniff_lib::programs::ProgramsInfo;
-use std::path::Path;
 
 /// Filter mode for output - determines which subsection to display.
 ///
@@ -1185,264 +1189,251 @@ pub fn print_json(result: &SniffResult, filter: OutputFilter) -> serde_json::Res
     Ok(())
 }
 
-// ============================================================================
-// Programs output functions
-// ============================================================================
+// ==========================================================================
+// Programs markdown output
+// ==========================================================================
 
-/// Print programs information as text.
-pub fn print_programs_text(programs: &ProgramsInfo, verbose: u8, filter: OutputFilter) {
+#[derive(Debug)]
+struct ProgramTableEntry {
+    name: String,
+    binary_name: String,
+    installed: bool,
+    path: Option<String>,
+    version: Option<String>,
+    description: String,
+    website: String,
+}
+
+fn escape_markdown_cell(value: &str) -> String {
+    value.replace('|', "\\|")
+}
+
+fn name_link(name: &str, website: &str) -> String {
+    if website.is_empty() {
+        return escape_markdown_cell(name);
+    }
+
+    let display = escape_markdown_cell(name);
+    Link::new(display, website).to_markdown()
+}
+
+fn collect_program_entries(programs: &ProgramsInfo, filter: OutputFilter) -> Vec<ProgramTableEntry> {
+    use sniff_lib::programs::ProgramMetadata;
+    use strum::IntoEnumIterator;
+
+    let mut entries = Vec::new();
+
     match filter {
-        OutputFilter::Programs => {
-            print_all_programs(programs, verbose);
-        }
-        OutputFilter::Editors => {
-            print_editors_section(&programs.editors, verbose);
-        }
-        OutputFilter::Utilities => {
-            print_utilities_section(&programs.utilities, verbose);
-        }
-        OutputFilter::LanguagePackageManagers => {
-            print_lang_pkg_mgrs_section(&programs.language_package_managers, verbose);
-        }
-        OutputFilter::OsPackageManagers => {
-            print_os_pkg_mgrs_section(&programs.os_package_managers, verbose);
-        }
-        OutputFilter::TtsClients => {
-            print_tts_clients_section(&programs.tts_clients, verbose);
-        }
-        OutputFilter::TerminalApps => {
-            print_terminal_apps_section(&programs.terminal_apps, verbose);
-        }
-        OutputFilter::HeadlessAudio => {
-            print_headless_audio_section(&programs.headless_audio, verbose);
-        }
-        _ => {
-            // Should not reach here, but print all as fallback
-            print_all_programs(programs, verbose);
-        }
-    }
-}
-
-fn print_all_programs(programs: &ProgramsInfo, verbose: u8) {
-    print_editors_section(&programs.editors, verbose);
-    print_utilities_section(&programs.utilities, verbose);
-    print_lang_pkg_mgrs_section(&programs.language_package_managers, verbose);
-    print_os_pkg_mgrs_section(&programs.os_package_managers, verbose);
-    print_tts_clients_section(&programs.tts_clients, verbose);
-    print_terminal_apps_section(&programs.terminal_apps, verbose);
-    print_headless_audio_section(&programs.headless_audio, verbose);
-}
-
-fn print_editors_section(editors: &sniff_lib::programs::InstalledEditors, verbose: u8) {
-    use sniff_lib::programs::ProgramMetadata;
-
-    println!("=== Editors ===");
-    let installed = editors.installed();
-    if installed.is_empty() {
-        println!("No editors detected");
-    } else {
-        println!("Installed ({}):", installed.len());
-        for editor in &installed {
-            let name = editor.display_name();
-            if verbose > 0 {
-                let desc = editor.description();
-                println!("  {} - {}", name, desc);
-                if verbose > 1 {
-                    println!("    Website: {}", editor.website());
-                    if let Some(path) = editors.path(*editor) {
-                        println!("    Path: {}", path.display());
-                    }
-                }
-            } else {
-                print!("  {}", name);
-                println!();
+        OutputFilter::Programs | OutputFilter::Editors => {
+            for editor in sniff_lib::programs::Editor::iter() {
+                let installed = programs.editors.is_installed(editor);
+                let path = programs.editors.path(editor).map(|p| p.display().to_string());
+                let version = if installed { programs.editors.version(editor).ok() } else { None };
+                entries.push(ProgramTableEntry {
+                    name: editor.display_name().to_string(),
+                    binary_name: editor.binary_name().to_string(),
+                    installed,
+                    path,
+                    version,
+                    description: editor.description().to_string(),
+                    website: editor.website().to_string(),
+                });
+            }
+            if filter == OutputFilter::Editors {
+                return entries;
             }
         }
+        _ => {}
     }
-    println!();
-}
 
-fn print_utilities_section(utilities: &sniff_lib::programs::InstalledUtilities, verbose: u8) {
-    use sniff_lib::programs::ProgramMetadata;
-
-    println!("=== Utilities ===");
-    let installed = utilities.installed();
-    if installed.is_empty() {
-        println!("No utilities detected");
-    } else {
-        println!("Installed ({}):", installed.len());
-        for util in &installed {
-            let name = util.display_name();
-            if verbose > 0 {
-                let desc = util.description();
-                println!("  {} - {}", name, desc);
-                if verbose > 1 {
-                    println!("    Website: {}", util.website());
-                    if let Some(path) = utilities.path(*util) {
-                        println!("    Path: {}", path.display());
-                    }
-                }
-            } else {
-                print!("  {}", name);
-                println!();
+    match filter {
+        OutputFilter::Programs | OutputFilter::Utilities => {
+            for util in sniff_lib::programs::Utility::iter() {
+                let installed = programs.utilities.is_installed(util);
+                let path = programs.utilities.path(util).map(|p| p.display().to_string());
+                let version = if installed { programs.utilities.version(util).ok() } else { None };
+                entries.push(ProgramTableEntry {
+                    name: util.display_name().to_string(),
+                    binary_name: util.binary_name().to_string(),
+                    installed,
+                    path,
+                    version,
+                    description: util.description().to_string(),
+                    website: util.website().to_string(),
+                });
+            }
+            if filter == OutputFilter::Utilities {
+                return entries;
             }
         }
+        _ => {}
     }
-    println!();
-}
 
-fn print_lang_pkg_mgrs_section(
-    pkg_mgrs: &sniff_lib::programs::InstalledLanguagePackageManagers,
-    verbose: u8,
-) {
-    use sniff_lib::programs::ProgramMetadata;
-
-    println!("=== Language Package Managers ===");
-    let installed = pkg_mgrs.installed();
-    if installed.is_empty() {
-        println!("No language package managers detected");
-    } else {
-        println!("Installed ({}):", installed.len());
-        for pm in &installed {
-            let name = pm.display_name();
-            if verbose > 0 {
-                let desc = pm.description();
-                println!("  {} - {}", name, desc);
-                if verbose > 1 {
-                    println!("    Website: {}", pm.website());
-                    if let Some(path) = pkg_mgrs.path(*pm) {
-                        println!("    Path: {}", path.display());
-                    }
-                }
-            } else {
-                print!("  {}", name);
-                println!();
+    match filter {
+        OutputFilter::Programs | OutputFilter::LanguagePackageManagers => {
+            for pm in sniff_lib::programs::LanguagePackageManager::iter() {
+                let installed = programs.language_package_managers.is_installed(pm);
+                let path = programs
+                    .language_package_managers
+                    .path(pm)
+                    .map(|p| p.display().to_string());
+                let version = if installed {
+                    programs.language_package_managers.version(pm).ok()
+                } else {
+                    None
+                };
+                entries.push(ProgramTableEntry {
+                    name: pm.display_name().to_string(),
+                    binary_name: pm.binary_name().to_string(),
+                    installed,
+                    path,
+                    version,
+                    description: pm.description().to_string(),
+                    website: pm.website().to_string(),
+                });
+            }
+            if filter == OutputFilter::LanguagePackageManagers {
+                return entries;
             }
         }
+        _ => {}
     }
-    println!();
-}
 
-fn print_os_pkg_mgrs_section(
-    pkg_mgrs: &sniff_lib::programs::InstalledOsPackageManagers,
-    verbose: u8,
-) {
-    use sniff_lib::programs::ProgramMetadata;
-
-    println!("=== OS Package Managers ===");
-    let installed = pkg_mgrs.installed();
-    if installed.is_empty() {
-        println!("No OS package managers detected");
-    } else {
-        println!("Installed ({}):", installed.len());
-        for pm in &installed {
-            let name = pm.display_name();
-            if verbose > 0 {
-                let desc = pm.description();
-                println!("  {} - {}", name, desc);
-                if verbose > 1 {
-                    println!("    Website: {}", pm.website());
-                    if let Some(path) = pkg_mgrs.path(*pm) {
-                        println!("    Path: {}", path.display());
-                    }
-                }
-            } else {
-                print!("  {}", name);
-                println!();
+    match filter {
+        OutputFilter::Programs | OutputFilter::OsPackageManagers => {
+            for pm in sniff_lib::programs::OsPackageManager::iter() {
+                let installed = programs.os_package_managers.is_installed(pm);
+                let path = programs
+                    .os_package_managers
+                    .path(pm)
+                    .map(|p| p.display().to_string());
+                let version = if installed { programs.os_package_managers.version(pm).ok() } else { None };
+                entries.push(ProgramTableEntry {
+                    name: pm.display_name().to_string(),
+                    binary_name: pm.binary_name().to_string(),
+                    installed,
+                    path,
+                    version,
+                    description: pm.description().to_string(),
+                    website: pm.website().to_string(),
+                });
+            }
+            if filter == OutputFilter::OsPackageManagers {
+                return entries;
             }
         }
+        _ => {}
     }
-    println!();
-}
 
-fn print_tts_clients_section(clients: &sniff_lib::programs::InstalledTtsClients, verbose: u8) {
-    use sniff_lib::programs::ProgramMetadata;
-
-    println!("=== TTS Clients ===");
-    let installed = clients.installed();
-    if installed.is_empty() {
-        println!("No TTS clients detected");
-    } else {
-        println!("Installed ({}):", installed.len());
-        for client in &installed {
-            let name = client.display_name();
-            if verbose > 0 {
-                let desc = client.description();
-                println!("  {} - {}", name, desc);
-                if verbose > 1 {
-                    println!("    Website: {}", client.website());
-                    if let Some(path) = clients.path(*client) {
-                        println!("    Path: {}", path.display());
-                    }
-                }
-            } else {
-                print!("  {}", name);
-                println!();
+    match filter {
+        OutputFilter::Programs | OutputFilter::TtsClients => {
+            for client in sniff_lib::programs::TtsClient::iter() {
+                let installed = programs.tts_clients.is_installed(client);
+                let path = programs.tts_clients.path(client).map(|p| p.display().to_string());
+                let version = if installed { programs.tts_clients.version(client).ok() } else { None };
+                entries.push(ProgramTableEntry {
+                    name: client.display_name().to_string(),
+                    binary_name: client.binary_name().to_string(),
+                    installed,
+                    path,
+                    version,
+                    description: client.description().to_string(),
+                    website: client.website().to_string(),
+                });
+            }
+            if filter == OutputFilter::TtsClients {
+                return entries;
             }
         }
+        _ => {}
     }
-    println!();
-}
 
-fn print_terminal_apps_section(apps: &sniff_lib::programs::InstalledTerminalApps, verbose: u8) {
-    use sniff_lib::programs::ProgramMetadata;
-
-    println!("=== Terminal Apps ===");
-    let installed = apps.installed();
-    if installed.is_empty() {
-        println!("No terminal apps detected");
-    } else {
-        println!("Installed ({}):", installed.len());
-        for app in &installed {
-            let name = app.display_name();
-            if verbose > 0 {
-                let desc = app.description();
-                println!("  {} - {}", name, desc);
-                if verbose > 1 {
-                    println!("    Website: {}", app.website());
-                    if let Some(path) = apps.path(*app) {
-                        println!("    Path: {}", path.display());
-                    }
-                }
-            } else {
-                print!("  {}", name);
-                println!();
+    match filter {
+        OutputFilter::Programs | OutputFilter::TerminalApps => {
+            for app in sniff_lib::programs::TerminalApp::iter() {
+                let installed = programs.terminal_apps.is_installed(app);
+                let path = programs.terminal_apps.path(app).map(|p| p.display().to_string());
+                let version = if installed { programs.terminal_apps.version(app).ok() } else { None };
+                entries.push(ProgramTableEntry {
+                    name: app.display_name().to_string(),
+                    binary_name: app.binary_name().to_string(),
+                    installed,
+                    path,
+                    version,
+                    description: app.description().to_string(),
+                    website: app.website().to_string(),
+                });
+            }
+            if filter == OutputFilter::TerminalApps {
+                return entries;
             }
         }
+        _ => {}
     }
-    println!();
-}
 
-fn print_headless_audio_section(
-    players: &sniff_lib::programs::InstalledHeadlessAudio,
-    verbose: u8,
-) {
-    use sniff_lib::programs::ProgramMetadata;
-
-    println!("=== Headless Audio Players ===");
-    let installed = players.installed();
-    if installed.is_empty() {
-        println!("No headless audio players detected");
-    } else {
-        println!("Installed ({}):", installed.len());
-        for player in &installed {
-            let name = player.display_name();
-            if verbose > 0 {
-                let desc = player.description();
-                println!("  {} - {}", name, desc);
-                if verbose > 1 {
-                    println!("    Website: {}", player.website());
-                    if let Some(path) = players.path(*player) {
-                        println!("    Path: {}", path.display());
-                    }
-                }
-            } else {
-                print!("  {}", name);
-                println!();
+    match filter {
+        OutputFilter::Programs | OutputFilter::HeadlessAudio => {
+            for player in sniff_lib::programs::HeadlessAudio::iter() {
+                let installed = programs.headless_audio.is_installed(player);
+                let path = programs.headless_audio.path(player).map(|p| p.display().to_string());
+                let version = if installed { programs.headless_audio.version(player).ok() } else { None };
+                entries.push(ProgramTableEntry {
+                    name: player.display_name().to_string(),
+                    binary_name: player.binary_name().to_string(),
+                    installed,
+                    path,
+                    version,
+                    description: player.description().to_string(),
+                    website: player.website().to_string(),
+                });
             }
         }
+        _ => {}
     }
-    println!();
+
+    entries
+}
+
+pub fn print_programs_markdown(programs: &ProgramsInfo, verbose: u8, filter: OutputFilter) {
+    let entries = collect_program_entries(programs, filter);
+    let mut headers = vec!["Name", "Installed", "Description"];
+
+    if verbose > 0 {
+        headers.insert(2, "Binary");
+        headers.insert(3, "Path");
+    }
+    if verbose > 1 {
+        headers.insert(4, "Version");
+    }
+
+    let mut lines = Vec::new();
+    lines.push(format!("| {} |", headers.join(" | ")));
+    lines.push(format!("| {} |", headers.iter().map(|_| "---").collect::<Vec<_>>().join(" | ")));
+
+    for entry in entries {
+        let mut cells = vec![
+            name_link(&entry.name, &entry.website),
+            if entry.installed { "✅".to_string() } else { "❌".to_string() },
+        ];
+
+        if verbose > 0 {
+            cells.push(escape_markdown_cell(&entry.binary_name));
+            cells.push(escape_markdown_cell(entry.path.as_deref().unwrap_or("")));
+        }
+        if verbose > 1 {
+            cells.push(escape_markdown_cell(entry.version.as_deref().unwrap_or("")));
+        }
+
+        cells.push(escape_markdown_cell(&entry.description));
+
+        lines.push(format!("| {} |", cells.join(" | ")));
+    }
+
+    let markdown = Markdown::from(lines.join("\n"));
+    match for_terminal(&markdown, TerminalOptions::default()) {
+        Ok(rendered) => print!("{}", rendered),
+        Err(_) => println!("{}", markdown.content()),
+    }
 }
 
 /// Rich program metadata for JSON output.

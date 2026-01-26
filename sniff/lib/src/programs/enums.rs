@@ -1100,7 +1100,7 @@ static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         "gst-play-1.0",
         "GStreamer gst-play",
         "CLI front-end to GStreamer pipelines",
-        "https://gstreamer.freedesktop.org/documentation/tools/gst-play.html",
+        "https://gstreamer.freedesktop.org/documentation/tools/gst-play-1.0.html",
     ),
     ProgramInfo::standard(
         "play",

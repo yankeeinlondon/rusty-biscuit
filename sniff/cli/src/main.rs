@@ -19,6 +19,10 @@ struct Cli {
     #[arg(long)]
     json: bool,
 
+    /// Output programs as a markdown table
+    #[arg(long, conflicts_with = "json", help_heading = "Programs Flags")]
+    markdown: bool,
+
     /// Increase output verbosity
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
@@ -260,6 +264,9 @@ impl Cli {
         if self.audio {
             return OutputFilter::HeadlessAudio;
         }
+        if self.markdown {
+            return OutputFilter::Programs;
+        }
 
         // Top-level section flags
         // When used alone, return specific filter for flattening
@@ -295,6 +302,7 @@ impl Cli {
             || self.tts_clients
             || self.terminal_apps
             || self.audio
+            || self.markdown
     }
 }
 
@@ -355,7 +363,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let format = cli.json_format.as_deref().unwrap_or("simple");
             output::print_programs_json(&programs, output_filter, format)?;
         } else {
-            output::print_programs_text(&programs, cli.verbose, output_filter);
+            output::print_programs_markdown(&programs, cli.verbose, output_filter);
         }
         return Ok(());
     }
