@@ -225,7 +225,15 @@ impl TtsVoiceInventory for EchogardenProvider {
         // List voices for each supported engine
         for engine in EchogardenEngine::all() {
             match list_voices_for_engine(*engine).await {
-                Ok(voices) => all_voices.extend(voices),
+                Ok(voices) => {
+                    // Process VITS voices: filter low quality, set correct VoiceQuality
+                    let voices = if *engine == EchogardenEngine::Vits {
+                        process_vits_voices(voices)
+                    } else {
+                        voices
+                    };
+                    all_voices.extend(voices);
+                }
                 Err(e) => {
                     debug!(
                         engine = engine.as_str(),
@@ -344,6 +352,129 @@ fn parse_echogarden_voices(output: &str, engine: EchogardenEngine) -> Result<Vec
     );
 
     Ok(voices)
+}
+
+/// Quality tier extracted from VITS voice names.
+///
+/// VITS voice names follow the pattern: `{locale}-{name}-{quality}`
+/// e.g., `nl_BE-nathalie-medium`, `nl_BE-nathalie-x_low`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum VitsQualityTier {
+    /// Highest quality
+    High = 3,
+    /// Medium quality
+    Medium = 2,
+    /// Lower quality - filtered out
+    Low = 1,
+    /// Lowest quality - filtered out
+    XLow = 0,
+}
+
+impl VitsQualityTier {
+    /// Parse the quality tier from a VITS voice name suffix.
+    fn from_suffix(name: &str) -> Option<Self> {
+        if name.ends_with("-high") {
+            Some(VitsQualityTier::High)
+        } else if name.ends_with("-medium") {
+            Some(VitsQualityTier::Medium)
+        } else if name.ends_with("-x_low") {
+            Some(VitsQualityTier::XLow)
+        } else if name.ends_with("-low") {
+            Some(VitsQualityTier::Low)
+        } else {
+            None
+        }
+    }
+
+    /// Extract the base name (without quality suffix) from a VITS voice name.
+    fn base_name(name: &str) -> &str {
+        if let Some(stripped) = name.strip_suffix("-high") {
+            stripped
+        } else if let Some(stripped) = name.strip_suffix("-medium") {
+            stripped
+        } else if let Some(stripped) = name.strip_suffix("-x_low") {
+            stripped
+        } else if let Some(stripped) = name.strip_suffix("-low") {
+            stripped
+        } else {
+            name
+        }
+    }
+
+    /// Convert to VoiceQuality.
+    ///
+    /// Mapping:
+    /// - `high` → `VoiceQuality::Good`
+    /// - `medium` → `VoiceQuality::Moderate`
+    /// - `low` / `x_low` → `VoiceQuality::Low`
+    fn to_voice_quality(self) -> VoiceQuality {
+        match self {
+            VitsQualityTier::High => VoiceQuality::Good,
+            VitsQualityTier::Medium => VoiceQuality::Moderate,
+            VitsQualityTier::Low | VitsQualityTier::XLow => VoiceQuality::Low,
+        }
+    }
+
+    /// Returns true if this tier should be filtered out.
+    ///
+    /// Low and x_low quality voices are filtered out entirely.
+    fn should_filter(self) -> bool {
+        matches!(self, VitsQualityTier::Low | VitsQualityTier::XLow)
+    }
+}
+
+/// Process VITS voices: filter low quality and set appropriate VoiceQuality.
+///
+/// This function:
+/// 1. Filters out `low` and `x_low` quality voices entirely
+/// 2. Sets the correct VoiceQuality based on the tier (high→Good, medium→Moderate)
+/// 3. Deduplicates voices with the same base name, keeping only the highest quality
+///
+/// For example, given:
+/// - `nl_BE-nathalie-medium`
+/// - `nl_BE-nathalie-x_low`
+///
+/// Only `nl_BE-nathalie-medium` will be kept (with VoiceQuality::Moderate).
+fn process_vits_voices(voices: Vec<Voice>) -> Vec<Voice> {
+    use std::collections::HashMap;
+
+    // Group voices by base name, keeping track of the best quality
+    let mut best_voices: HashMap<String, (VitsQualityTier, Voice)> = HashMap::new();
+
+    for mut voice in voices {
+        let tier = VitsQualityTier::from_suffix(&voice.name);
+
+        // If no quality suffix found, keep the voice as-is (e.g., Kokoro voices)
+        let Some(tier) = tier else {
+            let key = voice.name.clone();
+            best_voices
+                .entry(key)
+                .or_insert((VitsQualityTier::High, voice));
+            continue;
+        };
+
+        // Set the VoiceQuality based on the tier
+        voice.quality = tier.to_voice_quality();
+
+        let base = VitsQualityTier::base_name(&voice.name).to_string();
+
+        match best_voices.get(&base) {
+            Some((existing_tier, _)) if *existing_tier >= tier => {
+                // Existing voice is same or better quality, skip
+            }
+            _ => {
+                // New voice or better quality, replace
+                best_voices.insert(base, (tier, voice));
+            }
+        }
+    }
+
+    // Extract voices, filtering out low quality ones
+    best_voices
+        .into_values()
+        .filter(|(tier, _)| !tier.should_filter())
+        .map(|(_, voice)| voice)
+        .collect()
 }
 
 /// Parse the Languages field from echogarden output.
@@ -615,6 +746,232 @@ Gender: female
         assert_eq!(engines.len(), 2);
         assert!(engines.contains(&EchogardenEngine::Kokoro));
         assert!(engines.contains(&EchogardenEngine::Vits));
+    }
+
+    // ========================================================================
+    // VITS voice deduplication tests
+    // ========================================================================
+
+    #[test]
+    fn test_vits_quality_tier_from_suffix() {
+        assert_eq!(
+            VitsQualityTier::from_suffix("en_US-lessac-high"),
+            Some(VitsQualityTier::High)
+        );
+        assert_eq!(
+            VitsQualityTier::from_suffix("nl_BE-nathalie-medium"),
+            Some(VitsQualityTier::Medium)
+        );
+        assert_eq!(
+            VitsQualityTier::from_suffix("nl_BE-nathalie-low"),
+            Some(VitsQualityTier::Low)
+        );
+        assert_eq!(
+            VitsQualityTier::from_suffix("nl_BE-nathalie-x_low"),
+            Some(VitsQualityTier::XLow)
+        );
+        assert_eq!(VitsQualityTier::from_suffix("Heart"), None);
+    }
+
+    #[test]
+    fn test_vits_quality_tier_base_name() {
+        assert_eq!(
+            VitsQualityTier::base_name("en_US-lessac-high"),
+            "en_US-lessac"
+        );
+        assert_eq!(
+            VitsQualityTier::base_name("nl_BE-nathalie-medium"),
+            "nl_BE-nathalie"
+        );
+        assert_eq!(
+            VitsQualityTier::base_name("nl_BE-nathalie-low"),
+            "nl_BE-nathalie"
+        );
+        assert_eq!(
+            VitsQualityTier::base_name("nl_BE-nathalie-x_low"),
+            "nl_BE-nathalie"
+        );
+        assert_eq!(VitsQualityTier::base_name("Heart"), "Heart");
+    }
+
+    #[test]
+    fn test_vits_quality_tier_ordering() {
+        assert!(VitsQualityTier::High > VitsQualityTier::Medium);
+        assert!(VitsQualityTier::Medium > VitsQualityTier::Low);
+        assert!(VitsQualityTier::Low > VitsQualityTier::XLow);
+        assert!(VitsQualityTier::High > VitsQualityTier::XLow);
+    }
+
+    #[test]
+    fn test_vits_quality_tier_to_voice_quality() {
+        assert_eq!(
+            VitsQualityTier::High.to_voice_quality(),
+            VoiceQuality::Good
+        );
+        assert_eq!(
+            VitsQualityTier::Medium.to_voice_quality(),
+            VoiceQuality::Moderate
+        );
+        assert_eq!(
+            VitsQualityTier::Low.to_voice_quality(),
+            VoiceQuality::Low
+        );
+        assert_eq!(
+            VitsQualityTier::XLow.to_voice_quality(),
+            VoiceQuality::Low
+        );
+    }
+
+    #[test]
+    fn test_vits_quality_tier_should_filter() {
+        assert!(!VitsQualityTier::High.should_filter());
+        assert!(!VitsQualityTier::Medium.should_filter());
+        assert!(VitsQualityTier::Low.should_filter());
+        assert!(VitsQualityTier::XLow.should_filter());
+    }
+
+    #[test]
+    fn test_process_vits_voices_filters_low_quality() {
+        // Low and x_low voices should be filtered out entirely
+        let voices = vec![
+            Voice::new("nl_BE-nathalie-medium")
+                .with_identifier("vits:nl_BE-nathalie-medium")
+                .with_quality(VoiceQuality::Good),
+            Voice::new("nl_BE-nathalie-x_low")
+                .with_identifier("vits:nl_BE-nathalie-x_low")
+                .with_quality(VoiceQuality::Good),
+        ];
+
+        let processed = process_vits_voices(voices);
+        assert_eq!(processed.len(), 1);
+        assert_eq!(processed[0].name, "nl_BE-nathalie-medium");
+        // Quality should be set to Moderate for medium tier
+        assert_eq!(processed[0].quality, VoiceQuality::Moderate);
+    }
+
+    #[test]
+    fn test_process_vits_voices_filters_out_low_only_voices() {
+        // If only low/x_low versions exist, they should be filtered out entirely
+        let voices = vec![
+            Voice::new("nl_BE-nathalie-low")
+                .with_identifier("vits:nl_BE-nathalie-low")
+                .with_quality(VoiceQuality::Good),
+            Voice::new("nl_BE-nathalie-x_low")
+                .with_identifier("vits:nl_BE-nathalie-x_low")
+                .with_quality(VoiceQuality::Good),
+        ];
+
+        let processed = process_vits_voices(voices);
+        // Both are low quality, should be filtered out
+        assert!(processed.is_empty());
+    }
+
+    #[test]
+    fn test_process_vits_voices_keeps_high_quality() {
+        let voices = vec![
+            Voice::new("en_US-lessac-high")
+                .with_identifier("vits:en_US-lessac-high")
+                .with_quality(VoiceQuality::Good),
+            Voice::new("en_US-lessac-medium")
+                .with_identifier("vits:en_US-lessac-medium")
+                .with_quality(VoiceQuality::Good),
+        ];
+
+        let processed = process_vits_voices(voices);
+        assert_eq!(processed.len(), 1);
+        assert_eq!(processed[0].name, "en_US-lessac-high");
+        // Quality should be set to Good for high tier
+        assert_eq!(processed[0].quality, VoiceQuality::Good);
+    }
+
+    #[test]
+    fn test_process_vits_voices_multiple_voices() {
+        // Simulates real-world scenario with multiple voices
+        let voices = vec![
+            Voice::new("nl_BE-nathalie-medium").with_quality(VoiceQuality::Good),
+            Voice::new("nl_BE-nathalie-x_low").with_quality(VoiceQuality::Good),
+            Voice::new("nl_BE-rdh-medium").with_quality(VoiceQuality::Good),
+            Voice::new("nl_BE-rdh-x_low").with_quality(VoiceQuality::Good),
+            Voice::new("uk_UA-lada-x_low").with_quality(VoiceQuality::Good), // Only x_low - filtered
+            Voice::new("de_DE-thorsten-medium").with_quality(VoiceQuality::Good),
+            Voice::new("en_US-lessac-high").with_quality(VoiceQuality::Good),
+        ];
+
+        let processed = process_vits_voices(voices);
+
+        // Should have 4 voices: nathalie-medium, rdh-medium, thorsten-medium, lessac-high
+        // lada-x_low should be filtered out (low quality)
+        assert_eq!(processed.len(), 4);
+
+        let names: Vec<&str> = processed.iter().map(|v| v.name.as_str()).collect();
+        assert!(names.contains(&"nl_BE-nathalie-medium"));
+        assert!(names.contains(&"nl_BE-rdh-medium"));
+        assert!(names.contains(&"de_DE-thorsten-medium"));
+        assert!(names.contains(&"en_US-lessac-high"));
+
+        // Low quality voices should be filtered out
+        assert!(!names.contains(&"uk_UA-lada-x_low"));
+        assert!(!names.contains(&"nl_BE-nathalie-x_low"));
+        assert!(!names.contains(&"nl_BE-rdh-x_low"));
+    }
+
+    #[test]
+    fn test_process_vits_voices_preserves_kokoro_voices() {
+        // Kokoro voices don't have quality suffixes, they should pass through unchanged
+        let voices = vec![
+            Voice::new("Heart").with_quality(VoiceQuality::Excellent),
+            Voice::new("Michael").with_quality(VoiceQuality::Excellent),
+        ];
+
+        let processed = process_vits_voices(voices);
+        assert_eq!(processed.len(), 2);
+
+        let names: Vec<&str> = processed.iter().map(|v| v.name.as_str()).collect();
+        assert!(names.contains(&"Heart"));
+        assert!(names.contains(&"Michael"));
+
+        // Quality should be preserved for Kokoro voices
+        for voice in &processed {
+            assert_eq!(voice.quality, VoiceQuality::Excellent);
+        }
+    }
+
+    #[test]
+    fn test_process_vits_voices_sets_correct_quality() {
+        let voices = vec![
+            Voice::new("en_US-lessac-high").with_quality(VoiceQuality::Unknown),
+            Voice::new("de_DE-thorsten-medium").with_quality(VoiceQuality::Unknown),
+        ];
+
+        let processed = process_vits_voices(voices);
+
+        let high_voice = processed.iter().find(|v| v.name == "en_US-lessac-high");
+        let medium_voice = processed.iter().find(|v| v.name == "de_DE-thorsten-medium");
+
+        assert_eq!(high_voice.unwrap().quality, VoiceQuality::Good);
+        assert_eq!(medium_voice.unwrap().quality, VoiceQuality::Moderate);
+    }
+
+    #[test]
+    fn test_process_vits_voices_order_independent() {
+        // Should work regardless of which quality version comes first
+        let voices_high_first = vec![
+            Voice::new("en_US-lessac-high").with_quality(VoiceQuality::Good),
+            Voice::new("en_US-lessac-medium").with_quality(VoiceQuality::Good),
+        ];
+
+        let voices_medium_first = vec![
+            Voice::new("en_US-lessac-medium").with_quality(VoiceQuality::Good),
+            Voice::new("en_US-lessac-high").with_quality(VoiceQuality::Good),
+        ];
+
+        let processed1 = process_vits_voices(voices_high_first);
+        let processed2 = process_vits_voices(voices_medium_first);
+
+        assert_eq!(processed1.len(), 1);
+        assert_eq!(processed2.len(), 1);
+        assert_eq!(processed1[0].name, "en_US-lessac-high");
+        assert_eq!(processed2[0].name, "en_US-lessac-high");
     }
 
     // ========================================================================

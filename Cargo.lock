@@ -5317,6 +5317,8 @@ dependencies = [
  "biscuit-speaks",
  "clap 4.5.54",
  "inquire",
+ "owo-colors",
+ "shared",
  "tokio",
 ]
 
