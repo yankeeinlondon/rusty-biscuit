@@ -5,8 +5,8 @@ use biscuit_speaks::{
     bust_host_capability_cache, get_available_providers, parse_provider_name,
     populate_cache_for_all_providers, read_from_cache, speak, speak_with_result, CloudTtsProvider,
     EchogardenProvider, ESpeakProvider, ElevenLabsProvider, Gender, GttsProvider, HostTtsProvider,
-    KokoroTtsProvider, Language, SayProvider, SapiProvider, SpeakResult, TtsConfig, TtsError,
-    TtsFailoverStrategy, TtsProvider, TtsVoiceInventory, Voice, VoiceQuality,
+    KokoroTtsProvider, Language, SayProvider, SapiProvider, SpeakResult, SpeedLevel, TtsConfig,
+    TtsError, TtsFailoverStrategy, TtsProvider, TtsVoiceInventory, Voice, VoiceQuality, VolumeLevel,
 };
 use clap::{Parser, ValueEnum};
 use inquire::Select;
@@ -107,6 +107,22 @@ struct Cli {
     #[arg(long)]
     meta: bool,
 
+    /// Increase volume to maximum (loud)
+    #[arg(long, conflicts_with = "soft")]
+    loud: bool,
+
+    /// Decrease volume to softer level
+    #[arg(long, conflicts_with = "loud")]
+    soft: bool,
+
+    /// Increase speech rate (faster)
+    #[arg(long, conflicts_with = "slow")]
+    fast: bool,
+
+    /// Decrease speech rate (slower)
+    #[arg(long, conflicts_with = "fast")]
+    slow: bool,
+
     #[arg(
         long,
         help = "Refresh the TTS provider and voice cache",
@@ -164,7 +180,7 @@ fn provider_display_name(provider: &TtsProvider) -> &'static str {
     }
 }
 
-fn print_speak_result(result: &SpeakResult) {
+fn print_speak_result(result: &SpeakResult, volume: VolumeLevel, speed: SpeedLevel) {
     println!();
     println!(
         "  {}: {}",
@@ -193,6 +209,16 @@ fn print_speak_result(result: &SpeakResult) {
         "  {}: {}",
         "Quality".dimmed(),
         voice_quality_label(result.voice.quality)
+    );
+    println!(
+        "  {}: {}",
+        "Volume".dimmed(),
+        volume_label(volume)
+    );
+    println!(
+        "  {}: {}",
+        "Speed".dimmed(),
+        speed_label(speed)
     );
     // Show Model Used if available (useful for ElevenLabs)
     if let Some(ref model) = result.model_used {
@@ -349,6 +375,24 @@ fn voice_quality_label(quality: VoiceQuality) -> &'static str {
         VoiceQuality::Moderate => "Moderate",
         VoiceQuality::Low => "Low",
         VoiceQuality::Unknown => "Unknown",
+    }
+}
+
+fn volume_label(volume: VolumeLevel) -> &'static str {
+    match volume {
+        VolumeLevel::Loud => "loud",
+        VolumeLevel::Soft => "soft",
+        VolumeLevel::Normal => "normal",
+        VolumeLevel::Explicit(_) => "custom",
+    }
+}
+
+fn speed_label(speed: SpeedLevel) -> &'static str {
+    match speed {
+        SpeedLevel::Fast => "fast",
+        SpeedLevel::Slow => "slow",
+        SpeedLevel::Normal => "normal",
+        SpeedLevel::Explicit(_) => "custom",
     }
 }
 
@@ -938,12 +982,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config = config.with_failover(TtsFailoverStrategy::SpecificProvider(prov));
     }
 
+    // Apply --loud or --soft if specified
+    let volume = if cli.loud {
+        VolumeLevel::Loud
+    } else if cli.soft {
+        VolumeLevel::Soft
+    } else {
+        VolumeLevel::Normal
+    };
+    config = config.with_volume(volume);
+
+    // Apply --fast or --slow if specified
+    let speed = if cli.fast {
+        SpeedLevel::Fast
+    } else if cli.slow {
+        SpeedLevel::Slow
+    } else {
+        SpeedLevel::Normal
+    };
+    config = config.with_speed(speed);
+
     // Call the async TTS function
     if cli.meta {
         // Use speak_with_result to get metadata
         match speak_with_result(&message, &config).await {
             Ok(result) => {
-                print_speak_result(&result);
+                print_speak_result(&result, volume, speed);
             }
             Err(e) => {
                 eprintln!("Error: {:?}", e);
@@ -1540,5 +1604,25 @@ mod tests {
         // Voice without suffix should use provider-reported quality
         let voice = Voice::new("Heart").with_quality(VoiceQuality::Excellent);
         assert_eq!(effective_voice_quality(&voice), VoiceQuality::Excellent);
+    }
+
+    // ========================================================================
+    // Volume label tests
+    // ========================================================================
+
+    #[test]
+    fn test_volume_label() {
+        assert_eq!(volume_label(VolumeLevel::Loud), "loud");
+        assert_eq!(volume_label(VolumeLevel::Soft), "soft");
+        assert_eq!(volume_label(VolumeLevel::Normal), "normal");
+        assert_eq!(volume_label(VolumeLevel::Explicit(0.8)), "custom");
+    }
+
+    #[test]
+    fn test_speed_label() {
+        assert_eq!(speed_label(SpeedLevel::Fast), "fast");
+        assert_eq!(speed_label(SpeedLevel::Slow), "slow");
+        assert_eq!(speed_label(SpeedLevel::Normal), "normal");
+        assert_eq!(speed_label(SpeedLevel::Explicit(1.5)), "custom");
     }
 }

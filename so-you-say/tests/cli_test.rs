@@ -401,3 +401,133 @@ fn test_cli_help_shows_provider_option() {
         "Help should document --provider option"
     );
 }
+
+#[test]
+fn test_cli_loud_flag() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "so-you-say", "--", "--loud", "test"])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(output.status.success(), "CLI should accept --loud flag");
+}
+
+#[test]
+fn test_cli_soft_flag() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "so-you-say", "--", "--soft", "test"])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(output.status.success(), "CLI should accept --soft flag");
+}
+
+#[test]
+fn test_cli_loud_and_soft_conflict() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "so-you-say",
+            "--",
+            "--loud",
+            "--soft",
+            "test",
+        ])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(
+        !output.status.success(),
+        "CLI should reject --loud and --soft together"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cannot be used with"),
+        "Error should indicate flags cannot be used together"
+    );
+}
+
+#[test]
+fn test_cli_help_shows_volume_options() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "so-you-say", "--", "--help"])
+        .output()
+        .expect("Failed to execute");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--loud"),
+        "Help should document --loud flag"
+    );
+    assert!(
+        stdout.contains("--soft"),
+        "Help should document --soft flag"
+    );
+}
+
+#[test]
+fn test_cli_fast_flag() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "so-you-say", "--", "--fast", "test"])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(output.status.success(), "CLI should accept --fast flag");
+}
+
+#[test]
+fn test_cli_slow_flag() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "so-you-say", "--", "--slow", "test"])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(output.status.success(), "CLI should accept --slow flag");
+}
+
+#[test]
+fn test_cli_fast_and_slow_conflict() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "so-you-say",
+            "--",
+            "--fast",
+            "--slow",
+            "test",
+        ])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(
+        !output.status.success(),
+        "CLI should reject --fast and --slow together"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cannot be used with"),
+        "Error should indicate flags cannot be used together"
+    );
+}
+
+#[test]
+fn test_cli_help_shows_speed_options() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "so-you-say", "--", "--help"])
+        .output()
+        .expect("Failed to execute");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--fast"),
+        "Help should document --fast flag"
+    );
+    assert!(
+        stdout.contains("--slow"),
+        "Help should document --slow flag"
+    );
+}

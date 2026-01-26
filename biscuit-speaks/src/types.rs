@@ -45,6 +45,44 @@ impl Default for VolumeLevel {
     }
 }
 
+// ============================================================================
+// Speed Level
+// ============================================================================
+
+/// Speed level for TTS speech rate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SpeedLevel {
+    /// Fast speech (1.25x normal)
+    Fast,
+    /// Slow speech (0.75x normal)
+    Slow,
+    /// Default speech rate (1.0x)
+    Normal,
+    /// Explicit speed multiplier (clamped to 0.25-4.0)
+    Explicit(f32),
+}
+
+impl SpeedLevel {
+    /// Get the numeric speed multiplier.
+    ///
+    /// Returns a value where 1.0 is normal speed, values > 1.0 are faster,
+    /// and values < 1.0 are slower.
+    pub fn value(&self) -> f32 {
+        match self {
+            SpeedLevel::Fast => 1.25,
+            SpeedLevel::Slow => 0.75,
+            SpeedLevel::Normal => 1.0,
+            SpeedLevel::Explicit(v) => v.clamp(0.25, 4.0),
+        }
+    }
+}
+
+impl Default for SpeedLevel {
+    fn default() -> Self {
+        SpeedLevel::Normal
+    }
+}
+
 /// The quality of a specific voice (on a specific provider).
 ///
 /// Quality is subjective but provides a rough categorization for
@@ -669,6 +707,8 @@ pub struct TtsConfig {
     pub language: Language,
     /// Volume level for TTS output.
     pub volume: VolumeLevel,
+    /// Speed level for TTS speech rate.
+    pub speed: SpeedLevel,
     /// Failover strategy when providers fail.
     pub failover_strategy: TtsFailoverStrategy,
 }
@@ -714,6 +754,13 @@ impl TtsConfig {
     #[must_use]
     pub fn with_volume(mut self, volume: VolumeLevel) -> Self {
         self.volume = volume;
+        self
+    }
+
+    /// Set the speed level.
+    #[must_use]
+    pub fn with_speed(mut self, speed: SpeedLevel) -> Self {
+        self.speed = speed;
         self
     }
 
@@ -853,6 +900,20 @@ mod tests {
     }
 
     #[test]
+    fn test_speed_level_values() {
+        assert_eq!(SpeedLevel::Fast.value(), 1.25);
+        assert_eq!(SpeedLevel::Slow.value(), 0.75);
+        assert_eq!(SpeedLevel::Normal.value(), 1.0);
+        assert_eq!(SpeedLevel::Explicit(1.5).value(), 1.5);
+    }
+
+    #[test]
+    fn test_speed_level_clamping() {
+        assert_eq!(SpeedLevel::Explicit(5.0).value(), 4.0);
+        assert_eq!(SpeedLevel::Explicit(0.1).value(), 0.25);
+    }
+
+    #[test]
     fn test_language_code_prefix() {
         assert_eq!(Language::English.code_prefix(), "en");
         assert_eq!(Language::Custom("fr-FR".into()).code_prefix(), "fr-FR");
@@ -883,12 +944,14 @@ mod tests {
             .with_voice("Samantha")
             .with_gender(Gender::Female)
             .with_language(Language::Custom("en-US".into()))
-            .with_volume(VolumeLevel::Soft);
+            .with_volume(VolumeLevel::Soft)
+            .with_speed(SpeedLevel::Fast);
 
         assert_eq!(config.requested_voice, Some("Samantha".into()));
         assert_eq!(config.gender, Gender::Female);
         assert_eq!(config.language, Language::Custom("en-US".into()));
         assert_eq!(config.volume, VolumeLevel::Soft);
+        assert_eq!(config.speed, SpeedLevel::Fast);
     }
 
     #[test]

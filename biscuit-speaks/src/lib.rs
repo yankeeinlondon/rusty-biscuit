@@ -61,6 +61,6 @@ pub use speak::{speak, speak_when_able, speak_with_result, Speak};
 pub use traits::{TtsExecutor, TtsVoiceInventory};
 pub use types::{
     AudioFormat, CloudTtsProvider, Gender, HostTtsCapabilities, HostTtsCapability,
-    HostTtsProvider, Language, SpeakResult, TtsConfig, TtsFailoverStrategy, TtsProvider, Voice,
-    VoiceQuality, VolumeLevel,
+    HostTtsProvider, Language, SpeakResult, SpeedLevel, TtsConfig, TtsFailoverStrategy,
+    TtsProvider, Voice, VoiceQuality, VolumeLevel,
 };

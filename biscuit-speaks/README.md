@@ -8,17 +8,80 @@
 <p>This library provides TTS functionality to Rust programs:</p>
 
 <ul>
-  <li>leverages the host's existing capabilities for small yet cross-platform TTS functionality</li>
-  <li>includes <i>cloud</i> support for <a href="https://elevenlabs.io/docs/overview/intro">ElevenLabs</a> TTS</li>
-  <li>automatic failover between providers</li>
+    <li>leverages the host's existing capabilities for small yet cross-platform TTS functionality</li>
+    <li>includes <i>cloud</i> support for <a href="https://elevenlabs.io/docs/overview/intro">ElevenLabs</a> TTS</li>
+    <li>automatic failover between providers</li>
 </ul>
 
 <p>
-  This library is the TTS functionality behind the <code>so-you-say</code> CLI.
+    This library is the TTS functionality behind the <code>so-you-say</code> CLI.
 </p>
 </td>
 </tr>
 </table>
+
+## Providers
+
+This library can use any of the following TTS providers found on the host (or with the appropriate API Key for cloud providers):
+
+### Local Providers
+
+| Provider   | OS             | Vol | Speed | Notes                                                                      |
+|------------|----------------|:---:|:-----:| ----------------------------------------------------------------------------|
+| Say        | macOS          | ❌  | ✅    | Built-in macOS TTS with decent quality                                     |
+| eSpeak     | Cross-platform | ✅  | ✅    | Massive language library but voices a bit robotic                          |
+| SAPI       | Windows        | ✅  | ✅    | Windows Speech API with system voices                                      |
+| echogarden | Cross-platform | 🔺  | 🔺    | Uses very high quality **kokoro** voices or decent quality **vits** voices |
+| kokoro-cli | Cross-platform | 🔺  | 🔺    | Provides a good set of very high quality **kokoro** voices                 |
+
+### Hybrid Providers
+
+| Provider | OS             | Vol | Speed | Notes                                                                    |
+|----------|----------------|:---:|:-----:|--------------------------------------------------------------------------|
+| gTTS     | Cross-platform | 🔺  | ❌    | uses a locally installed client to interact with Google TTS in the cloud |
+
+### Cloud Providers
+
+| Provider   | ENV                                             | Vol | Speed | Notes                           |
+|------------|------------------------------------------------|:---:|:-----:|---------------------------------|
+| ElevenLabs | `ELEVEN_LABS_API_KEY` _or_ `ELEVENLABS_API_KEY` | 🔺  | ✅    | Excellent TTS done in the cloud |
+
+<br/>
+
+🔺 - certain TTS providers only produce an _audio file_ and then rely on other software on the host to play the audio; we use the `Playa` library to detect and use the best headless audio player on the host.
+
+## Useful Defaults
+
+There are times where we will want to have fine grained control over the TTS's voice, the volume of the voice, the provider we want to use, etc. but on the other side of the spectrum we often just want to "say something" and not concern ourselves with details.
+
+The **biscuit-speaks** library caters to both ends of this spectrum as well as all points in-between by providing _useful defaults_ which can progressively be overridden when more specificity/control is desired. The way _defaults_ are arrives at is:
+
+- **Capabilities**: _establish a cache file of providers and voices [`~/.biscuit-speaks-cache.json`]_:
+    - the host system is evaluated for it's installed TTS programs as well as the voices available
+    - we also check ENV variables to see if an [ElevenLabs](https://elevenlabs.io) API Key is detected and if it is then it is added to the list of providers
+- **Language**:
+    - when no specific language is formally specified we _default_ to English (or whatever `PREFER_LANGUAGE` is set to)
+- **Provider**:
+    - each operating system (Windows, Linux, macOS) have a statically defined "stack" of TTS providers which in general try to order the TTS providers from best-to-worst (in terms of voice quality)
+    - If a user specified the language they wish to use then we will use the first provider in the stack
+    - we iterate through this stack until we find one which the host system has _installed_ and which provides the at least one voice for the selected language we're targeting
+- **Gender**:
+    - if no gender is specified then we will _prefer_ the highest quality voice available but if there are both male and female variants at that same quality level we will prefer a female voice by default (or whatever the `PREFER_GENDER` environment variable states).
+    - **Note:** "gender" is always ignored when a specific "voice" is chosen
+- **Voice**:
+    - each provider has a set of voices which the host has available to them
+    - you can use the `with_voice(String)` builder function to specify a voice in code
+    - if no voice is specified then we'll see if `PREFER_VOICE` is available to the host as a valid voice and use it if it is
+    - if the voice is not passed in via code or suggested via an ENV variable then
+- **Volume**:
+    - the _volume_ that the spoken voice is spoken at defaults to a "normal" level but you can specify a volume level with the `with_volume(VolumeLevel)` builder function.
+    -
+- **Speed**:
+    - the _speed_ at which the text is spoken can be modified from it's default speed by using the `at_speed(Speed)`
+    - if not set programmatically the speed will also be influenced by the `PREFER_SPEED` environment variable set to either `fast` or `slow` (capitalization doesn't matter).
+
+
+
 
 ## Usage
 
@@ -36,25 +99,10 @@ let hello = Speak::new("Hello World");
 hello.play().await?;
 ```
 
-When we don't explicitly state the TTS provider, the voice, the language, etc. the library will try to pick a good set of _defaults_ for us. This is done by:
 
-- **Capabilities**: _establish a cache file of providers and voices [`~/.biscuit-speaks-cache.json`]_:
-    - the host system is evaluated for it's installed TTS programs as well as the voices available
-    - we also check ENV variables to see if an [ElevenLabs](https://elevenlabs.io) API Key is detected and if it is then it is added to the list of providers
-- **Language**:
-    - when no specific language is formally specified we _default_ to English (or whatever `PREFER_LANGUAGE` is set to)
-- **Provider**:
-    - each operating system (Windows, Linux, macOS) have a statically defined "stack" of TTS providers which in general try to order the TTS providers from best-to-worst (in terms of voice quality)
-    - If a user specified the language they wish to use then we will use the first provider in the stack
-    - we iterate through this stack until we find one which the host system has _installed_ and which provides the at least one voice for the selected language we're targeting
-- **Gender**:
-    - if no gender is specified then we will _prefer_ the highest quality voice available but if there are both male and female variants at that same quality level we will prefer a female voice by default (or whatever the `PREFER_GENDER` environment variable states).
-    - **Note:** "gender" is always ignored when a specific "voice" is chosen
-- **Voice**:
-    - each
+### Being More Explicit
 
-
-## Usage Examples
+In our first usage example we simply accepted the defaults and in many cases that will be
 
 ```rust
 use biscuit_speaks::{Speak, TtsConfig, Gender, VolumeLevel};
@@ -74,76 +122,21 @@ Speak::new("Custom voice")
 biscuit_speaks::speak_when_able("Task complete!", &TtsConfig::default()).await;
 ```
 
-## Features
 
-- **Cross-platform system TTS**: macOS (`say`), Windows (SAPI), Linux (eSpeak, Festival)
-- **Cloud TTS**: ElevenLabs API integration with high-quality voices
-- **Automatic failover**: Tries providers in priority order until one succeeds
-- **Async-first**: Built on tokio for non-blocking operations
-- **Builder pattern**: Ergonomic configuration via `TtsConfig` or `Speak` builder
-
-## Supported Providers
-
-### Host Providers (Implemented)
-
-| Provider | Platform       | Binary      | Notes                   |
-|----------|----------------|-------------|-------------------------|
-| Say      | macOS          | `say`       | Built-in macOS TTS      |
-| eSpeak   | Cross-platform | `espeak-ng` | Open source synthesizer |
-
-### Cloud Providers (Implemented)
-
-| Provider   | API Key Env Var                               | Notes                                 |
-|------------|-----------------------------------------------|---------------------------------------|
-| ElevenLabs | `ELEVEN_LABS_API_KEY` or `ELEVENLABS_API_KEY` | High-quality AI voices, sound effects |
-
-#### ElevenLabs Features
-
-The ElevenLabs provider offers full API access:
-
-- **Text-to-Speech**: Generate high-quality audio from text
-- **Voice Listing**: Query available voices with metadata
-- **Model Listing**: List available TTS models
-- **Sound Effects**: Generate sound effects from text descriptions
-
-### Deferred Providers (Not Yet Implemented)
+## Deferred Providers
 
 The following providers are defined in the type system but not yet implemented:
 
 | Provider   | Platform       | Requirements                                |
 |------------|----------------|---------------------------------------------|
-| SAPI       | Windows        | PowerShell with `System.Speech` assembly    |
 | Festival   | Linux          | `festival` binary installed                 |
 | Pico2Wave  | Linux          | `pico2wave` binary (SVOX Pico)              |
 | Mimic3     | Cross-platform | Mycroft neural TTS, SSML support            |
-| KokoroTts  | Cross-platform | Model files required                        |
-| EchoGarden | Cross-platform | Model configuration required                |
-| Sherpa     | Cross-platform | `SHERPA_MODEL` and `SHERPA_TOKENS` env vars |
-| Gtts       | Cross-platform | `gtts-cli`, requires network                |
+| Sherpa-ONNX   | Cross-platform | high quality multi-modal solution based on the ONNX C library|
 | SpdSay     | Linux          | Speech Dispatcher (`spd-say`)               |
 | Piper      | Cross-platform | Fast local neural TTS with ONNX             |
 
-#### Implementation Requirements for Deferred Providers
-
-- **SAPI (Windows)**: Implement PowerShell script invocation with `Add-Type -AssemblyName System.Speech`. Handle voice selection via `SelectVoice()`.
-
-- **Festival**: Simple CLI wrapper, pipe text to `festival --tts`.
-
-- **Pico2Wave**: Generate WAV file with `pico2wave -w /tmp/output.wav "text"`, then play via audio player.
-
-- **Mimic3**: CLI wrapper with SSML support. Requires model download.
-
-- **KokoroTts**: Requires model files and configuration. Supports voice blending syntax (e.g., `af_sarah:60,am_adam:40`).
-
-- **EchoGarden**: Needs model discovery and configuration.
-
-- **Sherpa**: Validate `SHERPA_MODEL` and `SHERPA_TOKENS` environment variables exist and point to valid files.
-
-- **Gtts**: HTTP-based Google TTS via CLI. Handle network errors gracefully.
-
-- **SpdSay**: Simple CLI wrapper for Speech Dispatcher on Linux desktops.
-
-- **Piper**: CLI wrapper for ONNX-based neural TTS. Very fast local inference.
+These providers are often found on hosts and may be added to this library in the future.
 
 ## Environment Variables
 
@@ -215,7 +208,6 @@ for provider in get_available_providers() {
     println!("Available: {:?}", provider);
 }
 ```
-
 
 ## Provider Specific Notes
 

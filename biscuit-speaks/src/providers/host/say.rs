@@ -10,7 +10,10 @@ use tracing::{debug, trace};
 use crate::errors::TtsError;
 use crate::gender_inference::infer_gender;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
+use crate::types::{Gender, HostTtsProvider, Language, SpeedLevel, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
+
+/// Default speaking rate for macOS `say` command in words per minute.
+const DEFAULT_RATE_WPM: f32 = 175.0;
 
 /// macOS Say TTS provider.
 ///
@@ -46,6 +49,19 @@ impl SayProvider {
             Gender::Male => Some("Alex"),
             Gender::Female => Some("Samantha"),
             Gender::Any => None,
+        }
+    }
+
+    /// Convert a SpeedLevel to words per minute for the `-r` flag.
+    ///
+    /// Returns `None` for normal speed (use system default).
+    fn resolve_rate(speed: SpeedLevel) -> Option<u32> {
+        match speed {
+            SpeedLevel::Normal => None, // Use default
+            _ => {
+                let rate = (DEFAULT_RATE_WPM * speed.value()).round() as u32;
+                Some(rate)
+            }
         }
     }
 
@@ -225,6 +241,11 @@ impl TtsExecutor for SayProvider {
         // Voice selection (NOT volume - macOS say has no volume flag)
         if let Some(voice) = Self::resolve_voice(config) {
             cmd.arg("-v").arg(voice);
+        }
+
+        // Rate (speed) selection
+        if let Some(rate) = Self::resolve_rate(config.speed) {
+            cmd.arg("-r").arg(rate.to_string());
         }
 
         // Use stdin for text input
@@ -418,6 +439,32 @@ mod tests {
     fn test_resolve_voice_gender_any() {
         let config = TtsConfig::new();
         assert_eq!(SayProvider::resolve_voice(&config), None);
+    }
+
+    #[test]
+    fn test_resolve_rate_normal() {
+        assert_eq!(SayProvider::resolve_rate(SpeedLevel::Normal), None);
+    }
+
+    #[test]
+    fn test_resolve_rate_fast() {
+        // Fast = 1.25x, so 175 * 1.25 = 219 (rounded)
+        let rate = SayProvider::resolve_rate(SpeedLevel::Fast).unwrap();
+        assert_eq!(rate, 219);
+    }
+
+    #[test]
+    fn test_resolve_rate_slow() {
+        // Slow = 0.75x, so 175 * 0.75 = 131 (rounded)
+        let rate = SayProvider::resolve_rate(SpeedLevel::Slow).unwrap();
+        assert_eq!(rate, 131);
+    }
+
+    #[test]
+    fn test_resolve_rate_explicit() {
+        // 2x speed = 175 * 2.0 = 350
+        let rate = SayProvider::resolve_rate(SpeedLevel::Explicit(2.0)).unwrap();
+        assert_eq!(rate, 350);
     }
 
     #[test]

@@ -21,13 +21,13 @@
 
 use schematic_schema::elevenlabs::{
     CreateSpeechBody, CreateSpeechRequest, CreateSoundEffectBody, CreateSoundEffectRequest,
-    ElevenLabs, ListVoicesResponse, ModelInfo, VoiceResponseModel,
+    ElevenLabs, ListVoicesResponse, ModelInfo, VoiceResponseModel, VoiceSettings,
 };
 use schematic_schema::shared::reqwest;
 
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{AudioFormat, CloudTtsProvider, Gender, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
+use crate::types::{AudioFormat, CloudTtsProvider, Gender, Language, SpeedLevel, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
 
 /// Default ElevenLabs voice ID (Rachel - a versatile female voice).
 const DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM";
@@ -142,6 +142,21 @@ impl ElevenLabsProvider {
     pub fn with_default_model(mut self, model_id: impl Into<String>) -> Self {
         self.default_model_id = model_id.into();
         self
+    }
+
+    /// Convert a SpeedLevel to ElevenLabs speed value (0.7-1.2).
+    ///
+    /// Returns `None` for normal speed (use API default of 1.0).
+    fn resolve_speed(speed: SpeedLevel) -> Option<f64> {
+        match speed {
+            SpeedLevel::Normal => None, // Use default
+            _ => {
+                // ElevenLabs speed range: 0.7 to 1.2
+                // Clamp our multiplier to this range
+                let value = speed.value() as f64;
+                Some(value.clamp(0.7, 1.2))
+            }
+        }
     }
 
     fn voice_matches_gender(voice: &VoiceResponseModel, gender_label: &str) -> bool {
@@ -333,10 +348,17 @@ impl ElevenLabsProvider {
             .unwrap_or_else(|| self.default_model_id.clone());
 
         // Build the request body
+        // Build voice settings if speed is not normal
+        let voice_settings = Self::resolve_speed(config.speed).map(|speed| VoiceSettings {
+            speed: Some(speed),
+            ..Default::default()
+        });
+
         let body = CreateSpeechBody {
             text: text.to_string(),
             model_id: Some(model_id.clone()),
             language_code: Some(config.language.code_prefix().to_string()),
+            voice_settings,
             ..Default::default()
         };
 
@@ -960,6 +982,50 @@ mod tests {
 
         // Unknown gender values should map to Gender::Any
         assert_eq!(voice.gender, Gender::Any);
+    }
+
+    // ========================================================================
+    // resolve_speed() tests
+    // ========================================================================
+
+    #[test]
+    fn test_resolve_speed_normal() {
+        assert_eq!(ElevenLabsProvider::resolve_speed(SpeedLevel::Normal), None);
+    }
+
+    #[test]
+    fn test_resolve_speed_fast() {
+        // Fast = 1.25x, but ElevenLabs max is 1.2
+        let speed = ElevenLabsProvider::resolve_speed(SpeedLevel::Fast).unwrap();
+        assert!((speed - 1.2).abs() < 0.001, "Fast should clamp to 1.2");
+    }
+
+    #[test]
+    fn test_resolve_speed_slow() {
+        // Slow = 0.75x, within ElevenLabs range (0.7-1.2)
+        let speed = ElevenLabsProvider::resolve_speed(SpeedLevel::Slow).unwrap();
+        assert!((speed - 0.75).abs() < 0.001, "Slow should be 0.75");
+    }
+
+    #[test]
+    fn test_resolve_speed_explicit_within_range() {
+        // 0.9x is within range
+        let speed = ElevenLabsProvider::resolve_speed(SpeedLevel::Explicit(0.9)).unwrap();
+        assert!((speed - 0.9).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_resolve_speed_explicit_clamped_low() {
+        // 0.5x should clamp to 0.7 (ElevenLabs minimum)
+        let speed = ElevenLabsProvider::resolve_speed(SpeedLevel::Explicit(0.5)).unwrap();
+        assert!((speed - 0.7).abs() < 0.001, "Should clamp to minimum 0.7");
+    }
+
+    #[test]
+    fn test_resolve_speed_explicit_clamped_high() {
+        // 2.0x should clamp to 1.2 (ElevenLabs maximum)
+        let speed = ElevenLabsProvider::resolve_speed(SpeedLevel::Explicit(2.0)).unwrap();
+        assert!((speed - 1.2).abs() < 0.001, "Should clamp to maximum 1.2");
     }
 
     // Note: Integration tests requiring API key should use #[ignore]

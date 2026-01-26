@@ -9,7 +9,10 @@ use tokio::io::AsyncWriteExt;
 
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
+use crate::types::{Gender, HostTtsProvider, Language, SpeedLevel, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
+
+/// Default speaking rate for eSpeak in words per minute.
+const DEFAULT_RATE_WPM: f32 = 175.0;
 
 /// eSpeak/eSpeak-NG TTS provider.
 ///
@@ -60,6 +63,19 @@ impl ESpeakProvider {
         }
     }
 
+    /// Convert a SpeedLevel to words per minute for the `-s` flag.
+    ///
+    /// Returns `None` for normal speed (use system default).
+    fn resolve_rate(speed: SpeedLevel) -> Option<u32> {
+        match speed {
+            SpeedLevel::Normal => None, // Use default
+            _ => {
+                let rate = (DEFAULT_RATE_WPM * speed.value()).round() as u32;
+                Some(rate)
+            }
+        }
+    }
+
     /// Build the voice argument based on config.
     fn build_voice_arg(&self, config: &TtsConfig) -> String {
         // Start with language
@@ -102,8 +118,10 @@ impl TtsExecutor for ESpeakProvider {
         let voice = self.build_voice_arg(config);
         cmd.arg("-v").arg(&voice);
 
-        // Speed (default is 175 wpm)
-        // Could add speed configuration later
+        // Speed (rate) selection
+        if let Some(rate) = Self::resolve_rate(config.speed) {
+            cmd.arg("-s").arg(rate.to_string());
+        }
 
         // Use stdin for text input
         cmd.stdin(Stdio::piped());
@@ -391,6 +409,32 @@ mod tests {
         let config = TtsConfig::new().with_voice("en-gb+f4");
         let voice = provider.build_voice_arg(&config);
         assert_eq!(voice, "en-gb+f4");
+    }
+
+    #[test]
+    fn test_resolve_rate_normal() {
+        assert_eq!(ESpeakProvider::resolve_rate(SpeedLevel::Normal), None);
+    }
+
+    #[test]
+    fn test_resolve_rate_fast() {
+        // Fast = 1.25x, so 175 * 1.25 = 219 (rounded)
+        let rate = ESpeakProvider::resolve_rate(SpeedLevel::Fast).unwrap();
+        assert_eq!(rate, 219);
+    }
+
+    #[test]
+    fn test_resolve_rate_slow() {
+        // Slow = 0.75x, so 175 * 0.75 = 131 (rounded)
+        let rate = ESpeakProvider::resolve_rate(SpeedLevel::Slow).unwrap();
+        assert_eq!(rate, 131);
+    }
+
+    #[test]
+    fn test_resolve_rate_explicit() {
+        // 2x speed = 175 * 2.0 = 350
+        let rate = ESpeakProvider::resolve_rate(SpeedLevel::Explicit(2.0)).unwrap();
+        assert_eq!(rate, 350);
     }
 
     #[test]
