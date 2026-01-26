@@ -5,46 +5,6 @@ use termini::{NumberCapability, StringCapability, TermInfo};
 // Color Depth Constants
 // =============================================================================
 
-/// 24-bit true color (16.7 million colors): 2^24
-pub const TRUE_COLOR_DEPTH: u32 = 16_777_216;
-
-/// 256-color mode depth
-pub const COLORS_256_DEPTH: u32 = 256;
-
-/// 16-color (basic ANSI) mode depth
-pub const COLORS_16_DEPTH: u32 = 16;
-
-/// 8-color (minimal) mode depth
-pub const COLORS_8_DEPTH: u32 = 8;
-
-/// Represents basic underline support capabilities.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UnderlineSupport {
-    /// Whether the terminal supports basic underline rendering.
-    pub basic: bool,
-    /// Whether the terminal supports coloring underlines independently of text.
-    pub colored: bool,
-}
-
-/// Represents support for various underline style variants.
-///
-/// Modern terminals (Kitty, WezTerm, Alacritty, etc.) support extended underline
-/// styles using SGR sub-parameters (e.g., `\e[4:3m` for curly underlines).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UnderlineVariants {
-    /// Straight/single underline (`\e[4:1m` or `\e[4m`).
-    pub straight: bool,
-    /// Double underline (`\e[4:2m`).
-    pub double: bool,
-    /// Curly/squiggly underline (`\e[4:3m`) - commonly used for LSP errors.
-    pub curly: bool,
-    /// Dotted underline (`\e[4:4m`).
-    pub dotted: bool,
-    /// Dashed underline (`\e[4:5m`).
-    pub dashed: bool,
-    /// Whether underlines can be colored independently (`\e[58:2::R:G:Bm`).
-    pub colored: bool,
-}
 
 /// Returns the maximum number of colors the terminal supports.
 ///
@@ -75,45 +35,7 @@ pub struct UnderlineVariants {
 /// }
 /// ```
 pub fn color_depth() -> u32 {
-    // Check COLORTERM environment variable first
-    if let Ok(colorterm) = env::var("COLORTERM") {
-        let colorterm_lower = colorterm.to_lowercase();
-        if colorterm_lower == "truecolor" || colorterm_lower == "24bit" {
-            tracing::info!(
-                color_depth = TRUE_COLOR_DEPTH,
-                source = "COLORTERM",
-                colorterm = %colorterm,
-                "Detected truecolor support from COLORTERM env var"
-            );
-            return TRUE_COLOR_DEPTH;
-        }
-    }
 
-    // Fallback to terminfo
-    match TermInfo::from_env() {
-        Ok(term_info) => {
-            // Query the MaxColors capability
-            let depth = term_info
-                .number_cap(NumberCapability::MaxColors)
-                .map(|n| n as u32)
-                .unwrap_or(0);
-            tracing::info!(
-                color_depth = depth,
-                source = "terminfo",
-                "Detected color depth from terminfo"
-            );
-            depth
-        }
-        Err(e) => {
-            tracing::info!(
-                color_depth = 0,
-                source = "fallback",
-                error = %e,
-                "Failed to query terminfo, defaulting to no color"
-            );
-            0
-        }
-    }
 }
 
 /// Returns whether the terminal supports setting the foreground color.
@@ -146,100 +68,6 @@ pub fn supports_setting_foreground() -> bool {
         }
         Err(_) => false,
     }
-}
-
-/// Returns whether the terminal supports italic text rendering.
-///
-/// This function uses a multi-layer detection strategy:
-///
-/// 1. **Terminfo** (authoritative): Checks for the `EnterItalicsMode` (`sitm`) capability
-/// 2. **TERM_PROGRAM**: Recognizes modern terminal emulators known to support italics
-/// 3. **TERM**: Falls back to pattern matching for common terminal types
-///
-/// This layered approach compensates for outdated terminfo databases that may lack
-/// italic capabilities for terminals that actually support them.
-///
-/// ## Returns
-///
-/// - `true` if the terminal supports italic text
-/// - `false` if stdout is not a TTY, TERM is "dumb", or no support is detected
-///
-/// ## Examples
-///
-/// ```
-/// use shared::terminal::supports_italics;
-///
-/// if supports_italics() {
-///     println!("\x1b[3mThis text is italic!\x1b[23m");
-/// } else {
-///     println!("This text has no styling");
-/// }
-/// ```
-pub fn supports_italics() -> bool {
-    use std::io::IsTerminal;
-
-    // If stdout is not a TTY, don't use styling
-    if !std::io::stdout().is_terminal() {
-        return false;
-    }
-
-    // Check for dumb terminal
-    let term = env::var("TERM").unwrap_or_default();
-    if term == "dumb" {
-        return false;
-    }
-
-    // 1. Query terminfo for EnterItalicsMode (sitm) capability (authoritative)
-    if let Ok(term_info) = TermInfo::from_env()
-        && term_info
-            .utf8_string_cap(StringCapability::EnterItalicsMode)
-            .is_some()
-    {
-        return true;
-    }
-
-    // 2. Check TERM_PROGRAM for known terminal emulators that support italics
-    if let Ok(term_program) = env::var("TERM_PROGRAM") {
-        let dominated = matches!(
-            term_program.as_str(),
-            "iTerm.app"
-                | "Apple_Terminal"
-                | "Alacritty"
-                | "kitty"
-                | "WezTerm"
-                | "vscode"
-                | "Hyper"
-                | "Tabby"
-                | "Rio"
-        );
-        if dominated {
-            return true;
-        }
-    }
-
-    // 3. Check for Windows Terminal (uses WT_SESSION env var)
-    if env::var("WT_SESSION").is_ok() {
-        return true;
-    }
-
-    // 4. Fallback: check TERM for patterns indicating modern terminals
-    let dominated = matches!(
-        term.as_str(),
-        "xterm-256color"
-            | "xterm-direct"
-            | "alacritty"
-            | "alacritty-direct"
-            | "kitty"
-            | "kitty-direct"
-            | "wezterm"
-            | "tmux-256color"
-            | "screen-256color"
-    );
-    if dominated {
-        return true;
-    }
-
-    false
 }
 
 /// Returns whether the terminal supports basic underline rendering.
