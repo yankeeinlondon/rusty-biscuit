@@ -9,6 +9,9 @@ use biscuit_speaks::{
 };
 use clap::{Parser, ValueEnum};
 use inquire::Select;
+use owo_colors::OwoColorize;
+use shared::markdown::output::terminal::{TerminalOptions, for_terminal};
+use shared::markdown::Markdown;
 
 /// Gender preference for voice selection
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -42,11 +45,17 @@ impl From<GenderArg> for Gender {
 /// // Speak text with a female voice
 /// // so-you-say --gender female Hello world
 ///
+/// // Speak text in a specific language
+/// // so-you-say --lang fr "Bonjour le monde"
+///
 /// // List available TTS providers
 /// // so-you-say --list-providers
 ///
 /// // List available voices for a provider
 /// // so-you-say --list-voices --provider say
+///
+/// // List only French voices for a provider
+/// // so-you-say --list-voices --provider gtts --lang fr
 ///
 /// // Select a provider interactively to list voices
 /// // so-you-say --list-voices
@@ -81,6 +90,13 @@ struct Cli {
     /// Voice gender preference (male or female)
     #[arg(short, long, value_enum)]
     gender: Option<GenderArg>,
+
+    /// Language code for voice selection (e.g., "en", "fr", "de")
+    ///
+    /// When used with --list-voices, filters to only show voices for this language.
+    /// When speaking, sets the preferred language for voice selection.
+    #[arg(short, long)]
+    lang: Option<String>,
 
     /// Text to speak (reads from stdin if not provided)
     text: Vec<String>,
@@ -158,7 +174,7 @@ fn print_providers() {
     println!();
 
     for provider in providers {
-        let name = provider_display_name(&provider);
+        let name = provider_display_name(provider);
         if matches!(provider, TtsProvider::Cloud(_)) {
             println!("  - {} [cloud]", name);
         } else {
@@ -248,8 +264,8 @@ fn voice_quality_rank(quality: VoiceQuality) -> u8 {
 
 fn voice_gender_label(gender: Gender) -> &'static str {
     match gender {
-        Gender::Male => "M",
-        Gender::Female => "F",
+        Gender::Male => "Male",
+        Gender::Female => "Female",
         Gender::Any => "-",
         _ => "?",
     }
@@ -257,11 +273,56 @@ fn voice_gender_label(gender: Gender) -> &'static str {
 
 fn voice_quality_label(quality: VoiceQuality) -> &'static str {
     match quality {
-        VoiceQuality::Excellent => "excellent",
-        VoiceQuality::Good => "good",
-        VoiceQuality::Moderate => "moderate",
-        VoiceQuality::Low => "low",
-        VoiceQuality::Unknown => "unknown",
+        VoiceQuality::Excellent => "Excellent",
+        VoiceQuality::Good => "Good",
+        VoiceQuality::Moderate => "Moderate",
+        VoiceQuality::Low => "Low",
+        VoiceQuality::Unknown => "Unknown",
+    }
+}
+
+/// Extract a clean display name from a voice name.
+///
+/// For VITS-style names like `de_DE-thorsten-high`, extracts `Thorsten`.
+/// For simple names like `Heart` or `Michael`, returns as-is.
+fn extract_display_name(name: &str) -> String {
+    // Check for VITS-style pattern: locale-name-quality (e.g., de_DE-thorsten-high)
+    // The pattern is: {locale}_{REGION}-{name}-{quality}
+    // We want to extract the name part and title-case it
+
+    // First, strip common quality suffixes
+    let name_without_quality = name
+        .strip_suffix("-high")
+        .or_else(|| name.strip_suffix("-medium"))
+        .or_else(|| name.strip_suffix("-low"))
+        .or_else(|| name.strip_suffix("-x_low"))
+        .unwrap_or(name);
+
+    // Check if it matches the locale pattern (e.g., de_DE-thorsten, en_US-lessac)
+    if let Some(dash_pos) = name_without_quality.find('-') {
+        let potential_locale = &name_without_quality[..dash_pos];
+        // Check if it looks like a locale (e.g., de_DE, en_US, ar_JO)
+        if potential_locale.len() >= 2
+            && potential_locale.contains('_')
+            && potential_locale.chars().all(|c| c.is_ascii_alphabetic() || c == '_')
+        {
+            // Extract the name part after the locale
+            let name_part = &name_without_quality[dash_pos + 1..];
+            // Title-case the name
+            return title_case(name_part);
+        }
+    }
+
+    // For simple names, just return as-is (they're already properly cased)
+    name.to_string()
+}
+
+/// Title-case a string (first letter uppercase, rest lowercase).
+fn title_case(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => first.to_uppercase().chain(chars.map(|c| c.to_ascii_lowercase())).collect(),
     }
 }
 
@@ -276,33 +337,191 @@ fn voice_language_label(languages: &[Language]) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
-fn print_voices(provider: TtsProvider, voices: &[Voice]) {
+/// Check if a voice matches a given language code.
+///
+/// Matching rules:
+/// - "en" matches Language::English and any "en-*" custom codes
+/// - Other codes match if the voice language starts with that code
+fn voice_matches_language(voice: &Voice, lang_code: &str) -> bool {
+    let lang_lower = lang_code.to_lowercase();
+
+    voice.languages.iter().any(|lang| match lang {
+        Language::English => lang_lower == "en" || lang_lower.starts_with("en-"),
+        Language::Custom(code) => {
+            let code_lower = code.to_lowercase();
+            // Exact match or prefix match (e.g., "fr" matches "fr-CA")
+            code_lower == lang_lower || code_lower.starts_with(&format!("{}-", lang_lower))
+        }
+        _ => false,
+    })
+}
+
+/// Filter voices by language code.
+fn filter_voices_by_language(voices: Vec<Voice>, lang_code: &str) -> Vec<Voice> {
+    voices
+        .into_iter()
+        .filter(|v| voice_matches_language(v, lang_code))
+        .collect()
+}
+
+/// Escape pipe characters in markdown table cells.
+fn escape_markdown_cell(value: &str) -> String {
+    value.replace('|', "\\|")
+}
+
+/// Result of voice resolution.
+#[derive(Debug)]
+enum VoiceResolution {
+    /// Found exactly one matching voice.
+    Found(Voice),
+    /// No matching voice found.
+    NotFound,
+    /// Multiple voices match - need language to disambiguate.
+    Ambiguous(Vec<Voice>),
+}
+
+/// Resolve a user-provided voice name to the actual voice.
+///
+/// Performs case-insensitive matching on:
+/// 1. The display name (e.g., "Heart", "Thorsten")
+/// 2. The original voice name (e.g., "de_DE-thorsten-high")
+///
+/// If multiple voices match, uses the language filter to disambiguate.
+fn resolve_voice_name(
+    voices: &[Voice],
+    user_voice: &str,
+    lang_filter: Option<&str>,
+) -> VoiceResolution {
+    let user_lower = user_voice.to_lowercase();
+
+    // Find all voices matching by display name OR original name (case-insensitive)
+    let matches: Vec<Voice> = voices
+        .iter()
+        .filter(|v| {
+            extract_display_name(&v.name).to_lowercase() == user_lower
+                || v.name.to_lowercase() == user_lower
+        })
+        .cloned()
+        .collect();
+
+    if matches.is_empty() {
+        return VoiceResolution::NotFound;
+    }
+
+    if matches.len() == 1 {
+        return VoiceResolution::Found(matches.into_iter().next().unwrap());
+    }
+
+    // Multiple matches - try to filter by language
+    if let Some(lang) = lang_filter {
+        let lang_matches = filter_voices_by_language(matches.clone(), lang);
+        if lang_matches.len() == 1 {
+            return VoiceResolution::Found(lang_matches.into_iter().next().unwrap());
+        }
+        if !lang_matches.is_empty() {
+            // Still ambiguous even with language filter
+            return VoiceResolution::Ambiguous(lang_matches);
+        }
+    }
+
+    VoiceResolution::Ambiguous(matches)
+}
+
+/// Get the actual voice name to pass to the TTS engine.
+///
+/// For most providers, this is the voice name. For some (like echogarden),
+/// the identifier without the engine prefix is what the engine expects.
+fn get_engine_voice_name(voice: &Voice) -> String {
+    // If there's an identifier like "kokoro:Heart", extract "Heart"
+    // If there's an identifier like "vits:de_DE-thorsten-high", extract "de_DE-thorsten-high"
+    if let Some(ref identifier) = voice.identifier {
+        if let Some(colon_pos) = identifier.find(':') {
+            return identifier[colon_pos + 1..].to_string();
+        }
+        return identifier.clone();
+    }
+    voice.name.clone()
+}
+
+fn print_voices(provider: TtsProvider, voices: &[Voice], lang_filter: Option<&str>) {
+    // Apply language filter if specified
+    let voices: Vec<Voice> = if let Some(lang) = lang_filter {
+        filter_voices_by_language(voices.to_vec(), lang)
+    } else {
+        voices.to_vec()
+    };
+
     if voices.is_empty() {
-        println!(
-            "No voices found for {}.",
-            provider_display_name(&provider)
-        );
+        if let Some(lang) = lang_filter {
+            println!(
+                "No voices found for {} with language '{}'.",
+                provider_display_name(&provider),
+                lang
+            );
+        } else {
+            println!(
+                "No voices found for {}.",
+                provider_display_name(&provider)
+            );
+        }
         return;
     }
 
+    if let Some(lang) = lang_filter {
+        println!(
+            "Found {} voices for {} (language: {}):",
+            voices.len(),
+            provider_display_name(&provider),
+            lang
+        );
+    } else {
+        println!(
+            "Found {} voices for {}:",
+            voices.len(),
+            provider_display_name(&provider)
+        );
+    }
+    println!();
     println!(
-        "Found {} voices for {}:\n",
-        voices.len(),
-        provider_display_name(&provider)
+        "  {}",
+        "Use --voice <name> to select a voice (case-insensitive)."
+            .dimmed()
+            .italic()
     );
+    println!();
 
-    let mut voices = voices.to_vec();
+    let mut voices = voices;
     voices.sort_by(|a, b| {
         voice_quality_rank(a.quality)
             .cmp(&voice_quality_rank(b.quality))
-            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| {
+                extract_display_name(&a.name)
+                    .to_lowercase()
+                    .cmp(&extract_display_name(&b.name).to_lowercase())
+            })
     });
 
+    // Build markdown table
+    let mut lines = Vec::new();
+    lines.push("| Voice | Language | Quality | Gender |".to_string());
+    lines.push("| --- | --- | --- | --- |".to_string());
+
     for voice in voices {
-        let gender = voice_gender_label(voice.gender);
+        let display_name = escape_markdown_cell(&extract_display_name(&voice.name));
+        let language = escape_markdown_cell(&voice_language_label(&voice.languages));
         let quality = voice_quality_label(voice.quality);
-        let language = voice_language_label(&voice.languages);
-        println!("  - {} ({}/{}/{})", voice.name, gender, quality, language);
+        let gender = voice_gender_label(voice.gender);
+
+        lines.push(format!(
+            "| {} | {} | {} | {} |",
+            display_name, language, quality, gender
+        ));
+    }
+
+    let markdown = Markdown::from(lines.join("\n"));
+    match for_terminal(&markdown, TerminalOptions::default()) {
+        Ok(rendered) => print!("{}", rendered),
+        Err(_) => println!("{}", markdown.content()),
     }
 }
 
@@ -353,7 +572,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         match list_voices_for_provider(provider).await {
-            Ok(voices) => print_voices(provider, &voices),
+            Ok(voices) => print_voices(provider, &voices, cli.lang.as_deref()),
             Err(err) => {
                 eprintln!("Error: {}", err);
                 std::process::exit(1);
@@ -374,9 +593,63 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Build TTS config
     let mut config = TtsConfig::new();
 
+    // Resolve provider first (needed for voice resolution)
+    let provider = if let Some(provider_name) = &cli.provider {
+        match parse_provider_name(provider_name) {
+            Some(p) => Some(p),
+            None => {
+                eprintln!("Error: Unknown provider '{}'", provider_name);
+                eprintln!("Use --list-providers to see available providers");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     // Apply --voice if specified
+    // If a provider is specified, resolve the voice name to the actual engine voice
     if let Some(voice_name) = &cli.voice {
-        config = config.with_voice(voice_name.clone());
+        let resolved_voice = if let Some(prov) = provider {
+            // Try to resolve the voice name for this provider
+            if provider_supports_voice_listing(&prov) {
+                match list_voices_for_provider(prov).await {
+                    Ok(voices) => {
+                        match resolve_voice_name(&voices, voice_name, cli.lang.as_deref()) {
+                            VoiceResolution::Found(voice) => get_engine_voice_name(&voice),
+                            VoiceResolution::NotFound => {
+                                eprintln!("Error: Voice '{}' not found for {}", voice_name, provider_display_name(&prov));
+                                eprintln!("Use --list-voices --provider {} to see available voices", cli.provider.as_ref().unwrap());
+                                std::process::exit(1);
+                            }
+                            VoiceResolution::Ambiguous(matches) => {
+                                eprintln!("Error: Multiple voices match '{}':", voice_name);
+                                for v in &matches {
+                                    let lang = voice_language_label(&v.languages);
+                                    eprintln!("  - {} ({})", extract_display_name(&v.name), lang);
+                                }
+                                eprintln!("Use --lang to disambiguate (e.g., --lang {} --voice {})",
+                                    voice_language_label(&matches[0].languages),
+                                    voice_name
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Couldn't list voices, fall back to using the name directly
+                        voice_name.clone()
+                    }
+                }
+            } else {
+                // Provider doesn't support voice listing, use the name directly
+                voice_name.clone()
+            }
+        } else {
+            // No provider specified, use the name directly
+            voice_name.clone()
+        };
+        config = config.with_voice(resolved_voice);
     }
 
     // Apply --gender if specified
@@ -384,15 +657,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config = config.with_gender(gender.into());
     }
 
-    // Apply --provider if specified
-    if let Some(provider_name) = &cli.provider {
-        if let Some(provider) = parse_provider_name(provider_name) {
-            config = config.with_failover(TtsFailoverStrategy::SpecificProvider(provider));
+    // Apply --lang if specified
+    if let Some(lang_code) = &cli.lang {
+        let language = if lang_code.eq_ignore_ascii_case("en")
+            || lang_code.to_lowercase().starts_with("en-")
+        {
+            Language::English
         } else {
-            eprintln!("Error: Unknown provider '{}'", provider_name);
-            eprintln!("Use --list-providers to see available providers");
-            std::process::exit(1);
-        }
+            Language::Custom(lang_code.clone())
+        };
+        config = config.with_language(language);
+    }
+
+    // Apply --provider if specified
+    if let Some(prov) = provider {
+        config = config.with_failover(TtsFailoverStrategy::SpecificProvider(prov));
     }
 
     // Call the async TTS function
@@ -447,5 +726,352 @@ mod tests {
     fn test_join_args_special_chars() {
         let args = vec!["Hello,".to_string(), "world!".to_string()];
         assert_eq!(join_args(args), "Hello, world!");
+    }
+
+    // ========================================================================
+    // Engine voice name tests
+    // ========================================================================
+    //
+    // Tests for get_engine_voice_name() which extracts the actual voice name
+    // that the TTS engine expects from our voice representation.
+
+    #[test]
+    fn test_get_engine_voice_name_with_prefixed_identifier() {
+        // Echogarden uses prefixed identifiers like "kokoro:Heart"
+        let voice = Voice::new("Heart")
+            .with_identifier("kokoro:Heart")
+            .with_quality(VoiceQuality::Excellent);
+
+        // Should extract "Heart" from "kokoro:Heart"
+        assert_eq!(get_engine_voice_name(&voice), "Heart");
+    }
+
+    #[test]
+    fn test_get_engine_voice_name_vits() {
+        // VITS voices have identifiers like "vits:de_DE-thorsten-high"
+        let voice = Voice::new("de_DE-thorsten-high")
+            .with_identifier("vits:de_DE-thorsten-high")
+            .with_quality(VoiceQuality::Good);
+
+        // Should extract "de_DE-thorsten-high" from "vits:de_DE-thorsten-high"
+        assert_eq!(get_engine_voice_name(&voice), "de_DE-thorsten-high");
+    }
+
+    #[test]
+    fn test_get_engine_voice_name_no_identifier() {
+        // macOS say voices don't have identifiers
+        let voice = Voice::new("Samantha")
+            .with_gender(Gender::Female)
+            .with_quality(VoiceQuality::Good);
+
+        // Should return the name directly
+        assert_eq!(get_engine_voice_name(&voice), "Samantha");
+    }
+
+    #[test]
+    fn test_get_engine_voice_name_identifier_without_prefix() {
+        // Some providers might have identifiers without colons
+        let voice = Voice::new("Welsh")
+            .with_identifier("cy")
+            .with_quality(VoiceQuality::Good);
+
+        // Should return the identifier as-is
+        assert_eq!(get_engine_voice_name(&voice), "cy");
+    }
+
+    // ========================================================================
+    // Voice resolution tests
+    // ========================================================================
+    //
+    // Tests for resolve_voice_name() which maps user-provided display names
+    // to the actual voice objects (case-insensitive, with language disambiguation).
+
+    #[test]
+    fn test_resolve_voice_name_exact_match() {
+        let voices = vec![
+            Voice::new("Heart").with_language(Language::English),
+            Voice::new("Michael").with_language(Language::English),
+        ];
+
+        match resolve_voice_name(&voices, "Heart", None) {
+            VoiceResolution::Found(v) => assert_eq!(v.name, "Heart"),
+            _ => panic!("Expected Found"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_voice_name_case_insensitive() {
+        let voices = vec![
+            Voice::new("Heart").with_language(Language::English),
+            Voice::new("Michael").with_language(Language::English),
+        ];
+
+        // Lowercase should match
+        match resolve_voice_name(&voices, "heart", None) {
+            VoiceResolution::Found(v) => assert_eq!(v.name, "Heart"),
+            _ => panic!("Expected Found"),
+        }
+
+        // Uppercase should match
+        match resolve_voice_name(&voices, "HEART", None) {
+            VoiceResolution::Found(v) => assert_eq!(v.name, "Heart"),
+            _ => panic!("Expected Found"),
+        }
+
+        // Mixed case should match
+        match resolve_voice_name(&voices, "HeArT", None) {
+            VoiceResolution::Found(v) => assert_eq!(v.name, "Heart"),
+            _ => panic!("Expected Found"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_voice_name_vits_display_name() {
+        let voices = vec![
+            Voice::new("de_DE-thorsten-high").with_language(Language::Custom("de-DE".into())),
+            Voice::new("en_US-lessac-high").with_language(Language::English),
+        ];
+
+        // "Thorsten" (extracted display name) should match "de_DE-thorsten-high"
+        match resolve_voice_name(&voices, "Thorsten", None) {
+            VoiceResolution::Found(v) => assert_eq!(v.name, "de_DE-thorsten-high"),
+            _ => panic!("Expected Found"),
+        }
+
+        // Case insensitive
+        match resolve_voice_name(&voices, "thorsten", None) {
+            VoiceResolution::Found(v) => assert_eq!(v.name, "de_DE-thorsten-high"),
+            _ => panic!("Expected Found"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_voice_name_by_technical_name() {
+        // Users should also be able to use the original technical name
+        let voices = vec![
+            Voice::new("de_DE-thorsten-high").with_language(Language::Custom("de-DE".into())),
+            Voice::new("en_US-lessac-high").with_language(Language::English),
+        ];
+
+        // Technical name should match directly
+        match resolve_voice_name(&voices, "de_DE-thorsten-high", None) {
+            VoiceResolution::Found(v) => assert_eq!(v.name, "de_DE-thorsten-high"),
+            _ => panic!("Expected Found"),
+        }
+
+        // Case insensitive for technical names too
+        match resolve_voice_name(&voices, "DE_DE-THORSTEN-HIGH", None) {
+            VoiceResolution::Found(v) => assert_eq!(v.name, "de_DE-thorsten-high"),
+            _ => panic!("Expected Found"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_voice_name_not_found() {
+        let voices = vec![
+            Voice::new("Heart").with_language(Language::English),
+        ];
+
+        match resolve_voice_name(&voices, "NonExistent", None) {
+            VoiceResolution::NotFound => {}
+            _ => panic!("Expected NotFound"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_voice_name_ambiguous() {
+        // Alex exists in multiple languages
+        let voices = vec![
+            Voice::new("Alex").with_language(Language::Custom("es-ES".into())),
+            Voice::new("Alex").with_language(Language::Custom("pt-BR".into())),
+        ];
+
+        match resolve_voice_name(&voices, "Alex", None) {
+            VoiceResolution::Ambiguous(matches) => {
+                assert_eq!(matches.len(), 2);
+            }
+            _ => panic!("Expected Ambiguous"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_voice_name_disambiguate_with_language() {
+        // Alex exists in multiple languages
+        let voices = vec![
+            Voice::new("Alex").with_language(Language::Custom("es-ES".into())),
+            Voice::new("Alex").with_language(Language::Custom("pt-BR".into())),
+        ];
+
+        // With language filter, should resolve to one
+        match resolve_voice_name(&voices, "Alex", Some("es")) {
+            VoiceResolution::Found(v) => {
+                assert!(v.languages.iter().any(|l| matches!(l, Language::Custom(c) if c == "es-ES")));
+            }
+            _ => panic!("Expected Found with language filter"),
+        }
+
+        match resolve_voice_name(&voices, "Alex", Some("pt")) {
+            VoiceResolution::Found(v) => {
+                assert!(v.languages.iter().any(|l| matches!(l, Language::Custom(c) if c == "pt-BR")));
+            }
+            _ => panic!("Expected Found with language filter"),
+        }
+    }
+
+    // ========================================================================
+    // Display name extraction tests
+    // ========================================================================
+    //
+    // Tests for extracting clean voice names from VITS-style identifiers.
+    // VITS voices have pattern: {locale}-{name}-{quality} (e.g., de_DE-thorsten-high)
+    // We extract and title-case the name part.
+
+    #[test]
+    fn test_extract_display_name_vits_high_quality() {
+        // VITS voice: de_DE-thorsten-high -> Thorsten
+        assert_eq!(extract_display_name("de_DE-thorsten-high"), "Thorsten");
+    }
+
+    #[test]
+    fn test_extract_display_name_vits_medium_quality() {
+        // VITS voice: en_US-lessac-medium -> Lessac
+        assert_eq!(extract_display_name("en_US-lessac-medium"), "Lessac");
+    }
+
+    #[test]
+    fn test_extract_display_name_vits_low_quality() {
+        // VITS voice: ar_JO-kareem-low -> Kareem
+        assert_eq!(extract_display_name("ar_JO-kareem-low"), "Kareem");
+    }
+
+    #[test]
+    fn test_extract_display_name_vits_x_low_quality() {
+        // VITS voice: nl_BE-nathalie-x_low -> Nathalie
+        assert_eq!(extract_display_name("nl_BE-nathalie-x_low"), "Nathalie");
+    }
+
+    #[test]
+    fn test_extract_display_name_simple_kokoro_voice() {
+        // Kokoro voices are simple names like "Heart", "Michael"
+        assert_eq!(extract_display_name("Heart"), "Heart");
+        assert_eq!(extract_display_name("Michael"), "Michael");
+    }
+
+    #[test]
+    fn test_extract_display_name_simple_say_voice() {
+        // macOS say voices are simple names
+        assert_eq!(extract_display_name("Samantha"), "Samantha");
+        assert_eq!(extract_display_name("Alex"), "Alex");
+    }
+
+    #[test]
+    fn test_title_case_lowercase() {
+        assert_eq!(title_case("thorsten"), "Thorsten");
+        assert_eq!(title_case("lessac"), "Lessac");
+    }
+
+    #[test]
+    fn test_title_case_uppercase() {
+        assert_eq!(title_case("THORSTEN"), "Thorsten");
+    }
+
+    #[test]
+    fn test_title_case_mixed() {
+        assert_eq!(title_case("tHoRsTeN"), "Thorsten");
+    }
+
+    #[test]
+    fn test_title_case_empty() {
+        assert_eq!(title_case(""), "");
+    }
+
+    #[test]
+    fn test_title_case_single_char() {
+        assert_eq!(title_case("a"), "A");
+        assert_eq!(title_case("A"), "A");
+    }
+
+    // ========================================================================
+    // Language filtering tests
+    // ========================================================================
+
+    #[test]
+    fn test_voice_matches_language_english_exact() {
+        let voice = Voice::new("English")
+            .with_language(Language::English);
+
+        assert!(voice_matches_language(&voice, "en"));
+        assert!(voice_matches_language(&voice, "EN")); // case insensitive
+    }
+
+    #[test]
+    fn test_voice_matches_language_english_variant_filter() {
+        // A voice with Language::English should match "en-us" filter
+        let voice = Voice::new("English")
+            .with_language(Language::English);
+
+        assert!(voice_matches_language(&voice, "en-us"));
+        assert!(voice_matches_language(&voice, "en-gb"));
+    }
+
+    #[test]
+    fn test_voice_matches_language_custom_exact() {
+        let voice = Voice::new("French")
+            .with_language(Language::Custom("fr".into()));
+
+        assert!(voice_matches_language(&voice, "fr"));
+        assert!(voice_matches_language(&voice, "FR")); // case insensitive
+    }
+
+    #[test]
+    fn test_voice_matches_language_custom_prefix() {
+        // "fr-CA" voice should match "fr" filter
+        let voice = Voice::new("French (Canada)")
+            .with_language(Language::Custom("fr-CA".into()));
+
+        assert!(voice_matches_language(&voice, "fr"));
+    }
+
+    #[test]
+    fn test_voice_matches_language_no_match() {
+        let voice = Voice::new("German")
+            .with_language(Language::Custom("de".into()));
+
+        assert!(!voice_matches_language(&voice, "fr"));
+        assert!(!voice_matches_language(&voice, "en"));
+    }
+
+    #[test]
+    fn test_filter_voices_by_language() {
+        let voices = vec![
+            Voice::new("English").with_language(Language::English),
+            Voice::new("French").with_language(Language::Custom("fr".into())),
+            Voice::new("French (Canada)").with_language(Language::Custom("fr-CA".into())),
+            Voice::new("German").with_language(Language::Custom("de".into())),
+        ];
+
+        let french_voices = filter_voices_by_language(voices.clone(), "fr");
+        assert_eq!(french_voices.len(), 2);
+        assert!(french_voices.iter().any(|v| v.name == "French"));
+        assert!(french_voices.iter().any(|v| v.name == "French (Canada)"));
+
+        let english_voices = filter_voices_by_language(voices.clone(), "en");
+        assert_eq!(english_voices.len(), 1);
+        assert!(english_voices.iter().any(|v| v.name == "English"));
+
+        let german_voices = filter_voices_by_language(voices, "de");
+        assert_eq!(german_voices.len(), 1);
+        assert!(german_voices.iter().any(|v| v.name == "German"));
+    }
+
+    #[test]
+    fn test_filter_voices_by_language_empty_result() {
+        let voices = vec![
+            Voice::new("English").with_language(Language::English),
+            Voice::new("French").with_language(Language::Custom("fr".into())),
+        ];
+
+        let spanish_voices = filter_voices_by_language(voices, "es");
+        assert!(spanish_voices.is_empty());
     }
 }
