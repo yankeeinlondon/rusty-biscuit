@@ -70,6 +70,10 @@ pub struct Player {
     pub is_open_source: bool,
     /// CPU/memory usage classification.
     pub resource_usage: ResourceUsage,
+    /// Supports playback speed/tempo control via CLI.
+    pub supports_speed_control: bool,
+    /// Supports volume control via CLI.
+    pub supports_volume_control: bool,
 }
 
 impl Player {
@@ -101,6 +105,36 @@ impl Player {
     /// Check if the player supports the given file format.
     pub fn supports_format(&self, format: AudioFileFormat) -> bool {
         self.supported_formats.contains(&format)
+    }
+
+    /// Check if the player supports playback speed control.
+    pub fn supports_speed(&self) -> bool {
+        self.supports_speed_control
+    }
+
+    /// Check if the player supports volume control.
+    pub fn supports_volume(&self) -> bool {
+        self.supports_volume_control
+    }
+
+    /// Calculate capability score for ranking.
+    ///
+    /// Higher scores indicate more capable players. Scoring:
+    /// - +4 for speed control (most valuable for TTS use cases)
+    /// - +3 for volume control (commonly needed)
+    /// - +2 for stream input (enables piping without disk I/O)
+    pub fn capability_score(&self) -> u8 {
+        let mut score: u8 = 0;
+        if self.supports_speed_control {
+            score += 4;
+        }
+        if self.supports_volume_control {
+            score += 3;
+        }
+        if self.takes_stream_input {
+            score += 2;
+        }
+        score
     }
 }
 
@@ -176,6 +210,7 @@ static PIPEWIRE_FORMATS: &[AudioFileFormat] = &[AudioFileFormat::Wav, AudioFileF
 pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new(|| {
     let mut map = HashMap::with_capacity(11);
 
+    // Tier 1: Full controllability (speed + volume + stream)
     map.insert(
         AudioPlayer::Mpv,
         Player {
@@ -187,6 +222,8 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
             supplies_stream_output: false,
             is_open_source: true,
             resource_usage: ResourceUsage::Medium,
+            supports_speed_control: true,  // --speed=N
+            supports_volume_control: true, // --volume=N
         },
     );
 
@@ -201,9 +238,12 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
             supplies_stream_output: false,
             is_open_source: true,
             resource_usage: ResourceUsage::Medium,
+            supports_speed_control: true,  // -af atempo=N
+            supports_volume_control: true, // -volume N
         },
     );
 
+    // Tier 2: Volume + stream (no speed control)
     map.insert(
         AudioPlayer::Vlc,
         Player {
@@ -215,6 +255,8 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
             supplies_stream_output: true,
             is_open_source: true,
             resource_usage: ResourceUsage::Medium,
+            supports_speed_control: false,
+            supports_volume_control: true, // --gain=N
         },
     );
 
@@ -229,6 +271,8 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
             supplies_stream_output: false,
             is_open_source: true,
             resource_usage: ResourceUsage::Medium,
+            supports_speed_control: false,
+            supports_volume_control: true, // -softvol -volume N
         },
     );
 
@@ -243,6 +287,8 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
             supplies_stream_output: true,
             is_open_source: true,
             resource_usage: ResourceUsage::Medium,
+            supports_speed_control: false,
+            supports_volume_control: true, // --volume=N
         },
     );
 
@@ -257,9 +303,12 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
             supplies_stream_output: false,
             is_open_source: true,
             resource_usage: ResourceUsage::Low,
+            supports_speed_control: true, // speed effect
+            supports_volume_control: true, // -v N
         },
     );
 
+    // Tier 3: Stream only (no volume/speed control)
     map.insert(
         AudioPlayer::Mpg123,
         Player {
@@ -271,6 +320,8 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
             supplies_stream_output: false,
             is_open_source: true,
             resource_usage: ResourceUsage::Low,
+            supports_speed_control: false,
+            supports_volume_control: false,
         },
     );
 
@@ -281,13 +332,16 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
             sniff_program: HeadlessAudio::Ogg123,
             supported_codecs: OGG123_CODECS,
             supported_formats: OGG123_FORMATS,
-            takes_stream_input: true,
+            takes_stream_input: false, // ogg123 does NOT support stdin
             supplies_stream_output: false,
             is_open_source: true,
             resource_usage: ResourceUsage::Low,
+            supports_speed_control: false,
+            supports_volume_control: false,
         },
     );
 
+    // Tier 4: No controllability
     map.insert(
         AudioPlayer::AlsaAplay,
         Player {
@@ -299,9 +353,12 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
             supplies_stream_output: false,
             is_open_source: true,
             resource_usage: ResourceUsage::Low,
+            supports_speed_control: false,
+            supports_volume_control: false,
         },
     );
 
+    // Tier 3: Volume only (Linux audio subsystems)
     map.insert(
         AudioPlayer::PulseaudioPaplay,
         Player {
@@ -313,6 +370,8 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
             supplies_stream_output: false,
             is_open_source: true,
             resource_usage: ResourceUsage::Low,
+            supports_speed_control: false,
+            supports_volume_control: true, // --volume=N
         },
     );
 
@@ -327,6 +386,8 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
             supplies_stream_output: false,
             is_open_source: true,
             resource_usage: ResourceUsage::Low,
+            supports_speed_control: false,
+            supports_volume_control: true, // --volume=N
         },
     );
 
@@ -375,14 +436,20 @@ fn compare_players(left: AudioPlayer, right: AudioPlayer) -> std::cmp::Ordering 
         .then_with(|| player_index(left).cmp(&player_index(right)))
 }
 
+/// Score a player based on capabilities.
+///
+/// Higher scores = more capable players (prioritize controllability).
+/// Returns (capability_score, format_count, codec_count) for comparison.
 fn player_score(player: AudioPlayer) -> (u8, usize, usize) {
     let Some(metadata) = PLAYER_LOOKUP.get(&player) else {
         return (0, 0, 0);
     };
-    let stream = if metadata.takes_stream_input { 1 } else { 0 };
+
+    let capability_score = metadata.capability_score();
     let format_count = metadata.supported_formats.len();
     let codec_count = metadata.supported_codecs.len();
-    (stream, format_count, codec_count)
+
+    (capability_score, format_count, codec_count)
 }
 
 fn player_index(player: AudioPlayer) -> usize {
@@ -409,14 +476,16 @@ mod tests {
         assert!(players.contains(&AudioPlayer::Sox));
         assert!(players.contains(&AudioPlayer::Mpg123));
 
-        let expected_prefix = [
-            AudioPlayer::Mpv,
-            AudioPlayer::FfPlay,
-            AudioPlayer::Vlc,
-            AudioPlayer::MPlayer,
-            AudioPlayer::GstreamerGstPlay,
-        ];
-        assert_eq!(&players[..expected_prefix.len()], &expected_prefix[..]);
+        // Tier 1 players (speed+volume+stream) should be first
+        let tier1_players = [AudioPlayer::Mpv, AudioPlayer::FfPlay, AudioPlayer::Sox];
+        for tier1 in &tier1_players {
+            assert!(
+                players.iter().position(|p| p == tier1).unwrap()
+                    < players.iter().position(|p| *p == AudioPlayer::Mpg123).unwrap(),
+                "Tier 1 player {:?} should rank before mpg123",
+                tier1
+            );
+        }
     }
 
     #[test]
@@ -426,5 +495,88 @@ mod tests {
         assert!(players.contains(&AudioPlayer::AlsaAplay));
         assert!(players.contains(&AudioPlayer::PulseaudioPaplay));
         assert!(players.contains(&AudioPlayer::Pipewire));
+    }
+
+    #[test]
+    fn player_score_prioritizes_controllability() {
+        // Tier 1 players should score highest (9 = speed+volume+stream)
+        let mpv_score = player_score(AudioPlayer::Mpv);
+        let ffplay_score = player_score(AudioPlayer::FfPlay);
+        let sox_score = player_score(AudioPlayer::Sox);
+
+        assert_eq!(mpv_score.0, 9, "mpv should have capability score 9");
+        assert_eq!(ffplay_score.0, 9, "ffplay should have capability score 9");
+        assert_eq!(sox_score.0, 9, "sox should have capability score 9");
+
+        // Tier 2 players have volume + stream = 5
+        let vlc_score = player_score(AudioPlayer::Vlc);
+        let mplayer_score = player_score(AudioPlayer::MPlayer);
+        let gstreamer_score = player_score(AudioPlayer::GstreamerGstPlay);
+
+        assert_eq!(vlc_score.0, 5, "vlc should have capability score 5");
+        assert_eq!(mplayer_score.0, 5, "mplayer should have capability score 5");
+        assert_eq!(gstreamer_score.0, 5, "gstreamer should have capability score 5");
+
+        // Tier 3 players with volume only = 3
+        let paplay_score = player_score(AudioPlayer::PulseaudioPaplay);
+        let pipewire_score = player_score(AudioPlayer::Pipewire);
+
+        assert_eq!(paplay_score.0, 3, "paplay should have capability score 3");
+        assert_eq!(pipewire_score.0, 3, "pipewire should have capability score 3");
+
+        // Tier 3 players with stream only = 2
+        let mpg123_score = player_score(AudioPlayer::Mpg123);
+
+        assert_eq!(mpg123_score.0, 2, "mpg123 should have capability score 2");
+
+        // ogg123 has no stream input (despite plan initially saying it does)
+        let ogg123_score = player_score(AudioPlayer::Ogg123);
+        assert_eq!(ogg123_score.0, 0, "ogg123 should have capability score 0");
+
+        // Tier 4: aplay has nothing = 0
+        let aplay_score = player_score(AudioPlayer::AlsaAplay);
+        assert_eq!(aplay_score.0, 0, "aplay should have capability score 0");
+    }
+
+    #[test]
+    fn match_players_prefers_controllable_players() {
+        let format = AudioFormat::new(AudioFileFormat::Wav, Some(Codec::Pcm));
+        let players = match_players(format);
+
+        // Players with speed+volume should come before those without
+        let mpv_pos = players.iter().position(|p| *p == AudioPlayer::Mpv);
+        let aplay_pos = players.iter().position(|p| *p == AudioPlayer::AlsaAplay);
+
+        assert!(
+            mpv_pos.unwrap() < aplay_pos.unwrap(),
+            "mpv should rank before aplay"
+        );
+
+        // Tier 1 (mpv, ffplay, sox) should all beat Tier 4 (aplay)
+        let ffplay_pos = players.iter().position(|p| *p == AudioPlayer::FfPlay);
+        let sox_pos = players.iter().position(|p| *p == AudioPlayer::Sox);
+
+        assert!(
+            ffplay_pos.unwrap() < aplay_pos.unwrap(),
+            "ffplay should rank before aplay"
+        );
+        assert!(
+            sox_pos.unwrap() < aplay_pos.unwrap(),
+            "sox should rank before aplay"
+        );
+    }
+
+    #[test]
+    fn capability_score_method_matches_scoring() {
+        for player in all_players() {
+            let metadata = PLAYER_LOOKUP.get(player).unwrap();
+            let method_score = metadata.capability_score();
+            let fn_score = player_score(*player).0;
+            assert_eq!(
+                method_score, fn_score,
+                "capability_score() should match player_score() for {:?}",
+                player
+            );
+        }
     }
 }

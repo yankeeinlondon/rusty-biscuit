@@ -8,8 +8,8 @@ use crate::detection::{
     detect_audio_format_from_bytes, detect_audio_format_from_path, detect_audio_format_from_url,
 };
 use crate::error::{DetectionError, InvalidAudio, PlaybackError};
-use crate::playback::playa_explicit;
-use crate::types::AudioFormat;
+use crate::playback::playa_explicit_with_options;
+use crate::types::{AudioFormat, PlaybackOptions};
 
 /// Audio source data.
 #[derive(Debug, Clone)]
@@ -84,7 +84,17 @@ impl Audio {
 
     /// Play the audio using the best available player.
     pub fn play(&self) -> Result<(), PlaybackError> {
-        playa_explicit(self.format, self.data.clone())?;
+        self.play_with_options(PlaybackOptions::default())
+    }
+
+    /// Play the audio with custom volume/speed options.
+    ///
+    /// The player will be selected based on format compatibility AND the
+    /// required capabilities (speed/volume control). If options require
+    /// capabilities that no installed player supports, returns
+    /// [`PlaybackError::NoPlayerWithCapabilities`].
+    pub fn play_with_options(&self, options: PlaybackOptions) -> Result<(), PlaybackError> {
+        playa_explicit_with_options(self.format, self.data.clone(), options)?;
         self.mark_playing()?;
         Ok(())
     }
@@ -135,6 +145,11 @@ impl Audio {
             AudioData::Url(_) => AudioSourceKind::Url,
             AudioData::Bytes(_) => AudioSourceKind::Bytes,
         }
+    }
+
+    /// Consume the `Audio` and return the underlying `AudioData`.
+    pub fn into_data(self) -> AudioData {
+        self.data
     }
 
     /// Record playback start time and clear pause state.

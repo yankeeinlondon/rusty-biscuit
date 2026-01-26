@@ -46,6 +46,16 @@ pub enum PlaybackError {
         /// The requested format.
         format: AudioFormat,
     },
+    /// No installed player supports the required capabilities.
+    #[error("no player for {format:?} with required capabilities (speed: {needs_speed}, volume: {needs_volume})")]
+    NoPlayerWithCapabilities {
+        /// The requested audio format.
+        format: AudioFormat,
+        /// Whether speed control was required.
+        needs_speed: bool,
+        /// Whether volume control was required.
+        needs_volume: bool,
+    },
     /// Player metadata could not be found in the lookup table.
     #[error("player metadata missing for {player:?}")]
     MissingPlayerMetadata {

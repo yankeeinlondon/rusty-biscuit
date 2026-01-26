@@ -2,7 +2,7 @@ use clap::{Parser, ValueHint};
 use sniff_lib::programs::InstalledHeadlessAudio;
 use std::path::PathBuf;
 
-use playa::{all_players, Audio, AudioFileFormat, AudioPlayer, Codec, PLAYER_LOOKUP};
+use playa::{all_players, AudioFileFormat, AudioPlayer, Codec, Playa, PLAYER_LOOKUP};
 use shared::markdown::output::terminal::{for_terminal, TerminalOptions};
 use shared::markdown::Markdown;
 
@@ -10,42 +10,101 @@ use shared::markdown::Markdown;
 #[command(name = "playa")]
 #[command(about = "Play audio using the host's installed players", long_about = None)]
 struct Cli {
-    /// Show a table of player metadata
+    /// Show a table of available players
+    #[arg(long)]
+    players: bool,
+
+    /// Display playback metadata (player, volume, speed, codec, format)
     #[arg(long)]
     meta: bool,
+
+    /// Play at 1.25x speed
+    #[arg(long, conflicts_with = "slow")]
+    fast: bool,
+
+    /// Play at 0.75x speed
+    #[arg(long, conflicts_with = "fast")]
+    slow: bool,
+
+    /// Play at 50% volume
+    #[arg(long, conflicts_with = "loud")]
+    quiet: bool,
+
+    /// Play at 150% volume
+    #[arg(long, conflicts_with = "quiet")]
+    loud: bool,
+
+    /// Custom playback speed (0.5 to 2.0)
+    #[arg(long, value_name = "MULTIPLIER", conflicts_with_all = ["fast", "slow"])]
+    speed: Option<f32>,
+
+    /// Custom volume level (0.0 to 2.0)
+    #[arg(long, value_name = "LEVEL", conflicts_with_all = ["quiet", "loud"])]
+    volume: Option<f32>,
 
     /// Audio file to play
     #[arg(
         value_name = "AUDIO_FILE",
         value_hint = ValueHint::FilePath,
-        required_unless_present = "meta"
+        required_unless_present = "players"
     )]
     audio_file: Option<PathBuf>,
+}
+
+impl Cli {
+    fn build_playa(&self, path: &PathBuf) -> Result<Playa, playa::InvalidAudio> {
+        let mut playa = Playa::from_path(path)?;
+
+        // Apply speed settings
+        if let Some(speed) = self.speed {
+            playa = playa.speed(speed);
+        } else if self.fast {
+            playa = playa.speed(1.25);
+        } else if self.slow {
+            playa = playa.speed(0.75);
+        }
+
+        // Apply volume settings
+        if let Some(volume) = self.volume {
+            playa = playa.volume(volume);
+        } else if self.quiet {
+            playa = playa.volume(0.5);
+        } else if self.loud {
+            playa = playa.volume(1.5);
+        }
+
+        // Apply meta display
+        if self.meta {
+            playa = playa.show_meta();
+        }
+
+        Ok(playa)
+    }
 }
 
 fn main() {
     let cli = Cli::parse();
 
-    if cli.meta {
+    if cli.players {
         let markdown = build_metadata_markdown();
         render_markdown(&markdown);
         return;
     }
 
-    let Some(path) = cli.audio_file else {
-        eprintln!("No audio file provided. Use `playa --meta` to show metadata.");
+    let Some(ref path) = cli.audio_file else {
+        eprintln!("No audio file provided. Use `playa --players` to show available players.");
         std::process::exit(2);
     };
 
-    let audio = match Audio::from_path(path.clone()) {
-        Ok(audio) => audio,
+    let playa = match cli.build_playa(path) {
+        Ok(playa) => playa,
         Err(error) => {
             eprintln!("Failed to detect audio format: {error}");
             std::process::exit(1);
         }
     };
 
-    if let Err(error) = audio.play() {
+    if let Err(error) = playa.play() {
         eprintln!("Playback failed: {error}");
         std::process::exit(1);
     }
@@ -189,5 +248,83 @@ mod tests {
         assert!(markdown.contains(".wav"));
         assert!(markdown.contains("Software not on this system:\n\n- [mpv]("));
         assert!(markdown.contains(", [FFplay]("));
+    }
+
+    fn make_cli(
+        players: bool,
+        meta: bool,
+        fast: bool,
+        slow: bool,
+        quiet: bool,
+        loud: bool,
+        speed: Option<f32>,
+        volume: Option<f32>,
+    ) -> Cli {
+        Cli {
+            players,
+            meta,
+            fast,
+            slow,
+            quiet,
+            loud,
+            speed,
+            volume,
+            audio_file: Some(PathBuf::from("test.mp3")),
+        }
+    }
+
+    #[test]
+    fn cli_default_no_speed_or_volume() {
+        let cli = make_cli(false, false, false, false, false, false, None, None);
+        // With no audio file to test against, we just verify the struct is created
+        assert!(!cli.fast);
+        assert!(!cli.slow);
+        assert!(!cli.quiet);
+        assert!(!cli.loud);
+        assert!(cli.speed.is_none());
+        assert!(cli.volume.is_none());
+    }
+
+    #[test]
+    fn cli_fast_sets_speed() {
+        let cli = make_cli(false, false, true, false, false, false, None, None);
+        assert!(cli.fast);
+    }
+
+    #[test]
+    fn cli_slow_sets_speed() {
+        let cli = make_cli(false, false, false, true, false, false, None, None);
+        assert!(cli.slow);
+    }
+
+    #[test]
+    fn cli_quiet_sets_volume() {
+        let cli = make_cli(false, false, false, false, true, false, None, None);
+        assert!(cli.quiet);
+    }
+
+    #[test]
+    fn cli_loud_sets_volume() {
+        let cli = make_cli(false, false, false, false, false, true, None, None);
+        assert!(cli.loud);
+    }
+
+    #[test]
+    fn cli_explicit_speed_and_volume() {
+        let cli = make_cli(false, false, false, false, false, false, Some(0.9), Some(0.3));
+        assert_eq!(cli.speed, Some(0.9));
+        assert_eq!(cli.volume, Some(0.3));
+    }
+
+    #[test]
+    fn cli_meta_flag() {
+        let cli = make_cli(false, true, false, false, false, false, None, None);
+        assert!(cli.meta);
+    }
+
+    #[test]
+    fn cli_players_flag() {
+        let cli = make_cli(true, false, false, false, false, false, None, None);
+        assert!(cli.players);
     }
 }

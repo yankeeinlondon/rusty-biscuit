@@ -1431,6 +1431,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "effect"
+version = "0.1.0"
+dependencies = [
+ "clap 4.5.54",
+]
+
+[[package]]
 name = "ego-tree"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
