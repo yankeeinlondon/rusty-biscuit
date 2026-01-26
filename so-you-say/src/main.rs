@@ -2,10 +2,10 @@ use std::fmt;
 use std::io::{self, Read};
 
 use biscuit_speaks::{
-    get_available_providers, parse_provider_name, speak, CloudTtsProvider, EchogardenProvider,
-    ESpeakProvider, ElevenLabsProvider, Gender, GttsProvider, HostTtsProvider, KokoroTtsProvider,
-    Language, SayProvider, SapiProvider, TtsConfig, TtsError, TtsFailoverStrategy, TtsProvider,
-    TtsVoiceInventory, Voice, VoiceQuality,
+    get_available_providers, parse_provider_name, speak, speak_with_result, CloudTtsProvider,
+    EchogardenProvider, ESpeakProvider, ElevenLabsProvider, Gender, GttsProvider, HostTtsProvider,
+    KokoroTtsProvider, Language, SayProvider, SapiProvider, SpeakResult, TtsConfig, TtsError,
+    TtsFailoverStrategy, TtsProvider, TtsVoiceInventory, Voice, VoiceQuality,
 };
 use clap::{Parser, ValueEnum};
 use inquire::Select;
@@ -98,6 +98,10 @@ struct Cli {
     #[arg(short, long)]
     lang: Option<String>,
 
+    /// Display metadata about the voice used after speaking
+    #[arg(long)]
+    meta: bool,
+
     /// Text to speak (reads from stdin if not provided)
     text: Vec<String>,
 }
@@ -146,6 +150,30 @@ fn provider_display_name(provider: &TtsProvider) -> &'static str {
         },
         _ => "unknown provider",
     }
+}
+
+fn print_speak_result(result: &SpeakResult) {
+    println!();
+    println!(
+        "  {}: {}",
+        "Provider".dimmed(),
+        provider_display_name(&result.provider)
+    );
+    println!(
+        "  {}: {}",
+        "Voice".dimmed(),
+        result.voice.name
+    );
+    println!(
+        "  {}: {}",
+        "Gender".dimmed(),
+        voice_gender_label(result.voice.gender)
+    );
+    println!(
+        "  {}: {}",
+        "Quality".dimmed(),
+        voice_quality_label(result.voice.quality)
+    );
 }
 
 fn provider_supports_voice_listing(provider: &TtsProvider) -> bool {
@@ -281,39 +309,132 @@ fn voice_quality_label(quality: VoiceQuality) -> &'static str {
     }
 }
 
+/// Quality tier extracted from voice name suffixes.
+///
+/// Higher tier = better quality. Used for deduplication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum QualityTier {
+    /// No quality suffix or unknown
+    Base = 0,
+    /// Compact/low quality variant
+    Compact = 1,
+    /// Enhanced quality variant
+    Enhanced = 2,
+    /// Premium quality variant (highest)
+    Premium = 3,
+}
+
+/// Extract quality tier from a voice name suffix.
+///
+/// macOS voices use suffixes like "(Premium)", "(Enhanced)", "(Compact)".
+fn extract_quality_tier(name: &str) -> QualityTier {
+    let name_lower = name.to_lowercase();
+    if name_lower.contains("(premium)") {
+        QualityTier::Premium
+    } else if name_lower.contains("(enhanced)") {
+        QualityTier::Enhanced
+    } else if name_lower.contains("(compact)") {
+        QualityTier::Compact
+    } else {
+        QualityTier::Base
+    }
+}
+
+/// Map quality tier to VoiceQuality.
+fn quality_tier_to_voice_quality(tier: QualityTier) -> VoiceQuality {
+    match tier {
+        QualityTier::Premium => VoiceQuality::Excellent,
+        QualityTier::Enhanced => VoiceQuality::Good,
+        QualityTier::Compact => VoiceQuality::Low,
+        QualityTier::Base => VoiceQuality::Moderate,
+    }
+}
+
 /// Extract a clean display name from a voice name.
 ///
-/// For VITS-style names like `de_DE-thorsten-high`, extracts `Thorsten`.
-/// For simple names like `Heart` or `Michael`, returns as-is.
+/// Handles multiple patterns:
+/// - VITS-style: `de_DE-thorsten-high` → `Thorsten`
+/// - macOS quality: `Ava (Premium)` → `Ava`
+/// - macOS language: `Eddy (English (UK))` → `Eddy`
+/// - Simple names: `Heart` → `Heart`
 fn extract_display_name(name: &str) -> String {
+    // First, strip macOS quality suffixes like "(Premium)", "(Enhanced)", "(Compact)"
+    let name_without_quality_suffix = name
+        .trim_end_matches(" (Premium)")
+        .trim_end_matches(" (Enhanced)")
+        .trim_end_matches(" (Compact)")
+        .trim_end_matches(" (premium)")
+        .trim_end_matches(" (enhanced)")
+        .trim_end_matches(" (compact)");
+
+    // Strip language/region suffixes like "(English (UK))", "(Chinese (China mainland))"
+    // These are parenthetical suffixes that aren't quality indicators
+    let name_without_lang_suffix = strip_parenthetical_suffix(name_without_quality_suffix);
+
     // Check for VITS-style pattern: locale-name-quality (e.g., de_DE-thorsten-high)
     // The pattern is: {locale}_{REGION}-{name}-{quality}
     // We want to extract the name part and title-case it
 
-    // First, strip common quality suffixes
-    let name_without_quality = name
+    // Strip common VITS quality suffixes
+    let name_without_vits_quality = name_without_lang_suffix
         .strip_suffix("-high")
-        .or_else(|| name.strip_suffix("-medium"))
-        .or_else(|| name.strip_suffix("-low"))
-        .or_else(|| name.strip_suffix("-x_low"))
-        .unwrap_or(name);
+        .or_else(|| name_without_lang_suffix.strip_suffix("-medium"))
+        .or_else(|| name_without_lang_suffix.strip_suffix("-low"))
+        .or_else(|| name_without_lang_suffix.strip_suffix("-x_low"))
+        .unwrap_or(&name_without_lang_suffix);
 
     // Check if it matches the locale pattern (e.g., de_DE-thorsten, en_US-lessac)
-    if let Some(dash_pos) = name_without_quality.find('-') {
-        let potential_locale = &name_without_quality[..dash_pos];
+    if let Some(dash_pos) = name_without_vits_quality.find('-') {
+        let potential_locale = &name_without_vits_quality[..dash_pos];
         // Check if it looks like a locale (e.g., de_DE, en_US, ar_JO)
         if potential_locale.len() >= 2
             && potential_locale.contains('_')
             && potential_locale.chars().all(|c| c.is_ascii_alphabetic() || c == '_')
         {
             // Extract the name part after the locale
-            let name_part = &name_without_quality[dash_pos + 1..];
+            let name_part = &name_without_vits_quality[dash_pos + 1..];
             // Title-case the name
             return title_case(name_part);
         }
     }
 
-    // For simple names, just return as-is (they're already properly cased)
+    // For simple names (possibly with suffix stripped), return as-is
+    name_without_vits_quality.to_string()
+}
+
+/// Strip a trailing parenthetical suffix from a name.
+///
+/// Handles patterns like:
+/// - "Eddy (English (UK))" → "Eddy"
+/// - "Eddy (Chinese (China mainland))" → "Eddy"
+/// - "Aman (English (India))" → "Aman"
+///
+/// Correctly handles nested parentheses by finding the outermost balanced group.
+fn strip_parenthetical_suffix(name: &str) -> String {
+    // Must end with ')' to have a parenthetical suffix
+    if !name.ends_with(')') {
+        return name.to_string();
+    }
+
+    // Find all " (" positions and check which one gives a balanced suffix
+    let mut pos = 0;
+    while let Some(relative_pos) = name[pos..].find(" (") {
+        let space_paren_pos = pos + relative_pos;
+        let suffix = &name[space_paren_pos + 1..]; // Include the space
+
+        // Count parens in the suffix
+        let open_count = suffix.chars().filter(|&c| c == '(').count();
+        let close_count = suffix.chars().filter(|&c| c == ')').count();
+
+        if open_count == close_count && open_count > 0 {
+            // Found a balanced suffix, strip it
+            return name[..space_paren_pos].to_string();
+        }
+
+        // Move past this position and continue searching
+        pos = space_paren_pos + 2;
+    }
+
     name.to_string()
 }
 
@@ -364,6 +485,39 @@ fn filter_voices_by_language(voices: Vec<Voice>, lang_code: &str) -> Vec<Voice> 
         .collect()
 }
 
+/// Deduplicate voices by display name + language, keeping only the highest quality.
+///
+/// When multiple voices exist for the same name/language (e.g., "Ava (Enhanced)" and
+/// "Ava (Premium)"), this keeps only the highest quality version.
+fn deduplicate_voices(voices: Vec<Voice>) -> Vec<Voice> {
+    use std::collections::HashMap;
+
+    // Group by (display_name_lowercase, language_label)
+    let mut best_voices: HashMap<(String, String), (Voice, QualityTier)> = HashMap::new();
+
+    for voice in voices {
+        let display_name = extract_display_name(&voice.name).to_lowercase();
+        let language = voice_language_label(&voice.languages);
+        let key = (display_name, language);
+
+        // Determine quality tier from the name suffix
+        let tier = extract_quality_tier(&voice.name);
+
+        // Keep the voice with the highest quality tier
+        match best_voices.get(&key) {
+            Some((_, existing_tier)) if tier <= *existing_tier => {
+                // Existing voice is same or better quality, keep it
+            }
+            _ => {
+                // New voice is better or no existing voice
+                best_voices.insert(key, (voice, tier));
+            }
+        }
+    }
+
+    best_voices.into_values().map(|(voice, _)| voice).collect()
+}
+
 /// Escape pipe characters in markdown table cells.
 fn escape_markdown_cell(value: &str) -> String {
     value.replace('|', "\\|")
@@ -386,7 +540,10 @@ enum VoiceResolution {
 /// 1. The display name (e.g., "Heart", "Thorsten")
 /// 2. The original voice name (e.g., "de_DE-thorsten-high")
 ///
-/// If multiple voices match, uses the language filter to disambiguate.
+/// If multiple voices match with the same display name and language (e.g., "Ava (Premium)"
+/// and "Ava (Enhanced)"), returns the highest quality version.
+///
+/// If multiple voices match with different languages, uses the language filter to disambiguate.
 fn resolve_voice_name(
     voices: &[Voice],
     user_voice: &str,
@@ -408,11 +565,15 @@ fn resolve_voice_name(
         return VoiceResolution::NotFound;
     }
 
+    // Deduplicate by display name + language, keeping highest quality
+    // This handles cases like "Ava (Premium)" and "Ava (Enhanced)" -> keep Premium
+    let matches = deduplicate_voices(matches);
+
     if matches.len() == 1 {
         return VoiceResolution::Found(matches.into_iter().next().unwrap());
     }
 
-    // Multiple matches - try to filter by language
+    // Multiple matches with different languages - try to filter by language
     if let Some(lang) = lang_filter {
         let lang_matches = filter_voices_by_language(matches.clone(), lang);
         if lang_matches.len() == 1 {
@@ -443,6 +604,21 @@ fn get_engine_voice_name(voice: &Voice) -> String {
     voice.name.clone()
 }
 
+/// Get the effective quality for a voice, preferring inferred quality from name suffix.
+///
+/// If the voice name has a quality suffix like "(Premium)" or "(Enhanced)", use that.
+/// Otherwise, fall back to the provider-reported quality.
+fn effective_voice_quality(voice: &Voice) -> VoiceQuality {
+    let tier = extract_quality_tier(&voice.name);
+    if tier != QualityTier::Base {
+        // Name has a quality suffix, use inferred quality
+        quality_tier_to_voice_quality(tier)
+    } else {
+        // No suffix, use provider-reported quality
+        voice.quality
+    }
+}
+
 fn print_voices(provider: TtsProvider, voices: &[Voice], lang_filter: Option<&str>) {
     // Apply language filter if specified
     let voices: Vec<Voice> = if let Some(lang) = lang_filter {
@@ -450,6 +626,9 @@ fn print_voices(provider: TtsProvider, voices: &[Voice], lang_filter: Option<&st
     } else {
         voices.to_vec()
     };
+
+    // Deduplicate voices by display name + language, keeping highest quality
+    let voices = deduplicate_voices(voices);
 
     if voices.is_empty() {
         if let Some(lang) = lang_filter {
@@ -492,8 +671,8 @@ fn print_voices(provider: TtsProvider, voices: &[Voice], lang_filter: Option<&st
 
     let mut voices = voices;
     voices.sort_by(|a, b| {
-        voice_quality_rank(a.quality)
-            .cmp(&voice_quality_rank(b.quality))
+        voice_quality_rank(effective_voice_quality(a))
+            .cmp(&voice_quality_rank(effective_voice_quality(b)))
             .then_with(|| {
                 extract_display_name(&a.name)
                     .to_lowercase()
@@ -509,7 +688,7 @@ fn print_voices(provider: TtsProvider, voices: &[Voice], lang_filter: Option<&st
     for voice in voices {
         let display_name = escape_markdown_cell(&extract_display_name(&voice.name));
         let language = escape_markdown_cell(&voice_language_label(&voice.languages));
-        let quality = voice_quality_label(voice.quality);
+        let quality = voice_quality_label(effective_voice_quality(&voice));
         let gender = voice_gender_label(voice.gender);
 
         lines.push(format!(
@@ -675,9 +854,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Call the async TTS function
-    if let Err(e) = speak(&message, &config).await {
-        eprintln!("Error: {:?}", e);
-        std::process::exit(1);
+    if cli.meta {
+        // Use speak_with_result to get metadata
+        match speak_with_result(&message, &config).await {
+            Ok(result) => {
+                print_speak_result(&result);
+            }
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        // Standard speak without metadata
+        if let Err(e) = speak(&message, &config).await {
+            eprintln!("Error: {:?}", e);
+            std::process::exit(1);
+        }
     }
 
     Ok(())
@@ -1073,5 +1266,194 @@ mod tests {
 
         let spanish_voices = filter_voices_by_language(voices, "es");
         assert!(spanish_voices.is_empty());
+    }
+
+    // ========================================================================
+    // macOS voice quality suffix tests
+    // ========================================================================
+    //
+    // Tests for handling macOS voice names like "Ava (Premium)", "Ava (Enhanced)".
+
+    #[test]
+    fn test_extract_display_name_macos_premium() {
+        assert_eq!(extract_display_name("Ava (Premium)"), "Ava");
+        assert_eq!(extract_display_name("Samantha (Premium)"), "Samantha");
+    }
+
+    #[test]
+    fn test_extract_display_name_macos_enhanced() {
+        assert_eq!(extract_display_name("Ava (Enhanced)"), "Ava");
+        assert_eq!(extract_display_name("Samantha (Enhanced)"), "Samantha");
+    }
+
+    #[test]
+    fn test_extract_display_name_macos_compact() {
+        assert_eq!(extract_display_name("Ava (Compact)"), "Ava");
+    }
+
+    #[test]
+    fn test_extract_display_name_macos_language_suffix() {
+        // Voices with language/region suffixes should have just the name
+        assert_eq!(extract_display_name("Eddy (English (UK))"), "Eddy");
+        assert_eq!(extract_display_name("Eddy (English (US))"), "Eddy");
+        assert_eq!(extract_display_name("Eddy (Chinese (China mainland))"), "Eddy");
+        assert_eq!(extract_display_name("Eddy (French (Canada))"), "Eddy");
+        assert_eq!(extract_display_name("Eddy (German (Germany))"), "Eddy");
+    }
+
+    #[test]
+    fn test_extract_display_name_macos_language_suffix_simple() {
+        // Some voices have simpler language suffixes
+        assert_eq!(extract_display_name("Aman (English (India))"), "Aman");
+        assert_eq!(extract_display_name("Amélie (French (Canada))"), "Amélie");
+    }
+
+    #[test]
+    fn test_strip_parenthetical_suffix_nested() {
+        assert_eq!(strip_parenthetical_suffix("Eddy (Chinese (China mainland))"), "Eddy");
+        assert_eq!(strip_parenthetical_suffix("Eddy (English (UK))"), "Eddy");
+    }
+
+    #[test]
+    fn test_strip_parenthetical_suffix_simple() {
+        assert_eq!(strip_parenthetical_suffix("Voice (Something)"), "Voice");
+    }
+
+    #[test]
+    fn test_strip_parenthetical_suffix_no_suffix() {
+        assert_eq!(strip_parenthetical_suffix("Voice"), "Voice");
+        assert_eq!(strip_parenthetical_suffix("Heart"), "Heart");
+    }
+
+    #[test]
+    fn test_strip_parenthetical_suffix_preserves_middle_parens() {
+        // If parens are in the middle (not a suffix), don't strip
+        assert_eq!(strip_parenthetical_suffix("Foo (bar) baz"), "Foo (bar) baz");
+    }
+
+    #[test]
+    fn test_extract_quality_tier_premium() {
+        assert_eq!(extract_quality_tier("Ava (Premium)"), QualityTier::Premium);
+        assert_eq!(extract_quality_tier("Samantha (Premium)"), QualityTier::Premium);
+    }
+
+    #[test]
+    fn test_extract_quality_tier_enhanced() {
+        assert_eq!(extract_quality_tier("Ava (Enhanced)"), QualityTier::Enhanced);
+    }
+
+    #[test]
+    fn test_extract_quality_tier_compact() {
+        assert_eq!(extract_quality_tier("Ava (Compact)"), QualityTier::Compact);
+    }
+
+    #[test]
+    fn test_extract_quality_tier_no_suffix() {
+        assert_eq!(extract_quality_tier("Ava"), QualityTier::Base);
+        assert_eq!(extract_quality_tier("Heart"), QualityTier::Base);
+    }
+
+    #[test]
+    fn test_quality_tier_ordering() {
+        // Premium > Enhanced > Compact > Base
+        assert!(QualityTier::Premium > QualityTier::Enhanced);
+        assert!(QualityTier::Enhanced > QualityTier::Compact);
+        assert!(QualityTier::Compact > QualityTier::Base);
+    }
+
+    // ========================================================================
+    // Voice deduplication tests
+    // ========================================================================
+
+    #[test]
+    fn test_deduplicate_voices_keeps_premium() {
+        // When Ava exists as both Premium and Enhanced, keep Premium
+        let voices = vec![
+            Voice::new("Ava (Enhanced)").with_language(Language::English),
+            Voice::new("Ava (Premium)").with_language(Language::English),
+        ];
+
+        let deduped = deduplicate_voices(voices);
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].name, "Ava (Premium)");
+    }
+
+    #[test]
+    fn test_deduplicate_voices_keeps_enhanced_over_compact() {
+        let voices = vec![
+            Voice::new("Ava (Compact)").with_language(Language::English),
+            Voice::new("Ava (Enhanced)").with_language(Language::English),
+        ];
+
+        let deduped = deduplicate_voices(voices);
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].name, "Ava (Enhanced)");
+    }
+
+    #[test]
+    fn test_deduplicate_voices_different_languages_kept() {
+        // Ava in English and Ava in Spanish should both be kept
+        let voices = vec![
+            Voice::new("Ava (Premium)").with_language(Language::English),
+            Voice::new("Ava (Premium)").with_language(Language::Custom("es".into())),
+        ];
+
+        let deduped = deduplicate_voices(voices);
+        assert_eq!(deduped.len(), 2);
+    }
+
+    #[test]
+    fn test_deduplicate_voices_mixed() {
+        // Mix of duplicates and unique voices
+        let voices = vec![
+            Voice::new("Ava (Enhanced)").with_language(Language::English),
+            Voice::new("Ava (Premium)").with_language(Language::English),
+            Voice::new("Samantha (Enhanced)").with_language(Language::English),
+            Voice::new("Heart").with_language(Language::English),
+        ];
+
+        let deduped = deduplicate_voices(voices);
+        assert_eq!(deduped.len(), 3);
+
+        // Check that Ava Premium was kept
+        assert!(deduped.iter().any(|v| v.name == "Ava (Premium)"));
+        assert!(!deduped.iter().any(|v| v.name == "Ava (Enhanced)"));
+
+        // Other voices should still be there
+        assert!(deduped.iter().any(|v| v.name == "Samantha (Enhanced)"));
+        assert!(deduped.iter().any(|v| v.name == "Heart"));
+    }
+
+    #[test]
+    fn test_resolve_voice_deduplicates_quality_variants() {
+        // When resolving "ava", should return the Premium version
+        let voices = vec![
+            Voice::new("Ava (Enhanced)").with_language(Language::English),
+            Voice::new("Ava (Premium)").with_language(Language::English),
+        ];
+
+        match resolve_voice_name(&voices, "ava", None) {
+            VoiceResolution::Found(v) => assert_eq!(v.name, "Ava (Premium)"),
+            _ => panic!("Expected Found"),
+        }
+    }
+
+    #[test]
+    fn test_effective_voice_quality_from_suffix() {
+        let premium = Voice::new("Ava (Premium)").with_quality(VoiceQuality::Good);
+        let enhanced = Voice::new("Ava (Enhanced)").with_quality(VoiceQuality::Good);
+        let compact = Voice::new("Ava (Compact)").with_quality(VoiceQuality::Good);
+
+        // Quality should be inferred from suffix, not provider-reported
+        assert_eq!(effective_voice_quality(&premium), VoiceQuality::Excellent);
+        assert_eq!(effective_voice_quality(&enhanced), VoiceQuality::Good);
+        assert_eq!(effective_voice_quality(&compact), VoiceQuality::Low);
+    }
+
+    #[test]
+    fn test_effective_voice_quality_falls_back_to_provider() {
+        // Voice without suffix should use provider-reported quality
+        let voice = Voice::new("Heart").with_quality(VoiceQuality::Excellent);
+        assert_eq!(effective_voice_quality(&voice), VoiceQuality::Excellent);
     }
 }
