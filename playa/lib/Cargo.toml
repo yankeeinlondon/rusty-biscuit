@@ -1,0 +1,14 @@
+[package]
+name = "playa"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+infer = "0.19"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+sniff-lib = { path = "../../sniff/lib" }
+thiserror = "2.0"
+url = "2.5"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }

@@ -592,6 +592,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fbdf580320f38b612e485521afda1ee26d10cc9884efaaa750d383e13e3c5f4"
 
 [[package]]
+name = "byteorder"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
+
+[[package]]
 name = "byteorder-lite"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -637,6 +643,17 @@ dependencies = [
  "jobserver",
  "libc",
  "shlex",
+]
+
+[[package]]
+name = "cfb"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d38f2da7a0a2c4ccf0065be06397cc26a81f4e528be095826eee9d4adbb8c60f"
+dependencies = [
+ "byteorder",
+ "fnv",
+ "uuid",
 ]
 
 [[package]]
@@ -2393,6 +2410,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "infer"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a588916bfdfd92e71cacef98a63d9b1f0d74d6599980d11894290e7ddefffcf7"
+dependencies = [
+ "cfb",
+]
+
+[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3649,6 +3675,21 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 name = "playa"
 version = "0.1.0"
 dependencies = [
+ "infer",
+ "reqwest",
+ "sniff-lib",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "playa-cli"
+version = "0.1.0"
+dependencies = [
+ "clap 4.5.54",
+ "playa",
+ "shared",
  "sniff-lib",
 ]
 
@@ -5234,6 +5275,7 @@ dependencies = [
  "predicates",
  "serde",
  "serde_json",
+ "shared",
  "sniff-lib",
  "strum 0.27.2",
  "tokio",
@@ -5274,6 +5316,7 @@ version = "0.1.0"
 dependencies = [
  "biscuit-speaks",
  "clap 4.5.54",
+ "inquire",
  "tokio",
 ]
 

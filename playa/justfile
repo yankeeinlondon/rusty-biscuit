@@ -1,0 +1,20 @@
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+build:
+    cargo build -p playa -p playa-cli
+
+test:
+    cargo test -p playa
+
+lint:
+    cargo clippy -p playa -p playa-cli
+
+lint-fix:
+    cargo clippy --fix -p playa -p playa-cli
+
+
+install:
+    cargo install --path ./cli
+
+check:
+    cargo check -p playa -p playa-cli
