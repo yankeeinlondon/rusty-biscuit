@@ -2,7 +2,8 @@ use std::fmt;
 use std::io::{self, Read};
 
 use biscuit_speaks::{
-    get_available_providers, parse_provider_name, speak, speak_with_result, CloudTtsProvider,
+    bust_host_capability_cache, get_available_providers, parse_provider_name,
+    populate_cache_for_all_providers, read_from_cache, speak, speak_with_result, CloudTtsProvider,
     EchogardenProvider, ESpeakProvider, ElevenLabsProvider, Gender, GttsProvider, HostTtsProvider,
     KokoroTtsProvider, Language, SayProvider, SapiProvider, SpeakResult, TtsConfig, TtsError,
     TtsFailoverStrategy, TtsProvider, TtsVoiceInventory, Voice, VoiceQuality,
@@ -60,6 +61,9 @@ impl From<GenderArg> for Gender {
 /// // Select a provider interactively to list voices
 /// // so-you-say --list-voices
 ///
+/// // Refresh the voice cache (useful after installing new voices)
+/// // so-you-say --refresh-cache
+///
 /// // Use a specific TTS provider
 /// // so-you-say --provider say Hello world
 ///
@@ -91,16 +95,24 @@ struct Cli {
     #[arg(short, long, value_enum)]
     gender: Option<GenderArg>,
 
-    /// Language code for voice selection (e.g., "en", "fr", "de")
-    ///
-    /// When used with --list-voices, filters to only show voices for this language.
-    /// When speaking, sets the preferred language for voice selection.
-    #[arg(short, long)]
+    #[arg(
+        short,
+        long,
+        help = "Language code for voice selection (e.g., \"en\", \"fr\", \"de\")",
+        long_help = "Language code for voice selection (e.g., \"en\", \"fr\", \"de\"). When used with --list-voices, filters to only show voices for this language. When speaking, sets the preferred language for voice selection."
+    )]
     lang: Option<String>,
 
     /// Display metadata about the voice used after speaking
     #[arg(long)]
     meta: bool,
+
+    #[arg(
+        long,
+        help = "Refresh the TTS provider and voice cache",
+        long_help = "Refresh the TTS provider and voice cache. Clears the cached voice data (~/.biscuit-speaks-cache.json) and repopulates it with fresh data from all available providers. Use this after installing new voices or if voice listings appear stale."
+    )]
+    refresh_cache: bool,
 
     /// Text to speak (reads from stdin if not provided)
     text: Vec<String>,
@@ -164,6 +176,14 @@ fn print_speak_result(result: &SpeakResult) {
         "Voice".dimmed(),
         result.voice.name
     );
+    // Show Voice ID if available (useful for ElevenLabs)
+    if let Some(ref id) = result.voice.identifier {
+        println!(
+            "  {}: {}",
+            "Voice ID".dimmed(),
+            id
+        );
+    }
     println!(
         "  {}: {}",
         "Gender".dimmed(),
@@ -174,6 +194,14 @@ fn print_speak_result(result: &SpeakResult) {
         "Quality".dimmed(),
         voice_quality_label(result.voice.quality)
     );
+    // Show Model Used if available (useful for ElevenLabs)
+    if let Some(ref model) = result.model_used {
+        println!(
+            "  {}: {}",
+            "Model".dimmed(),
+            model
+        );
+    }
 }
 
 fn provider_supports_voice_listing(provider: &TtsProvider) -> bool {
@@ -243,7 +271,22 @@ fn prompt_for_provider(providers: &[TtsProvider]) -> Result<TtsProvider, inquire
     Ok(selection.provider)
 }
 
+/// List voices for a provider, using the cache if available.
+///
+/// This function first checks the cache for voice data. If found, it returns
+/// the cached voices. Otherwise, it falls back to querying the provider directly.
+/// Use `--refresh-cache` to update the cache with fresh data from providers.
 async fn list_voices_for_provider(provider: TtsProvider) -> Result<Vec<Voice>, TtsError> {
+    // Try to read from cache first
+    if let Ok(cache) = read_from_cache() {
+        if let Some(capability) = cache.get_provider(&provider) {
+            if !capability.voices.is_empty() {
+                return Ok(capability.voices.clone());
+            }
+        }
+    }
+
+    // Cache miss - query the provider directly
     match provider {
         TtsProvider::Host(HostTtsProvider::Say) => {
             let provider = SayProvider;
@@ -448,14 +491,19 @@ fn title_case(s: &str) -> String {
 }
 
 fn voice_language_label(languages: &[Language]) -> String {
+    if languages.is_empty() {
+        return "-".to_string();
+    }
+
     languages
-        .first()
+        .iter()
         .map(|language| match language {
             Language::English => "en".to_string(),
             Language::Custom(code) => code.clone(),
             _ => "?".to_string(),
         })
-        .unwrap_or_else(|| "-".to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Check if a voice matches a given language code.
@@ -661,13 +709,6 @@ fn print_voices(provider: TtsProvider, voices: &[Voice], lang_filter: Option<&st
         );
     }
     println!();
-    println!(
-        "  {}",
-        "Use --voice <name> to select a voice (case-insensitive)."
-            .dimmed()
-            .italic()
-    );
-    println!();
 
     let mut voices = voices;
     voices.sort_by(|a, b| {
@@ -682,18 +723,23 @@ fn print_voices(provider: TtsProvider, voices: &[Voice], lang_filter: Option<&st
 
     // Build markdown table
     let mut lines = Vec::new();
-    lines.push("| Voice | Language | Quality | Gender |".to_string());
-    lines.push("| --- | --- | --- | --- |".to_string());
+    lines.push("| Voice | Description | Language | Quality | Gender |".to_string());
+    lines.push("| --- | --- | --- | --- | --- |".to_string());
 
     for voice in voices {
         let display_name = escape_markdown_cell(&extract_display_name(&voice.name));
+        let description = voice
+            .description
+            .as_deref()
+            .map(escape_markdown_cell)
+            .unwrap_or_default();
         let language = escape_markdown_cell(&voice_language_label(&voice.languages));
         let quality = voice_quality_label(effective_voice_quality(&voice));
         let gender = voice_gender_label(voice.gender);
 
         lines.push(format!(
-            "| {} | {} | {} | {} |",
-            display_name, language, quality, gender
+            "| {} | {} | {} | {} | {} |",
+            display_name, description, language, quality, gender
         ));
     }
 
@@ -702,11 +748,39 @@ fn print_voices(provider: TtsProvider, voices: &[Voice], lang_filter: Option<&st
         Ok(rendered) => print!("{}", rendered),
         Err(_) => println!("{}", markdown.content()),
     }
+
+    println!(
+        "{}",
+        "- Use --voice <name> to select a voice (case-insensitive)."
+            .dimmed()
+            .italic()
+    );
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+
+    // Handle --refresh-cache flag (does not exit early - continues with other operations)
+    if cli.refresh_cache {
+        println!("Clearing TTS provider cache...");
+        if let Err(e) = bust_host_capability_cache() {
+            eprintln!("Warning: Failed to clear cache: {}", e);
+        }
+
+        println!("Repopulating cache from all available providers...");
+        match populate_cache_for_all_providers().await {
+            Ok(()) => {
+                println!("{}", "Cache refreshed successfully.".green());
+                println!();
+            }
+            Err(e) => {
+                eprintln!("Error refreshing cache: {}", e);
+                std::process::exit(1);
+            }
+        }
+        // Continue with other operations (--list-voices, speaking, etc.)
+    }
 
     // Handle --list-providers flag
     if cli.list_providers {
@@ -789,13 +863,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Apply --voice if specified
     // If a provider is specified, resolve the voice name to the actual engine voice
     if let Some(voice_name) = &cli.voice {
-        let resolved_voice = if let Some(prov) = provider {
+        let (resolved_voice, recommended_model) = if let Some(prov) = provider {
             // Try to resolve the voice name for this provider
             if provider_supports_voice_listing(&prov) {
                 match list_voices_for_provider(prov).await {
                     Ok(voices) => {
                         match resolve_voice_name(&voices, voice_name, cli.lang.as_deref()) {
-                            VoiceResolution::Found(voice) => get_engine_voice_name(&voice),
+                            VoiceResolution::Found(voice) => {
+                                let engine_name = get_engine_voice_name(&voice);
+                                let model = voice.recommended_model().map(|s| s.to_string());
+                                if std::env::var("DEBUG").is_ok() {
+                                    eprintln!("[DEBUG] Resolved '{}' -> identifier={:?}, engine_name='{}', model={:?}",
+                                        voice_name, voice.identifier, engine_name, model);
+                                }
+                                (engine_name, model)
+                            }
                             VoiceResolution::NotFound => {
                                 eprintln!("Error: Voice '{}' not found for {}", voice_name, provider_display_name(&prov));
                                 eprintln!("Use --list-voices --provider {} to see available voices", cli.provider.as_ref().unwrap());
@@ -817,18 +899,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Err(_) => {
                         // Couldn't list voices, fall back to using the name directly
-                        voice_name.clone()
+                        (voice_name.clone(), None)
                     }
                 }
             } else {
                 // Provider doesn't support voice listing, use the name directly
-                voice_name.clone()
+                (voice_name.clone(), None)
             }
         } else {
             // No provider specified, use the name directly
-            voice_name.clone()
+            (voice_name.clone(), None)
         };
         config = config.with_voice(resolved_voice);
+        if let Some(model) = recommended_model {
+            config = config.with_model(model);
+        }
     }
 
     // Apply --gender if specified
