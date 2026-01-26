@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5.53", features = ["derive", "wrap_help"] }
-biscuit-speaks = { path = "../biscuit-speaks" }
+biscuit-speaks = { path = "../biscuit-speaks", features = ["playa"] }
 inquire = "0.9"
 owo-colors = { version = "4.2", features = ["supports-colors"] }
 shared = { path = "../biscuit" }

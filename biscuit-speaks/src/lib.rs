@@ -39,6 +39,8 @@ pub mod detection;
 pub mod errors;
 pub mod gender_inference;
 pub mod playback;
+#[cfg(feature = "playa")]
+mod playa_bridge;
 pub mod providers;
 pub mod speak;
 pub mod traits;
@@ -64,3 +66,7 @@ pub use types::{
     HostTtsProvider, Language, SpeakResult, SpeedLevel, TtsConfig, TtsFailoverStrategy,
     TtsProvider, Voice, VoiceQuality, VolumeLevel,
 };
+
+// Playa-based playback functions (feature-gated)
+#[cfg(feature = "playa")]
+pub use crate::playback::{play_audio_bytes_playa, play_audio_file_playa};

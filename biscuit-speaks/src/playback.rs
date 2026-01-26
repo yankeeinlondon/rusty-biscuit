@@ -1,7 +1,22 @@
 //! Audio playback utilities for TTS output.
 //!
-//! This module provides cross-platform audio playback functionality using
-//! system audio players (afplay on macOS, paplay/aplay on Linux, PowerShell on Windows).
+//! This module provides cross-platform audio playback functionality.
+//!
+//! ## Migration to Playa
+//!
+//! The original playback functions (`play_audio_bytes`, `play_audio_file`, etc.) use
+//! a simple player detection system based on the `which` crate. These are now deprecated
+//! in favor of the playa-based functions which provide:
+//!
+//! - More comprehensive player support across platforms
+//! - Volume and speed control where the player supports it
+//! - Better player capability detection
+//!
+//! To migrate, enable the `playa` feature and use:
+//! - `play_audio_bytes_playa` instead of `play_audio_bytes`
+//! - `play_audio_file_playa` instead of `play_audio_file` / `play_audio_file_with_format`
+//!
+//! The deprecated functions remain available for backwards compatibility.
 
 use std::path::Path;
 
@@ -61,6 +76,12 @@ const MP3_PLAYERS: &[&str] = &["mpv", "ffplay", "play"];
 /// the first one found. The check is synchronous since it only involves
 /// path lookups.
 ///
+/// ## Deprecated
+///
+/// This function is deprecated. Enable the `playa` feature and use
+/// `play_audio_bytes_playa` or `play_audio_file_playa` instead, which
+/// handle player detection internally with better cross-platform support.
+///
 /// ## Returns
 ///
 /// Returns `Some(&str)` with the player name if found, `None` otherwise.
@@ -74,6 +95,8 @@ const MP3_PLAYERS: &[&str] = &["mpv", "ffplay", "play"];
 ///     println!("Using audio player: {}", player);
 /// }
 /// ```
+#[deprecated(since = "0.2.0", note = "Use play_audio_bytes_playa or play_audio_file_playa with the playa feature instead")]
+#[allow(deprecated)]
 pub fn get_audio_player() -> Option<&'static str> {
     get_audio_player_for_format(AudioFormat::Wav)
 }
@@ -83,6 +106,12 @@ pub fn get_audio_player() -> Option<&'static str> {
 /// This is important on Linux where `paplay` and `aplay` only support
 /// WAV/PCM formats. Trying to play MP3 through them produces static noise.
 ///
+/// ## Deprecated
+///
+/// This function is deprecated. Enable the `playa` feature and use
+/// `play_audio_bytes_playa` or `play_audio_file_playa` instead, which
+/// handle player detection internally with better format support.
+///
 /// ## Arguments
 ///
 /// * `format` - The audio format to find a player for.
@@ -90,6 +119,7 @@ pub fn get_audio_player() -> Option<&'static str> {
 /// ## Returns
 ///
 /// Returns `Some(&str)` with the player name if found, `None` otherwise.
+#[deprecated(since = "0.2.0", note = "Use play_audio_bytes_playa or play_audio_file_playa with the playa feature instead")]
 pub fn get_audio_player_for_format(format: AudioFormat) -> Option<&'static str> {
     let players = match format {
         AudioFormat::Mp3 => MP3_PLAYERS,
@@ -114,6 +144,12 @@ pub fn get_audio_player_for_format(format: AudioFormat) -> Option<&'static str> 
 ///
 /// The temporary file is automatically cleaned up when the function returns.
 ///
+/// ## Deprecated
+///
+/// This function is deprecated. Enable the `playa` feature and use
+/// [`play_audio_bytes_playa`] instead, which provides volume/speed control
+/// and better cross-platform player support.
+///
 /// ## Arguments
 ///
 /// * `data` - The raw audio bytes to play.
@@ -135,6 +171,8 @@ pub fn get_audio_player_for_format(format: AudioFormat) -> Option<&'static str> 
 /// let wav_data: Vec<u8> = /* ... */;
 /// play_audio_bytes(&wav_data, AudioFormat::Wav).await?;
 /// ```
+#[deprecated(since = "0.2.0", note = "Use play_audio_bytes_playa with the playa feature instead")]
+#[allow(deprecated)]
 pub async fn play_audio_bytes(data: &[u8], format: AudioFormat) -> Result<(), TtsError> {
     let extension = format.extension();
 
@@ -155,6 +193,12 @@ pub async fn play_audio_bytes(data: &[u8], format: AudioFormat) -> Result<(), Tt
 ///
 /// Assumes WAV format. For other formats, use `play_audio_file_with_format`.
 ///
+/// ## Deprecated
+///
+/// This function is deprecated. Enable the `playa` feature and use
+/// [`play_audio_file_playa`] instead, which provides volume/speed control
+/// and better cross-platform player support.
+///
 /// ## Arguments
 ///
 /// * `path` - Path to the audio file to play.
@@ -174,6 +218,8 @@ pub async fn play_audio_bytes(data: &[u8], format: AudioFormat) -> Result<(), Tt
 ///
 /// play_audio_file(Path::new("/tmp/audio.wav")).await?;
 /// ```
+#[deprecated(since = "0.2.0", note = "Use play_audio_file_playa with the playa feature instead")]
+#[allow(deprecated)]
 pub async fn play_audio_file(path: &Path) -> Result<(), TtsError> {
     play_audio_file_with_format(path, AudioFormat::Wav).await
 }
@@ -182,6 +228,12 @@ pub async fn play_audio_file(path: &Path) -> Result<(), TtsError> {
 ///
 /// This is important on Linux where `paplay` and `aplay` only support
 /// WAV/PCM formats. Trying to play MP3 through them produces static noise.
+///
+/// ## Deprecated
+///
+/// This function is deprecated. Enable the `playa` feature and use
+/// [`play_audio_file_playa`] instead, which provides volume/speed control
+/// and better cross-platform player support.
 ///
 /// ## Arguments
 ///
@@ -194,6 +246,8 @@ pub async fn play_audio_file(path: &Path) -> Result<(), TtsError> {
 /// - No audio player is available for this format
 /// - The player process fails to start
 /// - The player exits with an error
+#[deprecated(since = "0.2.0", note = "Use play_audio_file_playa with the playa feature instead")]
+#[allow(deprecated)]
 pub async fn play_audio_file_with_format(path: &Path, format: AudioFormat) -> Result<(), TtsError> {
     let player = get_audio_player_for_format(format).ok_or(TtsError::NoAudioPlayer)?;
 
@@ -268,6 +322,120 @@ fn build_player_args(player: &str, path: &Path) -> Vec<String> {
 }
 
 // ============================================================================
+// Playa-Based Playback Functions (feature-gated)
+// ============================================================================
+
+/// Play audio bytes using playa with config-based volume and speed.
+///
+/// This function uses playa's multi-provider audio playback system which
+/// automatically selects the best available player and supports volume
+/// and speed control where the underlying player allows.
+///
+/// ## Arguments
+///
+/// * `data` - The raw audio bytes to play.
+/// * `format` - The audio format of the data.
+/// * `config` - TTS configuration containing volume and speed settings.
+///
+/// ## Errors
+///
+/// Returns `TtsError` if:
+/// - No compatible audio player is available
+/// - The player process fails to spawn
+/// - Temp file creation fails (for byte data)
+///
+/// ## Examples
+///
+/// ```ignore
+/// use biscuit_speaks::playback::play_audio_bytes_playa;
+/// use biscuit_speaks::{AudioFormat, TtsConfig, VolumeLevel, SpeedLevel};
+///
+/// let wav_data: Vec<u8> = /* ... */;
+/// let config = TtsConfig::new()
+///     .with_volume(VolumeLevel::Soft)
+///     .with_speed(SpeedLevel::Fast);
+/// play_audio_bytes_playa(&wav_data, AudioFormat::Wav, &config).await?;
+/// ```
+#[cfg(feature = "playa")]
+pub async fn play_audio_bytes_playa(
+    data: &[u8],
+    format: AudioFormat,
+    config: &crate::types::TtsConfig,
+) -> Result<(), TtsError> {
+    use crate::playa_bridge::{to_playa_audio_data, to_playa_format, to_playa_options};
+
+    let playa_format = to_playa_format(format);
+    let options = to_playa_options(config.volume, config.speed);
+    let audio_data = to_playa_audio_data(data.to_vec());
+
+    tracing::debug!(
+        format = ?format,
+        volume = ?config.volume,
+        speed = ?config.speed,
+        data_len = data.len(),
+        "Playing audio bytes via playa"
+    );
+
+    playa::playa_explicit_with_options_async(playa_format, audio_data, options)
+        .await
+        .map_err(TtsError::from)
+}
+
+/// Play an audio file using playa with config-based volume and speed.
+///
+/// This function uses playa's multi-provider audio playback system which
+/// automatically selects the best available player and supports volume
+/// and speed control where the underlying player allows.
+///
+/// ## Arguments
+///
+/// * `path` - Path to the audio file to play.
+/// * `format` - The audio format of the file.
+/// * `config` - TTS configuration containing volume and speed settings.
+///
+/// ## Errors
+///
+/// Returns `TtsError` if:
+/// - No compatible audio player is available
+/// - The player process fails to spawn
+/// - The file path is invalid
+///
+/// ## Examples
+///
+/// ```ignore
+/// use biscuit_speaks::playback::play_audio_file_playa;
+/// use biscuit_speaks::{AudioFormat, TtsConfig, VolumeLevel};
+/// use std::path::Path;
+///
+/// let config = TtsConfig::new().with_volume(VolumeLevel::Loud);
+/// play_audio_file_playa(Path::new("/tmp/audio.mp3"), AudioFormat::Mp3, &config).await?;
+/// ```
+#[cfg(feature = "playa")]
+pub async fn play_audio_file_playa(
+    path: &std::path::Path,
+    format: AudioFormat,
+    config: &crate::types::TtsConfig,
+) -> Result<(), TtsError> {
+    use crate::playa_bridge::{to_playa_format, to_playa_options};
+
+    let playa_format = to_playa_format(format);
+    let options = to_playa_options(config.volume, config.speed);
+    let audio_data = playa::AudioData::FilePath(path.to_path_buf());
+
+    tracing::debug!(
+        path = %path.display(),
+        format = ?format,
+        volume = ?config.volume,
+        speed = ?config.speed,
+        "Playing audio file via playa"
+    );
+
+    playa::playa_explicit_with_options_async(playa_format, audio_data, options)
+        .await
+        .map_err(TtsError::from)
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -314,11 +482,13 @@ mod tests {
 
     // This test checks if get_audio_player works (may or may not find a player)
     #[test]
+    #[allow(deprecated)]
     fn test_get_audio_player_does_not_panic() {
         let _ = get_audio_player();
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_get_audio_player_for_format_does_not_panic() {
         let _ = get_audio_player_for_format(AudioFormat::Wav);
         let _ = get_audio_player_for_format(AudioFormat::Mp3);
@@ -363,5 +533,95 @@ mod tests {
             WAV_PLAYERS.contains(&"paplay") || WAV_PLAYERS.contains(&"aplay"),
             "WAV_PLAYERS should include paplay or aplay on Linux"
         );
+    }
+
+    // ========================================================================
+    // Playa-based playback tests (feature-gated)
+    // ========================================================================
+
+    #[cfg(feature = "playa")]
+    mod playa_tests {
+        use super::*;
+        use crate::types::{SpeedLevel, TtsConfig, VolumeLevel};
+
+        /// Test that play_audio_bytes_playa has correct async signature.
+        ///
+        /// This is a compile-time test - if it compiles, the signature is correct.
+        #[allow(dead_code)]
+        fn assert_play_audio_bytes_playa_signature() {
+            fn _check<F: std::future::Future<Output = Result<(), TtsError>>>(_f: F) {}
+
+            let config = TtsConfig::new();
+            let data: &[u8] = &[];
+            _check(play_audio_bytes_playa(data, AudioFormat::Wav, &config));
+        }
+
+        /// Test that play_audio_file_playa has correct async signature.
+        ///
+        /// This is a compile-time test - if it compiles, the signature is correct.
+        #[allow(dead_code)]
+        fn assert_play_audio_file_playa_signature() {
+            fn _check<F: std::future::Future<Output = Result<(), TtsError>>>(_f: F) {}
+
+            let config = TtsConfig::new();
+            let path = std::path::Path::new("/tmp/test.wav");
+            _check(play_audio_file_playa(path, AudioFormat::Wav, &config));
+        }
+
+        /// Test that TtsConfig volume/speed are passed through correctly.
+        #[test]
+        fn test_config_options_used_in_conversion() {
+            use crate::playa_bridge::to_playa_options;
+
+            let config = TtsConfig::new()
+                .with_volume(VolumeLevel::Soft)
+                .with_speed(SpeedLevel::Fast);
+
+            let options = to_playa_options(config.volume, config.speed);
+
+            // VolumeLevel::Soft = 0.5, SpeedLevel::Fast = 1.25
+            assert_eq!(options.volume, Some(0.5));
+            assert_eq!(options.speed, Some(1.25));
+        }
+
+        /// Test that explicit volume/speed values are passed through.
+        #[test]
+        fn test_explicit_config_options() {
+            use crate::playa_bridge::to_playa_options;
+
+            let config = TtsConfig::new()
+                .with_volume(VolumeLevel::Explicit(0.33))
+                .with_speed(SpeedLevel::Explicit(1.8));
+
+            let options = to_playa_options(config.volume, config.speed);
+
+            assert_eq!(options.volume, Some(0.33));
+            assert_eq!(options.speed, Some(1.8));
+        }
+
+        /// Test that default config uses Normal values.
+        #[test]
+        fn test_default_config_options() {
+            use crate::playa_bridge::to_playa_options;
+
+            let config = TtsConfig::new();
+            let options = to_playa_options(config.volume, config.speed);
+
+            // VolumeLevel::Normal = 0.75, SpeedLevel::Normal = 1.0
+            assert_eq!(options.volume, Some(0.75));
+            assert_eq!(options.speed, Some(1.0));
+        }
+
+        /// Test format conversion for all AudioFormat variants.
+        #[test]
+        fn test_all_formats_convert_to_playa() {
+            use crate::playa_bridge::to_playa_format;
+
+            // Just verify these don't panic - detailed assertions are in playa_bridge tests
+            let _ = to_playa_format(AudioFormat::Wav);
+            let _ = to_playa_format(AudioFormat::Mp3);
+            let _ = to_playa_format(AudioFormat::Ogg);
+            let _ = to_playa_format(AudioFormat::Pcm);
+        }
     }
 }

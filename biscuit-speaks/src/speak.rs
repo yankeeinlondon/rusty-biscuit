@@ -181,7 +181,15 @@ impl Speak {
     pub async fn play(self) -> Result<(), TtsError> {
         // If audio was pre-generated, play it
         if let Some(audio) = &self.audio {
-            return crate::playback::play_audio_bytes(audio, self.audio_format).await;
+            #[cfg(feature = "playa")]
+            {
+                return crate::playback::play_audio_bytes_playa(audio, self.audio_format, &self.config).await;
+            }
+            #[cfg(not(feature = "playa"))]
+            #[allow(deprecated)]
+            {
+                return crate::playback::play_audio_bytes(audio, self.audio_format).await;
+            }
         }
 
         // Get available providers based on failover strategy

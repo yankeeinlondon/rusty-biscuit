@@ -10,6 +10,8 @@ use tempfile::NamedTempFile;
 use tracing::debug;
 
 use crate::errors::TtsError;
+#[cfg(not(feature = "playa"))]
+#[allow(deprecated)]
 use crate::playback::play_audio_file;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
 use crate::types::{AudioFormat, Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
@@ -209,7 +211,15 @@ impl TtsExecutor for GttsProvider {
         }
 
         // Play the generated audio
-        play_audio_file(temp_file.path()).await?;
+        #[cfg(feature = "playa")]
+        {
+            crate::playback::play_audio_file_playa(temp_file.path(), AudioFormat::Mp3, config).await?;
+        }
+        #[cfg(not(feature = "playa"))]
+        #[allow(deprecated)]
+        {
+            play_audio_file(temp_file.path()).await?;
+        }
 
         Ok(())
     }

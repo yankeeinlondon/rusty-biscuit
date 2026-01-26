@@ -84,6 +84,14 @@ pub enum PlaybackError {
         /// The underlying IO error.
         source: std::io::Error,
     },
+    /// The player process exited with a non-zero status.
+    #[error("player {player:?} failed with exit code {exit_code:?}")]
+    PlayerFailed {
+        /// The player that failed.
+        player: AudioPlayer,
+        /// The exit code, if available.
+        exit_code: Option<i32>,
+    },
     /// The audio state lock was poisoned.
     #[error("audio state lock poisoned")]
     StateLock,

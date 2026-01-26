@@ -441,6 +441,7 @@ version = "0.1.0"
 dependencies = [
  "dirs 6.0.0",
  "gender_guesser",
+ "playa",
  "reqwest",
  "schematic-schema",
  "serde",
@@ -1428,13 +1429,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a8bfa975b1aec2145850fcaa1c6fe269a16578c44705a532ae3edc92b8881c7"
 dependencies = [
  "cipher",
-]
-
-[[package]]
-name = "effect"
-version = "0.1.0"
-dependencies = [
- "clap 4.5.54",
 ]
 
 [[package]]

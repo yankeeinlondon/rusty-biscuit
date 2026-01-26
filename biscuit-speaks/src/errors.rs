@@ -179,6 +179,29 @@ impl From<std::io::Error> for TtsError {
     }
 }
 
+#[cfg(feature = "playa")]
+impl From<playa::PlaybackError> for TtsError {
+    fn from(err: playa::PlaybackError) -> Self {
+        match err {
+            playa::PlaybackError::Detection(_) => TtsError::ProviderFailed {
+                provider: "playa".to_string(),
+                message: err.to_string(),
+            },
+            playa::PlaybackError::NoCompatiblePlayer { .. }
+            | playa::PlaybackError::NoPlayerWithCapabilities { .. } => TtsError::NoAudioPlayer,
+            playa::PlaybackError::Spawn { source, .. } => TtsError::ProcessSpawnFailed {
+                provider: "playa".to_string(),
+                source,
+            },
+            playa::PlaybackError::Io(e) => TtsError::IoError { source: e },
+            _ => TtsError::ProviderFailed {
+                provider: "playa".to_string(),
+                message: err.to_string(),
+            },
+        }
+    }
+}
+
 /// Container for errors from all failed providers.
 ///
 /// When failover is enabled and all providers fail, this struct

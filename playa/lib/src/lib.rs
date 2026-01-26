@@ -16,6 +16,12 @@ pub use crate::playback::{
     playa, playa_explicit, playa_explicit_with_options, playa_with_player,
     playa_with_player_and_options,
 };
+
+#[cfg(feature = "async")]
+pub use crate::playback::{
+    playa_async, playa_explicit_async, playa_explicit_with_options_async, playa_with_player_async,
+    playa_with_player_and_options_async,
+};
 pub use crate::player::{
     all_players, match_available_players, match_players, AudioPlayer, Player, PLAYER_LOOKUP,
 };

@@ -10,6 +10,8 @@ use std::process::Stdio;
 use tracing::{debug, trace};
 
 use crate::errors::TtsError;
+#[cfg(not(feature = "playa"))]
+#[allow(deprecated)]
 use crate::playback::play_audio_file;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
 use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
@@ -265,7 +267,15 @@ impl TtsExecutor for EchogardenProvider {
         );
 
         // Play the generated audio file
-        play_audio_file(&output_path).await?;
+        #[cfg(feature = "playa")]
+        {
+            crate::playback::play_audio_file_playa(&output_path, crate::types::AudioFormat::Wav, config).await?;
+        }
+        #[cfg(not(feature = "playa"))]
+        #[allow(deprecated)]
+        {
+            play_audio_file(&output_path).await?;
+        }
 
         Ok(())
     }

@@ -592,7 +592,15 @@ impl TtsExecutor for ElevenLabsProvider {
         let audio_bytes = self.generate_audio(text, config).await?;
 
         // Play the audio (MP3 format from ElevenLabs)
-        crate::playback::play_audio_bytes(&audio_bytes, AudioFormat::Mp3).await
+        #[cfg(feature = "playa")]
+        {
+            crate::playback::play_audio_bytes_playa(&audio_bytes, AudioFormat::Mp3, config).await
+        }
+        #[cfg(not(feature = "playa"))]
+        #[allow(deprecated)]
+        {
+            crate::playback::play_audio_bytes(&audio_bytes, AudioFormat::Mp3).await
+        }
     }
 
     async fn is_ready(&self) -> bool {
