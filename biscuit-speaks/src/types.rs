@@ -99,6 +99,9 @@ pub struct Voice {
     /// Some providers use identifiers that differ from the display name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identifier: Option<String>,
+    /// Optional description or tagline for this voice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// Priority for voice selection (higher = preferred).
     ///
     /// Used when multiple voices match selection criteria.
@@ -119,6 +122,7 @@ impl Voice {
     /// - `quality`: `VoiceQuality::Unknown`
     /// - `languages`: empty
     /// - `identifier`: `None`
+    /// - `description`: `None`
     /// - `priority`: 0
     /// - `model_file`: `None`
     pub fn new(name: impl Into<String>) -> Self {
@@ -128,6 +132,7 @@ impl Voice {
             quality: VoiceQuality::Unknown,
             languages: Vec::new(),
             identifier: None,
+            description: None,
             priority: 0,
             model_file: None,
         }
@@ -165,6 +170,13 @@ impl Voice {
     #[must_use]
     pub fn with_identifier(mut self, identifier: impl Into<String>) -> Self {
         self.identifier = Some(identifier.into());
+        self
+    }
+
+    /// Set the voice description or tagline.
+    #[must_use]
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
         self
     }
 

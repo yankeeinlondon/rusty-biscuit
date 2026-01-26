@@ -20,6 +20,40 @@
 </tr>
 </table>
 
+## Usage
+
+### The Basics
+
+```rust
+use biscuit_speaks::Speak;
+
+// lazily specify the text you will want to speak at
+// some point in the future
+let hello = Speak::new("Hello World");
+
+// ... then later speak the phrase with the voice, TTS provider,
+// and language all set to the defaults
+hello.play().await?;
+```
+
+When we don't explicitly state the TTS provider, the voice, the language, etc. the library will try to pick a good set of _defaults_ for us. This is done by:
+
+- **Capabilities**: _establish a cache file of providers and voices [`~/.biscuit-speaks-cache.json`]_:
+    - the host system is evaluated for it's installed TTS programs as well as the voices available
+    - we also check ENV variables to see if an [ElevenLabs](https://elevenlabs.io) API Key is detected and if it is then it is added to the list of providers
+- **Language**:
+    - when no specific language is formally specified we _default_ to English (or whatever `PREFER_LANGUAGE` is set to)
+- **Provider**:
+    - each operating system (Windows, Linux, macOS) have a statically defined "stack" of TTS providers which in general try to order the TTS providers from best-to-worst (in terms of voice quality)
+    - If a user specified the language they wish to use then we will use the first provider in the stack
+    - we iterate through this stack until we find one which the host system has _installed_ and which provides the at least one voice for the selected language we're targeting
+- **Gender**:
+    - if no gender is specified then we will _prefer_ the highest quality voice available but if there are both male and female variants at that same quality level we will prefer a female voice by default (or whatever the `PREFER_GENDER` environment variable states).
+    - **Note:** "gender" is always ignored when a specific "voice" is chosen
+- **Voice**:
+    - each
+
+
 ## Usage Examples
 
 ```rust
@@ -93,23 +127,23 @@ The following providers are defined in the type system but not yet implemented:
 
 - **SAPI (Windows)**: Implement PowerShell script invocation with `Add-Type -AssemblyName System.Speech`. Handle voice selection via `SelectVoice()`.
 
-* **Festival**: Simple CLI wrapper, pipe text to `festival --tts`.
+- **Festival**: Simple CLI wrapper, pipe text to `festival --tts`.
 
-* **Pico2Wave**: Generate WAV file with `pico2wave -w /tmp/output.wav "text"`, then play via audio player.
+- **Pico2Wave**: Generate WAV file with `pico2wave -w /tmp/output.wav "text"`, then play via audio player.
 
-* **Mimic3**: CLI wrapper with SSML support. Requires model download.
+- **Mimic3**: CLI wrapper with SSML support. Requires model download.
 
-* **KokoroTts**: Requires model files and configuration. Supports voice blending syntax (e.g., `af_sarah:60,am_adam:40`).
+- **KokoroTts**: Requires model files and configuration. Supports voice blending syntax (e.g., `af_sarah:60,am_adam:40`).
 
-* **EchoGarden**: Needs model discovery and configuration.
+- **EchoGarden**: Needs model discovery and configuration.
 
-* **Sherpa**: Validate `SHERPA_MODEL` and `SHERPA_TOKENS` environment variables exist and point to valid files.
+- **Sherpa**: Validate `SHERPA_MODEL` and `SHERPA_TOKENS` environment variables exist and point to valid files.
 
-* **Gtts**: HTTP-based Google TTS via CLI. Handle network errors gracefully.
+- **Gtts**: HTTP-based Google TTS via CLI. Handle network errors gracefully.
 
-* **SpdSay**: Simple CLI wrapper for Speech Dispatcher on Linux desktops.
+- **SpdSay**: Simple CLI wrapper for Speech Dispatcher on Linux desktops.
 
-* **Piper**: CLI wrapper for ONNX-based neural TTS. Very fast local inference.
+- **Piper**: CLI wrapper for ONNX-based neural TTS. Very fast local inference.
 
 ## Environment Variables
 

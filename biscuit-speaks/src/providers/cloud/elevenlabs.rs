@@ -21,8 +21,9 @@
 
 use schematic_schema::elevenlabs::{
     CreateSpeechBody, CreateSpeechRequest, CreateSoundEffectBody, CreateSoundEffectRequest,
-    ElevenLabs, ListVoicesRequest, ListVoicesResponse, ModelInfo, VoiceResponseModel,
+    ElevenLabs, ListVoicesResponse, ModelInfo, VoiceResponseModel,
 };
+use schematic_schema::shared::reqwest;
 
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
@@ -166,30 +167,72 @@ impl ElevenLabsProvider {
             })
             .unwrap_or(Gender::Any);
 
-        // Extract languages from verified_languages if available
-        let languages: Vec<Language> = voice
-            .verified_languages
+        // Extract primary language from labels.language first (most reliable)
+        // Then supplement with verified_languages for multilingual voices
+        let primary_language = voice
+            .labels
             .as_ref()
-            .map(|langs| {
-                langs
-                    .iter()
-                    .map(|lang| {
-                        // Check for English variants
-                        if lang.language_id.starts_with("en") {
+            .and_then(|labels| labels.get("language"))
+            .map(|lang| {
+                if lang.starts_with("en") {
+                    Language::English
+                } else {
+                    Language::Custom(lang.clone())
+                }
+            });
+
+        // Get unique languages from verified_languages
+        let mut languages: Vec<Language> = if let Some(langs) = &voice.verified_languages {
+            let mut seen = std::collections::HashSet::new();
+            langs
+                .iter()
+                .filter_map(|lang| {
+                    // Deduplicate by language code (ignore model differences)
+                    if seen.insert(lang.language_id.clone()) {
+                        Some(if lang.language_id.starts_with("en") {
                             Language::English
                         } else {
                             Language::Custom(lang.language_id.clone())
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_else(|| vec![Language::English]); // Default to English
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            vec![]
+        };
 
-        Voice::new(&voice.name)
+        // If we have a primary language from labels, make sure it's first
+        if let Some(primary) = primary_language {
+            // Remove it if already in the list, then prepend
+            languages.retain(|l| l != &primary);
+            languages.insert(0, primary);
+        }
+
+        // Default to English if no languages found
+        if languages.is_empty() {
+            languages.push(Language::English);
+        }
+
+        // Parse name and description from "Name - Description" format
+        let (name, description) = if let Some((n, d)) = voice.name.split_once(" - ") {
+            (n.to_string(), Some(d.to_string()))
+        } else {
+            (voice.name.clone(), None)
+        };
+
+        let mut v = Voice::new(&name)
             .with_identifier(&voice.voice_id)
             .with_gender(gender)
             .with_quality(VoiceQuality::Excellent) // All ElevenLabs voices are excellent quality
-            .with_languages(languages)
+            .with_languages(languages);
+
+        if let Some(desc) = description {
+            v = v.with_description(desc);
+        }
+
+        v
     }
 
     /// Check if the ElevenLabs API key is configured in the environment.
@@ -212,9 +255,11 @@ impl ElevenLabsProvider {
             Gender::Any => None,
         };
 
-        if let Some(gender_label) = gender_label {
-            match self.list_voices_raw().await {
-                Ok(voices) => {
+        // Try to get voice list and find an appropriate voice
+        match self.list_voices_raw().await {
+            Ok(voices) => {
+                // If gender specified, try to match it
+                if let Some(gender_label) = gender_label {
                     if let Some(voice) = voices
                         .voices
                         .iter()
@@ -222,22 +267,26 @@ impl ElevenLabsProvider {
                     {
                         return Ok(voice.voice_id.clone());
                     }
+                    tracing::warn!(
+                        gender = gender_label,
+                        "No ElevenLabs voice matched gender, using first available"
+                    );
+                }
 
-                    tracing::warn!(
-                        gender = gender_label,
-                        "No ElevenLabs voice matched gender, falling back to default"
-                    );
+                // Use first available voice (better than hardcoded default that may not exist)
+                if let Some(voice) = voices.voices.first() {
+                    return Ok(voice.voice_id.clone());
                 }
-                Err(error) => {
-                    tracing::warn!(
-                        error = ?error,
-                        gender = gender_label,
-                        "Failed to fetch ElevenLabs voices, falling back to default"
-                    );
-                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    error = ?error,
+                    "Failed to fetch ElevenLabs voices, falling back to hardcoded default"
+                );
             }
         }
 
+        // Last resort: use hardcoded default
         Ok(self.default_voice_id.clone())
     }
 
@@ -305,8 +354,8 @@ impl ElevenLabsProvider {
 
     /// List available voices from the ElevenLabs API with full response details.
     ///
-    /// This returns the raw API response with all ElevenLabs-specific fields.
-    /// For a normalized voice list, use the `TtsVoiceInventory::list_voices()` trait method.
+    /// This fetches ALL pages of voices (the API is paginated) and returns
+    /// a consolidated response. Results are cached by the biscuit-speaks cache system.
     ///
     /// ## Returns
     ///
@@ -326,15 +375,101 @@ impl ElevenLabsProvider {
     /// }
     /// ```
     pub async fn list_voices_raw(&self) -> Result<ListVoicesResponse, TtsError> {
-        let request = ListVoicesRequest {};
+        // Get API key header from the schematic client
+        let (header_name, api_key) =
+            self.client
+                .api_key_header()
+                .ok_or_else(|| TtsError::MissingApiKey {
+                    provider: "elevenlabs".into(),
+                })?;
 
-        self.client
-            .request::<ListVoicesResponse>(request)
-            .await
-            .map_err(|e| TtsError::HttpError {
-                provider: "elevenlabs".into(),
-                message: e.to_string(),
-            })
+        let http_client = self.client.http_client();
+        let base_url = format!("{}/v2/voices", self.client.api_base_url());
+
+        let mut all_voices = Vec::new();
+        let mut page_token: Option<String> = None;
+        let mut has_more = true;
+        let mut total_count = None;
+
+        // Fetch all pages
+        let mut page_num = 0;
+        while has_more {
+            page_num += 1;
+            let mut url =
+                reqwest::Url::parse(&base_url).map_err(|e| TtsError::HttpError {
+                    provider: "elevenlabs".into(),
+                    message: format!("Invalid URL: {}", e),
+                })?;
+
+            // Add pagination parameters
+            url.query_pairs_mut().append_pair("page_size", "100");
+            if let Some(token) = &page_token {
+                url.query_pairs_mut().append_pair("page_token", token);
+            }
+
+            tracing::debug!(
+                page = page_num,
+                page_token = ?page_token,
+                "Fetching ElevenLabs voices page"
+            );
+
+            let response = http_client
+                .get(url)
+                .header(&header_name, &api_key)
+                .send()
+                .await
+                .map_err(|e| TtsError::HttpError {
+                    provider: "elevenlabs".into(),
+                    message: e.to_string(),
+                })?;
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let body = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "unknown".to_string());
+                return Err(TtsError::HttpError {
+                    provider: "elevenlabs".into(),
+                    message: format!("API error ({}): {}", status, body),
+                });
+            }
+
+            let page: ListVoicesResponse =
+                response.json().await.map_err(|e| TtsError::HttpError {
+                    provider: "elevenlabs".into(),
+                    message: format!("Failed to parse response: {}", e),
+                })?;
+
+            tracing::debug!(
+                page = page_num,
+                voices_in_page = page.voices.len(),
+                has_more = page.has_more,
+                total_count = ?page.total_count,
+                next_page_token = ?page.next_page_token,
+                "Received ElevenLabs voices page"
+            );
+
+            all_voices.extend(page.voices);
+            has_more = page.has_more;
+            page_token = page.next_page_token;
+            if total_count.is_none() {
+                total_count = page.total_count;
+            }
+        }
+
+        tracing::debug!(
+            total_voices = all_voices.len(),
+            total_pages = page_num,
+            "Completed fetching all ElevenLabs voices"
+        );
+
+        Ok(ListVoicesResponse {
+            voices: all_voices,
+            has_more: false,
+            total_count,
+            next_page_token: None,
+        })
     }
 
     /// List available models from the ElevenLabs API.
@@ -475,14 +610,12 @@ impl TtsExecutor for ElevenLabsProvider {
 
 impl TtsVoiceInventory for ElevenLabsProvider {
     async fn list_voices(&self) -> Result<Vec<Voice>, TtsError> {
-        let response = self
-            .client
-            .request::<ListVoicesResponse>(ListVoicesRequest {})
-            .await
-            .map_err(|e| TtsError::VoiceEnumerationFailed {
+        let response = self.list_voices_raw().await.map_err(|e| {
+            TtsError::VoiceEnumerationFailed {
                 provider: "elevenlabs".into(),
                 message: e.to_string(),
-            })?;
+            }
+        })?;
 
         Ok(response
             .voices
@@ -665,14 +798,7 @@ mod tests {
             voice_id: "voice123".to_string(),
             name: "Rachel".to_string(),
             labels: Some(labels),
-            category: None,
-            samples: None,
-            settings: None,
-            fine_tuning: None,
-            sharing: None,
-            verified_languages: None,
-            voice_verification: None,
-            description: None,
+            ..Default::default()
         };
 
         let voice = ElevenLabsProvider::voice_response_to_voice(voice_response);
@@ -692,14 +818,7 @@ mod tests {
             voice_id: "voice456".to_string(),
             name: "Adam".to_string(),
             labels: Some(labels),
-            category: None,
-            samples: None,
-            settings: None,
-            fine_tuning: None,
-            sharing: None,
-            verified_languages: None,
-            voice_verification: None,
-            description: None,
+            ..Default::default()
         };
 
         let voice = ElevenLabsProvider::voice_response_to_voice(voice_response);
@@ -714,15 +833,7 @@ mod tests {
         let voice_response = VoiceResponseModel {
             voice_id: "voice789".to_string(),
             name: "Unknown".to_string(),
-            labels: None,
-            category: None,
-            samples: None,
-            settings: None,
-            fine_tuning: None,
-            sharing: None,
-            verified_languages: None,
-            voice_verification: None,
-            description: None,
+            ..Default::default()
         };
 
         let voice = ElevenLabsProvider::voice_response_to_voice(voice_response);
@@ -741,14 +852,7 @@ mod tests {
             voice_id: "voice_upper".to_string(),
             name: "TestVoice".to_string(),
             labels: Some(labels),
-            category: None,
-            samples: None,
-            settings: None,
-            fine_tuning: None,
-            sharing: None,
-            verified_languages: None,
-            voice_verification: None,
-            description: None,
+            ..Default::default()
         };
 
         let voice = ElevenLabsProvider::voice_response_to_voice(voice_response);
@@ -763,24 +867,19 @@ mod tests {
         let voice_response = VoiceResponseModel {
             voice_id: "voice_multilang".to_string(),
             name: "MultiLingual".to_string(),
-            labels: None,
-            category: None,
-            samples: None,
-            settings: None,
-            fine_tuning: None,
-            sharing: None,
             verified_languages: Some(vec![
                 LanguageModel {
                     language_id: "en".to_string(),
                     name: "English".to_string(),
+                    ..Default::default()
                 },
                 LanguageModel {
                     language_id: "fr".to_string(),
                     name: "French".to_string(),
+                    ..Default::default()
                 },
             ]),
-            voice_verification: None,
-            description: None,
+            ..Default::default()
         };
 
         let voice = ElevenLabsProvider::voice_response_to_voice(voice_response);
@@ -795,15 +894,7 @@ mod tests {
         let voice_response = VoiceResponseModel {
             voice_id: "voice_no_lang".to_string(),
             name: "NoLang".to_string(),
-            labels: None,
-            category: None,
-            samples: None,
-            settings: None,
-            fine_tuning: None,
-            sharing: None,
-            verified_languages: None,
-            voice_verification: None,
-            description: None,
+            ..Default::default()
         };
 
         let voice = ElevenLabsProvider::voice_response_to_voice(voice_response);
@@ -820,14 +911,7 @@ mod tests {
             voice_id: "voice_nb".to_string(),
             name: "NonBinary".to_string(),
             labels: Some(labels),
-            category: None,
-            samples: None,
-            settings: None,
-            fine_tuning: None,
-            sharing: None,
-            verified_languages: None,
-            voice_verification: None,
-            description: None,
+            ..Default::default()
         };
 
         let voice = ElevenLabsProvider::voice_response_to_voice(voice_response);
@@ -878,6 +962,75 @@ mod tests {
         let provider = ElevenLabsProvider::new().expect("API key should be set");
         let models = provider.list_models().await.expect("Should list models");
         assert!(!models.is_empty(), "Should have at least one model");
+    }
+
+    /// Diagnostic test to debug voice deserialization issues.
+    /// Run with: cargo test -p biscuit-speaks -- --ignored test_debug_voice_deserialization --nocapture
+    #[tokio::test]
+    #[ignore = "diagnostic test - requires API key"]
+    async fn test_debug_voice_deserialization() {
+        use schematic_schema::elevenlabs::ListVoicesResponse;
+
+        let api_key = std::env::var("ELEVEN_LABS_API_KEY")
+            .or_else(|_| std::env::var("ELEVENLABS_API_KEY"))
+            .expect("No API key found");
+
+        let client = reqwest::Client::new();
+        let response = client
+            .get("https://api.elevenlabs.io/v2/voices")
+            .header("xi-api-key", &api_key)
+            .send()
+            .await
+            .expect("Request failed");
+
+        println!("Status: {}", response.status());
+
+        let text = response.text().await.expect("Failed to get text");
+
+        match serde_json::from_str::<ListVoicesResponse>(&text) {
+            Ok(resp) => {
+                println!("\n=== SUCCESS! Deserialized {} voices ===", resp.voices.len());
+                for v in resp.voices.iter() {
+                    println!("\nVoice: {} ({:?})", v.name, v.category);
+                    if let Some(langs) = &v.verified_languages {
+                        println!("  verified_languages ({} entries):", langs.len());
+                        for lang in langs.iter().take(3) {
+                            println!(
+                                "    - language_id='{}', model_id={:?}",
+                                lang.language_id, lang.model_id
+                            );
+                        }
+                    } else {
+                        println!("  verified_languages: None");
+                    }
+                }
+            }
+            Err(e) => {
+                println!("\n=== DESERIALIZATION ERROR ===");
+                println!("Error: {}", e);
+                println!("Line {}, Column {}", e.line(), e.column());
+
+                // Show context around the error
+                let lines: Vec<&str> = text.lines().collect();
+                let line_num = e.line();
+                if line_num > 0 && line_num <= lines.len() {
+                    let start = line_num.saturating_sub(5);
+                    let end = (line_num + 3).min(lines.len());
+                    println!("\nContext (lines {}-{}):", start + 1, end);
+                    for (i, line) in lines[start..end].iter().enumerate() {
+                        let actual_line = start + i + 1;
+                        let marker = if actual_line == line_num { ">>>" } else { "   " };
+                        println!(
+                            "{} {}: {}",
+                            marker,
+                            actual_line,
+                            &line[..line.len().min(100)]
+                        );
+                    }
+                }
+                panic!("Deserialization failed: {}", e);
+            }
+        }
     }
 
     #[tokio::test]

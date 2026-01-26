@@ -21,4 +21,5 @@ schematic-schema = { path = "../schematic/schema" }
 gender_guesser = "0.2"
 
 [dev-dependencies]
+reqwest = "0.12"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "fs"] }
