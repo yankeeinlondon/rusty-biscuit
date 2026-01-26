@@ -12,7 +12,7 @@ use tracing::debug;
 use crate::errors::TtsError;
 use crate::playback::play_audio_file;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{AudioFormat, Gender, Language, TtsConfig, Voice, VoiceQuality};
+use crate::types::{AudioFormat, Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
 
 /// gTTS (Google Text-to-Speech) provider.
 ///
@@ -231,6 +231,47 @@ impl TtsExecutor for GttsProvider {
     /// Get provider information.
     fn info(&self) -> &str {
         "gTTS - Google Text-to-Speech via Python CLI (requires internet)"
+    }
+
+    async fn speak_with_result(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        // Resolve language code
+        let lang_code = Self::resolve_language(config);
+
+        // Try to get the voice from the voice list for better metadata
+        let voice = if let Ok(voices) = self.list_voices().await {
+            // Find the voice matching this language code
+            voices
+                .iter()
+                .find(|v| v.identifier.as_deref() == Some(lang_code))
+                .cloned()
+                .unwrap_or_else(|| {
+                    Voice::new(lang_code)
+                        .with_gender(Gender::Any)
+                        .with_quality(VoiceQuality::Good)
+                        .with_language(config.language.clone())
+                        .with_identifier(lang_code)
+                })
+        } else {
+            // Fallback if voice list unavailable
+            Voice::new(lang_code)
+                .with_gender(Gender::Any)
+                .with_quality(VoiceQuality::Good)
+                .with_language(config.language.clone())
+                .with_identifier(lang_code)
+        };
+
+        // Call speak
+        self.speak(text, config).await?;
+
+        // Return the result
+        Ok(SpeakResult::new(
+            TtsProvider::Host(HostTtsProvider::Gtts),
+            voice,
+        ))
     }
 }
 

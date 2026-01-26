@@ -10,7 +10,7 @@ use tracing::debug;
 use crate::errors::TtsError;
 use crate::playback::play_audio_file;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{Gender, Language, TtsConfig, Voice, VoiceQuality};
+use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
 
 /// Kokoro TTS provider.
 ///
@@ -78,7 +78,7 @@ impl KokoroTtsProvider {
         }
     }
 
-    /// Resolve the voice to use based on config.
+    /// Resolve the voice to use based on config (simple fallback).
     fn resolve_voice(config: &TtsConfig) -> &str {
         if let Some(voice) = &config.requested_voice {
             return voice.as_str();
@@ -90,6 +90,57 @@ impl KokoroTtsProvider {
             Gender::Female => Self::DEFAULT_VOICE,
             Gender::Any => Self::DEFAULT_VOICE,
         }
+    }
+
+    /// Select the best voice from the Kokoro voice list based on config constraints.
+    fn select_best_voice(voices: &[Voice], config: &TtsConfig) -> Option<Voice> {
+        let mut candidates: Vec<&Voice> = voices.iter().collect();
+
+        // Filter by language if specified
+        let target_language = &config.language;
+        let filtered_by_lang: Vec<&Voice> = candidates
+            .iter()
+            .filter(|v| {
+                v.languages.iter().any(|lang| {
+                    match (lang, target_language) {
+                        (Language::English, Language::English) => true,
+                        (Language::Custom(a), Language::Custom(b)) => {
+                            let a_lower = a.to_lowercase();
+                            let b_lower = b.to_lowercase();
+                            a_lower == b_lower
+                                || a_lower.starts_with(&format!("{}-", b_lower))
+                                || b_lower.starts_with(&format!("{}-", a_lower))
+                        }
+                        (Language::English, Language::Custom(c))
+                        | (Language::Custom(c), Language::English) => {
+                            c.to_lowercase().starts_with("en")
+                        }
+                    }
+                })
+            })
+            .copied()
+            .collect();
+
+        if !filtered_by_lang.is_empty() {
+            candidates = filtered_by_lang;
+        }
+
+        // Filter by gender if specified (not Any)
+        if config.gender != Gender::Any {
+            let gender_matches: Vec<&Voice> = candidates
+                .iter()
+                .filter(|v| v.gender == config.gender)
+                .copied()
+                .collect();
+
+            if !gender_matches.is_empty() {
+                candidates = gender_matches;
+            }
+        }
+
+        // All Kokoro voices are Excellent quality, so just pick the first
+        // (which will be the first in the list, typically "af_heart" for female English)
+        candidates.first().cloned().cloned()
     }
 
     /// Check if the kokoro-tts binary exists on the system.
@@ -228,6 +279,49 @@ impl TtsExecutor for KokoroTtsProvider {
 
     fn info(&self) -> &str {
         "Kokoro TTS - High-quality neural TTS using the Kokoro-82M model with 54 voices across 9 languages"
+    }
+
+    async fn speak_with_result(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        // If a specific voice was requested, use it directly
+        if let Some(voice_name) = &config.requested_voice {
+            self.speak(text, config).await?;
+
+            let (gender, language) = Self::parse_voice_prefix(voice_name);
+            let voice = Voice::new(voice_name)
+                .with_gender(gender)
+                .with_quality(VoiceQuality::Excellent)
+                .with_language(language);
+
+            return Ok(SpeakResult::new(
+                TtsProvider::Host(HostTtsProvider::KokoroTts),
+                voice,
+            ));
+        }
+
+        // No specific voice requested - select the best one based on constraints
+        let voices = self.list_voices().await?;
+        let selected_voice = Self::select_best_voice(&voices, config).ok_or_else(|| {
+            TtsError::VoiceEnumerationFailed {
+                provider: Self::PROVIDER_NAME.into(),
+                message: "No matching voice found for the given constraints".into(),
+            }
+        })?;
+
+        // Update config to use the selected voice
+        let mut config_with_voice = config.clone();
+        config_with_voice.requested_voice = Some(selected_voice.name.clone());
+
+        // Speak with the selected voice
+        self.speak(text, &config_with_voice).await?;
+
+        Ok(SpeakResult::new(
+            TtsProvider::Host(HostTtsProvider::KokoroTts),
+            selected_voice,
+        ))
     }
 }
 

@@ -26,7 +26,7 @@ use schematic_schema::elevenlabs::{
 
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{AudioFormat, Gender, Language, TtsConfig, Voice, VoiceQuality};
+use crate::types::{AudioFormat, CloudTtsProvider, Gender, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
 
 /// Default ElevenLabs voice ID (Rachel - a versatile female voice).
 const DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM";
@@ -431,6 +431,45 @@ impl TtsExecutor for ElevenLabsProvider {
 
     fn info(&self) -> &str {
         "ElevenLabs - High quality AI voice synthesis with neural TTS models"
+    }
+
+    async fn speak_with_result(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        // Resolve the voice ID (this may fetch the voice list for gender matching)
+        let voice_id = self.resolve_voice_id(config).await?;
+
+        // Try to get full voice metadata from the voice list
+        let voice = if let Ok(voices) = self.list_voices().await {
+            // Find the voice with this ID
+            voices
+                .into_iter()
+                .find(|v| v.identifier.as_deref() == Some(&voice_id))
+                .unwrap_or_else(|| {
+                    Voice::new(&voice_id)
+                        .with_identifier(&voice_id)
+                        .with_gender(config.gender)
+                        .with_quality(VoiceQuality::Excellent)
+                        .with_language(config.language.clone())
+                })
+        } else {
+            Voice::new(&voice_id)
+                .with_identifier(&voice_id)
+                .with_gender(config.gender)
+                .with_quality(VoiceQuality::Excellent)
+                .with_language(config.language.clone())
+        };
+
+        // Call speak
+        self.speak(text, config).await?;
+
+        // Return the result
+        Ok(SpeakResult::new(
+            TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
+            voice,
+        ))
     }
 }
 

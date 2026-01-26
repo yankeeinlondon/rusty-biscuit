@@ -6,7 +6,7 @@
 //! - [`TtsVoiceInventory`] - Optional trait for voice enumeration and provider info
 
 use crate::errors::TtsError;
-use crate::types::{TtsConfig, Voice};
+use crate::types::{SpeakResult, TtsConfig, Voice};
 
 /// Executor trait for TTS providers.
 ///
@@ -88,6 +88,36 @@ pub trait TtsExecutor: Send + Sync {
     fn info(&self) -> &str {
         "Unknown TTS Provider"
     }
+
+    /// Generate and play TTS audio, returning metadata about what was used.
+    ///
+    /// This method is like `speak()` but also returns a `SpeakResult` containing
+    /// information about the provider and voice that were actually used.
+    ///
+    /// ## Arguments
+    ///
+    /// * `text` - The text to synthesize and play.
+    /// * `config` - Configuration for voice selection, volume, etc.
+    ///
+    /// ## Returns
+    ///
+    /// A `SpeakResult` containing the provider and voice used for synthesis.
+    ///
+    /// ## Errors
+    ///
+    /// Returns `TtsError` if synthesis or playback fails.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// let result = provider.speak_with_result("Hello", &config).await?;
+    /// println!("Used voice: {}", result.voice.name);
+    /// ```
+    fn speak_with_result(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> impl std::future::Future<Output = Result<SpeakResult, TtsError>> + Send;
 }
 
 /// Trait for TTS providers that support voice enumeration.
@@ -131,7 +161,7 @@ pub trait TtsVoiceInventory: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Gender, VoiceQuality};
+    use crate::types::{Gender, HostTtsProvider, TtsProvider, VoiceQuality};
 
     // Test that we can define a mock implementation
     struct MockExecutor {
@@ -149,6 +179,18 @@ mod tests {
             } else {
                 Ok(())
             }
+        }
+
+        async fn speak_with_result(
+            &self,
+            text: &str,
+            config: &TtsConfig,
+        ) -> Result<SpeakResult, TtsError> {
+            self.speak(text, config).await?;
+            Ok(SpeakResult::new(
+                TtsProvider::Host(HostTtsProvider::Say),
+                Voice::new("MockVoice").with_gender(Gender::Female),
+            ))
         }
 
         async fn is_ready(&self) -> bool {
@@ -262,6 +304,18 @@ mod tests {
     impl TtsExecutor for MinimalExecutor {
         async fn speak(&self, _text: &str, _config: &TtsConfig) -> Result<(), TtsError> {
             Ok(())
+        }
+
+        async fn speak_with_result(
+            &self,
+            text: &str,
+            config: &TtsConfig,
+        ) -> Result<SpeakResult, TtsError> {
+            self.speak(text, config).await?;
+            Ok(SpeakResult::new(
+                TtsProvider::Host(HostTtsProvider::Say),
+                Voice::new("MinimalVoice"),
+            ))
         }
         // Use default implementations for is_ready() and info()
     }

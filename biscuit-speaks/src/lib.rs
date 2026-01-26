@@ -57,10 +57,10 @@ pub use providers::host::{
     EchogardenEngine, EchogardenProvider, ESpeakProvider, GttsProvider, KokoroTtsProvider,
     SapiProvider, SayProvider,
 };
-pub use speak::{speak, speak_when_able, Speak};
+pub use speak::{speak, speak_when_able, speak_with_result, Speak};
 pub use traits::{TtsExecutor, TtsVoiceInventory};
 pub use types::{
     AudioFormat, CloudTtsProvider, Gender, HostTtsCapabilities, HostTtsCapability,
-    HostTtsProvider, Language, TtsConfig, TtsFailoverStrategy, TtsProvider, Voice,
+    HostTtsProvider, Language, SpeakResult, TtsConfig, TtsFailoverStrategy, TtsProvider, Voice,
     VoiceQuality, VolumeLevel,
 };

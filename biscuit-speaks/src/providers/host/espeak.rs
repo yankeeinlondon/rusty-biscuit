@@ -9,7 +9,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{Gender, Language, TtsConfig, Voice, VoiceQuality};
+use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
 
 /// eSpeak/eSpeak-NG TTS provider.
 ///
@@ -79,6 +79,19 @@ impl ESpeakProvider {
 
         format!("{}{}", lang, gender_suffix)
     }
+
+    /// Resolve voice to a Voice struct with full metadata.
+    fn resolve_voice_full(&self, config: &TtsConfig) -> Voice {
+        let voice_arg = self.build_voice_arg(config);
+        let gender = config.gender;
+        let language = config.language.clone();
+
+        Voice::new(&voice_arg)
+            .with_gender(gender)
+            .with_quality(VoiceQuality::Low) // eSpeak uses formant synthesis
+            .with_language(language)
+            .with_identifier(&voice_arg)
+    }
 }
 
 impl TtsExecutor for ESpeakProvider {
@@ -142,6 +155,24 @@ impl TtsExecutor for ESpeakProvider {
         "eSpeak/eSpeak-NG: Open source speech synthesizer with formant synthesis. \
          Supports many languages with compact voice data. Quality is robotic but \
          reliable and fast."
+    }
+
+    async fn speak_with_result(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        // Resolve the voice first
+        let voice = self.resolve_voice_full(config);
+
+        // Call speak
+        self.speak(text, config).await?;
+
+        // Return the result
+        Ok(SpeakResult::new(
+            TtsProvider::Host(HostTtsProvider::ESpeak),
+            voice,
+        ))
     }
 }
 

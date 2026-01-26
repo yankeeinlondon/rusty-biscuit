@@ -5,7 +5,7 @@
 
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{Gender, Language, TtsConfig, Voice, VoiceQuality};
+use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
 
 /// Windows SAPI provider using PowerShell commands.
 ///
@@ -117,6 +117,27 @@ impl TtsExecutor for SapiProvider {
 
     fn info(&self) -> &str {
         "Windows SAPI - Windows Speech API via PowerShell (Windows only)"
+    }
+
+    async fn speak_with_result(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        // Build a default voice (SAPI doesn't yet have voice selection)
+        let voice = Voice::new("Windows SAPI")
+            .with_gender(Gender::Any)
+            .with_quality(VoiceQuality::Moderate)
+            .with_language(Language::English);
+
+        // Call speak
+        self.speak(text, config).await?;
+
+        // Return the result
+        Ok(SpeakResult::new(
+            TtsProvider::Host(HostTtsProvider::Sapi),
+            voice,
+        ))
     }
 }
 

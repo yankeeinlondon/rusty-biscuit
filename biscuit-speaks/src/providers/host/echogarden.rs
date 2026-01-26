@@ -12,7 +12,7 @@ use tracing::{debug, trace};
 use crate::errors::TtsError;
 use crate::playback::play_audio_file;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{Gender, Language, TtsConfig, Voice, VoiceQuality};
+use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
 
 /// Echogarden TTS engine identifier.
 ///
@@ -135,6 +135,67 @@ impl EchogardenProvider {
         // For VITS, let echogarden pick the default
         None
     }
+
+    /// Select the best voice from a list based on config constraints.
+    fn select_best_voice(voices: &[&Voice], config: &TtsConfig) -> Option<Voice> {
+        let mut candidates: Vec<&Voice> = voices.iter().copied().collect();
+
+        // Filter by language if specified
+        let target_language = &config.language;
+        let filtered_by_lang: Vec<&Voice> = candidates
+            .iter()
+            .filter(|v| {
+                v.languages.iter().any(|lang| {
+                    match (lang, target_language) {
+                        (Language::English, Language::English) => true,
+                        (Language::Custom(a), Language::Custom(b)) => {
+                            let a_lower = a.to_lowercase();
+                            let b_lower = b.to_lowercase();
+                            a_lower == b_lower
+                                || a_lower.starts_with(&format!("{}-", b_lower))
+                                || b_lower.starts_with(&format!("{}-", a_lower))
+                        }
+                        (Language::English, Language::Custom(c))
+                        | (Language::Custom(c), Language::English) => {
+                            c.to_lowercase().starts_with("en")
+                        }
+                    }
+                })
+            })
+            .copied()
+            .collect();
+
+        if !filtered_by_lang.is_empty() {
+            candidates = filtered_by_lang;
+        }
+
+        // Filter by gender if specified (not Any)
+        if config.gender != Gender::Any {
+            let gender_matches: Vec<&Voice> = candidates
+                .iter()
+                .filter(|v| v.gender == config.gender)
+                .copied()
+                .collect();
+
+            if !gender_matches.is_empty() {
+                candidates = gender_matches;
+            }
+        }
+
+        // Sort by quality (highest first)
+        candidates.sort_by(|a, b| {
+            let quality_rank = |q: VoiceQuality| match q {
+                VoiceQuality::Excellent => 0,
+                VoiceQuality::Good => 1,
+                VoiceQuality::Moderate => 2,
+                VoiceQuality::Low => 3,
+                VoiceQuality::Unknown => 4,
+            };
+            quality_rank(a.quality).cmp(&quality_rank(b.quality))
+        });
+
+        candidates.first().cloned().cloned()
+    }
 }
 
 impl TtsExecutor for EchogardenProvider {
@@ -215,6 +276,69 @@ impl TtsExecutor for EchogardenProvider {
 
     fn info(&self) -> &str {
         "Echogarden - Speech processing engine with multiple high-quality TTS backends (VITS, Kokoro)"
+    }
+
+    async fn speak_with_result(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        // If a specific voice is requested, use it directly
+        if let Some(voice_name) = &config.requested_voice {
+            self.speak(text, config).await?;
+
+            // Try to find the voice in the list for full metadata
+            if let Ok(voices) = self.list_voices().await {
+                if let Some(voice) = voices.iter().find(|v| v.name == *voice_name) {
+                    return Ok(SpeakResult::new(
+                        TtsProvider::Host(HostTtsProvider::EchoGarden),
+                        voice.clone(),
+                    ));
+                }
+            }
+
+            // Fallback with constructed metadata
+            let voice = Voice::new(voice_name)
+                .with_gender(config.gender)
+                .with_quality(self.engine.quality())
+                .with_language(config.language.clone())
+                .with_identifier(format!("{}:{}", self.engine.as_str(), voice_name));
+
+            return Ok(SpeakResult::new(
+                TtsProvider::Host(HostTtsProvider::EchoGarden),
+                voice,
+            ));
+        }
+
+        // No specific voice requested - select from voice list
+        let voices = self.list_voices().await?;
+
+        // Filter voices by engine
+        let engine_prefix = format!("{}:", self.engine.as_str());
+        let engine_voices: Vec<&Voice> = voices
+            .iter()
+            .filter(|v| v.identifier.as_ref().map(|i| i.starts_with(&engine_prefix)).unwrap_or(false))
+            .collect();
+
+        // Select best voice based on constraints (gender, language, quality)
+        let selected_voice = Self::select_best_voice(&engine_voices, config).ok_or_else(|| {
+            TtsError::VoiceEnumerationFailed {
+                provider: Self::PROVIDER_NAME.into(),
+                message: "No matching voice found for the given constraints".into(),
+            }
+        })?;
+
+        // Update config to use the selected voice
+        let mut config_with_voice = config.clone();
+        config_with_voice.requested_voice = Some(selected_voice.name.clone());
+
+        // Speak with the selected voice
+        self.speak(text, &config_with_voice).await?;
+
+        Ok(SpeakResult::new(
+            TtsProvider::Host(HostTtsProvider::EchoGarden),
+            selected_voice,
+        ))
     }
 }
 

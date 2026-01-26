@@ -10,7 +10,7 @@ use tracing::{debug, trace};
 use crate::errors::TtsError;
 use crate::gender_inference::infer_gender;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{Gender, Language, TtsConfig, Voice, VoiceQuality};
+use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
 
 /// macOS Say TTS provider.
 ///
@@ -47,6 +47,67 @@ impl SayProvider {
             Gender::Female => Some("Samantha"),
             Gender::Any => None,
         }
+    }
+
+    /// Select the best voice from a list based on config constraints.
+    ///
+    /// Selection priority:
+    /// 1. Filter by language (if specified)
+    /// 2. Filter by gender (if specified)
+    /// 3. Sort by quality (highest first)
+    /// 4. Return the first match
+    fn select_best_voice(voices: &[Voice], config: &TtsConfig) -> Option<Voice> {
+        let mut candidates: Vec<&Voice> = voices.iter().collect();
+
+        // Filter by language if specified
+        let target_language = &config.language;
+        candidates.retain(|v| {
+            v.languages.iter().any(|lang| {
+                match (lang, target_language) {
+                    (Language::English, Language::English) => true,
+                    (Language::Custom(a), Language::Custom(b)) => {
+                        // Match if same language code or if one is a prefix of the other
+                        let a_lower = a.to_lowercase();
+                        let b_lower = b.to_lowercase();
+                        a_lower == b_lower
+                            || a_lower.starts_with(&format!("{}-", b_lower))
+                            || b_lower.starts_with(&format!("{}-", a_lower))
+                    }
+                    (Language::English, Language::Custom(c))
+                    | (Language::Custom(c), Language::English) => {
+                        c.to_lowercase().starts_with("en")
+                    }
+                }
+            })
+        });
+
+        // Filter by gender if specified (not Any)
+        if config.gender != Gender::Any {
+            let gender_matches: Vec<&Voice> = candidates
+                .iter()
+                .filter(|v| v.gender == config.gender)
+                .copied()
+                .collect();
+
+            // Only apply gender filter if we have matches
+            if !gender_matches.is_empty() {
+                candidates = gender_matches;
+            }
+        }
+
+        // Sort by quality (highest first)
+        candidates.sort_by(|a, b| {
+            let quality_rank = |q: VoiceQuality| match q {
+                VoiceQuality::Excellent => 0,
+                VoiceQuality::Good => 1,
+                VoiceQuality::Moderate => 2,
+                VoiceQuality::Low => 3,
+                VoiceQuality::Unknown => 4,
+            };
+            quality_rank(a.quality).cmp(&quality_rank(b.quality))
+        });
+
+        candidates.first().cloned().cloned()
     }
 
     /// Parse a single line of `say -v '?'` output into a Voice.
@@ -225,6 +286,55 @@ impl TtsExecutor for SayProvider {
     /// Get provider information.
     fn info(&self) -> &str {
         "macOS Say - Built-in speech synthesis using the `say` command"
+    }
+
+    async fn speak_with_result(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<SpeakResult, TtsError> {
+        // If a specific voice was requested, use it directly
+        if let Some(voice_name) = &config.requested_voice {
+            // Speak with the requested voice
+            self.speak(text, config).await?;
+
+            // Try to find the voice in the list for full metadata
+            if let Ok(voices) = self.list_voices().await {
+                if let Some(voice) = voices.iter().find(|v| v.name == *voice_name) {
+                    return Ok(SpeakResult::new(
+                        TtsProvider::Host(HostTtsProvider::Say),
+                        voice.clone(),
+                    ));
+                }
+            }
+
+            // Fallback if voice not found in list
+            return Ok(SpeakResult::new(
+                TtsProvider::Host(HostTtsProvider::Say),
+                Voice::new(voice_name.clone()).with_language(Language::English),
+            ));
+        }
+
+        // No specific voice requested - select the best one based on constraints
+        let voices = self.list_voices().await?;
+        let selected_voice = Self::select_best_voice(&voices, config).ok_or_else(|| {
+            TtsError::VoiceEnumerationFailed {
+                provider: Self::PROVIDER_NAME.into(),
+                message: "No matching voice found for the given constraints".into(),
+            }
+        })?;
+
+        // Update config to use the selected voice
+        let mut config_with_voice = config.clone();
+        config_with_voice.requested_voice = Some(selected_voice.name.clone());
+
+        // Speak with the selected voice
+        self.speak(text, &config_with_voice).await?;
+
+        Ok(SpeakResult::new(
+            TtsProvider::Host(HostTtsProvider::Say),
+            selected_voice,
+        ))
     }
 }
 

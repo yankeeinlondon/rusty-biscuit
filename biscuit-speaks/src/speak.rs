@@ -10,7 +10,7 @@ use crate::providers::host::{
 };
 use crate::traits::TtsExecutor;
 use crate::types::{
-    AudioFormat, CloudTtsProvider, Gender, HostTtsProvider, Language, TtsConfig,
+    AudioFormat, CloudTtsProvider, Gender, HostTtsProvider, Language, SpeakResult, TtsConfig,
     TtsFailoverStrategy, TtsProvider, VolumeLevel,
 };
 
@@ -195,6 +195,42 @@ impl Speak {
         self.execute_with_failover(&providers).await
     }
 
+    /// Play the TTS audio and return metadata about the voice used.
+    ///
+    /// This is like `play()` but also returns a `SpeakResult` containing
+    /// information about the provider and voice that were actually used.
+    ///
+    /// ## Errors
+    ///
+    /// Returns `TtsError` if generation or playback fails.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// let result = Speak::new("Hello!").play_with_result().await?;
+    /// println!("Used voice: {}", result.voice.name);
+    /// ```
+    pub async fn play_with_result(self) -> Result<SpeakResult, TtsError> {
+        // If audio was pre-generated, we can't return accurate metadata
+        // since we don't track which provider was used during prepare()
+        if self.audio.is_some() {
+            return Err(TtsError::ProviderFailed {
+                provider: "prepared".into(),
+                message: "play_with_result() not supported for prepared audio".into(),
+            });
+        }
+
+        // Get available providers based on failover strategy
+        let providers = get_providers_for_strategy(&self.config.failover_strategy);
+
+        if providers.is_empty() {
+            return Err(TtsError::NoProvidersAvailable);
+        }
+
+        // Try providers with failover
+        self.execute_with_failover_result(&providers).await
+    }
+
     /// Execute TTS with failover, collecting all errors.
     async fn execute_with_failover(&self, providers: &[TtsProvider]) -> Result<(), TtsError> {
         let mut errors: Vec<(TtsProvider, TtsError)> = Vec::new();
@@ -218,11 +254,42 @@ impl Speak {
         Err(TtsError::AllProvidersFailed(AllProvidersFailed { errors }))
     }
 
+    /// Execute TTS with failover, returning metadata about the voice used.
+    async fn execute_with_failover_result(&self, providers: &[TtsProvider]) -> Result<SpeakResult, TtsError> {
+        let mut errors: Vec<(TtsProvider, TtsError)> = Vec::new();
+
+        for provider in providers {
+            tracing::debug!(provider = ?provider, text_len = self.text.len(), "Trying TTS provider");
+
+            match self.execute_provider_with_result(*provider).await {
+                Ok(result) => {
+                    tracing::debug!(provider = ?provider, "TTS provider succeeded");
+                    return Ok(result);
+                }
+                Err(e) => {
+                    tracing::debug!(provider = ?provider, error = ?e, "TTS provider failed, trying next");
+                    errors.push((*provider, e));
+                }
+            }
+        }
+
+        // All providers failed - return ALL errors for debugging
+        Err(TtsError::AllProvidersFailed(AllProvidersFailed { errors }))
+    }
+
     /// Execute TTS with a specific provider.
     async fn execute_provider(&self, provider: TtsProvider) -> Result<(), TtsError> {
         match provider {
             TtsProvider::Host(host) => self.execute_host_provider(host).await,
             TtsProvider::Cloud(cloud) => self.execute_cloud_provider(cloud).await,
+        }
+    }
+
+    /// Execute TTS with a specific provider, returning metadata.
+    async fn execute_provider_with_result(&self, provider: TtsProvider) -> Result<SpeakResult, TtsError> {
+        match provider {
+            TtsProvider::Host(host) => self.execute_host_provider_with_result(host).await,
+            TtsProvider::Cloud(cloud) => self.execute_cloud_provider_with_result(cloud).await,
         }
     }
 
@@ -270,6 +337,51 @@ impl Speak {
             }),
         }
     }
+
+    /// Execute TTS with a cloud provider, returning metadata.
+    async fn execute_cloud_provider_with_result(&self, provider: CloudTtsProvider) -> Result<SpeakResult, TtsError> {
+        match provider {
+            CloudTtsProvider::ElevenLabs => {
+                let executor = ElevenLabsProvider::new()?;
+                executor.speak_with_result(&self.text, &self.config).await
+            }
+        }
+    }
+
+    /// Execute TTS with a host provider, returning metadata.
+    async fn execute_host_provider_with_result(&self, provider: HostTtsProvider) -> Result<SpeakResult, TtsError> {
+        match provider {
+            HostTtsProvider::Say => {
+                let executor = SayProvider;
+                executor.speak_with_result(&self.text, &self.config).await
+            }
+            HostTtsProvider::ESpeak => {
+                let executor = ESpeakProvider::new();
+                executor.speak_with_result(&self.text, &self.config).await
+            }
+            HostTtsProvider::EchoGarden => {
+                let executor = EchogardenProvider::new();
+                executor.speak_with_result(&self.text, &self.config).await
+            }
+            HostTtsProvider::Gtts => {
+                let executor = GttsProvider::new();
+                executor.speak_with_result(&self.text, &self.config).await
+            }
+            HostTtsProvider::KokoroTts => {
+                let executor = KokoroTtsProvider::new();
+                executor.speak_with_result(&self.text, &self.config).await
+            }
+            HostTtsProvider::Sapi => {
+                let executor = SapiProvider::new();
+                executor.speak_with_result(&self.text, &self.config).await
+            }
+            // Other providers not yet implemented
+            _ => Err(TtsError::ProviderFailed {
+                provider: format!("{:?}", provider),
+                message: "Provider not yet implemented".into(),
+            }),
+        }
+    }
 }
 
 /// Convenience function for simple TTS.
@@ -285,6 +397,23 @@ impl Speak {
 /// ```
 pub async fn speak(text: &str, config: &TtsConfig) -> Result<(), TtsError> {
     Speak::new(text).with_config(config.clone()).play().await
+}
+
+/// Convenience function for TTS that returns metadata about the voice used.
+///
+/// This is equivalent to `Speak::new(text).with_config(config).play_with_result().await`.
+///
+/// ## Examples
+///
+/// ```ignore
+/// use biscuit_speaks::{speak_with_result, TtsConfig};
+///
+/// let result = speak_with_result("Hello!", &TtsConfig::default()).await?;
+/// println!("Provider: {:?}", result.provider);
+/// println!("Voice: {}", result.voice.name);
+/// ```
+pub async fn speak_with_result(text: &str, config: &TtsConfig) -> Result<SpeakResult, TtsError> {
+    Speak::new(text).with_config(config.clone()).play_with_result().await
 }
 
 /// Fire-and-forget TTS that ignores errors.

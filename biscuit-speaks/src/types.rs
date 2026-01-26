@@ -727,6 +727,45 @@ pub static WINDOWS_TTS_STACK: LazyLock<Vec<TtsProvider>> = LazyLock::new(|| {
 });
 
 // ============================================================================
+// SpeakResult
+// ============================================================================
+
+/// Result of a TTS operation containing metadata about what was actually used.
+///
+/// This struct is returned by `speak_with_result()` and contains information
+/// about the provider and voice that were actually used for synthesis.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_speaks::types::{SpeakResult, TtsProvider, HostTtsProvider, Voice, Gender, VoiceQuality};
+///
+/// let result = SpeakResult::new(
+///     TtsProvider::Host(HostTtsProvider::Say),
+///     Voice::new("Samantha")
+///         .with_gender(Gender::Female)
+///         .with_quality(VoiceQuality::Good),
+/// );
+///
+/// assert!(matches!(result.provider, TtsProvider::Host(HostTtsProvider::Say)));
+/// assert_eq!(result.voice.name, "Samantha");
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpeakResult {
+    /// The TTS provider that was used.
+    pub provider: TtsProvider,
+    /// The voice that was used for synthesis.
+    pub voice: Voice,
+}
+
+impl SpeakResult {
+    /// Create a new SpeakResult.
+    pub fn new(provider: TtsProvider, voice: Voice) -> Self {
+        Self { provider, voice }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
