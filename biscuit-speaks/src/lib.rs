@@ -69,4 +69,4 @@ pub use types::{
 
 // Playa-based playback functions (feature-gated)
 #[cfg(feature = "playa")]
-pub use crate::playback::{play_audio_bytes_playa, play_audio_file_playa};
+pub use crate::playback::{play_audio_bytes, play_audio_file};

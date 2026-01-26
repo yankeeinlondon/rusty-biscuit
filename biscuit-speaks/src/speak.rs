@@ -54,6 +54,7 @@ pub struct Speak {
     /// Pre-generated audio data (if prepared).
     audio: Option<Vec<u8>>,
     /// Audio format of pre-generated audio.
+    #[cfg_attr(not(feature = "playa"), allow(dead_code))]
     audio_format: AudioFormat,
     /// TTS configuration.
     config: TtsConfig,
@@ -183,12 +184,13 @@ impl Speak {
         if let Some(audio) = &self.audio {
             #[cfg(feature = "playa")]
             {
-                return crate::playback::play_audio_bytes_playa(audio, self.audio_format, &self.config).await;
+                return crate::playback::play_audio_bytes(audio, self.audio_format, &self.config).await;
             }
             #[cfg(not(feature = "playa"))]
-            #[allow(deprecated)]
             {
-                return crate::playback::play_audio_bytes(audio, self.audio_format).await;
+                // Playback requires the playa feature
+                let _ = audio;
+                return Err(TtsError::NoAudioPlayer);
             }
         }
 

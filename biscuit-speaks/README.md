@@ -54,7 +54,7 @@ This library can use any of the following TTS providers found on the host (or wi
 
 There are times where we will want to have fine grained control over the TTS's voice, the volume of the voice, the provider we want to use, etc. but on the other side of the spectrum we often just want to "say something" and not concern ourselves with details.
 
-The **biscuit-speaks** library caters to both ends of this spectrum as well as all points in-between by providing _useful defaults_ which can progressively be overridden when more specificity/control is desired. The way _defaults_ are arrives at is:
+The **biscuit-speaks** library caters to both ends of this spectrum as well as all points in-between by providing _useful defaults_ which can progressively be overridden when more specificity/control is desired. The way _defaults_ are arrived at is:
 
 - **Capabilities**: _establish a cache file of providers and voices [`~/.biscuit-speaks-cache.json`]_:
     - the host system is evaluated for it's installed TTS programs as well as the voices available
@@ -72,16 +72,15 @@ The **biscuit-speaks** library caters to both ends of this spectrum as well as a
     - each provider has a set of voices which the host has available to them
     - you can use the `with_voice(String)` builder function to specify a voice in code
     - if no voice is specified then we'll see if `PREFER_VOICE` is available to the host as a valid voice and use it if it is
-    - if the voice is not passed in via code or suggested via an ENV variable then
+    - if the voice is not passed in via code or suggested via an ENV variable then the highest quality voice matching the language/gender constraints is selected
 - **Volume**:
-    - the _volume_ that the spoken voice is spoken at defaults to a "normal" level but you can specify a volume level with the `with_volume(VolumeLevel)` builder function.
-    -
+    - the _volume_ that the spoken voice is spoken at defaults to a "normal" level but you can specify a volume level with the `with_volume(VolumeLevel)` builder function
 - **Speed**:
-    - the _speed_ at which the text is spoken can be modified from it's default speed by using the `at_speed(Speed)`
+    - the _speed_ at which the text is spoken can be modified from its default speed by using the `with_speed(SpeedLevel)` builder function
     - if not set programmatically the speed will also be influenced by the `PREFER_SPEED` environment variable set to either `fast` or `slow` (capitalization doesn't matter).
 
 
-
+One important point to note, when you don't specify the provider, the general rule of thumb is use the highest quality provider which is available. However, there is one exception ... we will not use a cloud based API (for now that just means ElevenLabs) unless explicitly asked to. That's not because it isn't high quality (it is) but because it could cost money (even though the free tier is generous). For this reason we felt it would be better to require a caller to explicitly use a cloud based provider.
 
 ## Usage
 
@@ -102,7 +101,7 @@ hello.play().await?;
 
 ### Being More Explicit
 
-In our first usage example we simply accepted the defaults and in many cases that will be
+In the first usage example we simply accepted the defaults, and in many cases that will be sufficient. However, when you need more control:
 
 ```rust
 use biscuit_speaks::{Speak, TtsConfig, Gender, VolumeLevel};
@@ -127,14 +126,14 @@ biscuit_speaks::speak_when_able("Task complete!", &TtsConfig::default()).await;
 
 The following providers are defined in the type system but not yet implemented:
 
-| Provider   | Platform       | Requirements                                |
-|------------|----------------|---------------------------------------------|
-| Festival   | Linux          | `festival` binary installed                 |
-| Pico2Wave  | Linux          | `pico2wave` binary (SVOX Pico)              |
-| Mimic3     | Cross-platform | Mycroft neural TTS, SSML support            |
-| Sherpa-ONNX   | Cross-platform | high quality multi-modal solution based on the ONNX C library|
-| SpdSay     | Linux          | Speech Dispatcher (`spd-say`)               |
-| Piper      | Cross-platform | Fast local neural TTS with ONNX             |
+| Provider    | Platform       | Requirements                                |
+|------------ |----------------|---------------------------------------------|
+| Festival    | Linux          | `festival` binary installed                 |
+| Pico2Wave   | Linux          | `pico2wave` binary (SVOX Pico)              |
+| Mimic3      | Cross-platform | Mycroft neural TTS, SSML support            |
+| Sherpa-ONNX | Cross-platform | high quality multi-modal solution based on the ONNX C library |
+| SpdSay      | Linux          | Speech Dispatcher (`spd-say`)               |
+| Piper       | Cross-platform | Fast local neural TTS with ONNX             |
 
 These providers are often found on hosts and may be added to this library in the future.
 
@@ -173,7 +172,7 @@ Speak::new("Cloud first")
 ### Direct Provider Access
 
 ```rust
-use biscuit_speaks::{ElevenLabsProvider, TtsExecutor, TtsConfig};
+use biscuit_speaks::{ElevenLabsProvider, TtsExecutor, TtsVoiceInventory, TtsConfig};
 
 // Direct ElevenLabs usage
 let provider = ElevenLabsProvider::new()?;
@@ -182,10 +181,16 @@ provider.speak("Direct API call", &TtsConfig::default()).await?;
 // Generate audio bytes without playing
 let audio_bytes = provider.generate_audio("Get audio", &TtsConfig::default()).await?;
 
-// List available voices
-let voices = provider.list_voices().await?;
-for voice in voices.voices {
+// List available voices (raw ElevenLabs API response)
+let response = provider.list_voices_raw().await?;
+for voice in response.voices {
     println!("{}: {}", voice.voice_id, voice.name);
+}
+
+// Or use the TtsVoiceInventory trait for normalized Voice structs
+let voices = provider.list_voices().await?;
+for voice in voices {
+    println!("{}: {}", voice.identifier.as_deref().unwrap_or("?"), voice.name);
 }
 
 // List available models
@@ -213,18 +218,78 @@ for provider in get_available_providers() {
 
 ### ElevenLabs
 
-- Specifying a voice in eleven labs requires a "voice ID" which has no semantic meaning
-- Instead we need to
-- ElevenLabs offers different models, currently the latest model is `v3`
-    - the quality of the voice will differ based on the model used
-    - Not all voices work equally well with all models. A voice is essentially "trained" or "optimized" for specific models. That's why the API returns high_quality_base_model_ids for each voice - it tells you which models produce the best results.
-    - If you use a mismatched model, you might get:
-        - Lower quality audio
-        - The voice not sounding like itself
-        - Artifacts or unnatural speech
+- **Voice Selection**: Specifying a voice requires a "voice ID" (e.g., `21m00Tcm4TlvDq8ikWAM`), which has no semantic meaning. The library can list available voices via `list_voices()` to discover human-readable names and their corresponding IDs.
+- **Model Selection**: ElevenLabs offers different models with varying capabilities:
+    - Default: `eleven_multilingual_v2` - best for multilingual support
+    - The quality and character of a voice depends on which model you use
+    - Voices are optimized for specific models. The API returns `high_quality_base_model_ids` for each voice indicating which models produce best results
+    - Using a mismatched voice/model combination may result in lower quality audio, unnatural speech, or the voice not sounding like itself
+- **Speed Control**: ElevenLabs supports speed adjustment between 0.7x and 1.2x (our speed values are clamped to this range)
+- **Sound Effects**: The provider also supports generating AI sound effects from text prompts via `create_sound_effect()`
 
-### say (on macOS)
+### Say (macOS)
 
-- there is a wide range of voice qualities available from the voices on say and depending on how the user has setup Siri, voice dictation, etc. will influence what voices are actually available
-- the lowest quality voices are labelled as "eloquence" voices and are filtered out because of their low quality
-- the highest quality voices are labelled as
+- **Platform**: Built-in on all macOS systems, uses the `say` command
+- **Voice Quality Tiers**: Voice quality varies significantly based on installed voices:
+    - "Enhanced" and "Premium" voices provide good quality neural TTS
+    - Standard voices provide moderate quality
+    - "Eloquence" voices (robotic, low quality) are automatically filtered out
+- **Available Voices**: Depends on user's Siri/dictation settings and downloaded voice packs. Run `say -v '?'` to see what's installed
+- **Speed Control**: Supports rate adjustment via the `-r` flag (words per minute)
+- **No Volume Control**: The macOS `say` command does NOT support a volume flag
+
+### eSpeak
+
+- **Platform**: Cross-platform, uses `espeak-ng` (preferred) or `espeak` binary
+- **Voice Quality**: Uses formant synthesis which produces robotic but reliable output. All voices are marked as `Low` quality
+- **Language Support**: Supports 100+ languages with compact voice data files
+- **Voice Selection**: Uses language codes with optional gender suffixes:
+    - `en` - English, any gender
+    - `en+f3` - English, female variant 3
+    - `en+m3` - English, male variant 3
+- **Speed Control**: Supports rate adjustment via the `-s` flag (words per minute)
+
+### SAPI (Windows)
+
+- **Platform**: Windows only, uses PowerShell to access Windows Speech API
+- **Voice Types**: Supports both SAPI5 and OneCore voices
+    - OneCore/Neural voices are excellent quality
+    - Desktop voices are good quality
+    - Legacy SAPI5 voices are moderate quality
+- **Status**: Currently a stub implementation - `speak()` is not yet functional
+
+### Echogarden
+
+- **Platform**: Cross-platform, requires `echogarden` npm package installed globally
+- **Engine Options**: Supports multiple TTS backends:
+    - **Kokoro**: High-quality neural TTS (default) - Excellent quality
+    - **VITS**: Neural TTS with broad language support - Good quality
+- **Voice Selection**: Default voices by gender:
+    - Female: "Heart" (Kokoro)
+    - Male: "Michael" (Kokoro)
+- **VITS Quality Filtering**: VITS voices come in quality tiers (`high`, `medium`, `low`, `x_low`). The library automatically filters out `low` and `x_low` variants, keeping only the best quality version of each voice
+- **Output Quirk**: Echogarden writes status output to stderr, not stdout
+
+### Kokoro-TTS
+
+- **Platform**: Cross-platform, requires `kokoro-tts` CLI and model files
+- **Model Requirements**: Requires two model files to be present:
+    - `kokoro-v1.0.onnx` - The ONNX model
+    - `voices-v1.0.bin` - Voice embeddings
+    - Set `KOKORO_MODEL` and `KOKORO_VOICES` environment variables to specify custom paths
+- **Voice Naming Convention**: Voices use a 2-character prefix:
+    - First char: language (a=American, b=British, j=Japanese, z=Mandarin, e=Spanish, f=French, h=Hindi, i=Italian, p=Portuguese)
+    - Second char: gender (f=Female, m=Male)
+    - Example: `af_heart` = American Female voice named "heart"
+- **Voice Count**: 54 voices across 9 languages
+- **Quality**: All voices are neural TTS with excellent quality
+
+### gTTS
+
+- **Platform**: Cross-platform, requires `gtts-cli` Python package (`pip install gTTS`)
+- **Network Dependency**: Requires internet connectivity - uses Google's TTS API
+- **Connectivity Caching**: After a network failure, the provider caches the failure state to provide fast-fail behavior on subsequent calls
+- **Voice Selection**: Uses language codes (e.g., `en`, `fr`, `de`, `en-au`)
+- **Gender**: gTTS does not distinguish between male and female voices
+- **Quality**: Good quality (Google's neural TTS)
+- **Supported Languages**: 70+ languages and regional variants

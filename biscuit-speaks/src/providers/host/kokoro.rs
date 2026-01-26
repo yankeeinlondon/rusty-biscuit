@@ -8,9 +8,6 @@ use std::process::Stdio;
 use tracing::debug;
 
 use crate::errors::TtsError;
-#[cfg(not(feature = "playa"))]
-#[allow(deprecated)]
-use crate::playback::play_audio_file;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
 use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
 
@@ -269,12 +266,13 @@ impl TtsExecutor for KokoroTtsProvider {
         // Play the generated audio file
         #[cfg(feature = "playa")]
         {
-            crate::playback::play_audio_file_playa(&output_path, crate::types::AudioFormat::Wav, config).await
+            crate::playback::play_audio_file(&output_path, crate::types::AudioFormat::Wav, config).await
         }
         #[cfg(not(feature = "playa"))]
-        #[allow(deprecated)]
         {
-            play_audio_file(&output_path).await
+            // Playback requires the playa feature
+            let _ = output_path;
+            Err(TtsError::NoAudioPlayer)
         }
     }
 

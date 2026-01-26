@@ -27,7 +27,9 @@ use schematic_schema::shared::reqwest;
 
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{AudioFormat, CloudTtsProvider, Gender, Language, SpeedLevel, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
+#[cfg(feature = "playa")]
+use crate::types::AudioFormat;
+use crate::types::{CloudTtsProvider, Gender, Language, SpeedLevel, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
 
 /// Default ElevenLabs voice ID (Rachel - a versatile female voice).
 const DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM";
@@ -594,12 +596,13 @@ impl TtsExecutor for ElevenLabsProvider {
         // Play the audio (MP3 format from ElevenLabs)
         #[cfg(feature = "playa")]
         {
-            crate::playback::play_audio_bytes_playa(&audio_bytes, AudioFormat::Mp3, config).await
+            crate::playback::play_audio_bytes(&audio_bytes, AudioFormat::Mp3, config).await
         }
         #[cfg(not(feature = "playa"))]
-        #[allow(deprecated)]
         {
-            crate::playback::play_audio_bytes(&audio_bytes, AudioFormat::Mp3).await
+            // Playback requires the playa feature
+            let _ = audio_bytes;
+            Err(TtsError::NoAudioPlayer)
         }
     }
 
