@@ -9,7 +9,7 @@ name = "playa"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4.5.53", features = ["derive"] }
+clap = { version = "4.5.53", features = ["derive", "wrap_help"] }
 playa = { path = "../lib" }
 shared = { path = "../../biscuit" }
 sniff-lib = { path = "../../sniff/lib" }

@@ -441,6 +441,7 @@ version = "0.1.0"
 dependencies = [
  "dirs 6.0.0",
  "gender_guesser",
+ "reqwest",
  "schematic-schema",
  "serde",
  "serde_json",
@@ -450,6 +451,31 @@ dependencies = [
  "tokio",
  "tracing",
  "which",
+]
+
+[[package]]
+name = "biscuit-terminal"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "predicates",
+ "serde_json",
+ "serde_yaml 0.9.34+deprecated",
+ "terminal_size",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "biscuit-terminal-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "biscuit-terminal",
+ "clap 4.5.54",
+ "predicates",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -754,6 +780,7 @@ dependencies = [
  "anstyle",
  "clap_lex",
  "strsim 0.11.1",
+ "terminal_size",
 ]
 
 [[package]]
