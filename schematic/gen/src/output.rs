@@ -91,6 +91,7 @@ fn get_request_suffix(api: &RestApi) -> String {
 /// - Module documentation
 /// - Common error type used by all API clients
 /// - Common type aliases (e.g., `RequestParts`)
+/// - Re-export of reqwest for downstream crates
 ///
 /// ## Returns
 ///
@@ -102,6 +103,12 @@ pub fn assemble_shared_module() -> TokenStream {
 
     quote! {
         //! Shared types and utilities for generated API clients.
+
+        /// Re-export reqwest for downstream crates that need to make custom requests.
+        ///
+        /// This allows consumers to use the same HTTP client types without adding
+        /// reqwest as a direct dependency.
+        pub use reqwest;
 
         #request_parts_type
 

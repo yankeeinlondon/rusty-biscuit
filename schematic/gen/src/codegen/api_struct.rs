@@ -223,6 +223,37 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     headers: self.headers.clone(),
                 }
             }
+
+            /// Returns a reference to the underlying HTTP client.
+            ///
+            /// Use this for custom requests that aren't covered by the generated methods,
+            /// such as paginated endpoints that require query parameters.
+            pub fn http_client(&self) -> &reqwest::Client {
+                &self.client
+            }
+
+            /// Returns the base URL for this API client.
+            pub fn api_base_url(&self) -> &str {
+                &self.base_url
+            }
+
+            /// Returns the API key header name and value for authentication.
+            ///
+            /// Returns `None` if the authentication strategy is not `ApiKey`
+            /// or if the API key environment variable is not set.
+            pub fn api_key_header(&self) -> Option<(String, String)> {
+                match &self.auth_strategy {
+                    schematic_define::AuthStrategy::ApiKey { header } => {
+                        for env_name in &self.env_auth {
+                            if let Ok(value) = std::env::var(env_name) {
+                                return Some((header.clone(), value));
+                            }
+                        }
+                        None
+                    }
+                    _ => None,
+                }
+            }
         }
 
         impl Default for #struct_name {
