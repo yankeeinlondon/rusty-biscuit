@@ -232,6 +232,11 @@ impl ElevenLabsProvider {
             v = v.with_description(desc);
         }
 
+        // Store recommended models for this voice
+        if let Some(models) = voice.high_quality_base_model_ids {
+            v = v.with_recommended_models(models);
+        }
+
         v
     }
 
@@ -246,8 +251,13 @@ impl ElevenLabsProvider {
 
     async fn resolve_voice_id(&self, config: &TtsConfig) -> Result<String, TtsError> {
         if let Some(voice_id) = &config.requested_voice {
+            tracing::debug!(
+                requested_voice = %voice_id,
+                "Using requested voice from config"
+            );
             return Ok(voice_id.clone());
         }
+        tracing::debug!("No requested voice in config, will resolve from gender/default");
 
         let gender_label = match config.gender {
             Gender::Male => Some("male"),
@@ -316,10 +326,16 @@ impl ElevenLabsProvider {
     pub async fn generate_audio(&self, text: &str, config: &TtsConfig) -> Result<Vec<u8>, TtsError> {
         let voice_id = self.resolve_voice_id(config).await?;
 
+        // Use requested model from config, or fall back to default
+        let model_id = config
+            .requested_model
+            .clone()
+            .unwrap_or_else(|| self.default_model_id.clone());
+
         // Build the request body
         let body = CreateSpeechBody {
             text: text.to_string(),
-            model_id: Some(self.default_model_id.clone()),
+            model_id: Some(model_id.clone()),
             language_code: Some(config.language.code_prefix().to_string()),
             ..Default::default()
         };
@@ -330,7 +346,7 @@ impl ElevenLabsProvider {
         tracing::debug!(
             voice_id = %voice_id,
             text_len = text.len(),
-            model = %self.default_model_id,
+            model = %model_id,
             "Sending ElevenLabs TTS request"
         );
 
@@ -573,16 +589,36 @@ impl TtsExecutor for ElevenLabsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<SpeakResult, TtsError> {
+        tracing::debug!(
+            requested_voice = ?config.requested_voice,
+            "speak_with_result called"
+        );
+
         // Resolve the voice ID (this may fetch the voice list for gender matching)
         let voice_id = self.resolve_voice_id(config).await?;
+        tracing::debug!(
+            voice_id = %voice_id,
+            "speak_with_result resolved voice_id"
+        );
+
+        // Determine the model that will be used (same logic as generate_audio)
+        let model_used = config
+            .requested_model
+            .clone()
+            .unwrap_or_else(|| self.default_model_id.clone());
 
         // Try to get full voice metadata from the voice list
-        let voice = if let Ok(voices) = self.list_voices().await {
+        let mut voice = if let Ok(voices) = self.list_voices().await {
             // Find the voice with this ID
-            voices
-                .into_iter()
-                .find(|v| v.identifier.as_deref() == Some(&voice_id))
-                .unwrap_or_else(|| {
+            let found = voices
+                .iter()
+                .find(|v| v.identifier.as_deref() == Some(&voice_id));
+            tracing::debug!(
+                voice_id = %voice_id,
+                found = found.is_some(),
+                "Looking up voice metadata"
+            );
+            found.cloned().unwrap_or_else(|| {
                     Voice::new(&voice_id)
                         .with_identifier(&voice_id)
                         .with_gender(config.gender)
@@ -597,13 +633,19 @@ impl TtsExecutor for ElevenLabsProvider {
                 .with_language(config.language.clone())
         };
 
+        // Ensure the voice has its identifier set (for display)
+        if voice.identifier.is_none() {
+            voice.identifier = Some(voice_id.clone());
+        }
+
         // Call speak
         self.speak(text, config).await?;
 
-        // Return the result
-        Ok(SpeakResult::new(
+        // Return the result with model info
+        Ok(SpeakResult::with_model(
             TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
             voice,
+            model_used,
         ))
     }
 }

@@ -112,6 +112,12 @@ pub struct Voice {
     /// Required for providers like Piper or Sherpa that use local model files.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_file: Option<String>,
+    /// Recommended TTS model IDs for this voice (provider-specific).
+    ///
+    /// For ElevenLabs, this contains the `high_quality_base_model_ids` from the API.
+    /// The first model in the list is typically the best match for this voice.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recommended_models: Vec<String>,
 }
 
 impl Voice {
@@ -125,6 +131,7 @@ impl Voice {
     /// - `description`: `None`
     /// - `priority`: 0
     /// - `model_file`: `None`
+    /// - `recommended_models`: empty
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -135,6 +142,7 @@ impl Voice {
             description: None,
             priority: 0,
             model_file: None,
+            recommended_models: Vec::new(),
         }
     }
 
@@ -192,6 +200,18 @@ impl Voice {
     pub fn with_model_file(mut self, path: impl Into<String>) -> Self {
         self.model_file = Some(path.into());
         self
+    }
+
+    /// Set the recommended TTS models for this voice.
+    #[must_use]
+    pub fn with_recommended_models(mut self, models: Vec<String>) -> Self {
+        self.recommended_models = models;
+        self
+    }
+
+    /// Get the first recommended model for this voice, if any.
+    pub fn recommended_model(&self) -> Option<&str> {
+        self.recommended_models.first().map(|s| s.as_str())
     }
 }
 
@@ -638,6 +658,11 @@ pub enum TtsFailoverStrategy {
 pub struct TtsConfig {
     /// Requested voice name (provider-specific).
     pub requested_voice: Option<String>,
+    /// Requested TTS model (provider-specific, e.g., ElevenLabs model ID).
+    ///
+    /// If set, this model will be used instead of the provider's default.
+    /// For ElevenLabs, this should be a model ID like "eleven_multilingual_v2".
+    pub requested_model: Option<String>,
     /// Gender preference for voice selection.
     pub gender: Gender,
     /// Language preference for voice selection.
@@ -658,6 +683,16 @@ impl TtsConfig {
     #[must_use]
     pub fn with_voice(mut self, voice: impl Into<String>) -> Self {
         self.requested_voice = Some(voice.into());
+        self
+    }
+
+    /// Set the requested TTS model.
+    ///
+    /// For ElevenLabs, this should be a model ID like "eleven_multilingual_v2".
+    /// Use `Voice::recommended_model()` to get the best model for a specific voice.
+    #[must_use]
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.requested_model = Some(model.into());
         self
     }
 
@@ -697,10 +732,10 @@ impl TtsConfig {
 /// Default TTS provider stack for Linux systems.
 pub static LINUX_TTS_STACK: LazyLock<Vec<TtsProvider>> = LazyLock::new(|| {
     vec![
-        TtsProvider::Host(HostTtsProvider::Piper),
-        TtsProvider::Host(HostTtsProvider::EchoGarden),
         TtsProvider::Host(HostTtsProvider::KokoroTts),
+        TtsProvider::Host(HostTtsProvider::EchoGarden),
         TtsProvider::Host(HostTtsProvider::Sherpa),
+        TtsProvider::Host(HostTtsProvider::Piper),
         TtsProvider::Host(HostTtsProvider::Mimic3),
         TtsProvider::Host(HostTtsProvider::ESpeak),
         TtsProvider::Host(HostTtsProvider::Festival),
@@ -713,10 +748,10 @@ pub static LINUX_TTS_STACK: LazyLock<Vec<TtsProvider>> = LazyLock::new(|| {
 /// Default TTS provider stack for macOS systems.
 pub static MACOS_TTS_STACK: LazyLock<Vec<TtsProvider>> = LazyLock::new(|| {
     vec![
+        TtsProvider::Host(HostTtsProvider::KokoroTts),
+        TtsProvider::Host(HostTtsProvider::EchoGarden),
         TtsProvider::Host(HostTtsProvider::Say),
         TtsProvider::Host(HostTtsProvider::Piper),
-        TtsProvider::Host(HostTtsProvider::EchoGarden),
-        TtsProvider::Host(HostTtsProvider::KokoroTts),
         TtsProvider::Host(HostTtsProvider::Sherpa),
         TtsProvider::Host(HostTtsProvider::ESpeak),
         TtsProvider::Host(HostTtsProvider::Gtts),
@@ -768,12 +803,30 @@ pub struct SpeakResult {
     pub provider: TtsProvider,
     /// The voice that was used for synthesis.
     pub voice: Voice,
+    /// The TTS model that was used (provider-specific).
+    ///
+    /// For ElevenLabs, this is the model ID like "eleven_multilingual_v2".
+    /// For other providers, this may be None.
+    pub model_used: Option<String>,
 }
 
 impl SpeakResult {
     /// Create a new SpeakResult.
     pub fn new(provider: TtsProvider, voice: Voice) -> Self {
-        Self { provider, voice }
+        Self {
+            provider,
+            voice,
+            model_used: None,
+        }
+    }
+
+    /// Create a new SpeakResult with a model.
+    pub fn with_model(provider: TtsProvider, voice: Voice, model: impl Into<String>) -> Self {
+        Self {
+            provider,
+            voice,
+            model_used: Some(model.into()),
+        }
     }
 }
 

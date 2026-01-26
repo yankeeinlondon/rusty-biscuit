@@ -215,3 +215,24 @@ for provider in get_available_providers() {
     println!("Available: {:?}", provider);
 }
 ```
+
+
+## Provider Specific Notes
+
+### ElevenLabs
+
+- Specifying a voice in eleven labs requires a "voice ID" which has no semantic meaning
+- Instead we need to
+- ElevenLabs offers different models, currently the latest model is `v3`
+    - the quality of the voice will differ based on the model used
+    - Not all voices work equally well with all models. A voice is essentially "trained" or "optimized" for specific models. That's why the API returns high_quality_base_model_ids for each voice - it tells you which models produce the best results.
+    - If you use a mismatched model, you might get:
+        - Lower quality audio
+        - The voice not sounding like itself
+        - Artifacts or unnatural speech
+
+### say (on macOS)
+
+- there is a wide range of voice qualities available from the voices on say and depending on how the user has setup Siri, voice dictation, etc. will influence what voices are actually available
+- the lowest quality voices are labelled as "eloquence" voices and are filtered out because of their low quality
+- the highest quality voices are labelled as
