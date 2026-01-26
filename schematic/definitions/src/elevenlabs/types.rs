@@ -245,11 +245,18 @@ pub enum AccessLevel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FineTuningState {
-    Draft,
+    /// Voice has not started fine-tuning.
+    NotStarted,
+    /// Voice is queued for fine-tuning.
     Queued,
+    /// Voice is currently being fine-tuned.
     FineTuning,
-    Completed,
+    /// Voice has been successfully fine-tuned.
+    FineTuned,
+    /// Fine-tuning failed.
     Failed,
+    /// Fine-tuning is delayed.
+    Delayed,
 }
 
 /// Speaker separation status for PVC samples.
@@ -260,6 +267,26 @@ pub enum SpeakerSeparationStatus {
     Pending,
     Completed,
     Failed,
+}
+
+/// Safety control level for voices.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SafetyControl {
+    /// No safety control applied.
+    #[serde(rename = "NONE")]
+    None,
+    /// Voice is banned.
+    #[serde(rename = "BAN")]
+    Ban,
+    /// Captcha required.
+    #[serde(rename = "CAPTCHA")]
+    Captcha,
+    /// Enterprise-level ban.
+    #[serde(rename = "ENTERPRISE_BAN")]
+    EnterpriseBan,
+    /// Enterprise-level captcha.
+    #[serde(rename = "ENTERPRISE_CAPTCHA")]
+    EnterpriseCaptcha,
 }
 
 /// API permissions for service account keys.
@@ -503,21 +530,47 @@ pub struct SampleModel {
 }
 
 /// Language model for voices.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Used in verified_languages array. The API can return different field
+/// combinations depending on context.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LanguageModel {
-    /// Language identifier.
+    /// Language identifier (e.g., "en").
+    /// Note: API returns this as "language" in verified_languages.
+    #[serde(alias = "language")]
     pub language_id: String,
 
-    /// Display name.
+    /// Display name (e.g., "English").
+    /// May not be present in all API responses.
+    #[serde(default)]
     pub name: String,
+
+    /// Model ID this language is verified for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+
+    /// Accent variant (e.g., "american", "british").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accent: Option<String>,
+
+    /// Locale code (e.g., "en-US").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
+
+    /// URL to preview audio for this language.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_url: Option<String>,
 }
 
 /// Fine-tuning model for PVC voices.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Note: The `state` field is a map from model ID to fine-tuning state,
+/// as each voice can have different fine-tuning status per model.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FineTuningModel {
-    /// Current fine-tuning state.
+    /// Fine-tuning state per model. Keys are model IDs like "eleven_multilingual_v2".
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub state: Option<FineTuningState>,
+    pub state: Option<std::collections::HashMap<String, FineTuningState>>,
 
     /// Model used for fine-tuning.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -526,6 +579,46 @@ pub struct FineTuningModel {
     /// Whether verification is required.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verification_required: Option<bool>,
+
+    /// Whether fine-tuning is allowed for this voice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_allowed_to_fine_tune: Option<bool>,
+
+    /// Verification failures list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_failures: Option<Vec<String>>,
+
+    /// Number of verification attempts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_attempts_count: Option<i64>,
+
+    /// Whether manual verification was requested.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manual_verification_requested: Option<bool>,
+
+    /// Language code for fine-tuning.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+
+    /// Fine-tuning progress per model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<std::collections::HashMap<String, serde_json::Value>>,
+
+    /// Messages per model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<std::collections::HashMap<String, String>>,
+
+    /// Dataset duration in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dataset_duration_seconds: Option<f64>,
+
+    /// Maximum verification attempts allowed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_verification_attempts: Option<i64>,
+
+    /// Unix timestamp for next verification reset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_max_verification_attempts_reset_unix_ms: Option<i64>,
 }
 
 /// Sharing model for voices.
@@ -555,7 +648,7 @@ pub struct VoiceVerificationModel {
 }
 
 /// Full voice response model.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VoiceResponseModel {
     /// Voice identifier.
     pub voice_id: String,
@@ -598,6 +691,50 @@ pub struct VoiceResponseModel {
     /// Voice labels (language, accent, gender, age).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub labels: Option<std::collections::HashMap<String, String>>,
+
+    /// URL to preview audio for this voice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_url: Option<String>,
+
+    /// Subscription tiers this voice is available for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available_for_tiers: Option<Vec<String>>,
+
+    /// Base model IDs that support high-quality for this voice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub high_quality_base_model_ids: Option<Vec<String>>,
+
+    /// Collection IDs this voice belongs to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collection_ids: Option<Vec<String>>,
+
+    /// Whether this is a legacy voice.
+    #[serde(default)]
+    pub is_legacy: bool,
+
+    /// Whether this voice uses mixed models.
+    #[serde(default)]
+    pub is_mixed: bool,
+
+    /// Whether the current user owns this voice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_owner: Option<bool>,
+
+    /// Permission level on this resource.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_on_resource: Option<String>,
+
+    /// Unix timestamp when the voice was favorited.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub favorited_at_unix: Option<i64>,
+
+    /// Unix timestamp when the voice was created.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at_unix: Option<i64>,
+
+    /// Safety control level for this voice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safety_control: Option<SafetyControl>,
 }
 
 /// Response from list voices endpoint.
@@ -1709,6 +1846,186 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&TokenType::TtsWebsocket).unwrap(),
             "\"tts_websocket\""
+        );
+    }
+
+    // =========================================================================
+    // Regression tests for voice enumeration deserialization (bug fix 2026-01)
+    // The ElevenLabs /v2/voices API was returning values our enums didn't support.
+    // =========================================================================
+
+    #[test]
+    fn fine_tuning_state_deserializes_all_api_values() {
+        // Regression test: the API returns these exact string values for fine_tuning.state
+        // The previous enum had "Completed" instead of "FineTuned", causing deserialization errors
+        let api_values = [
+            ("\"not_started\"", FineTuningState::NotStarted),
+            ("\"queued\"", FineTuningState::Queued),
+            ("\"fine_tuning\"", FineTuningState::FineTuning),
+            ("\"fine_tuned\"", FineTuningState::FineTuned),
+            ("\"failed\"", FineTuningState::Failed),
+            ("\"delayed\"", FineTuningState::Delayed),
+        ];
+
+        for (json, expected) in api_values {
+            let deserialized: FineTuningState = serde_json::from_str(json)
+                .unwrap_or_else(|e| panic!("Failed to deserialize {}: {}", json, e));
+            assert_eq!(deserialized, expected, "Mismatch for JSON {}", json);
+        }
+    }
+
+    #[test]
+    fn fine_tuning_state_roundtrip() {
+        // Ensure serialization produces values the API expects
+        let states = [
+            FineTuningState::NotStarted,
+            FineTuningState::Queued,
+            FineTuningState::FineTuning,
+            FineTuningState::FineTuned,
+            FineTuningState::Failed,
+            FineTuningState::Delayed,
+        ];
+
+        for state in states {
+            let json = serde_json::to_string(&state).unwrap();
+            let roundtrip: FineTuningState = serde_json::from_str(&json).unwrap();
+            assert_eq!(roundtrip, state);
+        }
+    }
+
+    #[test]
+    fn safety_control_deserializes_screaming_case_values() {
+        // Regression test: API returns SCREAMING_CASE for safety_control
+        let api_values = [
+            ("\"NONE\"", SafetyControl::None),
+            ("\"BAN\"", SafetyControl::Ban),
+            ("\"CAPTCHA\"", SafetyControl::Captcha),
+            ("\"ENTERPRISE_BAN\"", SafetyControl::EnterpriseBan),
+            ("\"ENTERPRISE_CAPTCHA\"", SafetyControl::EnterpriseCaptcha),
+        ];
+
+        for (json, expected) in api_values {
+            let deserialized: SafetyControl = serde_json::from_str(json)
+                .unwrap_or_else(|e| panic!("Failed to deserialize {}: {}", json, e));
+            assert_eq!(deserialized, expected, "Mismatch for JSON {}", json);
+        }
+    }
+
+    #[test]
+    fn voice_response_model_deserializes_with_new_fields() {
+        // Regression test: VoiceResponseModel must handle all fields the v2 API returns
+        let json = r#"{
+            "voice_id": "test123",
+            "name": "Test Voice",
+            "category": "premade",
+            "preview_url": "https://example.com/preview.mp3",
+            "available_for_tiers": ["free", "starter", "creator"],
+            "high_quality_base_model_ids": ["eleven_multilingual_v2"],
+            "collection_ids": ["abc", "def"],
+            "is_legacy": false,
+            "is_mixed": true,
+            "is_owner": true,
+            "permission_on_resource": "owner",
+            "favorited_at_unix": 1706000000,
+            "created_at_unix": 1700000000,
+            "safety_control": "NONE",
+            "fine_tuning": {
+                "state": {
+                    "eleven_multilingual_v2": "fine_tuned",
+                    "eleven_turbo_v2": "fine_tuned"
+                },
+                "model_id": "eleven_multilingual_v2",
+                "is_allowed_to_fine_tune": true
+            }
+        }"#;
+
+        let voice: VoiceResponseModel = serde_json::from_str(json)
+            .expect("VoiceResponseModel should deserialize all v2 API fields");
+
+        assert_eq!(voice.voice_id, "test123");
+        assert_eq!(voice.name, "Test Voice");
+        assert_eq!(voice.category, Some(VoiceCategory::Premade));
+        assert_eq!(
+            voice.preview_url,
+            Some("https://example.com/preview.mp3".to_string())
+        );
+        assert_eq!(
+            voice.available_for_tiers,
+            Some(vec![
+                "free".to_string(),
+                "starter".to_string(),
+                "creator".to_string()
+            ])
+        );
+        assert!(voice.is_mixed);
+        assert_eq!(voice.is_owner, Some(true));
+        assert_eq!(voice.safety_control, Some(SafetyControl::None));
+
+        // Check fine_tuning state deserialization (the root cause of the bug)
+        // State is now a HashMap<model_id, FineTuningState>
+        let fine_tuning = voice.fine_tuning.expect("fine_tuning should be present");
+        let state_map = fine_tuning.state.expect("state should be present");
+        assert_eq!(
+            state_map.get("eleven_multilingual_v2"),
+            Some(&FineTuningState::FineTuned)
+        );
+    }
+
+    #[test]
+    fn list_voices_response_deserializes_realistic_payload() {
+        // Regression test: simulate a realistic /v2/voices response
+        let json = r#"{
+            "voices": [
+                {
+                    "voice_id": "21m00Tcm4TlvDq8ikWAM",
+                    "name": "Rachel",
+                    "category": "premade",
+                    "is_legacy": false,
+                    "is_mixed": false,
+                    "labels": {
+                        "gender": "female",
+                        "accent": "american"
+                    }
+                },
+                {
+                    "voice_id": "custom123",
+                    "name": "My Clone",
+                    "category": "cloned",
+                    "is_legacy": false,
+                    "is_mixed": false,
+                    "fine_tuning": {
+                        "state": {
+                            "eleven_turbo_v2": "not_started"
+                        },
+                        "is_allowed_to_fine_tune": true
+                    }
+                }
+            ],
+            "has_more": true,
+            "total_count": 100,
+            "next_page_token": "abc123"
+        }"#;
+
+        let response: ListVoicesResponse = serde_json::from_str(json)
+            .expect("ListVoicesResponse should deserialize v2 API response");
+
+        assert_eq!(response.voices.len(), 2);
+        assert!(response.has_more);
+        assert_eq!(response.total_count, Some(100));
+        assert_eq!(response.next_page_token, Some("abc123".to_string()));
+
+        // Verify first voice (premade)
+        assert_eq!(response.voices[0].voice_id, "21m00Tcm4TlvDq8ikWAM");
+        assert_eq!(response.voices[0].category, Some(VoiceCategory::Premade));
+
+        // Verify second voice (cloned with fine_tuning)
+        let cloned = &response.voices[1];
+        assert_eq!(cloned.category, Some(VoiceCategory::Cloned));
+        let ft = cloned.fine_tuning.as_ref().expect("fine_tuning should exist");
+        let state_map = ft.state.as_ref().expect("state should exist");
+        assert_eq!(
+            state_map.get("eleven_turbo_v2"),
+            Some(&FineTuningState::NotStarted)
         );
     }
 }
