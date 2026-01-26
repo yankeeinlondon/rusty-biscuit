@@ -17,8 +17,8 @@
 
 | Title | Price |
 | ----- | ----: |
-| Happy Potter | 9.99 |
-| Tea for the Tillerman | 18.99 |
+| Happy Potter | **9.99** |
+| [Tea for the Tillerman](https://goggle.com) | 18.99 |
 
 
 ## Fenced Blocks

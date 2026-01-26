@@ -35,6 +35,7 @@ use crate::markdown::{
     },
     inline::{InlineEvent, InlineTag, MarkProcessor},
 };
+use crate::render::link::Link;
 use comfy_table::{Attribute, Cell, CellAlignment, ContentArrangement, Table, presets};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::io::IsTerminal;
@@ -192,6 +193,11 @@ pub enum MermaidMode {
 
 /// Maximum image file size (10MB).
 const MAX_IMAGE_FILE_SIZE: u64 = 10 * 1024 * 1024;
+
+const LINK_MARKER_START: char = '\u{200b}';
+const LINK_MARKER_END: char = '\u{200c}';
+const CODE_MARKER_START: &str = "\x00CODE\x00";
+const CODE_MARKER_END: &str = "\x00/CODE\x00";
 
 /// Renderer for inline images in terminal output.
 ///
@@ -904,44 +910,50 @@ pub fn write_terminal<W: std::io::Write>(
                 }
             }
             InlineEvent::Standard(Event::End(TagEnd::Link)) => {
-                // Pop link scope to get parent scopes, then query theme for link styling
-                // (The link scope was pushed in Start(Link))
-                scope_stack.pop();
-                let link_tag = Tag::Link {
-                    link_type: pulldown_cmark::LinkType::Inline,
-                    dest_url: "".into(),
-                    title: "".into(),
-                    id: "".into(),
-                };
-                let mut style = prose_highlighter.style_for_tag(&link_tag, &scope_stack);
+                if in_table {
+                    scope_stack.pop();
+                    let link = Link::new(current_link_text.clone(), current_link_url.clone());
+                    current_cell.push_str(&link.to_terminal_unchecked());
+                } else {
+                    // Pop link scope to get parent scopes, then query theme for link styling
+                    // (The link scope was pushed in Start(Link))
+                    scope_stack.pop();
+                    let link_tag = Tag::Link {
+                        link_type: pulldown_cmark::LinkType::Inline,
+                        dest_url: "".into(),
+                        title: "".into(),
+                        id: "".into(),
+                    };
+                    let mut style = prose_highlighter.style_for_tag(&link_tag, &scope_stack);
 
-                // Fallback: If theme doesn't define a distinct link color, use standard blue with underline.
-                // Many themes (e.g., OneHalf) don't style the markup.underline.link.markdown scope,
-                // causing links to appear identical to regular text. This ensures links are always
-                // visually distinguishable.
-                let base_style = prose_highlighter.base_style();
-                if style.foreground == base_style.foreground {
-                    // Apply standard link blue color (similar to HTML default #0066cc)
-                    style.foreground = Color {
-                        r: 65,
-                        g: 160,
-                        b: 225,
-                        a: 255,
-                    }; // Soft blue
-                    // Also add underline for extra visual distinction
-                    style.font_style |= syntect::highlighting::FontStyle::UNDERLINE;
+                    // Fallback: If theme doesn't define a distinct link color, use standard blue with underline.
+                    // Many themes (e.g., OneHalf) don't style the markup.underline.link.markdown scope,
+                    // causing links to appear identical to regular text. This ensures links are always
+                    // visually distinguishable.
+                    let base_style = prose_highlighter.base_style();
+                    if style.foreground == base_style.foreground {
+                        // Apply standard link blue color (similar to HTML default #0066cc)
+                        style.foreground = Color {
+                            r: 65,
+                            g: 160,
+                            b: 225,
+                            a: 255,
+                        }; // Soft blue
+                        // Also add underline for extra visual distinction
+                        style.font_style |= syntect::highlighting::FontStyle::UNDERLINE;
+                    }
+
+                    // Emit styled hyperlink with OSC8 escape sequences
+                    // IMPORTANT: Styling must be applied INSIDE the OSC8 sequence, not outside.
+                    // OSC8 format: ESC]8;;URL BEL <styled_text> ESC]8;; BEL
+                    // The styled text appears between the OSC8 open and close sequences.
+                    wrapper.emit_styled_hyperlink(
+                        &current_link_text,
+                        &current_link_url,
+                        style,
+                        emit_italic,
+                    );
                 }
-
-                // Emit styled hyperlink with OSC8 escape sequences
-                // IMPORTANT: Styling must be applied INSIDE the OSC8 sequence, not outside.
-                // OSC8 format: ESC]8;;URL BEL <styled_text> ESC]8;; BEL
-                // The styled text appears between the OSC8 open and close sequences.
-                wrapper.emit_styled_hyperlink(
-                    &current_link_text,
-                    &current_link_url,
-                    style,
-                    emit_italic,
-                );
 
                 in_link = false;
                 current_link_url.clear();
@@ -1410,7 +1422,7 @@ fn calculate_min_column_width(rows: &[Vec<String>], col_index: usize) -> usize {
     for row in rows {
         if let Some(cell) = row.get(col_index) {
             // Strip ANSI codes AND inline code markers for width calculation
-            let plain_content = strip_code_markers(&crate::testing::strip_ansi_codes(cell));
+            let plain_content = strip_control_sequences(cell);
 
             // Find the longest word (space-separated)
             for word in plain_content.split_whitespace() {
@@ -1420,6 +1432,42 @@ fn calculate_min_column_width(rows: &[Vec<String>], col_index: usize) -> usize {
         }
     }
     max_word_len
+}
+
+fn strip_control_sequences(input: &str) -> String {
+    let without_ansi = crate::testing::strip_ansi_codes(input);
+    let without_links = strip_osc8_sequences(&without_ansi);
+    let without_link_markers =
+        without_links.replace([LINK_MARKER_START, LINK_MARKER_END], "");
+    let without_code_start = without_link_markers.replace(CODE_MARKER_START, "");
+    without_code_start.replace(CODE_MARKER_END, "")
+}
+
+fn strip_osc8_sequences(input: &str) -> String {
+    let osc8_start = "\x1b]8;;";
+    let osc8_end = "\x1b]8;;\x07";
+    let mut output = String::new();
+    let mut remaining = input;
+
+    while let Some(start) = remaining.find(osc8_start) {
+        output.push_str(&remaining[..start]);
+        let after_start = &remaining[start + osc8_start.len()..];
+        let Some(bel_pos) = after_start.find('\x07') else {
+            output.push_str(&remaining[start..]);
+            return output;
+        };
+        let after_url = &after_start[bel_pos + 1..];
+        let Some(end_pos) = after_url.find(osc8_end) else {
+            output.push_str(&remaining[start..]);
+            return output;
+        };
+        let display = &after_url[..end_pos];
+        output.push_str(display);
+        remaining = &after_url[end_pos + osc8_end.len()..];
+    }
+
+    output.push_str(remaining);
+    output
 }
 
 /// Renders a buffered table using comfy-table with automatic wrapping.
@@ -1445,7 +1493,17 @@ fn render_table(rows: &[Vec<String>], alignments: &[CellAlignment], terminal_wid
         return String::new();
     }
 
-    let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    let mut link_replacements = Vec::new();
+    let processed_rows: Vec<Vec<String>> = rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|cell| replace_osc8_with_markers(cell, &mut link_replacements))
+                .collect()
+        })
+        .collect();
+
+    let col_count = processed_rows.iter().map(|r| r.len()).max().unwrap_or(0);
     tracing::Span::current().record("col_count", col_count);
 
     let mut table = Table::new();
@@ -1461,12 +1519,10 @@ fn render_table(rows: &[Vec<String>], alignments: &[CellAlignment], terminal_wid
     // Note: We strip inline code markers but don't convert to ANSI - comfy-table
     // doesn't handle raw ANSI injection well during content wrapping, causing
     // alignment issues and broken escape sequences.
-    if let Some(header) = rows.first() {
+    if let Some(header) = processed_rows.first() {
         table.set_header(header.iter().enumerate().map(|(i, cell_content)| {
             let alignment = alignments.get(i).copied().unwrap_or(CellAlignment::Left);
-            // Strip markers without ANSI conversion - headers shouldn't have them anyway
-            let plain_content = strip_code_markers(cell_content);
-            Cell::new(plain_content)
+            Cell::new(strip_code_markers(cell_content))
                 .set_alignment(alignment)
                 .add_attribute(Attribute::Bold)
                 .fg(ComfyColor::White)
@@ -1478,12 +1534,10 @@ fn render_table(rows: &[Vec<String>], alignments: &[CellAlignment], terminal_wid
     // 1. comfy-table breaks ANSI sequences during content wrapping
     // 2. This causes misalignment between headers and data columns
     // 3. Stripped markers preserve content while allowing proper width calculation
-    for row in rows.iter().skip(1) {
+    for row in processed_rows.iter().skip(1) {
         table.add_row(row.iter().enumerate().map(|(i, cell_content)| {
             let alignment = alignments.get(i).copied().unwrap_or(CellAlignment::Left);
-            // Strip markers - trade off inline code styling for proper alignment
-            let plain_content = strip_code_markers(cell_content);
-            Cell::new(plain_content).set_alignment(alignment)
+            Cell::new(strip_code_markers(cell_content)).set_alignment(alignment)
         }));
     }
 
@@ -1497,7 +1551,7 @@ fn render_table(rows: &[Vec<String>], alignments: &[CellAlignment], terminal_wid
     // 3. If total exceeds terminal, apply scaled-down constraints that still
     //    provide reasonable minimums to avoid the worst word breaks
     let min_widths: Vec<usize> = (0..col_count)
-        .map(|i| calculate_min_column_width(rows, i) + 2) // +2 for padding
+        .map(|i| calculate_min_column_width(&processed_rows, i) + 2) // +2 for padding
         .collect();
 
     // Calculate total minimum width including borders and column separators
@@ -1536,7 +1590,62 @@ fn render_table(rows: &[Vec<String>], alignments: &[CellAlignment], terminal_wid
         table.set_constraints(constraints);
     }
 
-    table.to_string()
+    let rendered = table.to_string();
+    reinsert_osc8_links(&rendered, &link_replacements)
+}
+
+fn replace_osc8_with_markers(content: &str, links: &mut Vec<String>) -> String {
+    let osc8_start = "\x1b]8;;";
+    let osc8_end = "\x1b]8;;\x07";
+    let mut output = String::new();
+    let mut remaining = content;
+
+    while let Some(start) = remaining.find(osc8_start) {
+        output.push_str(&remaining[..start]);
+        let after_start = &remaining[start + osc8_start.len()..];
+        let Some(bel_pos) = after_start.find('\x07') else {
+            output.push_str(&remaining[start..]);
+            return output;
+        };
+        let after_url = &after_start[bel_pos + 1..];
+        let Some(end_pos) = after_url.find(osc8_end) else {
+            output.push_str(&remaining[start..]);
+            return output;
+        };
+        let display = &after_url[..end_pos];
+        let osc8 = format!("{}{}\x07{}{}", osc8_start, &after_start[..bel_pos], display, osc8_end);
+        links.push(osc8);
+        output.push(LINK_MARKER_START);
+        output.push_str(display);
+        output.push(LINK_MARKER_END);
+        remaining = &after_url[end_pos + osc8_end.len()..];
+    }
+
+    output.push_str(remaining);
+    output
+}
+
+fn reinsert_osc8_links(rendered: &str, links: &[String]) -> String {
+    let mut output = String::new();
+    let mut link_iter = links.iter();
+    let mut chars = rendered.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == LINK_MARKER_START {
+            for next in chars.by_ref() {
+                if next == LINK_MARKER_END {
+                    break;
+                }
+            }
+            if let Some(link) = link_iter.next() {
+                output.push_str(link);
+            }
+        } else {
+            output.push(ch);
+        }
+    }
+
+    output
 }
 
 /// Emits code text with both foreground and background colors.
