@@ -1,9 +1,14 @@
+use std::fmt;
+use std::io::{self, Read};
+
 use biscuit_speaks::{
-    get_available_providers, parse_provider_name, speak, Gender, HostTtsProvider, TtsConfig,
-    TtsFailoverStrategy, TtsProvider,
+    get_available_providers, parse_provider_name, speak, CloudTtsProvider, EchogardenProvider,
+    ESpeakProvider, ElevenLabsProvider, Gender, GttsProvider, HostTtsProvider, KokoroTtsProvider,
+    Language, SayProvider, SapiProvider, TtsConfig, TtsError, TtsFailoverStrategy, TtsProvider,
+    TtsVoiceInventory, Voice, VoiceQuality,
 };
 use clap::{Parser, ValueEnum};
-use std::io::{self, Read};
+use inquire::Select;
 
 /// Gender preference for voice selection
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -40,6 +45,12 @@ impl From<GenderArg> for Gender {
 /// // List available TTS providers
 /// // so-you-say --list-providers
 ///
+/// // List available voices for a provider
+/// // so-you-say --list-voices --provider say
+///
+/// // Select a provider interactively to list voices
+/// // so-you-say --list-voices
+///
 /// // Use a specific TTS provider
 /// // so-you-say --provider say Hello world
 ///
@@ -54,6 +65,10 @@ struct Cli {
     /// List available TTS providers and exit
     #[arg(long)]
     list_providers: bool,
+
+    /// List available voices for a provider and exit
+    #[arg(long, conflicts_with = "list_providers")]
+    list_voices: bool,
 
     /// Use a specific TTS provider
     #[arg(long)]
@@ -92,7 +107,45 @@ fn read_from_stdin() -> io::Result<String> {
     Ok(text)
 }
 
-/// Print available TTS providers
+fn provider_display_name(provider: &TtsProvider) -> &'static str {
+    match provider {
+        TtsProvider::Host(h) => match h {
+            HostTtsProvider::Say => "say (macOS)",
+            HostTtsProvider::ESpeak => "espeak (eSpeak-NG)",
+            HostTtsProvider::Piper => "piper (Piper TTS)",
+            HostTtsProvider::EchoGarden => "echogarden",
+            HostTtsProvider::Sherpa => "sherpa (Sherpa-ONNX)",
+            HostTtsProvider::Mimic3 => "mimic3 (Mycroft)",
+            HostTtsProvider::Festival => "festival",
+            HostTtsProvider::Gtts => "gtts (Google TTS CLI)",
+            HostTtsProvider::Sapi => "sapi (Windows)",
+            HostTtsProvider::KokoroTts => "kokoro (Kokoro TTS)",
+            HostTtsProvider::Pico2Wave => "pico2wave",
+            HostTtsProvider::SpdSay => "spd-say (Speech Dispatcher)",
+            _ => "unknown host provider",
+        },
+        TtsProvider::Cloud(c) => match c {
+            CloudTtsProvider::ElevenLabs => "elevenlabs (ElevenLabs API)",
+            _ => "unknown cloud provider",
+        },
+        _ => "unknown provider",
+    }
+}
+
+fn provider_supports_voice_listing(provider: &TtsProvider) -> bool {
+    matches!(
+        provider,
+        TtsProvider::Host(
+            HostTtsProvider::Say
+                | HostTtsProvider::ESpeak
+                | HostTtsProvider::Gtts
+                | HostTtsProvider::EchoGarden
+                | HostTtsProvider::KokoroTts
+                | HostTtsProvider::Sapi
+        ) | TtsProvider::Cloud(CloudTtsProvider::ElevenLabs)
+    )
+}
+
 fn print_providers() {
     let providers = get_available_providers();
 
@@ -105,38 +158,151 @@ fn print_providers() {
     println!();
 
     for provider in providers {
-        match provider {
-            TtsProvider::Host(h) => {
-                let name = match h {
-                    HostTtsProvider::Say => "say (macOS)",
-                    HostTtsProvider::ESpeak => "espeak (eSpeak-NG)",
-                    HostTtsProvider::Piper => "piper (Piper TTS)",
-                    HostTtsProvider::EchoGarden => "echogarden",
-                    HostTtsProvider::Sherpa => "sherpa (Sherpa-ONNX)",
-                    HostTtsProvider::Mimic3 => "mimic3 (Mycroft)",
-                    HostTtsProvider::Festival => "festival",
-                    HostTtsProvider::Gtts => "gtts (Google TTS CLI)",
-                    HostTtsProvider::Sapi => "sapi (Windows)",
-                    HostTtsProvider::KokoroTts => "kokoro (Kokoro TTS)",
-                    HostTtsProvider::Pico2Wave => "pico2wave",
-                    HostTtsProvider::SpdSay => "spd-say (Speech Dispatcher)",
-                    _ => "unknown host provider",
-                };
-                println!("  - {}", name);
-            }
-            TtsProvider::Cloud(c) => {
-                let name = match c {
-                    biscuit_speaks::CloudTtsProvider::ElevenLabs => {
-                        "elevenlabs (ElevenLabs API)"
-                    }
-                    _ => "unknown cloud provider",
-                };
-                println!("  - {} [cloud]", name);
-            }
-            _ => {
-                println!("  - unknown provider");
-            }
+        let name = provider_display_name(&provider);
+        if matches!(provider, TtsProvider::Cloud(_)) {
+            println!("  - {} [cloud]", name);
+        } else {
+            println!("  - {}", name);
         }
+    }
+}
+
+#[derive(Clone)]
+struct ProviderOption {
+    provider: TtsProvider,
+    label: String,
+}
+
+impl fmt::Display for ProviderOption {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
+fn listable_providers() -> Vec<TtsProvider> {
+    get_available_providers()
+        .iter()
+        .copied()
+        .filter(provider_supports_voice_listing)
+        .collect()
+}
+
+fn prompt_for_provider(providers: &[TtsProvider]) -> Result<TtsProvider, inquire::InquireError> {
+    let options: Vec<ProviderOption> = providers
+        .iter()
+        .map(|provider| ProviderOption {
+            provider: *provider,
+            label: provider_display_name(provider).to_string(),
+        })
+        .collect();
+    let selection = Select::new("Select a TTS provider", options).prompt()?;
+    Ok(selection.provider)
+}
+
+async fn list_voices_for_provider(provider: TtsProvider) -> Result<Vec<Voice>, TtsError> {
+    match provider {
+        TtsProvider::Host(HostTtsProvider::Say) => {
+            let provider = SayProvider;
+            provider.list_voices().await
+        }
+        TtsProvider::Host(HostTtsProvider::ESpeak) => {
+            let provider = ESpeakProvider::new();
+            provider.list_voices().await
+        }
+        TtsProvider::Host(HostTtsProvider::Gtts) => {
+            let provider = GttsProvider::new();
+            provider.list_voices().await
+        }
+        TtsProvider::Host(HostTtsProvider::EchoGarden) => {
+            let provider = EchogardenProvider::new();
+            provider.list_voices().await
+        }
+        TtsProvider::Host(HostTtsProvider::KokoroTts) => {
+            let provider = KokoroTtsProvider::new();
+            provider.list_voices().await
+        }
+        TtsProvider::Host(HostTtsProvider::Sapi) => {
+            let provider = SapiProvider::new();
+            provider.list_voices().await
+        }
+        TtsProvider::Cloud(CloudTtsProvider::ElevenLabs) => {
+            let provider = ElevenLabsProvider::new()?;
+            provider.list_voices().await
+        }
+        _ => Err(TtsError::VoiceEnumerationFailed {
+            provider: provider_display_name(&provider).to_string(),
+            message: "Voice listing is not supported for this provider".to_string(),
+        }),
+    }
+}
+
+fn voice_quality_rank(quality: VoiceQuality) -> u8 {
+    match quality {
+        VoiceQuality::Excellent => 0,
+        VoiceQuality::Good => 1,
+        VoiceQuality::Moderate => 2,
+        VoiceQuality::Low => 3,
+        VoiceQuality::Unknown => 4,
+    }
+}
+
+fn voice_gender_label(gender: Gender) -> &'static str {
+    match gender {
+        Gender::Male => "M",
+        Gender::Female => "F",
+        Gender::Any => "-",
+        _ => "?",
+    }
+}
+
+fn voice_quality_label(quality: VoiceQuality) -> &'static str {
+    match quality {
+        VoiceQuality::Excellent => "excellent",
+        VoiceQuality::Good => "good",
+        VoiceQuality::Moderate => "moderate",
+        VoiceQuality::Low => "low",
+        VoiceQuality::Unknown => "unknown",
+    }
+}
+
+fn voice_language_label(languages: &[Language]) -> String {
+    languages
+        .first()
+        .map(|language| match language {
+            Language::English => "en".to_string(),
+            Language::Custom(code) => code.clone(),
+            _ => "?".to_string(),
+        })
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn print_voices(provider: TtsProvider, voices: &[Voice]) {
+    if voices.is_empty() {
+        println!(
+            "No voices found for {}.",
+            provider_display_name(&provider)
+        );
+        return;
+    }
+
+    println!(
+        "Found {} voices for {}:\n",
+        voices.len(),
+        provider_display_name(&provider)
+    );
+
+    let mut voices = voices.to_vec();
+    voices.sort_by(|a, b| {
+        voice_quality_rank(a.quality)
+            .cmp(&voice_quality_rank(b.quality))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    for voice in voices {
+        let gender = voice_gender_label(voice.gender);
+        let quality = voice_quality_label(voice.quality);
+        let language = voice_language_label(&voice.languages);
+        println!("  - {} ({}/{}/{})", voice.name, gender, quality, language);
     }
 }
 
@@ -147,6 +313,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Handle --list-providers flag
     if cli.list_providers {
         print_providers();
+        return Ok(());
+    }
+
+    if cli.list_voices {
+        let provider = if let Some(provider_name) = &cli.provider {
+            match parse_provider_name(provider_name) {
+                Some(provider) => provider,
+                None => {
+                    eprintln!("Error: Unknown provider '{}'", provider_name);
+                    eprintln!("Use --list-providers to see available providers");
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            let providers = listable_providers();
+            if providers.is_empty() {
+                println!("No TTS providers available for voice listing on this system.");
+                return Ok(());
+            }
+
+            match prompt_for_provider(&providers) {
+                Ok(selected) => selected,
+                Err(err) => {
+                    eprintln!("Error: {}", err);
+                    eprintln!("Use --provider to select a provider directly");
+                    std::process::exit(1);
+                }
+            }
+        };
+
+        if !provider_supports_voice_listing(&provider) {
+            eprintln!(
+                "Error: Voice listing is not supported for '{}'",
+                provider_display_name(&provider)
+            );
+            eprintln!("Use --list-providers to see available providers");
+            std::process::exit(1);
+        }
+
+        match list_voices_for_provider(provider).await {
+            Ok(voices) => print_voices(provider, &voices),
+            Err(err) => {
+                eprintln!("Error: {}", err);
+                std::process::exit(1);
+            }
+        }
+
         return Ok(());
     }
 

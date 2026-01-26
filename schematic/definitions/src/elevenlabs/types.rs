@@ -607,6 +607,7 @@ pub struct ListVoicesResponse {
     pub voices: Vec<VoiceResponseModel>,
 
     /// Whether more results exist.
+    #[serde(default)]
     pub has_more: bool,
 
     /// Total count of matching voices.
