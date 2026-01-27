@@ -29,7 +29,9 @@ fn headless_audio_details(
         HeadlessAudio::Mpg123 => Program::Mpg123,
         HeadlessAudio::Ogg123 => Program::Ogg123,
         HeadlessAudio::AlsaAplay => Program::AlsaAplay,
+        HeadlessAudio::MacOsAfplay => Program::MacOsAfplay,
         HeadlessAudio::PulseaudioPaplay => Program::PulseaudioPaplay,
+        HeadlessAudio::PulseaudioPacat => Program::PulseaudioPacat,
         HeadlessAudio::Pipewire => Program::Pipewire,
     };
 
@@ -57,8 +59,12 @@ pub struct InstalledHeadlessAudio {
     pub ogg123: bool,
     /// ALSA aplay utility. [Website](https://linux.die.net/man/1/aplay)
     pub alsa_aplay: bool,
+    /// macOS afplay utility. [Website](https://ss64.com/osx/afplay.html)
+    pub macos_afplay: bool,
     /// PulseAudio paplay utility. [Website](https://manpages.ubuntu.com/)
     pub pulseaudio_paplay: bool,
+    /// PulseAudio pacat raw streaming utility. [Website](https://www.freedesktop.org/wiki/Software/PulseAudio/)
+    pub pulseaudio_pacat: bool,
     /// PipeWire pw-play/pw-cat. [Website](https://docs.pipewire.org/)
     pub pipewire: bool,
 }
@@ -79,6 +85,7 @@ impl InstalledHeadlessAudio {
             "mpg123",
             "ogg123",
             "aplay",
+            "afplay",
             "paplay",
             "pacat",
             "pw-cat",
@@ -100,7 +107,9 @@ impl InstalledHeadlessAudio {
             mpg123: has("mpg123"),
             ogg123: has("ogg123"),
             alsa_aplay: has("aplay"),
-            pulseaudio_paplay: any(&["paplay", "pacat"]),
+            macos_afplay: has("afplay"),
+            pulseaudio_paplay: has("paplay"),
+            pulseaudio_pacat: has("pacat"),
             pipewire: any(&["pw-cat", "pw-play"]),
         }
     }
@@ -156,7 +165,9 @@ impl InstalledHeadlessAudio {
             HeadlessAudio::Mpg123 => self.mpg123,
             HeadlessAudio::Ogg123 => self.ogg123,
             HeadlessAudio::AlsaAplay => self.alsa_aplay,
+            HeadlessAudio::MacOsAfplay => self.macos_afplay,
             HeadlessAudio::PulseaudioPaplay => self.pulseaudio_paplay,
+            HeadlessAudio::PulseaudioPacat => self.pulseaudio_pacat,
             HeadlessAudio::Pipewire => self.pipewire,
         }
     }

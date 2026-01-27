@@ -1066,7 +1066,9 @@ pub enum HeadlessAudio {
     Mpg123,
     Ogg123,
     AlsaAplay,
+    MacOsAfplay,
     PulseaudioPaplay,
+    PulseaudioPacat,
     Pipewire,
 }
 
@@ -1127,10 +1129,22 @@ static HEADLESS_AUDIO_INFO: &[ProgramInfo] = &[
         "https://linux.die.net/man/1/aplay",
     ),
     ProgramInfo::standard(
+        "afplay",
+        "afplay",
+        "macOS native audio file player",
+        "https://ss64.com/osx/afplay.html",
+    ),
+    ProgramInfo::standard(
         "paplay",
         "paplay",
         "Simple PulseAudio playback tool",
         "https://manpages.ubuntu.com/manpages/trusty/man1/paplay.1.html",
+    ),
+    ProgramInfo::standard(
+        "pacat",
+        "pacat",
+        "PulseAudio raw audio streaming",
+        "https://www.freedesktop.org/wiki/Software/PulseAudio/",
     ),
     ProgramInfo::standard(
         "pw-play",

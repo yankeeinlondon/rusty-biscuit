@@ -133,7 +133,9 @@ pub enum Program {
     Mpg123,
     Ogg123,
     AlsaAplay,
+    MacOsAfplay,
     PulseaudioPaplay,
+    PulseaudioPacat,
     Pipewire,
 
     // Terminal Apps
@@ -778,11 +780,17 @@ static ALSA_APLAY_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Pacman("alsa-utils"),
 ];
 
+// macOS afplay is pre-installed, no installation needed
+static MACOS_AFPLAY_INSTALL: &[InstallationMethod] = &[];
+
 static PULSEAUDIO_PAPLAY_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Apt("pulseaudio-utils"),
     InstallationMethod::Dnf("pulseaudio-utils"),
     InstallationMethod::Pacman("pulseaudio"),
 ];
+
+// pacat is part of pulseaudio-utils, same as paplay
+static PULSEAUDIO_PACAT_INSTALL: &[InstallationMethod] = PULSEAUDIO_PAPLAY_INSTALL;
 
 static PIPEWIRE_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Apt("pipewire"),
@@ -2198,6 +2206,18 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     lookup.insert(
+        Program::MacOsAfplay,
+        ProgramDetails::full(
+            "afplay",
+            "macOS native audio file player",
+            MACOS_ONLY,
+            "https://ss64.com/osx/afplay.html",
+            None,
+            MACOS_AFPLAY_INSTALL,
+        ),
+    );
+
+    lookup.insert(
         Program::PulseaudioPaplay,
         ProgramDetails::full(
             "paplay",
@@ -2206,6 +2226,18 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
             "https://manpages.ubuntu.com/",
             None,
             PULSEAUDIO_PAPLAY_INSTALL,
+        ),
+    );
+
+    lookup.insert(
+        Program::PulseaudioPacat,
+        ProgramDetails::full(
+            "pacat",
+            "PulseAudio raw audio streaming",
+            LINUX_ONLY,
+            "https://www.freedesktop.org/wiki/Software/PulseAudio/",
+            None,
+            PULSEAUDIO_PACAT_INSTALL,
         ),
     );
 
