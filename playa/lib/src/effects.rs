@@ -4,16 +4,23 @@
 //! Each category must be explicitly enabled via feature flags to minimize
 //! binary size.
 //!
+//! ## Binary Size Warning
+//!
+//! Sound effects are embedded directly in your binary. Enabling all categories
+//! (`sound-effects` feature) adds approximately **30MB** to your binary size.
+//! Only enable the categories you actually need.
+//!
 //! ## Categories
 //!
-//! | Feature | Contents | Size |
-//! |---------|----------|------|
-//! | `sfx-ui` | Doorbells, alerts, hits | ~3MB |
-//! | `sfx-cartoon` | Cartoon accents, cries | ~8MB |
-//! | `sfx-reactions` | Laughs, cheers, trombone | ~4MB |
-//! | `sfx-scifi` | Phase jumps, phasers | ~3MB |
-//! | `sfx-atmosphere` | Music stings, transitions | ~7MB |
-//! | `sfx-motion` | Whooshes, air sounds | ~5MB |
+//! | Feature | Contents | Effects | Size |
+//! |---------|----------|---------|------|
+//! | `sfx-ui` | Doorbells, alerts, hits | 11 | ~3MB |
+//! | `sfx-cartoon` | Cartoon accents, cries | 13 | ~8MB |
+//! | `sfx-reactions` | Laughs, cheers, trombone | 6 | ~4MB |
+//! | `sfx-scifi` | Phase jumps, phasers | 11 | ~3MB |
+//! | `sfx-atmosphere` | Music stings, transitions | 5 | ~7MB |
+//! | `sfx-motion` | Whooshes, air sounds | 7 | ~5MB |
+//! | **`sound-effects`** | **All categories** | **53** | **~30MB** |
 //!
 //! ## Usage
 //!
@@ -23,6 +30,27 @@
 //! [dependencies]
 //! playa = { version = "0.1", features = ["sfx-ui", "sfx-reactions"] }
 //! ```
+//!
+//! Then use the effects in your code:
+//!
+//! ```ignore
+//! use playa::SoundEffect;
+//!
+//! // Play synchronously (blocks until complete)
+//! SoundEffect::SadTrombone.play()?;
+//!
+//! // Play asynchronously (requires `async` feature)
+//! SoundEffect::Doorbell.play_async().await?;
+//! ```
+//!
+//! ## Supported Formats
+//!
+//! Effects are stored in their original formats:
+//! - **WAV**: UI, cartoon, reactions, atmosphere (partial), motion
+//! - **OGG**: Sci-fi effects
+//! - **MP3**: Some atmosphere effects
+//!
+//! Format detection is automatic - you don't need to know the underlying format.
 
 /// A categorized sound effect with embedded audio data.
 ///
@@ -468,7 +496,7 @@ impl SoundEffect {
     /// Play this sound effect synchronously.
     ///
     /// This method blocks until playback completes. For non-blocking playback,
-    /// use [`play_async`](Self::play_async) (requires the `async` feature).
+    /// use `play_async` (requires the `async` feature).
     ///
     /// ## Errors
     ///
