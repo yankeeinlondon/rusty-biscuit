@@ -15,6 +15,10 @@ default:
     @just --list | grep -v 'default'
     @echo
 
+cc *args="":
+  @echo Starting Claude Code in Yolo mode
+  @claude --dangerously-skip-permissions {{args}}
+
 # build all areas that have a build target
 build *args="":
     #!/usr/bin/env bash
