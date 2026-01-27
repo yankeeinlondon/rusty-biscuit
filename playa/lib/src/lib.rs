@@ -6,6 +6,28 @@ mod playback;
 mod player;
 mod types;
 
+#[cfg(any(
+    feature = "sound-effects",
+    feature = "sfx-ui",
+    feature = "sfx-cartoon",
+    feature = "sfx-reactions",
+    feature = "sfx-scifi",
+    feature = "sfx-atmosphere",
+    feature = "sfx-motion",
+))]
+mod effects;
+
+#[cfg(any(
+    feature = "sound-effects",
+    feature = "sfx-ui",
+    feature = "sfx-cartoon",
+    feature = "sfx-reactions",
+    feature = "sfx-scifi",
+    feature = "sfx-atmosphere",
+    feature = "sfx-motion",
+))]
+pub use crate::effects::SoundEffect;
+
 pub use crate::audio::{Audio, AudioData, AudioSourceKind};
 pub use crate::detection::{
     detect_audio_format_from_bytes, detect_audio_format_from_path, detect_audio_format_from_url,

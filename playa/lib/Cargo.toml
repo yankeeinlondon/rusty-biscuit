@@ -4,7 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
+default = []  # Sound effects are NOT default - users must opt-in
 async = ["tokio"]
+
+# Umbrella feature for all effects (~30MB)
+sound-effects = ["sfx-ui", "sfx-cartoon", "sfx-reactions", "sfx-scifi", "sfx-atmosphere", "sfx-motion"]
+
+# Individual categories (users pick what they need)
+sfx-ui = []         # doorbells, alerts, hits (~3MB, 11 files)
+sfx-cartoon = []    # cartoon accents (~8MB, 13 files)
+sfx-reactions = []  # laughs, cheers, trombone (~4MB, 6 files)
+sfx-scifi = []      # phase jumps, phasers (~3MB, 10 files)
+sfx-atmosphere = [] # music stings, transitions (~7MB, 5 files)
+sfx-motion = []     # whooshes, air sounds (~5MB, 7 files)
 
 [dependencies]
 infer = "0.19"
