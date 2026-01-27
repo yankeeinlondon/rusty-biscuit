@@ -1,16 +1,15 @@
 use crate::discovery::detection::{
-    color_depth, color_mode, get_terminal_app, image_support, is_tty, italics_support,
-    osc8_link_support, supports_underline, terminal_height, terminal_width, ColorDepth, ColorMode,
-    ImageSupport, TerminalApp, UnderlineSupport,
+    ColorDepth, ColorMode, ImageSupport, TerminalApp, UnderlineSupport, color_depth, color_mode,
+    get_terminal_app, image_support, is_tty, italics_support, osc8_link_support, terminal_height,
+    terminal_width, underline_support,
 };
-
 
 fn new_terminal() -> Terminal {
     Terminal {
         app: get_terminal_app(),
         supports_italic: italics_support(),
         image_support: image_support(),
-        underline_support: supports_underline(),
+        underline_support: underline_support(),
         osc_link_support: osc8_link_support(),
         is_tty: is_tty(),
         color_depth: color_depth(),
@@ -32,7 +31,6 @@ pub struct Terminal {
 
     pub is_tty: bool,
     pub color_depth: ColorDepth,
-
 }
 
 impl Default for Terminal {
@@ -54,15 +52,12 @@ impl Terminal {
         terminal_height()
     }
 
-
     /// Whether the terminal is in "light" or "dark" mode (detected using OSC12)
     pub fn color_mode() -> ColorMode {
         color_mode()
     }
 
-
     pub fn render<T: Into<String>>(content: T) -> () {
         todo!()
     }
-
 }

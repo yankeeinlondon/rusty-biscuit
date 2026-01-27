@@ -1,3 +1,4 @@
+use crate::components::renderable::Renderable;
 
 /// Prose content allows plain text to be passed in and that content will be parsed
 /// for two kinds of tokens:
@@ -47,7 +48,7 @@ pub struct Prose {
     /// the raw content as received
     content: String,
     /// the content after having been parsed for template
-    parsed_content: Option<string>,
+    parsed_content: Option<String>,
 
     /// Whether the **word wrap** feature is turned on.
     /// When on, an attempt to create clean line breaks
@@ -58,7 +59,7 @@ pub struct Prose {
     margin_left: Option<u32>,
     /// Optionally force a fixed number of blank characters at the
     /// end of each line to create a "right margin" effect
-    margin_right: Option<u32>
+    margin_right: Option<u32>,
 }
 
 impl Default for Prose {
@@ -68,14 +69,17 @@ impl Default for Prose {
             parsed_content: None,
             word_wrap: true,
             margin_left: None,
-            margin_right: None
+            margin_right: None,
         }
-
     }
 }
 
 impl Renderable for Prose {
     fn render() -> String {
+        todo!()
+    }
+
+    fn fallback_render(term: &crate::terminal::Terminal) -> String {
         todo!()
     }
 }

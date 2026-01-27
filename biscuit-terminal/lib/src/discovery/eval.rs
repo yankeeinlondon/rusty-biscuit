@@ -1,5 +1,3 @@
-
-
 /// **line_widths**`(content)`
 ///
 /// returns the length of each line in the content
@@ -16,5 +14,3 @@ pub fn has_escape_codes<T: Into<String>>(content: T) -> bool {
 pub fn has_osc8_link<T: Into<String>>(content: T) -> bool {
     todo!()
 }
-
-

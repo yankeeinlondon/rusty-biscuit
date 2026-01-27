@@ -1,11 +1,11 @@
 use std::env;
 
 use serde::{Deserialize, Serialize};
-use terminal_size::{terminal_size, Height, Width};
+use terminal_size::{Height, Width, terminal_size};
 use termini::{NumberCapability, StringCapability, TermInfo};
 
 /// The type of image support (if any) of a terminal
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ImageSupport {
     None,
     /// the highest quality image support comes from the
@@ -26,7 +26,7 @@ pub enum ImageSupport {
     ITerm,
 }
 
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TerminalApp {
     AppleTerminal,
     Contour,
@@ -41,10 +41,10 @@ pub enum TerminalApp {
     Ghostty,
     Wast,
     VsCode,
-    Other(String)
+    Other(String),
 }
 
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ColorDepth {
     /// no color support
     None,
@@ -55,10 +55,10 @@ pub enum ColorDepth {
     /// 256 color palette (8 bit)
     Enhanced,
     /// 16 million colors (24 bit)
-    TrueColor
+    TrueColor,
 }
 
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ColorMode {
     /// the background color is light, and text characters must be dark
     /// to provide adequate contrast
@@ -66,7 +66,7 @@ pub enum ColorMode {
     /// the background color is dark, and text characters must be light
     /// to provide the adequate contrast
     Dark,
-    Unknown
+    Unknown,
 }
 
 /// Represents support for various underline style variants.
@@ -89,6 +89,90 @@ pub struct UnderlineSupport {
     pub colored: bool,
 }
 
+/// Represents the type of terminal multiplexing support available.
+///
+/// Terminal multiplexers allow splitting terminal windows into multiple panes,
+/// managing persistent sessions, and providing advanced navigation features.
+///
+/// ## Detection
+///
+/// Detection is based on environment variables:
+/// - `TMUX` - Set when running inside tmux
+/// - `ZELLIJ` - Set when running inside Zellij
+/// - `TERM_PROGRAM` - Identifies terminals with native multiplexing (Kitty, WezTerm, Ghostty)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MultiplexSupport {
+    /// No multiplexing support available
+    None,
+    /// Native multiplexing built into the terminal emulator
+    ///
+    /// Supported by:
+    /// - Kitty (GPU-accelerated layouts: splits, stack, grid, tall, fat)
+    /// - WezTerm (multiplexer domains with SSH, WSL, local support)
+    /// - Ghostty (native platform integration)
+    ///
+    /// Note: Native multiplexing typically loses sessions on terminal close,
+    /// unlike tmux which provides persistent sessions.
+    Native {
+        /// Whether the terminal can split the current window/pane horizontally or vertically
+        split_window: bool,
+        /// Whether the terminal can resize panes
+        resize_pane: bool,
+        /// Whether the terminal can change focus to another pane
+        focus_pane: bool,
+        /// Whether the terminal supports multiple tabs or windows
+        multiple_tabs: bool,
+    },
+    /// tmux multiplexer detected
+    ///
+    /// tmux is the standard terminal multiplexer for persistent sessions.
+    /// Features include:
+    /// - Horizontal/vertical splits
+    /// - Pane resizing
+    /// - Session persistence (detaches survive terminal close)
+    /// - Multiple windows per session
+    ///
+    /// Configuration: `~/.tmux.conf`
+    Tmux {
+        /// Whether tmux can split windows horizontally or vertically
+        split_window: bool,
+        /// Whether tmux can resize panes
+        resize_pane: bool,
+        /// Whether tmux can change focus to another pane
+        focus_pane: bool,
+        /// Whether tmux supports multiple windows (tabs) within a session
+        multiple_windows: bool,
+        /// Whether tmux sessions persist after closing the terminal
+        session_persistence: bool,
+        /// Whether tmux supports detaching and reattaching to sessions
+        detach_session: bool,
+    },
+    /// Zellij multiplexer detected
+    ///
+    /// Modern multiplexer written in Rust with advanced features:
+    /// - Layout system with KDL configuration
+    /// - Session resurrection
+    /// - WebAssembly plugins
+    /// - Floating panes
+    ///
+    /// Configuration: `~/.config/zellij/config.kdl`
+    Zellij {
+        /// Whether Zellij can split windows horizontally or vertically
+        split_window: bool,
+        /// Whether Zellij can resize panes
+        resize_pane: bool,
+        /// Whether Zellij can change focus to another pane
+        focus_pane: bool,
+        /// Whether Zellij supports multiple tabs
+        multiple_tabs: bool,
+        /// Whether Zellij sessions can be resurrected after closing
+        session_resurrection: bool,
+        /// Whether Zellij supports floating panes
+        floating_panes: bool,
+        /// Whether Zellij supports detaching and reattaching to sessions
+        detach_session: bool,
+    },
+}
 
 pub fn color_depth() -> ColorDepth {
     // Check COLORTERM environment variable first
@@ -143,7 +227,45 @@ pub fn color_depth() -> ColorDepth {
 
 /// Whether the terminal is in "light" or "dark" mode
 pub fn color_mode() -> ColorMode {
-    todo!()
+    ColorMode::Dark // Default for now
+}
+
+pub fn is_tty() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal()
+}
+
+pub fn get_terminal_app() -> TerminalApp {
+    if let Ok(term_program) = env::var("TERM_PROGRAM") {
+        match term_program.as_str() {
+            "Apple_Terminal" => return TerminalApp::AppleTerminal,
+            "iterm2" | "iTerm.app" => return TerminalApp::ITerm2,
+            "vscode" => return TerminalApp::VsCode,
+            "warp" => return TerminalApp::Warp,
+            "ghostty" => return TerminalApp::Ghostty,
+            "kitty" => return TerminalApp::Kitty,
+            "Alacritty" => return TerminalApp::Alacritty,
+            "WezTerm" => return TerminalApp::Wezterm,
+            "gnome-terminal" => return TerminalApp::GnomeTerminal,
+            "konsole" => return TerminalApp::Konsole,
+            _ => {}
+        }
+    }
+
+    if env::var("WT_SESSION").is_ok() {
+        return TerminalApp::Other("Windows Terminal".to_string());
+    }
+
+    let term = env::var("TERM").unwrap_or_default();
+    match term.as_str() {
+        "xterm-kitty" | "kitty" => TerminalApp::Kitty,
+        "alacritty" => TerminalApp::Alacritty,
+        "wezterm" => TerminalApp::Wezterm,
+        "ghostty" => TerminalApp::Ghostty,
+        "foot" => TerminalApp::Foot,
+        "contour" => TerminalApp::Contour,
+        _ => TerminalApp::Other(term),
+    }
 }
 
 /// The width of the terminal (in characters)
@@ -163,26 +285,178 @@ pub fn dimensions() -> (u32, u32) {
         .unwrap_or((80, 24))
 }
 
-
-
 /// Whether the terminal supports images and if so
 /// via which standard.
 ///
 /// If multiple standards are supported then
 /// the highest quality standard is returned.
 pub fn image_support() -> ImageSupport {
-    todo!()
-}
+    if !is_tty() {
+        return ImageSupport::None;
+    }
 
+    if let Ok(term_program) = env::var("TERM_PROGRAM") {
+        match term_program.as_str() {
+            "kitty" | "WezTerm" | "Warp" | "ghostty" | "konsole" | "wast" | "iTerm.app" => {
+                return ImageSupport::Kitty;
+            }
+            _ => {}
+        }
+    }
+
+    let term = env::var("TERM").unwrap_or_default();
+    if term.contains("kitty") {
+        return ImageSupport::Kitty;
+    }
+
+    ImageSupport::None
+}
 
 pub fn osc8_link_support() -> bool {
-    todo!()
+    if !is_tty() {
+        return false;
+    }
+
+    if let Ok(term_program) = env::var("TERM_PROGRAM") {
+        match term_program.as_str() {
+            "iTerm.app" | "kitty" | "WezTerm" | "Alacritty" | "ghostty" | "warp" | "vscode"
+            | "gnome-terminal" => {
+                return true;
+            }
+            _ => {}
+        }
+    }
+
+    if env::var("VTE_VERSION").is_ok() {
+        return true;
+    }
+
+    if env::var("WT_SESSION").is_ok() {
+        return true;
+    }
+
+    let term = env::var("TERM").unwrap_or_default();
+    if term.contains("kitty") || term.contains("wezterm") || term.contains("alacritty") {
+        return true;
+    }
+
+    false
 }
 
+/// Detects the type of terminal multiplexing support available.
+///
+/// This function checks environment variables to determine if a multiplexer
+/// is active (tmux, Zellij) or if the terminal emulator has native multiplexing
+/// capabilities (Kitty, WezTerm, Ghostty).
+///
+/// ## Detection Order
+///
+/// 1. **tmux** - Checks `TMUX` environment variable
+/// 2. **Zellij** - Checks `ZELLIJ` environment variable
+/// 3. **Native** - Checks `TERM_PROGRAM` for terminals with built-in multiplexing
+/// 4. **None** - No multiplexing detected
+///
+/// ## Returns
+///
+/// A [`MultiplexSupport`] enum variant indicating the detected multiplexer
+/// and its capabilities.
+///
+/// ## Examples
+///
+/// ```no_run
+/// use biscuit_terminal::discovery::detection::multiplex_support;
+///
+/// match multiplex_support() {
+///     MultiplexSupport::Tmux { split_window: true, .. } => {
+///         println!("Running inside tmux with split support");
+///     }
+///     MultiplexSupport::Native { .. } => {
+///         println!("Terminal has native multiplexing");
+///     }
+///     MultiplexSupport::None => {
+///         println!("No multiplexing support detected");
+///     }
+///     _ => {}
+/// }
+/// ```
+pub fn multiplex_support() -> MultiplexSupport {
+    // Check for tmux first (most common persistent multiplexer)
+    if env::var("TMUX").is_ok() {
+        return MultiplexSupport::Tmux {
+            split_window: true,
+            resize_pane: true,
+            focus_pane: true,
+            multiple_windows: true,
+            session_persistence: true,
+            detach_session: true,
+        };
+    }
 
+    // Check for Zellij
+    if env::var("ZELLIJ").is_ok() {
+        return MultiplexSupport::Zellij {
+            split_window: true,
+            resize_pane: true,
+            focus_pane: true,
+            multiple_tabs: true,
+            session_resurrection: true,
+            floating_panes: true,
+            detach_session: true,
+        };
+    }
 
+    // Check for native multiplexing in terminal emulators
+    if let Ok(term_program) = env::var("TERM_PROGRAM") {
+        match term_program.as_str() {
+            // Kitty has native multiplexing with layouts
+            "kitty" => {
+                return MultiplexSupport::Native {
+                    split_window: true,
+                    resize_pane: true,
+                    focus_pane: true,
+                    multiple_tabs: true,
+                };
+            }
+            // WezTerm has multiplexer domains (SSH, WSL, local)
+            "WezTerm" => {
+                return MultiplexSupport::Native {
+                    split_window: true,
+                    resize_pane: true,
+                    focus_pane: true,
+                    multiple_tabs: true,
+                };
+            }
+            // Ghostty has native multiplexing
+            "ghostty" => {
+                return MultiplexSupport::Native {
+                    split_window: true,
+                    resize_pane: true,
+                    focus_pane: true,
+                    multiple_tabs: true,
+                };
+            }
+            _ => {}
+        }
+    }
 
-pub fn supports_underline() -> UnderlineSupport {
+    // Check TERM variable for terminals with native multiplexing
+    let term = env::var("TERM").unwrap_or_default();
+    if term.contains("kitty") || term.contains("wezterm") || term.contains("ghostty") {
+        return MultiplexSupport::Native {
+            split_window: true,
+            resize_pane: true,
+            focus_pane: true,
+            multiple_tabs: true,
+        };
+    }
+
+    // No multiplexing detected
+    MultiplexSupport::None
+}
+
+/// Provides details on what type of underlining support
+/// the terminal provides.
+pub fn underline_support() -> UnderlineSupport {
     use std::io::IsTerminal;
 
     let none = UnderlineSupport {
@@ -202,7 +476,7 @@ pub fn supports_underline() -> UnderlineSupport {
             curly: false,
             dotted: false,
             dashed: false,
-            colored: false
+            colored: false,
         };
     }
 
@@ -308,8 +582,6 @@ pub fn supports_underline() -> UnderlineSupport {
 
     none
 }
-
-
 
 /// Returns whether the terminal supports italic text rendering.
 ///

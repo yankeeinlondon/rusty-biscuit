@@ -1,5 +1,7 @@
 use std::{collections::HashMap, sync::LazyLock};
 
+use crate::{components::renderable::RenderableWrapper, terminal::Terminal};
+
 /// A single byte value (0-255) representing one RGB color channel.
 ///
 /// This is a newtype wrapper around `u8` that provides type safety for color
@@ -117,163 +119,309 @@ impl RgbColor {
     }
 }
 
-
 /// Use any of the named CSS/Web Colors.
 ///
 /// These correspond to the 148 named colors defined in the CSS Color Module Level 4
 /// specification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WebColor {
+    /// Alice Blue color (240, 248, 255).
     AliceBlue,
+    /// Antique White color (250, 235, 215).
     AntiqueWhite,
+    /// Aqua color (0, 255, 255).
     Aqua,
+    /// Aquamarine color (127, 255, 212).
     Aquamarine,
+    /// Azure color (240, 255, 255).
     Azure,
+    /// Beige color (245, 245, 220).
     Beige,
+    /// Bisque color (255, 228, 196).
     Bisque,
+    /// Black color (0, 0, 0).
     Black,
+    /// Blanched Almond color (255, 235, 205).
     BlanchedAlmond,
+    /// Blue color (0, 0, 255).
     Blue,
+    /// Blue Violet color (138, 43, 226).
     BlueViolet,
+    /// Brown color (165, 42, 42).
     Brown,
+    /// Burly Wood color (222, 184, 135).
     BurlyWood,
+    /// Cadet Blue color (95, 158, 160).
     CadetBlue,
+    /// Chartreuse color (127, 255, 0).
     Chartreuse,
+    /// Chocolate color (210, 105, 30).
     Chocolate,
+    /// Coral color (255, 127, 80).
     Coral,
+    /// Cornflower Blue color (100, 149, 237).
     CornflowerBlue,
+    /// Cornsilk color (255, 248, 220).
     Cornsilk,
+    /// Crimson color (220, 20, 60).
     Crimson,
+    /// Cyan color (0, 255, 255).
     Cyan,
+    /// Dark Blue color (0, 0, 139).
     DarkBlue,
+    /// Dark Cyan color (0, 139, 139).
     DarkCyan,
+    /// Dark Goldenrod color (184, 134, 11).
     DarkGoldenrod,
+    /// Dark Gray color (169, 169, 169).
     DarkGray,
+    /// Dark Grey color (169, 169, 169).
     DarkGrey,
+    /// Dark Green color (0, 100, 0).
     DarkGreen,
+    /// Dark Khaki color (189, 183, 107).
     DarkKhaki,
+    /// Dark Magenta color (139, 0, 139).
     DarkMagenta,
+    /// Dark Olive Green color (85, 107, 47).
     DarkOliveGreen,
+    /// Dark Orange color (255, 140, 0).
     DarkOrange,
+    /// Dark Orchid color (153, 50, 204).
     DarkOrchid,
+    /// Dark Red color (139, 0, 0).
     DarkRed,
+    /// Dark Salmon color (233, 150, 122).
     DarkSalmon,
+    /// Dark Sea Green color (143, 188, 143).
     DarkSeaGreen,
+    /// Dark Slate Blue color (72, 61, 139).
     DarkSlateBlue,
+    /// Dark Slate Gray color (47, 79, 79).
     DarkSlateGray,
+    /// Dark Slate Grey color (47, 79, 79).
     DarkSlateGrey,
+    /// Dark Turquoise color (0, 206, 209).
     DarkTurquoise,
+    /// Dark Violet color (148, 0, 211).
     DarkViolet,
+    /// Deep Pink color (255, 20, 147).
     DeepPink,
+    /// Deep Sky Blue color (0, 191, 255).
     DeepSkyBlue,
+    /// Dim Gray color (105, 105, 105).
     DimGray,
+    /// Dim Grey color (105, 105, 105).
     DimGrey,
+    /// Dodger Blue color (30, 144, 255).
     DodgerBlue,
+    /// Fire Brick color (178, 34, 34).
     FireBrick,
+    /// Floral White color (255, 250, 240).
     FloralWhite,
+    /// Forest Green color (34, 139, 34).
     ForestGreen,
+    /// Fuchsia color (255, 0, 255).
     Fuchsia,
+    /// Gainsboro color (220, 220, 220).
     Gainsboro,
+    /// Ghost White color (248, 248, 255).
     GhostWhite,
+    /// Gold color (255, 215, 0).
     Gold,
+    /// Goldenrod color (218, 165, 32).
     Goldenrod,
+    /// Gray color (128, 128, 128).
     Gray,
+    /// Grey color (128, 128, 128).
     Grey,
+    /// Green color (0, 128, 0).
     Green,
+    /// Green Yellow color (173, 255, 47).
     GreenYellow,
+    /// Honey Dew color (240, 255, 240).
     HoneyDew,
+    /// Hot Pink color (255, 105, 180).
     HotPink,
+    /// Indian Red color (205, 92, 92).
     IndianRed,
+    /// Indigo color (75, 0, 130).
     Indigo,
+    /// Ivory color (255, 255, 240).
     Ivory,
+    /// Khaki color (240, 230, 140).
     Khaki,
+    /// Lavender color (230, 230, 250).
     Lavender,
+    /// Lavender Blush color (255, 240, 245).
     LavenderBlush,
+    /// Lawn Green color (124, 252, 0).
     LawnGreen,
+    /// Lemon Chiffon color (255, 250, 205).
     LemonChiffon,
+    /// Light Blue color (173, 216, 230).
     LightBlue,
+    /// Light Coral color (240, 128, 128).
     LightCoral,
+    /// Light Cyan color (224, 255, 255).
     LightCyan,
+    /// Light Goldenrod Yellow color (250, 250, 210).
     LightGoldenrodYellow,
+    /// Light Gray color (211, 211, 211).
     LightGray,
+    /// Light Grey color (211, 211, 211).
     LightGrey,
+    /// Light Green color (144, 238, 144).
     LightGreen,
+    /// Light Pink color (255, 182, 193).
     LightPink,
+    /// Light Salmon color (255, 160, 122).
     LightSalmon,
+    /// Light Sea Green color (32, 178, 170).
     LightSeaGreen,
+    /// Light Sky Blue color (135, 206, 250).
     LightSkyBlue,
+    /// Light Slate Gray color (119, 136, 153).
     LightSlateGray,
+    /// Light Slate Grey color (119, 136, 153).
     LightSlateGrey,
+    /// Light Steel Blue color (176, 196, 222).
     LightSteelBlue,
+    /// Light Yellow color (255, 255, 224).
     LightYellow,
+    /// Lime color (0, 255, 0).
     Lime,
+    /// Lime Green color (50, 205, 50).
     LimeGreen,
+    /// Linen color (250, 240, 230).
     Linen,
+    /// Magenta color (255, 0, 255).
     Magenta,
+    /// Maroon color (128, 0, 0).
     Maroon,
+    /// Medium Aquamarine color (102, 205, 170).
     MediumAquamarine,
+    /// Medium Blue color (0, 0, 205).
     MediumBlue,
+    /// Medium Orchid color (186, 85, 211).
     MediumOrchid,
+    /// Medium Purple color (147, 112, 219).
     MediumPurple,
+    /// Medium Sea Green color (60, 179, 113).
     MediumSeaGreen,
+    /// Medium Slate Blue color (123, 104, 238).
     MediumSlateBlue,
+    /// Medium Spring Green color (0, 250, 154).
     MediumSpringGreen,
+    /// Medium Turquoise color (72, 209, 204).
     MediumTurquoise,
+    /// Medium Violet Red color (199, 21, 133).
     MediumVioletRed,
+    /// Midnight Blue color (25, 25, 112).
     MidnightBlue,
+    /// Mint Cream color (245, 255, 250).
     MintCream,
+    /// Misty Rose color (255, 228, 225).
     MistyRose,
+    /// Moccasin color (255, 228, 181).
     Moccasin,
+    /// Navajo White color (255, 222, 173).
     NavajoWhite,
+    /// Navy color (0, 0, 128).
     Navy,
+    /// Old Lace color (253, 245, 230).
     OldLace,
+    /// Olive color (128, 128, 0).
     Olive,
+    /// Olive Drab color (107, 142, 35).
     OliveDrab,
+    /// Orange color (255, 165, 0).
     Orange,
+    /// Orange Red color (255, 69, 0).
     OrangeRed,
+    /// Orchid color (218, 112, 214).
     Orchid,
+    /// Pale Goldenrod color (238, 232, 170).
     PaleGoldenrod,
+    /// Pale Green color (152, 251, 152).
     PaleGreen,
+    /// Pale Turquoise color (175, 238, 238).
     PaleTurquoise,
+    /// Pale Violet Red color (219, 112, 147).
     PaleVioletRed,
+    /// Papaya Whip color (255, 239, 213).
     PapayaWhip,
+    /// Peach Puff color (255, 218, 185).
     PeachPuff,
+    /// Peru color (205, 133, 63).
     Peru,
+    /// Pink color (255, 192, 203).
     Pink,
+    /// Plum color (221, 160, 221).
     Plum,
+    /// Powder Blue color (176, 224, 230).
     PowderBlue,
+    /// Purple color (128, 0, 128).
     Purple,
+    /// Rebecca Purple color (102, 51, 153).
     RebeccaPurple,
+    /// Red color (255, 0, 0).
     Red,
+    /// Rosy Brown color (188, 143, 143).
     RosyBrown,
+    /// Royal Blue color (65, 105, 225).
     RoyalBlue,
+    /// Saddle Brown color (139, 69, 19).
     SaddleBrown,
+    /// Salmon color (250, 128, 114).
     Salmon,
+    /// Sandy Brown color (244, 164, 96).
     SandyBrown,
+    /// Sea Green color (46, 139, 87).
     SeaGreen,
+    /// Sea Shell color (255, 245, 238).
     SeaShell,
+    /// Sienna color (160, 82, 45).
     Sienna,
+    /// Silver color (192, 192, 192).
     Silver,
+    /// Sky Blue color (135, 206, 235).
     SkyBlue,
+    /// Slate Blue color (106, 90, 205).
     SlateBlue,
+    /// Slate Gray color (112, 128, 144).
     SlateGray,
+    /// Slate Grey color (112, 128, 144).
     SlateGrey,
+    /// Snow color (255, 250, 250).
     Snow,
+    /// Spring Green color (0, 255, 127).
     SpringGreen,
+    /// Steel Blue color (70, 130, 180).
     SteelBlue,
+    /// Tan color (210, 180, 140).
     Tan,
+    /// Teal color (0, 128, 128).
     Teal,
+    /// Thistle color (216, 191, 216).
     Thistle,
+    /// Tomato color (255, 99, 71).
     Tomato,
+    /// Turquoise color (64, 224, 208).
     Turquoise,
+    /// Violet color (238, 130, 238).
     Violet,
+    /// Wheat color (245, 222, 179).
     Wheat,
+    /// White color (255, 255, 255).
     White,
+    /// White Smoke color (245, 245, 245).
     WhiteSmoke,
+    /// Yellow color (255, 255, 0).
     Yellow,
+    /// Yellow Green color (154, 205, 50).
     YellowGreen,
 }
-
 
 /// Lookup table mapping CSS named colors to their RGB values with ANSI fallbacks.
 ///
@@ -287,7 +435,10 @@ pub static WEB_COLOR_LOOKUP: LazyLock<HashMap<WebColor, RgbColor>> = LazyLock::n
 
     // A
     m.insert(AliceBlue, RgbColor::new(240, 248, 255, BrightCyan));
-    m.insert(AntiqueWhite, RgbColor::new(250, 235, 215, BasicColor::White));
+    m.insert(
+        AntiqueWhite,
+        RgbColor::new(250, 235, 215, BasicColor::White),
+    );
     m.insert(Aqua, RgbColor::new(0, 255, 255, BrightCyan));
     m.insert(Aquamarine, RgbColor::new(127, 255, 212, BrightCyan));
     m.insert(Azure, RgbColor::new(240, 255, 255, BrightWhite));
@@ -296,7 +447,10 @@ pub static WEB_COLOR_LOOKUP: LazyLock<HashMap<WebColor, RgbColor>> = LazyLock::n
     m.insert(Beige, RgbColor::new(245, 245, 220, BasicColor::White));
     m.insert(Bisque, RgbColor::new(255, 228, 196, BasicColor::White));
     m.insert(WebColor::Black, RgbColor::new(0, 0, 0, BasicColor::Black));
-    m.insert(BlanchedAlmond, RgbColor::new(255, 235, 205, BasicColor::White));
+    m.insert(
+        BlanchedAlmond,
+        RgbColor::new(255, 235, 205, BasicColor::White),
+    );
     m.insert(WebColor::Blue, RgbColor::new(0, 0, 255, BrightBlue));
     m.insert(BlueViolet, RgbColor::new(138, 43, 226, BasicColor::Magenta));
     m.insert(Brown, RgbColor::new(165, 42, 42, BasicColor::Red));
@@ -315,18 +469,27 @@ pub static WEB_COLOR_LOOKUP: LazyLock<HashMap<WebColor, RgbColor>> = LazyLock::n
     // D
     m.insert(DarkBlue, RgbColor::new(0, 0, 139, BasicColor::Blue));
     m.insert(DarkCyan, RgbColor::new(0, 139, 139, BasicColor::Cyan));
-    m.insert(DarkGoldenrod, RgbColor::new(184, 134, 11, BasicColor::Yellow));
+    m.insert(
+        DarkGoldenrod,
+        RgbColor::new(184, 134, 11, BasicColor::Yellow),
+    );
     m.insert(DarkGray, RgbColor::new(169, 169, 169, BrightBlack));
     m.insert(DarkGrey, RgbColor::new(169, 169, 169, BrightBlack));
     m.insert(DarkGreen, RgbColor::new(0, 100, 0, BasicColor::Green));
     m.insert(DarkKhaki, RgbColor::new(189, 183, 107, BasicColor::Yellow));
     m.insert(DarkMagenta, RgbColor::new(139, 0, 139, BasicColor::Magenta));
-    m.insert(DarkOliveGreen, RgbColor::new(85, 107, 47, BasicColor::Green));
+    m.insert(
+        DarkOliveGreen,
+        RgbColor::new(85, 107, 47, BasicColor::Green),
+    );
     m.insert(DarkOrange, RgbColor::new(255, 140, 0, BrightYellow));
     m.insert(DarkOrchid, RgbColor::new(153, 50, 204, BasicColor::Magenta));
     m.insert(DarkRed, RgbColor::new(139, 0, 0, BasicColor::Red));
     m.insert(DarkSalmon, RgbColor::new(233, 150, 122, BrightRed));
-    m.insert(DarkSeaGreen, RgbColor::new(143, 188, 143, BasicColor::Green));
+    m.insert(
+        DarkSeaGreen,
+        RgbColor::new(143, 188, 143, BasicColor::Green),
+    );
     m.insert(DarkSlateBlue, RgbColor::new(72, 61, 139, BasicColor::Blue));
     m.insert(DarkSlateGray, RgbColor::new(47, 79, 79, BrightBlack));
     m.insert(DarkSlateGrey, RgbColor::new(47, 79, 79, BrightBlack));
@@ -374,7 +537,10 @@ pub static WEB_COLOR_LOOKUP: LazyLock<HashMap<WebColor, RgbColor>> = LazyLock::n
     m.insert(LightBlue, RgbColor::new(173, 216, 230, BrightCyan));
     m.insert(LightCoral, RgbColor::new(240, 128, 128, BrightRed));
     m.insert(LightCyan, RgbColor::new(224, 255, 255, BrightCyan));
-    m.insert(LightGoldenrodYellow, RgbColor::new(250, 250, 210, BrightYellow));
+    m.insert(
+        LightGoldenrodYellow,
+        RgbColor::new(250, 250, 210, BrightYellow),
+    );
     m.insert(LightGray, RgbColor::new(211, 211, 211, BasicColor::White));
     m.insert(LightGrey, RgbColor::new(211, 211, 211, BasicColor::White));
     m.insert(LightGreen, RgbColor::new(144, 238, 144, BrightGreen));
@@ -393,37 +559,53 @@ pub static WEB_COLOR_LOOKUP: LazyLock<HashMap<WebColor, RgbColor>> = LazyLock::n
     // M
     m.insert(WebColor::Magenta, RgbColor::new(255, 0, 255, BrightMagenta));
     m.insert(Maroon, RgbColor::new(128, 0, 0, BasicColor::Red));
-    m.insert(MediumAquamarine, RgbColor::new(102, 205, 170, BasicColor::Cyan));
+    m.insert(
+        MediumAquamarine,
+        RgbColor::new(102, 205, 170, BasicColor::Cyan),
+    );
     m.insert(MediumBlue, RgbColor::new(0, 0, 205, BasicColor::Blue));
-    m.insert(MediumOrchid, RgbColor::new(186, 85, 211, BasicColor::Magenta));
-    m.insert(MediumPurple, RgbColor::new(147, 112, 219, BasicColor::Magenta));
-    m.insert(MediumSeaGreen, RgbColor::new(60, 179, 113, BasicColor::Green));
+    m.insert(
+        MediumOrchid,
+        RgbColor::new(186, 85, 211, BasicColor::Magenta),
+    );
+    m.insert(
+        MediumPurple,
+        RgbColor::new(147, 112, 219, BasicColor::Magenta),
+    );
+    m.insert(
+        MediumSeaGreen,
+        RgbColor::new(60, 179, 113, BasicColor::Green),
+    );
     m.insert(MediumSlateBlue, RgbColor::new(123, 104, 238, BrightBlue));
     m.insert(MediumSpringGreen, RgbColor::new(0, 250, 154, BrightGreen));
     m.insert(MediumTurquoise, RgbColor::new(72, 209, 204, BrightCyan));
-    m.insert(MediumVioletRed, RgbColor::new(199, 21, 133, BasicColor::Magenta));
+    m.insert(
+        MediumVioletRed,
+        RgbColor::new(199, 21, 133, BasicColor::Magenta),
+    );
     m.insert(MidnightBlue, RgbColor::new(25, 25, 112, BasicColor::Blue));
-    m.insert(MintCream, RgbColor::new(245, 255, 250, BasicColor::BrightWhite));
+    m.insert(MintCream, RgbColor::new(245, 255, 250, BrightWhite));
     m.insert(MistyRose, RgbColor::new(255, 228, 225, BasicColor::White));
     m.insert(Moccasin, RgbColor::new(255, 228, 181, BrightYellow));
 
     // N
     m.insert(NavajoWhite, RgbColor::new(255, 222, 173, BrightYellow));
     m.insert(Navy, RgbColor::new(0, 0, 128, BasicColor::Blue));
-
-    // O
     m.insert(OldLace, RgbColor::new(253, 245, 230, BasicColor::White));
     m.insert(Olive, RgbColor::new(128, 128, 0, BasicColor::Yellow));
     m.insert(OliveDrab, RgbColor::new(107, 142, 35, BasicColor::Green));
     m.insert(Orange, RgbColor::new(255, 165, 0, BrightYellow));
     m.insert(OrangeRed, RgbColor::new(255, 69, 0, BrightRed));
-    m.insert(Orchid, RgbColor::new(218, 112, 214, BrightMagenta));
+    m.insert(Orchid, RgbColor::new(218, 112, 214, BasicColor::Magenta));
 
     // P
     m.insert(PaleGoldenrod, RgbColor::new(238, 232, 170, BrightYellow));
     m.insert(PaleGreen, RgbColor::new(152, 251, 152, BrightGreen));
     m.insert(PaleTurquoise, RgbColor::new(175, 238, 238, BrightCyan));
-    m.insert(PaleVioletRed, RgbColor::new(219, 112, 147, BasicColor::Magenta));
+    m.insert(
+        PaleVioletRed,
+        RgbColor::new(219, 112, 147, BasicColor::Magenta),
+    );
     m.insert(PapayaWhip, RgbColor::new(255, 239, 213, BasicColor::White));
     m.insert(PeachPuff, RgbColor::new(255, 218, 185, BrightYellow));
     m.insert(Peru, RgbColor::new(205, 133, 63, BasicColor::Yellow));
@@ -433,7 +615,10 @@ pub static WEB_COLOR_LOOKUP: LazyLock<HashMap<WebColor, RgbColor>> = LazyLock::n
     m.insert(Purple, RgbColor::new(128, 0, 128, BasicColor::Magenta));
 
     // R
-    m.insert(RebeccaPurple, RgbColor::new(102, 51, 153, BasicColor::Magenta));
+    m.insert(
+        RebeccaPurple,
+        RgbColor::new(102, 51, 153, BasicColor::Magenta),
+    );
     m.insert(WebColor::Red, RgbColor::new(255, 0, 0, BrightRed));
     m.insert(RosyBrown, RgbColor::new(188, 143, 143, BasicColor::White));
     m.insert(RoyalBlue, RgbColor::new(65, 105, 225, BrightBlue));
@@ -476,12 +661,177 @@ pub static WEB_COLOR_LOOKUP: LazyLock<HashMap<WebColor, RgbColor>> = LazyLock::n
     m
 });
 
-
+/// An enumeration for specifying color for the terminal
 pub enum Color {
-    /// use a basic color which can be used in any terminal
+    /// Use a basic color which can be used in any terminal
     /// which supports color
     Basic(BasicColor),
-    /// specify a bespoke RGB color value (with a `BasicColor` as a fallback)
+    /// Specify a bespoke RGB color value (with a `BasicColor` as a fallback)
     Rgb(RgbColor),
-    Web(WebColor)
+    /// Use a named CSS/Web color
+    Web(WebColor),
+    /// Use the terminal's default foreground color
+    DefaultForeground,
+    /// Use the terminal's default background color
+    DefaultBackground,
+    /// Reset all colors
+    Reset,
+}
+
+/// Wrapper for basic colors that implements `RenderableWrapper`.
+#[derive(Debug, Clone, Copy)]
+pub struct BasicColorWrapper(pub BasicColor);
+
+impl RenderableWrapper for BasicColorWrapper {
+    fn render<T: Into<String>>(content: T) -> String {
+        let content = content.into();
+        format!(
+            "\x1b[{}m{}\x1b[0m",
+            color_code(BasicColorWrapper::DEFAULT_COLOR),
+            content
+        )
+    }
+
+    fn fallback_render<T: Into<String>>(content: T, _term: &Terminal) -> String {
+        let content = content.into();
+        format!(
+            "\x1b[{}m{}\x1b[0m",
+            color_code(BasicColorWrapper::DEFAULT_COLOR),
+            content
+        )
+    }
+}
+
+impl BasicColorWrapper {
+    const DEFAULT_COLOR: BasicColor = BasicColor::White;
+}
+
+/// Wrapper for RGB colors that implements `RenderableWrapper`.
+#[derive(Debug, Clone, Copy)]
+pub struct RgbColorWrapper(pub RgbColor);
+
+impl RenderableWrapper for RgbColorWrapper {
+    fn render<T: Into<String>>(content: T) -> String {
+        let content = content.into();
+        // For opportunistic render, we assume true color support
+        format!("\x1b[38;2;{};{};{}m{}\x1b[0m", 128, 128, 128, content)
+    }
+
+    fn fallback_render<T: Into<String>>(content: T, term: &Terminal) -> String {
+        let content = content.into();
+        let rgb = RgbColorWrapper::DEFAULT_COLOR;
+        // Check terminal color depth and use appropriate encoding
+        match term.color_depth {
+            crate::discovery::detection::ColorDepth::TrueColor => {
+                format!(
+                    "\x1b[38;2;{};{};{}m{}\x1b[0m",
+                    rgb.red(),
+                    rgb.green(),
+                    rgb.blue(),
+                    content
+                )
+            }
+            crate::discovery::detection::ColorDepth::Enhanced => {
+                // 256-color palette: ESC[38;5;<n>m
+                // Convert RGB to nearest 256-color index (simplified approach)
+                let r = rgb.red() as f32;
+                let g = rgb.green() as f32;
+                let b = rgb.blue() as f32;
+                // Simple 6x6x6 color cube approximation
+                let color_idx = ((r / 256.0 * 36.0).floor() as u8)
+                    + ((g / 256.0 * 6.0).floor() as u8)
+                    + ((b / 256.0 * 1.0).floor() as u8)
+                    + 16;
+                format!("\x1b[38;5;{}m{}\x1b[0m", color_idx, content)
+            }
+            _ => {
+                // Fallback to basic color
+                format!("\x1b[{}m{}\x1b[0m", color_code(rgb.fallback()), content)
+            }
+        }
+    }
+}
+
+impl RgbColorWrapper {
+    const DEFAULT_COLOR: RgbColor = RgbColor::new(128, 128, 128, BasicColor::White);
+}
+
+/// Wrapper for web colors that implements `RenderableWrapper`.
+#[derive(Debug, Clone, Copy)]
+pub struct WebColorWrapper(pub WebColor);
+
+impl RenderableWrapper for WebColorWrapper {
+    fn render<T: Into<String>>(content: T) -> String {
+        let content = content.into();
+        let rgb = WEB_COLOR_LOOKUP
+            .get(&WebColorWrapper::DEFAULT_COLOR)
+            .copied()
+            .unwrap_or(RgbColor::new(128, 128, 128, BasicColor::White));
+        format!(
+            "\x1b[38;2;{};{};{}m{}\x1b[0m",
+            rgb.red(),
+            rgb.green(),
+            rgb.blue(),
+            content
+        )
+    }
+
+    fn fallback_render<T: Into<String>>(content: T, term: &Terminal) -> String {
+        let content = content.into();
+        let rgb = WEB_COLOR_LOOKUP
+            .get(&WebColorWrapper::DEFAULT_COLOR)
+            .copied()
+            .unwrap_or(RgbColor::new(128, 128, 128, BasicColor::White));
+        match term.color_depth {
+            crate::discovery::detection::ColorDepth::TrueColor => {
+                format!(
+                    "\x1b[38;2;{};{};{}m{}\x1b[0m",
+                    rgb.red(),
+                    rgb.green(),
+                    rgb.blue(),
+                    content
+                )
+            }
+            crate::discovery::detection::ColorDepth::Enhanced => {
+                let r = rgb.red() as f32;
+                let g = rgb.green() as f32;
+                let b = rgb.blue() as f32;
+                // Simple 6x6x6 color cube approximation
+                let color_idx = ((r / 256.0 * 36.0).floor() as u8)
+                    + ((g / 256.0 * 6.0).floor() as u8)
+                    + ((b / 256.0 * 1.0).floor() as u8)
+                    + 16;
+                format!("\x1b[38;5;{}m{}\x1b[0m", color_idx, content)
+            }
+            _ => {
+                format!("\x1b[{}m{}\x1b[0m", color_code(rgb.fallback()), content)
+            }
+        }
+    }
+}
+
+impl WebColorWrapper {
+    const DEFAULT_COLOR: WebColor = WebColor::Gray;
+}
+
+/// Helper function to convert BasicColor to ANSI color code
+fn color_code(color: BasicColor) -> u8 {
+    match color {
+        BasicColor::Black => 30,
+        BasicColor::Red => 31,
+        BasicColor::Green => 32,
+        BasicColor::Yellow => 33,
+        BasicColor::Blue => 34,
+        BasicColor::Magenta => 35,
+        BasicColor::Cyan => 36,
+        BasicColor::White => 37,
+        BasicColor::BrightBlack => 90,
+        BasicColor::BrightRed => 91,
+        BasicColor::BrightGreen => 92,
+        BasicColor::BrightYellow => 93,
+        BasicColor::BrightBlue => 94,
+        BasicColor::BrightMagenta => 95,
+        BasicColor::BrightCyan => 96,
+        BasicColor::BrightWhite => 97,
+    }
 }
