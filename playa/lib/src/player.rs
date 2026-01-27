@@ -26,8 +26,12 @@ pub enum AudioPlayer {
     Ogg123,
     /// ALSA aplay.
     AlsaAplay,
+    /// macOS afplay.
+    MacOsAfplay,
     /// PulseAudio paplay.
     PulseaudioPaplay,
+    /// PulseAudio pacat (raw streaming).
+    PulseaudioPacat,
     /// PipeWire pw-play.
     Pipewire,
 }
@@ -45,7 +49,9 @@ impl AudioPlayer {
             AudioPlayer::Mpg123 => HeadlessAudio::Mpg123,
             AudioPlayer::Ogg123 => HeadlessAudio::Ogg123,
             AudioPlayer::AlsaAplay => HeadlessAudio::AlsaAplay,
+            AudioPlayer::MacOsAfplay => HeadlessAudio::MacOsAfplay,
             AudioPlayer::PulseaudioPaplay => HeadlessAudio::PulseaudioPaplay,
+            AudioPlayer::PulseaudioPacat => HeadlessAudio::PulseaudioPacat,
             AudioPlayer::Pipewire => HeadlessAudio::Pipewire,
         }
     }
@@ -138,7 +144,7 @@ impl Player {
     }
 }
 
-const ALL_PLAYERS: [AudioPlayer; 11] = [
+const ALL_PLAYERS: [AudioPlayer; 13] = [
     AudioPlayer::Mpv,
     AudioPlayer::FfPlay,
     AudioPlayer::Vlc,
@@ -148,7 +154,9 @@ const ALL_PLAYERS: [AudioPlayer; 11] = [
     AudioPlayer::Mpg123,
     AudioPlayer::Ogg123,
     AudioPlayer::AlsaAplay,
+    AudioPlayer::MacOsAfplay,
     AudioPlayer::PulseaudioPaplay,
+    AudioPlayer::PulseaudioPacat,
     AudioPlayer::Pipewire,
 ];
 
@@ -206,9 +214,24 @@ static PIPEWIRE_CODECS: &[Codec] = &[Codec::Pcm, Codec::Flac];
 
 static PIPEWIRE_FORMATS: &[AudioFileFormat] = &[AudioFileFormat::Wav, AudioFileFormat::Flac];
 
+// afplay supports many formats via macOS Core Audio
+static AFPLAY_CODECS: &[Codec] = &[Codec::Pcm, Codec::Flac, Codec::Alac, Codec::Mp3, Codec::Aac];
+
+static AFPLAY_FORMATS: &[AudioFileFormat] = &[
+    AudioFileFormat::Wav,
+    AudioFileFormat::Aiff,
+    AudioFileFormat::Flac,
+    AudioFileFormat::Mp3,
+    AudioFileFormat::M4a,
+];
+
+// pacat handles raw PCM only
+static PACAT_CODECS: &[Codec] = &[Codec::Pcm];
+static PACAT_FORMATS: &[AudioFileFormat] = &[AudioFileFormat::Wav];
+
 /// Static lookup table for all supported players.
 pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new(|| {
-    let mut map = HashMap::with_capacity(11);
+    let mut map = HashMap::with_capacity(13);
 
     // Tier 1: Full controllability (speed + volume + stream)
     map.insert(
@@ -358,6 +381,23 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
         },
     );
 
+    // Tier 1: macOS native with speed + volume (but no stdin)
+    map.insert(
+        AudioPlayer::MacOsAfplay,
+        Player {
+            id: AudioPlayer::MacOsAfplay,
+            sniff_program: HeadlessAudio::MacOsAfplay,
+            supported_codecs: AFPLAY_CODECS,
+            supported_formats: AFPLAY_FORMATS,
+            takes_stream_input: false, // File-only, no stdin
+            supplies_stream_output: false,
+            is_open_source: false, // Apple proprietary
+            resource_usage: ResourceUsage::Low,
+            supports_speed_control: true,  // -r 0.4-3.0
+            supports_volume_control: true, // -v 0.0-1.0
+        },
+    );
+
     // Tier 3: Volume only (Linux audio subsystems)
     map.insert(
         AudioPlayer::PulseaudioPaplay,
@@ -372,6 +412,23 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
             resource_usage: ResourceUsage::Low,
             supports_speed_control: false,
             supports_volume_control: true, // --volume=N
+        },
+    );
+
+    // Tier 4: stdin streaming, no controls
+    map.insert(
+        AudioPlayer::PulseaudioPacat,
+        Player {
+            id: AudioPlayer::PulseaudioPacat,
+            sniff_program: HeadlessAudio::PulseaudioPacat,
+            supported_codecs: PACAT_CODECS,
+            supported_formats: PACAT_FORMATS,
+            takes_stream_input: true, // Reads from stdin by default
+            supplies_stream_output: false,
+            is_open_source: true,
+            resource_usage: ResourceUsage::Low,
+            supports_speed_control: false,
+            supports_volume_control: false,
         },
     );
 
@@ -578,5 +635,44 @@ mod tests {
                 player
             );
         }
+    }
+
+    #[test]
+    fn player_score_afplay_tier1() {
+        let score = player_score(AudioPlayer::MacOsAfplay);
+        // afplay has speed(4) + volume(3) = 7 (no stream input)
+        assert_eq!(score.0, 7, "afplay: speed(4) + volume(3) = 7");
+    }
+
+    #[test]
+    fn player_score_pacat_tier4() {
+        let score = player_score(AudioPlayer::PulseaudioPacat);
+        // pacat has stream(2) only
+        assert_eq!(score.0, 2, "pacat: stream(2) = 2");
+    }
+
+    #[test]
+    fn match_players_wav_includes_afplay() {
+        let format = AudioFormat::new(AudioFileFormat::Wav, Some(Codec::Pcm));
+        let players = match_players(format);
+        assert!(
+            players.contains(&AudioPlayer::MacOsAfplay),
+            "afplay should match WAV/PCM format"
+        );
+    }
+
+    #[test]
+    fn match_players_wav_includes_pacat() {
+        let format = AudioFormat::new(AudioFileFormat::Wav, Some(Codec::Pcm));
+        let players = match_players(format);
+        assert!(
+            players.contains(&AudioPlayer::PulseaudioPacat),
+            "pacat should match WAV/PCM format"
+        );
+    }
+
+    #[test]
+    fn all_players_returns_13() {
+        assert_eq!(all_players().len(), 13, "all_players() should return 13 players");
     }
 }

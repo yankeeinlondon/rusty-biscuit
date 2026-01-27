@@ -33,7 +33,9 @@
 | [mpg123](https://www.mpg123.de/) | All | ❌ | ❌ | ✅ | ❌ | MP3 | MP3 |
 | [ogg123](https://github.com/xiph/vorbis-tools) | All | ❌ | ❌ | ✅ | ❌ | Vorbis, Opus, FLAC | OGG |
 | [aplay](https://linux.die.net/man/1/aplay) | Linux | ❌ | ❌ | ❌ | ❌ | PCM | WAV |
+| [afplay](https://ss64.com/osx/afplay.html) | macOS | ✅ | ✅ | ❌ | ❌ | PCM, FLAC, ALAC, MP3, AAC | WAV, AIFF, FLAC, MP3, M4A |
 | [paplay](https://manpages.ubuntu.com/manpages/trusty/man1/paplay.1.html) | Linux | ❌ | ✅ | ❌ | ❌ | PCM | WAV |
+| [pacat](https://www.freedesktop.org/wiki/Software/PulseAudio/) | Linux | ❌ | ❌ | ✅ | ❌ | PCM | WAV |
 | [PipeWire pw-play](https://docs.pipewire.org/page_man_pw-cat_1.html) | Linux | ❌ | ✅ | ❌ | ❌ | PCM, FLAC | WAV, FLAC |
 
 

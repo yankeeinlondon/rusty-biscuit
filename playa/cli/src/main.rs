@@ -1,10 +1,16 @@
+use std::path::PathBuf;
+
 use clap::{Parser, ValueHint};
 use sniff_lib::programs::InstalledHeadlessAudio;
-use std::path::PathBuf;
 
 use playa::{all_players, AudioFileFormat, AudioPlayer, Codec, Playa, PLAYER_LOOKUP};
 use shared::markdown::output::terminal::{for_terminal, TerminalOptions};
 use shared::markdown::Markdown;
+use shared::testing::strip_ansi_codes;
+
+const DIM: &str = "\x1b[2m";
+const RESET: &str = "\x1b[0m";
+const TABLE_DIVIDER: char = '\u{2502}';
 
 #[derive(Parser)]
 #[command(name = "playa")]
@@ -86,8 +92,8 @@ fn main() {
     let cli = Cli::parse();
 
     if cli.players {
-        let markdown = build_metadata_markdown();
-        render_markdown(&markdown);
+        let (markdown, missing) = build_metadata_markdown();
+        render_markdown(&markdown, &missing);
         return;
     }
 
@@ -110,13 +116,14 @@ fn main() {
     }
 }
 
-fn build_metadata_markdown() -> String {
+fn build_metadata_markdown() -> (String, Vec<String>) {
     let installed = InstalledHeadlessAudio::new();
     let missing = collect_missing_players(&installed);
-    build_metadata_markdown_with_missing(&missing)
+    let markdown = build_metadata_markdown_table();
+    (markdown, missing)
 }
 
-fn build_metadata_markdown_with_missing(missing: &[String]) -> String {
+fn build_metadata_markdown_table() -> String {
     let mut lines = Vec::new();
     lines.push("| Software | Codec Support | File Formats |".to_string());
     lines.push("|---|---|---|".to_string());
@@ -125,26 +132,11 @@ fn build_metadata_markdown_with_missing(missing: &[String]) -> String {
         let Some(metadata) = PLAYER_LOOKUP.get(player) else {
             continue;
         };
-        let website = metadata.website().trim();
-        let software = if website.is_empty() {
-            metadata.display_name().to_string()
-        } else {
-            format!("[{}]({})", metadata.display_name(), website)
-        };
+        let software = link_for_player(*player);
         let codecs = escape_markdown_cell(&format_codec_list(metadata.supported_codecs));
         let formats = escape_markdown_cell(&format_format_list(metadata.supported_formats));
         lines.push(format!("| {} | {} | {} |", software, codecs, formats));
     }
-
-    lines.push(String::new());
-    lines.push("Software not on this system:".to_string());
-    lines.push(String::new());
-    let missing_line = if missing.is_empty() {
-        "none".to_string()
-    } else {
-        missing.join(", ")
-    };
-    lines.push(format!("- {}", missing_line));
 
     lines.join("\n")
 }
@@ -153,7 +145,7 @@ fn collect_missing_players(installed: &InstalledHeadlessAudio) -> Vec<String> {
     all_players()
         .iter()
         .filter(|player| !installed.is_installed(player.as_headless_audio()))
-        .map(|player| link_for_player(*player))
+        .map(|player| display_name_for_player(*player))
         .collect()
 }
 
@@ -168,6 +160,13 @@ fn link_for_player(player: AudioPlayer) -> String {
                 format!("[{}]({})", metadata.display_name(), website)
             }
         })
+        .unwrap_or_else(|| format!("{player:?}"))
+}
+
+fn display_name_for_player(player: AudioPlayer) -> String {
+    PLAYER_LOOKUP
+        .get(&player)
+        .map(|metadata| metadata.display_name().to_string())
         .unwrap_or_else(|| format!("{player:?}"))
 }
 
@@ -221,12 +220,113 @@ fn escape_markdown_cell(value: &str) -> String {
     value.replace('|', "\\|").replace('\n', " ")
 }
 
-fn render_markdown(content: &str) {
+fn render_markdown(content: &str, missing_players: &[String]) {
     let markdown = Markdown::from(content.to_string());
     match for_terminal(&markdown, TerminalOptions::default()) {
-        Ok(rendered) => print!("{}", rendered),
+        Ok(rendered) => {
+            let output = dim_missing_rows(&rendered, missing_players);
+            print!("{}", output);
+        }
         Err(_) => println!("{}", markdown.content()),
     }
+}
+
+fn dim_missing_rows(rendered: &str, missing_players: &[String]) -> String {
+    if missing_players.is_empty() {
+        return rendered.to_string();
+    }
+
+    let mut output = String::with_capacity(rendered.len() + missing_players.len() * 12);
+    let mut current_row_missing = false;
+
+    for line_with_newline in rendered.split_inclusive('\n') {
+        let (line, newline) = line_with_newline
+            .strip_suffix('\n')
+            .map(|line| (line, "\n"))
+            .unwrap_or((line_with_newline, ""));
+
+        let plain_line = strip_osc8_sequences(&strip_ansi_codes(line));
+
+        if line.starts_with(TABLE_DIVIDER) {
+            if let Some(cell) = first_table_cell(&plain_line) {
+                let trimmed = cell.trim();
+                if !trimmed.is_empty() {
+                    current_row_missing =
+                        missing_players.iter().any(|name| trimmed.starts_with(name));
+                }
+            }
+
+            if current_row_missing {
+                output.push_str(&dim_table_row_line(line));
+            } else {
+                output.push_str(line);
+            }
+        } else {
+            current_row_missing = false;
+            output.push_str(line);
+        }
+
+        output.push_str(newline);
+    }
+
+    output
+}
+
+fn dim_table_row_line(line: &str) -> String {
+    let mut output = String::with_capacity(line.len() + 16);
+    let mut in_cell = false;
+
+    for ch in line.chars() {
+        if ch == TABLE_DIVIDER {
+            if in_cell {
+                output.push_str(RESET);
+            }
+            output.push(ch);
+            output.push_str(DIM);
+            in_cell = true;
+        } else {
+            output.push(ch);
+        }
+    }
+
+    if in_cell {
+        output.push_str(RESET);
+    }
+
+    output
+}
+
+fn first_table_cell(line: &str) -> Option<&str> {
+    let mut parts = line.split(TABLE_DIVIDER);
+    parts.next()?;
+    parts.next()
+}
+
+fn strip_osc8_sequences(input: &str) -> String {
+    let osc8_start = "\x1b]8;;";
+    let osc8_end = "\x1b]8;;\x07";
+    let mut output = String::new();
+    let mut remaining = input;
+
+    while let Some(start) = remaining.find(osc8_start) {
+        output.push_str(&remaining[..start]);
+        let after_start = &remaining[start + osc8_start.len()..];
+        let Some(bel_pos) = after_start.find('\x07') else {
+            output.push_str(&remaining[start..]);
+            return output;
+        };
+        let after_url = &after_start[bel_pos + 1..];
+        let Some(end_pos) = after_url.find(osc8_end) else {
+            output.push_str(&remaining[start..]);
+            return output;
+        };
+        let display = &after_url[..end_pos];
+        output.push_str(display);
+        remaining = &after_url[end_pos + osc8_end.len()..];
+    }
+
+    output.push_str(remaining);
+    output
 }
 
 #[cfg(test)]
@@ -235,19 +335,13 @@ mod tests {
 
     #[test]
     fn builds_meta_markdown_with_formatting_and_links() {
-        let missing = vec![
-            link_for_player(AudioPlayer::Mpv),
-            link_for_player(AudioPlayer::FfPlay),
-        ];
-
-        let markdown = build_metadata_markdown_with_missing(&missing);
+        let markdown = build_metadata_markdown_table();
 
         assert!(markdown.contains("| Software | Codec Support | File Formats |"));
         assert!(markdown.contains("PCM"));
         assert!(markdown.contains("Vorbis"));
         assert!(markdown.contains(".wav"));
-        assert!(markdown.contains("Software not on this system:\n\n- [mpv]("));
-        assert!(markdown.contains(", [FFplay]("));
+        assert!(markdown.contains(&link_for_player(AudioPlayer::Mpv)));
     }
 
     fn make_cli(
@@ -311,7 +405,16 @@ mod tests {
 
     #[test]
     fn cli_explicit_speed_and_volume() {
-        let cli = make_cli(false, false, false, false, false, false, Some(0.9), Some(0.3));
+        let cli = make_cli(
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            Some(0.9),
+            Some(0.3),
+        );
         assert_eq!(cli.speed, Some(0.9));
         assert_eq!(cli.volume, Some(0.3));
     }

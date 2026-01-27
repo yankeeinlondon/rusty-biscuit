@@ -331,6 +331,26 @@ fn build_player_command(
             // Note: volume/speed options ignored (not supported)
             source.apply(&mut command);
         }
+
+        // Tier 1: macOS native with speed + volume (but no stdin)
+        AudioPlayer::MacOsAfplay => {
+            // afplay -v <volume 0.0-1.0> -r <rate 0.4-3.0> <file>
+            if let Some(vol) = options.volume {
+                command.arg("-v").arg(vol.to_string());
+            }
+            if let Some(speed) = options.speed {
+                let clamped = speed.clamp(0.4, 3.0);
+                command.arg("-r").arg(clamped.to_string());
+            }
+            source.apply(&mut command);
+        }
+
+        // Tier 4: stdin streaming (playback is default mode)
+        AudioPlayer::PulseaudioPacat => {
+            // pacat reads from file or stdin by default in playback mode
+            // No volume/speed flags available
+            source.apply(&mut command);
+        }
     }
 
     Ok(command)
@@ -527,6 +547,25 @@ fn build_player_args(
         // Tier 4: No controllability
         AudioPlayer::AlsaAplay => {
             args.push("-q".into());
+            source.push_arg(&mut args);
+        }
+
+        // Tier 1: macOS native with speed + volume (but no stdin)
+        AudioPlayer::MacOsAfplay => {
+            if let Some(vol) = options.volume {
+                args.push("-v".into());
+                args.push(vol.to_string().into());
+            }
+            if let Some(speed) = options.speed {
+                let clamped = speed.clamp(0.4, 3.0);
+                args.push("-r".into());
+                args.push(clamped.to_string().into());
+            }
+            source.push_arg(&mut args);
+        }
+
+        // Tier 4: stdin streaming (playback is default mode)
+        AudioPlayer::PulseaudioPacat => {
             source.push_arg(&mut args);
         }
     }
@@ -826,6 +865,61 @@ mod tests {
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("-q")));
+    }
+
+    #[test]
+    fn build_command_afplay_basic() {
+        let metadata = get_metadata(AudioPlayer::MacOsAfplay);
+        let source = mock_source();
+        let options = PlaybackOptions::default();
+        let command =
+            build_player_command(AudioPlayer::MacOsAfplay, metadata, &source, &options).unwrap();
+
+        let args: Vec<_> = command.get_args().collect();
+        assert!(args.contains(&OsStr::new("/tmp/test.wav")));
+    }
+
+    #[test]
+    fn build_command_afplay_with_volume_and_speed() {
+        let metadata = get_metadata(AudioPlayer::MacOsAfplay);
+        let source = mock_source();
+        let options = PlaybackOptions::new().with_volume(0.5).with_speed(1.5);
+        let command =
+            build_player_command(AudioPlayer::MacOsAfplay, metadata, &source, &options).unwrap();
+
+        let args: Vec<_> = command.get_args().collect();
+        assert!(args.contains(&OsStr::new("-v")));
+        assert!(args.contains(&OsStr::new("0.5")));
+        assert!(args.contains(&OsStr::new("-r")));
+        assert!(args.contains(&OsStr::new("1.5")));
+    }
+
+    #[test]
+    fn build_command_afplay_clamps_speed() {
+        let metadata = get_metadata(AudioPlayer::MacOsAfplay);
+        let source = mock_source();
+        // Speed outside 0.4-3.0 range should be clamped
+        let options = PlaybackOptions::new().with_speed(5.0);
+        let command =
+            build_player_command(AudioPlayer::MacOsAfplay, metadata, &source, &options).unwrap();
+
+        let args: Vec<_> = command.get_args().collect();
+        assert!(args.contains(&OsStr::new("-r")));
+        assert!(args.contains(&OsStr::new("3"))); // clamped to 3.0
+    }
+
+    #[test]
+    fn build_command_pacat_basic() {
+        let metadata = get_metadata(AudioPlayer::PulseaudioPacat);
+        let source = mock_source();
+        let options = PlaybackOptions::default();
+        let command =
+            build_player_command(AudioPlayer::PulseaudioPacat, metadata, &source, &options)
+                .unwrap();
+
+        // pacat takes file path directly, no special flags
+        let args: Vec<_> = command.get_args().collect();
+        assert!(args.contains(&OsStr::new("/tmp/test.wav")));
     }
 
     // Async variant tests (feature-gated)
