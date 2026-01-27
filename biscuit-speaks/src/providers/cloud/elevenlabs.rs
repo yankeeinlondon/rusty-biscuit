@@ -19,12 +19,15 @@
 //! provider.speak("Hello, world!", &TtsConfig::default()).await?;
 //! ```
 
+use std::path::PathBuf;
+
 use schematic_schema::elevenlabs::{
     CreateSpeechBody, CreateSpeechRequest, CreateSoundEffectBody, CreateSoundEffectRequest,
     ElevenLabs, ListVoicesResponse, ModelInfo, VoiceResponseModel, VoiceSettings,
 };
 use schematic_schema::shared::reqwest;
 
+use crate::audio_cache::{write_atomic, CacheKey};
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
 #[cfg(feature = "playa")]
@@ -264,6 +267,85 @@ impl ElevenLabsProvider {
     pub fn has_api_key() -> bool {
         std::env::var("ELEVEN_LABS_API_KEY").is_ok()
             || std::env::var("ELEVENLABS_API_KEY").is_ok()
+    }
+
+    /// Generate audio to the cache path, returning the path and whether it was a cache hit.
+    ///
+    /// Speed IS included in the cache key because ElevenLabs bakes speed into the audio.
+    async fn generate_to_cache(
+        &self,
+        text: &str,
+        voice_id: &str,
+        model_id: &str,
+        speed: SpeedLevel,
+    ) -> Result<(PathBuf, bool), TtsError> {
+        // Build voice_id for cache key (combine voice_id + model_id)
+        let combined_id = format!("{}-{}", voice_id, model_id);
+
+        // Create cache key - speed IS included (ElevenLabs bakes speed via API)
+        let mut cache_key = CacheKey::new("elevenlabs", &combined_id, text, "mp3");
+        if speed != SpeedLevel::Normal {
+            cache_key = cache_key.with_speed(speed.value());
+        }
+
+        let cache_path = cache_key.cache_path();
+
+        // Check for cache hit
+        if cache_key.cache_exists() {
+            tracing::debug!(
+                voice_id = %voice_id,
+                model_id = %model_id,
+                cache_path = %cache_path.display(),
+                "Cache hit for ElevenLabs"
+            );
+            return Ok((cache_path, true));
+        }
+
+        // Cache miss - generate audio via API
+        tracing::debug!(
+            voice_id = %voice_id,
+            model_id = %model_id,
+            cache_path = %cache_path.display(),
+            "Cache miss for ElevenLabs, generating"
+        );
+
+        // Build the request body
+        let voice_settings = Self::resolve_speed(speed).map(|speed_val| VoiceSettings {
+            speed: Some(speed_val),
+            ..Default::default()
+        });
+
+        let body = CreateSpeechBody {
+            text: text.to_string(),
+            model_id: Some(model_id.to_string()),
+            voice_settings,
+            ..Default::default()
+        };
+
+        let request = CreateSpeechRequest::new(voice_id.to_string(), body);
+
+        // Make the API request
+        let audio_bytes = self
+            .client
+            .create_speech(request)
+            .await
+            .map_err(|e| TtsError::HttpError {
+                provider: "elevenlabs".into(),
+                message: e.to_string(),
+            })?;
+
+        // Write to cache atomically
+        write_atomic(&cache_path, &audio_bytes).map_err(|e| TtsError::TempFileError {
+            source: std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+        })?;
+
+        tracing::debug!(
+            audio_size = audio_bytes.len(),
+            cache_path = %cache_path.display(),
+            "Saved ElevenLabs audio to cache"
+        );
+
+        Ok((cache_path, false))
     }
 
     async fn resolve_voice_id(&self, config: &TtsConfig) -> Result<String, TtsError> {
@@ -590,18 +672,27 @@ impl ElevenLabsProvider {
 
 impl TtsExecutor for ElevenLabsProvider {
     async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
-        // Generate audio
-        let audio_bytes = self.generate_audio(text, config).await?;
+        // Resolve voice and model
+        let voice_id = self.resolve_voice_id(config).await?;
+        let model_id = config
+            .requested_model
+            .clone()
+            .unwrap_or_else(|| self.default_model_id.clone());
 
-        // Play the audio (MP3 format from ElevenLabs)
+        // Generate to cache (or get cached file)
+        let (audio_path, _cache_hit) = self
+            .generate_to_cache(text, &voice_id, &model_id, config.speed)
+            .await?;
+
+        // Play the audio file
         #[cfg(feature = "playa")]
         {
-            crate::playback::play_audio_bytes(&audio_bytes, AudioFormat::Mp3, config).await
+            crate::playback::play_audio_file(&audio_path, AudioFormat::Mp3, config).await
         }
         #[cfg(not(feature = "playa"))]
         {
             // Playback requires the playa feature
-            let _ = audio_bytes;
+            let _ = audio_path;
             Err(TtsError::NoAudioPlayer)
         }
     }
@@ -634,11 +725,26 @@ impl TtsExecutor for ElevenLabsProvider {
             "speak_with_result resolved voice_id"
         );
 
-        // Determine the model that will be used (same logic as generate_audio)
+        // Determine the model that will be used
         let model_used = config
             .requested_model
             .clone()
             .unwrap_or_else(|| self.default_model_id.clone());
+
+        // Generate to cache (or get cached file)
+        let (audio_path, cache_hit) = self
+            .generate_to_cache(text, &voice_id, &model_used, config.speed)
+            .await?;
+
+        // Play the audio file (requires playa feature)
+        #[cfg(feature = "playa")]
+        crate::playback::play_audio_file(&audio_path, AudioFormat::Mp3, config).await?;
+
+        #[cfg(not(feature = "playa"))]
+        {
+            let _ = (&audio_path, cache_hit);
+            return Err(TtsError::NoAudioPlayer);
+        }
 
         // Try to get full voice metadata from the voice list
         let mut voice = if let Ok(voices) = self.list_voices().await {
@@ -671,10 +777,18 @@ impl TtsExecutor for ElevenLabsProvider {
             voice.identifier = Some(voice_id.clone());
         }
 
-        // Call speak
-        self.speak(text, config).await?;
+        // Return the result with model info and cache metadata
+        #[cfg(feature = "playa")]
+        return Ok(SpeakResult::with_model(
+            TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
+            voice,
+            model_used,
+        )
+        .with_audio_file(audio_path)
+        .with_codec("mp3")
+        .with_cache_hit(cache_hit));
 
-        // Return the result with model info
+        #[cfg(not(feature = "playa"))]
         Ok(SpeakResult::with_model(
             TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
             voice,

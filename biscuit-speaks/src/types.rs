@@ -5,6 +5,7 @@
 //! - Configuration structs with builder pattern
 //! - Audio format and failover strategy types
 
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
@@ -854,7 +855,20 @@ pub struct SpeakResult {
     ///
     /// For ElevenLabs, this is the model ID like "eleven_multilingual_v2".
     /// For other providers, this may be None.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model_used: Option<String>,
+    /// Path to the audio file that was used (cached or newly generated).
+    ///
+    /// For file-based providers, this contains the path to the audio file
+    /// in the system temp directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_file_path: Option<PathBuf>,
+    /// The audio codec/format used (e.g., "wav", "mp3").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_codec: Option<String>,
+    /// Whether the audio was served from cache.
+    #[serde(default)]
+    pub cache_hit: bool,
 }
 
 impl SpeakResult {
@@ -864,6 +878,9 @@ impl SpeakResult {
             provider,
             voice,
             model_used: None,
+            audio_file_path: None,
+            audio_codec: None,
+            cache_hit: false,
         }
     }
 
@@ -873,7 +890,31 @@ impl SpeakResult {
             provider,
             voice,
             model_used: Some(model.into()),
+            audio_file_path: None,
+            audio_codec: None,
+            cache_hit: false,
         }
+    }
+
+    /// Set the audio file path.
+    #[must_use]
+    pub fn with_audio_file(mut self, path: PathBuf) -> Self {
+        self.audio_file_path = Some(path);
+        self
+    }
+
+    /// Set the audio codec.
+    #[must_use]
+    pub fn with_codec(mut self, codec: impl Into<String>) -> Self {
+        self.audio_codec = Some(codec.into());
+        self
+    }
+
+    /// Set whether this was a cache hit.
+    #[must_use]
+    pub fn with_cache_hit(mut self, hit: bool) -> Self {
+        self.cache_hit = hit;
+        self
     }
 }
 

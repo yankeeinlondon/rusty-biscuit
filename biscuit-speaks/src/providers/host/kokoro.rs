@@ -3,10 +3,12 @@
 //! Uses the `kokoro-tts` CLI tool for high-quality neural text-to-speech.
 //! Requires model files to be downloaded and available.
 
+use std::path::PathBuf;
 use std::process::Stdio;
 
 use tracing::debug;
 
+use crate::audio_cache::CacheKey;
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
 use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
@@ -203,27 +205,51 @@ impl KokoroTtsProvider {
 
         (gender, language)
     }
-}
 
-impl TtsExecutor for KokoroTtsProvider {
-    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
-        // Create a temporary directory for input and output files
-        // Note: We use a tempdir instead of NamedTempFile because some CLIs
-        // don't properly handle pre-existing files for output.
+    /// Generate audio to the cache path, returning the path and whether it was a cache hit.
+    ///
+    /// This method handles the caching logic:
+    /// 1. Check if cached file exists
+    /// 2. If not, generate to cache path
+    /// 3. Return the path and cache hit status
+    async fn generate_to_cache(
+        &self,
+        text: &str,
+        voice: &str,
+    ) -> Result<(PathBuf, bool), TtsError> {
+        // Create cache key - speed NOT included (playa handles playback speed)
+        let cache_key = CacheKey::new("kokoro", voice, text, "wav");
+        let cache_path = cache_key.cache_path();
+
+        // Check for cache hit
+        if cache_key.cache_exists() {
+            debug!(
+                provider = Self::PROVIDER_NAME,
+                voice = voice,
+                cache_path = %cache_path.display(),
+                "Cache hit for Kokoro TTS"
+            );
+            return Ok((cache_path, true));
+        }
+
+        // Cache miss - generate audio
+        debug!(
+            provider = Self::PROVIDER_NAME,
+            voice = voice,
+            cache_path = %cache_path.display(),
+            "Cache miss for Kokoro TTS, generating"
+        );
+
+        // Create a temporary directory for input file
         let temp_dir = tempfile::tempdir().map_err(|e| TtsError::TempFileError { source: e })?;
 
         // Create input text file
         let input_path = temp_dir.path().join("input.txt");
         tokio::fs::write(&input_path, text).await?;
 
-        // Define output audio path (file doesn't exist yet)
-        let output_path = temp_dir.path().join("output.wav");
-
-        let voice = Self::resolve_voice(config);
-
         let mut cmd = tokio::process::Command::new("kokoro-tts");
         cmd.arg(&input_path);
-        cmd.arg(&output_path);
+        cmd.arg(&cache_path);
         cmd.arg("--voice").arg(voice);
         cmd.arg("--format").arg("wav");
 
@@ -263,15 +289,26 @@ impl TtsExecutor for KokoroTtsProvider {
             });
         }
 
-        // Play the generated audio file
+        Ok((cache_path, false))
+    }
+}
+
+impl TtsExecutor for KokoroTtsProvider {
+    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        let voice = Self::resolve_voice(config);
+
+        // Generate to cache (or get cached file)
+        let (audio_path, _cache_hit) = self.generate_to_cache(text, voice).await?;
+
+        // Play the audio file
         #[cfg(feature = "playa")]
         {
-            crate::playback::play_audio_file(&output_path, crate::types::AudioFormat::Wav, config).await
+            crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config).await
         }
         #[cfg(not(feature = "playa"))]
         {
             // Playback requires the playa feature
-            let _ = output_path;
+            let _ = audio_path;
             Err(TtsError::NoAudioPlayer)
         }
     }
@@ -294,41 +331,54 @@ impl TtsExecutor for KokoroTtsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<SpeakResult, TtsError> {
-        // If a specific voice was requested, use it directly
-        if let Some(voice_name) = &config.requested_voice {
-            self.speak(text, config).await?;
+        // Determine the voice to use
+        let voice_name = if let Some(voice) = &config.requested_voice {
+            voice.clone()
+        } else {
+            // No specific voice requested - select the best one based on constraints
+            let voices = self.list_voices().await?;
+            let selected = Self::select_best_voice(&voices, config).ok_or_else(|| {
+                TtsError::VoiceEnumerationFailed {
+                    provider: Self::PROVIDER_NAME.into(),
+                    message: "No matching voice found for the given constraints".into(),
+                }
+            })?;
+            selected.name
+        };
 
-            let (gender, language) = Self::parse_voice_prefix(voice_name);
-            let voice = Voice::new(voice_name)
-                .with_gender(gender)
-                .with_quality(VoiceQuality::Excellent)
-                .with_language(language);
+        // Generate to cache (or get cached file)
+        let (audio_path, cache_hit) = self.generate_to_cache(text, &voice_name).await?;
 
-            return Ok(SpeakResult::new(
-                TtsProvider::Host(HostTtsProvider::KokoroTts),
-                voice,
-            ));
+        // Play the audio file (requires playa feature)
+        #[cfg(feature = "playa")]
+        crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config).await?;
+
+        #[cfg(not(feature = "playa"))]
+        {
+            let _ = (&audio_path, cache_hit);
+            return Err(TtsError::NoAudioPlayer);
         }
 
-        // No specific voice requested - select the best one based on constraints
-        let voices = self.list_voices().await?;
-        let selected_voice = Self::select_best_voice(&voices, config).ok_or_else(|| {
-            TtsError::VoiceEnumerationFailed {
-                provider: Self::PROVIDER_NAME.into(),
-                message: "No matching voice found for the given constraints".into(),
-            }
-        })?;
+        // Build voice metadata
+        let (gender, language) = Self::parse_voice_prefix(&voice_name);
+        let voice = Voice::new(&voice_name)
+            .with_gender(gender)
+            .with_quality(VoiceQuality::Excellent)
+            .with_language(language);
 
-        // Update config to use the selected voice
-        let mut config_with_voice = config.clone();
-        config_with_voice.requested_voice = Some(selected_voice.name.clone());
+        #[cfg(feature = "playa")]
+        return Ok(SpeakResult::new(
+            TtsProvider::Host(HostTtsProvider::KokoroTts),
+            voice,
+        )
+        .with_audio_file(audio_path)
+        .with_codec("wav")
+        .with_cache_hit(cache_hit));
 
-        // Speak with the selected voice
-        self.speak(text, &config_with_voice).await?;
-
+        #[cfg(not(feature = "playa"))]
         Ok(SpeakResult::new(
             TtsProvider::Host(HostTtsProvider::KokoroTts),
-            selected_voice,
+            voice,
         ))
     }
 }

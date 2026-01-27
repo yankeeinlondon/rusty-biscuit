@@ -439,6 +439,7 @@ dependencies = [
 name = "biscuit-speaks"
 version = "0.1.0"
 dependencies = [
+ "biscuit-hash",
  "dirs 6.0.0",
  "gender_guesser",
  "playa",
@@ -460,9 +461,11 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "predicates",
+ "serde",
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
  "terminal_size",
+ "termini",
  "tracing",
  "tracing-subscriber",
 ]

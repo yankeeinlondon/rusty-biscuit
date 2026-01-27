@@ -6,12 +6,14 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tempfile::NamedTempFile;
 use tracing::debug;
 
+use crate::audio_cache::CacheKey;
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{AudioFormat, Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
+#[cfg(feature = "playa")]
+use crate::types::AudioFormat;
+use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
 
 /// gTTS (Google Text-to-Speech) provider.
 ///
@@ -152,37 +154,38 @@ impl GttsProvider {
                 .with_identifier(lang_code), // Use language code as identifier for gTTS
         )
     }
-}
 
-impl TtsExecutor for GttsProvider {
-    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
-        // Check cached connectivity status for fast fail
-        if !self.connectivity_ok.load(Ordering::Relaxed) {
-            return Err(TtsError::ProviderFailed {
-                provider: Self::PROVIDER_NAME.into(),
-                message: "Network connectivity unavailable (cached)".into(),
-            });
+    /// Generate audio to the cache path, returning the path and whether it was a cache hit.
+    ///
+    /// Speed is NOT included in the cache key because playa handles playback speed.
+    async fn generate_to_cache(&self, text: &str, lang: &str) -> Result<(PathBuf, bool), TtsError> {
+        // Create cache key - speed NOT included (playa handles playback speed)
+        let cache_key = CacheKey::new("gtts", lang, text, "mp3");
+        let cache_path = cache_key.cache_path();
+
+        // Check for cache hit
+        if cache_key.cache_exists() {
+            debug!(
+                provider = Self::PROVIDER_NAME,
+                lang = lang,
+                cache_path = %cache_path.display(),
+                "Cache hit for gTTS"
+            );
+            return Ok((cache_path, true));
         }
 
-        let lang = Self::resolve_language(config);
-
-        // Create temp file for audio output
-        let temp_file = NamedTempFile::with_suffix(format!(".{}", AudioFormat::Mp3.extension()))
-            .map_err(|e| TtsError::TempFileError { source: e })?;
-
-        let output_path = temp_file.path().to_string_lossy().to_string();
-
+        // Cache miss - generate audio
         debug!(
             provider = Self::PROVIDER_NAME,
             lang = lang,
-            output = %output_path,
-            "Generating speech with gTTS"
+            cache_path = %cache_path.display(),
+            "Cache miss for gTTS, generating"
         );
 
-        // Run gtts-cli to generate audio
+        // Run gtts-cli to generate audio directly to cache path
         let output = tokio::process::Command::new(Self::binary_path())
             .arg("--output")
-            .arg(&output_path)
+            .arg(&cache_path)
             .arg("--lang")
             .arg(lang)
             .arg(text)
@@ -207,15 +210,34 @@ impl TtsExecutor for GttsProvider {
             });
         }
 
-        // Play the generated audio
+        Ok((cache_path, false))
+    }
+}
+
+impl TtsExecutor for GttsProvider {
+    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        // Check cached connectivity status for fast fail
+        if !self.connectivity_ok.load(Ordering::Relaxed) {
+            return Err(TtsError::ProviderFailed {
+                provider: Self::PROVIDER_NAME.into(),
+                message: "Network connectivity unavailable (cached)".into(),
+            });
+        }
+
+        let lang = Self::resolve_language(config);
+
+        // Generate to cache (or get cached file)
+        let (audio_path, _cache_hit) = self.generate_to_cache(text, lang).await?;
+
+        // Play the audio file
         #[cfg(feature = "playa")]
         {
-            crate::playback::play_audio_file(temp_file.path(), AudioFormat::Mp3, config).await
+            crate::playback::play_audio_file(&audio_path, AudioFormat::Mp3, config).await
         }
         #[cfg(not(feature = "playa"))]
         {
             // Playback requires the playa feature
-            let _ = temp_file;
+            let _ = audio_path;
             Err(TtsError::NoAudioPlayer)
         }
     }
@@ -244,6 +266,14 @@ impl TtsExecutor for GttsProvider {
         text: &str,
         config: &TtsConfig,
     ) -> Result<SpeakResult, TtsError> {
+        // Check cached connectivity status for fast fail
+        if !self.connectivity_ok.load(Ordering::Relaxed) {
+            return Err(TtsError::ProviderFailed {
+                provider: Self::PROVIDER_NAME.into(),
+                message: "Network connectivity unavailable (cached)".into(),
+            });
+        }
+
         // Resolve language code
         let lang_code = Self::resolve_language(config);
 
@@ -270,10 +300,30 @@ impl TtsExecutor for GttsProvider {
                 .with_identifier(lang_code)
         };
 
-        // Call speak
-        self.speak(text, config).await?;
+        // Generate to cache (or get cached file)
+        let (audio_path, cache_hit) = self.generate_to_cache(text, lang_code).await?;
 
-        // Return the result
+        // Play the audio file (requires playa feature)
+        #[cfg(feature = "playa")]
+        crate::playback::play_audio_file(&audio_path, AudioFormat::Mp3, config).await?;
+
+        #[cfg(not(feature = "playa"))]
+        {
+            let _ = (&audio_path, cache_hit);
+            return Err(TtsError::NoAudioPlayer);
+        }
+
+        // Return the result with cache metadata
+        #[cfg(feature = "playa")]
+        return Ok(SpeakResult::new(
+            TtsProvider::Host(HostTtsProvider::Gtts),
+            voice,
+        )
+        .with_audio_file(audio_path)
+        .with_codec("mp3")
+        .with_cache_hit(cache_hit));
+
+        #[cfg(not(feature = "playa"))]
         Ok(SpeakResult::new(
             TtsProvider::Host(HostTtsProvider::Gtts),
             voice,

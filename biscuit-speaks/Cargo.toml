@@ -27,6 +27,7 @@ tempfile = "3"
 which = "8"
 schematic-schema = { path = "../schematic/schema" }
 gender_guesser = "0.2"
+biscuit-hash = { path = "../biscuit-hash" }
 
 [dev-dependencies]
 reqwest = "0.12"

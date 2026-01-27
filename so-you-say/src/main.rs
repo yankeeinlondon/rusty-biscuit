@@ -228,6 +228,28 @@ fn print_speak_result(result: &SpeakResult, volume: VolumeLevel, speed: SpeedLev
             model
         );
     }
+    // Show Audio File path if available
+    if let Some(ref path) = result.audio_file_path {
+        println!(
+            "  {}: {}",
+            "Audio File".dimmed(),
+            path.display()
+        );
+    }
+    // Show Audio Codec if available
+    if let Some(ref codec) = result.audio_codec {
+        println!(
+            "  {}: {}",
+            "Codec".dimmed(),
+            codec
+        );
+    }
+    // Show Cache status
+    println!(
+        "  {}: {}",
+        "Cache".dimmed(),
+        if result.cache_hit { "hit" } else { "miss" }
+    );
 }
 
 fn provider_supports_voice_listing(provider: &TtsProvider) -> bool {
