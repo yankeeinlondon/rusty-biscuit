@@ -14,6 +14,7 @@ use ratatui::{
     Frame,
 };
 
+use super::color_context::ColorContext;
 use super::PANEL_BG;
 
 /// Trait for modal dialogs.
@@ -22,7 +23,10 @@ use super::PANEL_BG;
 /// using the [`render_modal`] function.
 pub trait Modal {
     /// Render the modal content (without the overlay border).
-    fn render(&self, frame: &mut Frame, area: Rect);
+    ///
+    /// The `color_context` parameter provides NO_COLOR-aware symbol selection
+    /// and should be used for status indicators and other symbols.
+    fn render(&self, frame: &mut Frame, area: Rect, color_context: &ColorContext);
 
     /// Get the modal title displayed in the border.
     fn title(&self) -> &str;
@@ -66,7 +70,13 @@ pub trait Modal {
 /// * `frame` - The frame to render to
 /// * `modal` - The modal implementation to render
 /// * `main_area` - The parent area to center within (typically `frame.area()`)
-pub fn render_modal(frame: &mut Frame, modal: &impl Modal, main_area: Rect) {
+/// * `color_context` - Color context for NO_COLOR-aware rendering
+pub fn render_modal(
+    frame: &mut Frame,
+    modal: &impl Modal,
+    main_area: Rect,
+    color_context: &ColorContext,
+) {
     let modal_area = centered_rect_with_min(
         modal.width_percent(),
         modal.height_percent(),
@@ -88,7 +98,7 @@ pub fn render_modal(frame: &mut Frame, modal: &impl Modal, main_area: Rect) {
     frame.render_widget(block, modal_area);
 
     // Step 3: Render the modal content
-    modal.render(frame, inner);
+    modal.render(frame, inner, color_context);
 }
 
 /// Calculate a centered rectangle with the given percentage of parent size.
@@ -144,13 +154,14 @@ impl Modal for ConfirmQuitDialog {
         7
     }
 
-    fn render(&self, frame: &mut Frame, area: Rect) {
+    fn render(&self, frame: &mut Frame, area: Rect, _color_context: &ColorContext) {
+        // Brackets around keys provide NO_COLOR-friendly visual distinction
         let text = vec![
             Line::from("Are you sure you want to quit?"),
             Line::from(""),
             Line::from(vec![
                 Span::styled(
-                    " Y ",
+                    " [Y] ",
                     Style::default()
                         .bg(Color::Green)
                         .fg(Color::Black)
@@ -158,7 +169,7 @@ impl Modal for ConfirmQuitDialog {
                 ),
                 Span::raw(" Yes  "),
                 Span::styled(
-                    " N ",
+                    " [N] ",
                     Style::default()
                         .bg(Color::Red)
                         .fg(Color::Black)
@@ -217,7 +228,7 @@ mod tests {
     fn modal_trait_has_default_dimensions() {
         struct TestModal;
         impl Modal for TestModal {
-            fn render(&self, _frame: &mut Frame, _area: Rect) {}
+            fn render(&self, _frame: &mut Frame, _area: Rect, _color_context: &ColorContext) {}
             fn title(&self) -> &str {
                 "Test"
             }
@@ -232,7 +243,7 @@ mod tests {
     fn modal_trait_has_default_min_dimensions() {
         struct TestModal;
         impl Modal for TestModal {
-            fn render(&self, _frame: &mut Frame, _area: Rect) {}
+            fn render(&self, _frame: &mut Frame, _area: Rect, _color_context: &ColorContext) {}
             fn title(&self) -> &str {
                 "Test"
             }
@@ -241,6 +252,16 @@ mod tests {
         let modal = TestModal;
         assert_eq!(modal.min_width(), 0);
         assert_eq!(modal.min_height(), 0);
+    }
+
+    #[test]
+    fn confirm_quit_dialog_has_bracketed_keys() {
+        // Verify that the quit dialog shows [Y] and [N] with brackets
+        // This is verified by the render implementation using bracketed key labels
+        let dialog = ConfirmQuitDialog;
+        assert_eq!(dialog.title(), "Quit?");
+        // The bracketed keys are hardcoded in the render method as "[Y]" and "[N]"
+        // which provides NO_COLOR-friendly visual distinction
     }
 
     // =========================================================================

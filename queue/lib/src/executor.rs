@@ -175,21 +175,21 @@ impl TaskExecutor {
         let handle = tokio::spawn(async move {
             Self::execute_task(task, tx, task_pane_id, task_handles.clone()).await;
         });
-        if let Ok(mut handles) = self.task_handles.lock() {
-            if !handle.is_finished() {
-                handles.insert(task_id, handle);
-            }
+        if let Ok(mut handles) = self.task_handles.lock()
+            && !handle.is_finished()
+        {
+            handles.insert(task_id, handle);
         }
     }
 
     /// Cancels a scheduled task if it hasn't started executing.
     #[must_use]
     pub fn cancel_task(&self, task_id: u64) -> bool {
-        if let Ok(mut handles) = self.task_handles.lock() {
-            if let Some(handle) = handles.remove(&task_id) {
-                handle.abort();
-                return true;
-            }
+        if let Ok(mut handles) = self.task_handles.lock()
+            && let Some(handle) = handles.remove(&task_id)
+        {
+            handle.abort();
+            return true;
         }
         false
     }

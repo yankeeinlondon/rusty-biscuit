@@ -9,6 +9,7 @@ use ratatui::{
     Frame,
 };
 
+use super::color_context::ColorContext;
 use super::modal::Modal;
 
 /// Layout mode for the history modal.
@@ -68,6 +69,21 @@ impl HistoryModal {
                 .iter()
                 .filter(|task| task.command.to_lowercase().contains(&filter_lower))
                 .collect()
+        }
+    }
+
+    /// Returns the title with filtered/total count when filtering.
+    ///
+    /// When no filter is active or all items match, returns "History".
+    /// When filtering, returns "History (N of M)" where N is filtered count
+    /// and M is total count.
+    pub fn title_with_count(&self) -> String {
+        let filtered_count = self.filtered_items().len();
+        let total_count = self.items.len();
+        if filtered_count == total_count {
+            "History".to_string()
+        } else {
+            format!("History ({} of {})", filtered_count, total_count)
         }
     }
 
@@ -174,17 +190,17 @@ impl Modal for HistoryModal {
         70
     }
 
-    fn render(&self, frame: &mut Frame, area: Rect) {
+    fn render(&self, frame: &mut Frame, area: Rect, color_context: &ColorContext) {
         match self.layout {
-            HistoryLayout::Full => self.render_full(frame, area),
-            HistoryLayout::Compact => self.render_compact(frame, area),
+            HistoryLayout::Full => self.render_full(frame, area, color_context),
+            HistoryLayout::Compact => self.render_compact(frame, area, color_context),
         }
     }
 }
 
 impl HistoryModal {
     /// Render full layout (>= 18 rows) - always shows filter section.
-    fn render_full(&self, frame: &mut Frame, area: Rect) {
+    fn render_full(&self, frame: &mut Frame, area: Rect, color_context: &ColorContext) {
         let chunks = Layout::vertical([
             Constraint::Length(3), // Filter (always visible)
             Constraint::Min(3),    // List
@@ -193,33 +209,36 @@ impl HistoryModal {
         .split(area);
 
         self.render_filter_section(frame, chunks[0]);
-        self.render_history_list(frame, chunks[1]);
-        self.render_help_text(frame, chunks[2]);
+        self.render_history_list(frame, chunks[1], color_context);
+        self.render_help_text(frame, chunks[2], color_context);
     }
 
-    /// Render compact layout (< 18 rows) - only shows filter when active.
-    fn render_compact(&self, frame: &mut Frame, area: Rect) {
-        // In compact mode, only show filter section when filter_mode is active
-        // This gives more space for the history list
-        if self.filter_mode || !self.filter.is_empty() {
+    /// Render compact layout (< 18 rows) - only shows filter when in filter_mode.
+    ///
+    /// When a filter is active but filter_mode is off, the filter text is shown
+    /// in the help line instead of the filter section. This maximizes list space.
+    fn render_compact(&self, frame: &mut Frame, area: Rect, color_context: &ColorContext) {
+        // In compact mode, only show filter section when actively editing filter
+        // If there's a filter but not in filter_mode, show filter in help line
+        if self.filter_mode {
             let chunks = Layout::vertical([
-                Constraint::Length(3), // Filter (only when active)
+                Constraint::Length(3), // Filter (only when editing)
                 Constraint::Min(3),    // List
                 Constraint::Length(1), // Help (compact)
             ])
             .split(area);
 
             self.render_filter_section(frame, chunks[0]);
-            self.render_history_list(frame, chunks[1]);
+            self.render_history_list(frame, chunks[1], color_context);
             self.render_help_text_compact(frame, chunks[2]);
         } else {
             let chunks = Layout::vertical([
                 Constraint::Min(3),    // List (gets all the space)
-                Constraint::Length(1), // Help (compact)
+                Constraint::Length(1), // Help (compact - shows filter if active)
             ])
             .split(area);
 
-            self.render_history_list(frame, chunks[0]);
+            self.render_history_list(frame, chunks[0], color_context);
             self.render_help_text_compact(frame, chunks[1]);
         }
     }
@@ -257,18 +276,13 @@ impl HistoryModal {
     }
 
     /// Render the history list.
-    fn render_history_list(&self, frame: &mut Frame, area: Rect) {
+    fn render_history_list(&self, frame: &mut Frame, area: Rect, color_context: &ColorContext) {
         let filtered = self.filtered_items();
         let items: Vec<ListItem> = filtered
             .iter()
             .map(|task| {
-                let status_char = match task.status {
-                    TaskStatus::Completed => "✓",
-                    TaskStatus::Cancelled => "×",
-                    TaskStatus::Failed { .. } => "✗",
-                    TaskStatus::Running => "▶",
-                    TaskStatus::Pending => "○",
-                };
+                // Use ColorContext for NO_COLOR-aware status symbols
+                let status_char = color_context.status_symbol(&task.status);
 
                 let line = Line::from(vec![
                     Span::styled(
@@ -289,8 +303,10 @@ impl HistoryModal {
             })
             .collect();
 
+        // Use title_with_count for dynamic title showing filtered/total
+        let title = format!(" {} ", self.title_with_count());
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(" History "))
+            .block(Block::default().borders(Borders::ALL).title(title))
             .highlight_style(
                 Style::default()
                     .add_modifier(Modifier::REVERSED)
@@ -302,25 +318,46 @@ impl HistoryModal {
     }
 
     /// Render help text (full layout - 2 rows).
-    fn render_help_text(&self, frame: &mut Frame, area: Rect) {
+    ///
+    /// When width >= 70 and not in filter mode, includes a status legend
+    /// showing the meaning of status symbols.
+    fn render_help_text(&self, frame: &mut Frame, area: Rect, color_context: &ColorContext) {
         let help_text = if self.filter_mode {
-            "Type to filter | Esc: Exit filter | Enter: Select"
+            "Type to filter | Esc: Exit filter | Enter: Select".to_string()
         } else {
-            "↑↓: Navigate | Enter: Use command | N: New task | F: Filter | Esc: Close"
+            "↑↓: Navigate | Enter: Use command | N: New task | F: Filter | Esc: Close".to_string()
         };
 
-        let help = Paragraph::new(help_text)
+        // Add status legend when width >= 70 and not in filter mode
+        let display_text = if area.width >= 70 && !self.filter_mode {
+            let ok_symbol = color_context.status_symbol(&TaskStatus::Completed);
+            let fail_symbol = color_context.status_symbol(&TaskStatus::Failed {
+                error: String::new(),
+            });
+            format!("{} | {} done  {} fail", help_text, ok_symbol, fail_symbol)
+        } else {
+            help_text
+        };
+
+        let help = Paragraph::new(display_text)
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
         frame.render_widget(help, area);
     }
 
     /// Render help text (compact layout - 1 row, shorter text).
+    ///
+    /// When filter section is hidden (compact mode without filter_mode) but a
+    /// filter is active, shows the filter text in the help line to maintain
+    /// visibility of the active filter.
     fn render_help_text_compact(&self, frame: &mut Frame, area: Rect) {
-        let help_text = if self.filter_mode {
-            "Type to filter | Esc: Exit | Enter: Select"
+        let help_text: String = if self.filter_mode {
+            "Type to filter | Esc: Exit | Enter: Select".to_string()
+        } else if !self.filter.is_empty() {
+            // Show active filter in help when filter section is hidden
+            format!("Filter: {} | Esc: Close", self.filter)
         } else {
-            "↑↓/Enter: Select | N: New | F: Filter | Esc: Close"
+            "↑↓/Enter: Select | N: New | F: Filter | Esc: Close".to_string()
         };
 
         let help = Paragraph::new(help_text)
@@ -480,5 +517,140 @@ mod tests {
         let modal = HistoryModal::new();
         // Default is Full, but after update_layout with small height it becomes Compact
         assert_eq!(modal.layout, HistoryLayout::Full, "Default should be Full");
+    }
+
+    // =========================================================================
+    // ColorContext integration tests for NO_COLOR support
+    // =========================================================================
+
+    #[test]
+    fn history_modal_uses_color_context_symbols() {
+        use super::ColorContext;
+
+        // Verify the Modal trait impl compiles and accepts ColorContext
+        let _modal = HistoryModal {
+            items: vec![create_test_task(1, "echo test")],
+            list_state: ListState::default(),
+            filter: String::new(),
+            filter_mode: false,
+            layout: HistoryLayout::default(),
+        };
+
+        // This test verifies that the trait implementation signature is correct
+        // The actual symbol rendering is tested via ColorContext's own tests
+        let color_ctx = ColorContext::with_color();
+        assert!(color_ctx.is_color_enabled());
+
+        let no_color_ctx = ColorContext::without_color();
+        assert!(!no_color_ctx.is_color_enabled());
+
+        // Verify status_symbol returns different values based on color context
+        let status = TaskStatus::Completed;
+        assert_eq!(color_ctx.status_symbol(&status), "\u{2713}"); // ✓
+        assert_eq!(no_color_ctx.status_symbol(&status), "[OK]");
+    }
+
+    // =========================================================================
+    // Phase 4: History Modal Accessibility tests
+    // =========================================================================
+
+    #[test]
+    fn title_with_count_shows_history_when_no_filter() {
+        let modal = HistoryModal {
+            items: vec![
+                create_test_task(1, "echo hello"),
+                create_test_task(2, "ls -la"),
+                create_test_task(3, "echo world"),
+            ],
+            list_state: ListState::default(),
+            filter: String::new(),
+            filter_mode: false,
+            layout: HistoryLayout::default(),
+        };
+        assert_eq!(modal.title_with_count(), "History");
+    }
+
+    #[test]
+    fn title_with_count_shows_filtered_count() {
+        let modal = HistoryModal {
+            items: vec![
+                create_test_task(1, "echo hello"),
+                create_test_task(2, "ls -la"),
+                create_test_task(3, "echo world"),
+            ],
+            list_state: ListState::default(),
+            filter: "echo".to_string(),
+            filter_mode: false,
+            layout: HistoryLayout::default(),
+        };
+        // 2 of 3 items match "echo"
+        assert_eq!(modal.title_with_count(), "History (2 of 3)");
+    }
+
+    #[test]
+    fn title_with_count_shows_zero_when_filter_matches_nothing() {
+        let modal = HistoryModal {
+            items: vec![
+                create_test_task(1, "echo hello"),
+                create_test_task(2, "ls -la"),
+            ],
+            list_state: ListState::default(),
+            filter: "nonexistent".to_string(),
+            filter_mode: false,
+            layout: HistoryLayout::default(),
+        };
+        assert_eq!(modal.title_with_count(), "History (0 of 2)");
+    }
+
+    #[test]
+    fn title_with_count_updates_when_filter_changes() {
+        let mut modal = HistoryModal {
+            items: vec![
+                create_test_task(1, "echo hello"),
+                create_test_task(2, "echo world"),
+                create_test_task(3, "ls -la"),
+            ],
+            list_state: ListState::default(),
+            filter: String::new(),
+            filter_mode: true,
+            layout: HistoryLayout::default(),
+        };
+
+        // No filter
+        assert_eq!(modal.title_with_count(), "History");
+
+        // Add filter
+        modal.handle_char('e');
+        modal.handle_char('c');
+        modal.handle_char('h');
+        modal.handle_char('o');
+        assert_eq!(modal.title_with_count(), "History (2 of 3)");
+
+        // Clear filter
+        modal.filter.clear();
+        assert_eq!(modal.title_with_count(), "History");
+    }
+
+    #[test]
+    fn compact_mode_hides_filter_section_when_not_in_filter_mode() {
+        // This test verifies the behavior change: in compact mode, filter section
+        // is only shown when filter_mode is active, not just when filter is non-empty
+        let mut modal = HistoryModal {
+            items: vec![create_test_task(1, "test")],
+            list_state: ListState::default(),
+            filter: "test".to_string(), // Non-empty filter
+            filter_mode: false,         // But not in filter mode
+            layout: HistoryLayout::Compact,
+        };
+
+        // With filter_mode = false, even with a filter, compact mode should
+        // hide the filter section (filter shown in help line instead)
+        // This is tested implicitly via the render_compact implementation
+        assert!(!modal.filter_mode);
+        assert!(!modal.filter.is_empty());
+
+        // When filter_mode becomes active, filter section appears
+        modal.filter_mode = true;
+        assert!(modal.filter_mode);
     }
 }

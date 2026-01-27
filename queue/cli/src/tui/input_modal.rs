@@ -9,6 +9,7 @@ use ratatui::{
     Frame,
 };
 
+use super::color_context::ColorContext;
 use super::modal::Modal;
 
 /// The active field in the input form.
@@ -268,7 +269,7 @@ impl Modal for InputModal {
         }
     }
 
-    fn render(&self, frame: &mut Frame, area: Rect) {
+    fn render(&self, frame: &mut Frame, area: Rect, _color_context: &ColorContext) {
         match self.layout {
             InputLayout::Full => self.render_full(frame, area),
             InputLayout::Compact => self.render_compact(frame, area),
@@ -292,9 +293,14 @@ impl InputModal {
         }
 
         // Calculate lines needed for the command text.
-        // Add 1 for the cursor when active.
-        let text_len = self.command.len() + 1;
-        let lines_needed = ((text_len as f32) / (content_width as f32)).ceil() as u16;
+        // Use actual text length - cursor is positioned by terminal, not a character.
+        let text_len = self.command.len();
+        // Ensure at least 1 line when empty
+        let lines_needed = if text_len == 0 {
+            1
+        } else {
+            ((text_len as f32) / (content_width as f32)).ceil() as u16
+        };
 
         lines_needed.clamp(MIN_ROWS, MAX_ROWS)
     }
@@ -480,19 +486,17 @@ fn render_text_field(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let display_value = if is_active {
-        if let Some(pos) = cursor_pos {
-            let (before, after) = value.split_at(pos.min(value.len()));
-            format!("{}|{}", before, after)
-        } else {
-            format!("{}|", value)
-        }
-    } else {
-        value.to_string()
-    };
-
-    let para = Paragraph::new(display_value);
+    // Display the value without cursor character
+    let para = Paragraph::new(value);
     frame.render_widget(para, inner);
+
+    // Position the real terminal cursor when active
+    if is_active {
+        let cursor_offset = cursor_pos.unwrap_or(value.len());
+        let cursor_x = inner.x + cursor_offset as u16;
+        let cursor_y = inner.y;
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
 }
 
 fn render_text_field_with_placeholder(
@@ -517,25 +521,24 @@ fn render_text_field_with_placeholder(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // Show placeholder only when empty and not active
     let is_placeholder = value.is_empty() && !is_active;
-    let text = if value.is_empty() { placeholder } else { value };
-    let display = if is_active {
-        if value.is_empty() {
-            "|".to_string()
-        } else {
-            format!("{}|", value)
-        }
-    } else {
-        text.to_string()
-    };
+    let display_text = if is_placeholder { placeholder } else { value };
     let text_style = if is_placeholder {
         Style::default().fg(Color::DarkGray)
     } else {
         Style::default()
     };
 
-    let para = Paragraph::new(display).style(text_style);
+    let para = Paragraph::new(display_text).style(text_style);
     frame.render_widget(para, inner);
+
+    // Position the real terminal cursor when active
+    if is_active {
+        let cursor_x = inner.x + value.len() as u16;
+        let cursor_y = inner.y;
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
 }
 
 fn render_selector_field(
@@ -587,13 +590,16 @@ fn render_compact_text_field(
     };
     let label_text = format!("{label:<width$}: ", width = COMPACT_LABEL_WIDTH);
 
+    // Calculate label prefix length for cursor positioning
+    // Format: " {label_text}" = 1 space + label + ": "
+    let label_prefix_len = 1 + COMPACT_LABEL_WIDTH + 2; // " " + label + ": "
+
     let line = if value.is_empty() {
         if is_active {
-            Line::from(vec![
-                Span::styled(format!(" {label_text}"), label_style),
-                Span::styled("|", value_style),
-            ])
+            // Empty field when active: just show label (cursor will be positioned)
+            Line::from(vec![Span::styled(format!(" {label_text}"), label_style)])
         } else if let Some(placeholder) = placeholder {
+            // Empty field when not active: show placeholder in dim color
             Line::from(vec![
                 Span::styled(format!(" {label_text}"), label_style),
                 Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
@@ -602,18 +608,22 @@ fn render_compact_text_field(
             Line::from(vec![Span::styled(format!(" {label_text}"), label_style)])
         }
     } else {
-        let display_value = if is_active {
-            insert_cursor(value, cursor_pos)
-        } else {
-            value.to_string()
-        };
+        // Field has value: display without cursor character
         Line::from(vec![
             Span::styled(format!(" {label_text}"), label_style),
-            Span::styled(display_value, value_style),
+            Span::styled(value, value_style),
         ])
     };
 
     frame.render_widget(Paragraph::new(line), area);
+
+    // Position the real terminal cursor when active
+    if is_active {
+        let cursor_offset = cursor_pos.unwrap_or(value.len());
+        let cursor_x = area.x + label_prefix_len as u16 + cursor_offset as u16;
+        let cursor_y = area.y;
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
 }
 
 /// Renders a compact text field that can span multiple rows for longer content.
@@ -654,17 +664,15 @@ fn render_compact_multiline_text_field(
         return;
     }
 
-    // Get display value with cursor if active
+    // Determine display value (without cursor character)
     let display_value = if value.is_empty() {
         if is_active {
-            "|".to_string()
+            String::new() // Empty when active, cursor will be positioned
         } else if let Some(ph) = placeholder {
             ph.to_string()
         } else {
             String::new()
         }
-    } else if is_active {
-        insert_cursor(value, cursor_pos)
     } else {
         value.to_string()
     };
@@ -703,6 +711,31 @@ fn render_compact_multiline_text_field(
     // Render as a paragraph (which handles multiple lines)
     let para = Paragraph::new(lines);
     frame.render_widget(para, area);
+
+    // Position the real terminal cursor when active
+    if is_active {
+        let cursor_offset = cursor_pos.unwrap_or(value.len());
+
+        // Calculate which line and column the cursor is on
+        // First line has content_width chars, subsequent lines also have content_width
+        let (cursor_line, cursor_col) = if cursor_offset < content_width {
+            // Cursor is on the first line
+            (0, cursor_offset)
+        } else {
+            // Cursor is on a subsequent line
+            let chars_after_first = cursor_offset - content_width;
+            let line_num = 1 + chars_after_first / content_width;
+            let col = chars_after_first % content_width;
+            (line_num, col)
+        };
+
+        // X position: label prefix + column offset
+        let cursor_x = area.x + label_prefix_len as u16 + cursor_col as u16;
+        // Y position: area.y + which line we're on
+        let cursor_y = area.y + cursor_line as u16;
+
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
 }
 
 fn render_compact_selector_field(
@@ -734,16 +767,6 @@ fn render_compact_selector_field(
         Span::styled(display_value, value_style),
     ]);
     frame.render_widget(Paragraph::new(line), area);
-}
-
-fn insert_cursor(value: &str, cursor_pos: Option<usize>) -> String {
-    match cursor_pos {
-        Some(pos) => {
-            let (before, after) = value.split_at(pos.min(value.len()));
-            format!("{before}|{after}")
-        }
-        None => format!("{value}|"),
-    }
 }
 
 #[cfg(test)]
@@ -958,7 +981,7 @@ mod tests {
         let mut modal = InputModal::new(wezterm_caps());
         modal.command = "echo test".to_string();
         // Very narrow terminal (15 - 13 label = ~2 content width)
-        // "echo test" (9 chars) + cursor (1) = 10 chars / 2 = 5 rows, capped to 4
+        // "echo test" (9 chars) / 2 = 4.5 rows, rounded up = 5, capped to 4
         let rows = modal.calculate_command_rows(15);
         assert_eq!(rows, 4, "Narrow terminal should expand rows to fit content (capped at max)");
     }
@@ -1025,5 +1048,306 @@ mod tests {
         assert_eq!(modal.editing_task_id, Some(42));
         assert_eq!(modal.schedule_type, ScheduleType::AtTime);
         assert_eq!(modal.active_field, InputField::Command);
+    }
+
+    // =========================================================================
+    // Tests for real cursor positioning (no pipe character in display)
+    // Bug: Previous implementation inserted "|" at cursor position, which
+    // appeared in copied text. Now using frame.set_cursor_position() instead.
+    // =========================================================================
+
+    #[test]
+    fn render_text_field_does_not_include_pipe() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 40, 3);
+                render_text_field(
+                    frame,
+                    area,
+                    "Command",
+                    "echo hello",
+                    true, // active
+                    Some(5),
+                );
+            })
+            .unwrap();
+
+        // Get the rendered buffer content
+        let buffer = terminal.backend().buffer();
+
+        // Check that no pipe character appears in the rendered text
+        // The field should contain "echo hello" without a "|" character
+        let mut found_pipe_in_value = false;
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                let cell = &buffer[(x, y)];
+                // Check the content area (inside the border)
+                if y == 1 && x > 0 && x < 39 {
+                    if cell.symbol() == "|" {
+                        // Pipe found - but it could be part of the border, check if it's in the value area
+                        // The value starts after the left border (x >= 1)
+                        if x >= 1 && x <= 20 {
+                            found_pipe_in_value = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        assert!(
+            !found_pipe_in_value,
+            "Pipe character should not appear in field text"
+        );
+    }
+
+    #[test]
+    fn cursor_positioned_at_correct_offset() {
+        use ratatui::backend::TestBackend;
+        use ratatui::prelude::Position;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(5, 2, 40, 3);
+                render_text_field(
+                    frame,
+                    area,
+                    "Command",
+                    "hello",
+                    true, // active
+                    Some(3), // cursor at position 3 (after "hel")
+                );
+            })
+            .unwrap();
+
+        // The cursor position should be set
+        // inner area is area with borders removed: x+1, y+1
+        // So cursor_x = (5+1) + 3 = 9, cursor_y = 2+1 = 3
+        let expected_x = 5 + 1 + 3; // area.x + border + cursor_offset
+        let expected_y = 2 + 1; // area.y + border
+
+        terminal
+            .backend_mut()
+            .assert_cursor_position(Position::new(expected_x, expected_y));
+    }
+
+    #[test]
+    fn cursor_at_end_of_value() {
+        use ratatui::backend::TestBackend;
+        use ratatui::prelude::Position;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 40, 3);
+                render_text_field(
+                    frame,
+                    area,
+                    "Label",
+                    "test",
+                    true,
+                    None, // cursor_pos None means end of value
+                );
+            })
+            .unwrap();
+
+        // Cursor should be at end of "test" (length 4)
+        // inner area starts at x=1 (after border)
+        let expected_x = 1 + 4; // border + value.len()
+        let expected_y = 1; // border
+
+        terminal
+            .backend_mut()
+            .assert_cursor_position(Position::new(expected_x, expected_y));
+    }
+
+    #[test]
+    fn cursor_not_moved_when_field_inactive() {
+        use ratatui::backend::{Backend, TestBackend};
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        // Get the initial cursor position
+        let initial_pos = terminal.backend_mut().get_cursor_position().unwrap();
+
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 40, 3);
+                render_text_field(
+                    frame,
+                    area,
+                    "Label",
+                    "test",
+                    false, // NOT active
+                    Some(2),
+                );
+            })
+            .unwrap();
+
+        // Cursor position should not have changed (inactive field doesn't set cursor)
+        let final_pos = terminal.backend_mut().get_cursor_position().unwrap();
+        assert_eq!(
+            initial_pos, final_pos,
+            "Cursor should not be moved when field is inactive"
+        );
+    }
+
+    #[test]
+    fn placeholder_shown_when_empty_and_inactive() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 50, 3);
+                render_text_field_with_placeholder(
+                    frame,
+                    area,
+                    "When",
+                    "",                      // empty value
+                    "e.g., 7:00am or 19:30", // placeholder
+                    false,                   // NOT active
+                );
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+
+        // Check that placeholder text appears in the buffer
+        // The placeholder should be visible somewhere in row 1 (inside borders)
+        let row_content: String = (1..49)
+            .map(|x| buffer[(x, 1)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+
+        assert!(
+            row_content.contains("e.g."),
+            "Placeholder should be visible when field is empty and inactive. Got: '{}'",
+            row_content
+        );
+    }
+
+    #[test]
+    fn placeholder_hidden_when_active_and_empty() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 50, 3);
+                render_text_field_with_placeholder(
+                    frame,
+                    area,
+                    "When",
+                    "",                      // empty value
+                    "e.g., 7:00am or 19:30", // placeholder
+                    true,                    // active
+                );
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+
+        // Check that placeholder text does NOT appear when active
+        let row_content: String = (1..49)
+            .map(|x| buffer[(x, 1)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+
+        assert!(
+            !row_content.contains("e.g."),
+            "Placeholder should NOT be visible when field is active. Got: '{}'",
+            row_content
+        );
+    }
+
+    #[test]
+    fn compact_multiline_cursor_on_first_line() {
+        use ratatui::backend::TestBackend;
+        use ratatui::prelude::Position;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 80, 4);
+                render_compact_multiline_text_field(
+                    frame,
+                    area,
+                    "Command",
+                    "short",
+                    None,
+                    true,
+                    Some(3), // cursor at position 3
+                );
+            })
+            .unwrap();
+
+        // Label prefix: " Command   : " = 13 chars
+        // Cursor at position 3 within value
+        let expected_x = 0 + 13 + 3; // area.x + label_prefix + cursor_offset
+        let expected_y = 0;
+
+        terminal
+            .backend_mut()
+            .assert_cursor_position(Position::new(expected_x, expected_y));
+    }
+
+    #[test]
+    fn compact_multiline_cursor_on_wrapped_line() {
+        use ratatui::backend::TestBackend;
+        use ratatui::prelude::Position;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        // With 80 width, content_width = 80 - 13 = 67
+        // Create a command that wraps to second line
+        let long_command = "x".repeat(70); // 70 chars, wraps at 67
+
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 80, 4);
+                render_compact_multiline_text_field(
+                    frame,
+                    area,
+                    "Command",
+                    &long_command,
+                    None,
+                    true,
+                    Some(68), // cursor at position 68 (1 char into second line)
+                );
+            })
+            .unwrap();
+
+        // First line has 67 chars, cursor at 68 is position 1 on second line
+        // 68 - 67 = 1, so column 1 on line 1 (0-indexed)
+        let expected_x = 0 + 13 + 1; // area.x + label_prefix + column
+        let expected_y = 1; // second line
+
+        terminal
+            .backend_mut()
+            .assert_cursor_position(Position::new(expected_x, expected_y));
     }
 }

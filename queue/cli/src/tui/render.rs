@@ -5,7 +5,7 @@
 use chrono::Utc;
 use queue_lib::{ExecutionTarget, ScheduledTask, TaskStatus};
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
@@ -13,6 +13,7 @@ use ratatui::{
 };
 
 use super::app::{App, AppMode};
+use super::color_context::ColorContext;
 use super::modal::{render_modal, ConfirmQuitDialog};
 use super::PANEL_BG;
 
@@ -23,6 +24,9 @@ use super::PANEL_BG;
 /// - A footer bar showing keyboard shortcuts for the current mode
 /// - Modal overlays rendered on top based on current mode
 pub fn render(app: &mut App, frame: &mut Frame) {
+    // Create color context once for NO_COLOR-aware rendering
+    let color_context = ColorContext::new();
+
     let chunks = Layout::vertical([
         Constraint::Min(3),    // Task table
         Constraint::Length(3), // Footer
@@ -35,79 +39,184 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     // Render modal overlays based on mode
     match app.mode {
         AppMode::ConfirmQuit => {
-            render_modal(frame, &ConfirmQuitDialog, frame.area());
+            render_modal(frame, &ConfirmQuitDialog, frame.area(), &color_context);
         }
         AppMode::InputModal => {
             if let Some(input_modal) = app.input_modal.as_mut() {
                 input_modal.update_layout(frame.area().height);
-                render_modal(frame, input_modal, frame.area());
+                render_modal(frame, input_modal, frame.area(), &color_context);
             }
         }
         AppMode::HistoryModal => {
             if let Some(history_modal) = app.history_modal.as_mut() {
                 history_modal.update_layout(frame.area().height);
-                render_modal(frame, history_modal, frame.area());
+                render_modal(frame, history_modal, frame.area(), &color_context);
             }
         }
         _ => {}
     }
 }
 
+/// Configuration for responsive column display based on terminal width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ColumnConfig {
+    /// Whether to show the Status column.
+    show_status: bool,
+    /// Whether to abbreviate the Where column values.
+    abbreviated_target: bool,
+}
+
+/// Calculates the column configuration based on available width.
+///
+/// - Width >= 80: Full display (all columns, full text)
+/// - Width 60-79: All columns, abbreviated "Where" values
+/// - Width < 60: Hide "Status" column, abbreviated "Where" values
+fn calculate_column_config(width: u16) -> ColumnConfig {
+    ColumnConfig {
+        show_status: width >= 60,
+        abbreviated_target: width < 80,
+    }
+}
+
 /// Renders the task table with columns for ID, WHEN, Command, Where, and Status.
+///
+/// Displays an empty state message when no tasks are scheduled.
+/// Responsive to terminal width:
+/// - Width >= 80: All columns with full text
+/// - Width 60-79: Abbreviated "Where" column values
+/// - Width < 60: Status column hidden
 fn render_task_table(app: &mut App, frame: &mut Frame, area: Rect) {
-    let header = Row::new([
-        Cell::from("ID"),
-        Cell::from("WHEN"),
-        Cell::from("Command"),
-        Cell::from("Where"),
-        Cell::from("Status"),
-    ])
-    .style(Style::default().add_modifier(Modifier::BOLD))
-    .bottom_margin(1);
+    let block = Block::default().borders(Borders::ALL).title(" Tasks ");
+
+    // Handle empty state
+    if app.tasks.is_empty() {
+        let message = if area.width < 40 {
+            "Press N to add task"
+        } else {
+            "No tasks scheduled. Press N to add one."
+        };
+        let paragraph = Paragraph::new(message)
+            .block(block)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(paragraph, area);
+        return;
+    }
+
+    let config = calculate_column_config(area.width);
+
+    // Build header based on config
+    let header_cells: Vec<Cell> = if config.show_status {
+        vec![
+            Cell::from("ID"),
+            Cell::from("WHEN"),
+            Cell::from("Command"),
+            Cell::from("Where"),
+            Cell::from("Status"),
+        ]
+    } else {
+        vec![
+            Cell::from("ID"),
+            Cell::from("WHEN"),
+            Cell::from("Command"),
+            Cell::from("Where"),
+        ]
+    };
+    let header = Row::new(header_cells)
+        .style(Style::default().add_modifier(Modifier::BOLD))
+        .bottom_margin(1);
 
     let rows = app.tasks.iter().map(|task| {
         let style = task_style(task);
-        Row::new([
-            Cell::from(task.id.to_string()),
-            Cell::from(format_schedule(task)),
-            Cell::from(task.command.as_str()),
-            Cell::from(format_target(&task.target)),
-            Cell::from(format_status(&task.status)),
-        ])
-        .style(style)
+        let cells: Vec<Cell> = if config.show_status {
+            vec![
+                Cell::from(task.id.to_string()),
+                Cell::from(format_schedule(task)),
+                Cell::from(task.command.as_str()),
+                Cell::from(format_target(&task.target, config.abbreviated_target)),
+                Cell::from(format_status(&task.status)),
+            ]
+        } else {
+            vec![
+                Cell::from(task.id.to_string()),
+                Cell::from(format_schedule(task)),
+                Cell::from(task.command.as_str()),
+                Cell::from(format_target(&task.target, config.abbreviated_target)),
+            ]
+        };
+        Row::new(cells).style(style)
     });
 
-    let widths = [
-        Constraint::Length(4),  // ID
-        Constraint::Length(12), // WHEN
-        Constraint::Min(20),    // Command
-        Constraint::Length(10), // Where
-        Constraint::Length(10), // Status
-    ];
+    let widths: Vec<Constraint> = if config.show_status {
+        vec![
+            Constraint::Length(4),  // ID
+            Constraint::Length(12), // WHEN
+            Constraint::Min(20),    // Command
+            Constraint::Length(10), // Where
+            Constraint::Length(10), // Status
+        ]
+    } else {
+        vec![
+            Constraint::Length(4),  // ID
+            Constraint::Length(12), // WHEN
+            Constraint::Min(20),    // Command
+            Constraint::Length(10), // Where
+        ]
+    };
 
     let table = Table::new(rows, widths)
         .header(header)
-        .block(Block::default().borders(Borders::ALL).title(" Tasks "))
+        .block(block)
         .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     frame.render_stateful_widget(table, area, &mut app.table_state);
 }
 
+/// Returns the appropriate keyboard shortcuts for Normal mode based on terminal width.
+///
+/// - Width >= 80: Full labels (e.g., "Remove", "History", "Navigate")
+/// - Width 60-79: Abbreviated labels (e.g., "Rm", "Hist", "Nav")
+/// - Width < 60: Minimal shortcuts (only most essential actions)
+fn get_normal_mode_shortcuts(width: u16) -> Vec<(&'static str, &'static str)> {
+    if width >= 80 {
+        // Full labels
+        vec![
+            ("Q", "Quit"),
+            ("N", "New"),
+            ("E", "Edit"),
+            ("R", "Remove"),
+            ("X", "Cancel"),
+            ("H", "History"),
+            ("\u{2191}\u{2193}", "Navigate"),
+        ]
+    } else if width >= 60 {
+        // Medium - shorter labels
+        vec![
+            ("Q", "Quit"),
+            ("N", "New"),
+            ("E", "Edit"),
+            ("R", "Rm"),
+            ("X", "Cancel"),
+            ("H", "Hist"),
+            ("\u{2191}\u{2193}", "Nav"),
+        ]
+    } else {
+        // Compact - minimal shortcuts
+        vec![("Q", "Quit"), ("N", "New"), ("E", "Edit"), ("H", "Hist")]
+    }
+}
+
 /// Renders the footer with keyboard shortcuts appropriate for the current mode.
+///
+/// The footer is responsive to terminal width in Normal mode:
+/// - Width >= 80: Full shortcut labels
+/// - Width 60-79: Abbreviated labels
+/// - Width < 60: Minimal set of shortcuts
 fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
+    let width = area.width;
+
     let (bg_color, shortcuts) = match app.mode {
-        AppMode::Normal => (
-            PANEL_BG,
-            vec![
-                ("Q", "Quit"),
-                ("N", "New"),
-                ("E", "Edit"),
-                ("R", "Remove"),
-                ("X", "Cancel"),
-                ("H", "History"),
-                ("\u{2191}\u{2193}", "Navigate"),
-            ],
-        ),
+        AppMode::Normal => (PANEL_BG, get_normal_mode_shortcuts(width)),
         AppMode::EditMode => (
             Color::Yellow,
             vec![("Enter", "Edit Selected"), ("Esc", "Cancel")],
@@ -116,13 +225,8 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             Color::Red,
             vec![("Enter", "Remove Selected"), ("Esc", "Cancel")],
         ),
-        AppMode::ConfirmQuit => (
-            PANEL_BG,
-            vec![("Y", "Yes, Quit"), ("N", "No, Stay")],
-        ),
-        AppMode::InputModal | AppMode::HistoryModal => {
-            (PANEL_BG, vec![("Esc", "Back")])
-        }
+        AppMode::ConfirmQuit => (PANEL_BG, vec![("Y", "Yes, Quit"), ("N", "No, Stay")]),
+        AppMode::InputModal | AppMode::HistoryModal => (PANEL_BG, vec![("Esc", "Back")]),
     };
 
     let spans: Vec<Span> = shortcuts
@@ -218,11 +322,16 @@ fn format_schedule(task: &ScheduledTask) -> String {
 }
 
 /// Formats an execution target as a short label.
-fn format_target(target: &ExecutionTarget) -> &'static str {
-    match target {
-        ExecutionTarget::NewPane => "new pane",
-        ExecutionTarget::NewWindow => "window",
-        ExecutionTarget::Background => "bg",
+///
+/// When `abbreviated` is true, returns shorter versions suitable for narrow terminals.
+fn format_target(target: &ExecutionTarget, abbreviated: bool) -> &'static str {
+    match (target, abbreviated) {
+        (ExecutionTarget::NewPane, false) => "new pane",
+        (ExecutionTarget::NewPane, true) => "pane",
+        (ExecutionTarget::NewWindow, false) => "window",
+        (ExecutionTarget::NewWindow, true) => "win",
+        (ExecutionTarget::Background, false) => "background",
+        (ExecutionTarget::Background, true) => "bg",
     }
 }
 
@@ -386,10 +495,17 @@ mod tests {
     }
 
     #[test]
-    fn format_target_values() {
-        assert_eq!(format_target(&ExecutionTarget::NewPane), "new pane");
-        assert_eq!(format_target(&ExecutionTarget::NewWindow), "window");
-        assert_eq!(format_target(&ExecutionTarget::Background), "bg");
+    fn format_target_full_values() {
+        assert_eq!(format_target(&ExecutionTarget::NewPane, false), "new pane");
+        assert_eq!(format_target(&ExecutionTarget::NewWindow, false), "window");
+        assert_eq!(format_target(&ExecutionTarget::Background, false), "background");
+    }
+
+    #[test]
+    fn format_target_abbreviated_values() {
+        assert_eq!(format_target(&ExecutionTarget::NewPane, true), "pane");
+        assert_eq!(format_target(&ExecutionTarget::NewWindow, true), "win");
+        assert_eq!(format_target(&ExecutionTarget::Background, true), "bg");
     }
 
     #[test]
@@ -528,7 +644,8 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
         assert!(content.contains("echo hello"));
-        assert!(content.contains("bg"));
+        // At 80 width, shows full "background" text (not abbreviated "bg")
+        assert!(content.contains("background"));
     }
 
     #[test]
@@ -569,5 +686,476 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
         assert!(content.contains("Quit"));
+    }
+
+    // =========================================================================
+    // Column configuration tests
+    // =========================================================================
+
+    #[test]
+    fn calculate_column_config_full_at_80_plus() {
+        let config = calculate_column_config(80);
+        assert!(config.show_status);
+        assert!(!config.abbreviated_target);
+
+        let config = calculate_column_config(120);
+        assert!(config.show_status);
+        assert!(!config.abbreviated_target);
+    }
+
+    #[test]
+    fn calculate_column_config_abbreviated_at_70() {
+        let config = calculate_column_config(70);
+        assert!(config.show_status);
+        assert!(config.abbreviated_target);
+
+        let config = calculate_column_config(79);
+        assert!(config.show_status);
+        assert!(config.abbreviated_target);
+    }
+
+    #[test]
+    fn calculate_column_config_no_status_at_50() {
+        let config = calculate_column_config(50);
+        assert!(!config.show_status);
+        assert!(config.abbreviated_target);
+
+        let config = calculate_column_config(59);
+        assert!(!config.show_status);
+        assert!(config.abbreviated_target);
+    }
+
+    #[test]
+    fn calculate_column_config_boundary_60() {
+        // At exactly 60, show_status should be true
+        let config = calculate_column_config(60);
+        assert!(config.show_status);
+        assert!(config.abbreviated_target);
+    }
+
+    // =========================================================================
+    // Empty state tests
+    // =========================================================================
+
+    #[test]
+    fn render_shows_empty_state_when_no_tasks() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not fail");
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        assert!(
+            content.contains("No tasks scheduled"),
+            "Should show full empty state message at 80 cols, got: {}",
+            content
+        );
+        assert!(
+            content.contains("Press N to add one"),
+            "Should include instruction, got: {}",
+            content
+        );
+    }
+
+    #[test]
+    fn render_shows_short_empty_state_in_narrow_terminal() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(39, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not fail");
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        assert!(
+            content.contains("Press N to add task"),
+            "Should show short message at narrow width, got: {}",
+            content
+        );
+        assert!(
+            !content.contains("No tasks scheduled"),
+            "Should NOT show long message at narrow width, got: {}",
+            content
+        );
+    }
+
+    // =========================================================================
+    // Responsive column tests
+    // =========================================================================
+
+    #[test]
+    fn render_shows_all_columns_at_80_width() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tasks.push(ScheduledTask::new(
+            1,
+            "test cmd".to_string(),
+            Utc::now() + Duration::minutes(15),
+            ExecutionTarget::Background,
+        ));
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not fail");
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        // At 80 width, should show full "background" and "Status" column
+        assert!(content.contains("Status"), "Should show Status column header");
+        assert!(content.contains("background"), "Should show full target text");
+    }
+
+    #[test]
+    fn render_abbreviates_target_at_70_width() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(70, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tasks.push(ScheduledTask::new(
+            1,
+            "test cmd".to_string(),
+            Utc::now() + Duration::minutes(15),
+            ExecutionTarget::Background,
+        ));
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not fail");
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        // At 70 width, should show abbreviated "bg" and still have "Status" column
+        assert!(content.contains("Status"), "Should still show Status column");
+        assert!(content.contains("bg"), "Should show abbreviated target 'bg'");
+        assert!(
+            !content.contains("background"),
+            "Should NOT show full 'background' at 70 width"
+        );
+    }
+
+    #[test]
+    fn render_hides_status_at_50_width() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(50, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tasks.push(ScheduledTask::new(
+            1,
+            "test cmd".to_string(),
+            Utc::now() + Duration::minutes(15),
+            ExecutionTarget::Background,
+        ));
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not fail");
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        // At 50 width, should hide Status column entirely
+        assert!(
+            !content.contains("Status"),
+            "Should NOT show Status column at narrow width, got: {}",
+            content
+        );
+        assert!(
+            !content.contains("pending"),
+            "Should NOT show status value at narrow width"
+        );
+    }
+
+    // =========================================================================
+    // Responsive footer tests
+    // =========================================================================
+
+    #[test]
+    fn get_normal_mode_shortcuts_full_at_80_width() {
+        let shortcuts = get_normal_mode_shortcuts(80);
+        // Full labels should include "Remove", "History", and "Navigate"
+        assert!(shortcuts.iter().any(|(_, desc)| *desc == "Remove"));
+        assert!(shortcuts.iter().any(|(_, desc)| *desc == "History"));
+        assert!(shortcuts.iter().any(|(_, desc)| *desc == "Navigate"));
+        // Should have all 7 shortcuts
+        assert_eq!(shortcuts.len(), 7);
+    }
+
+    #[test]
+    fn get_normal_mode_shortcuts_abbreviated_at_70_width() {
+        let shortcuts = get_normal_mode_shortcuts(70);
+        // Abbreviated labels should use "Rm", "Hist", and "Nav"
+        assert!(shortcuts.iter().any(|(_, desc)| *desc == "Rm"));
+        assert!(shortcuts.iter().any(|(_, desc)| *desc == "Hist"));
+        assert!(shortcuts.iter().any(|(_, desc)| *desc == "Nav"));
+        // Should NOT have full labels
+        assert!(!shortcuts.iter().any(|(_, desc)| *desc == "Remove"));
+        assert!(!shortcuts.iter().any(|(_, desc)| *desc == "History"));
+        assert!(!shortcuts.iter().any(|(_, desc)| *desc == "Navigate"));
+        // Should still have all 7 shortcuts
+        assert_eq!(shortcuts.len(), 7);
+    }
+
+    #[test]
+    fn get_normal_mode_shortcuts_minimal_at_50_width() {
+        let shortcuts = get_normal_mode_shortcuts(50);
+        // Minimal set should only have Q, N, E, H
+        assert!(shortcuts.iter().any(|(key, _)| *key == "Q"));
+        assert!(shortcuts.iter().any(|(key, _)| *key == "N"));
+        assert!(shortcuts.iter().any(|(key, _)| *key == "E"));
+        assert!(shortcuts.iter().any(|(key, _)| *key == "H"));
+        // Should NOT have R, X, or arrows
+        assert!(!shortcuts.iter().any(|(key, _)| *key == "R"));
+        assert!(!shortcuts.iter().any(|(key, _)| *key == "X"));
+        assert!(!shortcuts.iter().any(|(key, _)| *key == "\u{2191}\u{2193}"));
+        // Should have only 4 shortcuts
+        assert_eq!(shortcuts.len(), 4);
+    }
+
+    #[test]
+    fn get_normal_mode_shortcuts_boundary_at_60() {
+        let shortcuts = get_normal_mode_shortcuts(60);
+        // At exactly 60, should use abbreviated labels (medium tier)
+        assert!(shortcuts.iter().any(|(_, desc)| *desc == "Rm"));
+        assert!(shortcuts.iter().any(|(_, desc)| *desc == "Hist"));
+        assert_eq!(shortcuts.len(), 7);
+    }
+
+    #[test]
+    fn get_normal_mode_shortcuts_boundary_at_59() {
+        let shortcuts = get_normal_mode_shortcuts(59);
+        // Below 60, should use minimal set
+        assert_eq!(shortcuts.len(), 4);
+    }
+
+    #[test]
+    fn footer_shows_full_shortcuts_at_80_width() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not fail");
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        // At 80 width, footer should show full labels
+        assert!(
+            content.contains("Remove"),
+            "Should show 'Remove' at 80 width, got: {}",
+            content
+        );
+        assert!(
+            content.contains("History"),
+            "Should show 'History' at 80 width, got: {}",
+            content
+        );
+        assert!(
+            content.contains("Navigate"),
+            "Should show 'Navigate' at 80 width, got: {}",
+            content
+        );
+    }
+
+    #[test]
+    fn footer_shows_abbreviated_shortcuts_at_70_width() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(70, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not fail");
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        // At 70 width, footer should show abbreviated labels
+        assert!(
+            content.contains("Rm"),
+            "Should show 'Rm' at 70 width, got: {}",
+            content
+        );
+        assert!(
+            content.contains("Hist"),
+            "Should show 'Hist' at 70 width, got: {}",
+            content
+        );
+        // Should NOT show full labels
+        assert!(
+            !content.contains("Remove"),
+            "Should NOT show 'Remove' at 70 width, got: {}",
+            content
+        );
+        assert!(
+            !content.contains("History"),
+            "Should NOT show 'History' at 70 width, got: {}",
+            content
+        );
+    }
+
+    #[test]
+    fn footer_shows_minimal_shortcuts_at_50_width() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(50, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not fail");
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        // At 50 width, footer should show minimal set
+        assert!(
+            content.contains("Quit"),
+            "Should show 'Quit' at 50 width, got: {}",
+            content
+        );
+        assert!(
+            content.contains("New"),
+            "Should show 'New' at 50 width, got: {}",
+            content
+        );
+        assert!(
+            content.contains("Edit"),
+            "Should show 'Edit' at 50 width, got: {}",
+            content
+        );
+        // Should NOT show removed shortcuts
+        assert!(
+            !content.contains("Cancel"),
+            "Should NOT show 'Cancel' at 50 width, got: {}",
+            content
+        );
+    }
+
+    // =========================================================================
+    // Extreme width tests - verify no panics at edge cases
+    // =========================================================================
+
+    #[test]
+    fn render_handles_very_narrow_terminal() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        // 20x10 is extremely narrow - should not panic
+        let backend = TestBackend::new(20, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+
+        // Test with empty task list
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not panic at 20x10");
+
+        // Test with a task
+        app.tasks.push(ScheduledTask::new(
+            1,
+            "echo hello world with a very long command".to_string(),
+            Utc::now() + Duration::minutes(15),
+            ExecutionTarget::Background,
+        ));
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render with task should not panic at 20x10");
+    }
+
+    #[test]
+    fn render_handles_very_wide_terminal() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        // 200x50 is very wide - should not panic
+        let backend = TestBackend::new(200, 50);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+
+        // Test with empty task list
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not panic at 200x50");
+
+        // Test with a task
+        app.tasks.push(ScheduledTask::new(
+            1,
+            "echo hello".to_string(),
+            Utc::now() + Duration::minutes(15),
+            ExecutionTarget::Background,
+        ));
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render with task should not panic at 200x50");
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        // At very wide terminal, should show all columns with full text
+        assert!(content.contains("Status"), "Should show Status column at wide width");
+        assert!(content.contains("background"), "Should show full target text at wide width");
+    }
+
+    #[test]
+    fn render_handles_minimal_terminal_1x1() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        // Absolute minimum - 1x1 should not panic
+        let backend = TestBackend::new(1, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+
+        // Should not panic even at 1x1
+        let result = terminal.draw(|frame| render(&mut app, frame));
+        assert!(result.is_ok(), "render should not panic at 1x1");
+    }
+
+    #[test]
+    fn render_handles_very_short_terminal() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        // 80 cols but only 5 rows - tests vertical constraints
+        let backend = TestBackend::new(80, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = App::new();
+        app.tasks.push(ScheduledTask::new(
+            1,
+            "echo test".to_string(),
+            Utc::now() + Duration::minutes(15),
+            ExecutionTarget::Background,
+        ));
+
+        terminal
+            .draw(|frame| render(&mut app, frame))
+            .expect("render should not panic at 80x5");
     }
 }

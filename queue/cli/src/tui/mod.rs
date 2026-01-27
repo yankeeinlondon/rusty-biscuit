@@ -5,6 +5,7 @@
 use ratatui::style::Color;
 
 mod app;
+mod color_context;
 mod event;
 mod history_modal;
 mod input_modal;

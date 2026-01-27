@@ -161,11 +161,11 @@ impl App {
             return false;
         };
 
-        if should_reschedule {
-            if let Some(ref executor) = self.executor {
-                let _ = executor.cancel_task(task_id);
-                executor.schedule(updated_task.clone());
-            }
+        if should_reschedule
+            && let Some(ref executor) = self.executor
+        {
+            let _ = executor.cancel_task(task_id);
+            executor.schedule(updated_task.clone());
         }
 
         self.update_history(&updated_task);
@@ -242,18 +242,18 @@ impl App {
     }
 
     fn save_history(&self, task: &ScheduledTask) {
-        if let Some(ref store) = self.history_store {
-            if let Err(err) = store.save(task) {
-                tracing::warn!(error = %err, "Failed to persist task history");
-            }
+        if let Some(ref store) = self.history_store
+            && let Err(err) = store.save(task)
+        {
+            tracing::warn!(error = %err, "Failed to persist task history");
         }
     }
 
     fn update_history(&self, task: &ScheduledTask) {
-        if let Some(ref store) = self.history_store {
-            if let Err(err) = store.update(task) {
-                tracing::warn!(error = %err, "Failed to update task history");
-            }
+        if let Some(ref store) = self.history_store
+            && let Err(err) = store.update(task)
+        {
+            tracing::warn!(error = %err, "Failed to update task history");
         }
     }
 }
