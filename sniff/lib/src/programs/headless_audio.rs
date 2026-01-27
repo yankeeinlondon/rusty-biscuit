@@ -11,7 +11,7 @@ use crate::programs::installer::{
     execute_install, execute_versioned_install, method_available, select_best_method,
     InstallOptions,
 };
-use crate::programs::schema::{ProgramError, ProgramMetadata};
+use crate::programs::schema::{ProgramEntry, ProgramError, ProgramMetadata};
 use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{
     InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
@@ -198,20 +198,35 @@ impl Serialize for InstalledHeadlessAudio {
     where
         S: Serializer,
     {
+        use strum::IntoEnumIterator;
+
+        let entry = |player: HeadlessAudio| -> ProgramEntry {
+            let info = player.info();
+            match self.path_with_source(player) {
+                Some((path, source)) => ProgramEntry::installed(info, path, source),
+                None => ProgramEntry::not_installed(info),
+            }
+        };
+
         let mut state = serializer.serialize_struct("InstalledHeadlessAudio", 13)?;
-        state.serialize_field("mpv", &self.mpv.is_some())?;
-        state.serialize_field("ffplay", &self.ffplay.is_some())?;
-        state.serialize_field("vlc", &self.vlc.is_some())?;
-        state.serialize_field("mplayer", &self.mplayer.is_some())?;
-        state.serialize_field("gstreamer_gst_play", &self.gstreamer_gst_play.is_some())?;
-        state.serialize_field("sox", &self.sox.is_some())?;
-        state.serialize_field("mpg123", &self.mpg123.is_some())?;
-        state.serialize_field("ogg123", &self.ogg123.is_some())?;
-        state.serialize_field("alsa_aplay", &self.alsa_aplay.is_some())?;
-        state.serialize_field("macos_afplay", &self.macos_afplay.is_some())?;
-        state.serialize_field("pulseaudio_paplay", &self.pulseaudio_paplay.is_some())?;
-        state.serialize_field("pulseaudio_pacat", &self.pulseaudio_pacat.is_some())?;
-        state.serialize_field("pipewire", &self.pipewire.is_some())?;
+        for player in HeadlessAudio::iter() {
+            let field_name = match player {
+                HeadlessAudio::Mpv => "mpv",
+                HeadlessAudio::Ffplay => "ffplay",
+                HeadlessAudio::Vlc => "vlc",
+                HeadlessAudio::Mplayer => "mplayer",
+                HeadlessAudio::GstreamerGstPlay => "gstreamer_gst_play",
+                HeadlessAudio::Sox => "sox",
+                HeadlessAudio::Mpg123 => "mpg123",
+                HeadlessAudio::Ogg123 => "ogg123",
+                HeadlessAudio::AlsaAplay => "alsa_aplay",
+                HeadlessAudio::MacOsAfplay => "macos_afplay",
+                HeadlessAudio::PulseaudioPaplay => "pulseaudio_paplay",
+                HeadlessAudio::PulseaudioPacat => "pulseaudio_pacat",
+                HeadlessAudio::Pipewire => "pipewire",
+            };
+            state.serialize_field(field_name, &entry(player))?;
+        }
         state.end()
     }
 }
