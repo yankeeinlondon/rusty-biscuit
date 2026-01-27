@@ -28,6 +28,7 @@
 use std::process::{Command, Output};
 
 use crate::error::SniffInstallationError;
+use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 use crate::programs::types::InstallationMethod;
 
@@ -136,33 +137,33 @@ pub(crate) fn method_available(
     }
 
     match method {
-        InstallationMethod::Apt(_) => os_pkg_mgrs.apt,
-        InstallationMethod::Nala(_) => os_pkg_mgrs.nala,
-        InstallationMethod::Brew(_) => os_pkg_mgrs.brew,
-        InstallationMethod::Dnf(_) => os_pkg_mgrs.dnf,
-        InstallationMethod::Pacman(_) => os_pkg_mgrs.pacman,
-        InstallationMethod::Winget(_) => os_pkg_mgrs.winget,
-        InstallationMethod::Chocolatey(_) => os_pkg_mgrs.chocolatey,
-        InstallationMethod::Scoop(_) => os_pkg_mgrs.scoop,
-        InstallationMethod::Nix(_) => os_pkg_mgrs.nix,
-        InstallationMethod::Npm(_) => lang_pkg_mgrs.npm,
-        InstallationMethod::Pnpm(_) => lang_pkg_mgrs.pnpm,
-        InstallationMethod::Yarn(_) => lang_pkg_mgrs.yarn,
-        InstallationMethod::Bun(_) => lang_pkg_mgrs.bun,
-        InstallationMethod::Cargo(_) => lang_pkg_mgrs.cargo,
-        InstallationMethod::GoModules(_) => lang_pkg_mgrs.go_modules,
-        InstallationMethod::Composer(_) => lang_pkg_mgrs.composer,
-        InstallationMethod::SwiftPm(_) => lang_pkg_mgrs.swift_pm,
-        InstallationMethod::LuaRocks(_) => lang_pkg_mgrs.luarocks,
-        InstallationMethod::VcPkg(_) => lang_pkg_mgrs.vcpkg,
-        InstallationMethod::Conan(_) => lang_pkg_mgrs.conan,
-        InstallationMethod::Nuget(_) => lang_pkg_mgrs.nuget,
-        InstallationMethod::Hex(_) => lang_pkg_mgrs.hex,
-        InstallationMethod::Pip(_) => lang_pkg_mgrs.pip,
-        InstallationMethod::Uv(_) => lang_pkg_mgrs.uv,
-        InstallationMethod::Poetry(_) => lang_pkg_mgrs.poetry,
-        InstallationMethod::Cpan(_) => lang_pkg_mgrs.cpan,
-        InstallationMethod::Cpanm(_) => lang_pkg_mgrs.cpanm,
+        InstallationMethod::Apt(_) => os_pkg_mgrs.is_installed(OsPackageManager::Apt),
+        InstallationMethod::Nala(_) => os_pkg_mgrs.is_installed(OsPackageManager::Nala),
+        InstallationMethod::Brew(_) => os_pkg_mgrs.is_installed(OsPackageManager::Brew),
+        InstallationMethod::Dnf(_) => os_pkg_mgrs.is_installed(OsPackageManager::Dnf),
+        InstallationMethod::Pacman(_) => os_pkg_mgrs.is_installed(OsPackageManager::Pacman),
+        InstallationMethod::Winget(_) => os_pkg_mgrs.is_installed(OsPackageManager::Winget),
+        InstallationMethod::Chocolatey(_) => os_pkg_mgrs.is_installed(OsPackageManager::Chocolatey),
+        InstallationMethod::Scoop(_) => os_pkg_mgrs.is_installed(OsPackageManager::Scoop),
+        InstallationMethod::Nix(_) => os_pkg_mgrs.is_installed(OsPackageManager::Nix),
+        InstallationMethod::Npm(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Npm),
+        InstallationMethod::Pnpm(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Pnpm),
+        InstallationMethod::Yarn(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Yarn),
+        InstallationMethod::Bun(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Bun),
+        InstallationMethod::Cargo(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Cargo),
+        InstallationMethod::GoModules(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::GoModules),
+        InstallationMethod::Composer(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Composer),
+        InstallationMethod::SwiftPm(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::SwiftPm),
+        InstallationMethod::LuaRocks(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Luarocks),
+        InstallationMethod::VcPkg(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Vcpkg),
+        InstallationMethod::Conan(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Conan),
+        InstallationMethod::Nuget(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Nuget),
+        InstallationMethod::Hex(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Hex),
+        InstallationMethod::Pip(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Pip),
+        InstallationMethod::Uv(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Uv),
+        InstallationMethod::Poetry(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Poetry),
+        InstallationMethod::Cpan(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Cpan),
+        InstallationMethod::Cpanm(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Cpanm),
         InstallationMethod::RemoteBash(_) => false,
     }
 }
@@ -627,6 +628,14 @@ mod tests {
         InstalledLanguagePackageManagers::default()
     }
 
+    fn os_pkg_mgrs_with_brew() -> InstalledOsPackageManagers {
+        serde_json::from_str(r#"{"brew": true}"#).unwrap()
+    }
+
+    fn lang_pkg_mgrs_with_cargo() -> InstalledLanguagePackageManagers {
+        serde_json::from_str(r#"{"cargo": true}"#).unwrap()
+    }
+
     #[test]
     fn test_validate_package_name_valid() {
         assert!(validate_package_name("ripgrep").is_ok());
@@ -723,10 +732,8 @@ mod tests {
             InstallationMethod::Cargo("bat"),
             InstallationMethod::Brew("bat"),
         ];
-        let mut os_pkg_mgrs = empty_os_pkg_mgrs();
-        let mut lang_pkg_mgrs = empty_lang_pkg_mgrs();
-        os_pkg_mgrs.brew = true;
-        lang_pkg_mgrs.cargo = true;
+        let os_pkg_mgrs = os_pkg_mgrs_with_brew();
+        let lang_pkg_mgrs = lang_pkg_mgrs_with_cargo();
 
         let selected = select_best_method(&methods, &os_pkg_mgrs, &lang_pkg_mgrs)
             .expect("Expected a method to be selected");
@@ -737,8 +744,7 @@ mod tests {
     fn test_select_best_method_falls_back_to_language_manager() {
         let methods = [InstallationMethod::Cargo("bat")];
         let os_pkg_mgrs = empty_os_pkg_mgrs();
-        let mut lang_pkg_mgrs = empty_lang_pkg_mgrs();
-        lang_pkg_mgrs.cargo = true;
+        let lang_pkg_mgrs = lang_pkg_mgrs_with_cargo();
 
         let selected = select_best_method(&methods, &os_pkg_mgrs, &lang_pkg_mgrs)
             .expect("Expected a method to be selected");

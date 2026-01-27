@@ -324,6 +324,63 @@ fn parse_version(output: &str, info: &ProgramInfo) -> Result<String, ProgramErro
     }
 }
 
+/// A serializable entry for a single program with rich metadata.
+///
+/// This struct is used by detection structs to serialize program information
+/// with full metadata including description, website, path, and source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProgramEntry {
+    /// Whether the program is installed.
+    pub installed: bool,
+
+    /// Human-readable display name.
+    pub name: &'static str,
+
+    /// One-line description of the program.
+    pub description: &'static str,
+
+    /// Official website URL.
+    pub website: &'static str,
+
+    /// Path to the executable (if installed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+
+    /// How the program was discovered (if installed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+impl ProgramEntry {
+    /// Creates a new entry for an installed program.
+    pub fn installed(
+        info: &ProgramInfo,
+        path: std::path::PathBuf,
+        source: crate::programs::types::ExecutableSource,
+    ) -> Self {
+        Self {
+            installed: true,
+            name: info.display_name,
+            description: info.description,
+            website: info.website,
+            path: Some(path.to_string_lossy().to_string()),
+            source: Some(source.to_string().to_lowercase().replace(' ', "_")),
+        }
+    }
+
+    /// Creates a new entry for a program that is not installed.
+    pub fn not_installed(info: &ProgramInfo) -> Self {
+        Self {
+            installed: false,
+            name: info.display_name,
+            description: info.description,
+            website: info.website,
+            path: None,
+            source: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

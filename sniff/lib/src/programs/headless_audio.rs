@@ -1,17 +1,18 @@
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::error::SniffInstallationError;
 use crate::os::detect_os_type;
 use crate::programs::enums::HeadlessAudio;
-use crate::programs::find_program::find_programs_parallel;
+use crate::programs::find_program::find_programs_with_source_parallel;
 use crate::programs::installer::{
     execute_install, execute_versioned_install, method_available, select_best_method,
     InstallOptions,
 };
 use crate::programs::schema::{ProgramError, ProgramMetadata};
-use crate::programs::types::ProgramDetector;
+use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{
     InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
 };
@@ -39,34 +40,23 @@ fn headless_audio_details(
 }
 
 /// Headless audio players found on the system.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+///
+/// Stores path and discovery source for each installed audio player.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InstalledHeadlessAudio {
-    /// mpv media player. [Website](https://mpv.io/)
-    pub mpv: bool,
-    /// FFplay from FFmpeg. [Website](https://www.ffmpeg.org/ffplay.html)
-    pub ffplay: bool,
-    /// VLC media player (cvlc). [Website](https://wiki.videolan.org/VLC_command-line_help/)
-    pub vlc: bool,
-    /// MPlayer media player. [Website](https://www.mplayerhq.hu/)
-    pub mplayer: bool,
-    /// GStreamer gst-play tool. [Website](https://gstreamer.freedesktop.org/)
-    pub gstreamer_gst_play: bool,
-    /// SoX play command. [Website](https://linux.die.net/man/1/sox)
-    pub sox: bool,
-    /// mpg123 MP3 player. [Website](https://www.mpg123.de/)
-    pub mpg123: bool,
-    /// ogg123 Vorbis player. [Website](https://github.com/xiph/vorbis-tools)
-    pub ogg123: bool,
-    /// ALSA aplay utility. [Website](https://linux.die.net/man/1/aplay)
-    pub alsa_aplay: bool,
-    /// macOS afplay utility. [Website](https://ss64.com/osx/afplay.html)
-    pub macos_afplay: bool,
-    /// PulseAudio paplay utility. [Website](https://manpages.ubuntu.com/)
-    pub pulseaudio_paplay: bool,
-    /// PulseAudio pacat raw streaming utility. [Website](https://www.freedesktop.org/wiki/Software/PulseAudio/)
-    pub pulseaudio_pacat: bool,
-    /// PipeWire pw-play/pw-cat. [Website](https://docs.pipewire.org/)
-    pub pipewire: bool,
+    mpv: Option<(PathBuf, ExecutableSource)>,
+    ffplay: Option<(PathBuf, ExecutableSource)>,
+    vlc: Option<(PathBuf, ExecutableSource)>,
+    mplayer: Option<(PathBuf, ExecutableSource)>,
+    gstreamer_gst_play: Option<(PathBuf, ExecutableSource)>,
+    sox: Option<(PathBuf, ExecutableSource)>,
+    mpg123: Option<(PathBuf, ExecutableSource)>,
+    ogg123: Option<(PathBuf, ExecutableSource)>,
+    alsa_aplay: Option<(PathBuf, ExecutableSource)>,
+    macos_afplay: Option<(PathBuf, ExecutableSource)>,
+    pulseaudio_paplay: Option<(PathBuf, ExecutableSource)>,
+    pulseaudio_pacat: Option<(PathBuf, ExecutableSource)>,
+    pipewire: Option<(PathBuf, ExecutableSource)>,
 }
 
 impl InstalledHeadlessAudio {
@@ -92,25 +82,32 @@ impl InstalledHeadlessAudio {
             "pw-play",
         ];
 
-        let results = find_programs_parallel(&programs);
+        let results = find_programs_with_source_parallel(&programs);
 
-        let has = |name: &str| results.get(name).and_then(|r| r.as_ref()).is_some();
-        let any = |names: &[&str]| names.iter().any(|&name| has(name));
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_any = |names: &[&str]| {
+            for name in names {
+                if let Some(result) = results.get(*name).and_then(|r| r.clone()) {
+                    return Some(result);
+                }
+            }
+            None
+        };
 
         Self {
-            mpv: has("mpv"),
-            ffplay: has("ffplay"),
-            vlc: any(&["vlc", "cvlc"]),
-            mplayer: has("mplayer"),
-            gstreamer_gst_play: any(&["gst-play-1.0", "gst-play"]),
-            sox: any(&["play", "sox"]),
-            mpg123: has("mpg123"),
-            ogg123: has("ogg123"),
-            alsa_aplay: has("aplay"),
-            macos_afplay: has("afplay"),
-            pulseaudio_paplay: has("paplay"),
-            pulseaudio_pacat: has("pacat"),
-            pipewire: any(&["pw-cat", "pw-play"]),
+            mpv: get("mpv"),
+            ffplay: get("ffplay"),
+            vlc: get_any(&["vlc", "cvlc"]),
+            mplayer: get("mplayer"),
+            gstreamer_gst_play: get_any(&["gst-play-1.0", "gst-play"]),
+            sox: get_any(&["play", "sox"]),
+            mpg123: get("mpg123"),
+            ogg123: get("ogg123"),
+            alsa_aplay: get("aplay"),
+            macos_afplay: get("afplay"),
+            pulseaudio_paplay: get("paplay"),
+            pulseaudio_pacat: get("pacat"),
+            pipewire: get_any(&["pw-cat", "pw-play"]),
         }
     }
 
@@ -121,10 +118,25 @@ impl InstalledHeadlessAudio {
 
     /// Returns the path to the specified audio player's binary if installed.
     pub fn path(&self, player: HeadlessAudio) -> Option<PathBuf> {
-        if self.is_installed(player) {
-            player.path()
-        } else {
-            None
+        self.path_with_source(player).map(|(p, _)| p)
+    }
+
+    /// Returns the path and source of the specified audio player if installed.
+    pub fn path_with_source(&self, player: HeadlessAudio) -> Option<(PathBuf, ExecutableSource)> {
+        match player {
+            HeadlessAudio::Mpv => self.mpv.clone(),
+            HeadlessAudio::Ffplay => self.ffplay.clone(),
+            HeadlessAudio::Vlc => self.vlc.clone(),
+            HeadlessAudio::MPlayer => self.mplayer.clone(),
+            HeadlessAudio::GstreamerGstPlay => self.gstreamer_gst_play.clone(),
+            HeadlessAudio::Sox => self.sox.clone(),
+            HeadlessAudio::Mpg123 => self.mpg123.clone(),
+            HeadlessAudio::Ogg123 => self.ogg123.clone(),
+            HeadlessAudio::AlsaAplay => self.alsa_aplay.clone(),
+            HeadlessAudio::MacOsAfplay => self.macos_afplay.clone(),
+            HeadlessAudio::PulseaudioPaplay => self.pulseaudio_paplay.clone(),
+            HeadlessAudio::PulseaudioPacat => self.pulseaudio_pacat.clone(),
+            HeadlessAudio::Pipewire => self.pipewire.clone(),
         }
     }
 
@@ -156,19 +168,19 @@ impl InstalledHeadlessAudio {
     /// Checks if the specified audio player is installed.
     pub fn is_installed(&self, player: HeadlessAudio) -> bool {
         match player {
-            HeadlessAudio::Mpv => self.mpv,
-            HeadlessAudio::Ffplay => self.ffplay,
-            HeadlessAudio::Vlc => self.vlc,
-            HeadlessAudio::MPlayer => self.mplayer,
-            HeadlessAudio::GstreamerGstPlay => self.gstreamer_gst_play,
-            HeadlessAudio::Sox => self.sox,
-            HeadlessAudio::Mpg123 => self.mpg123,
-            HeadlessAudio::Ogg123 => self.ogg123,
-            HeadlessAudio::AlsaAplay => self.alsa_aplay,
-            HeadlessAudio::MacOsAfplay => self.macos_afplay,
-            HeadlessAudio::PulseaudioPaplay => self.pulseaudio_paplay,
-            HeadlessAudio::PulseaudioPacat => self.pulseaudio_pacat,
-            HeadlessAudio::Pipewire => self.pipewire,
+            HeadlessAudio::Mpv => self.mpv.is_some(),
+            HeadlessAudio::Ffplay => self.ffplay.is_some(),
+            HeadlessAudio::Vlc => self.vlc.is_some(),
+            HeadlessAudio::MPlayer => self.mplayer.is_some(),
+            HeadlessAudio::GstreamerGstPlay => self.gstreamer_gst_play.is_some(),
+            HeadlessAudio::Sox => self.sox.is_some(),
+            HeadlessAudio::Mpg123 => self.mpg123.is_some(),
+            HeadlessAudio::Ogg123 => self.ogg123.is_some(),
+            HeadlessAudio::AlsaAplay => self.alsa_aplay.is_some(),
+            HeadlessAudio::MacOsAfplay => self.macos_afplay.is_some(),
+            HeadlessAudio::PulseaudioPaplay => self.pulseaudio_paplay.is_some(),
+            HeadlessAudio::PulseaudioPacat => self.pulseaudio_pacat.is_some(),
+            HeadlessAudio::Pipewire => self.pipewire.is_some(),
         }
     }
 
@@ -178,6 +190,92 @@ impl InstalledHeadlessAudio {
         HeadlessAudio::iter()
             .filter(|p| self.is_installed(*p))
             .collect()
+    }
+}
+
+impl Serialize for InstalledHeadlessAudio {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("InstalledHeadlessAudio", 13)?;
+        state.serialize_field("mpv", &self.mpv.is_some())?;
+        state.serialize_field("ffplay", &self.ffplay.is_some())?;
+        state.serialize_field("vlc", &self.vlc.is_some())?;
+        state.serialize_field("mplayer", &self.mplayer.is_some())?;
+        state.serialize_field("gstreamer_gst_play", &self.gstreamer_gst_play.is_some())?;
+        state.serialize_field("sox", &self.sox.is_some())?;
+        state.serialize_field("mpg123", &self.mpg123.is_some())?;
+        state.serialize_field("ogg123", &self.ogg123.is_some())?;
+        state.serialize_field("alsa_aplay", &self.alsa_aplay.is_some())?;
+        state.serialize_field("macos_afplay", &self.macos_afplay.is_some())?;
+        state.serialize_field("pulseaudio_paplay", &self.pulseaudio_paplay.is_some())?;
+        state.serialize_field("pulseaudio_pacat", &self.pulseaudio_pacat.is_some())?;
+        state.serialize_field("pipewire", &self.pipewire.is_some())?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for InstalledHeadlessAudio {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct BoolHeadlessAudio {
+            #[serde(default)]
+            mpv: bool,
+            #[serde(default)]
+            ffplay: bool,
+            #[serde(default)]
+            vlc: bool,
+            #[serde(default)]
+            mplayer: bool,
+            #[serde(default)]
+            gstreamer_gst_play: bool,
+            #[serde(default)]
+            sox: bool,
+            #[serde(default)]
+            mpg123: bool,
+            #[serde(default)]
+            ogg123: bool,
+            #[serde(default)]
+            alsa_aplay: bool,
+            #[serde(default)]
+            macos_afplay: bool,
+            #[serde(default)]
+            pulseaudio_paplay: bool,
+            #[serde(default)]
+            pulseaudio_pacat: bool,
+            #[serde(default)]
+            pipewire: bool,
+        }
+
+        let b = BoolHeadlessAudio::deserialize(deserializer)?;
+
+        let to_opt = |installed: bool| {
+            if installed {
+                Some((PathBuf::new(), ExecutableSource::Path))
+            } else {
+                None
+            }
+        };
+
+        Ok(InstalledHeadlessAudio {
+            mpv: to_opt(b.mpv),
+            ffplay: to_opt(b.ffplay),
+            vlc: to_opt(b.vlc),
+            mplayer: to_opt(b.mplayer),
+            gstreamer_gst_play: to_opt(b.gstreamer_gst_play),
+            sox: to_opt(b.sox),
+            mpg123: to_opt(b.mpg123),
+            ogg123: to_opt(b.ogg123),
+            alsa_aplay: to_opt(b.alsa_aplay),
+            macos_afplay: to_opt(b.macos_afplay),
+            pulseaudio_paplay: to_opt(b.pulseaudio_paplay),
+            pulseaudio_pacat: to_opt(b.pulseaudio_pacat),
+            pipewire: to_opt(b.pipewire),
+        })
     }
 }
 
@@ -194,6 +292,10 @@ impl ProgramDetector for InstalledHeadlessAudio {
 
     fn path(&self, program: Self::Program) -> Option<PathBuf> {
         InstalledHeadlessAudio::path(self, program)
+    }
+
+    fn path_with_source(&self, program: Self::Program) -> Option<(PathBuf, ExecutableSource)> {
+        InstalledHeadlessAudio::path_with_source(self, program)
     }
 
     fn version(&self, program: Self::Program) -> Result<String, ProgramError> {
@@ -289,5 +391,162 @@ impl ProgramDetector for InstalledHeadlessAudio {
 
         let _result = execute_versioned_install(method, version, &InstallOptions::default())?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_path_with_source_returns_none_when_not_installed() {
+        let players = InstalledHeadlessAudio::default();
+        assert!(players.path_with_source(HeadlessAudio::Ffplay).is_none());
+    }
+
+    #[test]
+    fn test_is_installed_returns_false_for_default() {
+        let players = InstalledHeadlessAudio::default();
+        assert!(!players.is_installed(HeadlessAudio::Ffplay));
+        assert!(!players.is_installed(HeadlessAudio::Mpv));
+    }
+
+    #[test]
+    fn test_serialize_produces_boolean_fields() {
+        let players = InstalledHeadlessAudio::default();
+        let json = serde_json::to_string(&players).unwrap();
+        assert!(json.contains("\"ffplay\":false"));
+        assert!(json.contains("\"mpv\":false"));
+    }
+
+    #[test]
+    fn test_deserialize_from_boolean_fields() {
+        let json = r#"{"ffplay": true, "mpv": false}"#;
+        let players: InstalledHeadlessAudio = serde_json::from_str(json).unwrap();
+        assert!(players.is_installed(HeadlessAudio::Ffplay));
+        assert!(!players.is_installed(HeadlessAudio::Mpv));
+    }
+
+    #[test]
+    fn test_serde_roundtrip() {
+        let original = InstalledHeadlessAudio::default();
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: InstalledHeadlessAudio = serde_json::from_str(&json).unwrap();
+        for player in original.installed() {
+            assert!(deserialized.is_installed(player));
+        }
+    }
+
+    #[test]
+    fn test_path_returns_none_when_not_installed() {
+        let players = InstalledHeadlessAudio::default();
+        assert!(players.path(HeadlessAudio::Ffplay).is_none());
+        assert!(players.path(HeadlessAudio::Mpv).is_none());
+    }
+
+    #[test]
+    fn test_installed_returns_empty_for_default() {
+        let players = InstalledHeadlessAudio::default();
+        assert!(players.installed().is_empty());
+    }
+
+    #[test]
+    fn test_version_returns_not_found_for_uninstalled() {
+        let players = InstalledHeadlessAudio::default();
+        let result = players.version(HeadlessAudio::Ffplay);
+        assert!(result.is_err());
+        if let Err(ProgramError::NotFound(name)) = result {
+            assert_eq!(name, "ffplay");
+        } else {
+            panic!("Expected NotFound error");
+        }
+    }
+
+    #[test]
+    fn test_website_returns_static_str() {
+        let players = InstalledHeadlessAudio::default();
+        let website = players.website(HeadlessAudio::Ffplay);
+        assert!(!website.is_empty());
+        assert!(website.starts_with("http"));
+    }
+
+    #[test]
+    fn test_description_returns_static_str() {
+        let players = InstalledHeadlessAudio::default();
+        let desc = players.description(HeadlessAudio::Ffplay);
+        assert!(!desc.is_empty());
+    }
+
+    #[test]
+    fn test_deserialize_partial_json() {
+        let json = r#"{"ffplay": true}"#;
+        let players: InstalledHeadlessAudio = serde_json::from_str(json).unwrap();
+        assert!(players.is_installed(HeadlessAudio::Ffplay));
+        assert!(!players.is_installed(HeadlessAudio::Mpv));
+    }
+
+    #[test]
+    fn test_clone_produces_equal_struct() {
+        let players = InstalledHeadlessAudio::default();
+        let cloned = players.clone();
+        assert_eq!(players, cloned);
+    }
+
+    #[test]
+    fn test_path_with_source_all_players_default() {
+        let players = InstalledHeadlessAudio::default();
+        use strum::IntoEnumIterator;
+        for player in HeadlessAudio::iter() {
+            assert!(
+                players.path_with_source(player).is_none(),
+                "{:?} should return None for default",
+                player
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_installed_all_players_default() {
+        let players = InstalledHeadlessAudio::default();
+        use strum::IntoEnumIterator;
+        for player in HeadlessAudio::iter() {
+            assert!(
+                !players.is_installed(player),
+                "{:?} should not be installed for default",
+                player
+            );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    mod macos_tests {
+        use super::*;
+
+        #[test]
+        fn test_afplay_detected_on_macos() {
+            // afplay is a built-in macOS command and should always be available
+            let players = InstalledHeadlessAudio::new();
+            assert!(
+                players.is_installed(HeadlessAudio::MacOsAfplay),
+                "afplay should be installed on macOS"
+            );
+        }
+
+        #[test]
+        fn test_path_with_source_detects_source_correctly() {
+            let players = InstalledHeadlessAudio::new();
+            for player in players.installed() {
+                let result = players.path_with_source(player);
+                assert!(result.is_some(), "{:?} should have path info", player);
+                let (path, source) = result.unwrap();
+                assert!(!path.as_os_str().is_empty(), "Path should not be empty");
+                // Headless audio players are typically PATH-based, not app bundles
+                assert!(
+                    source == ExecutableSource::Path
+                        || source == ExecutableSource::MacOsAppBundle,
+                    "Source should be valid"
+                );
+            }
+        }
     }
 }

@@ -1,17 +1,18 @@
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::error::SniffInstallationError;
 use crate::os::detect_os_type;
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
-use crate::programs::find_program::find_programs_parallel;
+use crate::programs::find_program::find_programs_with_source_parallel;
 use crate::programs::installer::{
     execute_install, execute_versioned_install, method_available, select_best_method,
     InstallOptions,
 };
 use crate::programs::schema::{ProgramError, ProgramMetadata};
-use crate::programs::types::ProgramDetector;
+use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{Program, PROGRAM_LOOKUP};
 
 fn lang_pkg_mgr_details(
@@ -60,44 +61,28 @@ fn os_pkg_mgr_details(
 }
 
 /// Language-specific package managers found on the system.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+///
+/// Stores path and discovery source for each installed package manager.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InstalledLanguagePackageManagers {
-    /// Default Node.js package manager; registry, dependency resolution, scripts. [Website](https://www.npmjs.com)
-    pub npm: bool,
-    /// Disk-efficient Node.js package manager using a content-addressable store. [Website](https://pnpm.io)
-    pub pnpm: bool,
-    /// Alternative Node.js package manager; workspaces, Plug’n’Play. [Website](https://yarnpkg.com)
-    pub yarn: bool,
-    /// All-in-one JS runtime with built-in package manager. [Website](https://bun.sh)
-    pub bun: bool,
-    /// Official Rust package manager and build tool. [Website](https://doc.rust-lang.org/cargo)
-    pub cargo: bool,
-    /// Built-in Go dependency system integrated with the go tool. [Website](https://go.dev/ref/mod)
-    pub go_modules: bool,
-    /// Dependency manager for modern PHP applications. [Website](https://getcomposer.org)
-    pub composer: bool,
-    /// Official Swift dependency manager, integrated with the Swift toolchain. [Website](https://www.swift.org/package-manager)
-    pub swift_pm: bool,
-    /// Standard package manager for Lua modules. [Website](https://luarocks.org)
-    pub luarocks: bool,
-    /// Cross-platform C/C++ dependency manager backed by Microsoft. [Website](https://vcpkg.io)
-    pub vcpkg: bool,
-    /// Decentralized C/C++ package manager with build-system integration. [Website](https://conan.io)
-    pub conan: bool,
-    /// Official package manager for .NET and C# ecosystems. [Website](https://www.nuget.org)
-    pub nuget: bool,
-    /// Package manager for the BEAM (Elixir, Erlang) ecosystem. [Website](https://hex.pm)
-    pub hex: bool,
-    /// Traditional Python package installer. [Website](https://pip.pypa.io)
-    pub pip: bool,
-    /// High-performance Python package manager and virtual environment tool. [Website](https://astral.sh/uv)
-    pub uv: bool,
-    /// Dependency manager and build system with lockfile support. [Website](https://python-poetry.org)
-    pub poetry: bool,
-    /// Canonical archive and installer for Perl modules. [Website](https://www.cpan.org)
-    pub cpan: bool,
-    /// Lightweight, scriptable CPAN client. [Website](https://metacpan.org/pod/App::cpanminus)
-    pub cpanm: bool,
+    npm: Option<(PathBuf, ExecutableSource)>,
+    pnpm: Option<(PathBuf, ExecutableSource)>,
+    yarn: Option<(PathBuf, ExecutableSource)>,
+    bun: Option<(PathBuf, ExecutableSource)>,
+    cargo: Option<(PathBuf, ExecutableSource)>,
+    go_modules: Option<(PathBuf, ExecutableSource)>,
+    composer: Option<(PathBuf, ExecutableSource)>,
+    swift_pm: Option<(PathBuf, ExecutableSource)>,
+    luarocks: Option<(PathBuf, ExecutableSource)>,
+    vcpkg: Option<(PathBuf, ExecutableSource)>,
+    conan: Option<(PathBuf, ExecutableSource)>,
+    nuget: Option<(PathBuf, ExecutableSource)>,
+    hex: Option<(PathBuf, ExecutableSource)>,
+    pip: Option<(PathBuf, ExecutableSource)>,
+    uv: Option<(PathBuf, ExecutableSource)>,
+    poetry: Option<(PathBuf, ExecutableSource)>,
+    cpan: Option<(PathBuf, ExecutableSource)>,
+    cpanm: Option<(PathBuf, ExecutableSource)>,
 }
 
 impl InstalledLanguagePackageManagers {
@@ -108,30 +93,37 @@ impl InstalledLanguagePackageManagers {
             "conan", "dotnet", "nuget", "mix", "pip", "pip3", "uv", "poetry", "cpan", "cpanm",
         ];
 
-        let results = find_programs_parallel(&programs);
+        let results = find_programs_with_source_parallel(&programs);
 
-        let has = |name: &str| results.get(name).and_then(|r| r.as_ref()).is_some();
-        let any = |names: &[&str]| names.iter().any(|&name| has(name));
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_any = |names: &[&str]| {
+            for name in names {
+                if let Some(result) = results.get(*name).and_then(|r| r.clone()) {
+                    return Some(result);
+                }
+            }
+            None
+        };
 
         Self {
-            npm: has("npm"),
-            pnpm: has("pnpm"),
-            yarn: has("yarn"),
-            bun: has("bun"),
-            cargo: has("cargo"),
-            go_modules: has("go"),
-            composer: has("composer"),
-            swift_pm: has("swift"),
-            luarocks: has("luarocks"),
-            vcpkg: has("vcpkg"),
-            conan: has("conan"),
-            nuget: any(&["dotnet", "nuget"]),
-            hex: has("mix"),
-            pip: any(&["pip", "pip3"]),
-            uv: has("uv"),
-            poetry: has("poetry"),
-            cpan: has("cpan"),
-            cpanm: has("cpanm"),
+            npm: get("npm"),
+            pnpm: get("pnpm"),
+            yarn: get("yarn"),
+            bun: get("bun"),
+            cargo: get("cargo"),
+            go_modules: get("go"),
+            composer: get("composer"),
+            swift_pm: get("swift"),
+            luarocks: get("luarocks"),
+            vcpkg: get("vcpkg"),
+            conan: get("conan"),
+            nuget: get_any(&["dotnet", "nuget"]),
+            hex: get("mix"),
+            pip: get_any(&["pip", "pip3"]),
+            uv: get("uv"),
+            poetry: get("poetry"),
+            cpan: get("cpan"),
+            cpanm: get("cpanm"),
         }
     }
 
@@ -142,10 +134,33 @@ impl InstalledLanguagePackageManagers {
 
     /// Returns the path to the specified package manager's binary if installed.
     pub fn path(&self, pkg_mgr: LanguagePackageManager) -> Option<PathBuf> {
-        if self.is_installed(pkg_mgr) {
-            pkg_mgr.path()
-        } else {
-            None
+        self.path_with_source(pkg_mgr).map(|(p, _)| p)
+    }
+
+    /// Returns the path and source of the specified package manager if installed.
+    pub fn path_with_source(
+        &self,
+        pkg_mgr: LanguagePackageManager,
+    ) -> Option<(PathBuf, ExecutableSource)> {
+        match pkg_mgr {
+            LanguagePackageManager::Npm => self.npm.clone(),
+            LanguagePackageManager::Pnpm => self.pnpm.clone(),
+            LanguagePackageManager::Yarn => self.yarn.clone(),
+            LanguagePackageManager::Bun => self.bun.clone(),
+            LanguagePackageManager::Cargo => self.cargo.clone(),
+            LanguagePackageManager::GoModules => self.go_modules.clone(),
+            LanguagePackageManager::Composer => self.composer.clone(),
+            LanguagePackageManager::SwiftPm => self.swift_pm.clone(),
+            LanguagePackageManager::Luarocks => self.luarocks.clone(),
+            LanguagePackageManager::Vcpkg => self.vcpkg.clone(),
+            LanguagePackageManager::Conan => self.conan.clone(),
+            LanguagePackageManager::Nuget => self.nuget.clone(),
+            LanguagePackageManager::Hex => self.hex.clone(),
+            LanguagePackageManager::Pip => self.pip.clone(),
+            LanguagePackageManager::Uv => self.uv.clone(),
+            LanguagePackageManager::Poetry => self.poetry.clone(),
+            LanguagePackageManager::Cpan => self.cpan.clone(),
+            LanguagePackageManager::Cpanm => self.cpanm.clone(),
         }
     }
 
@@ -177,24 +192,24 @@ impl InstalledLanguagePackageManagers {
     /// Checks if the specified package manager is installed.
     pub fn is_installed(&self, pkg_mgr: LanguagePackageManager) -> bool {
         match pkg_mgr {
-            LanguagePackageManager::Npm => self.npm,
-            LanguagePackageManager::Pnpm => self.pnpm,
-            LanguagePackageManager::Yarn => self.yarn,
-            LanguagePackageManager::Bun => self.bun,
-            LanguagePackageManager::Cargo => self.cargo,
-            LanguagePackageManager::GoModules => self.go_modules,
-            LanguagePackageManager::Composer => self.composer,
-            LanguagePackageManager::SwiftPm => self.swift_pm,
-            LanguagePackageManager::Luarocks => self.luarocks,
-            LanguagePackageManager::Vcpkg => self.vcpkg,
-            LanguagePackageManager::Conan => self.conan,
-            LanguagePackageManager::Nuget => self.nuget,
-            LanguagePackageManager::Hex => self.hex,
-            LanguagePackageManager::Pip => self.pip,
-            LanguagePackageManager::Uv => self.uv,
-            LanguagePackageManager::Poetry => self.poetry,
-            LanguagePackageManager::Cpan => self.cpan,
-            LanguagePackageManager::Cpanm => self.cpanm,
+            LanguagePackageManager::Npm => self.npm.is_some(),
+            LanguagePackageManager::Pnpm => self.pnpm.is_some(),
+            LanguagePackageManager::Yarn => self.yarn.is_some(),
+            LanguagePackageManager::Bun => self.bun.is_some(),
+            LanguagePackageManager::Cargo => self.cargo.is_some(),
+            LanguagePackageManager::GoModules => self.go_modules.is_some(),
+            LanguagePackageManager::Composer => self.composer.is_some(),
+            LanguagePackageManager::SwiftPm => self.swift_pm.is_some(),
+            LanguagePackageManager::Luarocks => self.luarocks.is_some(),
+            LanguagePackageManager::Vcpkg => self.vcpkg.is_some(),
+            LanguagePackageManager::Conan => self.conan.is_some(),
+            LanguagePackageManager::Nuget => self.nuget.is_some(),
+            LanguagePackageManager::Hex => self.hex.is_some(),
+            LanguagePackageManager::Pip => self.pip.is_some(),
+            LanguagePackageManager::Uv => self.uv.is_some(),
+            LanguagePackageManager::Poetry => self.poetry.is_some(),
+            LanguagePackageManager::Cpan => self.cpan.is_some(),
+            LanguagePackageManager::Cpanm => self.cpanm.is_some(),
         }
     }
 
@@ -204,6 +219,112 @@ impl InstalledLanguagePackageManagers {
         LanguagePackageManager::iter()
             .filter(|p| self.is_installed(*p))
             .collect()
+    }
+}
+
+impl Serialize for InstalledLanguagePackageManagers {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("InstalledLanguagePackageManagers", 18)?;
+        state.serialize_field("npm", &self.npm.is_some())?;
+        state.serialize_field("pnpm", &self.pnpm.is_some())?;
+        state.serialize_field("yarn", &self.yarn.is_some())?;
+        state.serialize_field("bun", &self.bun.is_some())?;
+        state.serialize_field("cargo", &self.cargo.is_some())?;
+        state.serialize_field("go_modules", &self.go_modules.is_some())?;
+        state.serialize_field("composer", &self.composer.is_some())?;
+        state.serialize_field("swift_pm", &self.swift_pm.is_some())?;
+        state.serialize_field("luarocks", &self.luarocks.is_some())?;
+        state.serialize_field("vcpkg", &self.vcpkg.is_some())?;
+        state.serialize_field("conan", &self.conan.is_some())?;
+        state.serialize_field("nuget", &self.nuget.is_some())?;
+        state.serialize_field("hex", &self.hex.is_some())?;
+        state.serialize_field("pip", &self.pip.is_some())?;
+        state.serialize_field("uv", &self.uv.is_some())?;
+        state.serialize_field("poetry", &self.poetry.is_some())?;
+        state.serialize_field("cpan", &self.cpan.is_some())?;
+        state.serialize_field("cpanm", &self.cpanm.is_some())?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for InstalledLanguagePackageManagers {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct BoolLangPkgMgrs {
+            #[serde(default)]
+            npm: bool,
+            #[serde(default)]
+            pnpm: bool,
+            #[serde(default)]
+            yarn: bool,
+            #[serde(default)]
+            bun: bool,
+            #[serde(default)]
+            cargo: bool,
+            #[serde(default)]
+            go_modules: bool,
+            #[serde(default)]
+            composer: bool,
+            #[serde(default)]
+            swift_pm: bool,
+            #[serde(default)]
+            luarocks: bool,
+            #[serde(default)]
+            vcpkg: bool,
+            #[serde(default)]
+            conan: bool,
+            #[serde(default)]
+            nuget: bool,
+            #[serde(default)]
+            hex: bool,
+            #[serde(default)]
+            pip: bool,
+            #[serde(default)]
+            uv: bool,
+            #[serde(default)]
+            poetry: bool,
+            #[serde(default)]
+            cpan: bool,
+            #[serde(default)]
+            cpanm: bool,
+        }
+
+        let b = BoolLangPkgMgrs::deserialize(deserializer)?;
+
+        let to_opt = |installed: bool| {
+            if installed {
+                Some((PathBuf::new(), ExecutableSource::Path))
+            } else {
+                None
+            }
+        };
+
+        Ok(InstalledLanguagePackageManagers {
+            npm: to_opt(b.npm),
+            pnpm: to_opt(b.pnpm),
+            yarn: to_opt(b.yarn),
+            bun: to_opt(b.bun),
+            cargo: to_opt(b.cargo),
+            go_modules: to_opt(b.go_modules),
+            composer: to_opt(b.composer),
+            swift_pm: to_opt(b.swift_pm),
+            luarocks: to_opt(b.luarocks),
+            vcpkg: to_opt(b.vcpkg),
+            conan: to_opt(b.conan),
+            nuget: to_opt(b.nuget),
+            hex: to_opt(b.hex),
+            pip: to_opt(b.pip),
+            uv: to_opt(b.uv),
+            poetry: to_opt(b.poetry),
+            cpan: to_opt(b.cpan),
+            cpanm: to_opt(b.cpanm),
+        })
     }
 }
 
@@ -220,6 +341,10 @@ impl ProgramDetector for InstalledLanguagePackageManagers {
 
     fn path(&self, program: Self::Program) -> Option<PathBuf> {
         InstalledLanguagePackageManagers::path(self, program)
+    }
+
+    fn path_with_source(&self, program: Self::Program) -> Option<(PathBuf, ExecutableSource)> {
+        InstalledLanguagePackageManagers::path_with_source(self, program)
     }
 
     fn version(&self, program: Self::Program) -> Result<String, ProgramError> {
@@ -319,26 +444,19 @@ impl ProgramDetector for InstalledLanguagePackageManagers {
 }
 
 /// OS-level package managers found on the system.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+///
+/// Stores path and discovery source for each installed package manager.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InstalledOsPackageManagers {
-    /// Debian/Ubuntu primary package manager. [Website](https://tracker.debian.org/pkg/apt)
-    pub apt: bool,
-    /// Modern apt frontend with parallel downloads. [Website](https://github.com/volitank/nala)
-    pub nala: bool,
-    /// macOS/Linux community package manager. [Website](https://brew.sh)
-    pub brew: bool,
-    /// Fedora/RHEL primary package manager. [Website](https://github.com/rpm-software-management/dnf)
-    pub dnf: bool,
-    /// Arch Linux package manager. [Website](https://archlinux.org/pacman/)
-    pub pacman: bool,
-    /// Windows Package Manager. [Website](https://github.com/microsoft/winget-cli)
-    pub winget: bool,
-    /// Windows community package manager. [Website](https://chocolatey.org)
-    pub chocolatey: bool,
-    /// Windows command-line installer. [Website](https://scoop.sh)
-    pub scoop: bool,
-    /// Nix package manager. [Website](https://nixos.org)
-    pub nix: bool,
+    apt: Option<(PathBuf, ExecutableSource)>,
+    nala: Option<(PathBuf, ExecutableSource)>,
+    brew: Option<(PathBuf, ExecutableSource)>,
+    dnf: Option<(PathBuf, ExecutableSource)>,
+    pacman: Option<(PathBuf, ExecutableSource)>,
+    winget: Option<(PathBuf, ExecutableSource)>,
+    chocolatey: Option<(PathBuf, ExecutableSource)>,
+    scoop: Option<(PathBuf, ExecutableSource)>,
+    nix: Option<(PathBuf, ExecutableSource)>,
 }
 
 impl InstalledOsPackageManagers {
@@ -348,21 +466,28 @@ impl InstalledOsPackageManagers {
             "apt", "nala", "brew", "dnf", "yum", "pacman", "winget", "choco", "scoop", "nix",
         ];
 
-        let results = find_programs_parallel(&programs);
+        let results = find_programs_with_source_parallel(&programs);
 
-        let has = |name: &str| results.get(name).and_then(|r| r.as_ref()).is_some();
-        let any = |names: &[&str]| names.iter().any(|&name| has(name));
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_any = |names: &[&str]| {
+            for name in names {
+                if let Some(result) = results.get(*name).and_then(|r| r.clone()) {
+                    return Some(result);
+                }
+            }
+            None
+        };
 
         Self {
-            apt: has("apt"),
-            nala: has("nala"),
-            brew: has("brew"),
-            dnf: any(&["dnf", "yum"]),
-            pacman: has("pacman"),
-            winget: has("winget"),
-            chocolatey: has("choco"),
-            scoop: has("scoop"),
-            nix: has("nix"),
+            apt: get("apt"),
+            nala: get("nala"),
+            brew: get("brew"),
+            dnf: get_any(&["dnf", "yum"]),
+            pacman: get("pacman"),
+            winget: get("winget"),
+            chocolatey: get("choco"),
+            scoop: get("scoop"),
+            nix: get("nix"),
         }
     }
 
@@ -373,10 +498,24 @@ impl InstalledOsPackageManagers {
 
     /// Returns the path to the specified package manager's binary if installed.
     pub fn path(&self, pkg_mgr: OsPackageManager) -> Option<PathBuf> {
-        if self.is_installed(pkg_mgr) {
-            pkg_mgr.path()
-        } else {
-            None
+        self.path_with_source(pkg_mgr).map(|(p, _)| p)
+    }
+
+    /// Returns the path and source of the specified package manager if installed.
+    pub fn path_with_source(
+        &self,
+        pkg_mgr: OsPackageManager,
+    ) -> Option<(PathBuf, ExecutableSource)> {
+        match pkg_mgr {
+            OsPackageManager::Apt => self.apt.clone(),
+            OsPackageManager::Nala => self.nala.clone(),
+            OsPackageManager::Brew => self.brew.clone(),
+            OsPackageManager::Dnf => self.dnf.clone(),
+            OsPackageManager::Pacman => self.pacman.clone(),
+            OsPackageManager::Winget => self.winget.clone(),
+            OsPackageManager::Chocolatey => self.chocolatey.clone(),
+            OsPackageManager::Scoop => self.scoop.clone(),
+            OsPackageManager::Nix => self.nix.clone(),
         }
     }
 
@@ -408,15 +547,15 @@ impl InstalledOsPackageManagers {
     /// Checks if the specified package manager is installed.
     pub fn is_installed(&self, pkg_mgr: OsPackageManager) -> bool {
         match pkg_mgr {
-            OsPackageManager::Apt => self.apt,
-            OsPackageManager::Nala => self.nala,
-            OsPackageManager::Brew => self.brew,
-            OsPackageManager::Dnf => self.dnf,
-            OsPackageManager::Pacman => self.pacman,
-            OsPackageManager::Winget => self.winget,
-            OsPackageManager::Chocolatey => self.chocolatey,
-            OsPackageManager::Scoop => self.scoop,
-            OsPackageManager::Nix => self.nix,
+            OsPackageManager::Apt => self.apt.is_some(),
+            OsPackageManager::Nala => self.nala.is_some(),
+            OsPackageManager::Brew => self.brew.is_some(),
+            OsPackageManager::Dnf => self.dnf.is_some(),
+            OsPackageManager::Pacman => self.pacman.is_some(),
+            OsPackageManager::Winget => self.winget.is_some(),
+            OsPackageManager::Chocolatey => self.chocolatey.is_some(),
+            OsPackageManager::Scoop => self.scoop.is_some(),
+            OsPackageManager::Nix => self.nix.is_some(),
         }
     }
 
@@ -426,6 +565,76 @@ impl InstalledOsPackageManagers {
         OsPackageManager::iter()
             .filter(|p| self.is_installed(*p))
             .collect()
+    }
+}
+
+impl Serialize for InstalledOsPackageManagers {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("InstalledOsPackageManagers", 9)?;
+        state.serialize_field("apt", &self.apt.is_some())?;
+        state.serialize_field("nala", &self.nala.is_some())?;
+        state.serialize_field("brew", &self.brew.is_some())?;
+        state.serialize_field("dnf", &self.dnf.is_some())?;
+        state.serialize_field("pacman", &self.pacman.is_some())?;
+        state.serialize_field("winget", &self.winget.is_some())?;
+        state.serialize_field("chocolatey", &self.chocolatey.is_some())?;
+        state.serialize_field("scoop", &self.scoop.is_some())?;
+        state.serialize_field("nix", &self.nix.is_some())?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for InstalledOsPackageManagers {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct BoolOsPkgMgrs {
+            #[serde(default)]
+            apt: bool,
+            #[serde(default)]
+            nala: bool,
+            #[serde(default)]
+            brew: bool,
+            #[serde(default)]
+            dnf: bool,
+            #[serde(default)]
+            pacman: bool,
+            #[serde(default)]
+            winget: bool,
+            #[serde(default)]
+            chocolatey: bool,
+            #[serde(default)]
+            scoop: bool,
+            #[serde(default)]
+            nix: bool,
+        }
+
+        let b = BoolOsPkgMgrs::deserialize(deserializer)?;
+
+        let to_opt = |installed: bool| {
+            if installed {
+                Some((PathBuf::new(), ExecutableSource::Path))
+            } else {
+                None
+            }
+        };
+
+        Ok(InstalledOsPackageManagers {
+            apt: to_opt(b.apt),
+            nala: to_opt(b.nala),
+            brew: to_opt(b.brew),
+            dnf: to_opt(b.dnf),
+            pacman: to_opt(b.pacman),
+            winget: to_opt(b.winget),
+            chocolatey: to_opt(b.chocolatey),
+            scoop: to_opt(b.scoop),
+            nix: to_opt(b.nix),
+        })
     }
 }
 
@@ -442,6 +651,10 @@ impl ProgramDetector for InstalledOsPackageManagers {
 
     fn path(&self, program: Self::Program) -> Option<PathBuf> {
         InstalledOsPackageManagers::path(self, program)
+    }
+
+    fn path_with_source(&self, program: Self::Program) -> Option<(PathBuf, ExecutableSource)> {
+        InstalledOsPackageManagers::path_with_source(self, program)
     }
 
     fn version(&self, program: Self::Program) -> Result<String, ProgramError> {
@@ -537,5 +750,96 @@ impl ProgramDetector for InstalledOsPackageManagers {
 
         let _result = execute_versioned_install(method, version, &InstallOptions::default())?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod lang_pkg_mgrs {
+        use super::*;
+
+        #[test]
+        fn test_path_with_source_returns_none_when_not_installed() {
+            let mgrs = InstalledLanguagePackageManagers::default();
+            assert!(mgrs.path_with_source(LanguagePackageManager::Npm).is_none());
+        }
+
+        #[test]
+        fn test_is_installed_returns_false_for_default() {
+            let mgrs = InstalledLanguagePackageManagers::default();
+            assert!(!mgrs.is_installed(LanguagePackageManager::Npm));
+            assert!(!mgrs.is_installed(LanguagePackageManager::Cargo));
+        }
+
+        #[test]
+        fn test_serialize_produces_boolean_fields() {
+            let mgrs = InstalledLanguagePackageManagers::default();
+            let json = serde_json::to_string(&mgrs).unwrap();
+            assert!(json.contains("\"npm\":false"));
+            assert!(json.contains("\"cargo\":false"));
+        }
+
+        #[test]
+        fn test_deserialize_from_boolean_fields() {
+            let json = r#"{"npm": true, "cargo": false}"#;
+            let mgrs: InstalledLanguagePackageManagers = serde_json::from_str(json).unwrap();
+            assert!(mgrs.is_installed(LanguagePackageManager::Npm));
+            assert!(!mgrs.is_installed(LanguagePackageManager::Cargo));
+        }
+
+        #[test]
+        fn test_serde_roundtrip() {
+            let original = InstalledLanguagePackageManagers::default();
+            let json = serde_json::to_string(&original).unwrap();
+            let deserialized: InstalledLanguagePackageManagers = serde_json::from_str(&json).unwrap();
+            for mgr in original.installed() {
+                assert!(deserialized.is_installed(mgr));
+            }
+        }
+    }
+
+    mod os_pkg_mgrs {
+        use super::*;
+
+        #[test]
+        fn test_path_with_source_returns_none_when_not_installed() {
+            let mgrs = InstalledOsPackageManagers::default();
+            assert!(mgrs.path_with_source(OsPackageManager::Brew).is_none());
+        }
+
+        #[test]
+        fn test_is_installed_returns_false_for_default() {
+            let mgrs = InstalledOsPackageManagers::default();
+            assert!(!mgrs.is_installed(OsPackageManager::Brew));
+            assert!(!mgrs.is_installed(OsPackageManager::Apt));
+        }
+
+        #[test]
+        fn test_serialize_produces_boolean_fields() {
+            let mgrs = InstalledOsPackageManagers::default();
+            let json = serde_json::to_string(&mgrs).unwrap();
+            assert!(json.contains("\"brew\":false"));
+            assert!(json.contains("\"apt\":false"));
+        }
+
+        #[test]
+        fn test_deserialize_from_boolean_fields() {
+            let json = r#"{"brew": true, "apt": false}"#;
+            let mgrs: InstalledOsPackageManagers = serde_json::from_str(json).unwrap();
+            assert!(mgrs.is_installed(OsPackageManager::Brew));
+            assert!(!mgrs.is_installed(OsPackageManager::Apt));
+        }
+
+        #[test]
+        fn test_serde_roundtrip() {
+            let original = InstalledOsPackageManagers::default();
+            let json = serde_json::to_string(&original).unwrap();
+            let deserialized: InstalledOsPackageManagers = serde_json::from_str(&json).unwrap();
+            for mgr in original.installed() {
+                assert!(deserialized.is_installed(mgr));
+            }
+        }
     }
 }

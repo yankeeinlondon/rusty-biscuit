@@ -1,17 +1,18 @@
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::error::SniffInstallationError;
 use crate::os::detect_os_type;
 use crate::programs::enums::TtsClient;
-use crate::programs::find_program::find_programs_parallel;
+use crate::programs::find_program::find_programs_with_source_parallel;
 use crate::programs::installer::{
     execute_install, execute_versioned_install, method_available, select_best_method,
     InstallOptions,
 };
 use crate::programs::schema::{ProgramError, ProgramMetadata};
-use crate::programs::types::ProgramDetector;
+use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{
     InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
 };
@@ -39,38 +40,25 @@ fn tts_client_details(client: TtsClient) -> Option<&'static crate::programs::Pro
 }
 
 /// Popular text-to-speech (TTS) clients found on the system.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+///
+/// Stores path and discovery source for each installed TTS client.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InstalledTtsClients {
-    /// macOS built-in speech synthesis utility. [Website](https://developer.apple.com/library/archive/documentation/UserExperience/Conceptual/SpeechSynthesisProgrammingGuide/Introduction/Introduction.html)
-    pub say: bool,
-    /// Open source speech synthesizer. [Website](http://espeak.sourceforge.net/)
-    pub espeak: bool,
-    /// Multi-lingual software speech synthesizer, successor to eSpeak. [Website](https://github.com/espeak-ng/espeak-ng)
-    pub espeak_ng: bool,
-    /// General multi-lingual speech synthesis system. [Website](http://www.cstr.ed.ac.uk/projects/festival/)
-    pub festival: bool,
-    /// Mycroft's TTS engine based on Flite. [Website](https://github.com/MycroftAI/mimic)
-    pub mimic: bool,
-    /// Mycroft's neural TTS engine. [Website](https://github.com/MycroftAI/mycroft-mimic3-tts)
-    pub mimic3: bool,
-    /// A fast, local neural text to speech system using ONNX. [Website](https://github.com/rhasspy/piper)
-    pub piper: bool,
-    /// Speech processing engine. [Website](https://echogarden.io/)
-    pub echogarden: bool,
-    /// Command line utility for speech synthesis on Windows. [Website](http://www.cross-plus-a.com/balcon.htm)
-    pub balcon: bool,
-    /// Windows Speech API (SAPI). [Website](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ms723627(v=vs.85))
-    pub windows_sapi: bool,
-    /// Google Text-to-Speech CLI tool. [Website](https://github.com/pndurette/gTTS)
-    pub gtts_cli: bool,
-    /// Coqui TTS, deep learning for Text-to-Speech. [Website](https://github.com/coqui-ai/TTS)
-    pub coqui_tts: bool,
-    /// Sherpa-ONNX, streaming and non-streaming speech-to-text and text-to-speech using ONNX. [Website](https://k2-fsa.github.io/sherpa/onnx/index.html)
-    pub sherpa_onnx: bool,
-    /// A popular CLI which makes using the Kokoro TTS model very easy. [Website](https://github.com/nazdridoy/kokoro-tts)
-    pub kokoro_tts: bool,
-    /// SVOX Pico TTS engine (`pico2wave` command). Lightweight TTS for embedded systems.
-    pub pico2wave: bool,
+    say: Option<(PathBuf, ExecutableSource)>,
+    espeak: Option<(PathBuf, ExecutableSource)>,
+    espeak_ng: Option<(PathBuf, ExecutableSource)>,
+    festival: Option<(PathBuf, ExecutableSource)>,
+    mimic: Option<(PathBuf, ExecutableSource)>,
+    mimic3: Option<(PathBuf, ExecutableSource)>,
+    piper: Option<(PathBuf, ExecutableSource)>,
+    echogarden: Option<(PathBuf, ExecutableSource)>,
+    balcon: Option<(PathBuf, ExecutableSource)>,
+    windows_sapi: Option<(PathBuf, ExecutableSource)>,
+    gtts_cli: Option<(PathBuf, ExecutableSource)>,
+    coqui_tts: Option<(PathBuf, ExecutableSource)>,
+    sherpa_onnx: Option<(PathBuf, ExecutableSource)>,
+    kokoro_tts: Option<(PathBuf, ExecutableSource)>,
+    pico2wave: Option<(PathBuf, ExecutableSource)>,
 }
 
 impl InstalledTtsClients {
@@ -94,27 +82,38 @@ impl InstalledTtsClients {
             "kokoro-tts",
         ];
 
-        let results = find_programs_parallel(&programs);
+        let results = find_programs_with_source_parallel(&programs);
 
-        let has = |name: &str| results.get(name).and_then(|r| r.as_ref()).is_some();
-        let any = |names: &[&str]| names.iter().any(|&name| has(name));
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_any = |names: &[&str]| {
+            for name in names {
+                if let Some(result) = results.get(*name).and_then(|r| r.clone()) {
+                    return Some(result);
+                }
+            }
+            None
+        };
 
         Self {
-            say: has("say"),
-            espeak: has("espeak"),
-            espeak_ng: has("espeak-ng"),
-            festival: has("festival"),
-            mimic: has("mimic"),
-            mimic3: has("mimic3"),
-            piper: has("piper"),
-            echogarden: has("echogarden"),
-            balcon: has("balcon"),
-            windows_sapi: cfg!(target_os = "windows"),
-            gtts_cli: has("gtts-cli"),
-            coqui_tts: has("tts"),
-            sherpa_onnx: any(&["sherpa-onnx-offline-tts", "sherpa-onnx-tts"]),
-            kokoro_tts: has("kokoro-tts"),
-            pico2wave: has("pico2wave"),
+            say: get("say"),
+            espeak: get("espeak"),
+            espeak_ng: get("espeak-ng"),
+            festival: get("festival"),
+            mimic: get("mimic"),
+            mimic3: get("mimic3"),
+            piper: get("piper"),
+            echogarden: get("echogarden"),
+            balcon: get("balcon"),
+            windows_sapi: if cfg!(target_os = "windows") {
+                Some((PathBuf::from("sapi"), ExecutableSource::Path))
+            } else {
+                None
+            },
+            gtts_cli: get("gtts-cli"),
+            coqui_tts: get("tts"),
+            sherpa_onnx: get_any(&["sherpa-onnx-offline-tts", "sherpa-onnx-tts"]),
+            kokoro_tts: get("kokoro-tts"),
+            pico2wave: get("pico2wave"),
         }
     }
 
@@ -123,12 +122,107 @@ impl InstalledTtsClients {
         *self = Self::new();
     }
 
+    // Boolean accessors for backward compatibility with direct field access patterns.
+    // These allow code to use `installed.say()` instead of `installed.is_installed(TtsClient::Say)`.
+
+    /// Returns true if macOS `say` command is available.
+    pub fn say(&self) -> bool {
+        self.say.is_some()
+    }
+
+    /// Returns true if `espeak` is installed.
+    pub fn espeak(&self) -> bool {
+        self.espeak.is_some()
+    }
+
+    /// Returns true if `espeak-ng` is installed.
+    pub fn espeak_ng(&self) -> bool {
+        self.espeak_ng.is_some()
+    }
+
+    /// Returns true if `festival` is installed.
+    pub fn festival(&self) -> bool {
+        self.festival.is_some()
+    }
+
+    /// Returns true if `mimic` is installed.
+    pub fn mimic(&self) -> bool {
+        self.mimic.is_some()
+    }
+
+    /// Returns true if `mimic3` is installed.
+    pub fn mimic3(&self) -> bool {
+        self.mimic3.is_some()
+    }
+
+    /// Returns true if `piper` is installed.
+    pub fn piper(&self) -> bool {
+        self.piper.is_some()
+    }
+
+    /// Returns true if `echogarden` is installed.
+    pub fn echogarden(&self) -> bool {
+        self.echogarden.is_some()
+    }
+
+    /// Returns true if `balcon` is installed.
+    pub fn balcon(&self) -> bool {
+        self.balcon.is_some()
+    }
+
+    /// Returns true if Windows SAPI is available.
+    pub fn windows_sapi(&self) -> bool {
+        self.windows_sapi.is_some()
+    }
+
+    /// Returns true if `gtts-cli` is installed.
+    pub fn gtts_cli(&self) -> bool {
+        self.gtts_cli.is_some()
+    }
+
+    /// Returns true if Coqui TTS is installed.
+    pub fn coqui_tts(&self) -> bool {
+        self.coqui_tts.is_some()
+    }
+
+    /// Returns true if `sherpa-onnx` TTS is installed.
+    pub fn sherpa_onnx(&self) -> bool {
+        self.sherpa_onnx.is_some()
+    }
+
+    /// Returns true if `kokoro-tts` is installed.
+    pub fn kokoro_tts(&self) -> bool {
+        self.kokoro_tts.is_some()
+    }
+
+    /// Returns true if `pico2wave` is installed.
+    pub fn pico2wave(&self) -> bool {
+        self.pico2wave.is_some()
+    }
+
     /// Returns the path to the specified TTS client's binary if installed.
     pub fn path(&self, client: TtsClient) -> Option<PathBuf> {
-        if self.is_installed(client) {
-            client.path()
-        } else {
-            None
+        self.path_with_source(client).map(|(p, _)| p)
+    }
+
+    /// Returns the path and source of the specified TTS client if installed.
+    pub fn path_with_source(&self, client: TtsClient) -> Option<(PathBuf, ExecutableSource)> {
+        match client {
+            TtsClient::Say => self.say.clone(),
+            TtsClient::Espeak => self.espeak.clone(),
+            TtsClient::EspeakNg => self.espeak_ng.clone(),
+            TtsClient::Festival => self.festival.clone(),
+            TtsClient::Mimic => self.mimic.clone(),
+            TtsClient::Mimic3 => self.mimic3.clone(),
+            TtsClient::Piper => self.piper.clone(),
+            TtsClient::Echogarden => self.echogarden.clone(),
+            TtsClient::Balcon => self.balcon.clone(),
+            TtsClient::WindowsSapi => self.windows_sapi.clone(),
+            TtsClient::GttsCli => self.gtts_cli.clone(),
+            TtsClient::CoquiTts => self.coqui_tts.clone(),
+            TtsClient::SherpaOnnx => self.sherpa_onnx.clone(),
+            TtsClient::KokoroTts => self.kokoro_tts.clone(),
+            TtsClient::Pico2Wave => self.pico2wave.clone(),
         }
     }
 
@@ -160,21 +254,21 @@ impl InstalledTtsClients {
     /// Checks if the specified TTS client is installed.
     pub fn is_installed(&self, client: TtsClient) -> bool {
         match client {
-            TtsClient::Say => self.say,
-            TtsClient::Espeak => self.espeak,
-            TtsClient::EspeakNg => self.espeak_ng,
-            TtsClient::Festival => self.festival,
-            TtsClient::Mimic => self.mimic,
-            TtsClient::Mimic3 => self.mimic3,
-            TtsClient::Piper => self.piper,
-            TtsClient::Echogarden => self.echogarden,
-            TtsClient::Balcon => self.balcon,
-            TtsClient::WindowsSapi => self.windows_sapi,
-            TtsClient::GttsCli => self.gtts_cli,
-            TtsClient::CoquiTts => self.coqui_tts,
-            TtsClient::SherpaOnnx => self.sherpa_onnx,
-            TtsClient::KokoroTts => self.kokoro_tts,
-            TtsClient::Pico2Wave => self.pico2wave,
+            TtsClient::Say => self.say.is_some(),
+            TtsClient::Espeak => self.espeak.is_some(),
+            TtsClient::EspeakNg => self.espeak_ng.is_some(),
+            TtsClient::Festival => self.festival.is_some(),
+            TtsClient::Mimic => self.mimic.is_some(),
+            TtsClient::Mimic3 => self.mimic3.is_some(),
+            TtsClient::Piper => self.piper.is_some(),
+            TtsClient::Echogarden => self.echogarden.is_some(),
+            TtsClient::Balcon => self.balcon.is_some(),
+            TtsClient::WindowsSapi => self.windows_sapi.is_some(),
+            TtsClient::GttsCli => self.gtts_cli.is_some(),
+            TtsClient::CoquiTts => self.coqui_tts.is_some(),
+            TtsClient::SherpaOnnx => self.sherpa_onnx.is_some(),
+            TtsClient::KokoroTts => self.kokoro_tts.is_some(),
+            TtsClient::Pico2Wave => self.pico2wave.is_some(),
         }
     }
 
@@ -184,6 +278,100 @@ impl InstalledTtsClients {
         TtsClient::iter()
             .filter(|c| self.is_installed(*c))
             .collect()
+    }
+}
+
+impl Serialize for InstalledTtsClients {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("InstalledTtsClients", 15)?;
+        state.serialize_field("say", &self.say.is_some())?;
+        state.serialize_field("espeak", &self.espeak.is_some())?;
+        state.serialize_field("espeak_ng", &self.espeak_ng.is_some())?;
+        state.serialize_field("festival", &self.festival.is_some())?;
+        state.serialize_field("mimic", &self.mimic.is_some())?;
+        state.serialize_field("mimic3", &self.mimic3.is_some())?;
+        state.serialize_field("piper", &self.piper.is_some())?;
+        state.serialize_field("echogarden", &self.echogarden.is_some())?;
+        state.serialize_field("balcon", &self.balcon.is_some())?;
+        state.serialize_field("windows_sapi", &self.windows_sapi.is_some())?;
+        state.serialize_field("gtts_cli", &self.gtts_cli.is_some())?;
+        state.serialize_field("coqui_tts", &self.coqui_tts.is_some())?;
+        state.serialize_field("sherpa_onnx", &self.sherpa_onnx.is_some())?;
+        state.serialize_field("kokoro_tts", &self.kokoro_tts.is_some())?;
+        state.serialize_field("pico2wave", &self.pico2wave.is_some())?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for InstalledTtsClients {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct BoolTtsClients {
+            #[serde(default)]
+            say: bool,
+            #[serde(default)]
+            espeak: bool,
+            #[serde(default)]
+            espeak_ng: bool,
+            #[serde(default)]
+            festival: bool,
+            #[serde(default)]
+            mimic: bool,
+            #[serde(default)]
+            mimic3: bool,
+            #[serde(default)]
+            piper: bool,
+            #[serde(default)]
+            echogarden: bool,
+            #[serde(default)]
+            balcon: bool,
+            #[serde(default)]
+            windows_sapi: bool,
+            #[serde(default)]
+            gtts_cli: bool,
+            #[serde(default)]
+            coqui_tts: bool,
+            #[serde(default)]
+            sherpa_onnx: bool,
+            #[serde(default)]
+            kokoro_tts: bool,
+            #[serde(default)]
+            pico2wave: bool,
+        }
+
+        let b = BoolTtsClients::deserialize(deserializer)?;
+
+        let to_opt = |installed: bool| {
+            if installed {
+                Some((PathBuf::new(), ExecutableSource::Path))
+            } else {
+                None
+            }
+        };
+
+        Ok(InstalledTtsClients {
+            say: to_opt(b.say),
+            espeak: to_opt(b.espeak),
+            espeak_ng: to_opt(b.espeak_ng),
+            festival: to_opt(b.festival),
+            mimic: to_opt(b.mimic),
+            mimic3: to_opt(b.mimic3),
+            piper: to_opt(b.piper),
+            echogarden: to_opt(b.echogarden),
+            balcon: to_opt(b.balcon),
+            windows_sapi: to_opt(b.windows_sapi),
+            gtts_cli: to_opt(b.gtts_cli),
+            coqui_tts: to_opt(b.coqui_tts),
+            sherpa_onnx: to_opt(b.sherpa_onnx),
+            kokoro_tts: to_opt(b.kokoro_tts),
+            pico2wave: to_opt(b.pico2wave),
+        })
     }
 }
 
@@ -200,6 +388,10 @@ impl ProgramDetector for InstalledTtsClients {
 
     fn path(&self, program: Self::Program) -> Option<PathBuf> {
         InstalledTtsClients::path(self, program)
+    }
+
+    fn path_with_source(&self, program: Self::Program) -> Option<(PathBuf, ExecutableSource)> {
+        InstalledTtsClients::path_with_source(self, program)
     }
 
     fn version(&self, program: Self::Program) -> Result<String, ProgramError> {
@@ -302,6 +494,45 @@ impl ProgramDetector for InstalledTtsClients {
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_path_with_source_returns_none_when_not_installed() {
+        let clients = InstalledTtsClients::default();
+        assert!(clients.path_with_source(TtsClient::Piper).is_none());
+    }
+
+    #[test]
+    fn test_is_installed_returns_false_for_default() {
+        let clients = InstalledTtsClients::default();
+        assert!(!clients.is_installed(TtsClient::Piper));
+        assert!(!clients.is_installed(TtsClient::Espeak));
+    }
+
+    #[test]
+    fn test_serialize_produces_boolean_fields() {
+        let clients = InstalledTtsClients::default();
+        let json = serde_json::to_string(&clients).unwrap();
+        assert!(json.contains("\"piper\":false"));
+        assert!(json.contains("\"espeak\":false"));
+    }
+
+    #[test]
+    fn test_deserialize_from_boolean_fields() {
+        let json = r#"{"piper": true, "espeak": false}"#;
+        let clients: InstalledTtsClients = serde_json::from_str(json).unwrap();
+        assert!(clients.is_installed(TtsClient::Piper));
+        assert!(!clients.is_installed(TtsClient::Espeak));
+    }
+
+    #[test]
+    fn test_serde_roundtrip() {
+        let original = InstalledTtsClients::default();
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: InstalledTtsClients = serde_json::from_str(&json).unwrap();
+        for client in original.installed() {
+            assert!(deserialized.is_installed(client));
+        }
+    }
+
     /// Regression test: kokoro-tts detection uses correct binary name.
     ///
     /// Bug: The detection code was looking for "kokoro_tts" (underscore)
@@ -309,18 +540,11 @@ mod tests {
     /// be detected even when installed.
     #[test]
     fn test_kokoro_tts_binary_name_uses_hyphen() {
-        // The programs array in InstalledTtsClients::new() should include
-        // "kokoro-tts" (with hyphen), not "kokoro_tts" (with underscore).
-        // This test verifies the struct field is properly populated when
-        // the detection logic runs.
-
-        // We can't easily test the actual binary detection in unit tests,
-        // but we can verify that the struct field exists and behaves correctly
         let mut clients = InstalledTtsClients::default();
-        assert!(!clients.kokoro_tts, "Default should be false");
+        assert!(!clients.is_installed(TtsClient::KokoroTts), "Default should be false");
 
         // Manually set to simulate detection
-        clients.kokoro_tts = true;
-        assert!(clients.kokoro_tts, "Should be settable to true");
+        clients.kokoro_tts = Some((PathBuf::from("/usr/local/bin/kokoro-tts"), ExecutableSource::Path));
+        assert!(clients.is_installed(TtsClient::KokoroTts), "Should be settable to true");
     }
 }

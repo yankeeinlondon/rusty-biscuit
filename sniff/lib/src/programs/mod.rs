@@ -12,6 +12,7 @@
 //! - **OS Package Managers**: brew, apt, dnf, etc.
 //! - **TTS Clients**: Text-to-speech tools (say, espeak, piper, etc.)
 //! - **Terminal Apps**: Terminal emulators (alacritty, kitty, wezterm, etc.)
+//! - **Headless Audio**: Background audio players (afplay, pacat, aplay, etc.)
 //!
 //! ## Usage
 //!
@@ -43,6 +44,52 @@
 //! - `website()` - Official website URL
 //! - `path()` - Path to the binary if installed
 //! - `version()` - Version string if available
+//!
+//! ## macOS App Bundle Detection
+//!
+//! On macOS, some applications are installed as `.app` bundles rather than
+//! command-line executables in PATH. This module provides fallback detection
+//! for these bundles when the traditional PATH lookup fails.
+//!
+//! ### How It Works
+//!
+//! When using [`find_program_with_source`] or [`find_programs_with_source_parallel`],
+//! the detection follows this order:
+//!
+//! 1. **PATH lookup** (priority) - Traditional executable search
+//! 2. **macOS app bundles** (fallback) - Searches `/Applications` and `~/Applications`
+//!
+//! The [`ExecutableSource`] enum indicates how the program was discovered:
+//! - [`ExecutableSource::Path`] - Found via PATH lookup
+//! - [`ExecutableSource::MacOsAppBundle`] - Found as a macOS `.app` bundle
+//!
+//! ### Supported Applications
+//!
+//! The bundle detection includes mappings for common applications:
+//! - **Editors**: VS Code (`code`), Cursor, Zed
+//! - **Terminals**: WezTerm, Alacritty, kitty, iTerm2, Ghostty
+//! - **Browsers**: Brave, Chrome, Firefox
+//! - **Media**: VLC, Spotify
+//! - **Communication**: Slack, Discord
+//!
+//! ### Example
+//!
+//! ```no_run
+//! use sniff_lib::programs::{find_program_with_source, ExecutableSource};
+//!
+//! // Find VS Code - checks PATH first, then macOS app bundles
+//! if let Some((path, source)) = find_program_with_source("code") {
+//!     match source {
+//!         ExecutableSource::Path => println!("Found in PATH: {}", path.display()),
+//!         ExecutableSource::MacOsAppBundle => println!("Found as macOS app: {}", path.display()),
+//!     }
+//! }
+//! ```
+//!
+//! ### Platform Behavior
+//!
+//! - **macOS**: Full bundle detection support
+//! - **Linux/Windows**: Bundle detection returns `None` (PATH-only)
 
 pub mod types;
 pub mod inventory;
@@ -51,6 +98,7 @@ pub mod enums;
 pub mod find_program;
 pub mod headless_audio;
 pub mod installer;
+pub mod macos_bundle;
 pub mod pkg_mngrs;
 pub mod schema;
 pub mod terminal_apps;
@@ -69,10 +117,12 @@ pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers
 pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 pub use terminal_apps::InstalledTerminalApps;
 pub use tts_clients::InstalledTtsClients;
-pub use types::{InstallationMethod, ProgramDetails, ProgramDetector};
+pub use types::{ExecutableSource, InstallationMethod, ProgramDetails, ProgramDetector};
 pub use utilities::InstalledUtilities;
 pub use inventory::{Program, PROGRAM_LOOKUP};
 pub use installer::{execute_install, execute_versioned_install, get_install_command, get_versioned_install_command, InstallOptions, InstallResult};
+pub use find_program::{find_program, find_programs_parallel, find_program_with_source, find_programs_with_source_parallel};
+pub use macos_bundle::{find_macos_app_bundle, get_app_bundle_name};
 
 /// Complete programs detection result.
 ///

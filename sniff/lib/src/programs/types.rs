@@ -1,13 +1,72 @@
 //! Type definitions for program detection and installation.
 //!
 //! This module provides:
+//! - `ExecutableSource`: Describes where a program executable was discovered
 //! - `ProgramDetails`: Metadata about a program including installation methods
 //! - `ProgramDetector`: Trait for structs that detect and manage installed programs
 //! - `InstallationMethod`: Enum describing how to install a program
 
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{error::SniffInstallationError, os::OsType, programs::schema::ProgramMetadata};
+
+/// Describes where a program executable was discovered.
+///
+/// This enum distinguishes between traditional PATH-based executables and
+/// macOS application bundles, enabling appropriate invocation strategies.
+///
+/// ## Variants
+///
+/// - `Path` - Found in system PATH (traditional executable)
+/// - `MacOsAppBundle` - Found as a macOS `.app` bundle
+///
+/// ## Examples
+///
+/// ```
+/// use sniff_lib::programs::ExecutableSource;
+///
+/// let source = ExecutableSource::Path;
+/// assert!(!source.is_app_bundle());
+///
+/// let bundle = ExecutableSource::MacOsAppBundle;
+/// assert!(bundle.is_app_bundle());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutableSource {
+    /// Found via PATH lookup (traditional executable).
+    Path,
+    /// Found as a macOS `.app` bundle.
+    MacOsAppBundle,
+}
+
+impl ExecutableSource {
+    /// Returns true if this source is a macOS app bundle.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use sniff_lib::programs::ExecutableSource;
+    ///
+    /// assert!(!ExecutableSource::Path.is_app_bundle());
+    /// assert!(ExecutableSource::MacOsAppBundle.is_app_bundle());
+    /// ```
+    #[must_use]
+    pub fn is_app_bundle(&self) -> bool {
+        matches!(self, Self::MacOsAppBundle)
+    }
+}
+
+impl std::fmt::Display for ExecutableSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExecutableSource::Path => write!(f, "PATH"),
+            ExecutableSource::MacOsAppBundle => write!(f, "macOS App Bundle"),
+        }
+    }
+}
 
 /// Describes an installation method for installing some piece of software.
 ///
@@ -271,6 +330,32 @@ pub trait ProgramDetector {
     /// Returns the path to the specified program's binary if installed.
     fn path(&self, program: Self::Program) -> Option<PathBuf>;
 
+    /// Returns the path and source of the specified program's binary if installed.
+    ///
+    /// This extends `path()` by also reporting how the executable was discovered:
+    /// - `ExecutableSource::Path` for traditional PATH-based executables
+    /// - `ExecutableSource::MacOsAppBundle` for macOS app bundles
+    ///
+    /// The default implementation wraps `path()` and assumes `ExecutableSource::Path`.
+    /// Implementors can override this to provide more accurate source information.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// use sniff_lib::programs::{ProgramDetector, InstalledEditors, Editor, ExecutableSource};
+    ///
+    /// let editors = InstalledEditors::new();
+    /// if let Some((path, source)) = editors.path_with_source(Editor::Vscode) {
+    ///     match source {
+    ///         ExecutableSource::Path => println!("Found in PATH: {}", path.display()),
+    ///         ExecutableSource::MacOsAppBundle => println!("Found as macOS app: {}", path.display()),
+    ///     }
+    /// }
+    /// ```
+    fn path_with_source(&self, program: Self::Program) -> Option<(PathBuf, ExecutableSource)> {
+        self.path(program).map(|p| (p, ExecutableSource::Path))
+    }
+
     /// Returns the version of the specified program if available.
     ///
     /// ## Errors
@@ -360,6 +445,212 @@ pub trait ProgramDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::programs::schema::{ProgramError, ProgramInfo, ProgramMetadata};
+
+    // ============================================
+    // Mock implementation for testing ProgramDetector trait
+    // ============================================
+
+    static MOCK_INSTALLED_INFO: ProgramInfo = ProgramInfo::standard(
+        "mock-installed",
+        "Mock Installed",
+        "A mock installed program",
+        "https://example.com/installed",
+    );
+
+    static MOCK_NOT_INSTALLED_INFO: ProgramInfo = ProgramInfo::standard(
+        "mock-not-installed",
+        "Mock Not Installed",
+        "A mock not-installed program",
+        "https://example.com/not-installed",
+    );
+
+    /// Mock program enum for testing the ProgramDetector trait.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum MockProgram {
+        Installed,
+        NotInstalled,
+    }
+
+    impl ProgramMetadata for MockProgram {
+        fn info(&self) -> &'static ProgramInfo {
+            match self {
+                MockProgram::Installed => &MOCK_INSTALLED_INFO,
+                MockProgram::NotInstalled => &MOCK_NOT_INSTALLED_INFO,
+            }
+        }
+    }
+
+    /// Mock detector that implements ProgramDetector for testing default methods.
+    struct MockDetector;
+
+    impl ProgramDetector for MockDetector {
+        type Program = MockProgram;
+
+        fn refresh(&mut self) {}
+
+        fn is_installed(&self, program: Self::Program) -> bool {
+            matches!(program, MockProgram::Installed)
+        }
+
+        fn path(&self, program: Self::Program) -> Option<PathBuf> {
+            match program {
+                MockProgram::Installed => Some(PathBuf::from("/usr/bin/mock-installed")),
+                MockProgram::NotInstalled => None,
+            }
+        }
+
+        fn version(&self, program: Self::Program) -> Result<String, ProgramError> {
+            match program {
+                MockProgram::Installed => Ok("1.0.0".to_string()),
+                MockProgram::NotInstalled => {
+                    Err(ProgramError::NotFound("mock-not-installed".to_string()))
+                }
+            }
+        }
+
+        fn website(&self, program: Self::Program) -> &'static str {
+            program.info().website
+        }
+
+        fn description(&self, program: Self::Program) -> &'static str {
+            program.info().description
+        }
+
+        fn installed(&self) -> Vec<Self::Program> {
+            vec![MockProgram::Installed]
+        }
+
+        fn installable(&self, _program: Self::Program) -> bool {
+            false
+        }
+
+        fn install(&self, _program: Self::Program) -> Result<(), SniffInstallationError> {
+            Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: "mock".to_string(),
+                os: "mock".to_string(),
+            })
+        }
+
+        fn install_version(
+            &self,
+            _program: Self::Program,
+            _version: &str,
+        ) -> Result<(), SniffInstallationError> {
+            Err(SniffInstallationError::NotInstallableOnOs {
+                pkg: "mock".to_string(),
+                os: "mock".to_string(),
+            })
+        }
+    }
+
+    // ============================================
+    // ProgramDetector::path_with_source tests
+    // ============================================
+
+    #[test]
+    fn test_path_with_source_default_returns_path_source_when_installed() {
+        let detector = MockDetector;
+        let result = detector.path_with_source(MockProgram::Installed);
+
+        assert!(result.is_some());
+        let (path, source) = result.unwrap();
+        assert_eq!(path, PathBuf::from("/usr/bin/mock-installed"));
+        assert_eq!(source, ExecutableSource::Path);
+    }
+
+    #[test]
+    fn test_path_with_source_default_returns_none_when_not_installed() {
+        let detector = MockDetector;
+        let result = detector.path_with_source(MockProgram::NotInstalled);
+
+        assert!(result.is_none());
+    }
+
+    // ============================================
+    // ExecutableSource tests
+    // ============================================
+
+    #[test]
+    fn test_executable_source_is_app_bundle() {
+        assert!(!ExecutableSource::Path.is_app_bundle());
+        assert!(ExecutableSource::MacOsAppBundle.is_app_bundle());
+    }
+
+    #[test]
+    fn test_executable_source_display() {
+        assert_eq!(ExecutableSource::Path.to_string(), "PATH");
+        assert_eq!(ExecutableSource::MacOsAppBundle.to_string(), "macOS App Bundle");
+    }
+
+    #[test]
+    fn test_executable_source_debug() {
+        assert_eq!(format!("{:?}", ExecutableSource::Path), "Path");
+        assert_eq!(format!("{:?}", ExecutableSource::MacOsAppBundle), "MacOsAppBundle");
+    }
+
+    #[test]
+    fn test_executable_source_clone_and_copy() {
+        let source = ExecutableSource::Path;
+        let cloned = source.clone();
+        let copied = source; // Copy
+        assert_eq!(source, cloned);
+        assert_eq!(source, copied);
+    }
+
+    #[test]
+    fn test_executable_source_equality() {
+        assert_eq!(ExecutableSource::Path, ExecutableSource::Path);
+        assert_eq!(ExecutableSource::MacOsAppBundle, ExecutableSource::MacOsAppBundle);
+        assert_ne!(ExecutableSource::Path, ExecutableSource::MacOsAppBundle);
+    }
+
+    #[test]
+    fn test_executable_source_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(ExecutableSource::Path);
+        set.insert(ExecutableSource::MacOsAppBundle);
+        set.insert(ExecutableSource::Path); // Duplicate
+
+        assert_eq!(set.len(), 2);
+        assert!(set.contains(&ExecutableSource::Path));
+        assert!(set.contains(&ExecutableSource::MacOsAppBundle));
+    }
+
+    #[test]
+    fn test_executable_source_serialize_json() {
+        let path = ExecutableSource::Path;
+        let bundle = ExecutableSource::MacOsAppBundle;
+
+        let path_json = serde_json::to_string(&path).unwrap();
+        let bundle_json = serde_json::to_string(&bundle).unwrap();
+
+        assert_eq!(path_json, "\"path\"");
+        assert_eq!(bundle_json, "\"mac_os_app_bundle\"");
+    }
+
+    #[test]
+    fn test_executable_source_deserialize_json() {
+        let path: ExecutableSource = serde_json::from_str("\"path\"").unwrap();
+        let bundle: ExecutableSource = serde_json::from_str("\"mac_os_app_bundle\"").unwrap();
+
+        assert_eq!(path, ExecutableSource::Path);
+        assert_eq!(bundle, ExecutableSource::MacOsAppBundle);
+    }
+
+    #[test]
+    fn test_executable_source_roundtrip() {
+        for source in [ExecutableSource::Path, ExecutableSource::MacOsAppBundle] {
+            let json = serde_json::to_string(&source).unwrap();
+            let deserialized: ExecutableSource = serde_json::from_str(&json).unwrap();
+            assert_eq!(source, deserialized);
+        }
+    }
+
+    // ============================================
+    // InstallationMethod tests
+    // ============================================
 
     #[test]
     fn test_installation_method_package_name() {
@@ -416,5 +707,158 @@ mod tests {
         assert_eq!(details.os_availability.len(), 2);
         assert_eq!(details.installation_methods.len(), 2);
         assert!(details.repo.is_some());
+    }
+
+    // ============================================
+    // InstallationMethod comprehensive tests
+    // ============================================
+
+    #[test]
+    fn test_installation_method_is_remote_bash() {
+        assert!(InstallationMethod::RemoteBash("https://example.com/install.sh").is_remote_bash());
+        assert!(!InstallationMethod::Brew("ripgrep").is_remote_bash());
+        assert!(!InstallationMethod::Cargo("bat").is_remote_bash());
+    }
+
+    #[test]
+    fn test_installation_method_all_language_managers() {
+        let methods = [
+            InstallationMethod::Npm("pkg"),
+            InstallationMethod::Pnpm("pkg"),
+            InstallationMethod::Yarn("pkg"),
+            InstallationMethod::Bun("pkg"),
+            InstallationMethod::Cargo("pkg"),
+            InstallationMethod::GoModules("pkg"),
+            InstallationMethod::Composer("pkg"),
+            InstallationMethod::SwiftPm("pkg"),
+            InstallationMethod::LuaRocks("pkg"),
+            InstallationMethod::VcPkg("pkg"),
+            InstallationMethod::Conan("pkg"),
+            InstallationMethod::Nuget("pkg"),
+            InstallationMethod::Hex("pkg"),
+            InstallationMethod::Pip("pkg"),
+            InstallationMethod::Uv("pkg"),
+            InstallationMethod::Poetry("pkg"),
+            InstallationMethod::Cpan("pkg"),
+            InstallationMethod::Cpanm("pkg"),
+        ];
+
+        for method in &methods {
+            assert!(!method.is_os_package_manager(), "{:?} should not be OS pkg mgr", method);
+            assert!(!method.is_remote_bash(), "{:?} should not be remote bash", method);
+            assert_eq!(method.package_name(), "pkg");
+        }
+    }
+
+    #[test]
+    fn test_installation_method_all_os_managers() {
+        let methods = [
+            InstallationMethod::Apt("pkg"),
+            InstallationMethod::Nala("pkg"),
+            InstallationMethod::Brew("pkg"),
+            InstallationMethod::Dnf("pkg"),
+            InstallationMethod::Pacman("pkg"),
+            InstallationMethod::Winget("pkg"),
+            InstallationMethod::Chocolatey("pkg"),
+            InstallationMethod::Scoop("pkg"),
+            InstallationMethod::Nix("pkg"),
+        ];
+
+        for method in &methods {
+            assert!(method.is_os_package_manager(), "{:?} should be OS pkg mgr", method);
+            assert!(!method.is_remote_bash(), "{:?} should not be remote bash", method);
+            assert_eq!(method.package_name(), "pkg");
+        }
+    }
+
+    #[test]
+    fn test_installation_method_manager_name_all_variants() {
+        // Test all manager names are non-empty strings
+        let all_methods = [
+            InstallationMethod::Npm("x"),
+            InstallationMethod::Pnpm("x"),
+            InstallationMethod::Yarn("x"),
+            InstallationMethod::Bun("x"),
+            InstallationMethod::Cargo("x"),
+            InstallationMethod::GoModules("x"),
+            InstallationMethod::Composer("x"),
+            InstallationMethod::SwiftPm("x"),
+            InstallationMethod::LuaRocks("x"),
+            InstallationMethod::VcPkg("x"),
+            InstallationMethod::Conan("x"),
+            InstallationMethod::Nuget("x"),
+            InstallationMethod::Hex("x"),
+            InstallationMethod::Pip("x"),
+            InstallationMethod::Uv("x"),
+            InstallationMethod::Poetry("x"),
+            InstallationMethod::Cpan("x"),
+            InstallationMethod::Cpanm("x"),
+            InstallationMethod::Apt("x"),
+            InstallationMethod::Nala("x"),
+            InstallationMethod::Brew("x"),
+            InstallationMethod::Dnf("x"),
+            InstallationMethod::Pacman("x"),
+            InstallationMethod::Winget("x"),
+            InstallationMethod::Chocolatey("x"),
+            InstallationMethod::Scoop("x"),
+            InstallationMethod::Nix("x"),
+            InstallationMethod::RemoteBash("x"),
+        ];
+
+        for method in &all_methods {
+            let name = method.manager_name();
+            assert!(!name.is_empty(), "{:?} should have non-empty manager name", method);
+        }
+    }
+
+    // ============================================
+    // ProgramDetails edge case tests
+    // ============================================
+
+    #[test]
+    fn test_program_details_default_os_availability() {
+        let details = ProgramDetails::new("test", "Test program", "https://example.com");
+        // Default should include all three major OS types
+        assert!(details.os_availability.contains(&OsType::MacOS));
+        assert!(details.os_availability.contains(&OsType::Linux));
+        assert!(details.os_availability.contains(&OsType::Windows));
+    }
+
+    #[test]
+    fn test_program_details_empty_installation_methods() {
+        let details = ProgramDetails::new("test", "Test program", "https://example.com");
+        assert!(details.installation_methods.is_empty());
+    }
+
+    // ============================================
+    // ExecutableSource additional tests
+    // ============================================
+
+    #[test]
+    fn test_executable_source_default_is_not_app_bundle() {
+        // Verify that Path (the most common case) is not an app bundle
+        let source = ExecutableSource::Path;
+        assert!(!source.is_app_bundle());
+    }
+
+    #[test]
+    fn test_executable_source_pattern_matching() {
+        // Test that match exhaustiveness is enforced by the compiler
+        fn describe_source(source: ExecutableSource) -> &'static str {
+            match source {
+                ExecutableSource::Path => "path",
+                ExecutableSource::MacOsAppBundle => "bundle",
+            }
+        }
+
+        assert_eq!(describe_source(ExecutableSource::Path), "path");
+        assert_eq!(describe_source(ExecutableSource::MacOsAppBundle), "bundle");
+    }
+
+    #[test]
+    fn test_executable_source_deserialize_invalid_json() {
+        // Invalid JSON value should fail to deserialize
+        let result: Result<ExecutableSource, _> = serde_json::from_str("\"invalid_source\"");
+        assert!(result.is_err(), "Invalid source should fail to deserialize");
     }
 }

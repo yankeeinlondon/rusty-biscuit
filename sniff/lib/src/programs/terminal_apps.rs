@@ -1,17 +1,18 @@
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::error::SniffInstallationError;
 use crate::os::detect_os_type;
 use crate::programs::enums::TerminalApp;
-use crate::programs::find_program::find_programs_parallel;
+use crate::programs::find_program::find_programs_with_source_parallel;
 use crate::programs::installer::{
     execute_install, execute_versioned_install, method_available, select_best_method,
     InstallOptions,
 };
-use crate::programs::schema::{ProgramError, ProgramMetadata};
-use crate::programs::types::ProgramDetector;
+use crate::programs::schema::{ProgramEntry, ProgramError, ProgramMetadata};
+use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{
     InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
 };
@@ -41,42 +42,27 @@ fn terminal_app_details(app: TerminalApp) -> Option<&'static crate::programs::Pr
 }
 
 /// Popular terminal applications found on macOS, Linux, or Windows.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+///
+/// Stores path and discovery source for each installed terminal app.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InstalledTerminalApps {
-    /// A fast, GPU-accelerated terminal emulator. [Website](https://alacritty.org/)
-    pub alacritty: bool,
-    /// A fast, feature-rich, GPU-based terminal emulator. [Website](https://sw.kovidgoyal.net/kitty/)
-    pub kitty: bool,
-    /// A terminal emulator for macOS that does amazing things. [Website](https://iterm2.com/)
-    pub iterm2: bool,
-    /// A GPU-accelerated cross-platform terminal emulator and multiplexer. [Website](https://wezfurlong.org/wezterm/)
-    pub wezterm: bool,
-    /// A fast, feature-rich, GPU-accelerated terminal emulator written in Zig. [Website](https://ghostty.org/)
-    pub ghostty: bool,
-    /// A modern, Rust-based terminal with built-in AI. [Website](https://www.warp.dev/)
-    pub warp: bool,
-    /// A hardware-accelerated GPU terminal emulator focusing on performance. [Website](https://github.com/raphamorim/rio)
-    pub rio: bool,
-    /// A terminal for a more modern age. [Website](https://tabby.sh/)
-    pub tabby: bool,
-    /// A fast, lightweight and minimalistic Wayland terminal emulator. [Website](https://codeberg.org/dnkl/foot)
-    pub foot: bool,
-    /// The default terminal emulator for the GNOME desktop environment. [Website](https://help.gnome.org/users/gnome-terminal/stable/)
-    pub gnome_terminal: bool,
-    /// A terminal emulator by KDE. [Website](https://konsole.kde.org/)
-    pub konsole: bool,
-    /// Terminal emulator for Xfce. [Website](https://docs.xfce.org/apps/xfce4-terminal/start)
-    pub xfce_terminal: bool,
-    /// A terminal emulator, and more, based on Enlightenment Foundation Libraries. [Website](https://www.enlightenment.org/about-terminology)
-    pub terminology: bool,
-    /// simple terminal (st) is a simple terminal emulator for X which sucks less. [Website](https://st.suckless.org/)
-    pub st: bool,
-    /// The standard terminal emulator for the X Window System. [Website](https://invisible-island.net/xterm/)
-    pub xterm: bool,
-    /// A terminal built on web technologies. [Website](https://hyper.is/)
-    pub hyper: bool,
-    /// A modern, fast, efficient, powerful, and productive terminal application for Windows. [Website](https://github.com/microsoft/terminal)
-    pub windows_terminal: bool,
+    alacritty: Option<(PathBuf, ExecutableSource)>,
+    kitty: Option<(PathBuf, ExecutableSource)>,
+    iterm2: Option<(PathBuf, ExecutableSource)>,
+    wezterm: Option<(PathBuf, ExecutableSource)>,
+    ghostty: Option<(PathBuf, ExecutableSource)>,
+    warp: Option<(PathBuf, ExecutableSource)>,
+    rio: Option<(PathBuf, ExecutableSource)>,
+    tabby: Option<(PathBuf, ExecutableSource)>,
+    foot: Option<(PathBuf, ExecutableSource)>,
+    gnome_terminal: Option<(PathBuf, ExecutableSource)>,
+    konsole: Option<(PathBuf, ExecutableSource)>,
+    xfce_terminal: Option<(PathBuf, ExecutableSource)>,
+    terminology: Option<(PathBuf, ExecutableSource)>,
+    st: Option<(PathBuf, ExecutableSource)>,
+    xterm: Option<(PathBuf, ExecutableSource)>,
+    hyper: Option<(PathBuf, ExecutableSource)>,
+    windows_terminal: Option<(PathBuf, ExecutableSource)>,
 }
 
 impl InstalledTerminalApps {
@@ -89,6 +75,7 @@ impl InstalledTerminalApps {
             "wezterm",
             "ghostty",
             "warp-terminal",
+            "warp",
             "rio",
             "tabby",
             "foot",
@@ -102,29 +89,36 @@ impl InstalledTerminalApps {
             "wt",
         ];
 
-        let results = find_programs_parallel(&programs);
+        let results = find_programs_with_source_parallel(&programs);
 
-        let has = |name: &str| results.get(name).and_then(|r| r.as_ref()).is_some();
-        let any = |names: &[&str]| names.iter().any(|&name| has(name));
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_any = |names: &[&str]| {
+            for name in names {
+                if let Some(result) = results.get(*name).and_then(|r| r.clone()) {
+                    return Some(result);
+                }
+            }
+            None
+        };
 
         Self {
-            alacritty: has("alacritty"),
-            kitty: has("kitty"),
-            iterm2: has("iterm2"),
-            wezterm: has("wezterm"),
-            ghostty: has("ghostty"),
-            warp: any(&["warp-terminal", "warp"]),
-            rio: has("rio"),
-            tabby: has("tabby"),
-            foot: has("foot"),
-            gnome_terminal: has("gnome-terminal"),
-            konsole: has("konsole"),
-            xfce_terminal: has("xfce4-terminal"),
-            terminology: has("terminology"),
-            st: has("st"),
-            xterm: has("xterm"),
-            hyper: has("hyper"),
-            windows_terminal: has("wt"),
+            alacritty: get("alacritty"),
+            kitty: get("kitty"),
+            iterm2: get("iterm2"),
+            wezterm: get("wezterm"),
+            ghostty: get("ghostty"),
+            warp: get_any(&["warp-terminal", "warp"]),
+            rio: get("rio"),
+            tabby: get("tabby"),
+            foot: get("foot"),
+            gnome_terminal: get("gnome-terminal"),
+            konsole: get("konsole"),
+            xfce_terminal: get("xfce4-terminal"),
+            terminology: get("terminology"),
+            st: get("st"),
+            xterm: get("xterm"),
+            hyper: get("hyper"),
+            windows_terminal: get("wt"),
         }
     }
 
@@ -135,10 +129,29 @@ impl InstalledTerminalApps {
 
     /// Returns the path to the specified terminal app's binary if installed.
     pub fn path(&self, app: TerminalApp) -> Option<PathBuf> {
-        if self.is_installed(app) {
-            app.path()
-        } else {
-            None
+        self.path_with_source(app).map(|(p, _)| p)
+    }
+
+    /// Returns the path and source of the specified terminal app if installed.
+    pub fn path_with_source(&self, app: TerminalApp) -> Option<(PathBuf, ExecutableSource)> {
+        match app {
+            TerminalApp::Alacritty => self.alacritty.clone(),
+            TerminalApp::Kitty => self.kitty.clone(),
+            TerminalApp::ITerm2 => self.iterm2.clone(),
+            TerminalApp::WezTerm => self.wezterm.clone(),
+            TerminalApp::Ghostty => self.ghostty.clone(),
+            TerminalApp::Warp => self.warp.clone(),
+            TerminalApp::Rio => self.rio.clone(),
+            TerminalApp::Tabby => self.tabby.clone(),
+            TerminalApp::Foot => self.foot.clone(),
+            TerminalApp::GnomeTerminal => self.gnome_terminal.clone(),
+            TerminalApp::Konsole => self.konsole.clone(),
+            TerminalApp::XfceTerminal => self.xfce_terminal.clone(),
+            TerminalApp::Terminology => self.terminology.clone(),
+            TerminalApp::St => self.st.clone(),
+            TerminalApp::Xterm => self.xterm.clone(),
+            TerminalApp::Hyper => self.hyper.clone(),
+            TerminalApp::WindowsTerminal => self.windows_terminal.clone(),
         }
     }
 
@@ -170,23 +183,23 @@ impl InstalledTerminalApps {
     /// Checks if the specified terminal app is installed.
     pub fn is_installed(&self, app: TerminalApp) -> bool {
         match app {
-            TerminalApp::Alacritty => self.alacritty,
-            TerminalApp::Kitty => self.kitty,
-            TerminalApp::ITerm2 => self.iterm2,
-            TerminalApp::WezTerm => self.wezterm,
-            TerminalApp::Ghostty => self.ghostty,
-            TerminalApp::Warp => self.warp,
-            TerminalApp::Rio => self.rio,
-            TerminalApp::Tabby => self.tabby,
-            TerminalApp::Foot => self.foot,
-            TerminalApp::GnomeTerminal => self.gnome_terminal,
-            TerminalApp::Konsole => self.konsole,
-            TerminalApp::XfceTerminal => self.xfce_terminal,
-            TerminalApp::Terminology => self.terminology,
-            TerminalApp::St => self.st,
-            TerminalApp::Xterm => self.xterm,
-            TerminalApp::Hyper => self.hyper,
-            TerminalApp::WindowsTerminal => self.windows_terminal,
+            TerminalApp::Alacritty => self.alacritty.is_some(),
+            TerminalApp::Kitty => self.kitty.is_some(),
+            TerminalApp::ITerm2 => self.iterm2.is_some(),
+            TerminalApp::WezTerm => self.wezterm.is_some(),
+            TerminalApp::Ghostty => self.ghostty.is_some(),
+            TerminalApp::Warp => self.warp.is_some(),
+            TerminalApp::Rio => self.rio.is_some(),
+            TerminalApp::Tabby => self.tabby.is_some(),
+            TerminalApp::Foot => self.foot.is_some(),
+            TerminalApp::GnomeTerminal => self.gnome_terminal.is_some(),
+            TerminalApp::Konsole => self.konsole.is_some(),
+            TerminalApp::XfceTerminal => self.xfce_terminal.is_some(),
+            TerminalApp::Terminology => self.terminology.is_some(),
+            TerminalApp::St => self.st.is_some(),
+            TerminalApp::Xterm => self.xterm.is_some(),
+            TerminalApp::Hyper => self.hyper.is_some(),
+            TerminalApp::WindowsTerminal => self.windows_terminal.is_some(),
         }
     }
 
@@ -196,6 +209,124 @@ impl InstalledTerminalApps {
         TerminalApp::iter()
             .filter(|a| self.is_installed(*a))
             .collect()
+    }
+}
+
+impl Serialize for InstalledTerminalApps {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use strum::IntoEnumIterator;
+
+        // Helper to create a ProgramEntry for a terminal app
+        let entry = |app: TerminalApp| -> ProgramEntry {
+            let info = app.info();
+            match self.path_with_source(app) {
+                Some((path, source)) => ProgramEntry::installed(info, path, source),
+                None => ProgramEntry::not_installed(info),
+            }
+        };
+
+        let mut state = serializer.serialize_struct("InstalledTerminalApps", 17)?;
+        for app in TerminalApp::iter() {
+            let field_name = match app {
+                TerminalApp::Alacritty => "alacritty",
+                TerminalApp::Kitty => "kitty",
+                TerminalApp::ITerm2 => "iterm2",
+                TerminalApp::WezTerm => "wezterm",
+                TerminalApp::Ghostty => "ghostty",
+                TerminalApp::Warp => "warp",
+                TerminalApp::Rio => "rio",
+                TerminalApp::Tabby => "tabby",
+                TerminalApp::Foot => "foot",
+                TerminalApp::GnomeTerminal => "gnome_terminal",
+                TerminalApp::Konsole => "konsole",
+                TerminalApp::XfceTerminal => "xfce_terminal",
+                TerminalApp::Terminology => "terminology",
+                TerminalApp::St => "st",
+                TerminalApp::Xterm => "xterm",
+                TerminalApp::Hyper => "hyper",
+                TerminalApp::WindowsTerminal => "windows_terminal",
+            };
+            state.serialize_field(field_name, &entry(app))?;
+        }
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for InstalledTerminalApps {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct BoolTerminalApps {
+            #[serde(default)]
+            alacritty: bool,
+            #[serde(default)]
+            kitty: bool,
+            #[serde(default)]
+            iterm2: bool,
+            #[serde(default)]
+            wezterm: bool,
+            #[serde(default)]
+            ghostty: bool,
+            #[serde(default)]
+            warp: bool,
+            #[serde(default)]
+            rio: bool,
+            #[serde(default)]
+            tabby: bool,
+            #[serde(default)]
+            foot: bool,
+            #[serde(default)]
+            gnome_terminal: bool,
+            #[serde(default)]
+            konsole: bool,
+            #[serde(default)]
+            xfce_terminal: bool,
+            #[serde(default)]
+            terminology: bool,
+            #[serde(default)]
+            st: bool,
+            #[serde(default)]
+            xterm: bool,
+            #[serde(default)]
+            hyper: bool,
+            #[serde(default)]
+            windows_terminal: bool,
+        }
+
+        let b = BoolTerminalApps::deserialize(deserializer)?;
+
+        let to_opt = |installed: bool| {
+            if installed {
+                Some((PathBuf::new(), ExecutableSource::Path))
+            } else {
+                None
+            }
+        };
+
+        Ok(InstalledTerminalApps {
+            alacritty: to_opt(b.alacritty),
+            kitty: to_opt(b.kitty),
+            iterm2: to_opt(b.iterm2),
+            wezterm: to_opt(b.wezterm),
+            ghostty: to_opt(b.ghostty),
+            warp: to_opt(b.warp),
+            rio: to_opt(b.rio),
+            tabby: to_opt(b.tabby),
+            foot: to_opt(b.foot),
+            gnome_terminal: to_opt(b.gnome_terminal),
+            konsole: to_opt(b.konsole),
+            xfce_terminal: to_opt(b.xfce_terminal),
+            terminology: to_opt(b.terminology),
+            st: to_opt(b.st),
+            xterm: to_opt(b.xterm),
+            hyper: to_opt(b.hyper),
+            windows_terminal: to_opt(b.windows_terminal),
+        })
     }
 }
 
@@ -212,6 +343,10 @@ impl ProgramDetector for InstalledTerminalApps {
 
     fn path(&self, program: Self::Program) -> Option<PathBuf> {
         InstalledTerminalApps::path(self, program)
+    }
+
+    fn path_with_source(&self, program: Self::Program) -> Option<(PathBuf, ExecutableSource)> {
+        InstalledTerminalApps::path_with_source(self, program)
     }
 
     fn version(&self, program: Self::Program) -> Result<String, ProgramError> {
@@ -307,5 +442,151 @@ impl ProgramDetector for InstalledTerminalApps {
 
         let _result = execute_versioned_install(method, version, &InstallOptions::default())?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_path_with_source_returns_none_when_not_installed() {
+        let apps = InstalledTerminalApps::default();
+        assert!(apps.path_with_source(TerminalApp::Alacritty).is_none());
+    }
+
+    #[test]
+    fn test_is_installed_returns_false_for_default() {
+        let apps = InstalledTerminalApps::default();
+        assert!(!apps.is_installed(TerminalApp::Alacritty));
+        assert!(!apps.is_installed(TerminalApp::WezTerm));
+    }
+
+    #[test]
+    fn test_serialize_produces_boolean_fields() {
+        let apps = InstalledTerminalApps::default();
+        let json = serde_json::to_string(&apps).unwrap();
+        assert!(json.contains("\"alacritty\":false"));
+        assert!(json.contains("\"wezterm\":false"));
+    }
+
+    #[test]
+    fn test_deserialize_from_boolean_fields() {
+        let json = r#"{"alacritty": true, "wezterm": false}"#;
+        let apps: InstalledTerminalApps = serde_json::from_str(json).unwrap();
+        assert!(apps.is_installed(TerminalApp::Alacritty));
+        assert!(!apps.is_installed(TerminalApp::WezTerm));
+    }
+
+    #[test]
+    fn test_serde_roundtrip() {
+        let original = InstalledTerminalApps::default();
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: InstalledTerminalApps = serde_json::from_str(&json).unwrap();
+        for app in original.installed() {
+            assert!(deserialized.is_installed(app));
+        }
+    }
+
+    #[test]
+    fn test_path_returns_none_when_not_installed() {
+        let apps = InstalledTerminalApps::default();
+        assert!(apps.path(TerminalApp::Alacritty).is_none());
+        assert!(apps.path(TerminalApp::WezTerm).is_none());
+    }
+
+    #[test]
+    fn test_installed_returns_empty_for_default() {
+        let apps = InstalledTerminalApps::default();
+        assert!(apps.installed().is_empty());
+    }
+
+    #[test]
+    fn test_version_returns_not_found_for_uninstalled() {
+        let apps = InstalledTerminalApps::default();
+        let result = apps.version(TerminalApp::Alacritty);
+        assert!(result.is_err());
+        if let Err(ProgramError::NotFound(name)) = result {
+            assert_eq!(name, "alacritty");
+        } else {
+            panic!("Expected NotFound error");
+        }
+    }
+
+    #[test]
+    fn test_website_returns_static_str() {
+        let apps = InstalledTerminalApps::default();
+        let website = apps.website(TerminalApp::Alacritty);
+        assert!(!website.is_empty());
+        assert!(website.starts_with("http"));
+    }
+
+    #[test]
+    fn test_description_returns_static_str() {
+        let apps = InstalledTerminalApps::default();
+        let desc = apps.description(TerminalApp::Alacritty);
+        assert!(!desc.is_empty());
+    }
+
+    #[test]
+    fn test_deserialize_partial_json() {
+        let json = r#"{"alacritty": true}"#;
+        let apps: InstalledTerminalApps = serde_json::from_str(json).unwrap();
+        assert!(apps.is_installed(TerminalApp::Alacritty));
+        assert!(!apps.is_installed(TerminalApp::WezTerm));
+    }
+
+    #[test]
+    fn test_clone_produces_equal_struct() {
+        let apps = InstalledTerminalApps::default();
+        let cloned = apps.clone();
+        assert_eq!(apps, cloned);
+    }
+
+    #[test]
+    fn test_path_with_source_all_apps_default() {
+        let apps = InstalledTerminalApps::default();
+        use strum::IntoEnumIterator;
+        for app in TerminalApp::iter() {
+            assert!(
+                apps.path_with_source(app).is_none(),
+                "{:?} should return None for default",
+                app
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_installed_all_apps_default() {
+        let apps = InstalledTerminalApps::default();
+        use strum::IntoEnumIterator;
+        for app in TerminalApp::iter() {
+            assert!(
+                !apps.is_installed(app),
+                "{:?} should not be installed for default",
+                app
+            );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    mod macos_tests {
+        use super::*;
+
+        #[test]
+        fn test_path_with_source_detects_source_correctly() {
+            let apps = InstalledTerminalApps::new();
+            for app in apps.installed() {
+                let result = apps.path_with_source(app);
+                assert!(result.is_some(), "{:?} should have path info", app);
+                let (path, source) = result.unwrap();
+                assert!(!path.as_os_str().is_empty(), "Path should not be empty");
+                assert!(
+                    source == ExecutableSource::Path
+                        || source == ExecutableSource::MacOsAppBundle,
+                    "Source should be valid"
+                );
+            }
+        }
     }
 }

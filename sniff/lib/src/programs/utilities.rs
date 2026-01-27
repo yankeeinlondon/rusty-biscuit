@@ -1,17 +1,18 @@
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::error::SniffInstallationError;
 use crate::os::detect_os_type;
 use crate::programs::enums::Utility;
-use crate::programs::find_program::find_programs_parallel;
+use crate::programs::find_program::find_programs_with_source_parallel;
 use crate::programs::installer::{
     execute_install, execute_versioned_install, method_available, select_best_method,
     InstallOptions,
 };
 use crate::programs::schema::{ProgramError, ProgramMetadata};
-use crate::programs::types::ProgramDetector;
+use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{
     InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
 };
@@ -54,68 +55,40 @@ fn utility_details(utility: Utility) -> Option<&'static crate::programs::Program
 }
 
 /// Popular modern utility programs found on macOS, Linux, or Windows.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+///
+/// Stores path and discovery source for each installed utility.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InstalledUtilities {
-    /// a replacement for `ls`; but older than the modern `eza`. [Website](https://the.exa.website/)
-    pub exa: bool,
-    /// a modern replacement for `ls`. [Website](https://eza.rocks/)
-    pub eza: bool,
-    /// a faster and more feature rich grep utility. [Website](https://github.com/BurntSushi/ripgrep)
-    pub ripgrep: bool,
-    /// a modern and more visually pleasing version of `du`. [Website](https://github.com/bootandy/dust)
-    pub dust: bool,
-    /// a cat(1) clone with syntax highlighting and Git integration. [Website](https://github.com/sharkdp/bat)
-    pub bat: bool,
-    /// a simple, fast and user-friendly alternative to 'find'. [Website](https://github.com/sharkdp/fd)
-    pub fd: bool,
-    /// a modern replacement for ps. [Website](https://github.com/dalance/procs)
-    pub procs: bool,
-    /// a cross-platform graphical process/system monitor. [Website](https://github.com/ClementTsang/bottom)
-    pub bottom: bool,
-    /// a command-line fuzzy finder. [Website](https://github.com/junegunn/fzf)
-    pub fzf: bool,
-    /// a smarter cd command. [Website](https://github.com/ajeetdsouza/zoxide)
-    pub zoxide: bool,
-    /// the minimal, blazing-fast, and infinitely customizable prompt for any shell. [Website](https://starship.rs/)
-    pub starship: bool,
-    /// unclutter your .profile (environment manager). [Website](https://direnv.net/)
-    pub direnv: bool,
-    /// command-line JSON processor. [Website](https://jqlang.github.io/jq/)
-    pub jq: bool,
-    /// a viewer for git and diff output. [Website](https://github.com/dandavison/delta)
-    pub delta: bool,
-    /// a fast tldr client that displays simplified man pages. [Website](https://github.com/dbrgn/tealdeer)
-    pub tealdeer: bool,
-    /// simple terminal UI for git commands. [Website](https://github.com/jesseduffield/lazygit)
-    pub lazygit: bool,
-    /// GitHub CLI. [Website](https://cli.github.com/)
-    pub gh: bool,
-    /// interactive process viewer. [Website](https://htop.dev/)
-    pub htop: bool,
-    /// a monitor of resources. [Website](https://github.com/aristocratos/btop)
-    pub btop: bool,
-    /// Terminal multiplexer. [Website](https://github.com/tmux/tmux/wiki)
-    pub tmux: bool,
-    /// A modern terminal multiplexer. [Website](https://zellij.dev/)
-    pub zellij: bool,
-    /// HTTP client for the CLI. [Website](https://httpie.io/)
-    pub httpie: bool,
-    /// A simple, fast and user-friendly alternative to 'curl'. [Website](https://github.com/rs/curlie)
-    pub curlie: bool,
-    /// A fast, all-in-one tool for your development workflow. [Website](https://mise.jdx.dev/)
-    pub mise: bool,
-    /// A command-line benchmarking tool. [Website](https://github.com/sharkdp/hyperfine)
-    pub hyperfine: bool,
-    /// A program that displays statistics about your code. [Website](https://github.com/XAMPPRocky/tokei)
-    pub tokei: bool,
-    /// A fast and friendly tool for sending HTTP requests. [Website](https://github.com/ducaale/xh)
-    pub xh: bool,
-    /// Command line tool for transferring data with URLs. [Website](https://curl.se/)
-    pub curl: bool,
-    /// Network utility to retrieve content from web servers. [Website](https://www.gnu.org/software/wget/)
-    pub wget: bool,
-    /// A tool for real-time measurements of the maximum achievable bandwidth on IP networks. [Website](https://iperf.fr/)
-    pub iperf3: bool,
+    exa: Option<(PathBuf, ExecutableSource)>,
+    eza: Option<(PathBuf, ExecutableSource)>,
+    ripgrep: Option<(PathBuf, ExecutableSource)>,
+    dust: Option<(PathBuf, ExecutableSource)>,
+    bat: Option<(PathBuf, ExecutableSource)>,
+    fd: Option<(PathBuf, ExecutableSource)>,
+    procs: Option<(PathBuf, ExecutableSource)>,
+    bottom: Option<(PathBuf, ExecutableSource)>,
+    fzf: Option<(PathBuf, ExecutableSource)>,
+    zoxide: Option<(PathBuf, ExecutableSource)>,
+    starship: Option<(PathBuf, ExecutableSource)>,
+    direnv: Option<(PathBuf, ExecutableSource)>,
+    jq: Option<(PathBuf, ExecutableSource)>,
+    delta: Option<(PathBuf, ExecutableSource)>,
+    tealdeer: Option<(PathBuf, ExecutableSource)>,
+    lazygit: Option<(PathBuf, ExecutableSource)>,
+    gh: Option<(PathBuf, ExecutableSource)>,
+    htop: Option<(PathBuf, ExecutableSource)>,
+    btop: Option<(PathBuf, ExecutableSource)>,
+    tmux: Option<(PathBuf, ExecutableSource)>,
+    zellij: Option<(PathBuf, ExecutableSource)>,
+    httpie: Option<(PathBuf, ExecutableSource)>,
+    curlie: Option<(PathBuf, ExecutableSource)>,
+    mise: Option<(PathBuf, ExecutableSource)>,
+    hyperfine: Option<(PathBuf, ExecutableSource)>,
+    tokei: Option<(PathBuf, ExecutableSource)>,
+    xh: Option<(PathBuf, ExecutableSource)>,
+    curl: Option<(PathBuf, ExecutableSource)>,
+    wget: Option<(PathBuf, ExecutableSource)>,
+    iperf3: Option<(PathBuf, ExecutableSource)>,
 }
 
 impl InstalledUtilities {
@@ -162,42 +135,49 @@ impl InstalledUtilities {
             "iperf3",
         ];
 
-        let results = find_programs_parallel(&programs);
+        let results = find_programs_with_source_parallel(&programs);
 
-        let has = |name: &str| results.get(name).and_then(|r| r.as_ref()).is_some();
-        let any = |names: &[&str]| names.iter().any(|&name| has(name));
+        let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_any = |names: &[&str]| {
+            for name in names {
+                if let Some(result) = results.get(*name).and_then(|r| r.clone()) {
+                    return Some(result);
+                }
+            }
+            None
+        };
 
         Self {
-            exa: has("exa"),
-            eza: has("eza"),
-            ripgrep: any(&["rg", "ripgrep"]),
-            dust: has("dust"),
-            bat: any(&["bat", "batcat"]),
-            fd: any(&["fd", "fdfind"]),
-            procs: has("procs"),
-            bottom: any(&["btm", "bottom"]),
-            fzf: has("fzf"),
-            zoxide: has("zoxide"),
-            starship: has("starship"),
-            direnv: has("direnv"),
-            jq: has("jq"),
-            delta: has("delta"),
-            tealdeer: any(&["tldr", "tealdeer"]),
-            lazygit: has("lazygit"),
-            gh: has("gh"),
-            htop: has("htop"),
-            btop: has("btop"),
-            tmux: has("tmux"),
-            zellij: has("zellij"),
-            httpie: any(&["http", "https", "httpie"]),
-            curlie: has("curlie"),
-            mise: has("mise"),
-            hyperfine: has("hyperfine"),
-            tokei: has("tokei"),
-            xh: any(&["xh", "xhs"]),
-            curl: has("curl"),
-            wget: has("wget"),
-            iperf3: has("iperf3"),
+            exa: get("exa"),
+            eza: get("eza"),
+            ripgrep: get_any(&["rg", "ripgrep"]),
+            dust: get("dust"),
+            bat: get_any(&["bat", "batcat"]),
+            fd: get_any(&["fd", "fdfind"]),
+            procs: get("procs"),
+            bottom: get_any(&["btm", "bottom"]),
+            fzf: get("fzf"),
+            zoxide: get("zoxide"),
+            starship: get("starship"),
+            direnv: get("direnv"),
+            jq: get("jq"),
+            delta: get("delta"),
+            tealdeer: get_any(&["tldr", "tealdeer"]),
+            lazygit: get("lazygit"),
+            gh: get("gh"),
+            htop: get("htop"),
+            btop: get("btop"),
+            tmux: get("tmux"),
+            zellij: get("zellij"),
+            httpie: get_any(&["http", "https", "httpie"]),
+            curlie: get("curlie"),
+            mise: get("mise"),
+            hyperfine: get("hyperfine"),
+            tokei: get("tokei"),
+            xh: get_any(&["xh", "xhs"]),
+            curl: get("curl"),
+            wget: get("wget"),
+            iperf3: get("iperf3"),
         }
     }
 
@@ -208,10 +188,42 @@ impl InstalledUtilities {
 
     /// Returns the path to the specified utility's binary if installed.
     pub fn path(&self, utility: Utility) -> Option<PathBuf> {
-        if self.is_installed(utility) {
-            utility.path()
-        } else {
-            None
+        self.path_with_source(utility).map(|(p, _)| p)
+    }
+
+    /// Returns the path and source of the specified utility if installed.
+    pub fn path_with_source(&self, utility: Utility) -> Option<(PathBuf, ExecutableSource)> {
+        match utility {
+            Utility::Exa => self.exa.clone(),
+            Utility::Eza => self.eza.clone(),
+            Utility::Ripgrep => self.ripgrep.clone(),
+            Utility::Dust => self.dust.clone(),
+            Utility::Bat => self.bat.clone(),
+            Utility::Fd => self.fd.clone(),
+            Utility::Procs => self.procs.clone(),
+            Utility::Bottom => self.bottom.clone(),
+            Utility::Fzf => self.fzf.clone(),
+            Utility::Zoxide => self.zoxide.clone(),
+            Utility::Starship => self.starship.clone(),
+            Utility::Direnv => self.direnv.clone(),
+            Utility::Jq => self.jq.clone(),
+            Utility::Delta => self.delta.clone(),
+            Utility::Tealdeer => self.tealdeer.clone(),
+            Utility::Lazygit => self.lazygit.clone(),
+            Utility::Gh => self.gh.clone(),
+            Utility::Htop => self.htop.clone(),
+            Utility::Btop => self.btop.clone(),
+            Utility::Tmux => self.tmux.clone(),
+            Utility::Zellij => self.zellij.clone(),
+            Utility::Httpie => self.httpie.clone(),
+            Utility::Curlie => self.curlie.clone(),
+            Utility::Mise => self.mise.clone(),
+            Utility::Hyperfine => self.hyperfine.clone(),
+            Utility::Tokei => self.tokei.clone(),
+            Utility::Xh => self.xh.clone(),
+            Utility::Curl => self.curl.clone(),
+            Utility::Wget => self.wget.clone(),
+            Utility::Iperf3 => self.iperf3.clone(),
         }
     }
 
@@ -243,36 +255,36 @@ impl InstalledUtilities {
     /// Checks if the specified utility is installed.
     pub fn is_installed(&self, utility: Utility) -> bool {
         match utility {
-            Utility::Exa => self.exa,
-            Utility::Eza => self.eza,
-            Utility::Ripgrep => self.ripgrep,
-            Utility::Dust => self.dust,
-            Utility::Bat => self.bat,
-            Utility::Fd => self.fd,
-            Utility::Procs => self.procs,
-            Utility::Bottom => self.bottom,
-            Utility::Fzf => self.fzf,
-            Utility::Zoxide => self.zoxide,
-            Utility::Starship => self.starship,
-            Utility::Direnv => self.direnv,
-            Utility::Jq => self.jq,
-            Utility::Delta => self.delta,
-            Utility::Tealdeer => self.tealdeer,
-            Utility::Lazygit => self.lazygit,
-            Utility::Gh => self.gh,
-            Utility::Htop => self.htop,
-            Utility::Btop => self.btop,
-            Utility::Tmux => self.tmux,
-            Utility::Zellij => self.zellij,
-            Utility::Httpie => self.httpie,
-            Utility::Curlie => self.curlie,
-            Utility::Mise => self.mise,
-            Utility::Hyperfine => self.hyperfine,
-            Utility::Tokei => self.tokei,
-            Utility::Xh => self.xh,
-            Utility::Curl => self.curl,
-            Utility::Wget => self.wget,
-            Utility::Iperf3 => self.iperf3,
+            Utility::Exa => self.exa.is_some(),
+            Utility::Eza => self.eza.is_some(),
+            Utility::Ripgrep => self.ripgrep.is_some(),
+            Utility::Dust => self.dust.is_some(),
+            Utility::Bat => self.bat.is_some(),
+            Utility::Fd => self.fd.is_some(),
+            Utility::Procs => self.procs.is_some(),
+            Utility::Bottom => self.bottom.is_some(),
+            Utility::Fzf => self.fzf.is_some(),
+            Utility::Zoxide => self.zoxide.is_some(),
+            Utility::Starship => self.starship.is_some(),
+            Utility::Direnv => self.direnv.is_some(),
+            Utility::Jq => self.jq.is_some(),
+            Utility::Delta => self.delta.is_some(),
+            Utility::Tealdeer => self.tealdeer.is_some(),
+            Utility::Lazygit => self.lazygit.is_some(),
+            Utility::Gh => self.gh.is_some(),
+            Utility::Htop => self.htop.is_some(),
+            Utility::Btop => self.btop.is_some(),
+            Utility::Tmux => self.tmux.is_some(),
+            Utility::Zellij => self.zellij.is_some(),
+            Utility::Httpie => self.httpie.is_some(),
+            Utility::Curlie => self.curlie.is_some(),
+            Utility::Mise => self.mise.is_some(),
+            Utility::Hyperfine => self.hyperfine.is_some(),
+            Utility::Tokei => self.tokei.is_some(),
+            Utility::Xh => self.xh.is_some(),
+            Utility::Curl => self.curl.is_some(),
+            Utility::Wget => self.wget.is_some(),
+            Utility::Iperf3 => self.iperf3.is_some(),
         }
     }
 
@@ -280,6 +292,160 @@ impl InstalledUtilities {
     pub fn installed(&self) -> Vec<Utility> {
         use strum::IntoEnumIterator;
         Utility::iter().filter(|u| self.is_installed(*u)).collect()
+    }
+}
+
+impl Serialize for InstalledUtilities {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("InstalledUtilities", 30)?;
+        state.serialize_field("exa", &self.exa.is_some())?;
+        state.serialize_field("eza", &self.eza.is_some())?;
+        state.serialize_field("ripgrep", &self.ripgrep.is_some())?;
+        state.serialize_field("dust", &self.dust.is_some())?;
+        state.serialize_field("bat", &self.bat.is_some())?;
+        state.serialize_field("fd", &self.fd.is_some())?;
+        state.serialize_field("procs", &self.procs.is_some())?;
+        state.serialize_field("bottom", &self.bottom.is_some())?;
+        state.serialize_field("fzf", &self.fzf.is_some())?;
+        state.serialize_field("zoxide", &self.zoxide.is_some())?;
+        state.serialize_field("starship", &self.starship.is_some())?;
+        state.serialize_field("direnv", &self.direnv.is_some())?;
+        state.serialize_field("jq", &self.jq.is_some())?;
+        state.serialize_field("delta", &self.delta.is_some())?;
+        state.serialize_field("tealdeer", &self.tealdeer.is_some())?;
+        state.serialize_field("lazygit", &self.lazygit.is_some())?;
+        state.serialize_field("gh", &self.gh.is_some())?;
+        state.serialize_field("htop", &self.htop.is_some())?;
+        state.serialize_field("btop", &self.btop.is_some())?;
+        state.serialize_field("tmux", &self.tmux.is_some())?;
+        state.serialize_field("zellij", &self.zellij.is_some())?;
+        state.serialize_field("httpie", &self.httpie.is_some())?;
+        state.serialize_field("curlie", &self.curlie.is_some())?;
+        state.serialize_field("mise", &self.mise.is_some())?;
+        state.serialize_field("hyperfine", &self.hyperfine.is_some())?;
+        state.serialize_field("tokei", &self.tokei.is_some())?;
+        state.serialize_field("xh", &self.xh.is_some())?;
+        state.serialize_field("curl", &self.curl.is_some())?;
+        state.serialize_field("wget", &self.wget.is_some())?;
+        state.serialize_field("iperf3", &self.iperf3.is_some())?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for InstalledUtilities {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct BoolUtilities {
+            #[serde(default)]
+            exa: bool,
+            #[serde(default)]
+            eza: bool,
+            #[serde(default)]
+            ripgrep: bool,
+            #[serde(default)]
+            dust: bool,
+            #[serde(default)]
+            bat: bool,
+            #[serde(default)]
+            fd: bool,
+            #[serde(default)]
+            procs: bool,
+            #[serde(default)]
+            bottom: bool,
+            #[serde(default)]
+            fzf: bool,
+            #[serde(default)]
+            zoxide: bool,
+            #[serde(default)]
+            starship: bool,
+            #[serde(default)]
+            direnv: bool,
+            #[serde(default)]
+            jq: bool,
+            #[serde(default)]
+            delta: bool,
+            #[serde(default)]
+            tealdeer: bool,
+            #[serde(default)]
+            lazygit: bool,
+            #[serde(default)]
+            gh: bool,
+            #[serde(default)]
+            htop: bool,
+            #[serde(default)]
+            btop: bool,
+            #[serde(default)]
+            tmux: bool,
+            #[serde(default)]
+            zellij: bool,
+            #[serde(default)]
+            httpie: bool,
+            #[serde(default)]
+            curlie: bool,
+            #[serde(default)]
+            mise: bool,
+            #[serde(default)]
+            hyperfine: bool,
+            #[serde(default)]
+            tokei: bool,
+            #[serde(default)]
+            xh: bool,
+            #[serde(default)]
+            curl: bool,
+            #[serde(default)]
+            wget: bool,
+            #[serde(default)]
+            iperf3: bool,
+        }
+
+        let b = BoolUtilities::deserialize(deserializer)?;
+
+        let to_opt = |installed: bool| {
+            if installed {
+                Some((PathBuf::new(), ExecutableSource::Path))
+            } else {
+                None
+            }
+        };
+
+        Ok(InstalledUtilities {
+            exa: to_opt(b.exa),
+            eza: to_opt(b.eza),
+            ripgrep: to_opt(b.ripgrep),
+            dust: to_opt(b.dust),
+            bat: to_opt(b.bat),
+            fd: to_opt(b.fd),
+            procs: to_opt(b.procs),
+            bottom: to_opt(b.bottom),
+            fzf: to_opt(b.fzf),
+            zoxide: to_opt(b.zoxide),
+            starship: to_opt(b.starship),
+            direnv: to_opt(b.direnv),
+            jq: to_opt(b.jq),
+            delta: to_opt(b.delta),
+            tealdeer: to_opt(b.tealdeer),
+            lazygit: to_opt(b.lazygit),
+            gh: to_opt(b.gh),
+            htop: to_opt(b.htop),
+            btop: to_opt(b.btop),
+            tmux: to_opt(b.tmux),
+            zellij: to_opt(b.zellij),
+            httpie: to_opt(b.httpie),
+            curlie: to_opt(b.curlie),
+            mise: to_opt(b.mise),
+            hyperfine: to_opt(b.hyperfine),
+            tokei: to_opt(b.tokei),
+            xh: to_opt(b.xh),
+            curl: to_opt(b.curl),
+            wget: to_opt(b.wget),
+            iperf3: to_opt(b.iperf3),
+        })
     }
 }
 
@@ -296,6 +462,10 @@ impl ProgramDetector for InstalledUtilities {
 
     fn path(&self, program: Self::Program) -> Option<PathBuf> {
         InstalledUtilities::path(self, program)
+    }
+
+    fn path_with_source(&self, program: Self::Program) -> Option<(PathBuf, ExecutableSource)> {
+        InstalledUtilities::path_with_source(self, program)
     }
 
     fn version(&self, program: Self::Program) -> Result<String, ProgramError> {
@@ -389,5 +559,49 @@ impl ProgramDetector for InstalledUtilities {
 
         let _result = execute_versioned_install(method, version, &InstallOptions::default())?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_path_with_source_returns_none_when_not_installed() {
+        let utils = InstalledUtilities::default();
+        assert!(utils.path_with_source(Utility::Ripgrep).is_none());
+    }
+
+    #[test]
+    fn test_is_installed_returns_false_for_default() {
+        let utils = InstalledUtilities::default();
+        assert!(!utils.is_installed(Utility::Ripgrep));
+        assert!(!utils.is_installed(Utility::Bat));
+    }
+
+    #[test]
+    fn test_serialize_produces_boolean_fields() {
+        let utils = InstalledUtilities::default();
+        let json = serde_json::to_string(&utils).unwrap();
+        assert!(json.contains("\"ripgrep\":false"));
+        assert!(json.contains("\"bat\":false"));
+    }
+
+    #[test]
+    fn test_deserialize_from_boolean_fields() {
+        let json = r#"{"ripgrep": true, "bat": false}"#;
+        let utils: InstalledUtilities = serde_json::from_str(json).unwrap();
+        assert!(utils.is_installed(Utility::Ripgrep));
+        assert!(!utils.is_installed(Utility::Bat));
+    }
+
+    #[test]
+    fn test_serde_roundtrip() {
+        let original = InstalledUtilities::default();
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: InstalledUtilities = serde_json::from_str(&json).unwrap();
+        for util in original.installed() {
+            assert!(deserialized.is_installed(util));
+        }
     }
 }
