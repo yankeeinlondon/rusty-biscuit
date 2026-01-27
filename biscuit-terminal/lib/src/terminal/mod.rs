@@ -4,12 +4,12 @@
 //! and capabilities, useful for callers that need to adapt their output
 //! to the terminal's capabilities.
 
+pub mod ansi;
 pub mod color;
-pub mod colorize;
 pub mod detection;
 pub mod eval;
+pub mod multiplex;
 pub mod render;
 pub mod styling;
-pub mod render;
+pub mod supports;
 pub mod terminal;
-pub mod components;

@@ -1,10 +1,17 @@
+use crate::terminal::detection::{
+    color_depth, color_mode, get_terminal_app, image_support, is_tty, italics_support,
+    osc8_link_support, supports_underline, terminal_height, terminal_width, ColorDepth, ColorMode,
+    ImageSupport, TerminalApp, UnderlineSupport,
+};
 
-fn new_terminal() {
-    return Terminal {
+
+fn new_terminal() -> Terminal {
+    Terminal {
         app: get_terminal_app(),
-        italics_support: italics_support(),
+        supports_italic: italics_support(),
         image_support: image_support(),
-        underline_support: underline_support(),
+        underline_support: supports_underline(),
+        osc_link_support: osc8_link_support(),
         is_tty: is_tty(),
         color_depth: color_depth(),
     }
@@ -49,7 +56,7 @@ impl Terminal {
     }
 
 
-    /// Whether the terminal is in "light" or "dark" mode
+    /// Whether the terminal is in "light" or "dark" mode (detected using OSC12)
     pub fn color_mode() -> ColorMode {
         color_mode()
     }

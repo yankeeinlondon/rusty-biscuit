@@ -12,9 +12,10 @@
 ///
 ///       - `{{bold}}`
 ///       - `{{dim}}`
-///       - `{{red}}`, `{{blue}}`, ...
+///       - `{{italic}}`, `{{underline}}`, `{{strikethrough}}`
+///       - `{{red}}`, `{{blue}}`, `{{bright-red}}`, ...
 ///       - `{{bg-red}}`, `{{bg-blue}}`, ...
-///       - `{{reset}}`
+///       - `{{reset}}`, `{{reset_fg}}`, `{{reset_bg}}`
 ///
 ///     The key characteristic of these atomic tokens is that they don't clean up
 ///     after themselves and require the caller to use the `{{reset}}` token whenever

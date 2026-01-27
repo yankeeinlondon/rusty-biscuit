@@ -1,4 +1,11 @@
+use std::env;
+
+use serde::{Deserialize, Serialize};
+use terminal_size::{terminal_size, Height, Width};
+use termini::{NumberCapability, StringCapability, TermInfo};
+
 /// The type of image support (if any) of a terminal
+#[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum ImageSupport {
     None,
     /// the highest quality image support comes from the
@@ -19,6 +26,7 @@ pub enum ImageSupport {
     ITerm,
 }
 
+#[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum TerminalApp {
     AppleTerminal,
     Contour,
@@ -36,6 +44,7 @@ pub enum TerminalApp {
     Other(String)
 }
 
+#[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum ColorDepth {
     /// no color support
     None,
@@ -49,6 +58,7 @@ pub enum ColorDepth {
     TrueColor
 }
 
+#[derive(Debug,Clone,Serialize,Deserialize)]
 pub enum ColorMode {
     /// the background color is light, and text characters must be dark
     /// to provide adequate contrast
@@ -58,89 +68,6 @@ pub enum ColorMode {
     Dark,
     Unknown
 }
-
-
-pub fn color_depth() -> ColorDepth {
-    // Check COLORTERM environment variable first
-    if let Ok(colorterm) = env::var("COLORTERM") {
-        let colorterm_lower = colorterm.to_lowercase();
-        if colorterm_lower == "truecolor" || colorterm_lower == "24bit" {
-            tracing::info!(
-                color_depth = ColorDepth::TrueColor,
-                source = "COLORTERM",
-                colorterm = %colorterm,
-                "Detected truecolor support from COLORTERM env var"
-            );
-            return ColorDepth::TrueColor;
-        }
-    }
-
-    // Fallback to terminfo
-    match TermInfo::from_env() {
-        Ok(term_info) => {
-            // Query the MaxColors capability
-            let depth = term_info
-                .number_cap(NumberCapability::MaxColors)
-                .map(|n| n as u32)
-                .unwrap_or(0);
-            tracing::info!(
-                color_depth = depth,
-                source = "terminfo",
-                "Detected color depth from terminfo"
-            );
-            depth
-        }
-        Err(e) => {
-            tracing::info!(
-                color_depth = 0,
-                source = "fallback",
-                error = %e,
-                "Failed to query terminfo, defaulting to no color"
-            );
-            0
-        }
-    }
-}
-
-/// Whether the terminal is in "light" or "dark" mode
-pub fn color_mode() -> ColorMode {
-    todo!()
-}
-
-/// The width of the terminal (in characters)
-pub fn terminal_width() ->u32 {
-    todo!()
-}
-
-/// The height of the terminal (in characters)
-pub fn terminal_height() -> u32 {
-    todo!()
-}
-
-/// the terminal's dimensions (width, height)
-pub fn dimensions() -> (u32, u32) {
-    (
-      width(),
-      height()
-    )
-}
-
-
-
-/// Whether the terminal supports images and if so
-/// via which standard.
-///
-/// If multiple standards are supported then
-/// the highest quality standard is returned.
-pub fn image_support() -> ImageSupport {
-    todo!()
-}
-
-
-pub fn osc8_link_support() -> bool {
-    todo!()
-}
-
 
 /// Represents support for various underline style variants.
 ///
@@ -162,8 +89,224 @@ pub struct UnderlineSupport {
     pub colored: bool,
 }
 
-pub fn supports_underline() -> UnderlineSupport {
+
+pub fn color_depth() -> ColorDepth {
+    // Check COLORTERM environment variable first
+    if let Ok(colorterm) = env::var("COLORTERM") {
+        let colorterm_lower = colorterm.to_lowercase();
+        if colorterm_lower == "truecolor" || colorterm_lower == "24bit" {
+            tracing::info!(
+                color_depth = ?ColorDepth::TrueColor,
+                source = "COLORTERM",
+                colorterm = %colorterm,
+                "Detected truecolor support from COLORTERM env var"
+            );
+            return ColorDepth::TrueColor;
+        }
+    }
+
+    // Fallback to terminfo
+    match TermInfo::from_env() {
+        Ok(term_info) => {
+            // Query the MaxColors capability
+            let depth = term_info
+                .number_cap(NumberCapability::MaxColors)
+                .map(|n| n as u32)
+                .unwrap_or(0);
+
+            let color_depth = match depth {
+                d if d >= 16_777_216 => ColorDepth::TrueColor,
+                d if d >= 256 => ColorDepth::Enhanced,
+                d if d >= 16 => ColorDepth::Basic,
+                d if d >= 8 => ColorDepth::Minimal,
+                _ => ColorDepth::None,
+            };
+
+            tracing::info!(
+                ?color_depth,
+                source = "terminfo",
+                "Detected color depth from terminfo"
+            );
+            color_depth
+        }
+        Err(e) => {
+            tracing::info!(
+                color_depth = ?ColorDepth::None,
+                source = "fallback",
+                error = %e,
+                "Failed to query terminfo, defaulting to no color"
+            );
+            ColorDepth::None
+        }
+    }
+}
+
+/// Whether the terminal is in "light" or "dark" mode
+pub fn color_mode() -> ColorMode {
     todo!()
+}
+
+/// The width of the terminal (in characters)
+pub fn terminal_width() -> u32 {
+    dimensions().0
+}
+
+/// The height of the terminal (in characters)
+pub fn terminal_height() -> u32 {
+    dimensions().1
+}
+
+/// the terminal's dimensions (width, height)
+pub fn dimensions() -> (u32, u32) {
+    terminal_size()
+        .map(|(Width(w), Height(h))| (w as u32, h as u32))
+        .unwrap_or((80, 24))
+}
+
+
+
+/// Whether the terminal supports images and if so
+/// via which standard.
+///
+/// If multiple standards are supported then
+/// the highest quality standard is returned.
+pub fn image_support() -> ImageSupport {
+    todo!()
+}
+
+
+pub fn osc8_link_support() -> bool {
+    todo!()
+}
+
+
+
+
+pub fn supports_underline() -> UnderlineSupport {
+    use std::io::IsTerminal;
+
+    let none = UnderlineSupport {
+        straight: false,
+        double: false,
+        curly: false,
+        dotted: false,
+        dashed: false,
+        colored: false,
+    };
+
+    // If stdout is not a TTY, no styling
+    if !std::io::stdout().is_terminal() {
+        return UnderlineSupport {
+            straight: false,
+            double: false,
+            curly: false,
+            dotted: false,
+            dashed: false,
+            colored: false
+        };
+    }
+
+    // Check for dumb terminal
+    let term = env::var("TERM").unwrap_or_default();
+    if term == "dumb" {
+        return none;
+    }
+
+    // Check if basic underline is supported via terminfo
+    let has_basic_underline = TermInfo::from_env()
+        .map(|ti| {
+            ti.utf8_string_cap(StringCapability::EnterUnderlineMode)
+                .is_some()
+        })
+        .unwrap_or(false);
+
+    // Helper for terminals with full extended underline support
+    let full_support = || UnderlineSupport {
+        straight: true,
+        double: true,
+        curly: true,
+        dotted: true,
+        dashed: true,
+        colored: true,
+    };
+
+    // Helper for terminals with straight underline only
+    let basic_only = || UnderlineSupport {
+        straight: true,
+        double: false,
+        curly: false,
+        dotted: false,
+        dashed: false,
+        colored: false,
+    };
+
+    // 1. Check TERM_PROGRAM for known terminal emulators
+    if let Ok(term_program) = env::var("TERM_PROGRAM") {
+        match term_program.as_str() {
+            // Full Kitty-style underline support
+            "kitty" | "WezTerm" | "Alacritty" | "ghostty" | "contour" | "foot" | "iTerm.app" => {
+                return full_support();
+            }
+            // VTE-based terminals (GNOME Terminal 3.44+, Tilix) - full support
+            "gnome-terminal" | "tilix" => {
+                return full_support();
+            }
+            // Konsole has colored underlines but limited style support
+            "konsole" => {
+                return UnderlineSupport {
+                    straight: true,
+                    double: true,
+                    curly: false, // Konsole doesn't support curly as of 2024
+                    dotted: false,
+                    dashed: false,
+                    colored: true,
+                };
+            }
+            // Apple Terminal - basic underline only
+            "Apple_Terminal" => {
+                return basic_only();
+            }
+            // VS Code terminal - full support
+            "vscode" => {
+                return full_support();
+            }
+            _ => {}
+        }
+    }
+
+    // 2. Check for Windows Terminal
+    if env::var("WT_SESSION").is_ok() {
+        return full_support();
+    }
+
+    // 3. Check TERM for known terminal patterns
+    match term.as_str() {
+        // Full extended underline support
+        "xterm-kitty" | "kitty" | "kitty-direct" | "wezterm" | "alacritty" | "alacritty-direct"
+        | "ghostty" | "foot" | "foot-direct" | "contour" => {
+            return full_support();
+        }
+        // Basic underline via common terminal types
+        "xterm-256color"
+        | "xterm-direct"
+        | "tmux-256color"
+        | "screen-256color"
+        | "rxvt-unicode-256color" => {
+            // These may or may not support extended underlines depending on
+            // the actual terminal behind them. Return basic only to be safe.
+            if has_basic_underline {
+                return basic_only();
+            }
+        }
+        _ => {}
+    }
+
+    // 4. Fall back to terminfo for basic support
+    if has_basic_underline {
+        return basic_only();
+    }
+
+    none
 }
 
 
