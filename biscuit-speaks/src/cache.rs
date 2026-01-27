@@ -318,7 +318,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
 
     // macOS Say provider
     #[cfg(target_os = "macos")]
-    if installed.say {
+    if installed.say() {
         let provider = SayProvider;
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::Say);
         match populate_cache_for_provider(&provider, provider_type).await {
@@ -334,7 +334,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     }
 
     // eSpeak provider
-    if installed.espeak || installed.espeak_ng {
+    if installed.espeak() || installed.espeak_ng() {
         let provider = ESpeakProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::ESpeak);
         match populate_cache_for_provider(&provider, provider_type).await {
@@ -350,7 +350,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     }
 
     // Echogarden provider
-    if installed.echogarden {
+    if installed.echogarden() {
         let provider = EchogardenProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::EchoGarden);
         match populate_cache_for_provider(&provider, provider_type).await {
@@ -366,7 +366,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     }
 
     // gTTS provider
-    if installed.gtts_cli {
+    if installed.gtts_cli() {
         let provider = GttsProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::Gtts);
         match populate_cache_for_provider(&provider, provider_type).await {
@@ -382,7 +382,7 @@ pub async fn populate_cache_for_all_providers() -> Result<(), TtsError> {
     }
 
     // Kokoro TTS provider
-    if installed.kokoro_tts {
+    if installed.kokoro_tts() {
         let provider = KokoroTtsProvider::new();
         let provider_type = TtsProvider::Host(crate::types::HostTtsProvider::KokoroTts);
         match populate_cache_for_provider(&provider, provider_type).await {

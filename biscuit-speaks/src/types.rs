@@ -529,18 +529,18 @@ impl HostTtsProvider {
     /// Check if this provider is available on the host system.
     pub fn is_available(&self, installed: &InstalledTtsClients) -> bool {
         match self {
-            HostTtsProvider::Say => installed.say,
-            HostTtsProvider::EchoGarden => installed.echogarden,
-            HostTtsProvider::Sherpa => installed.sherpa_onnx,
-            HostTtsProvider::ESpeak => installed.espeak || installed.espeak_ng,
-            HostTtsProvider::Sapi => installed.windows_sapi,
-            HostTtsProvider::Festival => installed.festival,
-            HostTtsProvider::Mimic3 => installed.mimic3,
-            HostTtsProvider::KokoroTts => installed.kokoro_tts,
-            HostTtsProvider::Gtts => installed.gtts_cli,
+            HostTtsProvider::Say => installed.say(),
+            HostTtsProvider::EchoGarden => installed.echogarden(),
+            HostTtsProvider::Sherpa => installed.sherpa_onnx(),
+            HostTtsProvider::ESpeak => installed.espeak() || installed.espeak_ng(),
+            HostTtsProvider::Sapi => installed.windows_sapi(),
+            HostTtsProvider::Festival => installed.festival(),
+            HostTtsProvider::Mimic3 => installed.mimic3(),
+            HostTtsProvider::KokoroTts => installed.kokoro_tts(),
+            HostTtsProvider::Gtts => installed.gtts_cli(),
             HostTtsProvider::SpdSay => false, // Not yet detected by sniff-lib
-            HostTtsProvider::Piper => installed.piper,
-            HostTtsProvider::Pico2Wave => installed.pico2wave,
+            HostTtsProvider::Piper => installed.piper(),
+            HostTtsProvider::Pico2Wave => installed.pico2wave(),
         }
     }
 
