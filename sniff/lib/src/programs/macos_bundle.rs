@@ -54,6 +54,7 @@ pub fn get_app_bundle_name(binary_name: &str) -> Option<&'static str> {
         "kitty" => Some("kitty"),
         "iterm2" => Some("iTerm"),
         "ghostty" => Some("Ghostty"),
+        "warp" | "warp-terminal" => Some("Warp"),
 
         // Browsers
         "brave" | "brave-browser" => Some("Brave Browser"),
@@ -181,6 +182,21 @@ fn find_executable_in_bundle(
                 return Some(exec_path);
             }
         }
+
+        // Fallback: if the bundle has a single executable, use it
+        if let Ok(entries) = std::fs::read_dir(&macos_dir) {
+            let mut executables = Vec::new();
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if is_executable(&path) {
+                    executables.push(path);
+                }
+            }
+
+            if executables.len() == 1 {
+                return executables.pop();
+            }
+        }
     }
 
     None
@@ -212,6 +228,9 @@ fn get_executable_candidates(app_name: &str, binary_name: &str) -> Vec<String> {
         }
         "iterm2" => {
             candidates.push("iTerm2".to_string());
+        }
+        "warp" | "warp-terminal" => {
+            candidates.push("stable".to_string());
         }
         _ => {}
     }
@@ -262,6 +281,8 @@ mod tests {
         assert_eq!(get_app_bundle_name("kitty"), Some("kitty"));
         assert_eq!(get_app_bundle_name("iterm2"), Some("iTerm"));
         assert_eq!(get_app_bundle_name("ghostty"), Some("Ghostty"));
+        assert_eq!(get_app_bundle_name("warp"), Some("Warp"));
+        assert_eq!(get_app_bundle_name("warp-terminal"), Some("Warp"));
     }
 
     #[test]
@@ -414,6 +435,14 @@ mod tests {
         }
 
         #[test]
+        fn test_get_executable_candidates_warp() {
+            let candidates = get_executable_candidates("Warp", "warp-terminal");
+            assert!(candidates.contains(&"warp-terminal".to_string()));
+            assert!(candidates.contains(&"Warp".to_string()));
+            assert!(candidates.contains(&"stable".to_string())); // Special case
+        }
+
+        #[test]
         fn test_get_executable_candidates_includes_variations() {
             // When binary_name and app_name are the same, should include the name
             // plus lowercase variants if different
@@ -525,6 +554,30 @@ mod tests {
 
             assert!(result.is_none(), "Should not find non-executable file");
         }
+
+        #[test]
+        fn test_find_executable_in_bundle_single_exec_fallback() {
+            use std::fs;
+            use std::os::unix::fs::PermissionsExt;
+
+            let temp_dir = tempfile::tempdir().unwrap();
+            let app_dir = temp_dir.path().join("SingleExec.app");
+            let macos_dir = app_dir.join("Contents").join("MacOS");
+            fs::create_dir_all(&macos_dir).unwrap();
+
+            let exec_path = macos_dir.join("only-exec");
+            fs::write(&exec_path, b"#!/bin/sh\necho single").unwrap();
+
+            let mut perms = fs::metadata(&exec_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&exec_path, perms).unwrap();
+
+            let search_dirs = vec![temp_dir.path().to_path_buf()];
+            let result = find_executable_in_bundle(&search_dirs, "SingleExec", "unknown");
+
+            assert!(result.is_some(), "Should find lone executable");
+            assert_eq!(result.unwrap(), exec_path);
+        }
     }
 
     // Tests that should compile and run on all platforms
@@ -550,8 +603,8 @@ mod tests {
             // All known app mappings should still return None on non-macOS
             let known_apps = [
                 "code", "cursor", "zed", "wezterm", "alacritty", "kitty",
-                "iterm2", "ghostty", "brave", "chrome", "firefox", "vlc",
-                "spotify", "slack", "discord",
+                "iterm2", "ghostty", "warp", "warp-terminal", "brave", "chrome",
+                "firefox", "vlc", "spotify", "slack", "discord",
             ];
             for app in known_apps {
                 assert!(
