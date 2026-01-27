@@ -137,3 +137,27 @@ install-release-plz:
 # run the latest debug build of the `sniff` CLI
 sniff *args="":
     @cargo run -p sniff-cli -- {{args}}
+
+lint *args="":
+  #!/usr/bin/env bash
+    set -euo pipefail
+    echo ""
+    echo "Linting all packages..."
+    echo "----------------------------"
+    echo ""
+    for area in {{areas}}; do
+        if [ -f "$area/justfile" ]; then
+            if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "lint"; then
+                echo "Linting $area..."
+                just -f "$area/justfile" lint
+            else
+                if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "lint"; then
+                    echo "No lint command for $area"
+                else
+                    echo "- no lint command for the area **$area**" >&2
+                fi
+            fi
+        else
+            echo "- no justfile for the area **$area**" >&2
+        fi
+    done
