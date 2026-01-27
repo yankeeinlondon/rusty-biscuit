@@ -214,7 +214,7 @@ impl Serialize for InstalledHeadlessAudio {
                 HeadlessAudio::Mpv => "mpv",
                 HeadlessAudio::Ffplay => "ffplay",
                 HeadlessAudio::Vlc => "vlc",
-                HeadlessAudio::Mplayer => "mplayer",
+                HeadlessAudio::MPlayer => "mplayer",
                 HeadlessAudio::GstreamerGstPlay => "gstreamer_gst_play",
                 HeadlessAudio::Sox => "sox",
                 HeadlessAudio::Mpg123 => "mpg123",
