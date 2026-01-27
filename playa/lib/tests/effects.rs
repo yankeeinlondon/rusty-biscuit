@@ -574,12 +574,12 @@ fn effects_create_valid_playa_instances() {
 
     // Test one effect from each category
     let sample_effects = [
-        Doorbell,                  // UI - WAV
-        CartoonAccent01,           // Cartoon - WAV
-        SadTrombone,               // Reactions - WAV
-        PhaseJump1,                // Sci-Fi - OGG
-        CreepyDarkLogo,            // Atmosphere - MP3
-        AirWoosh,                  // Motion - WAV
+        Doorbell,        // UI - WAV
+        CartoonAccent01, // Cartoon - WAV
+        SadTrombone,     // Reactions - WAV
+        PhaseJump1,      // Sci-Fi - OGG
+        CreepyDarkLogo,  // Atmosphere - MP3
+        AirWoosh,        // Motion - WAV
     ];
 
     for effect in sample_effects {
@@ -688,4 +688,17 @@ fn playa_format_matches_detection() {
             effect
         );
     }
+}
+
+#[test]
+fn sound_effect_names_roundtrip() {
+    for effect in SoundEffect::all() {
+        let name = effect.name();
+        assert_eq!(SoundEffect::from_name(name), Some(effect));
+    }
+}
+
+#[test]
+fn sound_effect_all_matches_total_count() {
+    assert_eq!(SoundEffect::all().len(), 53, "Expected 53 total effects");
 }

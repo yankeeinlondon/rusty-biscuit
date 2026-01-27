@@ -11,6 +11,18 @@ Play a file:
 playa path/to/audio.wav
 ```
 
+Play a built-in sound effect:
+
+```bash
+playa --effect sad-trombone
+```
+
+List built-in sound effects:
+
+```bash
+playa --list-effects
+```
+
 Show player metadata:
 
 ```bash
@@ -33,3 +45,4 @@ found on the host.
 - Rendering uses the `shared::markdown::Markdown` terminal renderer, which handles
   tables and formatting.
 - Playback uses the Playa library's detection and player matching.
+- This CLI enables the full `sound-effects` set, which adds ~30MB to the binary.

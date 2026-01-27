@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, ValueHint};
 use sniff_lib::programs::InstalledHeadlessAudio;
 
-use playa::{all_players, AudioFileFormat, AudioPlayer, Codec, Playa, PLAYER_LOOKUP};
+use playa::{all_players, AudioFileFormat, AudioPlayer, Codec, Playa, SoundEffect, PLAYER_LOOKUP};
 use shared::markdown::output::terminal::{for_terminal, TerminalOptions};
 use shared::markdown::Markdown;
 use shared::testing::strip_ansi_codes;
@@ -24,6 +24,14 @@ struct Cli {
     /// Display playback metadata (player, volume, speed, codec, format)
     #[arg(long)]
     meta: bool,
+
+    /// Play a built-in sound effect
+    #[arg(long, value_name = "SOUND_EFFECT", conflicts_with_all = ["players", "list_effects"])]
+    effect: Option<String>,
+
+    /// List available built-in sound effects
+    #[arg(long, conflicts_with_all = ["players", "effect"])]
+    list_effects: bool,
 
     /// Play at 1.25x speed
     #[arg(long, conflicts_with = "slow")]
@@ -53,16 +61,23 @@ struct Cli {
     #[arg(
         value_name = "AUDIO_FILE",
         value_hint = ValueHint::FilePath,
-        required_unless_present = "players"
+        required_unless_present_any = ["players", "list_effects", "effect"]
     )]
     audio_file: Option<PathBuf>,
 }
 
 impl Cli {
-    fn build_playa(&self, path: &PathBuf) -> Result<Playa, playa::InvalidAudio> {
-        let mut playa = Playa::from_path(path)?;
+    fn build_playa_from_path(&self, path: &PathBuf) -> Result<Playa, playa::InvalidAudio> {
+        let playa = Playa::from_path(path)?;
+        Ok(self.apply_playa_options(playa))
+    }
 
-        // Apply speed settings
+    fn build_playa_from_effect(&self, effect: SoundEffect) -> Result<Playa, playa::InvalidAudio> {
+        let playa = Playa::from_bytes(effect.bytes().to_vec())?;
+        Ok(self.apply_playa_options(playa))
+    }
+
+    fn apply_playa_options(&self, mut playa: Playa) -> Playa {
         if let Some(speed) = self.speed {
             playa = playa.speed(speed);
         } else if self.fast {
@@ -71,7 +86,6 @@ impl Cli {
             playa = playa.speed(0.75);
         }
 
-        // Apply volume settings
         if let Some(volume) = self.volume {
             playa = playa.volume(volume);
         } else if self.quiet {
@@ -80,17 +94,21 @@ impl Cli {
             playa = playa.volume(1.5);
         }
 
-        // Apply meta display
         if self.meta {
             playa = playa.show_meta();
         }
 
-        Ok(playa)
+        playa
     }
 }
 
 fn main() {
     let cli = Cli::parse();
+
+    if cli.list_effects {
+        list_sound_effects();
+        return;
+    }
 
     if cli.players {
         let (markdown, missing) = build_metadata_markdown();
@@ -98,22 +116,54 @@ fn main() {
         return;
     }
 
-    let Some(ref path) = cli.audio_file else {
-        eprintln!("No audio file provided. Use `playa --players` to show available players.");
-        std::process::exit(2);
-    };
+    let playa = if let Some(effect_name) = cli.effect.as_deref() {
+        let Some(effect) = SoundEffect::from_name(effect_name) else {
+            eprintln!(
+                "Unknown sound effect: {effect_name}. Use `playa --list-effects` to see available effects."
+            );
+            std::process::exit(2);
+        };
 
-    let playa = match cli.build_playa(path) {
-        Ok(playa) => playa,
-        Err(error) => {
-            eprintln!("Failed to detect audio format: {error}");
-            std::process::exit(1);
+        match cli.build_playa_from_effect(effect) {
+            Ok(playa) => playa,
+            Err(error) => {
+                eprintln!("Failed to load sound effect: {error}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        let Some(ref path) = cli.audio_file else {
+            eprintln!("No audio file provided. Use `playa --players` to show available players.");
+            std::process::exit(2);
+        };
+
+        match cli.build_playa_from_path(path) {
+            Ok(playa) => playa,
+            Err(error) => {
+                eprintln!("Failed to detect audio format: {error}");
+                std::process::exit(1);
+            }
         }
     };
 
     if let Err(error) = playa.play() {
         eprintln!("Playback failed: {error}");
         std::process::exit(1);
+    }
+}
+
+fn list_sound_effects() {
+    let effects = SoundEffect::all();
+    if effects.is_empty() {
+        eprintln!(
+            "No sound effects are enabled in this build. Rebuild with `cargo build -p playa-cli --features sound-effects`."
+        );
+        std::process::exit(1);
+    }
+
+    println!("Available sound effects ({}):", effects.len());
+    for effect in effects {
+        println!("- {}", effect.name());
     }
 }
 
@@ -361,6 +411,8 @@ mod tests {
     fn make_cli(
         players: bool,
         meta: bool,
+        effect: Option<String>,
+        list_effects: bool,
         fast: bool,
         slow: bool,
         quiet: bool,
@@ -371,6 +423,8 @@ mod tests {
         Cli {
             players,
             meta,
+            effect,
+            list_effects,
             fast,
             slow,
             quiet,
@@ -383,7 +437,9 @@ mod tests {
 
     #[test]
     fn cli_default_no_speed_or_volume() {
-        let cli = make_cli(false, false, false, false, false, false, None, None);
+        let cli = make_cli(
+            false, false, None, false, false, false, false, false, None, None,
+        );
         // With no audio file to test against, we just verify the struct is created
         assert!(!cli.fast);
         assert!(!cli.slow);
@@ -395,25 +451,33 @@ mod tests {
 
     #[test]
     fn cli_fast_sets_speed() {
-        let cli = make_cli(false, false, true, false, false, false, None, None);
+        let cli = make_cli(
+            false, false, None, false, true, false, false, false, None, None,
+        );
         assert!(cli.fast);
     }
 
     #[test]
     fn cli_slow_sets_speed() {
-        let cli = make_cli(false, false, false, true, false, false, None, None);
+        let cli = make_cli(
+            false, false, None, false, false, true, false, false, None, None,
+        );
         assert!(cli.slow);
     }
 
     #[test]
     fn cli_quiet_sets_volume() {
-        let cli = make_cli(false, false, false, false, true, false, None, None);
+        let cli = make_cli(
+            false, false, None, false, false, false, true, false, None, None,
+        );
         assert!(cli.quiet);
     }
 
     #[test]
     fn cli_loud_sets_volume() {
-        let cli = make_cli(false, false, false, false, false, true, None, None);
+        let cli = make_cli(
+            false, false, None, false, false, false, false, true, None, None,
+        );
         assert!(cli.loud);
     }
 
@@ -421,6 +485,8 @@ mod tests {
     fn cli_explicit_speed_and_volume() {
         let cli = make_cli(
             false,
+            false,
+            None,
             false,
             false,
             false,
@@ -435,13 +501,42 @@ mod tests {
 
     #[test]
     fn cli_meta_flag() {
-        let cli = make_cli(false, true, false, false, false, false, None, None);
+        let cli = make_cli(
+            false, true, None, false, false, false, false, false, None, None,
+        );
         assert!(cli.meta);
     }
 
     #[test]
     fn cli_players_flag() {
-        let cli = make_cli(true, false, false, false, false, false, None, None);
+        let cli = make_cli(
+            true, false, None, false, false, false, false, false, None, None,
+        );
         assert!(cli.players);
+    }
+
+    #[test]
+    fn cli_effect_flag() {
+        let cli = make_cli(
+            false,
+            false,
+            Some("sad-trombone".to_string()),
+            false,
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
+        );
+        assert_eq!(cli.effect.as_deref(), Some("sad-trombone"));
+    }
+
+    #[test]
+    fn cli_list_effects_flag() {
+        let cli = make_cli(
+            false, false, None, true, false, false, false, false, None, None,
+        );
+        assert!(cli.list_effects);
     }
 }
