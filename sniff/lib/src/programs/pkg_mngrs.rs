@@ -11,7 +11,7 @@ use crate::programs::installer::{
     execute_install, execute_versioned_install, method_available, select_best_method,
     InstallOptions,
 };
-use crate::programs::schema::{ProgramError, ProgramMetadata};
+use crate::programs::schema::{ProgramEntry, ProgramError, ProgramMetadata};
 use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{Program, PROGRAM_LOOKUP};
 
@@ -227,25 +227,40 @@ impl Serialize for InstalledLanguagePackageManagers {
     where
         S: Serializer,
     {
+        use strum::IntoEnumIterator;
+
+        let entry = |mgr: LanguagePackageManager| -> ProgramEntry {
+            let info = mgr.info();
+            match self.path_with_source(mgr) {
+                Some((path, source)) => ProgramEntry::installed(info, path, source),
+                None => ProgramEntry::not_installed(info),
+            }
+        };
+
         let mut state = serializer.serialize_struct("InstalledLanguagePackageManagers", 18)?;
-        state.serialize_field("npm", &self.npm.is_some())?;
-        state.serialize_field("pnpm", &self.pnpm.is_some())?;
-        state.serialize_field("yarn", &self.yarn.is_some())?;
-        state.serialize_field("bun", &self.bun.is_some())?;
-        state.serialize_field("cargo", &self.cargo.is_some())?;
-        state.serialize_field("go_modules", &self.go_modules.is_some())?;
-        state.serialize_field("composer", &self.composer.is_some())?;
-        state.serialize_field("swift_pm", &self.swift_pm.is_some())?;
-        state.serialize_field("luarocks", &self.luarocks.is_some())?;
-        state.serialize_field("vcpkg", &self.vcpkg.is_some())?;
-        state.serialize_field("conan", &self.conan.is_some())?;
-        state.serialize_field("nuget", &self.nuget.is_some())?;
-        state.serialize_field("hex", &self.hex.is_some())?;
-        state.serialize_field("pip", &self.pip.is_some())?;
-        state.serialize_field("uv", &self.uv.is_some())?;
-        state.serialize_field("poetry", &self.poetry.is_some())?;
-        state.serialize_field("cpan", &self.cpan.is_some())?;
-        state.serialize_field("cpanm", &self.cpanm.is_some())?;
+        for mgr in LanguagePackageManager::iter() {
+            let field_name = match mgr {
+                LanguagePackageManager::Npm => "npm",
+                LanguagePackageManager::Pnpm => "pnpm",
+                LanguagePackageManager::Yarn => "yarn",
+                LanguagePackageManager::Bun => "bun",
+                LanguagePackageManager::Cargo => "cargo",
+                LanguagePackageManager::GoModules => "go_modules",
+                LanguagePackageManager::Composer => "composer",
+                LanguagePackageManager::SwiftPm => "swift_pm",
+                LanguagePackageManager::LuaRocks => "luarocks",
+                LanguagePackageManager::VcPkg => "vcpkg",
+                LanguagePackageManager::Conan => "conan",
+                LanguagePackageManager::Nuget => "nuget",
+                LanguagePackageManager::Hex => "hex",
+                LanguagePackageManager::Pip => "pip",
+                LanguagePackageManager::Uv => "uv",
+                LanguagePackageManager::Poetry => "poetry",
+                LanguagePackageManager::Cpan => "cpan",
+                LanguagePackageManager::Cpanm => "cpanm",
+            };
+            state.serialize_field(field_name, &entry(mgr))?;
+        }
         state.end()
     }
 }
@@ -573,16 +588,31 @@ impl Serialize for InstalledOsPackageManagers {
     where
         S: Serializer,
     {
+        use strum::IntoEnumIterator;
+
+        let entry = |mgr: OsPackageManager| -> ProgramEntry {
+            let info = mgr.info();
+            match self.path_with_source(mgr) {
+                Some((path, source)) => ProgramEntry::installed(info, path, source),
+                None => ProgramEntry::not_installed(info),
+            }
+        };
+
         let mut state = serializer.serialize_struct("InstalledOsPackageManagers", 9)?;
-        state.serialize_field("apt", &self.apt.is_some())?;
-        state.serialize_field("nala", &self.nala.is_some())?;
-        state.serialize_field("brew", &self.brew.is_some())?;
-        state.serialize_field("dnf", &self.dnf.is_some())?;
-        state.serialize_field("pacman", &self.pacman.is_some())?;
-        state.serialize_field("winget", &self.winget.is_some())?;
-        state.serialize_field("chocolatey", &self.chocolatey.is_some())?;
-        state.serialize_field("scoop", &self.scoop.is_some())?;
-        state.serialize_field("nix", &self.nix.is_some())?;
+        for mgr in OsPackageManager::iter() {
+            let field_name = match mgr {
+                OsPackageManager::Apt => "apt",
+                OsPackageManager::Nala => "nala",
+                OsPackageManager::Brew => "brew",
+                OsPackageManager::Dnf => "dnf",
+                OsPackageManager::Pacman => "pacman",
+                OsPackageManager::Winget => "winget",
+                OsPackageManager::Chocolatey => "chocolatey",
+                OsPackageManager::Scoop => "scoop",
+                OsPackageManager::Nix => "nix",
+            };
+            state.serialize_field(field_name, &entry(mgr))?;
+        }
         state.end()
     }
 }
