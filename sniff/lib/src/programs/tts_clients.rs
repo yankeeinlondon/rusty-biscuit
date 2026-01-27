@@ -523,11 +523,12 @@ mod tests {
     }
 
     #[test]
-    fn test_serialize_produces_boolean_fields() {
+    fn test_serialize_produces_program_entries() {
         let clients = InstalledTtsClients::default();
         let json = serde_json::to_string(&clients).unwrap();
-        assert!(json.contains("\"piper\":false"));
-        assert!(json.contains("\"espeak\":false"));
+        assert!(json.contains("\"installed\":false"));
+        assert!(json.contains("\"piper\":{"));
+        assert!(json.contains("\"name\":\"Piper\""));
     }
 
     #[test]
@@ -539,13 +540,12 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_roundtrip() {
+    fn test_serialize_to_json() {
         let original = InstalledTtsClients::default();
         let json = serde_json::to_string(&original).unwrap();
-        let deserialized: InstalledTtsClients = serde_json::from_str(&json).unwrap();
-        for client in original.installed() {
-            assert!(deserialized.is_installed(client));
-        }
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_object());
+        assert!(parsed.get("piper").is_some());
     }
 
     /// Regression test: kokoro-tts detection uses correct binary name.

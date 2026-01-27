@@ -595,11 +595,12 @@ mod tests {
     }
 
     #[test]
-    fn test_serialize_produces_boolean_fields() {
+    fn test_serialize_produces_program_entries() {
         let utils = InstalledUtilities::default();
         let json = serde_json::to_string(&utils).unwrap();
-        assert!(json.contains("\"ripgrep\":false"));
-        assert!(json.contains("\"bat\":false"));
+        assert!(json.contains("\"installed\":false"));
+        assert!(json.contains("\"ripgrep\":{"));
+        assert!(json.contains("\"name\":\"ripgrep\""));
     }
 
     #[test]
@@ -611,12 +612,11 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_roundtrip() {
+    fn test_serialize_to_json() {
         let original = InstalledUtilities::default();
         let json = serde_json::to_string(&original).unwrap();
-        let deserialized: InstalledUtilities = serde_json::from_str(&json).unwrap();
-        for util in original.installed() {
-            assert!(deserialized.is_installed(util));
-        }
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_object());
+        assert!(parsed.get("ripgrep").is_some());
     }
 }

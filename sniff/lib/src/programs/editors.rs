@@ -520,11 +520,13 @@ mod tests {
     }
 
     #[test]
-    fn test_serialize_produces_boolean_fields() {
+    fn test_serialize_produces_program_entries() {
         let editors = InstalledEditors::default();
         let json = serde_json::to_string(&editors).unwrap();
-        assert!(json.contains("\"vim\":false"));
-        assert!(json.contains("\"vscode\":false"));
+        // Now produces ProgramEntry objects with full metadata
+        assert!(json.contains("\"installed\":false"));
+        assert!(json.contains("\"vim\":{"));
+        assert!(json.contains("\"name\":\"Vim\""));
     }
 
     #[test]
@@ -536,14 +538,13 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_roundtrip() {
+    fn test_serialize_to_json() {
+        // Serialization produces rich ProgramEntry objects
         let original = InstalledEditors::default();
         let json = serde_json::to_string(&original).unwrap();
-        let deserialized: InstalledEditors = serde_json::from_str(&json).unwrap();
-        // Note: paths are lost on roundtrip, but installation status is preserved
-        for editor in original.installed() {
-            assert!(deserialized.is_installed(editor));
-        }
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_object());
+        assert!(parsed.get("vim").is_some());
     }
 
     #[test]

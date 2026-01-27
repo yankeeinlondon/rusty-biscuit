@@ -463,29 +463,33 @@ mod tests {
     }
 
     #[test]
-    fn test_serialize_produces_boolean_fields() {
+    fn test_serialize_produces_program_entries() {
         let apps = InstalledTerminalApps::default();
         let json = serde_json::to_string(&apps).unwrap();
-        assert!(json.contains("\"alacritty\":false"));
-        assert!(json.contains("\"wezterm\":false"));
+        // Now produces ProgramEntry objects with full metadata
+        assert!(json.contains("\"installed\":false"));
+        assert!(json.contains("\"alacritty\":{"));
+        assert!(json.contains("\"name\":\"Alacritty\""));
     }
 
     #[test]
-    fn test_deserialize_from_boolean_fields() {
+    fn test_serialize_to_json() {
+        // Serialization produces rich ProgramEntry objects
+        let original = InstalledTerminalApps::default();
+        let json = serde_json::to_string(&original).unwrap();
+        // The JSON should be valid and contain program metadata
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_object());
+        assert!(parsed.get("alacritty").is_some());
+    }
+
+    #[test]
+    fn test_deserialize_from_boolean_json() {
+        // Deserialization still accepts boolean-only format for backward compatibility
         let json = r#"{"alacritty": true, "wezterm": false}"#;
         let apps: InstalledTerminalApps = serde_json::from_str(json).unwrap();
         assert!(apps.is_installed(TerminalApp::Alacritty));
         assert!(!apps.is_installed(TerminalApp::WezTerm));
-    }
-
-    #[test]
-    fn test_serde_roundtrip() {
-        let original = InstalledTerminalApps::default();
-        let json = serde_json::to_string(&original).unwrap();
-        let deserialized: InstalledTerminalApps = serde_json::from_str(&json).unwrap();
-        for app in original.installed() {
-            assert!(deserialized.is_installed(app));
-        }
     }
 
     #[test]

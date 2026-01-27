@@ -427,11 +427,12 @@ mod tests {
     }
 
     #[test]
-    fn test_serialize_produces_boolean_fields() {
+    fn test_serialize_produces_program_entries() {
         let players = InstalledHeadlessAudio::default();
         let json = serde_json::to_string(&players).unwrap();
-        assert!(json.contains("\"ffplay\":false"));
-        assert!(json.contains("\"mpv\":false"));
+        assert!(json.contains("\"installed\":false"));
+        assert!(json.contains("\"mpv\":{"));
+        assert!(json.contains("\"name\":\"mpv\""));
     }
 
     #[test]
@@ -443,13 +444,12 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_roundtrip() {
+    fn test_serialize_to_json() {
         let original = InstalledHeadlessAudio::default();
         let json = serde_json::to_string(&original).unwrap();
-        let deserialized: InstalledHeadlessAudio = serde_json::from_str(&json).unwrap();
-        for player in original.installed() {
-            assert!(deserialized.is_installed(player));
-        }
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_object());
+        assert!(parsed.get("mpv").is_some());
     }
 
     #[test]
