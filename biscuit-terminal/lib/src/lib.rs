@@ -1,3 +1,3 @@
+pub mod discovery;
+pub mod components;
 pub mod terminal;
-pub mod table;
-pub mod escape_codes;

@@ -142,24 +142,58 @@ In the following sections we'll cover each in more detail but before we do let's
 
 ### `Prose` struct
 
-TODO
+The `Prose` struct allows for plain text to be parsed for two token types:
+
+1. Atomic Tokens (e.g., `{{red}}`, `{{bold}}`, `{{reset}}`, etc.)
+2. Block Tokens (e.g., `<i>italics</i>`, `<b>bold</b>`, etc.)
+
+These tokens are defined in the documentation for the struct but in a nutshell they are both ways to indicate styling (color, bold, dim, italics, etc.) within the body of the text. When the `Prose` **render** function is called it will replace these tokens with the appropriate escape codes to achieve the desired effect.
 
 ### `TextBlock` struct
 
-TODO
+The `TextBlock` struct is a block of text which the caller wants to have styled uniformly across the text. It uses a builder pattern to define what the escape codes which should _wrap_ the text are.
+
+```rust
+let heading = TextBlock("This is my heading")
+    .as_bold()
+    .text_color(Color::Basic(Blue))
+    .bg_color(Color::WebColor(HoneyDew))
+    .dotted_underline()
+    .build();
+```
 
 ### Numeric structs: `Currency`, `Numeric`, and `Metric`
 
-TODO
+The numeric structs provided are meant as a way to uniformly (and with nice formatting) represent numeric values in the terminal:
+
+- `Numeric` is the most basic and simply provides some basic options such as setting a precision, use of commas, etc.
+
+    ```rust
+    let population = Numeric::new("123900".into())
+        // how many decimal places of precision do we want?
+        .precision(0)
+        // How to handle moving the desired precision:
+        // - Precision::{Round,Floor,Error}
+        //
+        // the default is Precision::Round.
+        .handle_precision(Precision::Round)
+        // use commas between every three digits
+        .use_commas(Comma::ThreeDigits)
+        // how should we treat an undefined value for this
+        .handle_undefined(HandleUndefined::AsZero)
+        .build();
+    ```
+
+- `Currency` is a numeric value meant to represent a monetary amount in some currency. It adds to the builder pattern configuration of `Numeric` to accommodate it's more specific task.
+- `Metric` is a numeric quantity that has both a numeric and "unit of measure" component to it.
 
 ### `Table` struct
 
-TODO
+Of all the components offered, the `Table` struct is the most complex and therefore will be defined not here, but in the `./lib/src/components/table/README.md` file. In general though, it's function is to provide a well formed table that is responsive to the amount of space available and context-aware of the escape codes which may be used in a modern terminal and able to not be
 
 ### Lists: `UnorderedList` and `OrderedList`
 
-TODO
-
+Both list structs are represented by a 1:M _elements_ where the elements are any _renderable_ element. They are, however, most typically either a `String` (the text of an element) or another list struct (to achieve nesting).
 
 
 ## The `bt` CLI

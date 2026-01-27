@@ -1,4 +1,4 @@
-use crate::terminal::detection::{
+use crate::discovery::detection::{
     color_depth, color_mode, get_terminal_app, image_support, is_tty, italics_support,
     osc8_link_support, supports_underline, terminal_height, terminal_width, ColorDepth, ColorMode,
     ImageSupport, TerminalApp, UnderlineSupport,
@@ -45,7 +45,6 @@ impl Terminal {
     pub fn new() -> Terminal {
         new_terminal()
     }
-
 
     pub fn width() -> u32 {
         terminal_width()
