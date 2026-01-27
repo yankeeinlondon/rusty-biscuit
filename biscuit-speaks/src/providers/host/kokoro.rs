@@ -11,7 +11,9 @@ use tracing::debug;
 use crate::audio_cache::CacheKey;
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
+#[cfg(feature = "playa")]
+use crate::types::{HostTtsProvider, TtsProvider};
+use crate::types::{Gender, Language, SpeakResult, TtsConfig, Voice, VoiceQuality};
 
 /// Kokoro TTS provider.
 ///
@@ -355,31 +357,27 @@ impl TtsExecutor for KokoroTtsProvider {
 
         #[cfg(not(feature = "playa"))]
         {
-            let _ = (&audio_path, cache_hit);
-            return Err(TtsError::NoAudioPlayer);
+            let _ = (&audio_path, cache_hit, voice_name);
+            Err(TtsError::NoAudioPlayer)
         }
 
         // Build voice metadata
-        let (gender, language) = Self::parse_voice_prefix(&voice_name);
-        let voice = Voice::new(&voice_name)
-            .with_gender(gender)
-            .with_quality(VoiceQuality::Excellent)
-            .with_language(language);
-
         #[cfg(feature = "playa")]
-        return Ok(SpeakResult::new(
-            TtsProvider::Host(HostTtsProvider::KokoroTts),
-            voice,
-        )
-        .with_audio_file(audio_path)
-        .with_codec("wav")
-        .with_cache_hit(cache_hit));
+        {
+            let (gender, language) = Self::parse_voice_prefix(&voice_name);
+            let voice = Voice::new(&voice_name)
+                .with_gender(gender)
+                .with_quality(VoiceQuality::Excellent)
+                .with_language(language);
 
-        #[cfg(not(feature = "playa"))]
-        Ok(SpeakResult::new(
-            TtsProvider::Host(HostTtsProvider::KokoroTts),
-            voice,
-        ))
+            Ok(SpeakResult::new(
+                TtsProvider::Host(HostTtsProvider::KokoroTts),
+                voice,
+            )
+            .with_audio_file(audio_path)
+            .with_codec("wav")
+            .with_cache_hit(cache_hit))
+        }
     }
 }
 

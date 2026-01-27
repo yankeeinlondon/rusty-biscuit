@@ -445,16 +445,15 @@ impl OpenCodeDelegation {
                     }
                 }
                 Some("message.updated") => {
-                    if let Some(info) = event.get("properties").and_then(|p| p.get("info")) {
-                        if let Some(message_id) = info.get("id").and_then(Value::as_str) {
-                            if let Some(role) = info.get("role").and_then(Value::as_str) {
-                                message_roles.insert(message_id.to_string(), role.to_string());
-                                if role == "assistant" {
-                                    assistant_message_ids.insert(message_id.to_string());
-                                    if message_text.contains_key(message_id) {
-                                        last_assistant_id = Some(message_id.to_string());
-                                    }
-                                }
+                    if let Some(info) = event.get("properties").and_then(|p| p.get("info"))
+                        && let Some(message_id) = info.get("id").and_then(Value::as_str)
+                        && let Some(role) = info.get("role").and_then(Value::as_str)
+                    {
+                        message_roles.insert(message_id.to_string(), role.to_string());
+                        if role == "assistant" {
+                            assistant_message_ids.insert(message_id.to_string());
+                            if message_text.contains_key(message_id) {
+                                last_assistant_id = Some(message_id.to_string());
                             }
                         }
                     }
@@ -560,10 +559,10 @@ impl Runnable for OpenCodeDelegation {
             }
         };
 
-        if let Some(session_key) = self.session_key {
-            if let Some(session_id) = result.session_id {
-                state.set(session_key, session_id);
-            }
+        if let Some(session_key) = self.session_key
+            && let Some(session_id) = result.session_id
+        {
+            state.set(session_key, session_id);
         }
 
         Ok(result.output)

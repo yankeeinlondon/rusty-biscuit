@@ -326,12 +326,11 @@ fn prompt_for_provider(providers: &[TtsProvider]) -> Result<TtsProvider, inquire
 /// Use `--refresh-cache` to update the cache with fresh data from providers.
 async fn list_voices_for_provider(provider: TtsProvider) -> Result<Vec<Voice>, TtsError> {
     // Try to read from cache first
-    if let Ok(cache) = read_from_cache() {
-        if let Some(capability) = cache.get_provider(&provider) {
-            if !capability.voices.is_empty() {
-                return Ok(capability.voices.clone());
-            }
-        }
+    if let Ok(cache) = read_from_cache()
+        && let Some(capability) = cache.get_provider(&provider)
+        && !capability.voices.is_empty()
+    {
+        return Ok(capability.voices.clone());
     }
 
     // Cache miss - query the provider directly

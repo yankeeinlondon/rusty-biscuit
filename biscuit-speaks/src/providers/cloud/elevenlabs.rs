@@ -32,7 +32,9 @@ use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
 #[cfg(feature = "playa")]
 use crate::types::AudioFormat;
-use crate::types::{CloudTtsProvider, Gender, Language, SpeedLevel, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
+#[cfg(feature = "playa")]
+use crate::types::{CloudTtsProvider, TtsProvider};
+use crate::types::{Gender, Language, SpeedLevel, SpeakResult, TtsConfig, Voice, VoiceQuality};
 
 /// Default ElevenLabs voice ID (Rachel - a versatile female voice).
 const DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM";
@@ -336,7 +338,7 @@ impl ElevenLabsProvider {
 
         // Write to cache atomically
         write_atomic(&cache_path, &audio_bytes).map_err(|e| TtsError::TempFileError {
-            source: std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+            source: std::io::Error::other(e.to_string()),
         })?;
 
         tracing::debug!(
@@ -742,58 +744,53 @@ impl TtsExecutor for ElevenLabsProvider {
 
         #[cfg(not(feature = "playa"))]
         {
-            let _ = (&audio_path, cache_hit);
-            return Err(TtsError::NoAudioPlayer);
+            let _ = (&audio_path, cache_hit, model_used, voice_id);
+            Err(TtsError::NoAudioPlayer)
         }
 
         // Try to get full voice metadata from the voice list
-        let mut voice = if let Ok(voices) = self.list_voices().await {
-            // Find the voice with this ID
-            let found = voices
-                .iter()
-                .find(|v| v.identifier.as_deref() == Some(&voice_id));
-            tracing::debug!(
-                voice_id = %voice_id,
-                found = found.is_some(),
-                "Looking up voice metadata"
-            );
-            found.cloned().unwrap_or_else(|| {
+        #[cfg(feature = "playa")]
+        {
+            let mut voice = if let Ok(voices) = self.list_voices().await {
+                // Find the voice with this ID
+                let found = voices
+                    .iter()
+                    .find(|v| v.identifier.as_deref() == Some(&voice_id));
+                tracing::debug!(
+                    voice_id = %voice_id,
+                    found = found.is_some(),
+                    "Looking up voice metadata"
+                );
+                found.cloned().unwrap_or_else(|| {
                     Voice::new(&voice_id)
                         .with_identifier(&voice_id)
                         .with_gender(config.gender)
                         .with_quality(VoiceQuality::Excellent)
                         .with_language(config.language.clone())
                 })
-        } else {
-            Voice::new(&voice_id)
-                .with_identifier(&voice_id)
-                .with_gender(config.gender)
-                .with_quality(VoiceQuality::Excellent)
-                .with_language(config.language.clone())
-        };
+            } else {
+                Voice::new(&voice_id)
+                    .with_identifier(&voice_id)
+                    .with_gender(config.gender)
+                    .with_quality(VoiceQuality::Excellent)
+                    .with_language(config.language.clone())
+            };
 
-        // Ensure the voice has its identifier set (for display)
-        if voice.identifier.is_none() {
-            voice.identifier = Some(voice_id.clone());
+            // Ensure the voice has its identifier set (for display)
+            if voice.identifier.is_none() {
+                voice.identifier = Some(voice_id.clone());
+            }
+
+            // Return the result with model info and cache metadata
+            Ok(SpeakResult::with_model(
+                TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
+                voice,
+                model_used,
+            )
+            .with_audio_file(audio_path)
+            .with_codec("mp3")
+            .with_cache_hit(cache_hit))
         }
-
-        // Return the result with model info and cache metadata
-        #[cfg(feature = "playa")]
-        return Ok(SpeakResult::with_model(
-            TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
-            voice,
-            model_used,
-        )
-        .with_audio_file(audio_path)
-        .with_codec("mp3")
-        .with_cache_hit(cache_hit));
-
-        #[cfg(not(feature = "playa"))]
-        Ok(SpeakResult::with_model(
-            TtsProvider::Cloud(CloudTtsProvider::ElevenLabs),
-            voice,
-            model_used,
-        ))
     }
 }
 

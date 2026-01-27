@@ -46,7 +46,7 @@ lint *args="":
     @echo "Linting AI Pipeline"
     @echo "-------------------"
     @echo ""
-    @cargo clippy -p ./lib/Cargo.toml {{args}}
+    @cargo clippy -p ai-pipeline -p ai-pipeline-gen {{args}}
 
 
 

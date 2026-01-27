@@ -16,13 +16,14 @@ use sniff_lib::programs::InstalledTtsClients;
 // ============================================================================
 
 /// Volume level for TTS audio output.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum VolumeLevel {
     /// Full volume (1.0)
     Loud,
     /// Reduced volume (0.5)
     Soft,
     /// Default volume (0.75)
+    #[default]
     Normal,
     /// Explicit volume value (clamped to 0.0-1.0)
     Explicit(f32),
@@ -40,24 +41,20 @@ impl VolumeLevel {
     }
 }
 
-impl Default for VolumeLevel {
-    fn default() -> Self {
-        VolumeLevel::Normal
-    }
-}
 
 // ============================================================================
 // Speed Level
 // ============================================================================
 
 /// Speed level for TTS speech rate.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum SpeedLevel {
     /// Fast speech (1.25x normal)
     Fast,
     /// Slow speech (0.75x normal)
     Slow,
     /// Default speech rate (1.0x)
+    #[default]
     Normal,
     /// Explicit speed multiplier (clamped to 0.25-4.0)
     Explicit(f32),
@@ -78,11 +75,6 @@ impl SpeedLevel {
     }
 }
 
-impl Default for SpeedLevel {
-    fn default() -> Self {
-        SpeedLevel::Normal
-    }
-}
 
 /// The quality of a specific voice (on a specific provider).
 ///

@@ -13,7 +13,9 @@ use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
 #[cfg(feature = "playa")]
 use crate::types::AudioFormat;
-use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
+#[cfg(feature = "playa")]
+use crate::types::{HostTtsProvider, TtsProvider};
+use crate::types::{Gender, Language, SpeakResult, TtsConfig, Voice, VoiceQuality};
 
 /// gTTS (Google Text-to-Speech) provider.
 ///
@@ -309,25 +311,19 @@ impl TtsExecutor for GttsProvider {
 
         #[cfg(not(feature = "playa"))]
         {
-            let _ = (&audio_path, cache_hit);
-            return Err(TtsError::NoAudioPlayer);
+            let _ = (&audio_path, cache_hit, voice);
+            Err(TtsError::NoAudioPlayer)
         }
 
         // Return the result with cache metadata
         #[cfg(feature = "playa")]
-        return Ok(SpeakResult::new(
+        Ok(SpeakResult::new(
             TtsProvider::Host(HostTtsProvider::Gtts),
             voice,
         )
         .with_audio_file(audio_path)
         .with_codec("mp3")
-        .with_cache_hit(cache_hit));
-
-        #[cfg(not(feature = "playa"))]
-        Ok(SpeakResult::new(
-            TtsProvider::Host(HostTtsProvider::Gtts),
-            voice,
-        ))
+        .with_cache_hit(cache_hit))
     }
 }
 

@@ -440,10 +440,10 @@ impl<V: Serialize + Hash + Eq> Prompt<V> {
         // Check image URLs
         if let Some(ref images) = self.images {
             for image in images {
-                if let PromptImage::Url(url) = image {
-                    if !Self::check_url_accessible(&client, url).await {
-                        any_missing = true;
-                    }
+                if let PromptImage::Url(url) = image
+                    && !Self::check_url_accessible(&client, url).await
+                {
+                    any_missing = true;
                 }
             }
         }

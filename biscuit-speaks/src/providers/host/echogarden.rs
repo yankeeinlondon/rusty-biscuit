@@ -13,7 +13,9 @@ use tracing::{debug, trace};
 use crate::audio_cache::CacheKey;
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, SpeedLevel, TtsConfig, TtsProvider, Voice, VoiceQuality};
+#[cfg(feature = "playa")]
+use crate::types::{HostTtsProvider, TtsProvider};
+use crate::types::{Gender, Language, SpeakResult, SpeedLevel, TtsConfig, Voice, VoiceQuality};
 
 /// Echogarden TTS engine identifier.
 ///
@@ -139,7 +141,7 @@ impl EchogardenProvider {
 
     /// Select the best voice from a list based on config constraints.
     fn select_best_voice(voices: &[&Voice], config: &TtsConfig) -> Option<Voice> {
-        let mut candidates: Vec<&Voice> = voices.iter().copied().collect();
+        let mut candidates: Vec<&Voice> = voices.to_vec();
 
         // Filter by language if specified
         let target_language = &config.language;
@@ -377,45 +379,41 @@ impl TtsExecutor for EchogardenProvider {
 
         #[cfg(not(feature = "playa"))]
         {
-            let _ = (&audio_path, cache_hit);
-            return Err(TtsError::NoAudioPlayer);
+            let _ = (&audio_path, cache_hit, voice_name);
+            Err(TtsError::NoAudioPlayer)
         }
 
         // Build voice metadata
-        let voice = if let Ok(voices) = self.list_voices().await {
-            voices
-                .iter()
-                .find(|v| v.name == voice_name)
-                .cloned()
-                .unwrap_or_else(|| {
-                    Voice::new(&voice_name)
-                        .with_gender(config.gender)
-                        .with_quality(self.engine.quality())
-                        .with_language(config.language.clone())
-                        .with_identifier(format!("{}:{}", self.engine.as_str(), voice_name))
-                })
-        } else {
-            Voice::new(&voice_name)
-                .with_gender(config.gender)
-                .with_quality(self.engine.quality())
-                .with_language(config.language.clone())
-                .with_identifier(format!("{}:{}", self.engine.as_str(), voice_name))
-        };
-
         #[cfg(feature = "playa")]
-        return Ok(SpeakResult::new(
-            TtsProvider::Host(HostTtsProvider::EchoGarden),
-            voice,
-        )
-        .with_audio_file(audio_path)
-        .with_codec("wav")
-        .with_cache_hit(cache_hit));
+        {
+            let voice = if let Ok(voices) = self.list_voices().await {
+                voices
+                    .iter()
+                    .find(|v| v.name == voice_name)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        Voice::new(&voice_name)
+                            .with_gender(config.gender)
+                            .with_quality(self.engine.quality())
+                            .with_language(config.language.clone())
+                            .with_identifier(format!("{}:{}", self.engine.as_str(), voice_name))
+                    })
+            } else {
+                Voice::new(&voice_name)
+                    .with_gender(config.gender)
+                    .with_quality(self.engine.quality())
+                    .with_language(config.language.clone())
+                    .with_identifier(format!("{}:{}", self.engine.as_str(), voice_name))
+            };
 
-        #[cfg(not(feature = "playa"))]
-        Ok(SpeakResult::new(
-            TtsProvider::Host(HostTtsProvider::EchoGarden),
-            voice,
-        ))
+            Ok(SpeakResult::new(
+                TtsProvider::Host(HostTtsProvider::EchoGarden),
+                voice,
+            )
+            .with_audio_file(audio_path)
+            .with_codec("wav")
+            .with_cache_hit(cache_hit))
+        }
     }
 }
 

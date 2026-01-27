@@ -320,13 +320,13 @@ impl TtsExecutor for SayProvider {
             self.speak(text, config).await?;
 
             // Try to find the voice in the list for full metadata
-            if let Ok(voices) = self.list_voices().await {
-                if let Some(voice) = voices.iter().find(|v| v.name == *voice_name) {
-                    return Ok(SpeakResult::new(
-                        TtsProvider::Host(HostTtsProvider::Say),
-                        voice.clone(),
-                    ));
-                }
+            if let Ok(voices) = self.list_voices().await
+                && let Some(voice) = voices.iter().find(|v| v.name == *voice_name)
+            {
+                return Ok(SpeakResult::new(
+                    TtsProvider::Host(HostTtsProvider::Say),
+                    voice.clone(),
+                ));
             }
 
             // Fallback if voice not found in list

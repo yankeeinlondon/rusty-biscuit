@@ -106,11 +106,11 @@ pub fn get_api_keys() -> HashMap<Provider, String> {
 
         // Try each env var for this provider
         for env_var in config.env_vars {
-            if let Ok(key) = env::var(env_var) {
-                if !key.is_empty() {
-                    keys.insert(provider, key);
-                    break;
-                }
+            if let Ok(key) = env::var(env_var)
+                && !key.is_empty()
+            {
+                keys.insert(provider, key);
+                break;
             }
         }
     }
@@ -198,13 +198,13 @@ pub async fn get_provider_models_from_api(
     }
 
     // Check response size
-    if let Some(content_length) = response.content_length() {
-        if content_length as usize > MAX_RESPONSE_SIZE {
-            return Err(ProviderError::ResponseTooLarge {
-                provider: provider_name.clone(),
-                size: content_length as usize,
-            });
-        }
+    if let Some(content_length) = response.content_length()
+        && content_length as usize > MAX_RESPONSE_SIZE
+    {
+        return Err(ProviderError::ResponseTooLarge {
+            provider: provider_name.clone(),
+            size: content_length as usize,
+        });
     }
 
     // Parse response
