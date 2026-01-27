@@ -11,7 +11,7 @@ use crate::programs::installer::{
     execute_install, execute_versioned_install, method_available, select_best_method,
     InstallOptions,
 };
-use crate::programs::schema::{ProgramError, ProgramMetadata};
+use crate::programs::schema::{ProgramEntry, ProgramError, ProgramMetadata};
 use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{
     InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
@@ -286,22 +286,37 @@ impl Serialize for InstalledTtsClients {
     where
         S: Serializer,
     {
+        use strum::IntoEnumIterator;
+
+        let entry = |client: TtsClient| -> ProgramEntry {
+            let info = client.info();
+            match self.path_with_source(client) {
+                Some((path, source)) => ProgramEntry::installed(info, path, source),
+                None => ProgramEntry::not_installed(info),
+            }
+        };
+
         let mut state = serializer.serialize_struct("InstalledTtsClients", 15)?;
-        state.serialize_field("say", &self.say.is_some())?;
-        state.serialize_field("espeak", &self.espeak.is_some())?;
-        state.serialize_field("espeak_ng", &self.espeak_ng.is_some())?;
-        state.serialize_field("festival", &self.festival.is_some())?;
-        state.serialize_field("mimic", &self.mimic.is_some())?;
-        state.serialize_field("mimic3", &self.mimic3.is_some())?;
-        state.serialize_field("piper", &self.piper.is_some())?;
-        state.serialize_field("echogarden", &self.echogarden.is_some())?;
-        state.serialize_field("balcon", &self.balcon.is_some())?;
-        state.serialize_field("windows_sapi", &self.windows_sapi.is_some())?;
-        state.serialize_field("gtts_cli", &self.gtts_cli.is_some())?;
-        state.serialize_field("coqui_tts", &self.coqui_tts.is_some())?;
-        state.serialize_field("sherpa_onnx", &self.sherpa_onnx.is_some())?;
-        state.serialize_field("kokoro_tts", &self.kokoro_tts.is_some())?;
-        state.serialize_field("pico2wave", &self.pico2wave.is_some())?;
+        for client in TtsClient::iter() {
+            let field_name = match client {
+                TtsClient::Say => "say",
+                TtsClient::Espeak => "espeak",
+                TtsClient::EspeakNg => "espeak_ng",
+                TtsClient::Festival => "festival",
+                TtsClient::Mimic => "mimic",
+                TtsClient::Mimic3 => "mimic3",
+                TtsClient::Piper => "piper",
+                TtsClient::Echogarden => "echogarden",
+                TtsClient::Balcon => "balcon",
+                TtsClient::WindowsSapi => "windows_sapi",
+                TtsClient::GttsCli => "gtts_cli",
+                TtsClient::CoquiTts => "coqui_tts",
+                TtsClient::SherpaOnnx => "sherpa_onnx",
+                TtsClient::KokoroTts => "kokoro_tts",
+                TtsClient::Pico2Wave => "pico2wave",
+            };
+            state.serialize_field(field_name, &entry(client))?;
+        }
         state.end()
     }
 }

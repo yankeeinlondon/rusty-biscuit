@@ -11,7 +11,7 @@ use crate::programs::installer::{
     execute_install, execute_versioned_install, method_available, select_best_method,
     InstallOptions,
 };
-use crate::programs::schema::{ProgramError, ProgramMetadata};
+use crate::programs::schema::{ProgramEntry, ProgramError, ProgramMetadata};
 use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{
     InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
@@ -300,37 +300,52 @@ impl Serialize for InstalledUtilities {
     where
         S: Serializer,
     {
+        use strum::IntoEnumIterator;
+
+        let entry = |utility: Utility| -> ProgramEntry {
+            let info = utility.info();
+            match self.path_with_source(utility) {
+                Some((path, source)) => ProgramEntry::installed(info, path, source),
+                None => ProgramEntry::not_installed(info),
+            }
+        };
+
         let mut state = serializer.serialize_struct("InstalledUtilities", 30)?;
-        state.serialize_field("exa", &self.exa.is_some())?;
-        state.serialize_field("eza", &self.eza.is_some())?;
-        state.serialize_field("ripgrep", &self.ripgrep.is_some())?;
-        state.serialize_field("dust", &self.dust.is_some())?;
-        state.serialize_field("bat", &self.bat.is_some())?;
-        state.serialize_field("fd", &self.fd.is_some())?;
-        state.serialize_field("procs", &self.procs.is_some())?;
-        state.serialize_field("bottom", &self.bottom.is_some())?;
-        state.serialize_field("fzf", &self.fzf.is_some())?;
-        state.serialize_field("zoxide", &self.zoxide.is_some())?;
-        state.serialize_field("starship", &self.starship.is_some())?;
-        state.serialize_field("direnv", &self.direnv.is_some())?;
-        state.serialize_field("jq", &self.jq.is_some())?;
-        state.serialize_field("delta", &self.delta.is_some())?;
-        state.serialize_field("tealdeer", &self.tealdeer.is_some())?;
-        state.serialize_field("lazygit", &self.lazygit.is_some())?;
-        state.serialize_field("gh", &self.gh.is_some())?;
-        state.serialize_field("htop", &self.htop.is_some())?;
-        state.serialize_field("btop", &self.btop.is_some())?;
-        state.serialize_field("tmux", &self.tmux.is_some())?;
-        state.serialize_field("zellij", &self.zellij.is_some())?;
-        state.serialize_field("httpie", &self.httpie.is_some())?;
-        state.serialize_field("curlie", &self.curlie.is_some())?;
-        state.serialize_field("mise", &self.mise.is_some())?;
-        state.serialize_field("hyperfine", &self.hyperfine.is_some())?;
-        state.serialize_field("tokei", &self.tokei.is_some())?;
-        state.serialize_field("xh", &self.xh.is_some())?;
-        state.serialize_field("curl", &self.curl.is_some())?;
-        state.serialize_field("wget", &self.wget.is_some())?;
-        state.serialize_field("iperf3", &self.iperf3.is_some())?;
+        for utility in Utility::iter() {
+            let field_name = match utility {
+                Utility::Exa => "exa",
+                Utility::Eza => "eza",
+                Utility::Ripgrep => "ripgrep",
+                Utility::Dust => "dust",
+                Utility::Bat => "bat",
+                Utility::Fd => "fd",
+                Utility::Procs => "procs",
+                Utility::Bottom => "bottom",
+                Utility::Fzf => "fzf",
+                Utility::Zoxide => "zoxide",
+                Utility::Starship => "starship",
+                Utility::Direnv => "direnv",
+                Utility::Jq => "jq",
+                Utility::Delta => "delta",
+                Utility::Tealdeer => "tealdeer",
+                Utility::Lazygit => "lazygit",
+                Utility::Gh => "gh",
+                Utility::Htop => "htop",
+                Utility::Btop => "btop",
+                Utility::Tmux => "tmux",
+                Utility::Zellij => "zellij",
+                Utility::Httpie => "httpie",
+                Utility::Curlie => "curlie",
+                Utility::Mise => "mise",
+                Utility::Hyperfine => "hyperfine",
+                Utility::Tokei => "tokei",
+                Utility::Xh => "xh",
+                Utility::Curl => "curl",
+                Utility::Wget => "wget",
+                Utility::Iperf3 => "iperf3",
+            };
+            state.serialize_field(field_name, &entry(utility))?;
+        }
         state.end()
     }
 }
