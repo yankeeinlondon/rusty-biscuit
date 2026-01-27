@@ -8,7 +8,8 @@ use shared::markdown::output::terminal::{for_terminal, TerminalOptions};
 use shared::markdown::Markdown;
 use shared::testing::strip_ansi_codes;
 
-const DIM: &str = "\x1b[2m";
+const MISSING_FG: &str = "\x1b[38;2;140;140;140m";
+const ITALIC: &str = "\x1b[3m";
 const RESET: &str = "\x1b[0m";
 const TABLE_DIVIDER: char = '\u{2502}';
 
@@ -224,11 +225,24 @@ fn render_markdown(content: &str, missing_players: &[String]) {
     let markdown = Markdown::from(content.to_string());
     match for_terminal(&markdown, TerminalOptions::default()) {
         Ok(rendered) => {
-            let output = dim_missing_rows(&rendered, missing_players);
+            let mut output = dim_missing_rows(&rendered, missing_players);
+            append_missing_note(&mut output);
             print!("{}", output);
         }
         Err(_) => println!("{}", markdown.content()),
     }
+}
+
+fn append_missing_note(output: &mut String) {
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push_str(&format!(
+        "- {italic}items listed in {grey}grey{reset}{italic} are not installed{reset}\n",
+        italic = ITALIC,
+        grey = MISSING_FG,
+        reset = RESET
+    ));
 }
 
 fn dim_missing_rows(rendered: &str, missing_players: &[String]) -> String {
@@ -282,7 +296,7 @@ fn dim_table_row_line(line: &str) -> String {
                 output.push_str(RESET);
             }
             output.push(ch);
-            output.push_str(DIM);
+            output.push_str(MISSING_FG);
             in_cell = true;
         } else {
             output.push(ch);
