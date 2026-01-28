@@ -15,9 +15,19 @@ default:
     @just --list | grep -v 'default'
     @echo
 
+# start Claude Code CLI in yolo mode
 cc *args="":
-  @echo Starting Claude Code in Yolo mode
+  @clear
+  @echo "Starting Claude Code in Yolo mode"
+  @echo
   @claude --dangerously-skip-permissions {{args}}
+
+# start Opencode CLI
+oc *args="":
+  @clear
+  @echo  "Starting Opencode"
+  @echo
+  @opencode {{args}}
 
 # build all areas that have a build target
 build *args="":
