@@ -43,6 +43,7 @@ use crate::components::renderable::Renderable;
 /// - `<red>content</red>` for named color foreground text
 /// - `<clipboard>fallback</clipboard>` injects clipboard content or fallback
 ///
+#[allow(dead_code)]
 pub struct Prose {
     /// the raw content as received
     content: String,
@@ -78,7 +79,7 @@ impl Renderable for Prose {
         todo!()
     }
 
-    fn fallback_render(term: &crate::terminal::Terminal) -> String {
+    fn fallback_render(_term: &crate::terminal::Terminal) -> String {
         todo!()
     }
 }

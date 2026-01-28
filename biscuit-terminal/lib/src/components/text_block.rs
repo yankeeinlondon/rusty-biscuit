@@ -8,6 +8,7 @@ pub enum FontWeight {
 
 /// Provides uniform styling support to a block of text
 /// by wrapping the passed in block with
+#[allow(dead_code)]
 pub struct TextBlock {
     content: String,
     font_weight: FontWeight,
@@ -24,7 +25,7 @@ impl Renderable for TextBlock {
         todo!()
     }
 
-    fn fallback_render(term: &crate::terminal::Terminal) -> String {
+    fn fallback_render(_term: &crate::terminal::Terminal) -> String {
         todo!()
     }
 }
@@ -45,5 +46,10 @@ impl Default for TextBlock {
 }
 
 impl TextBlock {
-    pub fn new<T: Into<String>>(content: T) {}
+    pub fn new<T: Into<String>>(content: T) -> Self {
+        TextBlock {
+            content: content.into(),
+            ..Default::default()
+        }
+    }
 }

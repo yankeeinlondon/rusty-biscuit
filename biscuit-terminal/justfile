@@ -38,12 +38,12 @@ lint:
     @cargo clippy -p biscuit-terminal -p biscuit-terminal-cli
 
 # Lint Biscuit Terminal with Clippy and `--fix` flag on
-lint-fix:
+lint-fix *args="":
     @echo ""
     @echo "Test Biscuit Terminal (--fix)"
-    @echo "----------------------------"
+    @echo "-----------------------------"
     @echo ""
-    @cargo clippy --fix -p biscuit-terminal -p biscuit-terminal-cli
+    @cargo clippy --fix -p biscuit-terminal -p biscuit-terminal-cli {{args}}
 
 # Install the Biscuit Terminal CLI
 install:
@@ -65,7 +65,8 @@ check:
     @echo ""
     @cargo check -p biscuit-terminal -p biscuit-terminal-cli
 
+# Get the metadata from the Biscuit Terminal CLI's latest debug build
 meta:
-    @echo "Metadata from Biscuit Terminal CLI (latest build version)"
+    @echo "Metadata from Biscuit Terminal CLI (latest debug build)"
     @echo ""
-    @cargo run -p biscuit-terminal-cli -- --meta
+    @cargo run -p biscuit-terminal-cli

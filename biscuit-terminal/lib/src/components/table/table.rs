@@ -7,6 +7,7 @@ pub enum TableCellContent {
 
 pub enum TableColumn {}
 
+#[allow(dead_code)]
 pub struct Table {
     title: Option<String>,
     columns: Option<Vec<TableColumn>>,
@@ -18,7 +19,7 @@ impl Renderable for Table {
         todo!()
     }
 
-    fn fallback_render(term: &crate::terminal::Terminal) -> String {
+    fn fallback_render(_term: &crate::terminal::Terminal) -> String {
         todo!()
     }
 }

@@ -61,7 +61,7 @@ pub struct BlockConstraint {
     /// The maximum width allowed for the text in the block.
     ///
     /// - this is often set to the terminal's current width but
-    /// it can be something less than this
+    /// - it can be something less than this
     pub max_width: MaxWidth,
 
     /// the word wrap strategy for the block constraint
@@ -104,14 +104,14 @@ impl Default for BlockConstraint {
 }
 
 impl RenderableWrapper for BlockConstraint {
-    fn render<T: Into<String>>(self, content: T) -> String {
+    fn render<T: Into<String>>(self, _content: T) -> String {
         todo!()
     }
 
     fn fallback_render<T: Into<String>>(
         self,
-        content: T,
-        term: &crate::terminal::Terminal,
+        _content: T,
+        _term: &crate::terminal::Terminal,
     ) -> String {
         todo!()
     }
