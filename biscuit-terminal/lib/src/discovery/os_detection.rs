@@ -396,7 +396,7 @@ fn extract_version_from_release(text: &str) -> Option<String> {
                 }
             }
             // Only return if we found something substantial
-            if version.len() >= 1 {
+            if !version.is_empty() {
                 // Trim trailing dots
                 return Some(version.trim_end_matches('.').to_string());
             }

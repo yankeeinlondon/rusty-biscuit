@@ -12,6 +12,7 @@
 //! - [`osc_queries`] - OSC color queries (10/11/12) for background/foreground detection
 //! - [`mode_2027`] - Unicode grapheme cluster width support detection
 //! - [`clipboard`] - OSC52 clipboard support for terminal applications
+//! - [`fonts`] - Font detection utilities (font name, size, ligatures)
 
 pub mod clipboard;
 pub mod config_paths;
@@ -20,3 +21,4 @@ pub mod eval;
 pub mod mode_2027;
 pub mod osc_queries;
 pub mod os_detection;
+pub mod fonts;

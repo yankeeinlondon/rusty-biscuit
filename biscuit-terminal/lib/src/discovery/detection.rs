@@ -351,6 +351,7 @@ pub fn is_tty() -> bool {
 /// }
 /// ```
 pub fn get_terminal_app() -> TerminalApp {
+    // 1. Check TERM_PROGRAM environment variable (most reliable when set)
     if let Ok(term_program) = env::var("TERM_PROGRAM") {
         match term_program.as_str() {
             "Apple_Terminal" => return TerminalApp::AppleTerminal,
@@ -367,20 +368,84 @@ pub fn get_terminal_app() -> TerminalApp {
         }
     }
 
+    // 2. Check terminal-specific environment variables
     if env::var("WT_SESSION").is_ok() {
         return TerminalApp::Other("Windows Terminal".to_string());
     }
+    if env::var("KITTY_WINDOW_ID").is_ok() || env::var("KITTY_PID").is_ok() {
+        return TerminalApp::Kitty;
+    }
+    if env::var("WEZTERM_PANE").is_ok() || env::var("WEZTERM_UNIX_SOCKET").is_ok() {
+        return TerminalApp::Wezterm;
+    }
+    if env::var("ITERM_SESSION_ID").is_ok() || env::var("ITERM_PROFILE").is_ok() {
+        return TerminalApp::ITerm2;
+    }
+    if env::var("GHOSTTY_RESOURCES_DIR").is_ok() {
+        return TerminalApp::Ghostty;
+    }
+    // Alacritty sets these environment variables
+    if env::var("ALACRITTY_WINDOW_ID").is_ok()
+        || env::var("ALACRITTY_SOCKET").is_ok()
+        || env::var("ALACRITTY_LOG").is_ok()
+    {
+        return TerminalApp::Alacritty;
+    }
 
+    // 3. Check TERM variable
     let term = env::var("TERM").unwrap_or_default();
     match term.as_str() {
-        "xterm-kitty" | "kitty" => TerminalApp::Kitty,
-        "alacritty" => TerminalApp::Alacritty,
-        "wezterm" => TerminalApp::Wezterm,
-        "ghostty" => TerminalApp::Ghostty,
-        "foot" => TerminalApp::Foot,
-        "contour" => TerminalApp::Contour,
-        _ => TerminalApp::Other(term),
+        "xterm-kitty" | "kitty" => return TerminalApp::Kitty,
+        "alacritty" => return TerminalApp::Alacritty,
+        "wezterm" => return TerminalApp::Wezterm,
+        "ghostty" => return TerminalApp::Ghostty,
+        "foot" | "foot-extra" => return TerminalApp::Foot,
+        "contour" => return TerminalApp::Contour,
+        _ => {}
     }
+
+    // 4. Fallback: Check if config files exist for known terminals
+    // This helps detect terminals that don't set environment variables properly
+    if let Some(home) = home_dir() {
+        // Check for Alacritty config (common issue: doesn't set TERM_PROGRAM)
+        let alacritty_paths = [
+            home.join(".config/alacritty/alacritty.toml"),
+            home.join(".config/alacritty/alacritty.yml"),
+            home.join(".alacritty.toml"),
+            home.join(".alacritty.yml"),
+        ];
+        for path in &alacritty_paths {
+            if path.exists() {
+                // Config exists - might be Alacritty if TERM is generic
+                if term.contains("256color") || term == "xterm" {
+                    tracing::debug!(
+                        "get_terminal_app(): detected Alacritty via config file {:?}",
+                        path
+                    );
+                    return TerminalApp::Alacritty;
+                }
+            }
+        }
+    }
+
+    TerminalApp::Other(term)
+}
+
+/// Get the user's home directory.
+fn home_dir() -> Option<std::path::PathBuf> {
+    env::var("HOME")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            #[cfg(windows)]
+            {
+                env::var("USERPROFILE").ok().map(std::path::PathBuf::from)
+            }
+            #[cfg(not(windows))]
+            {
+                None
+            }
+        })
 }
 
 /// Get the terminal width in columns.
@@ -631,6 +696,8 @@ pub fn multiplex_support() -> MultiplexSupport {
     MultiplexSupport::None
 }
 
+
+
 /// Detect extended underline style support.
 ///
 /// Modern terminals support various underline styles beyond the basic
@@ -869,3 +936,24 @@ pub fn italics_support() -> bool {
 
     false
 }
+
+/// The **OSC10** standard allows for querying the terminal for
+/// the default foreground color
+pub fn osc10_support() -> bool {
+    todo!()
+}
+
+/// The **OSC11** standard allows for querying the terminal for
+/// the default background color
+pub fn osc11_support() -> bool {
+    todo!()
+}
+
+/// The **OSC12** standard allows for querying the terminal's
+/// default cursor color.
+pub fn osc12_support() -> bool {
+    todo!()
+}
+
+
+

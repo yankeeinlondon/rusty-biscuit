@@ -6,6 +6,7 @@ Terminal capability detection and utilities for Rust applications.
 
 - **OS Detection**: Identify operating system and Linux distribution
 - **Terminal App Detection**: Recognize 12+ terminal emulators
+- **Font Detection**: Extract font name and size from terminal config files
 - **Color Support**: Query color depth, mode (light/dark), and background color
 - **Escape Code Analysis**: Calculate visual line widths, detect escape codes
 - **Clipboard**: OSC52 clipboard support for compatible terminals
@@ -33,6 +34,7 @@ fn main() {
 - `terminal` - Main `Terminal` struct with all capabilities
 - `discovery::detection` - Low-level detection functions
 - `discovery::os_detection` - OS and Linux distribution detection
+- `discovery::fonts` - Font name/size detection via config parsing
 - `discovery::config_paths` - Terminal config file paths
 - `discovery::osc_queries` - Terminal color queries
 - `discovery::clipboard` - OSC52 clipboard support
@@ -76,6 +78,45 @@ match os {
 }
 ```
 
+## Font Detection
+
+Font detection works by parsing terminal configuration files:
+
+| Terminal | Config Format | Font Setting | Size Setting |
+|----------|--------------|--------------|--------------|
+| WezTerm | Lua | `config.font = wezterm.font("Name")` | `config.font_size = N` |
+| Ghostty | Key=Value | `font-family = Name` | `font-size = N` |
+| Kitty | Conf | `font_family Name` | `font_size N` |
+| Alacritty | TOML | `[font.normal] family = "Name"` | `[font] size = N` |
+
+```rust
+use biscuit_terminal::discovery::fonts::{font_name, font_size, ligature_support_likely};
+
+if let Some(name) = font_name() {
+    println!("Font: {}", name);
+}
+if let Some(size) = font_size() {
+    println!("Size: {}pt", size);
+}
+if ligature_support_likely() {
+    println!("Ligatures likely supported");
+}
+```
+
+The `Terminal` struct also exposes font fields:
+
+```rust
+use biscuit_terminal::terminal::Terminal;
+
+let term = Terminal::new();
+if let Some(font) = &term.font {
+    println!("Using font: {}", font);
+}
+if let Some(size) = term.font_size {
+    println!("Font size: {}pt", size);
+}
+```
+
 ## Escape Code Analysis
 
 ```rust
@@ -113,17 +154,14 @@ cargo run -p biscuit-terminal --example escape_analysis
 
 ## CLI
 
-The package includes a `terminal` CLI (in the `cli` crate):
+The package includes a `bt` CLI (in the `cli` crate):
 
 ```bash
-# Show basic info
-terminal
-
-# Show full metadata
-terminal --meta
+# Show terminal metadata (default)
+bt
 
 # Output as JSON
-terminal --meta --json
+bt --json
 ```
 
 ## License

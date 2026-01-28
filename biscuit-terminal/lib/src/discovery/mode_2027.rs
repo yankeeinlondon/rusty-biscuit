@@ -38,7 +38,7 @@ use crate::discovery::detection::{get_terminal_app, is_tty, TerminalApp};
 /// Check if terminal supports Mode 2027 (grapheme cluster width).
 ///
 /// Mode 2027 is a terminal feature that ensures proper rendering of
-/// complex Unicode characters (emoji with ZWJ, flags, etc.)
+/// complex Unicode characters (emoji with ZWJ, flags, etc.).
 ///
 /// This is a heuristic check based on terminal application detection,
 /// not an actual terminal query (which would require raw mode).

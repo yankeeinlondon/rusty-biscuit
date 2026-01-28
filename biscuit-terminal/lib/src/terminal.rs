@@ -6,6 +6,7 @@ use crate::discovery::detection::{
     get_terminal_app, image_support, is_tty, italics_support, osc8_link_support, terminal_height,
     terminal_width, underline_support,
 };
+use crate::discovery::fonts::{detect_nerd_font, font_ligatures, font_name, font_size, FontLigature};
 use crate::discovery::os_detection::{
     LinuxDistro, OsType, detect_linux_distro, detect_os_type, is_ci,
 };
@@ -26,6 +27,10 @@ fn new_terminal() -> Terminal {
         distro: detect_linux_distro(),
         config_file,
         is_ci: is_ci(),
+        font: font_name(),
+        font_size: font_size(),
+        font_ligatures: font_ligatures(),
+        is_nerd_font: detect_nerd_font(),
     }
 }
 
@@ -74,6 +79,22 @@ pub struct Terminal {
     pub config_file: Option<PathBuf>,
     /// Whether running in a CI environment
     pub is_ci: bool,
+    /// The font the terminal is using (if accessible)
+    pub font: Option<String>,
+    /// The font size the terminal is using (if accessible)
+    pub font_size: Option<u32>,
+    /// The font ligatures the terminal is using (if accessible)
+    pub font_ligatures: Option<Vec<FontLigature>>,
+    /// Whether the terminal is using a Nerd Font.
+    ///
+    /// Detection uses:
+    /// 1. `NERD_FONT` environment variable (explicit user declaration)
+    /// 2. Font name pattern matching against known Nerd Font families
+    ///
+    /// - `Some(true)`: Nerd Font confirmed
+    /// - `Some(false)`: Explicitly disabled via env var
+    /// - `None`: Cannot determine
+    pub is_nerd_font: Option<bool>,
 }
 
 impl Default for Terminal {
@@ -209,5 +230,44 @@ mod tests {
         let term = Terminal::new();
         #[cfg(not(target_os = "linux"))]
         assert!(term.distro.is_none());
+    }
+
+    #[test]
+    fn test_terminal_has_font_fields() {
+        let term = Terminal::new();
+        // Font fields should be accessible and have Option types
+        let _font = &term.font;
+        let _font_size = &term.font_size;
+        let _font_ligatures = &term.font_ligatures;
+    }
+
+    #[test]
+    fn test_terminal_font_fields_do_not_panic() {
+        let term = Terminal::new();
+        // Font detection via config parsing may or may not return values
+        // depending on the terminal and config. Just verify no panics.
+        let _font = &term.font;
+        let _font_size = term.font_size;
+        // font_ligatures is still unimplemented (always None)
+        assert!(term.font_ligatures.is_none(), "font_ligatures detection is not implemented");
+    }
+
+    #[test]
+    fn test_terminal_has_is_nerd_font_field() {
+        let term = Terminal::new();
+        // is_nerd_font field should be accessible
+        let _nerd_font = term.is_nerd_font;
+    }
+
+    #[test]
+    fn test_terminal_is_nerd_font_does_not_panic() {
+        let term = Terminal::new();
+        // Nerd font detection may return Some(true), Some(false), or None
+        // depending on environment. Just verify no panics.
+        match term.is_nerd_font {
+            Some(true) => {}
+            Some(false) => {}
+            None => {}
+        }
     }
 }

@@ -9,7 +9,7 @@
 
 use biscuit_terminal::{
     discovery::{
-        clipboard, detection::multiplex_support, detection::MultiplexSupport, mode_2027,
+        clipboard, detection::multiplex_support, detection::MultiplexSupport, fonts, mode_2027,
         osc_queries,
     },
     terminal::Terminal,
@@ -22,10 +22,6 @@ use serde::Serialize;
 #[command(name = "bt")]
 #[command(author, version, about = "Display terminal metadata and capabilities")]
 struct Args {
-    /// Show full terminal metadata
-    #[arg(long)]
-    meta: bool,
-
     /// Output in JSON format
     #[arg(long)]
     json: bool,
@@ -54,6 +50,21 @@ struct TerminalMetadata {
     is_tty: bool,
     /// Whether running in a CI environment
     is_ci: bool,
+
+    /// Font name (if detectable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    font: Option<String>,
+    /// Font size in pixels (if detectable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    font_size: Option<u32>,
+    /// Whether using a Nerd Font (if detectable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    is_nerd_font: Option<bool>,
+    /// Font ligatures (if detectable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    font_ligatures: Option<Vec<String>>,
+    /// Whether the terminal likely supports font ligatures (heuristic)
+    ligatures_likely: bool,
 
     /// Supported color depth
     color_depth: String,
@@ -143,21 +154,12 @@ fn main() -> color_eyre::Result<()> {
     }
 
     let args = Args::parse();
+    let metadata = collect_metadata();
 
-    if args.meta {
-        let metadata = collect_metadata();
-
-        if args.json {
-            println!("{}", serde_json::to_string_pretty(&metadata)?);
-        } else {
-            print_pretty(&metadata, args.verbose);
-        }
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&metadata)?);
     } else {
-        // Default: just show basic info
-        let terminal = Terminal::new();
-        println!("Terminal: {:?}", terminal.app);
-        println!("Size: {}x{}", Terminal::width(), Terminal::height());
-        println!("Is TTY: {}", terminal.is_tty);
+        print_pretty(&metadata, args.verbose);
     }
 
     Ok(())
@@ -202,6 +204,14 @@ fn collect_metadata() -> TerminalMetadata {
         color_mode: format!("{:?}", Terminal::color_mode()),
         bg_color,
         text_color,
+        font: terminal.font.clone(),
+        font_size: terminal.font_size,
+        is_nerd_font: terminal.is_nerd_font,
+        font_ligatures: terminal.font_ligatures.as_ref().map(|ligatures| {
+            ligatures.iter().map(|l| format!("{:?}", l)).collect()
+        }),
+        ligatures_likely: fonts::ligature_support_likely(),
+
         supports_italic: terminal.supports_italic,
         image_support: format!("{:?}", terminal.image_support),
         underline_support: UnderlineInfo {
@@ -265,6 +275,35 @@ fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
             format!("{}yes{}", yellow, reset)
         } else {
             "no".to_string()
+        }
+    );
+
+    // Font section (always displayed)
+    println!("\n{}{}Fonts{}", bold, blue, reset);
+    if let Some(font) = &metadata.font {
+        println!("  Name:       {}", font);
+    } else {
+        println!("  Name:       {}", format!("{}n/a{}", dim, reset));
+    }
+    if let Some(size) = metadata.font_size {
+        println!("  Size:       {}pt", size);
+    } else {
+        println!("  Size:       {}", format!("{}n/a{}", dim, reset));
+    }
+    println!(
+        "  Nerd Font:  {}",
+        match metadata.is_nerd_font {
+            Some(true) => format!("{}yes{}", green, reset),
+            Some(false) => "no".to_string(),
+            None => format!("{}unknown{}", dim, reset),
+        }
+    );
+    println!(
+        "  Ligatures:  {}",
+        if metadata.ligatures_likely {
+            format!("{}likely{}", green, reset)
+        } else {
+            format!("{}unlikely{}", dim, reset)
         }
     );
 

@@ -17,7 +17,7 @@
 use super::detection::TerminalApp;
 use super::os_detection::{detect_os_type, OsType};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Get the configuration file path for a terminal application.
 ///
@@ -131,14 +131,14 @@ fn home_dir() -> Option<PathBuf> {
 }
 
 /// Get XDG config directory, with fallback to ~/.config
-fn config_dir(home: &PathBuf) -> PathBuf {
+fn config_dir(home: &Path) -> PathBuf {
     env::var("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| home.join(".config"))
 }
 
 /// Get XDG data directory, with fallback to ~/.local/share
-fn data_dir(home: &PathBuf) -> PathBuf {
+fn data_dir(home: &Path) -> PathBuf {
     env::var("XDG_DATA_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| home.join(".local").join("share"))
@@ -146,7 +146,7 @@ fn data_dir(home: &PathBuf) -> PathBuf {
 
 // Terminal-specific path functions
 
-fn wezterm_config_path(home: &PathBuf, os: OsType) -> PathBuf {
+fn wezterm_config_path(home: &Path, os: OsType) -> PathBuf {
     match os {
         OsType::Windows => home.join(".config").join("wezterm").join("wezterm.lua"),
         OsType::MacOS => config_dir(home).join("wezterm").join("wezterm.lua"),
@@ -154,7 +154,7 @@ fn wezterm_config_path(home: &PathBuf, os: OsType) -> PathBuf {
     }
 }
 
-fn kitty_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
+fn kitty_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
     match os {
         OsType::Windows => None, // Kitty doesn't officially support Windows
         OsType::MacOS => Some(config_dir(home).join("kitty").join("kitty.conf")),
@@ -163,14 +163,14 @@ fn kitty_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
     }
 }
 
-fn ghostty_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
+fn ghostty_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
     match os {
         OsType::MacOS | OsType::Linux => Some(config_dir(home).join("ghostty").join("config")),
         _ => None,
     }
 }
 
-fn alacritty_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
+fn alacritty_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
     match os {
         OsType::Windows => Some(
             env::var("APPDATA")
@@ -183,7 +183,7 @@ fn alacritty_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
     }
 }
 
-fn alacritty_config_paths(home: &PathBuf, os: OsType) -> Vec<PathBuf> {
+fn alacritty_config_paths(home: &Path, os: OsType) -> Vec<PathBuf> {
     let config = config_dir(home);
 
     match os {
@@ -207,7 +207,7 @@ fn alacritty_config_paths(home: &PathBuf, os: OsType) -> Vec<PathBuf> {
     }
 }
 
-fn iterm2_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
+fn iterm2_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
     match os {
         OsType::MacOS => Some(
             home.join("Library")
@@ -218,7 +218,7 @@ fn iterm2_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
     }
 }
 
-fn apple_terminal_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
+fn apple_terminal_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
     match os {
         OsType::MacOS => Some(
             home.join("Library")
@@ -229,7 +229,7 @@ fn apple_terminal_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
     }
 }
 
-fn konsole_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
+fn konsole_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
     match os {
         OsType::Linux | OsType::FreeBSD | OsType::NetBSD | OsType::OpenBSD => {
             // Konsole uses profiles in the data directory
@@ -240,12 +240,12 @@ fn konsole_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
     }
 }
 
-fn konsole_profile_paths(home: &PathBuf, os: OsType) -> Vec<PathBuf> {
+fn konsole_profile_paths(home: &Path, os: OsType) -> Vec<PathBuf> {
     match os {
         OsType::Linux | OsType::FreeBSD | OsType::NetBSD | OsType::OpenBSD => {
             let data = data_dir(home);
             vec![
-                data.join("konsole"), // Profile directory
+                data.join("konsole"),               // Profile directory
                 config_dir(home).join("konsolerc"), // Main config
             ]
         }
@@ -253,14 +253,14 @@ fn konsole_profile_paths(home: &PathBuf, os: OsType) -> Vec<PathBuf> {
     }
 }
 
-fn foot_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
+fn foot_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
     match os {
         OsType::Linux | OsType::FreeBSD => Some(config_dir(home).join("foot").join("foot.ini")),
         _ => None, // Foot is Wayland-only, primarily Linux
     }
 }
 
-fn contour_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
+fn contour_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
     match os {
         OsType::Windows => {
             let local_appdata = env::var("LOCALAPPDATA")
@@ -279,7 +279,7 @@ fn contour_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
     }
 }
 
-fn warp_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
+fn warp_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
     match os {
         OsType::MacOS => Some(home.join(".warp")),
         OsType::Linux => Some(home.join(".warp")),
@@ -287,7 +287,7 @@ fn warp_config_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
     }
 }
 
-fn vscode_settings_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
+fn vscode_settings_path(home: &Path, os: OsType) -> Option<PathBuf> {
     match os {
         OsType::Windows => {
             let appdata = env::var("APPDATA")
@@ -302,7 +302,12 @@ fn vscode_settings_path(home: &PathBuf, os: OsType) -> Option<PathBuf> {
                 .join("User")
                 .join("settings.json"),
         ),
-        OsType::Linux => Some(config_dir(home).join("Code").join("User").join("settings.json")),
+        OsType::Linux => Some(
+            config_dir(home)
+                .join("Code")
+                .join("User")
+                .join("settings.json"),
+        ),
         _ => None,
     }
 }
@@ -324,10 +329,7 @@ mod tests {
         // Default behavior without XDG_CONFIG_HOME
         let config = config_dir(&home);
         // Should either be XDG_CONFIG_HOME or ~/.config
-        assert!(
-            config.to_string_lossy().contains("config")
-                || config == home.join(".config")
-        );
+        assert!(config.to_string_lossy().contains("config") || config == home.join(".config"));
     }
 
     #[test]
@@ -383,7 +385,10 @@ mod tests {
         let paths = get_terminal_config_paths(&TerminalApp::Alacritty);
         #[cfg(not(target_os = "windows"))]
         {
-            assert!(paths.len() >= 2, "Alacritty should have multiple config paths");
+            assert!(
+                paths.len() >= 2,
+                "Alacritty should have multiple config paths"
+            );
             // Should include both .toml and .yml options
             let has_toml = paths.iter().any(|p| p.to_string_lossy().contains(".toml"));
             let has_yml = paths.iter().any(|p| p.to_string_lossy().contains(".yml"));
@@ -594,7 +599,9 @@ mod tests {
             assert!(paths.len() >= 1, "Konsole should have at least one path");
             // Should include the konsole directory
             assert!(
-                paths.iter().any(|p| p.to_string_lossy().contains("konsole")),
+                paths
+                    .iter()
+                    .any(|p| p.to_string_lossy().contains("konsole")),
                 "Konsole paths should include 'konsole' directory"
             );
         }

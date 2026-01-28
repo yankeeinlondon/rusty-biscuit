@@ -261,6 +261,27 @@ fn get_terminal_default_color(app: &TerminalApp, code: u8) -> Option<RgbValue> {
     }
 }
 
+
+/// The **OSC10** standard allows for querying the terminal for
+/// the default foreground color
+pub fn osc10_support() -> bool {
+    todo!()
+}
+
+/// The **OSC11** standard allows for querying the terminal for
+/// the default background color
+pub fn osc11_support() -> bool {
+    todo!()
+}
+
+/// The **OSC12** standard allows for querying the terminal's
+/// default cursor color.
+pub fn osc12_support() -> bool {
+    todo!()
+}
+
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
