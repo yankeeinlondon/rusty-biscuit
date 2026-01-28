@@ -22,3 +22,5 @@ pub mod mode_2027;
 pub mod osc_queries;
 pub mod os_detection;
 pub mod fonts;
+pub mod locale;
+pub mod service_manager;

@@ -44,6 +44,44 @@ pub enum TerminalApp {
     Other(String),
 }
 
+/// Client information for a host which was established over an SSH connection.
+///
+/// Parsed from the `SSH_CLIENT` environment variable which has the format:
+/// `<client_ip> <client_port> <server_port>`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SshClient {
+    /// The IP address or DNS name of the client connecting
+    pub host: String,
+
+    /// The port which the host is communicating back to the client on
+    pub source_port: u32,
+
+    /// The port the client used to connect to the host (typically 22)
+    pub server_port: u32,
+
+    /// The TTY path for the SSH session (from `SSH_TTY`)
+    pub tty_path: Option<String>,
+}
+
+/// Client information for a host which was established over a Mosh connection.
+///
+/// Mosh (Mobile Shell) provides a more resilient remote connection that
+/// handles intermittent connectivity and roaming.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MoshClient {
+    /// The connection string from `MOSH_CONNECTION`
+    pub connection: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Connection {
+    /// This terminal connection is a local connection
+    Local,
+    /// This terminal is using a SSH connection
+    SshClient(SshClient),
+    MoshClient(MoshClient),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ColorDepth {
     /// no color support
@@ -404,48 +442,7 @@ pub fn get_terminal_app() -> TerminalApp {
         _ => {}
     }
 
-    // 4. Fallback: Check if config files exist for known terminals
-    // This helps detect terminals that don't set environment variables properly
-    if let Some(home) = home_dir() {
-        // Check for Alacritty config (common issue: doesn't set TERM_PROGRAM)
-        let alacritty_paths = [
-            home.join(".config/alacritty/alacritty.toml"),
-            home.join(".config/alacritty/alacritty.yml"),
-            home.join(".alacritty.toml"),
-            home.join(".alacritty.yml"),
-        ];
-        for path in &alacritty_paths {
-            if path.exists() {
-                // Config exists - might be Alacritty if TERM is generic
-                if term.contains("256color") || term == "xterm" {
-                    tracing::debug!(
-                        "get_terminal_app(): detected Alacritty via config file {:?}",
-                        path
-                    );
-                    return TerminalApp::Alacritty;
-                }
-            }
-        }
-    }
-
     TerminalApp::Other(term)
-}
-
-/// Get the user's home directory.
-fn home_dir() -> Option<std::path::PathBuf> {
-    env::var("HOME")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            #[cfg(windows)]
-            {
-                env::var("USERPROFILE").ok().map(std::path::PathBuf::from)
-            }
-            #[cfg(not(windows))]
-            {
-                None
-            }
-        })
 }
 
 /// Get the terminal width in columns.
@@ -937,23 +934,57 @@ pub fn italics_support() -> bool {
     false
 }
 
-/// The **OSC10** standard allows for querying the terminal for
-/// the default foreground color
-pub fn osc10_support() -> bool {
-    todo!()
+// Re-export OSC support functions from osc_queries module for API compatibility
+pub use crate::discovery::osc_queries::{osc10_support, osc11_support, osc12_support};
+
+/// Detect whether the terminal session is a remote connection (SSH, Mosh) or local.
+///
+/// ## Detection Strategy
+///
+/// 1. Check `SSH_CLIENT` environment variable for SSH connections
+/// 2. Check `MOSH_CONNECTION` for Mosh connections
+/// 3. Default to `Connection::Local` if no remote indicators
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::{detect_connection, Connection};
+///
+/// match detect_connection() {
+///     Connection::Local => println!("Running locally"),
+///     Connection::SshClient(ssh) => println!("SSH from {}", ssh.host),
+///     Connection::MoshClient(mosh) => println!("Mosh connection: {}", mosh.connection),
+/// }
+/// ```
+pub fn detect_connection() -> Connection {
+    // Check for Mosh first (it also sets SSH_CLIENT sometimes)
+    if let Ok(mosh_conn) = env::var("MOSH_CONNECTION") {
+        if !mosh_conn.is_empty() {
+            return Connection::MoshClient(MoshClient {
+                connection: mosh_conn,
+            });
+        }
+    }
+
+    // Check for SSH connection
+    // SSH_CLIENT format: "client_ip client_port server_port"
+    if let Ok(ssh_client) = env::var("SSH_CLIENT") {
+        let parts: Vec<&str> = ssh_client.split_whitespace().collect();
+        if parts.len() >= 3 {
+            if let (Ok(source_port), Ok(server_port)) =
+                (parts[1].parse::<u32>(), parts[2].parse::<u32>())
+            {
+                let tty_path = env::var("SSH_TTY").ok();
+                return Connection::SshClient(SshClient {
+                    host: parts[0].to_string(),
+                    source_port,
+                    server_port,
+                    tty_path,
+                });
+            }
+        }
+    }
+
+    Connection::Local
 }
-
-/// The **OSC11** standard allows for querying the terminal for
-/// the default background color
-pub fn osc11_support() -> bool {
-    todo!()
-}
-
-/// The **OSC12** standard allows for querying the terminal's
-/// default cursor color.
-pub fn osc12_support() -> bool {
-    todo!()
-}
-
-
 

@@ -2,14 +2,17 @@ use std::path::PathBuf;
 
 use crate::discovery::config_paths::get_terminal_config_path;
 use crate::discovery::detection::{
-    ColorDepth, ColorMode, ImageSupport, TerminalApp, UnderlineSupport, color_depth, color_mode,
-    get_terminal_app, image_support, is_tty, italics_support, osc8_link_support, terminal_height,
-    terminal_width, underline_support,
+    ColorDepth, ColorMode, Connection, ImageSupport, TerminalApp, UnderlineSupport,
+    color_depth, color_mode, detect_connection, get_terminal_app, image_support,
+    is_tty, italics_support, osc8_link_support, terminal_height, terminal_width,
+    underline_support,
 };
 use crate::discovery::fonts::{detect_nerd_font, font_ligatures, font_name, font_size, FontLigature};
+use crate::discovery::locale::{CharEncoding, TerminalLocale};
 use crate::discovery::os_detection::{
     LinuxDistro, OsType, detect_linux_distro, detect_os_type, is_ci,
 };
+use crate::discovery::service_manager::{ServiceManager, ServiceState, host_services};
 
 fn new_terminal() -> Terminal {
     let app = get_terminal_app();
@@ -31,8 +34,14 @@ fn new_terminal() -> Terminal {
         font_size: font_size(),
         font_ligatures: font_ligatures(),
         is_nerd_font: detect_nerd_font(),
+        remote: detect_connection(),
+        char_encoding: CharEncoding::default(),
+        locale: TerminalLocale::default(),
+        service_manager: ServiceManager::detect(),
     }
 }
+
+
 
 /// Represents a detected terminal environment with its capabilities.
 ///
@@ -95,6 +104,18 @@ pub struct Terminal {
     /// - `Some(false)`: Explicitly disabled via env var
     /// - `None`: Cannot determine
     pub is_nerd_font: Option<bool>,
+
+    /// Information about the remote connection (if it exists)
+    pub remote: Connection,
+
+    /// What character encoding is this terminal using (typically UTF-8)
+    pub char_encoding: CharEncoding,
+
+    /// The detected locale which the terminal is reporting via environment
+    /// variables (`LC_ALL`, `LC_CTYPE`, `LANG`)
+    pub locale: TerminalLocale,
+
+    pub service_manager: ServiceManager
 }
 
 impl Default for Terminal {
@@ -190,6 +211,11 @@ impl Terminal {
     pub fn render<T: Into<String>>(_content: T) -> () {
         todo!()
     }
+
+    /// The "services" on the host
+    pub fn services(state: ServiceState) -> Vec<String> {
+        host_services(state)
+    }
 }
 
 #[cfg(test)]
@@ -269,5 +295,49 @@ mod tests {
             Some(false) => {}
             None => {}
         }
+    }
+
+    #[test]
+    fn test_terminal_has_service_manager() {
+        let term = Terminal::new();
+        // Service manager should be detected
+        let _ = term.service_manager.init_system.to_string();
+        let _ = term.service_manager.host_os;
+        let _ = &term.service_manager.evidence;
+    }
+
+    #[test]
+    fn test_terminal_service_manager_matches_os() {
+        let term = Terminal::new();
+        // On macOS, init system should be launchd
+        #[cfg(target_os = "macos")]
+        {
+            use crate::discovery::service_manager::{HostOs, InitSystem};
+            assert_eq!(term.service_manager.host_os, HostOs::Macos);
+            assert_eq!(term.service_manager.init_system, InitSystem::Launchd);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            use crate::discovery::service_manager::{HostOs, InitSystem};
+            assert_eq!(term.service_manager.host_os, HostOs::Windows);
+            assert_eq!(term.service_manager.init_system, InitSystem::WindowsScm);
+        }
+    }
+
+    #[test]
+    fn test_terminal_services_method() {
+        // The static method should work and not panic
+        let services = Terminal::services(ServiceState::All);
+        // On macOS/Linux with supported init systems, this returns actual services
+        // On unsupported systems, it returns empty
+        let _ = services;
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_terminal_services_returns_services_on_macos() {
+        let services = Terminal::services(ServiceState::All);
+        // macOS with launchd should return services
+        assert!(!services.is_empty(), "Should have services on macOS");
     }
 }
