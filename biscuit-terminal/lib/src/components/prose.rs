@@ -3,46 +3,45 @@ use crate::components::renderable::Renderable;
 /// Prose content allows plain text to be passed in and that content will be parsed
 /// for two kinds of tokens:
 ///
-/// - **Atomic** tokens
+/// ## Atomic Tokens
 ///
-///     Atomic tokens will be of the form `{{token}}` and the prose
-///     parser does a simple lookup table on the atomic token and
-///     replaces it with an escape code.
+/// Atomic tokens will be of the form `{{token}}` and the prose
+/// parser does a simple lookup table on the atomic token and
+/// replaces it with an escape code.
 ///
-///     Examples include:
+/// Examples include:
 ///
-///       - `{{bold}}`
-///       - `{{dim}}`
-///       - `{{italic}}`, `{{underline}}`, `{{strikethrough}}`
-///       - `{{red}}`, `{{blue}}`, `{{bright-red}}`, ...
-///       - `{{bg-red}}`, `{{bg-blue}}`, ...
-///       - `{{reset}}`, `{{reset_fg}}`, `{{reset_bg}}`
+/// - `{{bold}}`, `{{dim}}`
+/// - `{{italic}}`, `{{underline}}`, `{{strikethrough}}`
+/// - `{{red}}`, `{{blue}}`, `{{bright-red}}`, etc.
+/// - `{{bg-red}}`, `{{bg-blue}}`, etc.
+/// - `{{reset}}`, `{{reset_fg}}`, `{{reset_bg}}`
 ///
-///     The key characteristic of these atomic tokens is that they don't clean up
-///     after themselves and require the caller to use the `{{reset}}` token whenever
-///     they want to return to a known/default state.
+/// The key characteristic of these atomic tokens is that they don't clean up
+/// after themselves and require the caller to use the `{{reset}}` token whenever
+/// they want to return to a known/default state.
 ///
-///     > **Note:** a `{{reset}}` is _always_ added to the end of a prose section which
-///     > has used at least one atomic token. This is just to be sure that styles do not
-///     > bleed out from
+/// **Note:** a `{{reset}}` is _always_ added to the end of a prose section which
+/// has used at least one atomic token. This is just to be sure that styles do not
+/// bleed out.
 ///
-/// - **Block** tokens
+/// ## Block Tokens
 ///
-///     Block tokens use an _HTML-like_ syntax but are really just a tiny subset of HTML's
-///     vast catalog of tags. A block tag, in contrast to an atomic token, has a clear
-///     start and stop token and like HTML we use the nomenclature of `<tag>content</tag>`.
+/// Block tokens use an _HTML-like_ syntax but are really just a tiny subset of HTML's
+/// vast catalog of tags. A block tag, in contrast to an atomic token, has a clear
+/// start and stop token and like HTML we use the nomenclature of `<tag>content</tag>`.
 ///
-///     Supported block tokens are:
+/// Supported block tokens are:
 ///
-///       - `<i>content</i>` for italic text
-///       - `<b>content</b>` for bold text
-///       - `<u>content</u>` for underlined text
-///       - `<uu>content</uu>` for double-underlined text
-///       - `<~>content</~>` for strikethrough content
-///       - `<a href="https://somewhere.com">content</a>` for a OSC8 link to a file or URL
-///       - `<rgb 125,67,45>content</rgb>` for RGB colored foreground text
-///       - `<red>content</red>` for named color foreground text
-///       - `<clipboard>fallback</clipboard>` will inject the content found in the clipboard or fallback to the contained content
+/// - `<i>content</i>` for italic text
+/// - `<b>content</b>` for bold text
+/// - `<u>content</u>` for underlined text
+/// - `<uu>content</uu>` for double-underlined text
+/// - `<~>content</~>` for strikethrough content
+/// - `<a href="...">content</a>` for an OSC8 link to a file or URL
+/// - `<rgb 125,67,45>content</rgb>` for RGB colored foreground text
+/// - `<red>content</red>` for named color foreground text
+/// - `<clipboard>fallback</clipboard>` injects clipboard content or fallback
 ///
 pub struct Prose {
     /// the raw content as received

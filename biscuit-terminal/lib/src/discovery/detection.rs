@@ -174,6 +174,26 @@ pub enum MultiplexSupport {
     },
 }
 
+/// Detect the terminal's color depth capability.
+///
+/// Detection strategy:
+/// 1. Check `COLORTERM` environment variable for "truecolor" or "24bit"
+/// 2. Query terminfo `MaxColors` capability
+/// 3. Default to `ColorDepth::None` if detection fails
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::{color_depth, ColorDepth};
+///
+/// match color_depth() {
+///     ColorDepth::TrueColor => println!("24-bit color (16M colors)"),
+///     ColorDepth::Enhanced => println!("256 colors"),
+///     ColorDepth::Basic => println!("16 colors"),
+///     ColorDepth::Minimal => println!("8 colors"),
+///     ColorDepth::None => println!("No color support"),
+/// }
+/// ```
 pub fn color_depth() -> ColorDepth {
     // Check COLORTERM environment variable first
     if let Ok(colorterm) = env::var("COLORTERM") {
@@ -225,16 +245,111 @@ pub fn color_depth() -> ColorDepth {
     }
 }
 
-/// Whether the terminal is in "light" or "dark" mode
+/// Whether the terminal is in "light" or "dark" mode.
+///
+/// Detection strategy:
+/// 1. Try to get background color from OSC queries and determine from luminance
+/// 2. Check `DARK_MODE` environment variable
+/// 3. On macOS, check `AppleInterfaceStyle` system preference
+/// 4. Default to Dark (most common for terminal users)
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::{color_mode, ColorMode};
+///
+/// match color_mode() {
+///     ColorMode::Light => println!("Light mode - use dark text"),
+///     ColorMode::Dark => println!("Dark mode - use light text"),
+///     ColorMode::Unknown => println!("Unknown - use default colors"),
+/// }
+/// ```
 pub fn color_mode() -> ColorMode {
-    ColorMode::Dark // Default for now
+    // Try to get background color and determine from luminance
+    if let Some(bg) = crate::discovery::osc_queries::bg_color() {
+        let luminance = bg.luminance();
+        if luminance > 0.5 {
+            return ColorMode::Light;
+        } else {
+            return ColorMode::Dark;
+        }
+    }
+
+    // Check common environment variables
+    if let Ok(mode) = env::var("DARK_MODE") {
+        if mode == "0" || mode.to_lowercase() == "false" {
+            return ColorMode::Light;
+        }
+        if mode == "1" || mode.to_lowercase() == "true" {
+            return ColorMode::Dark;
+        }
+    }
+
+    // macOS: Check AppleInterfaceStyle
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("defaults")
+            .args(["read", "-g", "AppleInterfaceStyle"])
+            .output()
+        {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if stdout.trim().to_lowercase() == "dark" {
+                    return ColorMode::Dark;
+                }
+            }
+            // If command succeeds but no "Dark" value, it's Light mode
+            // (AppleInterfaceStyle is only set when Dark mode is active)
+            return ColorMode::Light;
+        }
+    }
+
+    // Default to Dark (most common for terminal users)
+    ColorMode::Dark
 }
 
+/// Check if stdout is connected to a TTY (terminal).
+///
+/// Returns `false` when output is piped or redirected to a file.
+/// Useful for deciding whether to use colors/formatting.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::is_tty;
+///
+/// if is_tty() {
+///     println!("\x1b[32mColored output\x1b[0m");
+/// } else {
+///     println!("Plain output (piped or redirected)");
+/// }
+/// ```
 pub fn is_tty() -> bool {
     use std::io::IsTerminal;
     std::io::stdout().is_terminal()
 }
 
+/// Detect the current terminal emulator application.
+///
+/// Detection uses environment variables in this order:
+/// 1. `TERM_PROGRAM` - Set by most modern terminals
+/// 2. `WT_SESSION` - Windows Terminal indicator
+/// 3. `TERM` - Fallback for terminals that set this
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::{get_terminal_app, TerminalApp};
+///
+/// match get_terminal_app() {
+///     TerminalApp::Wezterm => println!("Running in WezTerm"),
+///     TerminalApp::Kitty => println!("Running in Kitty"),
+///     TerminalApp::ITerm2 => println!("Running in iTerm2"),
+///     TerminalApp::Ghostty => println!("Running in Ghostty"),
+///     TerminalApp::Other(name) => println!("Running in: {}", name),
+///     _ => println!("Running in another terminal"),
+/// }
+/// ```
 pub fn get_terminal_app() -> TerminalApp {
     if let Ok(term_program) = env::var("TERM_PROGRAM") {
         match term_program.as_str() {
@@ -268,28 +383,74 @@ pub fn get_terminal_app() -> TerminalApp {
     }
 }
 
-/// The width of the terminal (in characters)
+/// Get the terminal width in columns.
+///
+/// Returns 80 as a fallback if detection fails.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::terminal_width;
+///
+/// let width = terminal_width();
+/// println!("Terminal is {} columns wide", width);
+/// ```
 pub fn terminal_width() -> u32 {
     dimensions().0
 }
 
-/// The height of the terminal (in characters)
+/// Get the terminal height in rows.
+///
+/// Returns 24 as a fallback if detection fails.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::terminal_height;
+///
+/// let height = terminal_height();
+/// println!("Terminal is {} rows tall", height);
+/// ```
 pub fn terminal_height() -> u32 {
     dimensions().1
 }
 
-/// the terminal's dimensions (width, height)
+/// Get the terminal dimensions as (width, height) in characters.
+///
+/// Returns (80, 24) as a fallback if detection fails.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::dimensions;
+///
+/// let (width, height) = dimensions();
+/// println!("Terminal size: {}x{}", width, height);
+/// ```
 pub fn dimensions() -> (u32, u32) {
     terminal_size()
         .map(|(Width(w), Height(h))| (w as u32, h as u32))
         .unwrap_or((80, 24))
 }
 
-/// Whether the terminal supports images and if so
-/// via which standard.
+/// Detect image display support in the terminal.
 ///
-/// If multiple standards are supported then
-/// the highest quality standard is returned.
+/// Returns the highest quality image protocol supported:
+/// - `Kitty` - Kitty Graphics Protocol (highest quality)
+/// - `ITerm` - iTerm2 image protocol (legacy)
+/// - `None` - No image support
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::{image_support, ImageSupport};
+///
+/// match image_support() {
+///     ImageSupport::Kitty => println!("Kitty graphics protocol supported"),
+///     ImageSupport::ITerm => println!("iTerm2 image protocol supported"),
+///     ImageSupport::None => println!("No image support"),
+/// }
+/// ```
 pub fn image_support() -> ImageSupport {
     if !is_tty() {
         return ImageSupport::None;
@@ -312,6 +473,22 @@ pub fn image_support() -> ImageSupport {
     ImageSupport::None
 }
 
+/// Detect if the terminal supports OSC8 hyperlinks.
+///
+/// OSC8 allows embedding clickable URLs in terminal output using
+/// escape sequences: `\x1b]8;;URL\x07text\x1b]8;;\x07`
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::osc8_link_support;
+///
+/// if osc8_link_support() {
+///     println!("\x1b]8;;https://rust-lang.org\x07Rust Homepage\x1b]8;;\x07");
+/// } else {
+///     println!("Visit: https://rust-lang.org");
+/// }
+/// ```
 pub fn osc8_link_support() -> bool {
     if !is_tty() {
         return false;
@@ -364,7 +541,7 @@ pub fn osc8_link_support() -> bool {
 /// ## Examples
 ///
 /// ```no_run
-/// use biscuit_terminal::discovery::detection::multiplex_support;
+/// use biscuit_terminal::discovery::detection::{multiplex_support, MultiplexSupport};
 ///
 /// match multiplex_support() {
 ///     MultiplexSupport::Tmux { split_window: true, .. } => {
@@ -454,8 +631,25 @@ pub fn multiplex_support() -> MultiplexSupport {
     MultiplexSupport::None
 }
 
-/// Provides details on what type of underlining support
-/// the terminal provides.
+/// Detect extended underline style support.
+///
+/// Modern terminals support various underline styles beyond the basic
+/// straight underline, including curly (for LSP errors), double, dotted,
+/// and dashed styles. Some terminals also support colored underlines.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::underline_support;
+///
+/// let support = underline_support();
+/// if support.curly {
+///     // Use curly underline for errors (common in editors)
+///     println!("\x1b[4:3m\x1b[58:2::255:0:0mError text\x1b[0m");
+/// } else if support.straight {
+///     println!("\x1b[4mUnderlined text\x1b[0m");
+/// }
+/// ```
 pub fn underline_support() -> UnderlineSupport {
     use std::io::IsTerminal;
 
@@ -583,16 +777,15 @@ pub fn underline_support() -> UnderlineSupport {
     none
 }
 
-/// Returns whether the terminal supports italic text rendering.
+/// Detect if the terminal supports italic text rendering.
 ///
 /// This function uses a multi-layer detection strategy:
 ///
-/// 1. **Terminfo** (authoritative): Checks for the `EnterItalicsMode` (`sitm`) capability
+/// 1. **Terminfo** (authoritative): Checks for `EnterItalicsMode` (`sitm`) capability
 /// 2. **TERM_PROGRAM**: Recognizes modern terminal emulators known to support italics
 /// 3. **TERM**: Falls back to pattern matching for common terminal types
 ///
-/// This layered approach compensates for outdated terminfo databases that may lack
-/// italic capabilities for terminals that actually support them.
+/// This layered approach compensates for outdated terminfo databases.
 ///
 /// ## Returns
 ///
@@ -602,9 +795,9 @@ pub fn underline_support() -> UnderlineSupport {
 /// ## Examples
 ///
 /// ```
-/// use shared::terminal::supports_italics;
+/// use biscuit_terminal::discovery::detection::italics_support;
 ///
-/// if supports_italics() {
+/// if italics_support() {
 ///     println!("\x1b[3mThis text is italic!\x1b[23m");
 /// } else {
 ///     println!("This text has no styling");

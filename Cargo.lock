@@ -460,7 +460,10 @@ name = "biscuit-terminal"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "base64",
  "predicates",
+ "proptest",
+ "regex",
  "serde",
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
@@ -468,6 +471,7 @@ dependencies = [
  "termini",
  "tracing",
  "tracing-subscriber",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -477,7 +481,10 @@ dependencies = [
  "assert_cmd",
  "biscuit-terminal",
  "clap 4.5.54",
+ "color-eyre",
  "predicates",
+ "serde",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
 ]

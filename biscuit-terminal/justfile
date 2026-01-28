@@ -1,0 +1,71 @@
+# set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+BOLD := '\033[1m'
+RESET := '\033[0m'
+
+default:
+    @echo
+    @echo "Biscuit Terminal"
+    @echo "================"
+    @echo ""
+    @just --list | grep -v 'default'
+    @echo
+
+
+# build the Biscuit Terminal (library and CLI)
+build *args="":
+    @echo ""
+    @echo "Build Biscuit Terminal"
+    @echo "---------------------"
+    @echo ""
+    @cargo build -p biscuit-terminal {{args}} -p biscuit-terminal-cli {{args}}
+
+# run tests on Biscuit Terminal (library & CLI)
+test *args="":
+    @echo ""
+    @echo "Test Biscuit Terminal"
+    @echo "---------------------"
+    @echo ""
+    @cargo test -p biscuit-terminal {{args}}
+    @echo ""
+
+# Lint Biscuit Terminal with Clippy
+lint:
+    @echo ""
+    @echo "Lint Biscuit Terminal"
+    @echo "---------------------"
+    @echo ""
+    @cargo clippy -p biscuit-terminal -p biscuit-terminal-cli
+
+# Lint Biscuit Terminal with Clippy and `--fix` flag on
+lint-fix:
+    @echo ""
+    @echo "Test Biscuit Terminal (--fix)"
+    @echo "----------------------------"
+    @echo ""
+    @cargo clippy --fix -p biscuit-terminal -p biscuit-terminal-cli
+
+# Install the Biscuit Terminal CLI
+install:
+    @echo ""
+    @echo "Install Biscuit Terminal CLI"
+    @echo "----------------------------"
+    @echo ""
+
+    @cargo build --release -p biscuit-terminal
+    @cargo install --path ./cli
+    @echo ""
+    @echo "{{BOLD}}bt{{RESET}} CLI installed"
+
+# Uses `cargo check` to validate code with the compiler
+check:
+    @echo ""
+    @echo "Check Biscuit Terminal"
+    @echo "---------------------"
+    @echo ""
+    @cargo check -p biscuit-terminal -p biscuit-terminal-cli
+
+meta:
+    @echo "Metadata from Biscuit Terminal CLI (latest build version)"
+    @echo ""
+    @cargo run -p biscuit-terminal-cli -- --meta

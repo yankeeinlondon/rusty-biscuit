@@ -10,7 +10,7 @@ use crate::{components::renderable::RenderableWrapper, terminal::Terminal};
 /// ## Examples
 ///
 /// ```
-/// use biscuit_terminal::terminal::color::Octet;
+/// use biscuit_terminal::utils::color::Octet;
 ///
 /// // From a u8 value
 /// let red = Octet::new(255);
@@ -683,43 +683,38 @@ pub enum Color {
 pub struct BasicColorWrapper(pub BasicColor);
 
 impl RenderableWrapper for BasicColorWrapper {
-    fn render<T: Into<String>>(content: T) -> String {
+    fn render<T: Into<String>>(self, content: T) -> String {
         let content = content.into();
-        format!(
-            "\x1b[{}m{}\x1b[0m",
-            color_code(BasicColorWrapper::DEFAULT_COLOR),
-            content
-        )
+        format!("\x1b[{}m{}\x1b[0m", color_code(self.0), content)
     }
 
-    fn fallback_render<T: Into<String>>(content: T, _term: &Terminal) -> String {
+    fn fallback_render<T: Into<String>>(self, content: T, _term: &Terminal) -> String {
         let content = content.into();
-        format!(
-            "\x1b[{}m{}\x1b[0m",
-            color_code(BasicColorWrapper::DEFAULT_COLOR),
-            content
-        )
+        format!("\x1b[{}m{}\x1b[0m", color_code(self.0), content)
     }
 }
 
-impl BasicColorWrapper {
-    const DEFAULT_COLOR: BasicColor = BasicColor::White;
-}
 
 /// Wrapper for RGB colors that implements `RenderableWrapper`.
 #[derive(Debug, Clone, Copy)]
 pub struct RgbColorWrapper(pub RgbColor);
 
 impl RenderableWrapper for RgbColorWrapper {
-    fn render<T: Into<String>>(content: T) -> String {
+    fn render<T: Into<String>>(self, content: T) -> String {
         let content = content.into();
-        // For opportunistic render, we assume true color support
-        format!("\x1b[38;2;{};{};{}m{}\x1b[0m", 128, 128, 128, content)
+        let rgb = self.0;
+        format!(
+            "\x1b[38;2;{};{};{}m{}\x1b[0m",
+            rgb.red(),
+            rgb.green(),
+            rgb.blue(),
+            content
+        )
     }
 
-    fn fallback_render<T: Into<String>>(content: T, term: &Terminal) -> String {
+    fn fallback_render<T: Into<String>>(self, content: T, term: &Terminal) -> String {
         let content = content.into();
-        let rgb = RgbColorWrapper::DEFAULT_COLOR;
+        let rgb = self.0;
         // Check terminal color depth and use appropriate encoding
         match term.color_depth {
             crate::discovery::detection::ColorDepth::TrueColor => {
@@ -752,19 +747,16 @@ impl RenderableWrapper for RgbColorWrapper {
     }
 }
 
-impl RgbColorWrapper {
-    const DEFAULT_COLOR: RgbColor = RgbColor::new(128, 128, 128, BasicColor::White);
-}
 
 /// Wrapper for web colors that implements `RenderableWrapper`.
 #[derive(Debug, Clone, Copy)]
 pub struct WebColorWrapper(pub WebColor);
 
 impl RenderableWrapper for WebColorWrapper {
-    fn render<T: Into<String>>(content: T) -> String {
+    fn render<T: Into<String>>(self, content: T) -> String {
         let content = content.into();
         let rgb = WEB_COLOR_LOOKUP
-            .get(&WebColorWrapper::DEFAULT_COLOR)
+            .get(&self.0)
             .copied()
             .unwrap_or(RgbColor::new(128, 128, 128, BasicColor::White));
         format!(
@@ -776,10 +768,10 @@ impl RenderableWrapper for WebColorWrapper {
         )
     }
 
-    fn fallback_render<T: Into<String>>(content: T, term: &Terminal) -> String {
+    fn fallback_render<T: Into<String>>(self, content: T, term: &Terminal) -> String {
         let content = content.into();
         let rgb = WEB_COLOR_LOOKUP
-            .get(&WebColorWrapper::DEFAULT_COLOR)
+            .get(&self.0)
             .copied()
             .unwrap_or(RgbColor::new(128, 128, 128, BasicColor::White));
         match term.color_depth {
@@ -810,9 +802,6 @@ impl RenderableWrapper for WebColorWrapper {
     }
 }
 
-impl WebColorWrapper {
-    const DEFAULT_COLOR: WebColor = WebColor::Gray;
-}
 
 /// Helper function to convert BasicColor to ANSI color code
 fn color_code(color: BasicColor) -> u8 {
