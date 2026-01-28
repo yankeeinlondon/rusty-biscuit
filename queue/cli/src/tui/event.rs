@@ -244,15 +244,14 @@ fn handle_input_modal(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
             modal.handle_backspace();
         }
         KeyCode::Left | KeyCode::Right => {
-            // Handle cursor movement for command field
-            if modal.active_field == InputField::Command {
+            // Handle cursor movement for text fields
+            if matches!(
+                modal.active_field,
+                InputField::Command | InputField::ScheduleValue
+            ) {
                 match key {
-                    KeyCode::Left if modal.cursor_pos > 0 => {
-                        modal.cursor_pos -= 1;
-                    }
-                    KeyCode::Right if modal.cursor_pos < modal.command.len() => {
-                        modal.cursor_pos += 1;
-                    }
+                    KeyCode::Left => modal.move_cursor_left(),
+                    KeyCode::Right => modal.move_cursor_right(),
                     _ => {}
                 }
             } else if matches!(
@@ -266,6 +265,18 @@ fn handle_input_modal(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
                     modal.cycle_target();
                 }
             }
+        }
+        KeyCode::Home => {
+            modal.move_cursor_start();
+        }
+        KeyCode::End => {
+            modal.move_cursor_end();
+        }
+        KeyCode::Char('a') if modifiers.contains(KeyModifiers::CONTROL) => {
+            modal.move_cursor_start();
+        }
+        KeyCode::Char('e') if modifiers.contains(KeyModifiers::CONTROL) => {
+            modal.move_cursor_end();
         }
         KeyCode::Char(' ') => {
             // Space toggles selector fields
@@ -734,5 +745,110 @@ mod tests {
 
         input(&mut app, KeyCode::Char('x'));
         assert_eq!(app.tasks.len(), 1); // Task not cancelled
+    }
+
+    // =========================================================================
+    // Tests for Ctrl+A/E cursor movement and Home/End keys
+    // =========================================================================
+
+    fn input_with_modifiers(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
+        handle_input(app, key, modifiers);
+    }
+
+    #[test]
+    fn input_modal_ctrl_a_moves_cursor_to_start() {
+        let mut app = App::new();
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.command = "echo hello".to_string();
+        modal.cursor_pos = 5;
+        app.input_modal = Some(modal);
+        app.mode = AppMode::InputModal;
+
+        input_with_modifiers(&mut app, KeyCode::Char('a'), KeyModifiers::CONTROL);
+
+        assert_eq!(app.input_modal.as_ref().unwrap().cursor_pos, 0);
+    }
+
+    #[test]
+    fn input_modal_ctrl_e_moves_cursor_to_end() {
+        let mut app = App::new();
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.command = "echo hello".to_string();
+        modal.cursor_pos = 0;
+        app.input_modal = Some(modal);
+        app.mode = AppMode::InputModal;
+
+        input_with_modifiers(&mut app, KeyCode::Char('e'), KeyModifiers::CONTROL);
+
+        assert_eq!(app.input_modal.as_ref().unwrap().cursor_pos, 10);
+    }
+
+    #[test]
+    fn input_modal_home_moves_cursor_to_start() {
+        let mut app = App::new();
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.command = "echo hello".to_string();
+        modal.cursor_pos = 5;
+        app.input_modal = Some(modal);
+        app.mode = AppMode::InputModal;
+
+        input(&mut app, KeyCode::Home);
+
+        assert_eq!(app.input_modal.as_ref().unwrap().cursor_pos, 0);
+    }
+
+    #[test]
+    fn input_modal_end_moves_cursor_to_end() {
+        let mut app = App::new();
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.command = "echo hello".to_string();
+        modal.cursor_pos = 0;
+        app.input_modal = Some(modal);
+        app.mode = AppMode::InputModal;
+
+        input(&mut app, KeyCode::End);
+
+        assert_eq!(app.input_modal.as_ref().unwrap().cursor_pos, 10);
+    }
+
+    #[test]
+    fn input_modal_ctrl_a_works_for_schedule_value() {
+        let mut app = App::new();
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.schedule_value = "15:30".to_string();
+        modal.schedule_value_cursor_pos = 3;
+        modal.active_field = InputField::ScheduleValue;
+        app.input_modal = Some(modal);
+        app.mode = AppMode::InputModal;
+
+        input_with_modifiers(&mut app, KeyCode::Char('a'), KeyModifiers::CONTROL);
+
+        assert_eq!(
+            app.input_modal.as_ref().unwrap().schedule_value_cursor_pos,
+            0
+        );
+    }
+
+    #[test]
+    fn input_modal_arrow_keys_work_for_schedule_value() {
+        let mut app = App::new();
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.schedule_value = "15:30".to_string();
+        modal.schedule_value_cursor_pos = 2;
+        modal.active_field = InputField::ScheduleValue;
+        app.input_modal = Some(modal);
+        app.mode = AppMode::InputModal;
+
+        input(&mut app, KeyCode::Left);
+        assert_eq!(
+            app.input_modal.as_ref().unwrap().schedule_value_cursor_pos,
+            1
+        );
+
+        input(&mut app, KeyCode::Right);
+        assert_eq!(
+            app.input_modal.as_ref().unwrap().schedule_value_cursor_pos,
+            2
+        );
     }
 }

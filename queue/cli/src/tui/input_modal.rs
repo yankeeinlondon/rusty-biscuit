@@ -44,6 +44,7 @@ pub struct InputModal {
     pub cursor_pos: usize,
     pub schedule_type: ScheduleType,
     pub schedule_value: String,
+    pub schedule_value_cursor_pos: usize,
     pub target: ExecutionTarget,
     pub active_field: InputField,
     pub layout: InputLayout,
@@ -78,6 +79,7 @@ impl InputModal {
             cursor_pos: 0,
             schedule_type: ScheduleType::default(),
             schedule_value: String::new(),
+            schedule_value_cursor_pos: 0,
             target: default_target,
             active_field: InputField::default(),
             layout: InputLayout::default(),
@@ -91,11 +93,14 @@ impl InputModal {
         // Convert UTC to local time for display - the reverse of the conversion
         // done in event.rs when submitting the form (local → UTC).
         let local_time = task.scheduled_at.with_timezone(&chrono::Local);
+        let schedule_value = local_time.format("%H:%M").to_string();
+        let schedule_value_cursor_pos = schedule_value.len();
         Self {
             command: task.command.clone(),
             cursor_pos: task.command.len(),
             schedule_type: ScheduleType::AtTime,
-            schedule_value: local_time.format("%H:%M").to_string(),
+            schedule_value,
+            schedule_value_cursor_pos,
             target: task.target,
             active_field: InputField::Command,
             layout: InputLayout::default(),
@@ -180,7 +185,9 @@ impl InputModal {
                 self.cursor_pos += 1;
             }
             InputField::ScheduleValue => {
-                self.schedule_value.push(c);
+                self.schedule_value
+                    .insert(self.schedule_value_cursor_pos, c);
+                self.schedule_value_cursor_pos += 1;
             }
             InputField::ScheduleType => {
                 self.toggle_schedule_type();
@@ -202,7 +209,70 @@ impl InputModal {
                 }
             }
             InputField::ScheduleValue => {
-                self.schedule_value.pop();
+                if self.schedule_value_cursor_pos > 0 {
+                    self.schedule_value_cursor_pos -= 1;
+                    self.schedule_value.remove(self.schedule_value_cursor_pos);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Move cursor to the beginning of the active text field.
+    pub fn move_cursor_start(&mut self) {
+        match self.active_field {
+            InputField::Command => {
+                self.cursor_pos = 0;
+            }
+            InputField::ScheduleValue => {
+                self.schedule_value_cursor_pos = 0;
+            }
+            _ => {}
+        }
+    }
+
+    /// Move cursor to the end of the active text field.
+    pub fn move_cursor_end(&mut self) {
+        match self.active_field {
+            InputField::Command => {
+                self.cursor_pos = self.command.len();
+            }
+            InputField::ScheduleValue => {
+                self.schedule_value_cursor_pos = self.schedule_value.len();
+            }
+            _ => {}
+        }
+    }
+
+    /// Move cursor left in the active text field.
+    pub fn move_cursor_left(&mut self) {
+        match self.active_field {
+            InputField::Command => {
+                if self.cursor_pos > 0 {
+                    self.cursor_pos -= 1;
+                }
+            }
+            InputField::ScheduleValue => {
+                if self.schedule_value_cursor_pos > 0 {
+                    self.schedule_value_cursor_pos -= 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Move cursor right in the active text field.
+    pub fn move_cursor_right(&mut self) {
+        match self.active_field {
+            InputField::Command => {
+                if self.cursor_pos < self.command.len() {
+                    self.cursor_pos += 1;
+                }
+            }
+            InputField::ScheduleValue => {
+                if self.schedule_value_cursor_pos < self.schedule_value.len() {
+                    self.schedule_value_cursor_pos += 1;
+                }
             }
             _ => {}
         }
@@ -352,6 +422,7 @@ impl InputModal {
             &self.schedule_value,
             placeholder,
             self.active_field == InputField::ScheduleValue,
+            self.schedule_value_cursor_pos,
         );
 
         // Target
@@ -434,7 +505,7 @@ impl InputModal {
             &self.schedule_value,
             Some(placeholder),
             self.active_field == InputField::ScheduleValue,
-            None,
+            Some(self.schedule_value_cursor_pos),
         );
 
         let target_text = match self.target {
@@ -506,6 +577,7 @@ fn render_text_field_with_placeholder(
     value: &str,
     placeholder: &str,
     is_active: bool,
+    cursor_pos: usize,
 ) {
     let style = if is_active {
         Style::default().fg(Color::Yellow)
@@ -535,7 +607,7 @@ fn render_text_field_with_placeholder(
 
     // Position the real terminal cursor when active
     if is_active {
-        let cursor_x = inner.x + value.len() as u16;
+        let cursor_x = inner.x + cursor_pos.min(value.len()) as u16;
         let cursor_y = inner.y;
         frame.set_cursor_position((cursor_x, cursor_y));
     }
@@ -1224,6 +1296,7 @@ mod tests {
                     "",                      // empty value
                     "e.g., 7:00am or 19:30", // placeholder
                     false,                   // NOT active
+                    0,                       // cursor_pos
                 );
             })
             .unwrap();
@@ -1261,6 +1334,7 @@ mod tests {
                     "",                      // empty value
                     "e.g., 7:00am or 19:30", // placeholder
                     true,                    // active
+                    0,                       // cursor_pos
                 );
             })
             .unwrap();
@@ -1349,5 +1423,117 @@ mod tests {
         terminal
             .backend_mut()
             .assert_cursor_position(Position::new(expected_x, expected_y));
+    }
+
+    // =========================================================================
+    // Tests for Ctrl+A/E cursor movement and schedule_value cursor tracking
+    // =========================================================================
+
+    #[test]
+    fn move_cursor_start_moves_command_cursor_to_beginning() {
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.command = "echo hello".to_string();
+        modal.cursor_pos = 5;
+        modal.active_field = InputField::Command;
+
+        modal.move_cursor_start();
+
+        assert_eq!(modal.cursor_pos, 0);
+    }
+
+    #[test]
+    fn move_cursor_end_moves_command_cursor_to_end() {
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.command = "echo hello".to_string();
+        modal.cursor_pos = 0;
+        modal.active_field = InputField::Command;
+
+        modal.move_cursor_end();
+
+        assert_eq!(modal.cursor_pos, 10); // "echo hello".len()
+    }
+
+    #[test]
+    fn move_cursor_start_moves_schedule_value_cursor_to_beginning() {
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.schedule_value = "15:30".to_string();
+        modal.schedule_value_cursor_pos = 3;
+        modal.active_field = InputField::ScheduleValue;
+
+        modal.move_cursor_start();
+
+        assert_eq!(modal.schedule_value_cursor_pos, 0);
+    }
+
+    #[test]
+    fn move_cursor_end_moves_schedule_value_cursor_to_end() {
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.schedule_value = "15:30".to_string();
+        modal.schedule_value_cursor_pos = 0;
+        modal.active_field = InputField::ScheduleValue;
+
+        modal.move_cursor_end();
+
+        assert_eq!(modal.schedule_value_cursor_pos, 5); // "15:30".len()
+    }
+
+    #[test]
+    fn schedule_value_cursor_moves_left_and_right() {
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.schedule_value = "15:30".to_string();
+        modal.schedule_value_cursor_pos = 2;
+        modal.active_field = InputField::ScheduleValue;
+
+        modal.move_cursor_left();
+        assert_eq!(modal.schedule_value_cursor_pos, 1);
+
+        modal.move_cursor_right();
+        assert_eq!(modal.schedule_value_cursor_pos, 2);
+
+        modal.move_cursor_right();
+        assert_eq!(modal.schedule_value_cursor_pos, 3);
+    }
+
+    #[test]
+    fn schedule_value_cursor_stays_at_boundaries() {
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.schedule_value = "15m".to_string();
+        modal.active_field = InputField::ScheduleValue;
+
+        // Start at beginning
+        modal.schedule_value_cursor_pos = 0;
+        modal.move_cursor_left();
+        assert_eq!(modal.schedule_value_cursor_pos, 0, "Should stay at 0");
+
+        // Move to end
+        modal.schedule_value_cursor_pos = 3;
+        modal.move_cursor_right();
+        assert_eq!(modal.schedule_value_cursor_pos, 3, "Should stay at end");
+    }
+
+    #[test]
+    fn schedule_value_insert_at_cursor() {
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.schedule_value = "1:30".to_string();
+        modal.schedule_value_cursor_pos = 1;
+        modal.active_field = InputField::ScheduleValue;
+
+        modal.handle_char('5');
+
+        assert_eq!(modal.schedule_value, "15:30");
+        assert_eq!(modal.schedule_value_cursor_pos, 2);
+    }
+
+    #[test]
+    fn schedule_value_backspace_at_cursor() {
+        let mut modal = InputModal::new(wezterm_caps());
+        modal.schedule_value = "15:30".to_string();
+        modal.schedule_value_cursor_pos = 2;
+        modal.active_field = InputField::ScheduleValue;
+
+        modal.handle_backspace();
+
+        assert_eq!(modal.schedule_value, "1:30");
+        assert_eq!(modal.schedule_value_cursor_pos, 1);
     }
 }
