@@ -41,5 +41,6 @@ pub struct TableColumn {
     kind: ColumnType,
     aggregate: ColumnAggregate,
     alignment: ColumnAlignment,
+
 }
 
