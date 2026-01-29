@@ -1,7 +1,0 @@
-[package]
-name = "test_export"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-tree-hugger-lib = { path = "../tree-hugger/lib" }
