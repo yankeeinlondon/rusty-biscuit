@@ -19,3 +19,9 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 futures = "0.3.31"
 model_id = { path = "../../model_id" }
 url= "2.5"
+scraper = "0.25"
+
+[dev-dependencies]
+serial_test = "3.0"
+wiremock = "0.6"
+tracing-test = "0.2"
