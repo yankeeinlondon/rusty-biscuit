@@ -66,8 +66,8 @@ fn create_invalid_skill(library: &Path, name: &str, topic_type: &str) {
     .unwrap();
 }
 
-/// Helper to set up temporary home directories for Claude Code and OpenCode
-fn setup_temp_home_dirs(temp_dir: &Path) -> (PathBuf, PathBuf) {
+/// Helper to set up temporary home directories for Claude Code, OpenCode, and Roo Code
+fn setup_temp_home_dirs(temp_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
     let home = temp_dir.join("home");
     fs::create_dir_all(&home).unwrap();
 
@@ -77,11 +77,16 @@ fn setup_temp_home_dirs(temp_dir: &Path) -> (PathBuf, PathBuf) {
     let opencode_skills = home.join(".config").join("opencode").join("skill");
     fs::create_dir_all(&opencode_skills).unwrap();
 
-    (claude_skills, opencode_skills)
+    let roo_skills = home.join(".roo").join("skills");
+    fs::create_dir_all(&roo_skills).unwrap();
+
+    (claude_skills, opencode_skills, roo_skills)
 }
 
-/// Helper to set up all temporary home directories including docs
-fn setup_temp_home_dirs_with_docs(temp_dir: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+/// Helper to set up all temporary home directories including docs for all three services
+fn setup_temp_home_dirs_with_docs(
+    temp_dir: &Path,
+) -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf, PathBuf) {
     let home = temp_dir.join("home");
     fs::create_dir_all(&home).unwrap();
 
@@ -97,7 +102,20 @@ fn setup_temp_home_dirs_with_docs(temp_dir: &Path) -> (PathBuf, PathBuf, PathBuf
     let opencode_docs = home.join(".config").join("opencode").join("docs");
     fs::create_dir_all(&opencode_docs).unwrap();
 
-    (claude_skills, claude_docs, opencode_skills, opencode_docs)
+    let roo_skills = home.join(".roo").join("skills");
+    fs::create_dir_all(&roo_skills).unwrap();
+
+    let roo_docs = home.join(".roo").join("docs");
+    fs::create_dir_all(&roo_docs).unwrap();
+
+    (
+        claude_skills,
+        claude_docs,
+        opencode_skills,
+        opencode_docs,
+        roo_skills,
+        roo_docs,
+    )
 }
 
 /// Helper to create a skill directory with SKILL.md and deep_dive.md
@@ -200,7 +218,7 @@ async fn test_end_to_end_discover_filter_link_with_mixed_scenarios() {
 async fn test_error_handling_continues_when_one_symlink_fails() {
     let temp = TempDir::new().unwrap();
     let library = create_test_research_library(temp.path());
-    let (_claude_skills, _opencode_skills) = setup_temp_home_dirs(temp.path());
+    let (_claude_skills, _opencode_skills, _roo_skills) = setup_temp_home_dirs(temp.path());
 
     // Create 5 test skills
     create_skill(&library, "skill1", "library");
@@ -255,7 +273,7 @@ async fn test_error_handling_continues_when_one_symlink_fails() {
 async fn test_asymmetric_failure_claude_succeeds_opencode_fails() {
     let temp = TempDir::new().unwrap();
     let library = create_test_research_library(temp.path());
-    let (_claude_skills, opencode_skills) = setup_temp_home_dirs(temp.path());
+    let (_claude_skills, opencode_skills, _roo_skills) = setup_temp_home_dirs(temp.path());
 
     // Create test skill
     create_skill(&library, "test-skill", "library");
@@ -575,7 +593,7 @@ async fn test_combined_glob_and_type_filters() {
 async fn test_symlinks_created_are_accessible() {
     let temp = TempDir::new().unwrap();
     let library = create_test_research_library(temp.path());
-    let (claude_skills, _opencode_skills) = setup_temp_home_dirs(temp.path());
+    let (claude_skills, _opencode_skills, _roo_skills) = setup_temp_home_dirs(temp.path());
 
     // Create test skill with some content
     create_skill(&library, "test-skill", "library");
@@ -622,7 +640,8 @@ async fn test_symlinks_created_are_accessible() {
 async fn test_stale_symlinks_are_removed_before_linking() {
     let temp = TempDir::new().unwrap();
     let library = create_test_research_library(temp.path());
-    let (claude_skills, _, opencode_skills, _) = setup_temp_home_dirs_with_docs(temp.path());
+    let (claude_skills, _, opencode_skills, _, _roo_skills, _) =
+        setup_temp_home_dirs_with_docs(temp.path());
 
     // Create a valid skill
     create_skill(&library, "valid-skill", "library");
@@ -699,7 +718,8 @@ async fn test_stale_symlinks_are_removed_before_linking() {
 async fn test_working_symlinks_are_not_removed() {
     let temp = TempDir::new().unwrap();
     let library = create_test_research_library(temp.path());
-    let (claude_skills, _, _opencode_skills, _) = setup_temp_home_dirs_with_docs(temp.path());
+    let (claude_skills, _, _opencode_skills, _, _roo_skills, _) =
+        setup_temp_home_dirs_with_docs(temp.path());
 
     // Create a valid skill
     create_skill(&library, "valid-skill", "library");
@@ -746,7 +766,8 @@ async fn test_working_symlinks_are_not_removed() {
 async fn test_deep_dive_symlinks_created_with_topic_name() {
     let temp = TempDir::new().unwrap();
     let library = create_test_research_library(temp.path());
-    let (_, claude_docs, _, opencode_docs) = setup_temp_home_dirs_with_docs(temp.path());
+    let (_, claude_docs, _, opencode_docs, _, _roo_docs) =
+        setup_temp_home_dirs_with_docs(temp.path());
 
     // Create skill with deep_dive.md
     create_skill_with_deep_dive(&library, "test-topic", "library");
@@ -815,7 +836,7 @@ async fn test_deep_dive_symlinks_created_with_topic_name() {
 async fn test_deep_dive_links_are_idempotent() {
     let temp = TempDir::new().unwrap();
     let library = create_test_research_library(temp.path());
-    let (_, claude_docs, _, _) = setup_temp_home_dirs_with_docs(temp.path());
+    let (_, claude_docs, _, _, _, _) = setup_temp_home_dirs_with_docs(temp.path());
 
     // Create skill with deep_dive.md
     create_skill_with_deep_dive(&library, "test-topic", "library");
@@ -913,7 +934,7 @@ async fn test_no_deep_dive_results_in_none_doc_action() {
 async fn test_multiple_topics_get_distinct_doc_names() {
     let temp = TempDir::new().unwrap();
     let library = create_test_research_library(temp.path());
-    let (_, claude_docs, _, _) = setup_temp_home_dirs_with_docs(temp.path());
+    let (_, claude_docs, _, _, _, _) = setup_temp_home_dirs_with_docs(temp.path());
 
     // Create multiple skills with deep_dive.md
     create_skill_with_deep_dive(&library, "clap", "library");
@@ -961,7 +982,8 @@ async fn test_multiple_topics_get_distinct_doc_names() {
 async fn test_stale_doc_symlinks_also_removed() {
     let temp = TempDir::new().unwrap();
     let library = create_test_research_library(temp.path());
-    let (_, claude_docs, _, opencode_docs) = setup_temp_home_dirs_with_docs(temp.path());
+    let (_, claude_docs, _, opencode_docs, _, _roo_docs) =
+        setup_temp_home_dirs_with_docs(temp.path());
 
     // Create a valid skill
     create_skill_with_deep_dive(&library, "valid-topic", "library");

@@ -3,6 +3,8 @@
 //! This module provides terminal-friendly and JSON output formatting for the
 //! link command, displaying skill linking results with appropriate colors and
 //! structure for both human and machine consumption.
+//!
+//! Supports three services: Claude Code, OpenCode, and Roo Code.
 
 use crate::link::types::{LinkResult, SkillAction, SkillLink};
 use owo_colors::OwoColorize;
@@ -34,6 +36,7 @@ use owo_colors::OwoColorize;
 /// let mut result = LinkResult::new();
 /// result.links.push(SkillLink::new(
 ///     "clap".to_string(),
+///     SkillAction::CreatedLink,
 ///     SkillAction::CreatedLink,
 ///     SkillAction::CreatedLink,
 /// ));
@@ -83,13 +86,18 @@ pub fn format_terminal(result: &LinkResult) -> String {
 fn format_skill_link(link: &SkillLink) -> String {
     let topic_name = link.name.bold();
 
-    // Format skill status
-    let skill_status = format_skill_actions(&link.claude_action, &link.opencode_action);
+    // Format skill status for all three services
+    let skill_status =
+        format_skill_actions(&link.claude_action, &link.opencode_action, &link.roo_action);
 
-    // Format doc status if present
-    let doc_status = match (&link.claude_doc_action, &link.opencode_doc_action) {
-        (Some(claude), Some(opencode)) => {
-            let doc_info = format_doc_actions(claude, opencode);
+    // Format doc status if present (all three must be present)
+    let doc_status = match (
+        &link.claude_doc_action,
+        &link.opencode_doc_action,
+        &link.roo_doc_action,
+    ) {
+        (Some(claude), Some(opencode), Some(roo)) => {
+            let doc_info = format_doc_actions(claude, opencode, roo);
             if !doc_info.is_empty() {
                 format!(" | {}", doc_info)
             } else {
@@ -102,115 +110,110 @@ fn format_skill_link(link: &SkillLink) -> String {
     format!("- {}: {}{}", topic_name, skill_status, doc_status)
 }
 
-/// Format skill actions (Claude Code and OpenCode skills).
-fn format_skill_actions(claude: &SkillAction, opencode: &SkillAction) -> String {
-    match (claude, opencode) {
-        // Both created successfully
-        (SkillAction::CreatedLink, SkillAction::CreatedLink) => {
-            "skills linked to both".green().to_string()
+/// Format skill actions for all three services (Claude Code, OpenCode, and Roo Code).
+fn format_skill_actions(
+    claude: &SkillAction,
+    opencode: &SkillAction,
+    roo: &SkillAction,
+) -> String {
+    // All three same state shortcuts
+    match (claude, opencode, roo) {
+        // All created successfully
+        (SkillAction::CreatedLink, SkillAction::CreatedLink, SkillAction::CreatedLink) => {
+            return "skills linked to all".green().to_string();
         }
 
-        // Both already linked
-        (SkillAction::NoneAlreadyLinked, SkillAction::NoneAlreadyLinked) => {
-            "skills already linked".dimmed().italic().to_string()
+        // All already linked
+        (
+            SkillAction::NoneAlreadyLinked,
+            SkillAction::NoneAlreadyLinked,
+            SkillAction::NoneAlreadyLinked,
+        ) => {
+            return "skills already linked".dimmed().italic().to_string();
         }
 
-        // Both have local definitions
-        (SkillAction::NoneLocalDefinition, SkillAction::NoneLocalDefinition) => {
-            "local skill definitions exist".yellow().to_string()
+        // All have local definitions
+        (
+            SkillAction::NoneLocalDefinition,
+            SkillAction::NoneLocalDefinition,
+            SkillAction::NoneLocalDefinition,
+        ) => {
+            return "local skill definitions exist".yellow().to_string();
         }
 
-        // Both invalid
-        (SkillAction::NoneSkillDirectoryInvalid, SkillAction::NoneSkillDirectoryInvalid) => {
-            "skill directory invalid (no SKILL.md)".yellow().to_string()
+        // All invalid
+        (
+            SkillAction::NoneSkillDirectoryInvalid,
+            SkillAction::NoneSkillDirectoryInvalid,
+            SkillAction::NoneSkillDirectoryInvalid,
+        ) => {
+            return "skill directory invalid (no SKILL.md)".yellow().to_string();
         }
 
-        // One created, one already linked
-        (SkillAction::CreatedLink, SkillAction::NoneAlreadyLinked) => format!(
-            "{} already linked, created for {}",
-            "OpenCode".italic(),
-            "Claude Code".italic()
-        )
-        .green()
-        .to_string(),
-        (SkillAction::NoneAlreadyLinked, SkillAction::CreatedLink) => format!(
-            "{} already linked, created for {}",
-            "Claude Code".italic(),
-            "OpenCode".italic()
-        )
-        .green()
-        .to_string(),
-
-        // One created, one has local definition
-        (SkillAction::CreatedLink, SkillAction::NoneLocalDefinition) => format!(
-            "created for {}, {} has local definition",
-            "Claude Code".italic(),
-            "OpenCode".italic()
-        ),
-        (SkillAction::NoneLocalDefinition, SkillAction::CreatedLink) => format!(
-            "{} has local definition, created for {}",
-            "Claude Code".italic(),
-            "OpenCode".italic()
-        ),
-
-        // One created, one invalid
-        (SkillAction::CreatedLink, SkillAction::NoneSkillDirectoryInvalid) => format!(
-            "created for {} (OpenCode: invalid skill directory)",
-            "Claude Code".italic()
-        ),
-        (SkillAction::NoneSkillDirectoryInvalid, SkillAction::CreatedLink) => format!(
-            "created for {} (Claude Code: invalid skill directory)",
-            "OpenCode".italic()
-        ),
-
-        // Failures
-        (SkillAction::FailedPermissionDenied(msg), _)
-        | (_, SkillAction::FailedPermissionDenied(msg)) => {
-            format!("failed (permission denied: {})", msg)
+        // Any failure takes priority - show error message
+        (SkillAction::FailedPermissionDenied(msg), _, _)
+        | (_, SkillAction::FailedPermissionDenied(msg), _)
+        | (_, _, SkillAction::FailedPermissionDenied(msg)) => {
+            return format!("failed (permission denied: {})", msg)
                 .red()
-                .to_string()
+                .to_string();
         }
 
-        (SkillAction::FailedOther(msg), _) | (_, SkillAction::FailedOther(msg)) => {
-            format!("failed ({})", msg).red().to_string()
+        (SkillAction::FailedOther(msg), _, _)
+        | (_, SkillAction::FailedOther(msg), _)
+        | (_, _, SkillAction::FailedOther(msg)) => {
+            return format!("failed ({})", msg).red().to_string();
         }
 
-        // Mixed states - handle remaining combinations
-        (claude_action, opencode_action) => {
-            let claude_status = format_action_status(claude_action, "Claude Code");
-            let opencode_status = format_action_status(opencode_action, "OpenCode");
-            format!("{}, {}", claude_status, opencode_status)
-        }
+        // Mixed states - fall through to per-service breakdown
+        _ => {}
     }
+
+    // Mixed states - show per-service breakdown
+    let claude_status = format_action_status(claude, "Claude Code");
+    let opencode_status = format_action_status(opencode, "OpenCode");
+    let roo_status = format_action_status(roo, "Roo Code");
+    format!("{}, {}, {}", claude_status, opencode_status, roo_status)
 }
 
-/// Format doc actions (Claude Code and OpenCode docs).
-fn format_doc_actions(claude: &SkillAction, opencode: &SkillAction) -> String {
-    match (claude, opencode) {
-        // Both created successfully
-        (SkillAction::CreatedLink, SkillAction::CreatedLink) => "docs linked".green().to_string(),
-
-        // Both already linked
-        (SkillAction::NoneAlreadyLinked, SkillAction::NoneAlreadyLinked) => {
-            "docs already linked".dimmed().to_string()
+/// Format doc actions for all three services (Claude Code, OpenCode, and Roo Code).
+fn format_doc_actions(claude: &SkillAction, opencode: &SkillAction, roo: &SkillAction) -> String {
+    match (claude, opencode, roo) {
+        // All created successfully
+        (SkillAction::CreatedLink, SkillAction::CreatedLink, SkillAction::CreatedLink) => {
+            "docs linked".green().to_string()
         }
 
-        // Both have local definitions
-        (SkillAction::NoneLocalDefinition, SkillAction::NoneLocalDefinition) => {
-            "local docs exist".yellow().to_string()
-        }
+        // All already linked
+        (
+            SkillAction::NoneAlreadyLinked,
+            SkillAction::NoneAlreadyLinked,
+            SkillAction::NoneAlreadyLinked,
+        ) => "docs already linked".dimmed().to_string(),
 
-        // One created, one already linked
-        (SkillAction::CreatedLink, SkillAction::NoneAlreadyLinked)
-        | (SkillAction::NoneAlreadyLinked, SkillAction::CreatedLink) => {
+        // All have local definitions
+        (
+            SkillAction::NoneLocalDefinition,
+            SkillAction::NoneLocalDefinition,
+            SkillAction::NoneLocalDefinition,
+        ) => "local docs exist".yellow().to_string(),
+
+        // Any failure in docs
+        (SkillAction::FailedPermissionDenied(_), _, _)
+        | (_, SkillAction::FailedPermissionDenied(_), _)
+        | (_, _, SkillAction::FailedPermissionDenied(_))
+        | (SkillAction::FailedOther(_), _, _)
+        | (_, SkillAction::FailedOther(_), _)
+        | (_, _, SkillAction::FailedOther(_)) => "doc linking failed".red().to_string(),
+
+        // Mixed success states (some created, some already linked)
+        (c, o, r)
+            if matches!(c, SkillAction::CreatedLink | SkillAction::NoneAlreadyLinked)
+                && matches!(o, SkillAction::CreatedLink | SkillAction::NoneAlreadyLinked)
+                && matches!(r, SkillAction::CreatedLink | SkillAction::NoneAlreadyLinked) =>
+        {
             "docs linked (partial)".green().to_string()
         }
-
-        // Failures in docs
-        (SkillAction::FailedPermissionDenied(_), _)
-        | (_, SkillAction::FailedPermissionDenied(_))
-        | (SkillAction::FailedOther(_), _)
-        | (_, SkillAction::FailedOther(_)) => "doc linking failed".red().to_string(),
 
         // Other combinations
         _ => String::new(),
@@ -271,6 +274,7 @@ fn format_action_status(action: &SkillAction, service: &str) -> String {
 ///     "clap".to_string(),
 ///     SkillAction::CreatedLink,
 ///     SkillAction::NoneAlreadyLinked,
+///     SkillAction::CreatedLink,
 /// ));
 ///
 /// let json = format_json(&result).unwrap();
@@ -285,56 +289,60 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_format_terminal_both_created() {
+    fn test_format_terminal_all_created() {
         let mut result = LinkResult::new();
         result.links.push(SkillLink::new(
             "clap".to_string(),
+            SkillAction::CreatedLink,
             SkillAction::CreatedLink,
             SkillAction::CreatedLink,
         ));
 
         let output = format_terminal(&result);
         assert!(output.contains("clap"));
-        assert!(output.contains("skills linked to both"));
+        assert!(output.contains("skills linked to all"));
     }
 
     #[test]
-    fn test_format_terminal_one_created_one_already_linked_claude() {
+    fn test_format_terminal_mixed_created_and_linked() {
         let mut result = LinkResult::new();
         result.links.push(SkillLink::new(
             "serde".to_string(),
             SkillAction::CreatedLink,
             SkillAction::NoneAlreadyLinked,
+            SkillAction::CreatedLink,
         ));
 
         let output = format_terminal(&result);
         assert!(output.contains("serde"));
-        assert!(output.contains("OpenCode"));
-        assert!(output.contains("already linked"));
+        // Mixed state shows per-service breakdown
         assert!(output.contains("Claude Code"));
+        assert!(output.contains("OpenCode"));
+        assert!(output.contains("Roo Code"));
     }
 
     #[test]
-    fn test_format_terminal_one_created_one_already_linked_opencode() {
+    fn test_format_terminal_roo_only_created() {
         let mut result = LinkResult::new();
         result.links.push(SkillLink::new(
             "tokio".to_string(),
+            SkillAction::NoneAlreadyLinked,
             SkillAction::NoneAlreadyLinked,
             SkillAction::CreatedLink,
         ));
 
         let output = format_terminal(&result);
         assert!(output.contains("tokio"));
-        assert!(output.contains("Claude Code"));
-        assert!(output.contains("already linked"));
-        assert!(output.contains("OpenCode"));
+        assert!(output.contains("Roo Code"));
+        assert!(output.contains("created"));
     }
 
     #[test]
-    fn test_format_terminal_both_already_linked() {
+    fn test_format_terminal_all_already_linked() {
         let mut result = LinkResult::new();
         result.links.push(SkillLink::new(
             "tokio".to_string(),
+            SkillAction::NoneAlreadyLinked,
             SkillAction::NoneAlreadyLinked,
             SkillAction::NoneAlreadyLinked,
         ));
@@ -345,10 +353,11 @@ mod tests {
     }
 
     #[test]
-    fn test_format_terminal_both_local_definition() {
+    fn test_format_terminal_all_local_definition() {
         let mut result = LinkResult::new();
         result.links.push(SkillLink::new(
             "actix".to_string(),
+            SkillAction::NoneLocalDefinition,
             SkillAction::NoneLocalDefinition,
             SkillAction::NoneLocalDefinition,
         ));
@@ -359,10 +368,11 @@ mod tests {
     }
 
     #[test]
-    fn test_format_terminal_both_invalid() {
+    fn test_format_terminal_all_invalid() {
         let mut result = LinkResult::new();
         result.links.push(SkillLink::new(
             "broken".to_string(),
+            SkillAction::NoneSkillDirectoryInvalid,
             SkillAction::NoneSkillDirectoryInvalid,
             SkillAction::NoneSkillDirectoryInvalid,
         ));
@@ -374,12 +384,13 @@ mod tests {
     }
 
     #[test]
-    fn test_format_terminal_one_created_one_failed_permission() {
+    fn test_format_terminal_one_failed_permission() {
         let mut result = LinkResult::new();
         result.links.push(SkillLink::new(
             "denied".to_string(),
             SkillAction::CreatedLink,
             SkillAction::FailedPermissionDenied("permission denied".to_string()),
+            SkillAction::CreatedLink,
         ));
 
         let output = format_terminal(&result);
@@ -388,11 +399,27 @@ mod tests {
     }
 
     #[test]
+    fn test_format_terminal_roo_failed() {
+        let mut result = LinkResult::new();
+        result.links.push(SkillLink::new(
+            "roo-error".to_string(),
+            SkillAction::CreatedLink,
+            SkillAction::CreatedLink,
+            SkillAction::FailedOther("Roo I/O error".to_string()),
+        ));
+
+        let output = format_terminal(&result);
+        assert!(output.contains("roo-error"));
+        assert!(output.contains("Roo I/O error"));
+    }
+
+    #[test]
     fn test_format_terminal_failed_other() {
         let mut result = LinkResult::new();
         result.links.push(SkillLink::new(
             "error".to_string(),
             SkillAction::FailedOther("I/O error".to_string()),
+            SkillAction::CreatedLink,
             SkillAction::CreatedLink,
         ));
 
@@ -408,19 +435,23 @@ mod tests {
             "clap".to_string(),
             SkillAction::CreatedLink,
             SkillAction::CreatedLink,
+            SkillAction::CreatedLink,
         ));
         result.links.push(SkillLink::new(
             "serde".to_string(),
             SkillAction::NoneAlreadyLinked,
             SkillAction::CreatedLink,
+            SkillAction::NoneAlreadyLinked,
         ));
         result.links.push(SkillLink::new(
             "tokio".to_string(),
             SkillAction::NoneAlreadyLinked,
             SkillAction::NoneAlreadyLinked,
+            SkillAction::NoneAlreadyLinked,
         ));
         result.links.push(SkillLink::new(
             "actix".to_string(),
+            SkillAction::NoneLocalDefinition,
             SkillAction::NoneLocalDefinition,
             SkillAction::NoneLocalDefinition,
         ));
@@ -446,6 +477,7 @@ mod tests {
             "failed".to_string(),
             SkillAction::FailedPermissionDenied("permission denied".to_string()),
             SkillAction::FailedOther("I/O error".to_string()),
+            SkillAction::CreatedLink,
         ));
 
         let output = format_terminal(&result);
@@ -460,6 +492,7 @@ mod tests {
         let mut result = LinkResult::new();
         result.links.push(SkillLink::new(
             "test".to_string(),
+            SkillAction::CreatedLink,
             SkillAction::CreatedLink,
             SkillAction::CreatedLink,
         ));
@@ -477,6 +510,7 @@ mod tests {
             "clap".to_string(),
             SkillAction::CreatedLink,
             SkillAction::NoneAlreadyLinked,
+            SkillAction::CreatedLink,
         ));
 
         let json = format_json(&result).unwrap();
@@ -484,6 +518,7 @@ mod tests {
         assert!(json.contains("\"clap\""));
         assert!(json.contains("\"claude_action\""));
         assert!(json.contains("\"opencode_action\""));
+        assert!(json.contains("\"roo_action\""));
     }
 
     #[test]
@@ -493,6 +528,7 @@ mod tests {
             "clap".to_string(),
             SkillAction::CreatedLink,
             SkillAction::NoneAlreadyLinked,
+            SkillAction::CreatedLink,
         ));
         result
             .errors
@@ -503,6 +539,7 @@ mod tests {
 
         assert_eq!(deserialized.links.len(), 1);
         assert_eq!(deserialized.links[0].name, "clap");
+        assert_eq!(deserialized.links[0].roo_action, SkillAction::CreatedLink);
         assert_eq!(deserialized.errors.len(), 1);
         assert_eq!(deserialized.errors[0].0, "error-topic");
     }
@@ -514,9 +551,11 @@ mod tests {
             "created".to_string(),
             SkillAction::CreatedLink,
             SkillAction::CreatedLink,
+            SkillAction::CreatedLink,
         ));
         result.links.push(SkillLink::new(
             "linked".to_string(),
+            SkillAction::NoneAlreadyLinked,
             SkillAction::NoneAlreadyLinked,
             SkillAction::NoneAlreadyLinked,
         ));
@@ -524,9 +563,11 @@ mod tests {
             "local".to_string(),
             SkillAction::NoneLocalDefinition,
             SkillAction::NoneLocalDefinition,
+            SkillAction::NoneLocalDefinition,
         ));
         result.links.push(SkillLink::new(
             "invalid".to_string(),
+            SkillAction::NoneSkillDirectoryInvalid,
             SkillAction::NoneSkillDirectoryInvalid,
             SkillAction::NoneSkillDirectoryInvalid,
         ));
@@ -534,11 +575,13 @@ mod tests {
             "permission".to_string(),
             SkillAction::FailedPermissionDenied("denied".to_string()),
             SkillAction::CreatedLink,
+            SkillAction::CreatedLink,
         ));
         result.links.push(SkillLink::new(
             "other".to_string(),
             SkillAction::CreatedLink,
             SkillAction::FailedOther("error".to_string()),
+            SkillAction::CreatedLink,
         ));
 
         let json = format_json(&result).unwrap();
@@ -606,12 +649,14 @@ mod tests {
 
     // Tests for doc action formatting
     #[test]
-    fn test_format_terminal_with_doc_actions_both_created() {
+    fn test_format_terminal_with_doc_actions_all_created() {
         let mut result = LinkResult::new();
         result.links.push(SkillLink::new_with_docs(
             "clap".to_string(),
             SkillAction::CreatedLink,
             SkillAction::CreatedLink,
+            SkillAction::CreatedLink,
+            Some(SkillAction::CreatedLink),
             Some(SkillAction::CreatedLink),
             Some(SkillAction::CreatedLink),
         ));
@@ -622,12 +667,14 @@ mod tests {
     }
 
     #[test]
-    fn test_format_terminal_with_doc_actions_already_linked() {
+    fn test_format_terminal_with_doc_actions_all_already_linked() {
         let mut result = LinkResult::new();
         result.links.push(SkillLink::new_with_docs(
             "serde".to_string(),
             SkillAction::NoneAlreadyLinked,
             SkillAction::NoneAlreadyLinked,
+            SkillAction::NoneAlreadyLinked,
+            Some(SkillAction::NoneAlreadyLinked),
             Some(SkillAction::NoneAlreadyLinked),
             Some(SkillAction::NoneAlreadyLinked),
         ));
@@ -642,6 +689,7 @@ mod tests {
         let mut result = LinkResult::new();
         result.links.push(SkillLink::new(
             "tokio".to_string(),
+            SkillAction::CreatedLink,
             SkillAction::CreatedLink,
             SkillAction::CreatedLink,
         ));
@@ -659,13 +707,16 @@ mod tests {
             "clap".to_string(),
             SkillAction::CreatedLink,
             SkillAction::CreatedLink,
+            SkillAction::CreatedLink,
             Some(SkillAction::CreatedLink),
             Some(SkillAction::NoneAlreadyLinked),
+            Some(SkillAction::CreatedLink),
         ));
 
         let json = format_json(&result).unwrap();
         assert!(json.contains("\"claude_doc_action\""));
         assert!(json.contains("\"opencode_doc_action\""));
+        assert!(json.contains("\"roo_doc_action\""));
     }
 
     #[test]

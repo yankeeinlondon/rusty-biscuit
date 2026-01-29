@@ -101,6 +101,38 @@ pub fn get_opencode_docs_dir() -> Result<PathBuf, DetectionError> {
     Ok(home.join(".config/opencode/docs"))
 }
 
+/// Get the Roo Code skills directory (~/.roo/skills/)
+///
+/// # Errors
+///
+/// Returns `DetectionError::HomeDirectoryNotFound` if the home directory
+/// cannot be determined.
+pub fn get_roo_skills_dir() -> Result<PathBuf, DetectionError> {
+    // In tests, prefer HOME env var over dirs::home_dir() to avoid caching issues
+    let home = if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home)
+    } else {
+        dirs::home_dir().ok_or(DetectionError::HomeDirectoryNotFound)?
+    };
+    Ok(home.join(".roo/skills"))
+}
+
+/// Get the Roo Code docs directory (~/.roo/docs/)
+///
+/// # Errors
+///
+/// Returns `DetectionError::HomeDirectoryNotFound` if the home directory
+/// cannot be determined.
+pub fn get_roo_docs_dir() -> Result<PathBuf, DetectionError> {
+    // In tests, prefer HOME env var over dirs::home_dir() to avoid caching issues
+    let home = if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home)
+    } else {
+        dirs::home_dir().ok_or(DetectionError::HomeDirectoryNotFound)?
+    };
+    Ok(home.join(".roo/docs"))
+}
+
 /// Result of scanning a directory for stale (broken) symlinks.
 #[derive(Debug, Clone, Default)]
 pub struct StaleSymlinkScanResult {
@@ -357,8 +389,9 @@ fn validate_no_traversal(path: &Path) -> Result<(), DetectionError> {
 /// Validate that a path is within one of the allowed directories.
 ///
 /// Allowed directories are:
-/// - `~/.claude/skills/` (Claude Code)
-/// - `~/.config/opencode/skill/` (OpenCode)
+/// - `~/.claude/skills/` and `~/.claude/docs/` (Claude Code)
+/// - `~/.config/opencode/skill/` and `~/.config/opencode/docs/` (OpenCode)
+/// - `~/.roo/skills/` and `~/.roo/docs/` (Roo Code)
 /// - `$RESEARCH_DIR/.research/library/` (research topics source)
 ///
 /// # Arguments
@@ -374,6 +407,7 @@ fn validate_within_allowed_dirs(path: &Path) -> Result<(), DetectionError> {
     let home = dirs::home_dir().ok_or(DetectionError::HomeDirectoryNotFound)?;
     let claude_dir = home.join(".claude/skills");
     let opencode_dir = home.join(".config/opencode/skill");
+    let roo_dir = home.join(".roo/skills");
 
     // Also allow research library directory
     // For now, we'll be permissive with absolute paths since source validation
@@ -383,10 +417,12 @@ fn validate_within_allowed_dirs(path: &Path) -> Result<(), DetectionError> {
     let path_str = path.to_string_lossy();
     let claude_str = claude_dir.to_string_lossy();
     let opencode_str = opencode_dir.to_string_lossy();
+    let roo_str = roo_dir.to_string_lossy();
 
     // Check if path starts with any allowed prefix
     if path_str.starts_with(&*claude_str)
         || path_str.starts_with(&*opencode_str)
+        || path_str.starts_with(&*roo_str)
         || path.is_absolute()
     // Allow absolute paths for source directories
     {
@@ -934,6 +970,22 @@ mod tests {
         assert!(result.is_ok());
         let path = result.unwrap();
         assert!(path.to_string_lossy().contains(".config/opencode/docs"));
+    }
+
+    #[test]
+    fn get_roo_skills_dir_returns_path() {
+        let result = get_roo_skills_dir();
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(path.to_string_lossy().contains(".roo/skills"));
+    }
+
+    #[test]
+    fn get_roo_docs_dir_returns_path() {
+        let result = get_roo_docs_dir();
+        assert!(result.is_ok());
+        let path = result.unwrap();
+        assert!(path.to_string_lossy().contains(".roo/docs"));
     }
 
     // Tests for scan_and_remove_stale_symlinks

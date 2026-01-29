@@ -1,7 +1,7 @@
 //! Link command implementation for the research CLI.
 //!
 //! This module provides functionality to create symbolic links from research topic
-//! skill directories to Claude Code and OpenCode user-scoped skill locations.
+//! skill directories to Claude Code, OpenCode, and Roo Code user-scoped skill locations.
 //!
 //! # Usage
 //!
@@ -104,14 +104,18 @@ pub async fn link(
         detection::get_claude_skills_dir().map_err(|_| LinkError::HomeDirectory)?;
     let opencode_skills_dir =
         detection::get_opencode_skills_dir().map_err(|_| LinkError::HomeDirectory)?;
+    let roo_skills_dir = detection::get_roo_skills_dir().map_err(|_| LinkError::HomeDirectory)?;
     let claude_docs_dir = detection::get_claude_docs_dir().map_err(|_| LinkError::HomeDirectory)?;
     let opencode_docs_dir =
         detection::get_opencode_docs_dir().map_err(|_| LinkError::HomeDirectory)?;
+    let roo_docs_dir = detection::get_roo_docs_dir().map_err(|_| LinkError::HomeDirectory)?;
 
     info!("Claude Code skills dir: {}", claude_skills_dir.display());
     info!("OpenCode skills dir: {}", opencode_skills_dir.display());
+    info!("Roo Code skills dir: {}", roo_skills_dir.display());
     info!("Claude Code docs dir: {}", claude_docs_dir.display());
     info!("OpenCode docs dir: {}", opencode_docs_dir.display());
+    info!("Roo Code docs dir: {}", roo_docs_dir.display());
 
     // 2. Scan and remove stale symlinks from all target directories
     let mut stale_removed = Vec::new();
@@ -120,8 +124,10 @@ pub async fn link(
     for (dir, dir_name) in [
         (&claude_skills_dir, "Claude Code skills"),
         (&opencode_skills_dir, "OpenCode skills"),
+        (&roo_skills_dir, "Roo Code skills"),
         (&claude_docs_dir, "Claude Code docs"),
         (&opencode_docs_dir, "OpenCode docs"),
+        (&roo_docs_dir, "Roo Code docs"),
     ] {
         let scan_result = detection::scan_and_remove_stale_symlinks(dir);
         for removed in scan_result.removed {
@@ -177,15 +183,18 @@ pub async fn link(
             );
         }
 
-        // Determine skill actions for both services
-        let (final_claude_action, final_opencode_action) = if skill_source_valid {
+        // Determine skill actions for all three services
+        let (final_claude_action, final_opencode_action, final_roo_action) = if skill_source_valid {
             let claude_target = claude_skills_dir.join(&topic.name);
             let claude_action = detection::determine_action(&claude_target, &source_path);
 
             let opencode_target = opencode_skills_dir.join(&topic.name);
             let opencode_action = detection::determine_action(&opencode_target, &source_path);
 
-            // Attempt creation for both services (asymmetric failure handling)
+            let roo_target = roo_skills_dir.join(&topic.name);
+            let roo_action = detection::determine_action(&roo_target, &source_path);
+
+            // Attempt creation for all three services (asymmetric failure handling)
             let final_claude_action = match claude_action {
                 SkillAction::CreatedLink => {
                     match creation::create_skill_symlink(&source_path, &claude_target) {
@@ -246,18 +255,50 @@ pub async fn link(
                 other => other,
             };
 
-            (final_claude_action, final_opencode_action)
+            let final_roo_action = match roo_action {
+                SkillAction::CreatedLink => {
+                    match creation::create_skill_symlink(&source_path, &roo_target) {
+                        Ok(()) => {
+                            info!("Created skill symlink for {} at Roo Code", topic.name);
+                            SkillAction::CreatedLink
+                        }
+                        Err(creation::CreationError::InvalidSource(_)) => {
+                            SkillAction::NoneSkillDirectoryInvalid
+                        }
+                        Err(creation::CreationError::SymlinkCreation(e))
+                            if e.kind() == std::io::ErrorKind::PermissionDenied =>
+                        {
+                            error!(
+                                "Permission denied creating skill symlink for {}: {}",
+                                topic.name, e
+                            );
+                            errors.push((topic.name.clone(), format!("Roo Code skill: {}", e)));
+                            SkillAction::FailedPermissionDenied(e.to_string())
+                        }
+                        Err(e) => {
+                            error!("Failed to create skill symlink for {}: {}", topic.name, e);
+                            errors.push((topic.name.clone(), format!("Roo Code skill: {}", e)));
+                            SkillAction::FailedOther(e.to_string())
+                        }
+                    }
+                }
+                other => other,
+            };
+
+            (final_claude_action, final_opencode_action, final_roo_action)
         } else {
             (
+                SkillAction::NoneSkillDirectoryInvalid,
                 SkillAction::NoneSkillDirectoryInvalid,
                 SkillAction::NoneSkillDirectoryInvalid,
             )
         };
 
         // Process deep dive linking (use topic name as file name: {topic}.md)
-        let (claude_doc_action, opencode_doc_action) = if deep_dive_path.exists() {
+        let (claude_doc_action, opencode_doc_action, roo_doc_action) = if deep_dive_path.exists() {
             let claude_doc_target = claude_docs_dir.join(format!("{}.md", topic.name));
             let opencode_doc_target = opencode_docs_dir.join(format!("{}.md", topic.name));
+            let roo_doc_target = roo_docs_dir.join(format!("{}.md", topic.name));
 
             // Claude Code deep dive
             let claude_doc_action = if detection::check_is_symlink(&claude_doc_target) {
@@ -326,22 +367,60 @@ pub async fn link(
                 }
             };
 
-            (Some(claude_doc_action), Some(opencode_doc_action))
+            // Roo Code deep dive
+            let roo_doc_action = if detection::check_is_symlink(&roo_doc_target) {
+                SkillAction::NoneAlreadyLinked
+            } else if detection::check_local_definition_exists(&roo_doc_target) {
+                SkillAction::NoneLocalDefinition
+            } else {
+                match creation::create_deep_dive_symlink(&deep_dive_path, &roo_doc_target) {
+                    Ok(()) => {
+                        info!("Created deep dive symlink for {} at Roo Code", topic.name);
+                        SkillAction::CreatedLink
+                    }
+                    Err(creation::CreationError::SymlinkCreation(e))
+                        if e.kind() == std::io::ErrorKind::PermissionDenied =>
+                    {
+                        error!(
+                            "Permission denied creating deep dive symlink for {}: {}",
+                            topic.name, e
+                        );
+                        errors.push((topic.name.clone(), format!("Roo Code doc: {}", e)));
+                        SkillAction::FailedPermissionDenied(e.to_string())
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to create deep dive symlink for {}: {}",
+                            topic.name, e
+                        );
+                        errors.push((topic.name.clone(), format!("Roo Code doc: {}", e)));
+                        SkillAction::FailedOther(e.to_string())
+                    }
+                }
+            };
+
+            (
+                Some(claude_doc_action),
+                Some(opencode_doc_action),
+                Some(roo_doc_action),
+            )
         } else {
             debug!(
                 "No deep_dive.md found for {}: {}",
                 topic.name,
                 deep_dive_path.display()
             );
-            (None, None)
+            (None, None, None)
         };
 
         links.push(SkillLink::new_with_docs(
             topic.name,
             final_claude_action,
             final_opencode_action,
+            final_roo_action,
             claude_doc_action,
             opencode_doc_action,
+            roo_doc_action,
         ));
     }
 

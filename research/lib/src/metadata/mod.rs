@@ -16,6 +16,8 @@
 pub mod migration;
 pub mod types;
 pub mod v0;
+pub mod content_policy;
+pub mod topic;
 
 pub use types::{
     ApiDetails, AppDetails, CliDetails, CloudProviderDetails, CompanyCategoryDetails,
@@ -23,3 +25,5 @@ pub use types::{
     ProductDetails, ResearchDetails, SkillSetDetails, SolutionSpaceDetails, StandardDetails,
 };
 pub use v0::MetadataV0;
+
+pub use content_policy::{ ContentPolicy, ContentExpiry };

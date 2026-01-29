@@ -2,7 +2,7 @@
 //!
 //! This module defines the core data structures used to represent skill linking
 //! actions and results when creating symbolic links from research topic skill
-//! directories to Claude Code and OpenCode user-scoped skill locations.
+//! directories to Claude Code, OpenCode, and Roo Code user-scoped skill locations.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -69,10 +69,10 @@ impl SkillAction {
     }
 }
 
-/// Information about a skill link operation for both Claude Code and OpenCode.
+/// Information about a skill link operation for Claude Code, OpenCode, and Roo Code.
 ///
 /// This structure tracks the action taken for each service independently,
-/// allowing for scenarios where one service succeeds while the other fails.
+/// allowing for scenarios where one service succeeds while others fail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillLink {
     /// The name of the skill/topic
@@ -84,6 +84,9 @@ pub struct SkillLink {
     /// Action taken for OpenCode (~/.config/opencode/skill/)
     pub opencode_action: SkillAction,
 
+    /// Action taken for Roo Code (~/.roo/skills/)
+    pub roo_action: SkillAction,
+
     /// Action taken for Claude Code deep dive doc (~/.claude/docs/)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_doc_action: Option<SkillAction>,
@@ -91,50 +94,71 @@ pub struct SkillLink {
     /// Action taken for OpenCode deep dive doc (~/.config/opencode/docs/)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opencode_doc_action: Option<SkillAction>,
+
+    /// Action taken for Roo Code deep dive doc (~/.roo/docs/)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roo_doc_action: Option<SkillAction>,
 }
 
 impl SkillLink {
-    /// Creates a new SkillLink with the given name and actions
-    pub fn new(name: String, claude_action: SkillAction, opencode_action: SkillAction) -> Self {
-        Self {
-            name,
-            claude_action,
-            opencode_action,
-            claude_doc_action: None,
-            opencode_doc_action: None,
-        }
-    }
-
-    /// Creates a new SkillLink with skill and doc actions
-    pub fn new_with_docs(
+    /// Creates a new SkillLink with the given name and actions for all three services
+    pub fn new(
         name: String,
         claude_action: SkillAction,
         opencode_action: SkillAction,
-        claude_doc_action: Option<SkillAction>,
-        opencode_doc_action: Option<SkillAction>,
+        roo_action: SkillAction,
     ) -> Self {
         Self {
             name,
             claude_action,
             opencode_action,
-            claude_doc_action,
-            opencode_doc_action,
+            roo_action,
+            claude_doc_action: None,
+            opencode_doc_action: None,
+            roo_doc_action: None,
         }
     }
 
-    /// Returns true if both actions were successful
-    pub fn both_succeeded(&self) -> bool {
-        self.claude_action.is_success() && self.opencode_action.is_success()
+    /// Creates a new SkillLink with skill and doc actions for all three services
+    pub fn new_with_docs(
+        name: String,
+        claude_action: SkillAction,
+        opencode_action: SkillAction,
+        roo_action: SkillAction,
+        claude_doc_action: Option<SkillAction>,
+        opencode_doc_action: Option<SkillAction>,
+        roo_doc_action: Option<SkillAction>,
+    ) -> Self {
+        Self {
+            name,
+            claude_action,
+            opencode_action,
+            roo_action,
+            claude_doc_action,
+            opencode_doc_action,
+            roo_doc_action,
+        }
+    }
+
+    /// Returns true if all three service actions were successful
+    pub fn all_succeeded(&self) -> bool {
+        self.claude_action.is_success()
+            && self.opencode_action.is_success()
+            && self.roo_action.is_success()
     }
 
     /// Returns true if at least one action failed
     pub fn has_failure(&self) -> bool {
-        self.claude_action.is_failure() || self.opencode_action.is_failure()
+        self.claude_action.is_failure()
+            || self.opencode_action.is_failure()
+            || self.roo_action.is_failure()
     }
 
-    /// Returns true if both actions were skipped (no changes made)
-    pub fn both_skipped(&self) -> bool {
-        self.claude_action.is_skipped() && self.opencode_action.is_skipped()
+    /// Returns true if all three service actions were skipped (no changes made)
+    pub fn all_skipped(&self) -> bool {
+        self.claude_action.is_skipped()
+            && self.opencode_action.is_skipped()
+            && self.roo_action.is_skipped()
     }
 }
 
@@ -176,12 +200,14 @@ impl LinkResult {
     }
 
     /// Returns the number of skills where links were successfully created
+    /// (at least one service created a link)
     pub fn total_created(&self) -> usize {
         self.links
             .iter()
             .filter(|link| {
                 matches!(link.claude_action, SkillAction::CreatedLink)
                     || matches!(link.opencode_action, SkillAction::CreatedLink)
+                    || matches!(link.roo_action, SkillAction::CreatedLink)
             })
             .count()
     }
@@ -260,35 +286,49 @@ mod tests {
             "test-skill".to_string(),
             SkillAction::CreatedLink,
             SkillAction::NoneAlreadyLinked,
+            SkillAction::CreatedLink,
         );
 
         assert_eq!(link.name, "test-skill");
         assert_eq!(link.claude_action, SkillAction::CreatedLink);
         assert_eq!(link.opencode_action, SkillAction::NoneAlreadyLinked);
+        assert_eq!(link.roo_action, SkillAction::CreatedLink);
     }
 
     #[test]
-    fn test_skill_link_both_succeeded() {
+    fn test_skill_link_all_succeeded() {
         let link1 = SkillLink::new(
             "test".to_string(),
             SkillAction::CreatedLink,
             SkillAction::CreatedLink,
+            SkillAction::CreatedLink,
         );
-        assert!(link1.both_succeeded());
+        assert!(link1.all_succeeded());
 
         let link2 = SkillLink::new(
             "test".to_string(),
             SkillAction::NoneAlreadyLinked,
             SkillAction::CreatedLink,
+            SkillAction::NoneAlreadyLinked,
         );
-        assert!(link2.both_succeeded());
+        assert!(link2.all_succeeded());
 
         let link3 = SkillLink::new(
             "test".to_string(),
             SkillAction::CreatedLink,
             SkillAction::FailedOther("error".to_string()),
+            SkillAction::CreatedLink,
         );
-        assert!(!link3.both_succeeded());
+        assert!(!link3.all_succeeded());
+
+        // Test Roo failure also causes all_succeeded to return false
+        let link4 = SkillLink::new(
+            "test".to_string(),
+            SkillAction::CreatedLink,
+            SkillAction::CreatedLink,
+            SkillAction::FailedOther("error".to_string()),
+        );
+        assert!(!link4.all_succeeded());
     }
 
     #[test]
@@ -297,6 +337,7 @@ mod tests {
             "test".to_string(),
             SkillAction::FailedPermissionDenied("error".to_string()),
             SkillAction::CreatedLink,
+            SkillAction::CreatedLink,
         );
         assert!(link1.has_failure());
 
@@ -304,15 +345,26 @@ mod tests {
             "test".to_string(),
             SkillAction::CreatedLink,
             SkillAction::FailedOther("error".to_string()),
+            SkillAction::CreatedLink,
         );
         assert!(link2.has_failure());
 
+        // Test Roo failure
         let link3 = SkillLink::new(
             "test".to_string(),
             SkillAction::CreatedLink,
-            SkillAction::NoneAlreadyLinked,
+            SkillAction::CreatedLink,
+            SkillAction::FailedPermissionDenied("error".to_string()),
         );
-        assert!(!link3.has_failure());
+        assert!(link3.has_failure());
+
+        let link4 = SkillLink::new(
+            "test".to_string(),
+            SkillAction::CreatedLink,
+            SkillAction::NoneAlreadyLinked,
+            SkillAction::CreatedLink,
+        );
+        assert!(!link4.has_failure());
     }
 
     #[test]
@@ -330,20 +382,30 @@ mod tests {
             "test1".to_string(),
             SkillAction::CreatedLink,
             SkillAction::NoneAlreadyLinked,
+            SkillAction::NoneAlreadyLinked,
         ));
         result.links.push(SkillLink::new(
             "test2".to_string(),
             SkillAction::NoneAlreadyLinked,
             SkillAction::CreatedLink,
+            SkillAction::NoneAlreadyLinked,
         ));
         result.links.push(SkillLink::new(
             "test3".to_string(),
             SkillAction::NoneAlreadyLinked,
             SkillAction::NoneAlreadyLinked,
+            SkillAction::NoneAlreadyLinked,
+        ));
+        // Test Roo-only creation counts
+        result.links.push(SkillLink::new(
+            "test4".to_string(),
+            SkillAction::NoneAlreadyLinked,
+            SkillAction::NoneAlreadyLinked,
+            SkillAction::CreatedLink,
         ));
 
-        assert_eq!(result.total_processed(), 3);
-        assert_eq!(result.total_created(), 2);
+        assert_eq!(result.total_processed(), 4);
+        assert_eq!(result.total_created(), 3);
     }
 
     #[test]
@@ -353,6 +415,7 @@ mod tests {
             "test-skill".to_string(),
             SkillAction::CreatedLink,
             SkillAction::NoneAlreadyLinked,
+            SkillAction::CreatedLink,
         ));
         result
             .errors
@@ -363,7 +426,36 @@ mod tests {
 
         assert_eq!(deserialized.links.len(), 1);
         assert_eq!(deserialized.links[0].name, "test-skill");
+        assert_eq!(deserialized.links[0].roo_action, SkillAction::CreatedLink);
         assert_eq!(deserialized.errors.len(), 1);
         assert_eq!(deserialized.errors[0].0, "error-topic");
+    }
+
+    #[test]
+    fn test_skill_link_all_skipped() {
+        let link1 = SkillLink::new(
+            "test".to_string(),
+            SkillAction::NoneAlreadyLinked,
+            SkillAction::NoneLocalDefinition,
+            SkillAction::NoneSkillDirectoryInvalid,
+        );
+        assert!(link1.all_skipped());
+
+        let link2 = SkillLink::new(
+            "test".to_string(),
+            SkillAction::CreatedLink,
+            SkillAction::NoneAlreadyLinked,
+            SkillAction::NoneAlreadyLinked,
+        );
+        assert!(!link2.all_skipped());
+
+        // Roo with non-skipped action
+        let link3 = SkillLink::new(
+            "test".to_string(),
+            SkillAction::NoneAlreadyLinked,
+            SkillAction::NoneAlreadyLinked,
+            SkillAction::CreatedLink,
+        );
+        assert!(!link3.all_skipped());
     }
 }
