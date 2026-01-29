@@ -2,18 +2,24 @@ set dotenv-load
 set positional-arguments
 
 # List of areas in this monorepo
-areas := "biscuit biscuit-hash biscuit-speaks biscuit-terminal playa playa-cli ai-pipeline research so-you-say darkmatter sniff"
+areas := "biscuit-hash biscuit-speaks biscuit-terminal playa playa-cli ai-pipeline research so-you-say darkmatter sniff"
 
 BOLD := '\033[1m'
 RESET := '\033[0m'
 
 default:
-    @echo
-    @echo "Dockhand Monorepo"
-    @echo "================="
-    @echo ""
-    @just --list | grep -v 'default'
-    @echo
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if command -v md &> /dev/null; then
+        md just.md
+    else
+        echo "Rusty Biscuit Monorepo"
+        echo "======================"
+    fi
+    echo ""
+    just --list | grep -v 'default'
+    echo
 
 # start Claude Code CLI in yolo mode
 cc *args="":

@@ -1,20 +1,40 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
-build:
-    cargo build -p playa -p playa-cli
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
 
+    if command -v md &> /dev/null; then
+        md just.md
+    fi
+
+    echo
+    echo "Playa (library & CLI)"
+    echo "====================="
+    echo ""
+    just --list | grep -v 'default'
+    echo
+
+# build the library and CLI
+build *args="":
+    cargo build -p playa -p playa-cli {{args}}
+
+# Test both Library and CLI
 test:
-    cargo test -p playa
+    cargo test -p playa -p playa-cli
 
+# Lint both the Library and CLI
 lint:
     cargo clippy -p playa -p playa-cli
 
+# Lint (and fix) both the Library and CLI
 lint-fix:
     cargo clippy --fix -p playa -p playa-cli
 
-
+# Install the Playa CLI
 install:
     cargo install --path ./cli
 
+# Validate the source code without doing a full build
 check:
     cargo check -p playa -p playa-cli

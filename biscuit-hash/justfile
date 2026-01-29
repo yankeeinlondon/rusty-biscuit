@@ -2,9 +2,16 @@ BOLD := '\033[1m'
 RESET := '\033[0m'
 
 default:
-    @echo "{{BOLD}}biscuit-hash{{RESET}} Library"
-    @echo
-    @just --list | grep -v 'default'
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if command -v md &> /dev/null; then
+        md just.md
+    fi
+    echo "biscuit-hash Library"
+    echo "===================="
+    echo
+    just --list | grep -v 'default'
 
 # build library and CLI
 build *args="":
