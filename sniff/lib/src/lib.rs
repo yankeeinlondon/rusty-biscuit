@@ -8,6 +8,7 @@ pub mod network;
 pub mod os;
 pub mod package;
 pub mod programs;
+pub mod services;
 
 pub use error::{Result, SniffError};
 pub use filesystem::FilesystemInfo;

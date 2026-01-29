@@ -1,6 +1,7 @@
 use clap::Parser;
 use sniff_lib::package::enrich_dependencies;
 use sniff_lib::programs::ProgramsInfo;
+use sniff_lib::services::{ServiceState, detect_services};
 use sniff_lib::{SniffConfig, SniffResult, detect_with_config};
 use std::path::PathBuf;
 
@@ -126,6 +127,24 @@ struct Cli {
     /// JSON output format: "simple" (default, backward compatible) or "full" (rich metadata)
     #[arg(long, value_name = "FORMAT", help_heading = "Programs Flags")]
     json_format: Option<String>,
+
+    // === Services flags ===
+    /// Show only system services (init system and service list)
+    #[arg(long, help_heading = "Services Flags")]
+    services: bool,
+
+    /// Filter services by state (only used with --services)
+    #[arg(long, value_enum, default_value = "running", help_heading = "Services Flags")]
+    state: ServiceStateArg,
+}
+
+/// Service state filter for --services flag.
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+pub enum ServiceStateArg {
+    #[default]
+    All,
+    Running,
+    Stopped,
 }
 
 impl Cli {
@@ -189,6 +208,11 @@ impl Cli {
         }
         if self.audio {
             flags.push("--audio");
+        }
+
+        // Services filter flag
+        if self.services {
+            flags.push("--services");
         }
 
         flags
@@ -263,6 +287,9 @@ impl Cli {
         }
         if self.audio {
             return OutputFilter::HeadlessAudio;
+        }
+        if self.services {
+            return OutputFilter::Services;
         }
         if self.markdown {
             return OutputFilter::Programs;
@@ -368,6 +395,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    // Handle services mode separately (doesn't use SniffResult)
+    if cli.services {
+        let services_info = detect_services();
+        let state_filter = match cli.state {
+            ServiceStateArg::All => ServiceState::All,
+            ServiceStateArg::Running => ServiceState::Running,
+            ServiceStateArg::Stopped => ServiceState::Stopped,
+        };
+        if cli.json {
+            output::print_services_json(&services_info, state_filter)?;
+        } else {
+            output::print_services_text(&services_info, cli.verbose, state_filter);
+        }
+        return Ok(());
+    }
+
     // Canonicalize path if provided
     let base_dir = cli
         .base
@@ -439,7 +482,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        // Programs filters are handled earlier in main, should not reach here
+        // Programs and Services filters are handled earlier in main, should not reach here
         OutputFilter::Programs
         | OutputFilter::Editors
         | OutputFilter::Utilities
@@ -447,8 +490,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::OsPackageManagers
         | OutputFilter::TtsClients
         | OutputFilter::TerminalApps
-        | OutputFilter::HeadlessAudio => {
-            unreachable!("Programs mode should be handled before this point")
+        | OutputFilter::HeadlessAudio
+        | OutputFilter::Services => {
+            unreachable!("Programs and Services mode should be handled before this point")
         }
     }
 
