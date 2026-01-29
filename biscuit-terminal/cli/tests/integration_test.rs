@@ -1,20 +1,21 @@
 //! Integration tests for the `terminal` CLI binary.
 
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
+use serde_json::json;
 
 #[test]
 fn test_default_shows_metadata() {
-    let mut cmd = Command::cargo_bin("bt").unwrap();
-    cmd.assert()
+    cargo_bin_cmd!("bt")
+        .assert()
         .success()
         .stdout(predicate::str::contains("Terminal Metadata"));
 }
 
 #[test]
 fn test_json_flag_outputs_json() {
-    let mut cmd = Command::cargo_bin("bt").unwrap();
-    cmd.arg("--json")
+    cargo_bin_cmd!("bt")
+        .arg("--json")
         .assert()
         .success()
         .stdout(predicate::str::contains("\"app\""))
@@ -23,8 +24,8 @@ fn test_json_flag_outputs_json() {
 
 #[test]
 fn test_help_flag() {
-    let mut cmd = Command::cargo_bin("bt").unwrap();
-    cmd.arg("--help")
+    cargo_bin_cmd!("bt")
+        .arg("--help")
         .assert()
         .success()
         .stdout(predicate::str::contains("Display terminal metadata"));
@@ -32,8 +33,8 @@ fn test_help_flag() {
 
 #[test]
 fn test_version_flag() {
-    let mut cmd = Command::cargo_bin("bt").unwrap();
-    cmd.arg("--version")
+    cargo_bin_cmd!("bt")
+        .arg("--version")
         .assert()
         .success()
         .stdout(predicate::str::contains("bt"));
@@ -41,8 +42,8 @@ fn test_version_flag() {
 
 #[test]
 fn test_respects_no_color() {
-    let mut cmd = Command::cargo_bin("bt").unwrap();
-    cmd.env("NO_COLOR", "1")
+    cargo_bin_cmd!("bt")
+        .env("NO_COLOR", "1")
         .assert()
         .success()
         // Should NOT contain escape codes when NO_COLOR is set
@@ -51,8 +52,8 @@ fn test_respects_no_color() {
 
 #[test]
 fn test_shows_underline_support() {
-    let mut cmd = Command::cargo_bin("bt").unwrap();
-    cmd.assert()
+    cargo_bin_cmd!("bt")
+        .assert()
         .success()
         .stdout(predicate::str::contains("Underline Support"))
         .stdout(predicate::str::contains("Straight:"))
@@ -61,8 +62,7 @@ fn test_shows_underline_support() {
 
 #[test]
 fn test_json_output_is_valid_json() {
-    let mut cmd = Command::cargo_bin("bt").unwrap();
-    let output = cmd
+    let output = cargo_bin_cmd!("bt")
         .arg("--json")
         .output()
         .expect("Failed to execute command");
@@ -98,16 +98,16 @@ fn test_json_output_is_valid_json() {
 
 #[test]
 fn test_default_output_shows_size() {
-    let mut cmd = Command::cargo_bin("bt").unwrap();
-    cmd.assert()
+    cargo_bin_cmd!("bt")
+        .assert()
         .success()
         .stdout(predicate::str::contains("Size:"));
 }
 
 #[test]
 fn test_default_output_shows_tty_status() {
-    let mut cmd = Command::cargo_bin("bt").unwrap();
-    cmd.assert()
+    cargo_bin_cmd!("bt")
+        .assert()
         .success()
         .stdout(predicate::str::contains("Is TTY:"));
 }
@@ -117,8 +117,7 @@ fn test_default_output_shows_tty_status() {
 /// the terminal and whether a config file exists.
 #[test]
 fn test_json_font_fields_are_valid_if_present() {
-    let mut cmd = Command::cargo_bin("bt").unwrap();
-    let output = cmd
+    let output = cargo_bin_cmd!("bt")
         .arg("--json")
         .output()
         .expect("Failed to execute command");
@@ -136,7 +135,10 @@ fn test_json_font_fields_are_valid_if_present() {
 
     // If font_size field is present, it should be a number
     if let Some(size) = parsed.get("font_size") {
-        assert!(size.is_number(), "'font_size' should be a number if present");
+        assert!(
+            size.is_number(),
+            "'font_size' should be a number if present"
+        );
     }
 
     // font_ligatures is still unimplemented, should always be absent
@@ -151,8 +153,9 @@ fn test_json_font_fields_are_valid_if_present() {
 /// shown conditionally when font data was available. Now it's always shown.
 #[test]
 fn test_always_shows_font_section() {
-    let mut cmd = Command::cargo_bin("bt").unwrap();
-    let output = cmd.output().expect("Failed to execute command");
+    let output = cargo_bin_cmd!("bt")
+        .output()
+        .expect("Failed to execute command");
 
     assert!(output.status.success());
 
@@ -180,8 +183,7 @@ fn test_always_shows_font_section() {
 /// This ensures the heuristic-based ligature support detection is exported.
 #[test]
 fn test_json_includes_ligatures_likely() {
-    let mut cmd = Command::cargo_bin("bt").unwrap();
-    let output = cmd
+    let output = cargo_bin_cmd!("bt")
         .arg("--json")
         .output()
         .expect("Failed to execute command");
@@ -201,4 +203,55 @@ fn test_json_includes_ligatures_likely() {
         parsed.get("ligatures_likely").unwrap().is_boolean(),
         "'ligatures_likely' must be a boolean"
     );
+}
+
+#[test]
+fn test_json_includes_content_analysis() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("--json")
+        .arg("red\nblue")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    assert_eq!(parsed.get("line_count").unwrap(), &json!(2));
+    assert_eq!(parsed.get("line_lengths").unwrap(), &json!([3, 4]));
+    assert_eq!(parsed.get("total_length").unwrap(), &json!(7));
+    assert_eq!(
+        parsed.get("contains_color_escape_codes").unwrap(),
+        &json!(false)
+    );
+    assert_eq!(parsed.get("contains_osc8_links").unwrap(), &json!(false));
+    assert!(parsed.get("app").is_none(), "Metadata should be omitted");
+}
+
+#[test]
+fn test_content_analysis_detects_color_and_osc8() {
+    let content = "\x1b[31mred\x1b[0m \x1b]8;;https://example.com\x07link\x1b]8;;\x07";
+    let output = cargo_bin_cmd!("bt")
+        .arg("--json")
+        .arg(content)
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    assert_eq!(parsed.get("line_count").unwrap(), &json!(1));
+    assert_eq!(parsed.get("line_lengths").unwrap(), &json!([8]));
+    assert_eq!(parsed.get("total_length").unwrap(), &json!(8));
+    assert_eq!(
+        parsed.get("contains_color_escape_codes").unwrap(),
+        &json!(true)
+    );
+    assert_eq!(parsed.get("contains_osc8_links").unwrap(), &json!(true));
+    assert!(parsed.get("app").is_none(), "Metadata should be omitted");
 }

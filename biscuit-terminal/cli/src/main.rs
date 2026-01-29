@@ -11,12 +11,12 @@ use biscuit_terminal::{
     discovery::{
         clipboard,
         detection::{multiplex_support, Connection, MultiplexSupport},
-        fonts, mode_2027, osc_queries,
-        service_manager::{HostOs, Service, ServiceState},
+        eval, fonts, mode_2027, osc_queries,
     },
     terminal::Terminal,
+    utils::escape_codes,
 };
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use serde::Serialize;
 
 /// Terminal information utility
@@ -32,30 +32,9 @@ struct Args {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Show system services instead of terminal info
-    #[arg(long)]
-    services: bool,
-
-    /// Filter services by state (only used with --services)
-    #[arg(long, value_enum, default_value = "all")]
-    state: ServiceStateArg,
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-enum ServiceStateArg {
-    All,
-    Running,
-    Stopped,
-}
-
-impl From<ServiceStateArg> for ServiceState {
-    fn from(arg: ServiceStateArg) -> Self {
-        match arg {
-            ServiceStateArg::All => ServiceState::All,
-            ServiceStateArg::Running => ServiceState::Running,
-            ServiceStateArg::Stopped => ServiceState::Stopped,
-        }
-    }
+    /// Content to analyze (positional; multiple values are joined with spaces)
+    #[arg(value_name = "CONTENT")]
+    content: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -143,23 +122,20 @@ struct TerminalMetadata {
     /// Path to terminal config file
     #[serde(skip_serializing_if = "Option::is_none")]
     config_file: Option<String>,
-
-    /// Service manager / init system information
-    service_manager: ServiceManagerInfo,
 }
 
 #[derive(Debug, Serialize)]
-struct ServiceManagerInfo {
-    /// The init system type (systemd, launchd, etc.)
-    init_system: String,
-    /// The host OS as detected by service manager
-    host_os: String,
-    /// Hints used during detection (for verbose mode)
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    hints: Vec<String>,
-    /// Notes about the detection (for verbose mode)
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    notes: Vec<String>,
+struct ContentAnalysis {
+    /// Number of lines in the content
+    line_count: u32,
+    /// Length of each line in characters (escape codes stripped)
+    line_lengths: Vec<u32>,
+    /// Whether the content contains SGR color escape codes
+    contains_color_escape_codes: bool,
+    /// Whether the content contains OSC8 links
+    contains_osc8_links: bool,
+    /// Total character length (escape codes stripped)
+    total_length: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -235,26 +211,27 @@ fn main() -> color_eyre::Result<()> {
     }
 
     let args = Args::parse();
-
-    if args.services {
-        let terminal = Terminal::new();
-        let services = terminal
-            .service_manager
-            .services_detailed(args.state.into());
-
-        if args.json {
-            println!("{}", serde_json::to_string_pretty(&services)?);
-        } else {
-            print_services(&services, &terminal.service_manager.init_system.to_string());
-        }
+    let content = if args.content.is_empty() {
+        None
     } else {
-        let metadata = collect_metadata();
+        Some(args.content.join(" "))
+    };
 
+    if let Some(content) = content.as_deref() {
+        let analysis = analyze_content(content);
         if args.json {
-            println!("{}", serde_json::to_string_pretty(&metadata)?);
+            println!("{}", serde_json::to_string_pretty(&analysis)?);
         } else {
-            print_pretty(&metadata, args.verbose);
+            print_content_analysis(&analysis);
         }
+        return Ok(());
+    }
+
+    let metadata = collect_metadata();
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&metadata)?);
+    } else {
+        print_pretty(&metadata, args.verbose);
     }
 
     Ok(())
@@ -310,9 +287,10 @@ fn collect_metadata() -> TerminalMetadata {
         font: terminal.font.clone(),
         font_size: terminal.font_size,
         is_nerd_font: terminal.is_nerd_font,
-        font_ligatures: terminal.font_ligatures.as_ref().map(|ligatures| {
-            ligatures.iter().map(|l| format!("{:?}", l)).collect()
-        }),
+        font_ligatures: terminal
+            .font_ligatures
+            .as_ref()
+            .map(|ligatures| ligatures.iter().map(|l| format!("{:?}", l)).collect()),
         ligatures_likely: fonts::ligature_support_likely(),
 
         supports_italic: terminal.supports_italic,
@@ -336,23 +314,61 @@ fn collect_metadata() -> TerminalMetadata {
         locale_raw: terminal.locale.raw().map(|s| s.to_string()),
         locale_tag: terminal.locale.tag().map(|s| s.to_string()),
         char_encoding: format!("{:?}", terminal.char_encoding),
-        config_file: terminal.config_file.as_ref().map(|p| p.display().to_string()),
-        service_manager: ServiceManagerInfo {
-            init_system: terminal.service_manager.init_system.to_string(),
-            host_os: format_host_os(terminal.service_manager.host_os),
-            hints: terminal.service_manager.evidence.hints.clone(),
-            notes: terminal.service_manager.evidence.notes.clone(),
-        },
+        config_file: terminal
+            .config_file
+            .as_ref()
+            .map(|p| p.display().to_string()),
     }
 }
 
-fn format_host_os(os: HostOs) -> String {
-    match os {
-        HostOs::Linux => "Linux".to_string(),
-        HostOs::Macos => "macOS".to_string(),
-        HostOs::Windows => "Windows".to_string(),
-        HostOs::Other => "Other".to_string(),
+fn analyze_content(content: &str) -> ContentAnalysis {
+    let stripped = escape_codes::strip_escape_codes(content);
+    let line_lengths: Vec<u32> = stripped
+        .split('\n')
+        .map(|line| line.chars().count() as u32)
+        .collect();
+    let line_count = line_lengths.len() as u32;
+    let total_length = line_lengths.iter().copied().sum();
+
+    ContentAnalysis {
+        line_count,
+        line_lengths,
+        contains_color_escape_codes: escape_codes::strip_color_codes(content) != content,
+        contains_osc8_links: eval::has_osc8_link(content),
+        total_length,
     }
+}
+
+fn print_content_analysis(analysis: &ContentAnalysis) {
+    let no_color = std::env::var("NO_COLOR").is_ok();
+    let bold = if no_color { "" } else { "\x1b[1m" };
+    let dim = if no_color { "" } else { "\x1b[2m" };
+    let reset = if no_color { "" } else { "\x1b[0m" };
+    let green = if no_color { "" } else { "\x1b[32m" };
+
+    let yes = format!("{}yes{}", green, reset);
+    let no_mark = format!("{}no{}", dim, reset);
+    let check = |b: bool| if b { &yes } else { &no_mark };
+
+    let line_lengths = analysis
+        .line_lengths
+        .iter()
+        .map(|len| len.to_string())
+        .collect::<Vec<String>>()
+        .join(", ");
+
+    println!();
+    println!("{}Content Analysis{}", bold, reset);
+    println!("{}══════════════════{}", dim, reset);
+    println!("  Lines:        {}", analysis.line_count);
+    println!("  Line lengths: {}", line_lengths);
+    println!("  Total length: {}", analysis.total_length);
+    println!(
+        "  Color codes:  {}",
+        check(analysis.contains_color_escape_codes)
+    );
+    println!("  OSC8 links:   {}", check(analysis.contains_osc8_links));
+    println!();
 }
 
 fn format_connection(conn: &Connection) -> ConnectionInfo {
@@ -555,23 +571,6 @@ fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     );
     println!("  Encoding:   {}", metadata.char_encoding);
 
-    // Service Manager
-    println!("\n{}{}Service Manager{}", bold, blue, reset);
-    println!("  Init System: {}", metadata.service_manager.init_system);
-    println!("  Host OS:     {}", metadata.service_manager.host_os);
-    if verbose && !metadata.service_manager.hints.is_empty() {
-        println!("  Hints:");
-        for hint in &metadata.service_manager.hints {
-            println!("    - {}", hint);
-        }
-    }
-    if verbose && !metadata.service_manager.notes.is_empty() {
-        println!("  Notes:");
-        for note in &metadata.service_manager.notes {
-            println!("    - {}", note);
-        }
-    }
-
     // Config
     if let Some(config) = &metadata.config_file {
         println!("\n{}{}Config{}", bold, blue, reset);
@@ -579,77 +578,4 @@ fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     }
 
     println!();
-}
-
-fn print_services(services: &[Service], init_system: &str) {
-    // Respect NO_COLOR environment variable
-    let no_color = std::env::var("NO_COLOR").is_ok();
-
-    let bold = if no_color { "" } else { "\x1b[1m" };
-    let dim = if no_color { "" } else { "\x1b[2m" };
-    let reset = if no_color { "" } else { "\x1b[0m" };
-    let green = if no_color { "" } else { "\x1b[32m" };
-    let red = if no_color { "" } else { "\x1b[31m" };
-    let blue = if no_color { "" } else { "\x1b[34m" };
-
-    println!();
-    println!(
-        "{}System Services{} {}({}){}\n",
-        bold, reset, dim, init_system, reset
-    );
-
-    if services.is_empty() {
-        println!("  {}No services found{}", dim, reset);
-        println!();
-        return;
-    }
-
-    // Calculate column widths
-    let max_name_len = services
-        .iter()
-        .map(|s| s.name.len())
-        .max()
-        .unwrap_or(20)
-        .min(50);
-
-    // Print header
-    println!(
-        "  {}{:<width$}  {:>8}  {:<7}{}",
-        blue,
-        "SERVICE",
-        "PID",
-        "STATUS",
-        reset,
-        width = max_name_len
-    );
-    println!(
-        "  {}{}{}",
-        dim,
-        "─".repeat(max_name_len + 20),
-        reset
-    );
-
-    // Print services
-    for service in services {
-        let status = if service.running {
-            format!("{}running{}", green, reset)
-        } else {
-            format!("{}stopped{}", red, reset)
-        };
-
-        let pid = match service.pid {
-            Some(p) => format!("{:>8}", p),
-            None => format!("{:>8}", "-"),
-        };
-
-        let name = if service.name.len() > max_name_len {
-            format!("{}...", &service.name[..max_name_len - 3])
-        } else {
-            service.name.clone()
-        };
-
-        println!("  {:<width$}  {}  {}", name, pid, status, width = max_name_len);
-    }
-
-    println!("\n  {}Total: {} services{}\n", dim, services.len(), reset);
 }
