@@ -117,6 +117,22 @@ enum Commands {
         #[arg(short, long)]
         force: bool,
     },
+
+    /// Pull a research skill from user scope to the current repository
+    ///
+    /// Copies the skill directory from ~/.research/library/<topic>/skill/
+    /// to .claude/skills/<topic>/ in the current git repository.
+    /// Also creates relative symlinks for Roo (.roo/skills/) and
+    /// OpenCode (.opencode/skill/) if those frameworks are detected.
+    Pull {
+        /// The topic to pull from the user's research library
+        #[arg(required = true, value_name = "TOPIC")]
+        topic: String,
+
+        /// Also copy underlying research documents to .claude/research/<topic>/
+        #[arg(long)]
+        local: bool,
+    },
 }
 
 fn read_topic_from_stdin() -> io::Result<String> {
@@ -353,6 +369,41 @@ async fn main() {
                 }
                 Err(e) => {
                     eprintln!("API research failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Pull { topic, local } => {
+            use research_lib::pull::{PullOptions, pull_topic};
+
+            let options = PullOptions { topic, local };
+
+            match pull_topic(&options) {
+                Ok(result) => {
+                    println!("Pulled '{}' to repository", result.topic);
+                    println!("  Skill: {}", result.skill_path.display());
+
+                    if let Some(research_path) = result.research_path {
+                        println!("  Research: {}", research_path.display());
+                    }
+
+                    if !result.symlinks_created.is_empty() {
+                        println!("  Symlinks created:");
+                        for symlink in &result.symlinks_created {
+                            println!("    - {}", symlink.display());
+                        }
+                    }
+
+                    if !result.warnings.is_empty() {
+                        println!("\nWarnings:");
+                        for warning in &result.warnings {
+                            println!("  - {}", warning);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Pull failed: {}", e);
                     std::process::exit(1);
                 }
             }

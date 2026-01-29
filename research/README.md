@@ -207,6 +207,55 @@ research api <API_NAME> [QUESTIONS...] [OPTIONS]
 | `-o`, `--output <DIR>` | Output directory (default: `$RESEARCH_DIR/.research/api/<API_NAME>`) |
 | `-f`, `--force` | Force recreation even if research exists |
 
+#### Pull to Repository (`research pull`)
+
+Copy a research skill from your user-level research library to the current git repository.
+
+```bash
+research pull <TOPIC> [OPTIONS]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--local` | Also copy underlying research documents to `.claude/research/<topic>/` |
+
+**What it does:**
+
+1. **Git detection**: Fails if not in a git repository
+2. **Skill copying**: Copies `~/.research/library/<topic>/skill/` to `.claude/skills/<topic>/`
+3. **Framework symlinks**: Creates relative symlinks for detected frameworks:
+   - `.roo/skills/<topic>` if `.roo/` directory exists (Roo framework)
+   - `.opencode/skill/<topic>` if `AGENTS.md` exists (OpenCode framework)
+4. **Local research** (with `--local`): Copies underlying research documents to `.claude/research/<topic>/`
+
+**Examples:**
+
+```bash
+# Pull clap skill to current repo
+research pull clap
+
+# Pull with underlying research documents
+research pull tokio --local
+```
+
+**Output locations:**
+
+```
+.claude/
+├── skills/<topic>/           # Skill files (always created)
+│   ├── SKILL.md
+│   └── *.md
+└── research/<topic>/         # Research docs (with --local)
+    ├── overview.md
+    ├── similar_libraries.md
+    └── ...
+
+.roo/skills/<topic>/          # Relative symlink (if .roo/ exists)
+.opencode/skill/<topic>/      # Relative symlink (if AGENTS.md exists)
+```
+
 ## Library Research Output
 
 ### Underlying Research (Phase 1)

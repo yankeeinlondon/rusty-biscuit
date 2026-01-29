@@ -13,11 +13,13 @@
 //!
 //! Migration happens automatically during [`crate::ResearchMetadata::load()`].
 
+pub mod content_policy;
+pub mod inventory;
 pub mod migration;
+pub mod migration_v2;
+pub mod topic;
 pub mod types;
 pub mod v0;
-pub mod content_policy;
-pub mod topic;
 
 pub use types::{
     ApiDetails, AppDetails, CliDetails, CloudProviderDetails, CompanyCategoryDetails,
@@ -26,4 +28,6 @@ pub use types::{
 };
 pub use v0::MetadataV0;
 
-pub use content_policy::{ ContentPolicy, ContentExpiry };
+pub use content_policy::{ContentExpiry, ContentPolicy};
+pub use inventory::{InventoryError, ResearchInventory};
+pub use topic::{ContentType, Document, DocumentConversionError, Flow, KindCategory, Library, License, Software, Topic};

@@ -4593,6 +4593,7 @@ dependencies = [
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
  "serial_test",
+ "sniff-lib",
  "tempfile",
  "termbg",
  "thiserror 2.0.18",
@@ -4602,6 +4603,7 @@ dependencies = [
  "tracing-test",
  "walkdir",
  "wiremock",
+ "xxhash-rust",
 ]
 
 [[package]]

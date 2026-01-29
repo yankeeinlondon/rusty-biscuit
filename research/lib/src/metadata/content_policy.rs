@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sniff::prelude::*;
+use sniff_lib::package::LanguagePackageManager;
 
 #[derive(Debug,Clone,Serialize,Deserialize)]
 pub struct LibraryVariant {

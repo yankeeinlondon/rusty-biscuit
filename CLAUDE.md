@@ -307,6 +307,10 @@ just research library clap "How does it compare to structopt?"
 # Or directly:
 just -f research/justfile cli library clap
 
+# Pull skill to repository
+research pull clap
+research pull tokio --local  # Also copy underlying research docs
+
 # Speak CLI (debug mode)
 just -f so-you-say/justfile cli "Hello world"
 ```

@@ -15,6 +15,7 @@ pub mod changelog;
 pub mod link;
 pub mod list;
 pub mod metadata;
+pub mod pull;
 pub mod utils;
 pub mod validation;
 
