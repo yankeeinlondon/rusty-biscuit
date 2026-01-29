@@ -4,6 +4,7 @@ BOLD := '\033[1m'
 RESET := '\033[0m'
 
 default:
+    @md just.md
     @echo
     @echo "Biscuit Terminal"
     @echo "================"
