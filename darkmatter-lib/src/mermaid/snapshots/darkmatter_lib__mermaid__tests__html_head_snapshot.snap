@@ -1,0 +1,51 @@
+---
+source: darkmatter-lib/src/mermaid/mod.rs
+expression: html.head
+---
+<style>
+  :root {
+    --mermaid-background: #ffffff;
+    --mermaid-primary-color: #fff4dd;
+    --mermaid-secondary-color: #e8f5e9;
+    --mermaid-tertiary-color: #e3f2fd;
+    --mermaid-primary-border-color: #666666;
+    --mermaid-secondary-border-color: #6699cc;
+    --mermaid-tertiary-border-color: #99ccff;
+    --mermaid-primary-text-color: #333333;
+    --mermaid-secondary-text-color: #000000;
+    --mermaid-tertiary-text-color: #000000;
+    --mermaid-line-color: #333333;
+    --mermaid-text-color: #333333;
+    --mermaid-main-bkg: #ececff;
+    --mermaid-node-border: #9370db;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --mermaid-background: #1a1a2e;
+      --mermaid-primary-color: #4a5568;
+      --mermaid-secondary-color: #6699cc;
+      --mermaid-tertiary-color: #99ccff;
+      --mermaid-primary-border-color: #718096;
+      --mermaid-secondary-border-color: #6699cc;
+      --mermaid-tertiary-border-color: #99ccff;
+      --mermaid-primary-text-color: #e2e8f0;
+      --mermaid-secondary-text-color: #ffffff;
+      --mermaid-tertiary-text-color: #ffffff;
+      --mermaid-line-color: #a0aec0;
+      --mermaid-text-color: #e2e8f0;
+      --mermaid-main-bkg: #1e1e1e;
+      --mermaid-node-border: #9370db;
+    }
+  }
+</style>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.registerIconPacks([
+    { name: 'fa7-brands', loader: () => fetch('https://unpkg.com/@iconify-json/fa7-brands@1/icons.json').then(r => r.json()) },
+    { name: 'lucide', loader: () => fetch('https://unpkg.com/@iconify-json/lucide@1/icons.json').then(r => r.json()) },
+    { name: 'carbon', loader: () => fetch('https://unpkg.com/@iconify-json/carbon@1/icons.json').then(r => r.json()) },
+    { name: 'system-uicons', loader: () => fetch('https://unpkg.com/@iconify-json/system-uicons@1/icons.json').then(r => r.json()) }
+  ]);
+  mermaid.initialize({ startOnLoad: true });
+</script>

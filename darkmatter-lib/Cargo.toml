@@ -1,0 +1,71 @@
+[package]
+name = "darkmatter-lib"
+description = "Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML output."
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+readme = "README.md"
+repository = "https://github.com/yankeeinlondon/dockhand"
+keywords = ["markdown", "terminal", "syntax-highlighting", "mermaid", "themes"]
+categories = ["text-processing", "visualization"]
+
+[lib]
+name = "darkmatter_lib"
+path = "src/lib.rs"
+
+[dependencies]
+# Tracing
+tracing = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Error handling
+thiserror = "2.0"
+
+# Utilities
+lazy_static = "1.5"
+regex = "1.11"
+tempfile = "3.8"
+
+# HTTP and URLs
+reqwest = { version = "0.12", features = ["json", "gzip"] }
+url = "2.5"
+
+# Async runtime
+tokio = { version = "1.48", features = ["time", "macros", "rt-multi-thread"] }
+
+# Syntax highlighting
+syntect = "5.2"
+two-face = "0.5"
+
+# Markdown parsing and rendering
+pulldown-cmark = "0.13"
+pulldown-cmark-to-cmark = "22"
+markdown = { version = "1.0.0-alpha.22", features = ["serde"] }
+html-escape = "0.2"
+unicode-width = "0.2.2"
+textwrap = "0.16"
+supports-hyperlinks = "3.2.0"
+similar = { version = "2.6", features = ["inline"] }
+
+# Terminal capabilities
+termini = "1.0"
+terminal_size = "0.4"
+
+# Table rendering
+comfy-table = "7.1"
+
+# Terminal image rendering
+viuer = { version = "0.11", features = ["print-file"] }
+
+# Hashing (for Mermaid diagram caching and markdown TOC)
+biscuit-hash = { path = "../biscuit-hash" }
+
+[dev-dependencies]
+tokio = { version = "1.48", features = ["full", "test-util"] }
+tracing-test = "0.2"
+insta = "1.41"
+serial_test = "3.0"

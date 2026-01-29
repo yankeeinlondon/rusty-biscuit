@@ -1,0 +1,6 @@
+---
+source: darkmatter-lib/src/mermaid/mod.rs
+expression: html.body
+---
+<pre class="mermaid" role="img" aria-label="Test Flowchart" title="Test Flowchart">flowchart LR
+    A --&gt; B</pre>

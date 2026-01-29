@@ -1,0 +1,8 @@
+build:
+    cargo build -p darkmatter-lib
+
+test:
+    cargo test -p darkmatter-lib
+
+lint:
+    cargo clippy -p darkmatter-lib

@@ -20,8 +20,9 @@ dockhand/
 │   ├── cli/          # Binary: `research` (FUTURE)
 │   └── lib/          # Core research library
 │   └── service/      # Server to abstract AI pipelining functionality (FUTURE)
-├── biscuit/          # Common utilities (providers, tools, TTS, codegen)
-├── darkmatter/       # Binary: `md` (markdown terminal renderer)
+├── biscuit/          # Common utilities (providers, tools, codegen, hashing)
+├── darkmatter-cli/   # Binary: `md` (markdown terminal renderer)
+├── darkmatter-lib/   # Markdown parsing, mermaid diagrams, syntax highlighting
 ├── queue/            # TUI command scheduler
 │   ├── cli/          # Binary: `queue` (TUI application)
 │   └── lib/          # Core library (types, persistence, execution, terminal detection)

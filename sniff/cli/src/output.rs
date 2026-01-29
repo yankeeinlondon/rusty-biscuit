@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use shared::markdown::Markdown;
-use shared::markdown::output::terminal::{TerminalOptions, for_terminal};
-use shared::render::link::Link;
+use darkmatter_lib::markdown::Markdown;
+use darkmatter_lib::markdown::output::terminal::{TerminalOptions, for_terminal};
+use darkmatter_lib::render::link::Link;
 use sniff_lib::SniffResult;
 use sniff_lib::filesystem::git::BehindStatus;
 use sniff_lib::hardware::NtpStatus;

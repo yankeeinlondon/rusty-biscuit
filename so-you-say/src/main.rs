@@ -11,8 +11,8 @@ use biscuit_speaks::{
 use clap::{Parser, ValueEnum};
 use inquire::Select;
 use owo_colors::OwoColorize;
-use shared::markdown::output::terminal::{TerminalOptions, for_terminal};
-use shared::markdown::Markdown;
+use darkmatter_lib::markdown::output::terminal::{TerminalOptions, for_terminal};
+use darkmatter_lib::markdown::Markdown;
 
 /// Gender preference for voice selection
 #[derive(Debug, Clone, Copy, ValueEnum)]

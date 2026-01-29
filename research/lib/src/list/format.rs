@@ -10,7 +10,7 @@
 
 use crate::list::types::TopicInfo;
 use owo_colors::OwoColorize;
-use shared::render::Link;
+use darkmatter_lib::render::Link;
 use std::sync::OnceLock;
 
 /// Formats a list of topics as pretty-printed JSON.

@@ -1172,20 +1172,55 @@ dependencies = [
 ]
 
 [[package]]
-name = "darkmatter"
+name = "darkmatter-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "clap 4.5.54",
  "color-eyre",
+ "darkmatter-lib",
  "open",
  "predicates",
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
- "shared",
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "darkmatter-lib"
+version = "0.1.0"
+dependencies = [
+ "biscuit-hash",
+ "comfy-table",
+ "html-escape",
+ "insta",
+ "lazy_static",
+ "markdown",
+ "pulldown-cmark",
+ "pulldown-cmark-to-cmark",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml 0.9.34+deprecated",
+ "serial_test",
+ "similar",
+ "supports-hyperlinks",
+ "syntect",
+ "tempfile",
+ "terminal_size",
+ "termini",
+ "textwrap 0.16.2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-test",
+ "two-face",
+ "unicode-width 0.2.2",
+ "url",
+ "viuer",
 ]
 
 [[package]]
@@ -3730,8 +3765,8 @@ name = "playa-cli"
 version = "0.1.0"
 dependencies = [
  "clap 4.5.54",
+ "darkmatter-lib",
  "playa",
- "shared",
  "sniff-lib",
 ]
 
@@ -4535,6 +4570,7 @@ version = "0.1.0"
 dependencies = [
  "biscuit-speaks",
  "chrono",
+ "darkmatter-lib",
  "dirs 5.0.1",
  "dotenvy",
  "futures",
@@ -5163,20 +5199,16 @@ dependencies = [
  "chrono",
  "clap 4.5.54",
  "color-eyre",
- "comfy-table",
  "criterion",
  "futures",
  "generic-array",
- "html-escape",
  "insta",
  "lazy_static",
- "markdown",
  "once_cell",
  "prettyplease",
  "proc-macro2",
  "proptest",
  "pulldown-cmark",
- "pulldown-cmark-to-cmark",
  "quote",
  "rand 0.8.5",
  "regex",
@@ -5187,25 +5219,16 @@ dependencies = [
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
  "serial_test",
- "similar",
  "strum 0.27.2",
  "strum_macros 0.27.2",
- "supports-hyperlinks",
  "syn 2.0.114",
- "syntect",
  "tempfile",
- "terminal_size",
- "termini",
- "textwrap 0.16.2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "tracing-test",
- "two-face",
- "unicode-width 0.2.2",
  "url",
- "viuer",
  "wiremock",
 ]
 
@@ -5314,10 +5337,10 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "clap 4.5.54",
+ "darkmatter-lib",
  "predicates",
  "serde",
  "serde_json",
- "shared",
  "sniff-lib",
  "strum 0.27.2",
  "tokio",
@@ -5358,9 +5381,9 @@ version = "0.1.0"
 dependencies = [
  "biscuit-speaks",
  "clap 4.5.54",
+ "darkmatter-lib",
  "inquire",
  "owo-colors",
- "shared",
  "tokio",
 ]
 

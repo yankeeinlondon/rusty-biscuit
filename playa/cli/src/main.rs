@@ -4,9 +4,9 @@ use clap::{Parser, ValueHint};
 use sniff_lib::programs::InstalledHeadlessAudio;
 
 use playa::{all_players, AudioFileFormat, AudioPlayer, Codec, Playa, SoundEffect, PLAYER_LOOKUP};
-use shared::markdown::output::terminal::{for_terminal, TerminalOptions};
-use shared::markdown::Markdown;
-use shared::testing::strip_ansi_codes;
+use darkmatter_lib::markdown::output::terminal::{for_terminal, TerminalOptions};
+use darkmatter_lib::markdown::Markdown;
+use darkmatter_lib::testing::strip_ansi_codes;
 
 const MISSING_FG: &str = "\x1b[38;2;140;140;140m";
 const ITALIC: &str = "\x1b[3m";
