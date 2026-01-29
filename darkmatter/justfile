@@ -1,0 +1,40 @@
+set dotenv-load
+set positional-arguments
+
+BOLD := '\033[1m'
+RESET := '\033[0m'
+
+default:
+    @echo "{{BOLD}}Darkmatter CLI and Library{{RESET}}"
+    @echo
+    @just --list | grep -v 'default'
+
+# build library and CLI
+build *args="":
+    @echo "Building ..."
+    @cargo build -p darkmatter-lib {{args}}
+    @cargo build -p darkmatter-cli {{args}}
+
+# test library and CLI
+test *args="":
+    @echo "Testing {{BOLD}}Library{{RESET}} code"
+    @cargo test -p darkmatter-lib {{args}}
+    @echo ""
+    @echo "Testing {{BOLD}}CLI{{RESET}} code"
+    @cargo test -p darkmatter-cli {{args}}
+
+# lint with clippy
+lint *args="":
+    @cargo clippy -p darkmatter-lib -p darkmatter-cli {{args}}
+
+# install latest release version of CLI
+install *args="":
+    @cargo install --path cli {{args}}
+
+# build and show the docs for the library code
+docs:
+    @cargo doc -p darkmatter-lib --open
+
+# run the debug release of the Darkmatter CLI
+cli *args="":
+    @cargo run -p darkmatter-cli -- {{args}}

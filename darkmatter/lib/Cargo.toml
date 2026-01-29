@@ -62,7 +62,7 @@ comfy-table = "7.1"
 viuer = { version = "0.11", features = ["print-file"] }
 
 # Hashing (for Mermaid diagram caching and markdown TOC)
-biscuit-hash = { path = "../biscuit-hash" }
+biscuit-hash = { path = "../../biscuit-hash" }
 
 [dev-dependencies]
 tokio = { version = "1.48", features = ["full", "test-util"] }

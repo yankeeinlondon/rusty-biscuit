@@ -110,7 +110,7 @@ md *args="":
     echo ""
     echo -e "{{BOLD}}Darkmatter CLI{{RESET}} (latest debug build)"
     echo -e "----------------------------------------------------"
-    cargo run -p darkmatter --bin md -- {{args}}
+    cargo run -p darkmatter-cli --bin md -- {{args}}
 
 # executes the latest Research CLI code in debug mode
 research *args="":

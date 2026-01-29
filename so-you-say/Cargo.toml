@@ -13,5 +13,5 @@ clap = { version = "4.5.53", features = ["derive", "wrap_help"] }
 biscuit-speaks = { path = "../biscuit-speaks", features = ["playa"] }
 inquire = "0.9"
 owo-colors = { version = "4.2", features = ["supports-colors"] }
-darkmatter-lib = { path = "../darkmatter-lib" }
+darkmatter-lib = { path = "../darkmatter/lib" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

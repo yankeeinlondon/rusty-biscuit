@@ -1,5 +1,5 @@
 ---
-source: darkmatter-lib/src/mermaid/mod.rs
+source: darkmatter/lib/src/mermaid/mod.rs
 expression: html.head
 ---
 <style>
