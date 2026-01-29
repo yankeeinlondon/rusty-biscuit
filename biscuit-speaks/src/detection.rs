@@ -282,9 +282,10 @@ mod tests {
 
     #[test]
     fn test_build_available_provider_stack_filters() {
+        use sniff_lib::programs::TtsClient;
+
         // Create a mock installed clients with only Say available
-        let mut installed = InstalledTtsClients::default();
-        installed.say = true;
+        let installed = InstalledTtsClients::default().with_client(TtsClient::Say);
 
         let stack = build_available_provider_stack(&installed);
 

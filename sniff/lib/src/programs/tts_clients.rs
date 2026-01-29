@@ -279,6 +279,50 @@ impl InstalledTtsClients {
             .filter(|c| self.is_installed(*c))
             .collect()
     }
+
+    /// Mark a client as installed (for testing purposes).
+    ///
+    /// Creates a fake path entry for the specified client.
+    /// This is useful for unit tests that need to mock installed clients.
+    pub fn with_client(mut self, client: TtsClient) -> Self {
+        let cmd_name = match client {
+            TtsClient::Say => "say",
+            TtsClient::Espeak => "espeak",
+            TtsClient::EspeakNg => "espeak-ng",
+            TtsClient::Festival => "festival",
+            TtsClient::Mimic => "mimic",
+            TtsClient::Mimic3 => "mimic3",
+            TtsClient::Piper => "piper",
+            TtsClient::Echogarden => "echogarden",
+            TtsClient::Balcon => "balcon",
+            TtsClient::WindowsSapi => "wsay",
+            TtsClient::GttsCli => "gtts-cli",
+            TtsClient::CoquiTts => "tts",
+            TtsClient::SherpaOnnx => "sherpa-onnx",
+            TtsClient::KokoroTts => "kokoro-tts",
+            TtsClient::Pico2Wave => "pico2wave",
+        };
+        let fake_path = PathBuf::from(format!("/usr/bin/{}", cmd_name));
+        let entry = Some((fake_path, ExecutableSource::Path));
+        match client {
+            TtsClient::Say => self.say = entry,
+            TtsClient::Espeak => self.espeak = entry,
+            TtsClient::EspeakNg => self.espeak_ng = entry,
+            TtsClient::Festival => self.festival = entry,
+            TtsClient::Mimic => self.mimic = entry,
+            TtsClient::Mimic3 => self.mimic3 = entry,
+            TtsClient::Piper => self.piper = entry,
+            TtsClient::Echogarden => self.echogarden = entry,
+            TtsClient::Balcon => self.balcon = entry,
+            TtsClient::WindowsSapi => self.windows_sapi = entry,
+            TtsClient::GttsCli => self.gtts_cli = entry,
+            TtsClient::CoquiTts => self.coqui_tts = entry,
+            TtsClient::SherpaOnnx => self.sherpa_onnx = entry,
+            TtsClient::KokoroTts => self.kokoro_tts = entry,
+            TtsClient::Pico2Wave => self.pico2wave = entry,
+        }
+        self
+    }
 }
 
 impl Serialize for InstalledTtsClients {

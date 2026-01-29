@@ -2,7 +2,7 @@
 //!
 //! This module provides comprehensive detection of installed programs across
 //! multiple categories including editors, utilities, package managers, TTS clients,
-//! and terminal emulators.
+//! terminal emulators, and AI CLI tools.
 //!
 //! ## Categories
 //!
@@ -13,6 +13,7 @@
 //! - **TTS Clients**: Text-to-speech tools (say, espeak, piper, etc.)
 //! - **Terminal Apps**: Terminal emulators (alacritty, kitty, wezterm, etc.)
 //! - **Headless Audio**: Background audio players (afplay, pacat, aplay, etc.)
+//! - **AI CLI Tools**: AI-powered coding assistants (claude, aider, goose, etc.)
 //!
 //! ## Usage
 //!
@@ -91,43 +92,52 @@
 //! - **macOS**: Full bundle detection support
 //! - **Linux/Windows**: Bundle detection returns `None` (PATH-only)
 
-pub mod types;
-pub mod inventory;
+pub mod ai_cli;
 pub mod editors;
 pub mod enums;
 pub mod find_program;
 pub mod headless_audio;
 pub mod installer;
+pub mod inventory;
 pub mod macos_bundle;
 pub mod pkg_mngrs;
 pub mod schema;
 pub mod terminal_apps;
 pub mod tts_clients;
+pub mod types;
 pub mod utilities;
 
 use serde::{Deserialize, Serialize};
 
+pub use ai_cli::InstalledAiClients;
 pub use editors::InstalledEditors;
 pub use enums::{
-    Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager, TerminalApp, TtsClient,
+    AiCli, Editor, HeadlessAudio, LanguagePackageManager, OsPackageManager, TerminalApp, TtsClient,
     Utility,
 };
+pub use find_program::{
+    find_program, find_program_with_source, find_programs_parallel,
+    find_programs_with_source_parallel,
+};
 pub use headless_audio::InstalledHeadlessAudio;
+pub use installer::{
+    execute_install, execute_versioned_install, get_install_command,
+    get_versioned_install_command, InstallOptions, InstallResult,
+};
+pub use inventory::{Program, PROGRAM_LOOKUP};
+pub use macos_bundle::{find_macos_app_bundle, get_app_bundle_name};
 pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};
 pub use terminal_apps::InstalledTerminalApps;
 pub use tts_clients::InstalledTtsClients;
 pub use types::{ExecutableSource, InstallationMethod, ProgramDetails, ProgramDetector};
 pub use utilities::InstalledUtilities;
-pub use inventory::{Program, PROGRAM_LOOKUP};
-pub use installer::{execute_install, execute_versioned_install, get_install_command, get_versioned_install_command, InstallOptions, InstallResult};
-pub use find_program::{find_program, find_programs_parallel, find_program_with_source, find_programs_with_source_parallel};
-pub use macos_bundle::{find_macos_app_bundle, get_app_bundle_name};
 
 /// Complete programs detection result.
 ///
 /// Contains detection results for all supported program categories:
-/// editors, utilities, package managers, TTS clients, terminal apps, and headless audio players.
+/// editors, utilities, package managers, TTS clients, terminal apps, headless audio players,
+/// and AI CLI tools.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProgramsInfo {
     /// Text editors and IDEs installed on the system.
@@ -150,6 +160,9 @@ pub struct ProgramsInfo {
 
     /// Headless audio players installed on the system.
     pub headless_audio: InstalledHeadlessAudio,
+
+    /// AI-powered CLI coding tools installed on the system.
+    pub ai_clients: InstalledAiClients,
 }
 
 impl ProgramsInfo {
@@ -165,6 +178,7 @@ impl ProgramsInfo {
             tts_clients: InstalledTtsClients::new(),
             terminal_apps: InstalledTerminalApps::new(),
             headless_audio: InstalledHeadlessAudio::new(),
+            ai_clients: InstalledAiClients::new(),
         }
     }
 
@@ -177,5 +191,6 @@ impl ProgramsInfo {
         self.tts_clients.refresh();
         self.terminal_apps.refresh();
         self.headless_audio.refresh();
+        self.ai_clients.refresh();
     }
 }

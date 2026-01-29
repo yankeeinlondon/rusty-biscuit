@@ -156,6 +156,15 @@ pub enum Program {
     Xterm,
     Hyper,
     WindowsTerminal,
+
+    // AI CLI Tools
+    Claude,
+    Opencode,
+    Roo,
+    GeminiCli,
+    Aider,
+    Codex,
+    Goose,
 }
 
 // ============================================================================
@@ -884,6 +893,38 @@ static HYPER_INSTALL: &[InstallationMethod] = &[
 static WINDOWS_TERMINAL_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Winget("Microsoft.WindowsTerminal"),
     InstallationMethod::Scoop("windows-terminal"),
+];
+
+// AI CLI Tools
+static CLAUDE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Npm("@anthropic-ai/claude-code"),
+];
+
+static OPENCODE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::GoModules("github.com/opencode-ai/opencode@latest"),
+];
+
+static ROO_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Npm("@anthropic-ai/claude-code"),
+];
+
+static GEMINI_CLI_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Npm("@anthropic-ai/claude-code"),
+];
+
+static AIDER_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Pip("aider-chat"),
+    InstallationMethod::Uv("aider-chat"),
+    InstallationMethod::Brew("aider"),
+];
+
+static CODEX_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Npm("@openai/codex"),
+];
+
+static GOOSE_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Brew("goose"),
+    InstallationMethod::Pip("goose-ai"),
 ];
 
 // ============================================================================
@@ -2457,6 +2498,93 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
             "https://github.com/microsoft/terminal",
             Some("https://github.com/microsoft/terminal"),
             WINDOWS_TERMINAL_INSTALL,
+        ),
+    );
+
+    // ========================================================================
+    // AI CLI Tools (7 entries)
+    // ========================================================================
+    lookup.insert(
+        Program::Claude,
+        ProgramDetails::full(
+            "Claude Code",
+            "Anthropic's agentic coding tool",
+            ALL_OS,
+            "https://docs.anthropic.com/en/docs/claude-code",
+            Some("https://github.com/anthropics/claude-code"),
+            CLAUDE_INSTALL,
+        ),
+    );
+
+    lookup.insert(
+        Program::Opencode,
+        ProgramDetails::full(
+            "OpenCode",
+            "AI-powered coding assistant CLI",
+            ALL_OS,
+            "https://github.com/opencode-ai/opencode",
+            Some("https://github.com/opencode-ai/opencode"),
+            OPENCODE_INSTALL,
+        ),
+    );
+
+    lookup.insert(
+        Program::Roo,
+        ProgramDetails::full(
+            "Roo Code",
+            "AI pair programming in your terminal",
+            ALL_OS,
+            "https://github.com/RooVetGit/Roo-Code",
+            Some("https://github.com/RooVetGit/Roo-Code"),
+            ROO_INSTALL,
+        ),
+    );
+
+    lookup.insert(
+        Program::GeminiCli,
+        ProgramDetails::full(
+            "Gemini CLI",
+            "Google's Gemini AI in the terminal",
+            ALL_OS,
+            "https://github.com/google-gemini/gemini-cli",
+            Some("https://github.com/google-gemini/gemini-cli"),
+            GEMINI_CLI_INSTALL,
+        ),
+    );
+
+    lookup.insert(
+        Program::Aider,
+        ProgramDetails::full(
+            "Aider",
+            "AI pair programming in your terminal",
+            ALL_OS,
+            "https://aider.chat/",
+            Some("https://github.com/paul-gauthier/aider"),
+            AIDER_INSTALL,
+        ),
+    );
+
+    lookup.insert(
+        Program::Codex,
+        ProgramDetails::full(
+            "Codex CLI",
+            "OpenAI lightweight coding agent",
+            ALL_OS,
+            "https://github.com/openai/codex",
+            Some("https://github.com/openai/codex"),
+            CODEX_INSTALL,
+        ),
+    );
+
+    lookup.insert(
+        Program::Goose,
+        ProgramDetails::full(
+            "Goose",
+            "Block's AI developer agent",
+            ALL_OS,
+            "https://github.com/block/goose",
+            Some("https://github.com/block/goose"),
+            GOOSE_INSTALL,
         ),
     );
 

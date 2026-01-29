@@ -1160,6 +1160,89 @@ impl ProgramMetadata for HeadlessAudio {
     }
 }
 
+// ============================================================================
+// AI CLI Enum
+// ============================================================================
+
+/// AI-powered command-line interface tools.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    EnumString,
+    EnumIter,
+    EnumCount,
+    IntoStaticStr,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum AiCli {
+    Claude,
+    Opencode,
+    Roo,
+    GeminiCli,
+    Aider,
+    Codex,
+    Goose,
+}
+
+/// Metadata lookup table for AI CLI tools.
+static AI_CLI_INFO: &[ProgramInfo] = &[
+    ProgramInfo::standard(
+        "claude",
+        "Claude Code",
+        "Anthropic's agentic coding tool",
+        "https://docs.anthropic.com/en/docs/claude-code",
+    ),
+    ProgramInfo::standard(
+        "opencode",
+        "OpenCode",
+        "AI-powered coding assistant CLI",
+        "https://github.com/opencode-ai/opencode",
+    ),
+    ProgramInfo::standard(
+        "roo",
+        "Roo Code",
+        "AI pair programming in your terminal",
+        "https://github.com/RooVetGit/Roo-Code",
+    ),
+    ProgramInfo::standard(
+        "gemini",
+        "Gemini CLI",
+        "Google's Gemini AI in the terminal",
+        "https://github.com/google-gemini/gemini-cli",
+    ),
+    ProgramInfo::standard(
+        "aider",
+        "Aider",
+        "AI pair programming in your terminal",
+        "https://aider.chat/",
+    ),
+    ProgramInfo::standard(
+        "codex",
+        "Codex CLI",
+        "OpenAI lightweight coding agent",
+        "https://github.com/openai/codex",
+    ),
+    ProgramInfo::standard(
+        "goose",
+        "Goose",
+        "Block's AI developer agent",
+        "https://github.com/block/goose",
+    ),
+];
+
+impl ProgramMetadata for AiCli {
+    fn info(&self) -> &'static ProgramInfo {
+        &AI_CLI_INFO[*self as usize]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1168,6 +1251,11 @@ mod tests {
     #[test]
     fn test_editor_count_matches_info() {
         assert_eq!(Editor::COUNT, EDITOR_INFO.len());
+    }
+
+    #[test]
+    fn test_ai_cli_count_matches_info() {
+        assert_eq!(AiCli::COUNT, AI_CLI_INFO.len());
     }
 
     #[test]
