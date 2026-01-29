@@ -317,19 +317,9 @@ mod tests {
 
     #[test]
     fn test_atomic_write() {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-        let temp_dir = std::env::temp_dir();
-        let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let test_file = temp_dir.join(format!(
-            "biscuit-speaks-test-atomic-{}-{}.tmp",
-            std::process::id(),
-            unique_id
-        ));
-
-        // Clean up if exists
-        let _ = fs::remove_file(&test_file);
+        // Use tempfile for proper test isolation
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let test_file = temp_dir.path().join("test-atomic.tmp");
 
         let data = b"test content for atomic write";
         write_atomic(&test_file, data).expect("Write should succeed");
@@ -337,26 +327,14 @@ mod tests {
         // Verify content
         let read_data = fs::read(&test_file).expect("Should be able to read");
         assert_eq!(read_data, data);
-
-        // Clean up
-        let _ = fs::remove_file(&test_file);
+        // temp_dir is automatically cleaned up on drop
     }
 
     #[test]
     fn test_atomic_write_overwrites() {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(1000);
-
-        let temp_dir = std::env::temp_dir();
-        let unique_id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let test_file = temp_dir.join(format!(
-            "biscuit-speaks-test-overwrite-{}-{}.tmp",
-            std::process::id(),
-            unique_id
-        ));
-
-        // Clean up if exists
-        let _ = fs::remove_file(&test_file);
+        // Use tempfile for proper test isolation
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let test_file = temp_dir.path().join("test-overwrite.tmp");
 
         // Write initial content
         write_atomic(&test_file, b"initial").expect("First write should succeed");
@@ -367,8 +345,6 @@ mod tests {
         // Verify new content
         let read_data = fs::read(&test_file).expect("Should be able to read");
         assert_eq!(read_data, b"updated");
-
-        // Clean up
-        let _ = fs::remove_file(&test_file);
+        // temp_dir is automatically cleaned up on drop
     }
 }

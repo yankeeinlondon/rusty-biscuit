@@ -898,6 +898,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_populate_cache_for_provider_success() {
         use super::populate_cache_for_provider;
 
@@ -947,6 +948,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_populate_cache_for_provider_updates_existing() {
         use super::populate_cache_for_provider;
 

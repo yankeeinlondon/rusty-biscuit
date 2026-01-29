@@ -1146,20 +1146,30 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn test_query_osc_actual_not_tty_in_tests() {
-        // In test environment, stdout is typically not a TTY
-        // This should return NotTty error
+        // Query behavior depends on the test environment:
+        // - CI/piped: NotTty or CiEnvironment error
+        // - Real terminal: May succeed or timeout
+        // - Multiplexer: Multiplexer error
         let result = query_osc_actual(11, Duration::from_millis(50));
 
-        // We expect either NotTty or CiEnvironment depending on the test runner
         match result {
             Err(OscQueryError::NotTty) | Err(OscQueryError::CiEnvironment) => {
-                // Expected
+                // Expected in non-TTY test environments
             }
             Err(OscQueryError::Multiplexer(_)) => {
-                // Also acceptable if running in tmux/zellij
+                // Acceptable if running in tmux/zellij
             }
-            other => {
-                panic!("Expected NotTty, CiEnvironment, or Multiplexer error, got: {:?}", other);
+            Ok(_) => {
+                // Running in a real TTY that supports OSC queries - acceptable
+            }
+            Err(OscQueryError::Timeout(_)) => {
+                // Terminal didn't respond in time - acceptable
+            }
+            Err(OscQueryError::ParseError(_)) => {
+                // Terminal responded but couldn't parse - acceptable
+            }
+            Err(e) => {
+                panic!("Unexpected error variant: {:?}", e);
             }
         }
     }

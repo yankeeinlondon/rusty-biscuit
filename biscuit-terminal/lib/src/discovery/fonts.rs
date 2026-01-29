@@ -1799,6 +1799,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "opens /dev/tty and sends escape sequences - run manually in real terminal"]
     fn test_window_size_pixels_does_not_panic() {
         // window_size_pixels() should not panic regardless of environment
         // In a non-TTY test environment, it returns None; in a real terminal it may succeed
