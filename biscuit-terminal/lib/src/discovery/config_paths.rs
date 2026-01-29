@@ -438,7 +438,7 @@ mod tests {
 
     #[test]
     fn test_konsole_config_path() {
-        let path = get_terminal_config_path(&TerminalApp::Konsole);
+        let _path = get_terminal_config_path(&TerminalApp::Konsole);
         #[cfg(target_os = "linux")]
         {
             assert!(path.is_some());
@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn test_foot_config_path() {
-        let path = get_terminal_config_path(&TerminalApp::Foot);
+        let _path = get_terminal_config_path(&TerminalApp::Foot);
         #[cfg(target_os = "linux")]
         {
             assert!(path.is_some());

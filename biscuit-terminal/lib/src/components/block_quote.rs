@@ -1,7 +1,8 @@
+use crate::utils::color::Color;
 
-
-pub struct block_quote {
-    content: Vec<Renderable>,
+#[allow(dead_code)]
+pub struct BlockQuote {
+    content: Vec<String>,
 
     text_color: Option<Color>,
     bg_color: Option<Color>,
