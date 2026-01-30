@@ -7,7 +7,6 @@ This is a Rust workspace with the following modules:
 - `Cargo.toml` - Root workspace configuration
 - `research/cli/Cargo.toml` - Research CLI application
 - `research/lib/Cargo.toml` - Research library with development binary
-- `shared/Cargo.toml` - Shared utilities library
 - `tui/Cargo.toml` - TUI module (no dependencies yet)
 
 ## Workspace Packages
@@ -23,12 +22,6 @@ This is a Rust workspace with the following modules:
     _Core library for research operations._
 
     _Tags: workspace, library_
-
- - [shared](./shared) _v0.1.0_
-
-     _Shared utilities and tools._
-
-     _Tags: workspace, library_
 
  - [tui](./tui) _v0.1.0_
 

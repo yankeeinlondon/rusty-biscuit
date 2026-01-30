@@ -20,7 +20,6 @@ dockhand/
 │   ├── cli/          # Binary: `research` (FUTURE)
 │   └── lib/          # Core research library
 │   └── service/      # Server to abstract AI pipelining functionality (FUTURE)
-├── biscuit/          # Common utilities (providers, tools, codegen, hashing)
 ├── biscuit-terminal/ # Terminal detection and rich rendering
 │   ├── cli/          # Binary: `bt` (terminal inspector)
 │   └── lib/          # Terminal capabilities, image rendering, escape codes
@@ -89,34 +88,7 @@ The research system uses a parallel two-phase approach:
 - TTS completion announcement via system text-to-speech (skipped on cancellation)
 - Markdown normalization ensures consistent formatting (pulldown-cmark + extensions)
 
-#### 2. Provider Discovery System (Shared Library)
-
-The `shared` library's provider system has three layers:
-
-- **Base layer** (`providers/base.rs`): Environment-based API key management, OpenAI-compatible `/v1/models` endpoint discovery
-- **Curated registry** (`providers/curated.rs`): Hardcoded model list (last updated timestamp)
-- **Discovery layer** (`providers/discovery.rs`): API fetching with 24-hour cache, rate limiting with exponential backoff
-
-Provider support includes: Anthropic, Deepseek, Gemini, MoonshotAI, Ollama (local), OpenAI, OpenRouter, ZAI, ZenMux.
-
-#### 3. Agent Tools (rig-core integration)
-
-The `biscuit/tools` module provides rig-core compatible agent tools:
-
-- **BraveSearchTool**: Web search with plan-based rate limiting (free: 1/sec, base: 20/sec, pro: 50/sec)
-- **ScreenScrapeTool**: Web scraping with multiple output formats (Markdown, HTML, PlainText, JSON, Links)
-
-Both tools include comprehensive tracing instrumentation with OpenTelemetry semantic conventions.
-
-#### 4. Safe Code Injection (Codegen)
-
-The `biscuit/codegen` module provides AST-based code manipulation:
-
-- Uses `syn` for parsing and `prettyplease` for formatting
-- Validates injection points before modification
-- Prevents duplicate injections via semantic analysis
-
-#### 5. REST API Client Generation (Schematic)
+#### 2. REST API Client Generation (Schematic)
 
 The `schematic` package provides type-safe REST API client generation:
 
@@ -171,7 +143,7 @@ Schematic tests verify **syntax only**, NOT runtime behavior! After modifying:
 3. Run `cargo check -p schematic-schema`
 4. **Manually verify** correct methods generated: `grep "request_bytes" schematic/schema/src/*.rs`
 
-#### 6. Tree-sitter Symbol Extraction (Tree Hugger)
+#### 3. Tree-sitter Symbol Extraction (Tree Hugger)
 
 The `tree-hugger` package provides multi-language symbol extraction using Tree-sitter:
 
@@ -186,7 +158,7 @@ The `tree-hugger` package provides multi-language symbol extraction using Tree-s
 3. Bug fixes require regression tests that would fail without the fix
 4. Run `cargo test -p tree-hugger-lib` to verify all language tests pass
 
-#### 7. Queue TUI Command Scheduler
+#### 4. Queue TUI Command Scheduler
 
 The `queue` package provides a terminal-based task scheduler with async execution:
 
@@ -254,13 +226,11 @@ just build
 
 # Build specific area
 just -f research/justfile build
-just -f biscuit/justfile build
 just -f so-you-say/justfile build
 
 # Build specific package
 cargo build -p research-cli
 cargo build -p research-lib
-cargo build -p shared
 cargo build -p so-you-say
 ```
 
@@ -272,15 +242,10 @@ just test
 
 # Test specific area
 just -f research/justfile test
-just -f biscuit/justfile test
 just -f so-you-say/justfile test
 
 # Test specific package with additional args
-cargo test -p shared -- --nocapture
 cargo test -p research-lib --lib
-
-# Run a single test
-cargo test -p shared --lib providers::base::tests::test_has_provider_api_key_with_set_env_var
 
 # Tree Hugger tests (16 languages - critical for cross-language coverage)
 cargo test -p tree-hugger-lib
@@ -326,7 +291,6 @@ just -f so-you-say/justfile cli "Hello world"
 just -f so-you-say/justfile lint
 
 # Or use cargo clippy directly
-cargo clippy -p shared
 cargo clippy -p queue-lib -p queue-cli
 cargo clippy --workspace
 ```
@@ -339,22 +303,6 @@ cargo clippy --workspace
 | `OPENAI_API_KEY` | OpenAI API key (GPT-5.2 for synthesis) | Research CLI |
 | `GEMINI_API_KEY` | Google Gemini API key (Flash for underlying research) | Research CLI |
 | `ZAI_API_KEY` | ZAI API key (GLM-4-7 for overview) | Research CLI |
-| `BRAVE_API_KEY` | Brave Search API key | Agent tools (optional) |
-| `BRAVE_PLAN` | Brave plan tier: `free`, `base`, `pro` (default: `free`) | Agent tools (optional) |
-
-### Provider API Keys (Shared Library)
-
-The shared library's provider system checks for these environment variables:
-
-- Anthropic: `ANTHROPIC_API_KEY`
-- Deepseek: `DEEPSEEK_API_KEY`
-- Gemini: `GEMINI_API_KEY` or `GOOGLE_API_KEY`
-- MoonshotAI: `MOONSHOT_API_KEY` or `MOONSHOT_AI_API_KEY`
-- OpenAI: `OPENAI_API_KEY`
-- OpenRouter: `OPEN_ROUTER_API_KEY` or `OPENROUTER_API_KEY`
-- ZAI: `ZAI_API_KEY` or `Z_AI_API_KEY`
-- ZenMux: `ZENMUX_API_KEY` or `ZEN_MUX_API_KEY`
-
 ## Output Locations
 
 ### Research Output
@@ -413,7 +361,6 @@ The research system auto-detects package managers:
 
 - **serde/serde_json** (v1.0): JSON serialization for metadata and API responses
 - **pulldown-cmark** (v0.13.0): Markdown parsing for research document manipulation
-- **syn**: AST parsing for safe code injection (codegen module)
 
 ### Rust Documentation Best Practices
 
@@ -459,13 +406,12 @@ For complete dependency information, see `docs/dependencies.md`.
 ### Test Isolation
 
 - Environment variable tests use `#[serial_test::serial]` to prevent race conditions
-- The `ScopedEnv` test helper (in `biscuit/src/providers/base.rs`) provides RAII-based cleanup
 
 ### Tracing
 
 **Core Principles**:
 
-- **Libraries emit, applications configure**: Libraries (`research-lib`, `shared`) only emit events/spans, never install subscribers
+- **Libraries emit, applications configure**: Libraries (`research-lib`) only emit events/spans, never install subscribers
 - **Structured fields over messages**: Use machine-readable fields for filtering (e.g., `tool.name`, `tool.duration_ms`)
 - **Spans for context**: Group related events and measure durations with `#[instrument]`
 
@@ -498,12 +444,6 @@ For complete tracing architecture, see `docs/tracing.md`.
 - Library code uses `thiserror` for error types
 - No `unwrap()` or `expect()` in production code paths (only in tests)
 - All public functions return `Result` types
-
-### Code Injection Safety
-
-- The `codegen` module uses AST manipulation (never regex on code)
-- Always validate injection points before modification
-- Use `syn` for parsing, `prettyplease` for formatting
 
 ## Additional Documentation
 
