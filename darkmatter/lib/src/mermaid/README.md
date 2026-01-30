@@ -1,18 +1,14 @@
 # Mermaid Rendering
 
-A feature of the `Markdown` struct in this library is it's ability to render to both the terminal (using escape codes) and the browser (using HTML/CSS/JS).
+Darkmatter renders Mermaid diagrams to both terminal (via mmdc CLI) and browser (via mermaid.js).
 
-## The Browser
+## Browser Rendering
 
-When we encounter a fenced code block with the language set to `mermaid` we will ALWAYS render it when targeting the browser. This is relatively easily achieved as currently the only official way to render a mermaid diagram is to use the `mermaidjs` package on NPM.
-
-So when we render to the browser we add some inline Javascript which points to the latest version of `mermaidjs` on a CDN.
+When targeting the browser, mermaid code blocks are rendered client-side using mermaid.js from CDN.
 
 ### Theming
 
-All of our rendering from Markdown to HTML uses the abstraction of CSS Variables and Mermaid is no different. Mermaid has the concept of "themes" but we target only the "base" theme but we do it with both a light and dark mode mapping.
-
-The following CSS variables are used to theme Mermaid diagrams:
+All rendering uses CSS variables for light/dark mode support. Mermaid uses the "base" theme with custom variable mappings:
 
 - `--mermaid-background`
 - `--mermaid-primary-color`
@@ -29,29 +25,39 @@ The following CSS variables are used to theme Mermaid diagrams:
 - `--mermaid-main-bkg`
 - `--mermaid-node-border`
 
-## The Terminal
+## Terminal Rendering
 
-The terminal, by default, does _not_ render mermaid diagram but instead is shown in a manner similar to the way any other fenced code blocks would be. However, use of the `--mermaid` switch changes that. When the `--mermaid` switch is used we:
+Terminal rendering requires the `--mermaid` flag. When enabled:
 
-- Validate the diagram size (must be less than 10KB to prevent passing excessively large content)
-- Create a temporary input file with the diagram instructions
-- Execute the `mmdc` CLI tool locally with dark theme and icon pack support (including Font Awesome 7 brand icons, Lucide icons, Carbon Design icons, and System UI icons)
-- Display the output PNG image using `viuer` in the terminal
-- Clean up all temporary files
+1. **Validation**: Diagram size must be < 10KB
+2. **Rendering**: Creates temp file, runs `mmdc` CLI with dark theme and icon packs
+3. **Display**: Shows PNG output via viuer
+4. **Cleanup**: Removes temporary files
 
 ### CLI Detection
 
-The module uses a fallback chain for finding the Mermaid CLI:
+The module uses a fallback chain:
 
-1. **Direct `mmdc`**: If `mmdc` is installed globally and available in PATH, use it directly
-2. **npx fallback**: If `mmdc` is not found but `npx` is available, use `npx -p @mermaid-js/mermaid-cli mmdc` to temporarily install and run the CLI. A warning is printed to stderr:
+1. **Direct `mmdc`**: If globally installed and in PATH
+2. **npx fallback**: `npx -p @mermaid-js/mermaid-cli mmdc` with warning:
 
-   ```txt
+   ```
    - Mermaid diagrams require mmdc to render to the terminal
    - You do not have the Mermaid CLI installed, using npx to install temporarily
    - To install permanently: npm install -g @mermaid-js/mermaid-cli
    ```
 
-3. **Error**: If neither `mmdc` nor `npx` is available, an error is returned asking the user to install Node.js and npm
+3. **Error**: If neither available, returns error asking for Node.js/npm
 
-> When terminal rendering fails or is not supported (e.g., the terminal doesn't support Kitty graphics or the `mmdc` CLI is not installed), we fall back to displaying the diagram as a standard fenced code block with the `mermaid` language identifier. This ensures the diagram content remains visible even when graphical rendering is unavailable.
+### Icon Packs
+
+Terminal rendering enables these icon packs:
+
+- `@iconify-json/fa7-brands` - Font Awesome 7 brand icons
+- `@iconify-json/lucide` - Lucide icons
+- `@iconify-json/carbon` - Carbon Design icons
+- `@iconify-json/system-uicons` - System UI icons
+
+### Fallback Behavior
+
+When terminal rendering fails or is unsupported (no Kitty graphics, mmdc not installed), the diagram is displayed as a syntax-highlighted code block with the `mermaid` language identifier.
