@@ -289,7 +289,10 @@ fn create_relative_symlink(
         if let Ok(existing_target) = fs::read_link(symlink_path) {
             let existing_str = existing_target.to_string_lossy();
             if existing_str == target {
-                debug!("Symlink already exists with correct target: {:?}", symlink_path);
+                debug!(
+                    "Symlink already exists with correct target: {:?}",
+                    symlink_path
+                );
                 return Ok(None);
             } else {
                 warnings.push(format!(
@@ -310,8 +313,7 @@ fn create_relative_symlink(
     // Create relative symlink
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(&target, symlink_path)
-            .map_err(|e| PullError::SymlinkError(e))?;
+        std::os::unix::fs::symlink(&target, symlink_path).map_err(PullError::SymlinkError)?;
         info!("Created symlink: {:?} -> {}", symlink_path, target);
         Ok(Some(symlink_path.to_path_buf()))
     }

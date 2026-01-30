@@ -4,7 +4,7 @@
 //! including discovery, filtering, and formatting.
 
 use research_lib::list::{
-    ResearchOutput, apply_filters, discover_topics, format_json, format_terminal,
+    apply_filters, discover_topics, format_json, format_terminal, ResearchOutput,
 };
 use std::path::PathBuf;
 
@@ -42,7 +42,6 @@ fn test_complete_topic_has_no_issues() {
         complete.description,
         Some("A complete test library with all files present".to_string())
     );
-    assert!(!complete.missing_metadata, "Should have valid metadata");
     assert!(
         complete.missing_output.is_empty(),
         "Should have all outputs"
@@ -68,19 +67,15 @@ fn test_incomplete_topic_has_critical_issues() {
         incomplete.description,
         Some("An incomplete test framework with missing files".to_string())
     );
-    assert!(!incomplete.missing_metadata, "Should have valid metadata");
-
     // Should be missing all output deliverables
     assert_eq!(
         incomplete.missing_output.len(),
         3,
         "Should be missing all 3 outputs"
     );
-    assert!(
-        incomplete
-            .missing_output
-            .contains(&ResearchOutput::DeepDive)
-    );
+    assert!(incomplete
+        .missing_output
+        .contains(&ResearchOutput::DeepDive));
     assert!(incomplete.missing_output.contains(&ResearchOutput::Brief));
     assert!(incomplete.missing_output.contains(&ResearchOutput::Skill));
 
@@ -106,10 +101,6 @@ fn test_corrupt_metadata_topic_marked_as_missing() {
         .find(|t| t.name == "corrupt-metadata")
         .expect("corrupt-metadata not found");
 
-    assert!(
-        corrupt.missing_metadata,
-        "Should mark metadata as missing due to parse error"
-    );
     assert_eq!(
         corrupt.topic_type, "library",
         "Should use default type when metadata missing"

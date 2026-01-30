@@ -169,7 +169,6 @@ mod tests {
                 additional_files: vec![],
                 missing_underlying: vec![],
                 missing_output: vec![],
-                missing_metadata: false,
                 needs_migration: false,
                 location: PathBuf::from("/test/foo-library"),
             },
@@ -181,7 +180,6 @@ mod tests {
                 additional_files: vec![],
                 missing_underlying: vec![],
                 missing_output: vec![],
-                missing_metadata: false,
                 needs_migration: false,
                 location: PathBuf::from("/test/bar-framework"),
             },
@@ -193,7 +191,6 @@ mod tests {
                 additional_files: vec![],
                 missing_underlying: vec![],
                 missing_output: vec![],
-                missing_metadata: false,
                 needs_migration: false,
                 location: PathBuf::from("/test/baz-software"),
             },
@@ -205,7 +202,6 @@ mod tests {
                 additional_files: vec![],
                 missing_underlying: vec![],
                 missing_output: vec![],
-                missing_metadata: false,
                 needs_migration: false,
                 location: PathBuf::from("/test/foobar-lib"),
             },
@@ -217,7 +213,6 @@ mod tests {
                 additional_files: vec![],
                 missing_underlying: vec![],
                 missing_output: vec![],
-                missing_metadata: false,
                 needs_migration: false,
                 location: PathBuf::from("/test/rust-library"),
             },
@@ -299,11 +294,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(filtered.len(), 4); // All except baz-software
-        assert!(
-            filtered
-                .iter()
-                .all(|t| t.topic_type == "library" || t.topic_type == "framework")
-        );
+        assert!(filtered
+            .iter()
+            .all(|t| t.topic_type == "library" || t.topic_type == "framework"));
     }
 
     #[test]

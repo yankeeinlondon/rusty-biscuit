@@ -83,9 +83,6 @@ pub struct TopicInfo {
     /// Missing final output deliverables (deep_dive, skill, brief)
     pub missing_output: Vec<ResearchOutput>,
 
-    /// Whether metadata.json is missing or has missing required properties
-    pub missing_metadata: bool,
-
     /// Whether metadata schema needs migration (v0 → v1)
     pub needs_migration: bool,
 
@@ -108,7 +105,6 @@ impl TopicInfo {
             additional_files: Vec::new(),
             missing_underlying: Vec::new(),
             missing_output: Vec::new(),
-            missing_metadata: false,
             needs_migration: false,
             location,
         }
@@ -116,8 +112,7 @@ impl TopicInfo {
 
     /// Returns true if this topic has any missing files or metadata issues.
     pub fn has_issues(&self) -> bool {
-        self.missing_metadata
-            || self.needs_migration
+        self.needs_migration
             || !self.missing_output.is_empty()
             || !self.missing_underlying.is_empty()
     }
@@ -127,14 +122,12 @@ impl TopicInfo {
     /// Critical issues include missing metadata.json or missing final output
     /// deliverables (deep_dive.md, brief.md, skill/SKILL.md).
     pub fn has_critical_issues(&self) -> bool {
-        self.missing_metadata || !self.missing_output.is_empty()
+        !self.missing_output.is_empty()
     }
 
     /// Returns true if this topic only has minor issues (missing underlying docs).
     pub fn has_minor_issues_only(&self) -> bool {
-        !self.missing_metadata
-            && self.missing_output.is_empty()
-            && !self.missing_underlying.is_empty()
+        self.missing_output.is_empty() && !self.missing_underlying.is_empty()
     }
 }
 
@@ -189,7 +182,6 @@ mod tests {
         assert!(topic.additional_files.is_empty());
         assert!(topic.missing_underlying.is_empty());
         assert!(topic.missing_output.is_empty());
-        assert!(!topic.missing_metadata);
         assert_eq!(topic.location, PathBuf::from("/test/path"));
     }
 
@@ -197,9 +189,6 @@ mod tests {
     fn test_topic_info_has_issues() {
         let mut topic = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
         assert!(!topic.has_issues());
-
-        topic.missing_metadata = true;
-        assert!(topic.has_issues());
 
         let mut topic2 = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
         topic2.missing_output.push(ResearchOutput::DeepDive);
@@ -214,9 +203,6 @@ mod tests {
     fn test_topic_info_has_critical_issues() {
         let mut topic = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
         assert!(!topic.has_critical_issues());
-
-        topic.missing_metadata = true;
-        assert!(topic.has_critical_issues());
 
         let mut topic2 = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
         topic2.missing_output.push(ResearchOutput::Brief);
@@ -235,9 +221,6 @@ mod tests {
         topic.missing_underlying.push("overview.md".to_string());
         assert!(topic.has_minor_issues_only());
 
-        topic.missing_metadata = true;
-        assert!(!topic.has_minor_issues_only());
-
         let mut topic2 = TopicInfo::new("test".to_string(), PathBuf::from("/test"));
         topic2.missing_underlying.push("overview.md".to_string());
         topic2.missing_output.push(ResearchOutput::DeepDive);
@@ -254,7 +237,6 @@ mod tests {
             additional_files: vec!["custom_prompt".to_string()],
             missing_underlying: vec!["overview.md".to_string()],
             missing_output: vec![ResearchOutput::Brief],
-            missing_metadata: false,
             needs_migration: false,
             location: PathBuf::from("/test/test-lib"),
         };
@@ -268,6 +250,6 @@ mod tests {
         assert_eq!(deserialized.additional_files, topic.additional_files);
         assert_eq!(deserialized.missing_underlying, topic.missing_underlying);
         assert_eq!(deserialized.missing_output, topic.missing_output);
-        assert_eq!(deserialized.missing_metadata, topic.missing_metadata);
+        assert_eq!(deserialized.needs_migration, topic.needs_migration);
     }
 }

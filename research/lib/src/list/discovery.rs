@@ -5,6 +5,8 @@
 //! for completeness.
 
 use super::types::{ResearchOutput, TopicInfo};
+use crate::metadata::inventory::ResearchInventory;
+use crate::metadata::KindCategory;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -154,6 +156,7 @@ pub fn discover_topics(base_dir: PathBuf) -> Result<Vec<TopicInfo>, DiscoveryErr
     }
 
     let mut topics = Vec::new();
+    let inventory = load_inventory_for_base_dir(&base_dir);
 
     // Walk the directory tree, but only go 1 level deep (immediate subdirectories are topics)
     // Skip symlinks for security (prevent symlink attacks)
@@ -187,7 +190,7 @@ pub fn discover_topics(base_dir: PathBuf) -> Result<Vec<TopicInfo>, DiscoveryErr
         debug!("Discovered topic directory: {}", topic_name);
 
         // Parse metadata and analyze topic
-        let topic_info = analyze_topic(topic_name, topic_dir.to_path_buf());
+        let topic_info = analyze_topic(topic_name, topic_dir.to_path_buf(), inventory.as_ref());
         topics.push(topic_info);
     }
 
@@ -201,25 +204,29 @@ pub fn discover_topics(base_dir: PathBuf) -> Result<Vec<TopicInfo>, DiscoveryErr
 /// 2. Checks for the presence of expected output files
 /// 3. Checks for the presence of underlying research documents
 /// 4. Identifies any additional custom prompt files
-fn analyze_topic(name: String, location: PathBuf) -> TopicInfo {
+fn analyze_topic(
+    name: String,
+    location: PathBuf,
+    inventory: Option<&ResearchInventory>,
+) -> TopicInfo {
     let mut topic = TopicInfo::new(name.clone(), location.clone());
 
-    // Try to read and parse metadata.json
-    let metadata_path = location.join("metadata.json");
-    match read_metadata(&metadata_path) {
-        Ok(metadata) => {
+    if let Some(inventory) = inventory
+        && let Some(metadata) = inventory.get(&name)
+    {
+        apply_inventory_metadata(&mut topic, metadata);
+    } else {
+        // Try to read and parse metadata.json for legacy topics.
+        let metadata_path = location.join("metadata.json");
+        if let Ok(metadata) = read_metadata(&metadata_path) {
             // Extract values that borrow BEFORE moving any fields
             topic.needs_migration = metadata.needs_migration();
             topic.language = metadata.language();
-            topic.missing_metadata = false;
             // Now move the owned fields
             topic.topic_type = metadata.kind.unwrap_or_else(|| "library".to_string());
             topic.description = metadata.brief;
-        }
-        Err(err) => {
-            debug!("Failed to read metadata for topic '{}': {}", name, err);
-            topic.missing_metadata = true;
-            // Keep default values for topic_type, description, and language
+        } else {
+            debug!("No inventory entry or legacy metadata for topic '{}'.", name);
         }
     }
 
@@ -240,6 +247,68 @@ fn read_metadata(path: &Path) -> Result<Metadata, DiscoveryError> {
     let content = std::fs::read_to_string(path)?;
     let metadata = serde_json::from_str(&content)?;
     Ok(metadata)
+}
+
+/// Resolve the inventory path for a given base directory.
+fn inventory_path_for_base_dir(base_dir: &Path) -> Option<PathBuf> {
+    let file_name = base_dir.file_name()?.to_string_lossy();
+    if file_name == "library" {
+        let parent = base_dir.parent()?;
+        Some(parent.join("research-inventory.json"))
+    } else {
+        Some(base_dir.join("research-inventory.json"))
+    }
+}
+
+/// Load the inventory for a base directory if it exists.
+fn load_inventory_for_base_dir(base_dir: &Path) -> Option<ResearchInventory> {
+    let inventory_path = inventory_path_for_base_dir(base_dir)?;
+    if !inventory_path.exists() {
+        return None;
+    }
+
+    match ResearchInventory::load_from(&inventory_path) {
+        Ok(inventory) => Some(inventory),
+        Err(err) => {
+            warn!(
+                "Failed to load research inventory at {}: {}",
+                inventory_path.display(),
+                err
+            );
+            None
+        }
+    }
+}
+
+/// Apply inventory metadata to a topic.
+fn apply_inventory_metadata(topic: &mut TopicInfo, metadata: &crate::metadata::Topic) {
+    topic.description = if metadata.brief().is_empty() {
+        None
+    } else {
+        Some(metadata.brief().to_string())
+    };
+
+    match metadata.kind() {
+        KindCategory::Library(library) => {
+            topic.topic_type = "library".to_string();
+            let language = library.language();
+            if !language.is_empty() {
+                topic.language = Some(language.to_string());
+            }
+        }
+        KindCategory::Software(_) => {
+            topic.topic_type = "software".to_string();
+        }
+        KindCategory::Person => {
+            topic.topic_type = "person".to_string();
+        }
+        KindCategory::SolutionArea => {
+            topic.topic_type = "solution_area".to_string();
+        }
+        KindCategory::ProgrammingLanguage => {
+            topic.topic_type = "language".to_string();
+        }
+    }
 }
 
 /// Checks for the presence of expected output files and updates topic.missing_output.
@@ -397,7 +466,6 @@ mod tests {
         assert_eq!(topic.name, "test-lib");
         assert_eq!(topic.topic_type, "library");
         assert_eq!(topic.description, Some("A test library".to_string()));
-        assert!(!topic.missing_metadata);
         assert!(!topic.needs_migration);
         assert!(topic.missing_output.is_empty());
         assert!(topic.missing_underlying.is_empty());
@@ -406,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn test_discover_topic_missing_metadata() {
+    fn test_discover_topic_missing_metadata_is_not_an_issue() {
         let temp_dir = TempDir::new().unwrap();
 
         create_test_topic(
@@ -426,10 +494,9 @@ mod tests {
         assert_eq!(topics.len(), 1);
 
         let topic = &topics[0];
-        assert!(topic.missing_metadata);
         assert_eq!(topic.topic_type, "library"); // Default value
         assert_eq!(topic.description, None);
-        assert!(topic.has_critical_issues());
+        assert!(!topic.has_issues());
     }
 
     #[test]
@@ -453,8 +520,7 @@ mod tests {
         assert_eq!(topics.len(), 1);
 
         let topic = &topics[0];
-        assert!(topic.missing_metadata);
-        assert!(topic.has_critical_issues());
+        assert!(!topic.has_issues());
     }
 
     #[test]

@@ -46,3 +46,12 @@ install:
 # run the debug release of the Research CLI
 cli *args="":
     @cargo run -p research-cli -- {{args}}
+
+# run clippy on research packages
+lint:
+    @echo ""
+    @echo "Linting research Packages"
+    @echo "--------------------------"
+    @echo ""
+    @cargo clippy -p research-lib -- -D warnings
+    @cargo clippy -p research-cli -- -D warnings

@@ -1255,16 +1255,15 @@ where
             // Normalization happens selectively later (e.g., SKILL.md preserves frontmatter)
             let path = output_dir.join(filename);
             // Create parent directory if needed (for paths like deep-dive/{topic}.md)
-            if let Some(parent) = path.parent() {
-                if !parent.exists() {
-                    if let Err(e) = fs::create_dir_all(parent).await {
-                        eprintln!(
-                            "  [{}/{}] ✗ {} failed to create directory: {} ({:.1}s)",
-                            completed, total, name, e, elapsed
-                        );
-                        return PromptTaskResult { metrics: None };
-                    }
-                }
+            if let Some(parent) = path.parent()
+                && !parent.exists()
+                && let Err(e) = fs::create_dir_all(parent).await
+            {
+                eprintln!(
+                    "  [{}/{}] ✗ {} failed to create directory: {} ({:.1}s)",
+                    completed, total, name, e, elapsed
+                );
+                return PromptTaskResult { metrics: None };
             }
             match fs::write(&path, &content).await {
                 Ok(_) => {
@@ -2613,12 +2612,12 @@ async fn run_incremental_research(
 
     // Normalize deep-dive/{topic}.md if it was generated
     let deep_dive_path = output_dir.join(format!("deep-dive/{}.md", topic));
-    if deep_dive_result.metrics.is_some() {
-        if let Ok(content) = fs::read_to_string(&deep_dive_path).await {
-            let normalized = normalize_markdown(&content);
-            if let Err(e) = fs::write(&deep_dive_path, normalized).await {
-                tracing::error!("Failed to normalize deep-dive/{}.md: {}", topic, e);
-            }
+    if deep_dive_result.metrics.is_some()
+        && let Ok(content) = fs::read_to_string(&deep_dive_path).await
+    {
+        let normalized = normalize_markdown(&content);
+        if let Err(e) = fs::write(&deep_dive_path, normalized).await {
+            tracing::error!("Failed to normalize deep-dive/{}.md: {}", topic, e);
         }
     }
 
@@ -3979,12 +3978,12 @@ pub async fn research(
 
     // Normalize deep-dive/{topic}.md if it was generated
     let deep_dive_path = output_dir.join(format!("deep-dive/{}.md", topic));
-    if deep_dive_result.metrics.is_some() {
-        if let Ok(content) = fs::read_to_string(&deep_dive_path).await {
-            let normalized = normalize_markdown(&content);
-            if let Err(e) = fs::write(&deep_dive_path, normalized).await {
-                tracing::error!("Failed to normalize deep-dive/{}.md: {}", topic, e);
-            }
+    if deep_dive_result.metrics.is_some()
+        && let Ok(content) = fs::read_to_string(&deep_dive_path).await
+    {
+        let normalized = normalize_markdown(&content);
+        if let Err(e) = fs::write(&deep_dive_path, normalized).await {
+            tracing::error!("Failed to normalize deep-dive/{}.md: {}", topic, e);
         }
     }
 

@@ -4,7 +4,7 @@
 //! output formats (JSON, terminal, etc.).
 //!
 //! Terminal formatting uses colored output with status-based coloring:
-//! - **RED + BOLD**: Missing output files or metadata.json
+//! - **RED + BOLD**: Missing output files
 //! - **ORANGE + BOLD**: Missing underlying documents only
 //! - **BOLD**: All files present
 
@@ -62,7 +62,6 @@ pub fn format_json(topics: &[TopicInfo]) -> Result<String, serde_json::Error> {
 /// In verbose mode, each topic is formatted as:
 /// ```text
 /// - {name} [TYPE_BADGE] : {description}
-///     - 🐞 metadata.json missing required props: ...
 ///     - 🐞 missing underlying research docs: ...
 ///     - 🐞 missing final output deliverables: ...
 ///     - 💡 {#} additional prompts used in research: ...
@@ -125,10 +124,6 @@ fn format_topic(topic: &TopicInfo, hide_type_badge: bool, verbose: bool) -> Stri
 
     // In verbose mode, add sub-bullets for issues
     if verbose {
-        if let Some(metadata_line) = format_metadata_issue(topic) {
-            lines.push(metadata_line);
-        }
-
         if let Some(migration_line) = format_migration_issue(topic) {
             lines.push(migration_line);
         }
@@ -203,10 +198,7 @@ fn format_main_line(topic: &TopicInfo, hide_type_badge: bool, verbose: bool) -> 
         }
 
         // Add 🐞 icon if there are any issues (other than migration)
-        if topic.missing_metadata
-            || !topic.missing_output.is_empty()
-            || !topic.missing_underlying.is_empty()
-        {
+        if !topic.missing_output.is_empty() || !topic.missing_underlying.is_empty() {
             icons.push("🐞");
         }
 
@@ -335,18 +327,6 @@ fn format_language_icon(language: Option<&String>) -> String {
     }
 }
 
-/// Formats metadata issues if present.
-fn format_metadata_issue(topic: &TopicInfo) -> Option<String> {
-    if !topic.missing_metadata {
-        return None;
-    }
-
-    Some(format!(
-        "    - 🐞 {} missing required props",
-        "metadata.json".bold()
-    ))
-}
-
 /// Formats underlying research document issues if present.
 fn format_underlying_issues(topic: &TopicInfo) -> Option<String> {
     if topic.missing_underlying.is_empty() {
@@ -438,7 +418,6 @@ mod tests {
             additional_files: vec!["custom_prompt".to_string()],
             missing_underlying: vec!["overview.md".to_string()],
             missing_output: vec![ResearchOutput::Brief],
-            missing_metadata: false,
             needs_migration: false,
             location: PathBuf::from("/test/test-library"),
         };
@@ -466,7 +445,7 @@ mod tests {
             vec!["overview.md".to_string()]
         );
         assert_eq!(parsed[0].missing_output, vec![ResearchOutput::Brief]);
-        assert_eq!(parsed[0].missing_metadata, false);
+        assert_eq!(parsed[0].needs_migration, false);
     }
 
     #[test]
@@ -479,7 +458,6 @@ mod tests {
             additional_files: vec![],
             missing_underlying: vec![],
             missing_output: vec![],
-            missing_metadata: false,
             needs_migration: false,
             location: PathBuf::from("/test/lib-one"),
         };
@@ -492,7 +470,6 @@ mod tests {
             additional_files: vec!["question_1".to_string(), "question_2".to_string()],
             missing_underlying: vec!["overview.md".to_string()],
             missing_output: vec![ResearchOutput::DeepDive, ResearchOutput::Skill],
-            missing_metadata: true,
             needs_migration: false,
             location: PathBuf::from("/test/lib-two"),
         };
@@ -505,7 +482,6 @@ mod tests {
             additional_files: vec![],
             missing_underlying: vec!["use_cases.md".to_string(), "best_practices.md".to_string()],
             missing_output: vec![ResearchOutput::Brief],
-            missing_metadata: false,
             needs_migration: false,
             location: PathBuf::from("/test/lib-three"),
         };
@@ -528,7 +504,7 @@ mod tests {
         assert_eq!(parsed[1].topic_type, "framework");
         assert_eq!(parsed[1].additional_files.len(), 2);
         assert_eq!(parsed[1].missing_output.len(), 2);
-        assert!(parsed[1].missing_metadata);
+        assert_eq!(parsed[1].needs_migration, false);
 
         assert_eq!(parsed[2].name, "lib-three");
         assert_eq!(parsed[2].topic_type, "software");
@@ -557,7 +533,6 @@ mod tests {
             additional_files: vec!["file1".to_string()],
             missing_underlying: vec!["doc1.md".to_string()],
             missing_output: vec![ResearchOutput::Brief],
-            missing_metadata: true,
             needs_migration: false,
             location: PathBuf::from("/test/complete"),
         };
@@ -571,7 +546,6 @@ mod tests {
         assert!(json.contains("\"additional_files\""));
         assert!(json.contains("\"missing_underlying\""));
         assert!(json.contains("\"missing_output\""));
-        assert!(json.contains("\"missing_metadata\""));
         assert!(json.contains("\"location\""));
     }
 
@@ -653,20 +627,6 @@ mod tests {
     }
 
     #[test]
-    fn test_missing_metadata_shows_red_with_sub_bullet() {
-        let mut topic = create_test_topic("no-meta-lib");
-        topic.missing_metadata = true;
-
-        let output = format_terminal(&[topic], false, true);
-
-        // Should contain the topic name
-        assert!(output.contains("no-meta-lib"));
-        // Should have issue marker
-        assert!(output.contains("🐞"));
-        assert!(output.contains("metadata.json"));
-    }
-
-    #[test]
     fn test_additional_prompts_shows_lightbulb() {
         let mut topic = create_test_topic("custom-lib");
         topic.additional_files.push("question_1".to_string());
@@ -730,7 +690,6 @@ mod tests {
     fn test_all_issue_types_combined() {
         let mut topic = create_test_topic("complex-lib");
         topic.description = Some("Complex library with issues".to_string());
-        topic.missing_metadata = true;
         topic.missing_underlying.push("overview.md".to_string());
         topic.missing_output.push(ResearchOutput::DeepDive);
         topic.additional_files.push("question_1".to_string());
@@ -740,7 +699,6 @@ mod tests {
         // Should contain all markers
         assert!(output.contains("complex-lib"));
         assert!(output.contains("Complex library with issues"));
-        assert!(output.contains("metadata.json"));
         assert!(output.contains("research docs"));
         assert!(output.contains("output deliverables"));
         assert!(output.contains("1 additional prompts used in research"));
@@ -822,13 +780,13 @@ mod tests {
     #[test]
     fn test_indentation_of_sub_bullets() {
         let mut topic = create_test_topic("indent-lib");
-        topic.missing_metadata = true;
+        topic.missing_output.push(ResearchOutput::Brief);
 
         let output = format_terminal(&[topic], false, true);
 
         // Find the sub-bullet line
         let lines: Vec<&str> = output.lines().collect();
-        let sub_bullet = lines.iter().find(|l| l.contains("metadata.json"));
+        let sub_bullet = lines.iter().find(|l| l.contains("output deliverables"));
         assert!(sub_bullet.is_some());
 
         // Should start with 4 spaces
@@ -838,7 +796,6 @@ mod tests {
     #[test]
     fn test_verbose_mode_shows_sub_bullets() {
         let mut topic = create_test_topic("test-lib");
-        topic.missing_metadata = true;
         topic.missing_underlying.push("overview.md".to_string());
         topic.additional_files.push("question_1".to_string());
 
@@ -846,7 +803,6 @@ mod tests {
 
         // Should contain sub-bullets
         assert!(output.contains("    - 🐞"));
-        assert!(output.contains("metadata.json"));
         assert!(output.contains("research docs"));
         assert!(output.contains("additional prompts used in research"));
     }
@@ -854,7 +810,6 @@ mod tests {
     #[test]
     fn test_non_verbose_mode_shows_only_icons() {
         let mut topic = create_test_topic("test-lib");
-        topic.missing_metadata = true;
         topic.missing_underlying.push("overview.md".to_string());
         topic.additional_files.push("question_1".to_string());
 
@@ -866,7 +821,6 @@ mod tests {
 
         // Should NOT contain sub-bullets
         assert!(!output.contains("    - "));
-        assert!(!output.contains("metadata.json"));
         assert!(!output.contains("research docs"));
         assert!(!output.contains("additional prompts used in research"));
     }
