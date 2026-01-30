@@ -369,8 +369,9 @@ fn test_terminal_distro_matches_detection() {
 
 #[test]
 fn test_repeated_terminal_creation() {
-    // Creating many Terminal instances shouldn't cause issues
-    for _ in 0..100 {
+    // Creating multiple Terminal instances shouldn't cause issues
+    // Note: Keep iteration count low to avoid OSC query flooding in TTY environments
+    for _ in 0..5 {
         let _term = Terminal::new();
     }
 }

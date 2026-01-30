@@ -7,7 +7,10 @@
 //! - Multiplexing status
 //! - OS and distribution information
 
+use std::path::Path;
+
 use biscuit_terminal::{
+    components::terminal_image::{parse_filepath_and_width, parse_width_spec, TerminalImage},
     discovery::{
         clipboard,
         detection::{multiplex_support, Connection, MultiplexSupport},
@@ -31,6 +34,12 @@ struct Args {
     /// Verbose output (show more details)
     #[arg(short, long)]
     verbose: bool,
+
+    /// Display an image in the terminal.
+    ///
+    /// Supports width specification: "file.jpg|50%" or "file.jpg|80"
+    #[arg(long, value_name = "FILEPATH")]
+    image: Option<String>,
 
     /// Content to analyze (positional; multiple values are joined with spaces)
     #[arg(value_name = "CONTENT")]
@@ -211,6 +220,12 @@ fn main() -> color_eyre::Result<()> {
     }
 
     let args = Args::parse();
+
+    // Handle --image flag
+    if let Some(ref image_spec) = args.image {
+        return render_image(image_spec);
+    }
+
     let content = if args.content.is_empty() {
         None
     } else {
@@ -233,6 +248,41 @@ fn main() -> color_eyre::Result<()> {
     } else {
         print_pretty(&metadata, args.verbose);
     }
+
+    Ok(())
+}
+
+/// Render an image to the terminal.
+///
+/// Supports width specification syntax: "file.jpg|50%" or "file.jpg|80"
+fn render_image(image_spec: &str) -> color_eyre::Result<()> {
+    // Parse the filepath and optional width
+    let (filepath, width_spec) = parse_filepath_and_width(image_spec)
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+
+    // Resolve path relative to CWD
+    let path = Path::new(&filepath);
+
+    // Create the terminal image
+    let mut term_image = TerminalImage::new(path)
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+
+    // Apply width if specified
+    if let Some(ref ws) = width_spec {
+        term_image.width = parse_width_spec(ws)
+            .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+        term_image.width_raw = Some(format!("|{}", ws));
+    }
+
+    // Get terminal capabilities
+    let terminal = Terminal::new();
+
+    // Render the image
+    let output = term_image.render_to_terminal(&terminal)
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+
+    // Output the result
+    print!("{}", output);
 
     Ok(())
 }

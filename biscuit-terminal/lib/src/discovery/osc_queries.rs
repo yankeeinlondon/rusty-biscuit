@@ -81,9 +81,21 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use thiserror::Error;
+
+/// Global mutex to serialize terminal queries.
+///
+/// OSC queries require exclusive access to the terminal because they:
+/// 1. Modify terminal mode (raw mode for reading responses)
+/// 2. Write to stdout and read from stdin
+///
+/// Without serialization, concurrent queries can:
+/// - Corrupt terminal mode state
+/// - Consume each other's responses
+/// - Cause hangs waiting for responses that were already read
+static TERMINAL_QUERY_MUTEX: Mutex<()> = Mutex::new(());
 
 use crate::discovery::detection::{get_terminal_app, is_tty, TerminalApp};
 use crate::discovery::os_detection::is_ci;
@@ -577,7 +589,7 @@ fn convert_16bit_to_8bit(val: u16) -> u8 {
 pub fn query_osc_actual(code: u8, timeout: Duration) -> Result<RgbValue, OscQueryError> {
     use std::io::{Read, Write};
 
-    // Pre-flight checks
+    // Pre-flight checks (before acquiring lock to fail fast)
     if !is_tty() {
         return Err(OscQueryError::NotTty);
     }
@@ -587,6 +599,11 @@ pub fn query_osc_actual(code: u8, timeout: Duration) -> Result<RgbValue, OscQuer
     if let Some(mux) = detect_multiplexer() {
         return Err(OscQueryError::Multiplexer(mux.to_string()));
     }
+
+    // Serialize terminal access to prevent race conditions
+    let _lock = TERMINAL_QUERY_MUTEX
+        .lock()
+        .map_err(|_| OscQueryError::IoError("terminal query mutex poisoned".into()))?;
 
     // RAII guard for terminal state
     struct RawModeGuard {
