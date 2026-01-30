@@ -58,11 +58,13 @@ You can provide one or more file-glob patterns to match files:
 
 ### Commands
 
-- `functions` - list functions
+- `functions` - list functions and methods
 - `types` - list type definitions (includes structs, enums, classes, interfaces, traits)
 - `symbols` - list all discovered symbols
 - `exports` - list exported symbols
 - `imports` - list imported symbols
+- `classes` - list classes with members (static/instance partitioning)
+- `lint` - run lint and syntax diagnostics
 
 ### Options
 
@@ -89,6 +91,12 @@ hug types "src/main.rs" --plain
 #   - type Cli { ... } [21:8]
 #   - enum Command { ... } [64:6]
 #   - type OutputConfig { ... } [122:8]
+
+# List classes with members
+hug classes "src/**/*.ts" --name MyClass
+
+# Run lint diagnostics only
+hug lint "src/**/*.rs" --lint-only
 ```
 
 ## JSON Output

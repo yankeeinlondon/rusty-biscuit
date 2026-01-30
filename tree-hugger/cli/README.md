@@ -24,6 +24,8 @@ hug imports --json "tests/fixtures/**/*.js"
 - `symbols` - List all discovered symbols
 - `exports` - List exported symbols
 - `imports` - List imported symbols
+- `classes` - List classes with members partitioned by static/instance
+- `lint` - Run lint and syntax diagnostics
 
 ## Options
 
@@ -121,4 +123,82 @@ hug symbols "lib/**/*.rs" --json > symbols.json
 
 # Check imports in JavaScript files
 hug imports "src/**/*.js" --plain
+
+# List classes with their members
+hug classes "src/**/*.ts"
+
+# Filter classes by name
+hug classes "src/**/*.java" --name Controller
+
+# Show only static members
+hug classes "src/**/*.ts" --static-only
+
+# Run lint diagnostics
+hug lint "src/**/*.rs"
+
+# Run only lint rules (skip syntax errors)
+hug lint "src/**/*.rs" --lint-only
+
+# Run only syntax diagnostics
+hug lint "src/**/*.rs" --syntax-only
 ```
+
+## Classes Command
+
+The `classes` command provides structured class inspection:
+
+```bash
+hug classes "src/**/*.ts"
+```
+
+Output shows classes with members partitioned:
+
+```
+src/service.ts (TypeScript)
+  class UserService [5:1]
+    Static Methods (2)
+      - public getInstance() [7:3]
+      - private validateConfig(config: Config) [12:3]
+    Instance Methods (3)
+      - public getUser(id: string): User [20:3]
+      - private fetchData() [25:3]
+    Static Fields (1)
+      - private instance: UserService
+    Instance Fields (2)
+      - private cache: Map<string, User>
+      - public readonly config: Config
+```
+
+Options:
+- `--name <FILTER>` - Filter classes by name (substring match)
+- `--static-only` - Show only static members
+- `--instance-only` - Show only instance members
+
+## Lint Command
+
+The `lint` command runs pattern-based and semantic diagnostics:
+
+```bash
+hug lint "src/**/*.rs"
+```
+
+Output shows categorized diagnostics:
+
+```
+src/main.rs (Rust)
+[lint] warning [unwrap-call]: Explicit `.unwrap()` call
+  --> src/main.rs:42:15
+    |
+ 42 |     let value = result.unwrap();
+    |                        ^^^^^^
+
+[semantic] error [undefined-symbol]: Reference to undefined symbol `foo`
+  --> src/main.rs:50:5
+
+[syntax] error: Missing semicolon
+  --> src/main.rs:60:20
+```
+
+Options:
+- `--lint-only` - Show only lint diagnostics (pattern rules and semantic analysis)
+- `--syntax-only` - Show only syntax diagnostics (parse errors)

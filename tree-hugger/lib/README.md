@@ -5,11 +5,26 @@ and packages.
 
 ## TreeFile
 
+The core API for file-level symbol extraction and diagnostics.
+
 ```rust
 use tree_hugger_lib::TreeFile;
 
 let file = TreeFile::new("src/lib.rs")?;
-let symbols = file.symbols()?;
+
+// Symbol extraction
+let symbols = file.symbols()?;           // All symbols combined
+let imports = file.imported_symbols()?;  // Import statements
+let exports = file.exported_symbols()?;  // Exported symbols
+let locals = file.local_symbols()?;      // Local definitions
+let refs = file.referenced_symbols()?;   // All identifier usages
+let reexports = file.reexported_symbols()?; // Imports that are re-exported
+
+// Diagnostics
+let lint = file.lint_diagnostics();      // Pattern-based lint rules
+let syntax = file.syntax_diagnostics();  // Syntax/parse errors
+let all = file.diagnostics();            // Unified diagnostic format
+let dead = file.dead_code();             // Unreachable code detection
 ```
 
 ## TreePackage
@@ -218,6 +233,35 @@ use tree_hugger_lib::{is_builtin, ProgrammingLanguage};
 assert!(is_builtin(ProgrammingLanguage::Rust, "Option"));
 assert!(is_builtin(ProgrammingLanguage::Python, "print"));
 assert!(is_builtin(ProgrammingLanguage::JavaScript, "console"));
+```
+
+## Builtins
+
+The library maintains builtin symbol databases for all 16 languages to avoid false positive "undefined symbol" diagnostics:
+
+```rust
+use tree_hugger_lib::{is_builtin, ProgrammingLanguage};
+
+assert!(is_builtin(ProgrammingLanguage::Rust, "Option"));
+assert!(is_builtin(ProgrammingLanguage::Python, "print"));
+assert!(is_builtin(ProgrammingLanguage::JavaScript, "console"));
+assert!(is_builtin(ProgrammingLanguage::Go, "make"));
+```
+
+## Dead Code Detection
+
+Control flow analysis detects unreachable code after terminal statements:
+
+```rust
+use tree_hugger_lib::{is_terminal_statement, find_dead_code_after, ProgrammingLanguage};
+
+// Detects terminal statements per language
+// Rust: panic!, unreachable!, todo!, process::exit()
+// Go: panic(), os.Exit()
+// C/C++: exit(), abort(), _exit(), _Exit(), quick_exit()
+// Swift: fatalError(), preconditionFailure()
+// Perl: die, exit
+// Lua: error(), os.exit()
 ```
 
 ## Known Limitations
