@@ -58,8 +58,8 @@ terminal_size = "0.4"
 # Table rendering
 comfy-table = "7.1"
 
-# Terminal image rendering
-viuer = { version = "0.11", features = ["print-file"] }
+# Terminal image rendering and mermaid diagrams (via biscuit-terminal)
+biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["viuer"] }
 
 # Hashing (for Mermaid diagram caching and markdown TOC)
 biscuit-hash = { path = "../../biscuit-hash" }

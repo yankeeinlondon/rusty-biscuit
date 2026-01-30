@@ -11,7 +11,22 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
 - **Document comparison**: Structural diff with change classification
 - **Table of Contents**: Hierarchical extraction with content hashing
 - **Heading normalization**: Fix hierarchy violations, relevel documents
-- **Terminal capabilities**: Auto-detect color depth, italic support, image protocols
+- **Image rendering**: Inline images via biscuit-terminal (Kitty/iTerm2 protocols)
+
+## Architecture
+
+Darkmatter focuses on **markdown parsing and transformation**. Terminal-specific capabilities are delegated to `biscuit-terminal`:
+
+| Responsibility | Package |
+|----------------|---------|
+| Markdown parsing (CommonMark + GFM) | darkmatter-lib |
+| Syntax highlighting | darkmatter-lib (syntect) |
+| Frontmatter extraction | darkmatter-lib |
+| Document comparison/normalization | darkmatter-lib |
+| Terminal detection | biscuit-terminal |
+| Image rendering (Kitty/iTerm2) | biscuit-terminal |
+| Mermaid diagram rendering | biscuit-terminal |
+| Color depth, italic support | biscuit-terminal |
 
 ## Quick Start
 
@@ -28,9 +43,9 @@ write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 | Module | Description |
 |--------|-------------|
 | `markdown` | Core `Markdown` type with frontmatter, rendering, and manipulation |
-| `mermaid` | Mermaid diagram theming and rendering (terminal/HTML) |
+| `mermaid` | Mermaid diagram theming (terminal rendering via biscuit-terminal) |
 | `render` | Hyperlink rendering utilities |
-| `terminal` | Terminal capability detection (color depth, italics, images) |
+| `terminal` | ANSI code generation and color depth constants |
 | `testing` | Test utilities for terminal output verification |
 
 ## API Reference
@@ -166,6 +181,8 @@ let (releveled, adjustment) = md.relevel(HeadingLevel::H2)?;
 
 ### Mermaid Diagrams
 
+For HTML output, use darkmatter's theming:
+
 ```rust
 use darkmatter_lib::mermaid::{Mermaid, MermaidTheme};
 
@@ -173,12 +190,21 @@ let diagram = Mermaid::new("flowchart LR\n    A --> B")
     .with_title("My Flowchart")
     .with_footer("Generated 2026-01-29");
 
-// HTML output
+// HTML output with theme
 let html = diagram.render_for_html();
 println!("<head>{}</head><body>{}</body>", html.head, html.body);
+```
 
-// Terminal output (requires mmdc CLI)
-diagram.render_for_terminal()?;
+For terminal output, use biscuit-terminal's `MermaidRenderer`:
+
+```rust
+use biscuit_terminal::components::mermaid::MermaidRenderer;
+
+let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
+match renderer.render_for_terminal() {
+    Ok(()) => {},
+    Err(_) => println!("{}", renderer.fallback_code_block()),
+}
 ```
 
 ## Syntax Highlighting
@@ -202,9 +228,9 @@ Themes come in light/dark pairs with automatic mode detection:
 ### Color Mode Detection
 
 ```rust
-use darkmatter_lib::markdown::highlighting::{ColorMode, detect_color_mode};
+use biscuit_terminal::terminal::Terminal;
 
-let mode = detect_color_mode();  // Light or Dark based on terminal
+let mode = Terminal::color_mode();  // Light, Dark, or Unknown
 ```
 
 ## Terminal Options
@@ -233,6 +259,6 @@ For command-line usage, see the [darkmatter-cli](../cli/) package which provides
 - **pulldown-cmark**: CommonMark parsing with GFM extensions
 - **syntect**: Syntax highlighting engine
 - **two-face**: Theme loading with bat-curated themes
-- **viuer**: Terminal image rendering (Kitty, iTerm2, sixel)
+- **biscuit-terminal**: Terminal detection, image rendering, mermaid diagrams
 - **comfy-table**: Table rendering with box-drawing characters
 - **serde**: Frontmatter serialization

@@ -38,14 +38,16 @@ use crate::markdown::{
 use crate::render::link::Link;
 use comfy_table::{Attribute, Cell, CellAlignment, ContentArrangement, Table, presets};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color, Style};
 use syntect::parsing::{Scope, SyntaxReference};
 use terminal_size::{Width, terminal_size};
 use unicode_width::UnicodeWidthStr;
-use viuer::{KittySupport, get_kitty_support, is_iterm_supported};
+use biscuit_terminal::components::image_options::TerminalImageOptions;
+use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage};
+use biscuit_terminal::discovery::detection::ImageSupport;
+use biscuit_terminal::terminal::Terminal;
 
 /// Color depth capability for terminal.
 ///
@@ -201,8 +203,8 @@ const CODE_MARKER_END: &str = "\x00/CODE\x00";
 
 /// Renderer for inline images in terminal output.
 ///
-/// Handles image rendering via `viuer` when graphics protocols (Kitty/iTerm2) are
-/// available, with graceful fallback to styled placeholder text.
+/// Wraps `biscuit_terminal::components::TerminalImage` to provide image rendering
+/// with automatic protocol detection (Kitty/iTerm2) and graceful fallback.
 ///
 /// ## Security
 ///
@@ -219,26 +221,31 @@ const CODE_MARKER_END: &str = "\x00/CODE\x00";
 /// let renderer = ImageRenderer::new(Some(Path::new("/tmp")));
 /// assert!(!renderer.graphics_supported()); // Usually false in test environment
 /// ```
-#[derive(Debug)]
 pub struct ImageRenderer {
-    /// Whether graphics protocols (Kitty/iTerm2) are available.
-    graphics_supported: bool,
-    /// Whether stdout is a TTY.
-    is_tty: bool,
+    /// Cached terminal capabilities from biscuit-terminal.
+    terminal: Terminal,
     /// Base path for resolving relative image paths.
     base_path: PathBuf,
-    /// Cached canonicalized base path for security validation.
-    base_path_canonical: Option<PathBuf>,
-    /// Terminal width for image scaling.
-    terminal_width: u16,
+    /// Pre-built options for TerminalImage rendering.
+    options: TerminalImageOptions,
+}
+
+impl std::fmt::Debug for ImageRenderer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImageRenderer")
+            .field("graphics_supported", &self.graphics_supported())
+            .field("is_tty", &self.is_tty())
+            .field("terminal_width", &self.terminal_width())
+            .field("base_path", &self.base_path)
+            .finish()
+    }
 }
 
 impl ImageRenderer {
     /// Creates a new image renderer with automatic graphics detection.
     ///
-    /// Detects terminal graphics protocol support (Kitty or iTerm2) and caches
-    /// the result for use during rendering. Falls back to placeholder text when
-    /// graphics are unavailable.
+    /// Uses `biscuit_terminal::terminal::Terminal` for capability detection.
+    /// Falls back to placeholder text when graphics are unavailable.
     ///
     /// ## Arguments
     ///
@@ -258,55 +265,52 @@ impl ImageRenderer {
     /// let renderer = ImageRenderer::new(Some(Path::new("/docs")));
     /// ```
     pub fn new(base_path: Option<&Path>) -> Self {
-        let is_tty = std::io::stdout().is_terminal();
-
-        let kitty_supported = matches!(
-            get_kitty_support(),
-            KittySupport::Local | KittySupport::Remote
-        );
-        let graphics_supported = is_tty && (kitty_supported || is_iterm_supported());
-
-        let terminal_width = terminal_size().map(|(Width(w), _)| w).unwrap_or(80);
+        let terminal = Terminal::new();
 
         let base = base_path
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-        let base_canonical = base.canonicalize().ok();
+        // Build options for TerminalImage rendering
+        let options = TerminalImageOptions::builder()
+            .base_path(base.clone())
+            .max_file_size(MAX_IMAGE_FILE_SIZE)
+            .allow_remote(false)
+            .width(ImageWidth::Percent(0.5)) // Default to 50% width
+            .use_viuer(true)
+            .build();
 
         tracing::debug!(
-            graphics_supported,
-            is_tty,
-            terminal_width,
+            graphics_supported = ?terminal.image_support,
+            is_tty = terminal.is_tty,
+            terminal_width = Terminal::width(),
             base_path = %base.display(),
-            "ImageRenderer initialized"
+            "ImageRenderer initialized (via biscuit-terminal)"
         );
 
         Self {
-            graphics_supported,
-            is_tty,
+            terminal,
             base_path: base,
-            base_path_canonical: base_canonical,
-            terminal_width,
+            options,
         }
     }
 
     /// Returns whether graphics protocols are supported.
     #[inline]
     pub fn graphics_supported(&self) -> bool {
-        self.graphics_supported
+        self.terminal.is_tty && !matches!(self.terminal.image_support, ImageSupport::None)
     }
 
     /// Returns whether stdout is a TTY.
     #[inline]
     pub fn is_tty(&self) -> bool {
-        self.is_tty
+        self.terminal.is_tty
     }
 
     /// Returns the terminal width.
     #[inline]
     pub fn terminal_width(&self) -> u16 {
-        self.terminal_width
+        Terminal::width() as u16
     }
 
     /// Returns the base path for resolving relative image paths.
@@ -317,8 +321,8 @@ impl ImageRenderer {
 
     /// Renders an image from the given path.
     ///
-    /// Attempts to render the image using viuer if graphics protocols are available,
-    /// otherwise returns a styled fallback placeholder.
+    /// Uses `biscuit_terminal::components::TerminalImage` for rendering when
+    /// graphics protocols are available, with fallback to styled placeholder text.
     ///
     /// ## Security
     ///
@@ -333,71 +337,52 @@ impl ImageRenderer {
     ///
     /// ## Returns
     ///
-    /// String containing either rendered image (via viuer) or fallback placeholder.
+    /// String containing either rendered image or fallback placeholder.
     #[tracing::instrument(skip(self), fields(
         image.path = %image_path,
-        image.graphics_supported = %self.graphics_supported
+        image.graphics_supported = %self.graphics_supported()
     ))]
     pub fn render_image(&self, image_path: &str, alt_text: &str) -> String {
-        // Reject remote URLs
+        // Reject remote URLs (biscuit-terminal also checks, but we fail early)
         if image_path.starts_with("http://") || image_path.starts_with("https://") {
             tracing::debug!("Remote URLs not supported");
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
+        // Resolve path (absolute or relative to base_path)
         let full_path = if Path::new(image_path).is_absolute() {
             PathBuf::from(image_path)
         } else {
             self.base_path.join(image_path)
         };
 
-        // Security: Prevent path traversal
-        if let Some(ref base_canonical) = self.base_path_canonical
-            && let Ok(canonical_image) = full_path.canonicalize()
-            && !canonical_image.starts_with(base_canonical)
-        {
-            tracing::warn!(path = %image_path, "Image path escapes base directory");
-            return format!("▉ IMAGE[{}]\n", alt_text);
-        }
-
-        // Check file exists
+        // Check file exists before attempting to create TerminalImage
         if !full_path.exists() {
             tracing::debug!(path = %image_path, "Image file not found");
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
-        // Check file size
-        if let Ok(metadata) = std::fs::metadata(&full_path)
-            && metadata.len() > MAX_IMAGE_FILE_SIZE
-        {
-            tracing::warn!(size = metadata.len(), "Image file too large (>10MB)");
-            return format!("▉ IMAGE[{}]\n", alt_text);
-        }
-
         // Fallback if graphics unsupported
-        if !self.graphics_supported {
+        if !self.graphics_supported() {
             tracing::debug!("Graphics protocol not available");
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
-        // Constrain width only; let height be determined by aspect ratio
-        let max_width = (self.terminal_width.saturating_sub(4) as u32).min(60);
-
-        let config = viuer::Config {
-            width: Some(max_width),
-            height: None, // Auto-calculate from aspect ratio
-            absolute_offset: false,
-            restore_cursor: false,
-            transparent: true,
-            truecolor: true,
-            ..Default::default()
+        // Create TerminalImage from the path
+        let term_image = match TerminalImage::new(&full_path) {
+            Ok(img) => img.with_alt_text(alt_text),
+            Err(e) => {
+                tracing::debug!(path = %image_path, error = %e, "Failed to create TerminalImage");
+                return format!("▉ IMAGE[{}]\n", alt_text);
+            }
         };
 
-        match viuer::print_from_file(&full_path, &config) {
-            Ok((_width, height)) => {
-                tracing::debug!(path = %image_path, height, "Image rendered successfully");
-                // With restore_cursor: false, viuer positions cursor after image.
-                // No extra spacing needed - viuer handles it.
+        // Render using viuer via TerminalImageOptions
+        // render_with_options prints directly to stdout (viuer behavior)
+        match term_image.render_with_options(&self.options) {
+            Ok(()) => {
+                tracing::debug!(path = %image_path, "Image rendered successfully via biscuit-terminal");
+                // viuer positions cursor after image, no extra output needed
                 String::new()
             }
             Err(e) => {
@@ -719,6 +704,10 @@ pub fn write_terminal<W: std::io::Write>(
 
                     match options.mermaid_mode {
                         MermaidMode::Text => {
+                            // Ensure header starts on a fresh line (not appended to previous content)
+                            if wrapper.current_col() > 0 {
+                                wrapper.newline();
+                            }
                             // Text mode: show header with title and "mermaid" label (it's a code block)
                             let header = format_header_row(
                                 meta.title.as_deref(),
@@ -776,6 +765,10 @@ pub fn write_terminal<W: std::io::Write>(
                                 wrapper.push_with_newlines("\n");
                             } else {
                                 // Rendering failed - show fallback with syntax highlighting
+                                // Ensure header starts on a fresh line
+                                if wrapper.current_col() > 0 {
+                                    wrapper.newline();
+                                }
                                 // Emit header row with title and "mermaid" label
                                 let header = format_header_row(
                                     meta.title.as_deref(),
@@ -808,6 +801,11 @@ pub fn write_terminal<W: std::io::Write>(
                     // Get background color from theme for header row
                     let theme = code_highlighter.theme();
                     let bg_color = theme.settings.background.unwrap_or(Color::BLACK);
+
+                    // Ensure header starts on a fresh line (not appended to previous content)
+                    if wrapper.current_col() > 0 {
+                        wrapper.newline();
+                    }
 
                     // Add header row with title and language (right-aligned)
                     let header = format_header_row(
@@ -6236,6 +6234,48 @@ fn bar() {}
         assert!(
             combined_line.is_none(),
             "fn foo and fn bar should not be on the same line"
+        );
+    }
+
+    /// Regression test: Code block header should start on its own line when inside a list item.
+    ///
+    /// Previously, when a code block followed text in a list item, the language label (e.g., "sh")
+    /// would be appended to the end of the text line instead of appearing on a dedicated header row.
+    /// This caused the right-aligned language label to appear inline with prose text.
+    #[test]
+    fn test_code_block_header_on_own_line_in_list() {
+        let content = r#"1. First item with text.
+
+   ```sh
+   echo hello
+   ```"#;
+        let md: Markdown = content.into();
+        let mut options = TerminalOptions::default();
+        options.color_depth = Some(ColorDepth::TrueColor);
+        options.max_width = Some(80);
+        let output = for_terminal(&md, options).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        let lines: Vec<&str> = plain.lines().collect();
+
+        // The language label "sh" should NOT be on the same line as "text."
+        let text_line = lines.iter().find(|l| l.contains("text."));
+        assert!(
+            text_line.is_some(),
+            "Should have a line containing 'text.'"
+        );
+        assert!(
+            !text_line.unwrap().contains(" sh "),
+            "Language label 'sh' should not be on same line as prose text. Found: {:?}",
+            text_line
+        );
+
+        // The "sh" label should be on its own line (right-aligned)
+        let sh_line = lines.iter().find(|l| l.trim().ends_with("sh"));
+        assert!(
+            sh_line.is_some(),
+            "Should have a line ending with language label 'sh'. Lines: {:?}",
+            lines
         );
     }
 

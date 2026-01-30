@@ -1,5 +1,17 @@
-use std::env;
-use termini::{NumberCapability, StringCapability, TermInfo};
+//! Terminal capability detection via biscuit-terminal.
+//!
+//! This module provides thin wrappers around biscuit-terminal's detection functions,
+//! maintaining API compatibility with the existing darkmatter interface.
+//!
+//! ## Migration Note
+//!
+//! The underlying detection logic has been consolidated into biscuit-terminal.
+//! This module re-exports and wraps those functions for API stability.
+
+use termini::{StringCapability, TermInfo};
+
+// Re-export biscuit-terminal's ColorDepth for conversion
+use biscuit_terminal::discovery::detection::ColorDepth as BtColorDepth;
 
 // =============================================================================
 // Color Depth Constants
@@ -18,6 +30,9 @@ pub const COLORS_16_DEPTH: u32 = 16;
 pub const COLORS_8_DEPTH: u32 = 8;
 
 /// Represents basic underline support capabilities.
+///
+/// This type is maintained for API compatibility with existing darkmatter code.
+/// For new code, consider using [`UnderlineVariants`] which provides more detail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnderlineSupport {
     /// Whether the terminal supports basic underline rendering.
@@ -48,15 +63,17 @@ pub struct UnderlineVariants {
 
 /// Returns the maximum number of colors the terminal supports.
 ///
-/// This function checks the COLORTERM environment variable first for truecolor
-/// support, then falls back to querying terminfo for the number of colors.
+/// This function delegates to biscuit-terminal's detection and converts
+/// the result to a u32 for API compatibility.
 ///
 /// ## Returns
 ///
 /// The number of colors supported:
-/// - 16,777,216 if COLORTERM indicates truecolor/24bit support
-/// - The value from terminfo's MaxColors capability if available
-/// - 0 if no color support can be detected
+/// - 16,777,216 if terminal supports truecolor/24bit
+/// - 256 for 256-color terminals
+/// - 16 for basic ANSI color support
+/// - 8 for minimal color support
+/// - 0 if no color support detected
 ///
 /// ## Examples
 ///
@@ -75,44 +92,13 @@ pub struct UnderlineVariants {
 /// }
 /// ```
 pub fn color_depth() -> u32 {
-    // Check COLORTERM environment variable first
-    if let Ok(colorterm) = env::var("COLORTERM") {
-        let colorterm_lower = colorterm.to_lowercase();
-        if colorterm_lower == "truecolor" || colorterm_lower == "24bit" {
-            tracing::info!(
-                color_depth = TRUE_COLOR_DEPTH,
-                source = "COLORTERM",
-                colorterm = %colorterm,
-                "Detected truecolor support from COLORTERM env var"
-            );
-            return TRUE_COLOR_DEPTH;
-        }
-    }
-
-    // Fallback to terminfo
-    match TermInfo::from_env() {
-        Ok(term_info) => {
-            // Query the MaxColors capability
-            let depth = term_info
-                .number_cap(NumberCapability::MaxColors)
-                .map(|n| n as u32)
-                .unwrap_or(0);
-            tracing::info!(
-                color_depth = depth,
-                source = "terminfo",
-                "Detected color depth from terminfo"
-            );
-            depth
-        }
-        Err(e) => {
-            tracing::info!(
-                color_depth = 0,
-                source = "fallback",
-                error = %e,
-                "Failed to query terminfo, defaulting to no color"
-            );
-            0
-        }
+    let bt_depth = biscuit_terminal::discovery::detection::color_depth();
+    match bt_depth {
+        BtColorDepth::TrueColor => TRUE_COLOR_DEPTH,
+        BtColorDepth::Enhanced => COLORS_256_DEPTH,
+        BtColorDepth::Basic => COLORS_16_DEPTH,
+        BtColorDepth::Minimal => COLORS_8_DEPTH,
+        BtColorDepth::None => 0,
     }
 }
 
@@ -150,14 +136,12 @@ pub fn supports_setting_foreground() -> bool {
 
 /// Returns whether the terminal supports italic text rendering.
 ///
-/// This function uses a multi-layer detection strategy:
+/// This function delegates to biscuit-terminal's `italics_support()` function,
+/// which uses a multi-layer detection strategy:
 ///
-/// 1. **Terminfo** (authoritative): Checks for the `EnterItalicsMode` (`sitm`) capability
+/// 1. **Terminfo** (authoritative): Checks for `EnterItalicsMode` (`sitm`) capability
 /// 2. **TERM_PROGRAM**: Recognizes modern terminal emulators known to support italics
 /// 3. **TERM**: Falls back to pattern matching for common terminal types
-///
-/// This layered approach compensates for outdated terminfo databases that may lack
-/// italic capabilities for terminals that actually support them.
 ///
 /// ## Returns
 ///
@@ -176,79 +160,13 @@ pub fn supports_setting_foreground() -> bool {
 /// }
 /// ```
 pub fn supports_italics() -> bool {
-    use std::io::IsTerminal;
-
-    // If stdout is not a TTY, don't use styling
-    if !std::io::stdout().is_terminal() {
-        return false;
-    }
-
-    // Check for dumb terminal
-    let term = env::var("TERM").unwrap_or_default();
-    if term == "dumb" {
-        return false;
-    }
-
-    // 1. Query terminfo for EnterItalicsMode (sitm) capability (authoritative)
-    if let Ok(term_info) = TermInfo::from_env()
-        && term_info
-            .utf8_string_cap(StringCapability::EnterItalicsMode)
-            .is_some()
-    {
-        return true;
-    }
-
-    // 2. Check TERM_PROGRAM for known terminal emulators that support italics
-    if let Ok(term_program) = env::var("TERM_PROGRAM") {
-        let dominated = matches!(
-            term_program.as_str(),
-            "iTerm.app"
-                | "Apple_Terminal"
-                | "Alacritty"
-                | "kitty"
-                | "WezTerm"
-                | "vscode"
-                | "Hyper"
-                | "Tabby"
-                | "Rio"
-        );
-        if dominated {
-            return true;
-        }
-    }
-
-    // 3. Check for Windows Terminal (uses WT_SESSION env var)
-    if env::var("WT_SESSION").is_ok() {
-        return true;
-    }
-
-    // 4. Fallback: check TERM for patterns indicating modern terminals
-    let dominated = matches!(
-        term.as_str(),
-        "xterm-256color"
-            | "xterm-direct"
-            | "alacritty"
-            | "alacritty-direct"
-            | "kitty"
-            | "kitty-direct"
-            | "wezterm"
-            | "tmux-256color"
-            | "screen-256color"
-    );
-    if dominated {
-        return true;
-    }
-
-    false
+    biscuit_terminal::discovery::detection::italics_support()
 }
 
 /// Returns whether the terminal supports basic underline rendering.
 ///
-/// This function uses a multi-layer detection strategy:
-///
-/// 1. **Terminfo** (authoritative): Checks for `EnterUnderlineMode` (`smul`) capability
-/// 2. **TERM_PROGRAM**: Recognizes modern terminal emulators known to support underlines
-/// 3. **TERM**: Falls back to pattern matching for common terminal types
+/// This function delegates to biscuit-terminal's `underline_support()` and
+/// converts the result to the darkmatter-compatible `UnderlineSupport` type.
 ///
 /// ## Returns
 ///
@@ -270,132 +188,21 @@ pub fn supports_italics() -> bool {
 /// }
 /// ```
 pub fn supports_underline() -> UnderlineSupport {
-    use std::io::IsTerminal;
-
-    // If stdout is not a TTY, no styling
-    if !std::io::stdout().is_terminal() {
-        return UnderlineSupport {
-            basic: false,
-            colored: false,
-        };
+    let bt_support = biscuit_terminal::discovery::detection::underline_support();
+    UnderlineSupport {
+        basic: bt_support.straight,
+        colored: bt_support.colored,
     }
-
-    // Check for dumb terminal
-    let term = env::var("TERM").unwrap_or_default();
-    if term == "dumb" {
-        return UnderlineSupport {
-            basic: false,
-            colored: false,
-        };
-    }
-
-    let mut basic = false;
-    let mut colored = false;
-
-    // 1. Query terminfo for EnterUnderlineMode (smul) capability
-    if let Ok(term_info) = TermInfo::from_env()
-        && term_info
-            .utf8_string_cap(StringCapability::EnterUnderlineMode)
-            .is_some()
-    {
-        basic = true;
-    }
-
-    // 2. Check TERM_PROGRAM for known terminal emulators with colored underline support
-    if let Ok(term_program) = env::var("TERM_PROGRAM") {
-        match term_program.as_str() {
-            // Modern terminals with full underline support including colors
-            "kitty" | "WezTerm" | "Alacritty" | "ghostty" | "contour" | "foot" => {
-                basic = true;
-                colored = true;
-            }
-            // iTerm2 supports colored underlines since 3.4
-            "iTerm.app" => {
-                basic = true;
-                colored = true;
-            }
-            // VTE-based terminals (GNOME Terminal, Tilix, etc.)
-            "gnome-terminal" | "tilix" => {
-                basic = true;
-                colored = true;
-            }
-            // Konsole supports colored underlines
-            "konsole" => {
-                basic = true;
-                colored = true;
-            }
-            // Apple Terminal has basic underline only
-            "Apple_Terminal" => {
-                basic = true;
-            }
-            // VS Code terminal
-            "vscode" => {
-                basic = true;
-                colored = true;
-            }
-            _ => {}
-        }
-    }
-
-    // 3. Check for Windows Terminal (uses WT_SESSION env var)
-    if env::var("WT_SESSION").is_ok() {
-        basic = true;
-        colored = true;
-    }
-
-    // 4. Fallback: check TERM for patterns indicating modern terminals
-    if !colored {
-        let colored_terms = matches!(
-            term.as_str(),
-            "xterm-kitty"
-                | "kitty"
-                | "kitty-direct"
-                | "wezterm"
-                | "alacritty"
-                | "alacritty-direct"
-                | "ghostty"
-                | "foot"
-                | "foot-direct"
-                | "contour"
-        );
-        if colored_terms {
-            basic = true;
-            colored = true;
-        }
-    }
-
-    // Most terminals with 256 colors support basic underline
-    if !basic {
-        let basic_terms = matches!(
-            term.as_str(),
-            "xterm-256color"
-                | "xterm-direct"
-                | "tmux-256color"
-                | "screen-256color"
-                | "rxvt-unicode-256color"
-        );
-        if basic_terms {
-            basic = true;
-        }
-    }
-
-    UnderlineSupport { basic, colored }
 }
 
 /// Returns the supported underline style variants for the current terminal.
 ///
-/// This function detects support for extended underline styles introduced by Kitty
+/// This function delegates to biscuit-terminal's `underline_support()` and
+/// converts the result to the darkmatter-compatible `UnderlineVariants` type.
+///
+/// Modern terminals support extended underline styles introduced by Kitty
 /// and adopted by many modern terminals. These styles use SGR sub-parameters
 /// (colon-separated values like `\e[4:3m` for curly underlines).
-///
-/// ## Detection Strategy
-///
-/// 1. **TERM_PROGRAM**: Identifies terminal emulator by name
-/// 2. **WT_SESSION**: Detects Windows Terminal
-/// 3. **TERM**: Falls back to terminal type patterns
-///
-/// Note: Terminfo's non-standard `Su` capability is not widely available in
-/// standard terminfo databases, so terminal identification is the primary method.
 ///
 /// ## Returns
 ///
@@ -422,121 +229,13 @@ pub fn supports_underline() -> UnderlineSupport {
 /// }
 /// ```
 pub fn supported_underline_variants() -> UnderlineVariants {
-    use std::io::IsTerminal;
-
-    let none = UnderlineVariants {
-        straight: false,
-        double: false,
-        curly: false,
-        dotted: false,
-        dashed: false,
-        colored: false,
-    };
-
-    // If stdout is not a TTY, no styling
-    if !std::io::stdout().is_terminal() {
-        return none;
+    let bt_support = biscuit_terminal::discovery::detection::underline_support();
+    UnderlineVariants {
+        straight: bt_support.straight,
+        double: bt_support.double,
+        curly: bt_support.curly,
+        dotted: bt_support.dotted,
+        dashed: bt_support.dashed,
+        colored: bt_support.colored,
     }
-
-    // Check for dumb terminal
-    let term = env::var("TERM").unwrap_or_default();
-    if term == "dumb" {
-        return none;
-    }
-
-    // Check if basic underline is supported via terminfo
-    let has_basic_underline = TermInfo::from_env()
-        .map(|ti| {
-            ti.utf8_string_cap(StringCapability::EnterUnderlineMode)
-                .is_some()
-        })
-        .unwrap_or(false);
-
-    // Helper for terminals with full extended underline support
-    let full_support = || UnderlineVariants {
-        straight: true,
-        double: true,
-        curly: true,
-        dotted: true,
-        dashed: true,
-        colored: true,
-    };
-
-    // Helper for terminals with straight underline only
-    let basic_only = || UnderlineVariants {
-        straight: true,
-        double: false,
-        curly: false,
-        dotted: false,
-        dashed: false,
-        colored: false,
-    };
-
-    // 1. Check TERM_PROGRAM for known terminal emulators
-    if let Ok(term_program) = env::var("TERM_PROGRAM") {
-        match term_program.as_str() {
-            // Full Kitty-style underline support
-            "kitty" | "WezTerm" | "Alacritty" | "ghostty" | "contour" | "foot" | "iTerm.app" => {
-                return full_support();
-            }
-            // VTE-based terminals (GNOME Terminal 3.44+, Tilix) - full support
-            "gnome-terminal" | "tilix" => {
-                return full_support();
-            }
-            // Konsole has colored underlines but limited style support
-            "konsole" => {
-                return UnderlineVariants {
-                    straight: true,
-                    double: true,
-                    curly: false, // Konsole doesn't support curly as of 2024
-                    dotted: false,
-                    dashed: false,
-                    colored: true,
-                };
-            }
-            // Apple Terminal - basic underline only
-            "Apple_Terminal" => {
-                return basic_only();
-            }
-            // VS Code terminal - full support
-            "vscode" => {
-                return full_support();
-            }
-            _ => {}
-        }
-    }
-
-    // 2. Check for Windows Terminal
-    if env::var("WT_SESSION").is_ok() {
-        return full_support();
-    }
-
-    // 3. Check TERM for known terminal patterns
-    match term.as_str() {
-        // Full extended underline support
-        "xterm-kitty" | "kitty" | "kitty-direct" | "wezterm" | "alacritty" | "alacritty-direct"
-        | "ghostty" | "foot" | "foot-direct" | "contour" => {
-            return full_support();
-        }
-        // Basic underline via common terminal types
-        "xterm-256color"
-        | "xterm-direct"
-        | "tmux-256color"
-        | "screen-256color"
-        | "rxvt-unicode-256color" => {
-            // These may or may not support extended underlines depending on
-            // the actual terminal behind them. Return basic only to be safe.
-            if has_basic_underline {
-                return basic_only();
-            }
-        }
-        _ => {}
-    }
-
-    // 4. Fall back to terminfo for basic support
-    if has_basic_underline {
-        return basic_only();
-    }
-
-    none
 }

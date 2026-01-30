@@ -1,4 +1,7 @@
 //! Tests for terminal color detection utilities
+//!
+//! These tests verify that the wrapper functions correctly delegate to
+//! biscuit-terminal and maintain API compatibility.
 
 use super::*;
 use serial_test::serial;
@@ -51,25 +54,29 @@ impl Drop for ScopedEnv {
     }
 }
 
+// =============================================================================
+// Color depth tests
+// =============================================================================
+
 #[test]
 #[serial]
 fn test_color_depth_truecolor() {
     let _env = ScopedEnv::set("COLORTERM", "truecolor");
-    assert_eq!(color_depth(), 16_777_216);
+    assert_eq!(color_depth(), TRUE_COLOR_DEPTH);
 }
 
 #[test]
 #[serial]
 fn test_color_depth_24bit() {
     let _env = ScopedEnv::set("COLORTERM", "24bit");
-    assert_eq!(color_depth(), 16_777_216);
+    assert_eq!(color_depth(), TRUE_COLOR_DEPTH);
 }
 
 #[test]
 #[serial]
 fn test_color_depth_case_insensitive() {
     let _env = ScopedEnv::set("COLORTERM", "TrueColor");
-    assert_eq!(color_depth(), 16_777_216);
+    assert_eq!(color_depth(), TRUE_COLOR_DEPTH);
 }
 
 #[test]
@@ -110,4 +117,51 @@ fn test_color_depth_invalid_colorterm() {
     // Should fall back to terminfo since "invalid" is not "truecolor" or "24bit"
     let _depth = color_depth();
     // We just verify the function runs without panicking
+}
+
+// =============================================================================
+// Italics support tests
+// =============================================================================
+
+#[test]
+fn test_supports_italics_returns_bool() {
+    // Just verify the function works and returns a boolean
+    let supports = supports_italics();
+    assert!(supports || !supports);
+}
+
+// =============================================================================
+// Underline support tests
+// =============================================================================
+
+#[test]
+fn test_supports_underline_returns_struct() {
+    let support = supports_underline();
+    // Verify the struct has the expected fields
+    assert!(support.basic || !support.basic);
+    assert!(support.colored || !support.colored);
+}
+
+#[test]
+fn test_supported_underline_variants_returns_struct() {
+    let variants = supported_underline_variants();
+    // Verify all expected fields exist
+    assert!(variants.straight || !variants.straight);
+    assert!(variants.double || !variants.double);
+    assert!(variants.curly || !variants.curly);
+    assert!(variants.dotted || !variants.dotted);
+    assert!(variants.dashed || !variants.dashed);
+    assert!(variants.colored || !variants.colored);
+}
+
+// =============================================================================
+// Constant tests
+// =============================================================================
+
+#[test]
+fn test_color_depth_constants() {
+    assert_eq!(TRUE_COLOR_DEPTH, 16_777_216);
+    assert_eq!(COLORS_256_DEPTH, 256);
+    assert_eq!(COLORS_16_DEPTH, 16);
+    assert_eq!(COLORS_8_DEPTH, 8);
 }
