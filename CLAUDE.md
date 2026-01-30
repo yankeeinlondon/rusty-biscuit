@@ -195,6 +195,7 @@ This repository has local Claude Code skills in `.claude/skills/`:
 - `biscuit-terminal` - **Terminal authority**: detection, image rendering (viuer), mermaid diagrams
 - `darkmatter` - Markdown parsing/rendering (delegates terminal rendering to biscuit-terminal)
 - `playa` - Audio playback via host players, format detection, 53 embedded sound effects
+- `research` - AI-powered library research with two-phase LLM pipeline
 - `sniff` - System detection (OS, hardware, network, programs, services)
 - `clap` - Command-line argument parsing
 - `color-eyre` - Error reporting
@@ -214,6 +215,7 @@ When working in this repository, you **must** follow these workflows:
 
 2. **Module-Specific Skills**:
    - Working in `tui/`? Use the `ratatui` skill
+   - Working in `research/`? Use the `research` skill
    - Working in CLI modules (`research/cli`, etc.)? Use the `clap` skill
    - Working in `darkmatter/`? Use the `darkmatter` skill
    - Working in `biscuit-terminal/`? Use the `biscuit-terminal` skill

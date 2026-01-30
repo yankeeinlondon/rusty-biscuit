@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5.54", features = ["derive", "wrap_help"] }
+clap_complete = "4.5"
 ignore = "0.4"
 owo-colors = { version = "4.2", features = ["supports-colors"] }
 percent-encoding = "2.3"

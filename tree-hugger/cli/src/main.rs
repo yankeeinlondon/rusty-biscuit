@@ -2,7 +2,8 @@ use std::io::IsTerminal;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::{Generator, Shell};
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
 use owo_colors::{OwoColorize, Style};
@@ -99,6 +100,14 @@ struct LintArgs {
     syntax_only: bool,
 }
 
+/// Arguments for the completions command
+#[derive(clap::Args, Debug, Clone)]
+struct CompletionsArgs {
+    /// The shell to generate completions for
+    #[arg(value_enum)]
+    shell: Shell,
+}
+
 #[derive(Subcommand, Debug, Clone)]
 enum Command {
     /// List functions in the file(s)
@@ -115,6 +124,8 @@ enum Command {
     Classes(ClassArgs),
     /// Run lint diagnostics on the file(s)
     Lint(LintArgs),
+    /// Generate shell completions
+    Completions(CompletionsArgs),
 }
 
 impl Command {
@@ -128,26 +139,28 @@ impl Command {
             | Self::Imports(args) => &args.inputs,
             Self::Lint(args) => &args.inputs,
             Self::Classes(args) => &args.inputs,
+            Self::Completions(_) => &[],
         }
     }
 
     /// Returns the command kind for dispatching operations.
-    fn kind(&self) -> CommandKind {
+    fn kind(&self) -> Option<CommandKind> {
         match self {
-            Self::Functions(_) => CommandKind::Functions,
-            Self::Types(_) => CommandKind::Types,
-            Self::Symbols(_) => CommandKind::Symbols,
-            Self::Exports(_) => CommandKind::Exports,
-            Self::Imports(_) => CommandKind::Imports,
-            Self::Lint(args) => CommandKind::Lint {
+            Self::Functions(_) => Some(CommandKind::Functions),
+            Self::Types(_) => Some(CommandKind::Types),
+            Self::Symbols(_) => Some(CommandKind::Symbols),
+            Self::Exports(_) => Some(CommandKind::Exports),
+            Self::Imports(_) => Some(CommandKind::Imports),
+            Self::Lint(args) => Some(CommandKind::Lint {
                 lint_only: args.lint_only,
                 syntax_only: args.syntax_only,
-            },
-            Self::Classes(args) => CommandKind::Classes {
+            }),
+            Self::Classes(args) => Some(CommandKind::Classes {
                 name_filter: args.name.clone(),
                 static_only: args.static_only,
                 instance_only: args.instance_only,
-            },
+            }),
+            Self::Completions(_) => None,
         }
     }
 }
@@ -319,6 +332,13 @@ impl From<LanguageArg> for ProgrammingLanguage {
 
 fn main() -> Result<(), TreeHuggerError> {
     let cli = Cli::parse();
+
+    // Handle completions command early (doesn't need file processing)
+    if let Command::Completions(args) = &cli.command {
+        print_completions(args.shell, &mut Cli::command());
+        return Ok(());
+    }
+
     let language = cli.language.map(ProgrammingLanguage::from);
     let inputs = cli.command.inputs();
     let output_format = cli.output_format();
@@ -328,7 +348,7 @@ fn main() -> Result<(), TreeHuggerError> {
     let display_root = find_repo_root(&root_dir);
     let files = collect_files(&root_dir, inputs, &cli.ignore, language)?;
 
-    let command_kind = cli.command.kind();
+    let command_kind = cli.command.kind().expect("completions already handled");
 
     // Handle classes command separately due to different output structure
     if let CommandKind::Classes {
@@ -414,6 +434,11 @@ fn current_dir() -> Result<PathBuf, TreeHuggerError> {
         path: PathBuf::from("."),
         source,
     })
+}
+
+/// Prints shell completions to stdout.
+fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command) {
+    clap_complete::generate(generator, cmd, cmd.get_name().to_string(), &mut std::io::stdout());
 }
 
 fn collect_files(

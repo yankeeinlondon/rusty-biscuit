@@ -2,7 +2,7 @@ set dotenv-load
 set positional-arguments
 
 # List of areas in this monorepo
-areas := "biscuit-hash biscuit-speaks biscuit-terminal playa playa-cli ai-pipeline research so-you-say darkmatter sniff"
+areas := "biscuit-hash biscuit-speaks biscuit-terminal playa playa-cli ai-pipeline research so-you-say tree-hugger tree-hugger-cli darkmatter sniff"
 
 BOLD := '\033[1m'
 RESET := '\033[0m'
@@ -253,3 +253,13 @@ skill-tree-hugger:
     @echo "The {{BOLD}}tree-hugger{{RESET}} skill has been rebuilt"
     @echo ""
     @so-you-say "The tree-hugger package has synced it's documents for drift and updated the skill tree."
+
+# Update docs and then update the skill for the Queue package
+skill-research:
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}research{{RESET}} Package"
+    @echo "-------------------------------------------------------------------------------"
+    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-research.md)"\'
+    @echo ""
+    @echo "The {{BOLD}}research{{RESET}} skill has been rebuilt"
+    @echo ""
+    @so-you-say "The research package has synced it's documents for drift and updated the skill tree."
