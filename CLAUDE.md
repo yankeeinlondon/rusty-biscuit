@@ -188,7 +188,8 @@ When running in Wezterm, Queue creates a split layout:
 
 This repository has local Claude Code skills in `.claude/skills/`:
 
-- `biscuit-terminal` - Terminal capability detection and image rendering
+- `biscuit-terminal` - **Terminal authority**: detection, image rendering (viuer), mermaid diagrams
+- `darkmatter` - Markdown parsing/rendering (delegates terminal rendering to biscuit-terminal)
 - `clap` - Command-line argument parsing
 - `color-eyre` - Error reporting
 - `ratatui` - Terminal UI framework
@@ -208,6 +209,8 @@ When working in this repository, you **must** follow these workflows:
 2. **Module-Specific Skills**:
    - Working in `tui/`? Use the `ratatui` skill
    - Working in CLI modules (`research/cli`, etc.)? Use the `clap` skill
+   - Working in `darkmatter/`? Use the `darkmatter` skill
+   - Working in `biscuit-terminal/`? Use the `biscuit-terminal` skill
 
 3. **Dependency Management**: Before introducing new dependencies:
    - Check `docs/dependencies.md` first (primary source)

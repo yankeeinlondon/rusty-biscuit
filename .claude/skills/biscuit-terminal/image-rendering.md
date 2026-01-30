@@ -16,6 +16,47 @@ let output = img.render_to_terminal(&term)?;
 print!("{}", output);
 ```
 
+## Secure Rendering with Options (Recommended)
+
+For production use, prefer `render_with_options()` which applies all security guards:
+
+```rust
+use biscuit_terminal::components::image_options::TerminalImageOptions;
+use biscuit_terminal::components::terminal_image::{TerminalImage, ImageWidth};
+use std::path::PathBuf;
+
+let options = TerminalImageOptions::builder()
+    .base_path(PathBuf::from("/safe/directory"))  // Security boundary
+    .max_file_size(10 * 1024 * 1024)              // 10MB limit
+    .allow_remote(false)                           // Block URLs
+    .width(ImageWidth::Percent(0.75))
+    .use_viuer(true)                               // Use viuer for rendering
+    .build();
+
+let img = TerminalImage::new(path)?;
+img.render_with_options(&options)?;  // Applies security checks then renders
+```
+
+### TerminalImageOptions Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `base_path` | `Option<PathBuf>` | `None` | Security boundary for relative paths |
+| `max_file_size` | `u64` | `10MB` | Maximum allowed file size |
+| `allow_remote` | `bool` | `false` | Allow http:// and https:// URLs |
+| `width` | `ImageWidth` | `Percent(0.5)` | Width specification |
+| `use_viuer` | `bool` | `true` | Use viuer for rendering |
+
+### Helper Methods
+
+```rust
+// Check if file size is within limits
+if options.is_size_allowed(file_size) { ... }
+
+// Check if path is within allowed base path
+if options.is_path_allowed(&path) { ... }
+```
+
 ## Width Specifications
 
 ### ImageWidth Enum
@@ -143,6 +184,20 @@ if let Some(cs) = cell_size() {
 
 This prevents "squished" images in terminals with non-2:1 cell aspect ratios (like WezTerm).
 
+## Security Features
+
+`TerminalImage` includes built-in security guards:
+
+- **Path traversal protection**: Rejects paths containing `..` or absolute paths outside base
+- **File size limits**: Configurable maximum file size (prevents memory exhaustion)
+- **Remote URL blocking**: Only local files allowed; remote URLs return an error
+
+```rust
+// Path traversal is blocked
+let result = TerminalImage::new(Path::new("../../../etc/passwd"));
+assert!(matches!(result, Err(TerminalImageError::PathTraversalBlocked { .. })));
+```
+
 ## Error Handling
 
 ```rust
@@ -154,6 +209,9 @@ pub enum TerminalImageError {
     ImageLoadError(image::ImageError),
     EncodingError { message: String },
     UnsupportedTerminal,
+    PathTraversalBlocked { path: String },
+    FileTooLarge { size: u64, max_size: u64 },
+    RemoteUrlBlocked { url: String },
 }
 ```
 

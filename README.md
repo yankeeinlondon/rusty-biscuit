@@ -13,21 +13,17 @@ This monorepo hosts the following packages:
 
 ### Shared Libraries
 
-1. **biscuit** [\[`./biscuit`]\[[`./biscuit`][[`./biscuit`](./biscuit/README.md)\]
-
-   Provides utility functions and a highly capable markdown pipelining engine.
-
-1. **schematic** [\[`./schematic`]\[[`./schematic`][[`./schematic`](./schematic/README.md)\]
+1. **schematic** [[`./schematic`](./schematic/README.md)]
 
    Builds type-strong enumerations for API's and data types to be consumed by other libraries/apps.
 
-1. **ai-pipeline** [\[`./ai-pipeline`]\[[`./ai-pipeline`][[`./ai-pipeline`](./ai-pipeline/README.md)\]
+2. **ai-pipeline** [[`./ai-pipeline`](./ai-pipeline/README.md)]
 
    Provides a set of AI pipeline primitives for Agent composition while re-exporting some `rig` primitives to allow lower level interaction as well.
 
 ### Applications
 
-1. **researcher** [\[`./research`]\[[`./research`][[`./research`](./research/README.md)\]
+1. **researcher** [ [`./research`](./research/README.md) ]
 
    A **CLI** which facilitates the research process and is able to produce content rich "deep dives" and tree-based `skills` for Claude Code and Opencode.
 
@@ -40,7 +36,7 @@ This monorepo hosts the following packages:
    research link
    ```
 
-1. **darkmatter** CLI [\[`./darkmatter`]\[[`./darkmatter`][[`./darkmatter`](./darkmatter/README.md)\]
+2. **darkmatter** CLI [[`./darkmatter`](./darkmatter/README.md)]
 
    A Markdown renderer which renders to both the terminal(escape codes) and browser (HTML).
 
@@ -55,7 +51,7 @@ This monorepo hosts the following packages:
    md doc.md --ast
    ```
 
-1. **observer** TUI [\[`./observer`]\[[`./observer`][[`./observer`](./observer/README.md)\]
+3. **observer** TUI [[`./observer`](./observer/README.md)]
 
    A TUI which helps you to observe state changes in the terminal.
 
@@ -66,7 +62,7 @@ This monorepo hosts the following packages:
    observe <file>
    ```
 
-1. **notable** [\[`./notable`]\[[`./notable`][[`./notable`](./notable/README.md)\]
+4. **notable** [[`./notable`](./notable/README.md)]
 
    A CLI (and lib) which interacts with an Obsidian vault.
 
@@ -79,7 +75,7 @@ This monorepo hosts the following packages:
    note --prompt "what are the top news stories today?"
    ```
 
-1. **so-you-say** CLI [\[`./so-you-say`]\[[`./so-you-say`][[`./so-you-say`](./so-you-say/README.md)\]
+5. **so-you-say** CLI [[`./so-you-say`](./so-you-say/README.md)]
 
    A simple TTS CLI which leverages TTS features on the host or in the cloud.
 
@@ -99,17 +95,20 @@ Some packages require system libraries to be installed:
 The TTS functionality requires platform-specific dependencies:
 
 **Linux (Ubuntu/Debian):**
+
 ```bash
 sudo apt-get update
 sudo apt-get install libspeechd-dev
 ```
 
 **Linux (Fedora/RHEL):**
+
 ```bash
 sudo dnf install speech-dispatcher-devel
 ```
 
 **Linux (Arch):**
+
 ```bash
 sudo pacman -S speech-dispatcher
 ```
