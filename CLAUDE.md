@@ -21,6 +21,9 @@ dockhand/
 │   └── lib/          # Core research library
 │   └── service/      # Server to abstract AI pipelining functionality (FUTURE)
 ├── biscuit/          # Common utilities (providers, tools, codegen, hashing)
+├── biscuit-terminal/ # Terminal detection and rich rendering
+│   ├── cli/          # Binary: `bt` (terminal inspector)
+│   └── lib/          # Terminal capabilities, image rendering, escape codes
 ├── darkmatter-cli/   # Binary: `md` (markdown terminal renderer)
 ├── darkmatter-lib/   # Markdown parsing, mermaid diagrams, syntax highlighting
 ├── queue/            # TUI command scheduler
@@ -213,6 +216,7 @@ When running in Wezterm, Queue creates a split layout:
 
 This repository has local Claude Code skills in `.claude/skills/`:
 
+- `biscuit-terminal` - Terminal capability detection and image rendering
 - `clap` - Command-line argument parsing
 - `color-eyre` - Error reporting
 - `ratatui` - Terminal UI framework
