@@ -8,7 +8,7 @@
 //! - **ORANGE + BOLD**: Missing underlying documents only
 //! - **BOLD**: All files present
 
-use crate::list::types::TopicInfo;
+use crate::list::types::{ResearchOutput, TopicInfo};
 use owo_colors::OwoColorize;
 use darkmatter_lib::render::Link;
 use std::sync::OnceLock;
@@ -165,8 +165,10 @@ fn format_main_line(topic: &TopicInfo, hide_type_badge: bool, verbose: bool) -> 
         topic.name.bold().to_string()
     };
 
-    // Create clickable link to deep_dive.md
-    let deep_dive_path = topic.location.join("deep_dive.md");
+    // Create clickable link to deep-dive/{topic}.md
+    let deep_dive_path = topic
+        .location
+        .join(ResearchOutput::DeepDive.path_for(&topic.name));
     let link_url = format!("file://{}", deep_dive_path.display());
     let formatted_name = Link::new(styled_name, link_url).to_terminal();
     parts.push(formatted_name);

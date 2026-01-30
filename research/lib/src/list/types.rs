@@ -22,12 +22,24 @@ pub enum ResearchOutput {
 }
 
 impl ResearchOutput {
-    /// Returns the expected filename for this output type.
-    pub fn filename(&self) -> &'static str {
+    /// Returns the expected relative path for this output type.
+    ///
+    /// For `DeepDive`, the path is `deep-dive/{topic_name}.md`.
+    /// For other types, the topic_name is ignored.
+    pub fn path_for(&self, topic_name: &str) -> String {
         match self {
-            ResearchOutput::DeepDive => "deep_dive.md",
-            ResearchOutput::Brief => "brief.md",
-            ResearchOutput::Skill => "skill/SKILL.md",
+            ResearchOutput::DeepDive => format!("deep-dive/{}.md", topic_name),
+            ResearchOutput::Brief => "brief.md".to_string(),
+            ResearchOutput::Skill => "skill/SKILL.md".to_string(),
+        }
+    }
+
+    /// Returns the directory name for this output type (if applicable).
+    pub fn directory(&self) -> Option<&'static str> {
+        match self {
+            ResearchOutput::DeepDive => Some("deep-dive"),
+            ResearchOutput::Skill => Some("skill"),
+            ResearchOutput::Brief => None,
         }
     }
 }
@@ -131,10 +143,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_research_output_filename() {
-        assert_eq!(ResearchOutput::DeepDive.filename(), "deep_dive.md");
-        assert_eq!(ResearchOutput::Brief.filename(), "brief.md");
-        assert_eq!(ResearchOutput::Skill.filename(), "skill/SKILL.md");
+    fn test_research_output_path_for() {
+        assert_eq!(
+            ResearchOutput::DeepDive.path_for("clap"),
+            "deep-dive/clap.md"
+        );
+        assert_eq!(ResearchOutput::Brief.path_for("clap"), "brief.md");
+        assert_eq!(ResearchOutput::Skill.path_for("clap"), "skill/SKILL.md");
+    }
+
+    #[test]
+    fn test_research_output_directory() {
+        assert_eq!(ResearchOutput::DeepDive.directory(), Some("deep-dive"));
+        assert_eq!(ResearchOutput::Skill.directory(), Some("skill"));
+        assert_eq!(ResearchOutput::Brief.directory(), None);
     }
 
     #[test]

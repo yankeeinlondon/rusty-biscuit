@@ -134,7 +134,7 @@ This is stored on disk as a JSON and is a dictionary/hashmap defined by the [`To
 
 ```txt
 (Root Dir)
-    ├── research-inventory.jsonl
+    ├── research-inventory.json
     └── {kind}/
         ├── {topic}
         │   ├── skill

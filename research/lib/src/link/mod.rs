@@ -171,7 +171,9 @@ pub async fn link(
 
     for topic in filtered_topics {
         let source_path = topic.location.join("skill");
-        let deep_dive_path = topic.location.join("deep_dive.md");
+        let deep_dive_path = topic
+            .location
+            .join(format!("deep-dive/{}.md", topic.name));
 
         // Validate skill source (early filtering)
         let skill_source_valid = detection::validate_skill_source(&source_path);
@@ -406,7 +408,8 @@ pub async fn link(
             )
         } else {
             debug!(
-                "No deep_dive.md found for {}: {}",
+                "No deep-dive/{}.md found for {}: {}",
+                topic.name,
                 topic.name,
                 deep_dive_path.display()
             );

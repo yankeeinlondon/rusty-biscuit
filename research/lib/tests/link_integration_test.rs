@@ -118,7 +118,7 @@ fn setup_temp_home_dirs_with_docs(
     )
 }
 
-/// Helper to create a skill directory with SKILL.md and deep_dive.md
+/// Helper to create a skill directory with SKILL.md and deep-dive/{name}.md
 fn create_skill_with_deep_dive(library: &Path, name: &str, topic_type: &str) {
     let topic_dir = library.join(name);
     let skill_dir = topic_dir.join("skill");
@@ -128,8 +128,10 @@ fn create_skill_with_deep_dive(library: &Path, name: &str, topic_type: &str) {
     let skill_md = skill_dir.join("SKILL.md");
     fs::write(&skill_md, format!("# {} Skill", name)).unwrap();
 
-    // Create deep_dive.md
-    let deep_dive = topic_dir.join("deep_dive.md");
+    // Create deep-dive/{name}.md (new structure)
+    let deep_dive_dir = topic_dir.join("deep-dive");
+    fs::create_dir_all(&deep_dive_dir).unwrap();
+    let deep_dive = deep_dive_dir.join(format!("{}.md", name));
     fs::write(
         &deep_dive,
         format!(

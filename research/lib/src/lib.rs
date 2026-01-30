@@ -210,9 +210,12 @@ pub struct MissingOutput {
 }
 
 /// Expected final output files that should be generated
+///
+/// Note: Deep Dive path changed from `deep_dive.md` to `deep-dive/{topic}.md`
+/// in the new directory structure. This constant is deprecated.
 const EXPECTED_OUTPUTS: &[(&str, &str)] = &[
     ("Skill", "skill/SKILL.md"),
-    ("Deep Dive", "deep_dive.md"),
+    ("Deep Dive", "deep_dive.md"), // Legacy path - new path is deep-dive/{topic}.md
     ("Brief", "brief.md"),
 ];
 
@@ -220,7 +223,7 @@ const EXPECTED_OUTPUTS: &[(&str, &str)] = &[
 ///
 /// This checks for the presence of:
 /// - skill/SKILL.md (not just the skill/ directory)
-/// - deep_dive.md
+/// - deep-dive/{topic}.md (new) or deep_dive.md (legacy)
 /// - brief.md
 ///
 /// Returns a list of outputs that don't exist.
@@ -1198,7 +1201,7 @@ struct PromptTaskResult {
 #[allow(clippy::too_many_arguments)]
 async fn run_prompt_task<M>(
     name: &'static str,
-    filename: &'static str,
+    filename: &str,
     output_dir: PathBuf,
     model: M,
     prompt: String,
@@ -1251,6 +1254,18 @@ where
             // Write raw content without normalization
             // Normalization happens selectively later (e.g., SKILL.md preserves frontmatter)
             let path = output_dir.join(filename);
+            // Create parent directory if needed (for paths like deep-dive/{topic}.md)
+            if let Some(parent) = path.parent() {
+                if !parent.exists() {
+                    if let Err(e) = fs::create_dir_all(parent).await {
+                        eprintln!(
+                            "  [{}/{}] ✗ {} failed to create directory: {} ({:.1}s)",
+                            completed, total, name, e, elapsed
+                        );
+                        return PromptTaskResult { metrics: None };
+                    }
+                }
+            }
             match fs::write(&path, &content).await {
                 Ok(_) => {
                     println!(
@@ -2562,6 +2577,7 @@ async fn run_incremental_research(
 
     let phase2_counter = Arc::new(AtomicUsize::new(0));
     let phase2_start = Instant::now();
+    let deep_dive_filename = format!("deep-dive/{}.md", topic);
 
     // Run phase 2 prompts in parallel
     let (skill_metrics_result, deep_dive_result) = tokio::join!(
@@ -2575,7 +2591,7 @@ async fn run_incremental_research(
         ),
         run_prompt_task(
             "deep_dive",
-            "deep_dive.md",
+            &deep_dive_filename,
             output_dir.clone(),
             deep_dive_gen,
             deep_dive_prompt,
@@ -2595,13 +2611,13 @@ async fn run_incremental_research(
         }
     }
 
-    // Normalize deep_dive.md if it was generated
+    // Normalize deep-dive/{topic}.md if it was generated
+    let deep_dive_path = output_dir.join(format!("deep-dive/{}.md", topic));
     if deep_dive_result.metrics.is_some() {
-        let deep_dive_path = output_dir.join("deep_dive.md");
         if let Ok(content) = fs::read_to_string(&deep_dive_path).await {
             let normalized = normalize_markdown(&content);
             if let Err(e) = fs::write(&deep_dive_path, normalized).await {
-                tracing::error!("Failed to normalize deep_dive.md: {}", e);
+                tracing::error!("Failed to normalize deep-dive/{}.md: {}", topic, e);
             }
         }
     }
@@ -2611,7 +2627,7 @@ async fn run_incremental_research(
         println!("Generating brief summary...\n");
 
         // Read the deep_dive content
-        let deep_dive_content = fs::read_to_string(output_dir.join("deep_dive.md"))
+        let deep_dive_content = fs::read_to_string(&deep_dive_path)
             .await
             .unwrap_or_default();
 
@@ -3930,6 +3946,7 @@ pub async fn research(
 
     let phase2_counter = Arc::new(AtomicUsize::new(0));
     let phase2_start = Instant::now();
+    let deep_dive_filename = format!("deep-dive/{}.md", topic);
 
     // Create a temporary metadata struct for skill generation to update
     let mut temp_metadata = ResearchMetadata::new_library(library_info.as_ref());
@@ -3946,7 +3963,7 @@ pub async fn research(
         ),
         run_prompt_task(
             "deep_dive",
-            "deep_dive.md",
+            &deep_dive_filename,
             output_dir.clone(),
             deep_dive_gen,
             deep_dive_prompt,
@@ -3960,13 +3977,13 @@ pub async fn research(
     // Extract when_to_use from temporary metadata
     let when_to_use = temp_metadata.when_to_use;
 
-    // Normalize deep_dive.md if it was generated
+    // Normalize deep-dive/{topic}.md if it was generated
+    let deep_dive_path = output_dir.join(format!("deep-dive/{}.md", topic));
     if deep_dive_result.metrics.is_some() {
-        let deep_dive_path = output_dir.join("deep_dive.md");
         if let Ok(content) = fs::read_to_string(&deep_dive_path).await {
             let normalized = normalize_markdown(&content);
             if let Err(e) = fs::write(&deep_dive_path, normalized).await {
-                tracing::error!("Failed to normalize deep_dive.md: {}", e);
+                tracing::error!("Failed to normalize deep-dive/{}.md: {}", topic, e);
             }
         }
     }
@@ -3976,7 +3993,7 @@ pub async fn research(
         println!("Generating brief summary...\n");
 
         // Read the deep_dive content
-        let deep_dive_content = fs::read_to_string(output_dir.join("deep_dive.md"))
+        let deep_dive_content = fs::read_to_string(&deep_dive_path)
             .await
             .unwrap_or_default();
 

@@ -6,52 +6,27 @@ use sniff_lib::package::LanguagePackageManager;
 use ai_pipeline::models::model_capability::ModelCapability;
 use thiserror::Error;
 
-/// The type of content in a research document.
+/// The type/provenance of a research document.
+///
+/// This describes HOW the document was created, not its purpose or filename.
+/// See `research/docs/research.md` for full documentation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ContentType {
-    /// High-level overview of the topic
-    Overview,
-    /// Comparison with similar libraries/tools
-    SimilarLibraries,
-    /// Libraries that integrate well with this topic
-    IntegrationPartners,
-    /// Common use cases and patterns
-    UseCases,
-    /// Version history and changes
-    Changelog,
-    /// Response to a custom user question
-    CustomQuestion,
-    /// In-depth technical reference
-    DeepDive,
-    /// Very short summary (1-2 sentences)
-    Brief,
-    /// Claude Code skill file
+    // -- Underlying Research Types --
+    /// A static document that was NOT generated NOR uses interpolation.
+    Static,
+    /// A static document that DOES use frontmatter interpolation.
+    Template,
+    /// A document generated from a prompt (prompt stored in frontmatter).
+    Prompt,
+    /// A document generated as a result of the topic's "kind" category.
+    KindDerived,
+
+    // -- Final Deliverable Types --
+    /// A skill tree document (SKILL.md and related files).
     Skill,
-}
-
-impl ContentType {
-    /// Infer content type from filename.
-    ///
-    /// Returns `None` if the filename doesn't match a known pattern.
-    pub fn from_filename(filename: &str) -> Option<Self> {
-        let stem = Path::new(filename)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(filename);
-
-        match stem.to_lowercase().as_str() {
-            "overview" => Some(Self::Overview),
-            "similar_libraries" => Some(Self::SimilarLibraries),
-            "integration_partners" => Some(Self::IntegrationPartners),
-            "use_cases" => Some(Self::UseCases),
-            "changelog" => Some(Self::Changelog),
-            "deep_dive" => Some(Self::DeepDive),
-            "brief" => Some(Self::Brief),
-            "skill" => Some(Self::Skill),
-            s if s.starts_with("question_") => Some(Self::CustomQuestion),
-            _ => None,
-        }
-    }
+    /// The deep dive comprehensive reference document.
+    DeepDive,
 }
 
 /// The AI workflow/flow used to generate a document.
@@ -238,8 +213,13 @@ pub struct Document {
     model_capability: Option<ModelCapability>,
     /// xxHash of the document content
     content_hash: u64,
-    /// xxHash of the interpolated prompt
+    /// xxHash of the interpolated prompt (only for Template content types)
+    #[serde(default, skip_serializing_if = "is_zero")]
     interpolated_hash: u64,
+}
+
+fn is_zero(val: &u64) -> bool {
+    *val == 0
 }
 
 impl TryFrom<String> for Document {
@@ -272,16 +252,13 @@ impl TryFrom<&String> for Document {
 impl Document {
     /// Create a new Document from a file path.
     ///
-    /// The content type is inferred from the filename.
-    pub fn new(filepath: &Path) -> Self {
+    /// The content type must be provided - it describes how the document was created.
+    pub fn new(filepath: &Path, content_type: ContentType) -> Self {
         let filename = filepath
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
-
-        let content_type = ContentType::from_filename(&filename)
-            .unwrap_or(ContentType::CustomQuestion);
 
         let now = Utc::now();
 

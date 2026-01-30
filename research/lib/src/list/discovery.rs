@@ -251,12 +251,12 @@ fn check_output_files(location: &Path, topic: &mut TopicInfo) {
     ];
 
     for output in outputs {
-        let file_path = location.join(output.filename());
+        let file_path = location.join(output.path_for(&topic.name));
         if !file_path.exists() {
             debug!(
                 "Topic '{}' is missing output file: {}",
                 topic.name,
-                output.filename()
+                output.path_for(&topic.name)
             );
             topic.missing_output.push(output);
         }
@@ -335,7 +335,7 @@ mod tests {
 
         // Create output files
         for output in output_files {
-            let file_path = topic_dir.join(output.filename());
+            let file_path = topic_dir.join(output.path_for(name));
             if let Some(parent) = file_path.parent() {
                 fs::create_dir_all(parent).unwrap();
             }

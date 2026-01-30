@@ -233,7 +233,8 @@ const CORE_DOCUMENTS: &[&str] = &[
     "integration_partners",
     "use_cases",
     "changelog",
-    "deep_dive",
+    "deep_dive",   // legacy
+    "deep-dive",   // new directory name
     "brief",
 ];
 
@@ -253,7 +254,7 @@ const CORE_DOCUMENTS: &[&str] = &[
 /// ## Validation Rules
 /// - Filename cannot be empty after trimming
 /// - Filename cannot match core documents: `overview`, `similar_libraries`,
-///   `integration_partners`, `use_cases`, `changelog`, `deep_dive`, `brief`
+///   `integration_partners`, `use_cases`, `changelog`, `deep_dive`, `brief`, `deep-dive`
 /// - Filename must not contain path separators (`/`, `\`)
 /// - `.md` extension added automatically if omitted
 ///

@@ -35,7 +35,9 @@ use thiserror::Error;
 use xxhash_rust::xxh3::xxh3_64;
 
 use super::inventory::ResearchInventory;
-use super::topic::{ContentType, Document, Flow, KindCategory, Software, Topic};
+use sniff_lib::package::LanguagePackageManager;
+
+use super::topic::{ContentType, Document, KindCategory, Library, Topic};
 use crate::ResearchMetadata;
 
 /// Errors that can occur during v2 migration.
@@ -85,7 +87,7 @@ pub fn build_topic_from_metadata_json(metadata_path: &Path) -> Result<Topic> {
     let v1_metadata: ResearchMetadata = serde_json::from_str(&content)?;
 
     // Convert v1 kind to v2 KindCategory
-    let kind = convert_kind(&v1_metadata);
+    let kind = convert_kind(&v1_metadata, &topic_name);
 
     // Scan for documents in the topic directory
     let documents = scan_documents(topic_dir)?;
@@ -160,26 +162,68 @@ pub fn scan_and_build_inventory(research_dir: &Path) -> Result<ResearchInventory
 }
 
 /// Convert v1 ResearchMetadata to v2 KindCategory.
-fn convert_kind(v1: &ResearchMetadata) -> KindCategory {
+fn convert_kind(v1: &ResearchMetadata, topic_name: &str) -> KindCategory {
     use crate::ResearchKind;
 
     match v1.kind {
         ResearchKind::Library => {
             // Extract library details if available
             if let Some(lib_details) = v1.library_details() {
-                // We can't fully populate Library without LanguagePackageManager enum conversion
-                // For now, create a Software entry with the name
-                KindCategory::Software(Software::new(
-                    lib_details
-                        .package_manager
-                        .clone()
-                        .unwrap_or_else(|| "unknown".to_string()),
+                let pm_str = lib_details
+                    .package_manager
+                    .as_deref()
+                    .unwrap_or("unknown");
+                let package_manager = parse_package_manager(pm_str);
+                let language = lib_details.language.clone().unwrap_or_default();
+                let url = lib_details.url.clone().unwrap_or_default();
+
+                KindCategory::Library(Library::new(
+                    package_manager,
+                    topic_name.to_string(),
+                    language,
+                    url,
                 ))
             } else {
-                KindCategory::Software(Software::new("library".to_string()))
+                // Default to Cargo for unknown libraries (most common case)
+                KindCategory::Library(Library::new(
+                    LanguagePackageManager::Cargo,
+                    topic_name.to_string(),
+                    "Rust".to_string(),
+                    String::new(),
+                ))
             }
         }
-        ResearchKind::Api => KindCategory::Software(Software::new("api".to_string())),
+        ResearchKind::Api => {
+            // For API research, still use Library with unknown package manager
+            KindCategory::Library(Library::new(
+                LanguagePackageManager::Cargo,
+                topic_name.to_string(),
+                String::new(),
+                String::new(),
+            ))
+        }
+    }
+}
+
+/// Parse a package manager string into a LanguagePackageManager enum.
+fn parse_package_manager(pm: &str) -> LanguagePackageManager {
+    match pm.to_lowercase().as_str() {
+        "crates.io" | "cargo" => LanguagePackageManager::Cargo,
+        "npm" | "npmjs" => LanguagePackageManager::Npm,
+        "pnpm" => LanguagePackageManager::Pnpm,
+        "yarn" => LanguagePackageManager::Yarn,
+        "bun" => LanguagePackageManager::Bun,
+        "pypi" | "pip" => LanguagePackageManager::Pip,
+        "poetry" => LanguagePackageManager::Poetry,
+        "uv" => LanguagePackageManager::Uv,
+        "go" | "go.mod" | "pkg.go.dev" => LanguagePackageManager::GoModules,
+        "composer" | "packagist" => LanguagePackageManager::Composer,
+        "luarocks" => LanguagePackageManager::Luarocks,
+        "hex" => LanguagePackageManager::Hex,
+        "nuget" => LanguagePackageManager::Nuget,
+        "cpan" => LanguagePackageManager::Cpan,
+        "cpanm" => LanguagePackageManager::Cpanm,
+        _ => LanguagePackageManager::Cargo, // Default to Cargo
     }
 }
 
@@ -207,8 +251,9 @@ fn scan_documents(topic_dir: &Path) -> Result<Vec<Document>> {
             .unwrap_or("")
             .to_string();
 
-        // Infer content type from filename
-        let content_type = ContentType::from_filename(&filename).unwrap_or(ContentType::CustomQuestion);
+        // Infer content type based on document provenance (how it was created)
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let content_type = infer_content_type_from_filename(stem);
 
         // Get file timestamps
         let metadata = fs::metadata(&path)?;
@@ -222,7 +267,7 @@ fn scan_documents(topic_dir: &Path) -> Result<Vec<Document>> {
             filename,
             content_type,
             None, // prompt - not available in migration
-            Some(Flow::Research), // Assume research flow for migrated docs
+            None, // flow not yet implemented
             created,
             last_updated,
             None, // model - not available in migration
@@ -267,7 +312,7 @@ fn scan_documents(topic_dir: &Path) -> Result<Vec<Document>> {
                 filename,
                 ContentType::Skill,
                 None,
-                Some(Flow::Synthesis),
+                None, // flow not yet implemented
                 created,
                 last_updated,
                 None,
@@ -280,7 +325,114 @@ fn scan_documents(topic_dir: &Path) -> Result<Vec<Document>> {
         }
     }
 
+    // Also check for deep-dive directory (new structure: deep-dive/{topic}.md)
+    let deep_dive_dir = topic_dir.join("deep-dive");
+    if deep_dive_dir.exists() && deep_dive_dir.is_dir() {
+        for entry in fs::read_dir(&deep_dive_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if !path.is_file() {
+                continue;
+            }
+
+            let extension = path.extension().and_then(|e| e.to_str());
+            if extension != Some("md") {
+                continue;
+            }
+
+            let filename = format!(
+                "deep-dive/{}",
+                path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("deep-dive.md")
+            );
+
+            let metadata = fs::metadata(&path)?;
+            let (created, last_updated) = get_file_timestamps(&metadata);
+
+            let content = fs::read(&path)?;
+            let content_hash = xxh3_64(&content);
+
+            let doc = Document::with_metadata(
+                filename,
+                ContentType::DeepDive,
+                None,
+                None, // flow not yet implemented
+                created,
+                last_updated,
+                None,
+                None,
+                content_hash,
+                0,
+            );
+
+            documents.push(doc);
+        }
+    }
+
+    // Legacy: Migrate old-style deep_dive.md to new deep-dive/{topic}.md structure
+    let legacy_deep_dive = topic_dir.join("deep_dive.md");
+    if legacy_deep_dive.exists() && legacy_deep_dive.is_file() {
+        // Get topic name from directory
+        let topic_name = topic_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+
+        // Create deep-dive directory and move file
+        let deep_dive_dir = topic_dir.join("deep-dive");
+        fs::create_dir_all(&deep_dive_dir)?;
+        let new_path = deep_dive_dir.join(format!("{}.md", topic_name));
+
+        // Move (rename) the file to new location
+        fs::rename(&legacy_deep_dive, &new_path)?;
+
+        // Now record with the new path
+        let metadata = fs::metadata(&new_path)?;
+        let (created, last_updated) = get_file_timestamps(&metadata);
+
+        let content = fs::read(&new_path)?;
+        let content_hash = xxh3_64(&content);
+
+        let doc = Document::with_metadata(
+            format!("deep-dive/{}.md", topic_name),
+            ContentType::DeepDive,
+            None,
+            None,
+            created,
+            last_updated,
+            None,
+            None,
+            content_hash,
+            0,
+        );
+
+        documents.push(doc);
+    }
+
     Ok(documents)
+}
+
+/// Infer content type based on filename for migration.
+///
+/// This maps known research filenames to their document provenance:
+/// - Kind-derived: overview, similar_libraries, integration_partners, use_cases, changelog, brief
+/// - Prompt: question_* files (user-provided prompts)
+/// - DeepDive: files in deep-dive/ directory
+/// - Skill: files in skill/ directory
+fn infer_content_type_from_filename(stem: &str) -> ContentType {
+    match stem.to_lowercase().as_str() {
+        // Kind-derived documents (generated based on topic kind)
+        "overview" | "similar_libraries" | "integration_partners" | "use_cases" | "changelog"
+        | "brief" => ContentType::KindDerived,
+
+        // Question files are prompt-generated
+        s if s.starts_with("question_") => ContentType::Prompt,
+
+        // Unknown files default to static (user-provided)
+        _ => ContentType::Static,
+    }
 }
 
 /// Get created and modified timestamps from file metadata.
@@ -361,14 +513,14 @@ mod tests {
         assert_eq!(topic.brief(), "A test library: test-lib");
         assert_eq!(topic.documents().len(), 2);
 
-        // Check document types are inferred correctly
-        let doc_types: Vec<_> = topic
-            .documents()
-            .iter()
-            .map(|d| d.content_type().clone())
-            .collect();
-        assert!(doc_types.contains(&ContentType::Overview));
-        assert!(doc_types.contains(&ContentType::SimilarLibraries));
+        // Check document types are inferred correctly (both are KindDerived)
+        for doc in topic.documents() {
+            assert_eq!(
+                doc.content_type(),
+                &ContentType::KindDerived,
+                "overview.md and similar_libraries.md should be KindDerived"
+            );
+        }
     }
 
     #[test]

@@ -239,7 +239,7 @@ pub fn research_health(
     let missing_underlying = check_missing_prompts(&topic_path);
 
     // Check Phase 2 outputs
-    let missing_deliverables = check_missing_outputs(&topic_path);
+    let missing_deliverables = check_missing_outputs(&topic_path, topic);
 
     // Validate SKILL.md frontmatter
     let skill_structure_valid = validate_skill_frontmatter(&topic_path);
@@ -280,16 +280,26 @@ fn check_missing_prompts(topic_path: &Path) -> Vec<String> {
 /// Check for missing Phase 2 output files
 ///
 /// Returns a list of output types that are missing.
-fn check_missing_outputs(topic_path: &Path) -> Vec<ResearchOutput> {
+fn check_missing_outputs(topic_path: &Path, topic_name: &str) -> Vec<ResearchOutput> {
     let mut missing = Vec::new();
 
-    if !topic_path.join("deep_dive.md").exists() {
+    // Deep dive is at deep-dive/{topic}.md
+    if !topic_path
+        .join(ResearchOutput::DeepDive.path_for(topic_name))
+        .exists()
+    {
         missing.push(ResearchOutput::DeepDive);
     }
-    if !topic_path.join("brief.md").exists() {
+    if !topic_path
+        .join(ResearchOutput::Brief.path_for(topic_name))
+        .exists()
+    {
         missing.push(ResearchOutput::Brief);
     }
-    if !topic_path.join("skill/SKILL.md").exists() {
+    if !topic_path
+        .join(ResearchOutput::Skill.path_for(topic_name))
+        .exists()
+    {
         missing.push(ResearchOutput::Skill);
     }
 
@@ -348,9 +358,16 @@ This is the skill content.
     }
 
     /// Create all output deliverables
-    fn create_all_outputs(topic_path: &Path) {
+    fn create_all_outputs(topic_path: &Path, topic_name: &str) {
         create_valid_skill(topic_path);
-        fs::write(topic_path.join("deep_dive.md"), "Deep dive content").unwrap();
+        // Create deep-dive directory and file
+        let deep_dive_dir = topic_path.join("deep-dive");
+        fs::create_dir_all(&deep_dive_dir).unwrap();
+        fs::write(
+            deep_dive_dir.join(format!("{}.md", topic_name)),
+            "Deep dive content",
+        )
+        .unwrap();
         fs::write(topic_path.join("brief.md"), "Brief content").unwrap();
     }
 
@@ -438,7 +455,7 @@ This is the skill content.
         let topic_path = create_test_topic(&temp, "library", "test-lib");
 
         create_all_prompts(&topic_path);
-        create_all_outputs(&topic_path);
+        create_all_outputs(&topic_path, "test-lib");
 
         // Set RESEARCH_DIR to temp directory
         unsafe {
@@ -470,7 +487,7 @@ This is the skill content.
         fs::write(topic_path.join("overview.md"), "content").unwrap();
         fs::write(topic_path.join("use_cases.md"), "content").unwrap();
 
-        create_all_outputs(&topic_path);
+        create_all_outputs(&topic_path, "incomplete-lib");
 
         unsafe {
             std::env::set_var("RESEARCH_DIR", temp.path());
@@ -555,7 +572,10 @@ Content
 "#;
         fs::write(skill_dir.join("SKILL.md"), invalid_skill).unwrap();
 
-        fs::write(topic_path.join("deep_dive.md"), "content").unwrap();
+        // Create deep-dive directory and file
+        let deep_dive_dir = topic_path.join("deep-dive");
+        fs::create_dir_all(&deep_dive_dir).unwrap();
+        fs::write(deep_dive_dir.join("bad-skill.md"), "content").unwrap();
         fs::write(topic_path.join("brief.md"), "content").unwrap();
 
         unsafe {
@@ -583,7 +603,10 @@ Content
         let topic_path = create_test_topic(&temp, "framework", "no-skill");
 
         create_all_prompts(&topic_path);
-        fs::write(topic_path.join("deep_dive.md"), "content").unwrap();
+        // Create deep-dive directory and file
+        let deep_dive_dir = topic_path.join("deep-dive");
+        fs::create_dir_all(&deep_dive_dir).unwrap();
+        fs::write(deep_dive_dir.join("no-skill.md"), "content").unwrap();
         fs::write(topic_path.join("brief.md"), "content").unwrap();
 
         unsafe {

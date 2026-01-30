@@ -185,11 +185,13 @@ pub fn create_skill_symlink(
     Ok(())
 }
 
-/// Validates that a deep_dive.md file exists.
+/// Validates that a deep dive file exists.
+///
+/// Deep dive files are located at `{topic}/deep-dive/{topic}.md`.
 ///
 /// # Arguments
 ///
-/// * `path` - Path to the deep_dive.md file to validate
+/// * `path` - Path to the deep dive file to validate
 ///
 /// # Returns
 ///
@@ -212,16 +214,18 @@ pub fn validate_deep_dive_file(path: &Path) -> Result<(), CreationError> {
     Ok(())
 }
 
-/// Creates an absolute symbolic link from a deep_dive.md file to a docs directory.
+/// Creates an absolute symbolic link from a deep dive file to a docs directory.
+///
+/// Deep dive files are located at `{topic}/deep-dive/{topic}.md`.
 ///
 /// This function:
-/// 1. Validates the source deep_dive.md exists
+/// 1. Validates the source deep dive file exists
 /// 2. Creates parent directories if needed
 /// 3. Creates an absolute symlink with the topic name as the file name
 ///
 /// # Arguments
 ///
-/// * `deep_dive_path` - The source deep_dive.md file path
+/// * `deep_dive_path` - The source deep dive file path (e.g., `clap/deep-dive/clap.md`)
 /// * `symlink_location` - Where to create the symlink (e.g., `~/.claude/docs/clap.md`)
 ///
 /// # Returns
@@ -241,7 +245,7 @@ pub fn validate_deep_dive_file(path: &Path) -> Result<(), CreationError> {
 /// use std::path::Path;
 /// use research_lib::link::creation::create_deep_dive_symlink;
 ///
-/// let deep_dive = Path::new("/home/user/.research/library/clap/deep_dive.md");
+/// let deep_dive = Path::new("/home/user/.research/library/clap/deep-dive/clap.md");
 /// let symlink_location = Path::new("/home/user/.claude/docs/clap.md");
 /// create_deep_dive_symlink(deep_dive, symlink_location)?;
 /// # Ok::<(), research_lib::link::creation::CreationError>(())
