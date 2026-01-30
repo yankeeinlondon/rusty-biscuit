@@ -16,6 +16,7 @@ pub struct ScheduledTask {
     pub target: ExecutionTarget,
     pub status: TaskStatus,
     pub created_at: DateTime<Utc>,
+    pub schedule_kind: Option<ScheduleKind>,
 }
 ```
 
@@ -24,6 +25,7 @@ pub struct ScheduledTask {
 | Method | Description |
 |--------|-------------|
 | `new(id, command, scheduled_at, target)` | Create a new pending task |
+| `with_schedule_kind(id, command, scheduled_at, target, kind)` | Create a new pending task with schedule kind |
 | `mark_running()` | Transition status to Running |
 | `mark_completed()` | Transition status to Completed |
 | `mark_cancelled()` | Transition status to Cancelled |
@@ -43,6 +45,15 @@ Where the command executes.
 | `NewPane` | Creates a new Wezterm pane (default in Wezterm) | `"new_pane"` |
 | `NewWindow` | Opens in a native terminal window | `"new_window"` |
 | `Background` | Runs detached, no terminal output | `"background"` |
+
+### ScheduleKind
+
+How the task was scheduled, affecting display in the WHEN column.
+
+| Variant | Description | Serialization |
+|---------|-------------|---------------|
+| `AtTime` | Scheduled at a specific clock time | `"at_time"` |
+| `AfterDelay` | Scheduled after a duration delay | `"after_delay"` |
 
 ### TaskStatus
 
@@ -206,6 +217,8 @@ Detected terminal types.
 | `Xterm` | `TERM=xterm*` | 8 |
 | `Unknown` | (fallback) | 9 (lowest) |
 
+**Note:** Detection order in code is: Wezterm → iTerm2 → Ghostty → GNOME Terminal → Konsole → Xfce4 Terminal → Terminal.app → XTerm → Unknown.
+
 ### TerminalCapabilities
 
 Capability flags based on detected terminal.
@@ -304,7 +317,7 @@ Parses delay strings for the `--in` flag.
 
 ```rust
 // Data types
-pub use types::{ScheduledTask, ExecutionTarget, TaskStatus};
+pub use types::{ScheduledTask, ExecutionTarget, TaskStatus, ScheduleKind};
 
 // Execution
 pub use executor::{TaskExecutor, TaskEvent};

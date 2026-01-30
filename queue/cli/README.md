@@ -98,6 +98,8 @@ pub struct App {
     pub input_modal: Option<InputModal>,
     pub history_modal: Option<HistoryModal>,
     pub capabilities: TerminalCapabilities,
+    pub history_store: Option<JsonFileStore>,
+    pub next_task_id: u64,
 }
 ```
 
@@ -107,8 +109,11 @@ pub struct App {
 |--------|-------------|
 | `new()` | Create default app, detect terminal capabilities |
 | `with_executor()` | Add executor and event channel |
+| `with_history_store(store)` | Add history store for persistence |
 | `schedule_task(task)` | Add task and schedule with executor |
+| `update_task(id, command, scheduled_at, target, schedule_kind)` | Update existing task |
 | `cancel_task(id)` | Remove pending task by ID |
+| `alloc_task_id()` | Allocate next task ID |
 | `select_next()` / `select_previous()` | Navigate task list |
 | `selected_task()` | Get currently selected task |
 | `handle_task_event(event)` | Process executor status updates |

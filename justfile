@@ -186,7 +186,7 @@ commit:
 
 # Update docs and then update the skill for the Schematic package
 skill-schematic:
-    @echo "Fixing documentation drift and rebuilding the skill for the Schematic Package"
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Schematic{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
     claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-schematic.md)"\'
     @echo ""
@@ -196,7 +196,7 @@ skill-schematic:
 
 # Update docs and then update the skill for the darkmatter package
 skill-darkmatter:
-    @echo "Fixing documentation drift and rebuilding the skill for the Darkmatter Package"
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Darkmatter{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
     @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-darkmatter.md)"\'
     @echo ""
@@ -206,7 +206,7 @@ skill-darkmatter:
 
 # Update docs and then update the skill for the Sniff package
 skill-sniff:
-    @echo "Fixing documentation drift and rebuilding the skill for the Sniff Package"
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Sniff{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
     @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-sniff.md)"\'
     @echo ""
@@ -223,3 +223,13 @@ skill-playa:
     @echo "The Playa skill has been rebuilt"
     @echo ""
     @so-you-say "The playa package has synced it's documents for drift and updated the skill tree."
+
+# Update docs and then update the skill for the Queue package
+skill-queue:
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Queue{{RESET}} Package"
+    @echo "-------------------------------------------------------------------------------"
+    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-queue.md)"\'
+    @echo ""
+    @echo "The Queue skill has been rebuilt"
+    @echo ""
+    @so-you-say "The Queue package has synced it's documents for drift and updated the skill tree."
