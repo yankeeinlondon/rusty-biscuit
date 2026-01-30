@@ -40,6 +40,40 @@ fn main() {
 - `discovery::clipboard` - OSC52 clipboard support
 - `discovery::mode_2027` - Unicode grapheme cluster support
 - `discovery::eval` - Escape code analysis utilities
+- `components::terminal_image` - Terminal image rendering (Kitty/iTerm2 with fallbacks)
+
+## Terminal Images (TerminalImage)
+
+`TerminalImage` renders inline images using the Kitty graphics protocol with automatic iTerm2 handling and a graceful text fallback.
+
+### Width syntax
+- `path.png` → default 50% of available width
+- `path.png|50%` → percentage of available columns
+- `path.png|80` → fixed columns
+- `path.png|fill` → fill available width
+
+### Protocol selection
+- Kitty-capable terminals (Kitty, WezTerm, Ghostty, etc.): use Kitty protocol
+- iTerm2: uses iTerm’s native inline images even if iTerm advertises Kitty, to avoid Kitty-path failures
+- Others / unsupported: falls back to alt text
+
+### Aspect ratio handling
+- Uses measured cell size when available (`discovery::fonts::cell_size`) to compute pixel targets; falls back to 8×16 px cells. This keeps images from looking “squished” in terminals with non-2:1 cells (e.g., WezTerm).
+- Respects user width specs and preserves aspect ratio; explicit widths are allowed to upscale, while the implicit 50% keeps a no-upscale guard.
+
+### Kitty specifics
+- Sends cell-based sizing (`c=`/`r=`) rather than pixel sizing for consistent layout.
+- Advances the cursor below the image after rendering so prompts don’t overlap.
+
+### iTerm2 specifics
+- Forces iTerm path when `TERM_PROGRAM=iTerm.app`, even if Kitty is advertised.
+- Uses `inline=1;preserveAspectRatio=1;width=<user spec>;size=auto`.
+- Appends a cursor advance based on measured cell height to avoid prompt collisions; avoids extra escape clutter that previously caused ENOENT errors in iTerm.
+
+### Gotchas and notes
+- If `cell_size` cannot be detected, default 8×16 is used; images may appear slightly off if the terminal font has a very different aspect. Provide a width in columns (e.g., `|80`) to get predictable sizing.
+- Large images: we don’t upscale the default 50% case; explicit widths can upscale.
+- Unsupported terminals: you’ll see the generated alt text instead of an image.
 
 ## Terminal Detection
 

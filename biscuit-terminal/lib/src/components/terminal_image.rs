@@ -17,7 +17,7 @@ use std::fmt::Alignment;
 use std::io::Cursor;
 use std::path::Path;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use image::{DynamicImage, ImageFormat, ImageReader};
 
 use crate::components::renderable::Renderable;
@@ -146,12 +146,11 @@ impl TerminalImage {
             });
         }
 
-        let absolute_path = std::fs::canonicalize(filepath).map_err(|e| {
-            TerminalImageError::InvalidPath {
+        let absolute_path =
+            std::fs::canonicalize(filepath).map_err(|e| TerminalImageError::InvalidPath {
                 path: filepath.to_string_lossy().to_string(),
                 reason: e.to_string(),
-            }
-        })?;
+            })?;
 
         Ok(Self {
             filename: absolute_path.to_string_lossy().to_string(),
@@ -201,10 +200,11 @@ impl TerminalImage {
     /// Returns `TerminalImageError::EncodingError` if PNG encoding fails.
     pub fn encode_as_png(&self, img: &DynamicImage) -> Result<Vec<u8>, TerminalImageError> {
         let mut buffer = Cursor::new(Vec::new());
-        img.write_to(&mut buffer, ImageFormat::Png)
-            .map_err(|e| TerminalImageError::EncodingError {
+        img.write_to(&mut buffer, ImageFormat::Png).map_err(|e| {
+            TerminalImageError::EncodingError {
                 message: format!("PNG encoding failed: {}", e),
-            })?;
+            }
+        })?;
         Ok(buffer.into_inner())
     }
 
@@ -272,8 +272,13 @@ impl TerminalImage {
         term: &crate::terminal::Terminal,
     ) -> Result<String, TerminalImageError> {
         use crate::discovery::detection::ImageSupport;
+        use crate::discovery::detection::TerminalApp;
 
         match term.image_support {
+            // iTerm advertises Kitty in some setups; prefer native iTerm protocol when the app is iTerm2.
+            ImageSupport::Kitty if matches!(term.app, TerminalApp::ITerm2) => {
+                self.render_as_iterm2(crate::terminal::Terminal::width())
+            }
             ImageSupport::Kitty => self.render_as_kitty(crate::terminal::Terminal::width()),
             ImageSupport::ITerm => self.render_as_iterm2(crate::terminal::Terminal::width()),
             ImageSupport::None => Ok(self.generate_alt_text()),
@@ -287,20 +292,39 @@ impl TerminalImage {
     /// * `term_width` - Terminal width in characters (defaults to 80 if 0)
     pub fn render_as_kitty(&self, term_width: u32) -> Result<String, TerminalImageError> {
         let term_width = if term_width == 0 { 80 } else { term_width };
+        let available_width = term_width.saturating_sub(self.margin_left + self.margin_right);
 
         let img = self.load_image()?;
-        let (display_width, display_height) = calculate_display_dimensions(
-            img.width(),
-            img.height(),
-            &self.width,
-            term_width.saturating_sub(self.margin_left + self.margin_right),
-        );
+
+        // Calculate target display size in character cells
+        let target_cells = match &self.width {
+            ImageWidth::Fill => available_width,
+            ImageWidth::Percent(pct) => ((available_width as f32) * pct) as u32,
+            ImageWidth::Characters(chars) => (*chars).min(available_width),
+        };
+
+        // Use measured cell size when available for correct aspect ratio.
+        let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
+            .map(|cs| (cs.width.max(1), cs.height.max(1)))
+            .unwrap_or((8u32, 16u32));
+
+        let target_pixel_width = target_cells * cell_pixel_width;
+
+        // Calculate pixel dimensions preserving aspect ratio
+        let aspect_ratio = img.height() as f32 / img.width() as f32;
+        // Only prevent upscaling when no explicit width is specified (default 50%)
+        let display_pixel_width = match &self.width {
+            ImageWidth::Percent(pct) if *pct == 0.5 => target_pixel_width.min(img.width()),
+            _ => target_pixel_width,
+        };
+        let display_pixel_height = (display_pixel_width as f32 * aspect_ratio) as u32;
 
         // Resize image if needed
-        let resized = if display_width != img.width() || display_height != img.height() {
+        let resized = if display_pixel_width != img.width() || display_pixel_height != img.height()
+        {
             img.resize_exact(
-                display_width,
-                display_height,
+                display_pixel_width.max(1),
+                display_pixel_height.max(1),
                 image::imageops::FilterType::Lanczos3,
             )
         } else {
@@ -308,7 +332,15 @@ impl TerminalImage {
         };
 
         let png_data = self.encode_as_png(&resized)?;
-        Ok(self.render_kitty(&png_data, display_width, display_height))
+
+        // Calculate cell height based on aspect ratio and measured cell height
+        let display_cells_height =
+            (display_pixel_height as f32 / cell_pixel_height as f32).ceil() as u32;
+
+        // Pass cell dimensions (not pixels) to Kitty and advance cursor below the image
+        let image = self.render_kitty_cells(&png_data, target_cells, display_cells_height.max(1));
+        let cursor_advance = format!("\x1b[{}B\r\n", display_cells_height.max(1));
+        Ok(format!("{}{}", image, cursor_advance))
     }
 
     /// Render the image using iTerm2 protocol.
@@ -330,8 +362,11 @@ impl TerminalImage {
         };
 
         // Resize to preserve aspect ratio based on character width
-        // Assuming ~8 pixels per character cell width
-        let target_pixel_width = char_width * 8;
+        let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
+            .map(|cs| (cs.width.max(1), cs.height.max(1)))
+            .unwrap_or((8u32, 16u32));
+
+        let target_pixel_width = char_width * cell_pixel_width;
         let aspect_ratio = img.height() as f32 / img.width() as f32;
         let target_pixel_height = (target_pixel_width as f32 * aspect_ratio) as u32;
 
@@ -347,13 +382,25 @@ impl TerminalImage {
 
         let png_data = self.encode_as_png(&resized)?;
 
+        // Build width string for iTerm2 (supports %, px, cells). Prefer percent for percent/fill specs.
+        let width_param = match &self.width {
+            ImageWidth::Fill => "100%".to_string(),
+            ImageWidth::Percent(pct) => format!("{:.0}%", pct * 100.0),
+            ImageWidth::Characters(chars) => chars.to_string(),
+        };
+
         // Get filename for iTerm2
         let filename = Path::new(&self.filename)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "image.png".to_string());
 
-        Ok(self.render_iterm2(&png_data, char_width, &filename))
+        // Keep aspect ratio; rely on iTerm to scale; avoid post cursor moves to prevent parsing issues.
+        let display_cells_height =
+            ((target_pixel_height as f32 / cell_pixel_height as f32).ceil() as u32).max(1);
+
+        let image = self.render_iterm2(&png_data, &width_param, &filename);
+        Ok(format!("{}\x1b[{}B\r\n", image, display_cells_height))
     }
 
     /// Render image using the Kitty graphics protocol.
@@ -379,7 +426,12 @@ impl TerminalImage {
     /// - `a=T`: action is transmit and display
     /// - `t=d`: transmission medium is direct (inline data)
     /// - `m=0|1`: more chunks follow (1) or this is final (0)
-    pub fn render_kitty(&self, png_data: &[u8], width: u32, height: u32) -> String {
+    pub fn render_kitty_cells(
+        &self,
+        png_data: &[u8],
+        width_cells: u32,
+        height_cells: u32,
+    ) -> String {
         let base64_data = self.encode_as_base64(png_data);
         let chunk_size = 4096;
         let mut result = String::new();
@@ -396,10 +448,10 @@ impl TerminalImage {
             let more = if is_last { 0 } else { 1 };
 
             if i == 0 {
-                // First chunk includes all parameters
+                // First chunk includes all parameters; use cell-based sizing
                 result.push_str(&format!(
-                    "\x1b_Gf=100,a=T,t=d,s={},v={},m={};{}\x1b\\",
-                    width, height, more, chunk
+                    "\x1b_Gf=100,a=T,t=d,c={},r={},m={};{}\x1b\\",
+                    width_cells, height_cells, more, chunk
                 ));
             } else {
                 // Subsequent chunks only include m parameter
@@ -410,12 +462,17 @@ impl TerminalImage {
         result
     }
 
+    /// Backwards-compatible helper accepting cell dimensions.
+    pub fn render_kitty(&self, png_data: &[u8], width: u32, height: u32) -> String {
+        self.render_kitty_cells(png_data, width, height)
+    }
+
     /// Render image using the iTerm2 inline images protocol.
     ///
     /// ## Arguments
     ///
     /// * `png_data` - PNG-encoded image bytes
-    /// * `width` - Display width in characters (cells)
+    /// * `width` - Display width (cells by default, supports `%` and `px` suffixes)
     /// * `filename` - Filename for the image (displayed in some contexts)
     ///
     /// ## Escape Sequence Format
@@ -423,12 +480,12 @@ impl TerminalImage {
     /// ```text
     /// ESC]1337;File=name={base64_name};inline=1;width={width}:{base64_data}BEL
     /// ```
-    pub fn render_iterm2(&self, png_data: &[u8], width: u32, filename: &str) -> String {
+    pub fn render_iterm2(&self, png_data: &[u8], width: &str, filename: &str) -> String {
         let base64_data = self.encode_as_base64(png_data);
         let base64_filename = self.encode_as_base64(filename.as_bytes());
 
         format!(
-            "\x1b]1337;File=name={};inline=1;width={}:{}\x07",
+            "\x1b]1337;File=name={};inline=1;preserveAspectRatio=1;width={};size=auto:{}\x07",
             base64_filename, width, base64_data
         )
     }
@@ -507,11 +564,13 @@ pub fn parse_width_spec(spec: &str) -> Result<ImageWidth, TerminalImageError> {
 
     // Handle percentage (e.g., "50%")
     if let Some(pct_str) = trimmed.strip_suffix('%') {
-        let pct_val: f32 = pct_str.trim().parse().map_err(|_| {
-            TerminalImageError::InvalidWidthSpec {
-                spec: spec.to_string(),
-            }
-        })?;
+        let pct_val: f32 =
+            pct_str
+                .trim()
+                .parse()
+                .map_err(|_| TerminalImageError::InvalidWidthSpec {
+                    spec: spec.to_string(),
+                })?;
 
         // Validate percentage range (0-100)
         if !(0.0..=100.0).contains(&pct_val) {
@@ -524,11 +583,11 @@ pub fn parse_width_spec(spec: &str) -> Result<ImageWidth, TerminalImageError> {
     }
 
     // Handle bare number (characters)
-    let char_val: u32 = trimmed.parse().map_err(|_| {
-        TerminalImageError::InvalidWidthSpec {
+    let char_val: u32 = trimmed
+        .parse()
+        .map_err(|_| TerminalImageError::InvalidWidthSpec {
             spec: spec.to_string(),
-        }
-    })?;
+        })?;
 
     // Validate that width is positive
     if char_val == 0 {
@@ -557,7 +616,9 @@ pub fn parse_width_spec(spec: &str) -> Result<ImageWidth, TerminalImageError> {
 /// assert_eq!(path, "image.png");
 /// assert!(width.is_none());
 /// ```
-pub fn parse_filepath_and_width(input: &str) -> Result<(String, Option<String>), TerminalImageError> {
+pub fn parse_filepath_and_width(
+    input: &str,
+) -> Result<(String, Option<String>), TerminalImageError> {
     let parts: Vec<&str> = input.splitn(2, '|').collect();
 
     let filepath = parts[0].trim().to_string();
@@ -581,13 +642,12 @@ mod tests {
 
     // Helper to create a minimal valid PNG using the image crate
     fn create_test_png() -> Vec<u8> {
-        use image::{ImageBuffer, Rgb, ImageFormat};
+        use image::{ImageBuffer, ImageFormat, Rgb};
         use std::io::Cursor;
 
         // Create a 2x2 red image
-        let img: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_fn(2, 2, |_x, _y| {
-            Rgb([255u8, 0u8, 0u8])
-        });
+        let img: ImageBuffer<Rgb<u8>, Vec<u8>> =
+            ImageBuffer::from_fn(2, 2, |_x, _y| Rgb([255u8, 0u8, 0u8]));
 
         let mut buffer = Cursor::new(Vec::new());
         img.write_to(&mut buffer, ImageFormat::Png).unwrap();
@@ -653,9 +713,18 @@ mod tests {
 
     #[test]
     fn test_parse_width_spec_fill() {
-        assert!(matches!(parse_width_spec("fill").unwrap(), ImageWidth::Fill));
-        assert!(matches!(parse_width_spec("FILL").unwrap(), ImageWidth::Fill));
-        assert!(matches!(parse_width_spec("Fill").unwrap(), ImageWidth::Fill));
+        assert!(matches!(
+            parse_width_spec("fill").unwrap(),
+            ImageWidth::Fill
+        ));
+        assert!(matches!(
+            parse_width_spec("FILL").unwrap(),
+            ImageWidth::Fill
+        ));
+        assert!(matches!(
+            parse_width_spec("Fill").unwrap(),
+            ImageWidth::Fill
+        ));
     }
 
     #[test]
@@ -678,9 +747,18 @@ mod tests {
 
     #[test]
     fn test_parse_width_spec_characters() {
-        assert!(matches!(parse_width_spec("80").unwrap(), ImageWidth::Characters(80)));
-        assert!(matches!(parse_width_spec("25").unwrap(), ImageWidth::Characters(25)));
-        assert!(matches!(parse_width_spec("1").unwrap(), ImageWidth::Characters(1)));
+        assert!(matches!(
+            parse_width_spec("80").unwrap(),
+            ImageWidth::Characters(80)
+        ));
+        assert!(matches!(
+            parse_width_spec("25").unwrap(),
+            ImageWidth::Characters(25)
+        ));
+        assert!(matches!(
+            parse_width_spec("1").unwrap(),
+            ImageWidth::Characters(1)
+        ));
     }
 
     #[test]
@@ -746,7 +824,10 @@ mod tests {
     #[test]
     fn test_terminal_image_new_file_not_found() {
         let result = TerminalImage::new(Path::new("/nonexistent/image.png"));
-        assert!(matches!(result, Err(TerminalImageError::FileNotFound { .. })));
+        assert!(matches!(
+            result,
+            Err(TerminalImageError::FileNotFound { .. })
+        ));
     }
 
     #[test]
@@ -892,9 +973,9 @@ mod tests {
         assert!(result.starts_with("\x1b_G"));
         // Should contain format and action parameters
         assert!(result.contains("f=100")); // PNG format
-        assert!(result.contains("a=T"));   // Transmit and display
-        assert!(result.contains("t=d"));   // Direct transmission
-        // Should end with string terminator
+        assert!(result.contains("a=T")); // Transmit and display
+        assert!(result.contains("t=d")); // Direct transmission
+                                         // Should end with string terminator
         assert!(result.ends_with("\x1b\\"));
     }
 
@@ -918,7 +999,7 @@ mod tests {
     fn test_render_iterm2() {
         let term_img = TerminalImage::default();
         let png_data = create_test_png();
-        let result = term_img.render_iterm2(&png_data, 40, "test.png");
+        let result = term_img.render_iterm2(&png_data, "40", "test.png");
 
         // Should start with iTerm2 inline image escape
         assert!(result.starts_with("\x1b]1337;File="));
@@ -996,7 +1077,7 @@ mod tests {
 
         // Should be a valid Kitty escape sequence
         assert!(result.starts_with("\x1b_G"));
-        assert!(result.ends_with("\x1b\\"));
+        assert!(result.contains("\x1b\\"));
         assert!(result.contains("f=100")); // PNG format
     }
 
@@ -1017,7 +1098,7 @@ mod tests {
 
         // Should be a valid iTerm2 escape sequence
         assert!(result.starts_with("\x1b]1337;File="));
-        assert!(result.ends_with("\x07"));
+        assert!(result.contains("\x07"));
         assert!(result.contains("inline=1"));
     }
 
