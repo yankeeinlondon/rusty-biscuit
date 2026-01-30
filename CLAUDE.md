@@ -36,10 +36,13 @@ dockhand/
 │   ├── definitions/  # Pre-built API definitions (OpenAI, Ollama, ElevenLabs, HuggingFace)
 │   ├── gen/          # Code generator CLI with validate/generate subcommands
 │   └── schema/       # Generated API clients (auto-generated, do not edit)
+├── playa/            # Audio playback with host player detection
+│   ├── cli/          # Binary: `playa` (audio player)
+│   └── lib/          # Player detection, format detection, 53 sound effects
 ├── sniff/
 │   ├── cli/          # Binary: `sniff`
 │   └── lib/          # Hardware, Network, OS, and package manager discovery
-├── so-you-say/       # Binary: `speak` (TTS CLI)
+├── so-you-say/       # Binary: `speak` (TTS CLI, uses playa for playback)
 ├── tree-hugger/      # Tree-sitter symbol extraction
 │   ├── cli/          # Binary: `hug` (symbol/import/export CLI)
 │   └── lib/          # Symbol extraction library (16 languages)
@@ -190,6 +193,8 @@ This repository has local Claude Code skills in `.claude/skills/`:
 
 - `biscuit-terminal` - **Terminal authority**: detection, image rendering (viuer), mermaid diagrams
 - `darkmatter` - Markdown parsing/rendering (delegates terminal rendering to biscuit-terminal)
+- `playa` - Audio playback via host players, format detection, 53 embedded sound effects
+- `sniff` - System detection (OS, hardware, network, programs, services)
 - `clap` - Command-line argument parsing
 - `color-eyre` - Error reporting
 - `ratatui` - Terminal UI framework
@@ -211,6 +216,8 @@ When working in this repository, you **must** follow these workflows:
    - Working in CLI modules (`research/cli`, etc.)? Use the `clap` skill
    - Working in `darkmatter/`? Use the `darkmatter` skill
    - Working in `biscuit-terminal/`? Use the `biscuit-terminal` skill
+   - Working in `playa/` or `so-you-say/`? Use the `playa` skill
+   - Working in `sniff/`? Use the `sniff` skill
 
 3. **Dependency Management**: Before introducing new dependencies:
    - Check `docs/dependencies.md` first (primary source)

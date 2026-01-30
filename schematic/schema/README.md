@@ -65,20 +65,34 @@ async fn main() -> Result<(), schematic_schema::openai::SchematicError> {
 
 | API | Module | Client Struct | Endpoints | Auth |
 |-----|--------|---------------|-----------|------|
+| Anthropic | `anthropic` | `Anthropic` | 4 | API Key (`ANTHROPIC_API_KEY`, header: `X-Api-Key`) |
 | OpenAI | `openai` | `OpenAI` | 3 | Bearer token (`OPENAI_API_KEY`) |
-| HuggingFace Hub | `huggingface` | `HuggingFaceHub` | 26 | Bearer token (`HUGGINGFACE_API_KEY`) |
-| Ollama Native | `ollama` | `OllamaNative` | 11 | None (local) |
-| Ollama OpenAI | `ollamaopenai` | `OllamaOpenAI` | 4 | None (local) |
-| ElevenLabs | `elevenlabs` | `ElevenLabs` | 42 | API Key (`ELEVEN_LABS_API_KEY`) |
+| HuggingFace Hub | `huggingface` | `HuggingFaceHub` | 28+ | Bearer token (`HUGGINGFACE_API_KEY`) |
+| ElevenLabs | `elevenlabs` | `ElevenLabs` | 45+ | API Key (`ELEVEN_LABS_API_KEY`, header: `xi-api-key`) |
+
+**Note**: Ollama and EMQX APIs are defined but must be generated separately due to shared definition modules. Generate them with:
+
+```bash
+schematic-gen generate --api ollama-native
+schematic-gen generate --api ollama-openai
+schematic-gen generate --api emqx-basic
+schematic-gen generate --api emqx-bearer
+```
 
 ## Prelude Exports
 
 The prelude (`schematic_schema::prelude`) exports:
 
-- **Client structs**: `OpenAI`, `HuggingFaceHub`, `OllamaNative`, `OllamaOpenAI`, `ElevenLabs`
-- **Request enums**: `OpenAIRequest`, `HuggingFaceHubRequest`, etc.
-- **Error type**: `SchematicError`
-- **Response types**: `Model`, `ListModelsResponse`, etc. (from definitions)
+- **Client structs**: `Anthropic`, `OpenAI`, `HuggingFaceHub`, `ElevenLabs`
+- **Request enums**: `AnthropicRequest`, `OpenAIRequest`, `HuggingFaceHubRequest`, `ElevenLabsRequest`
+- **Shared types**: `SchematicError`, `RequestParts`
+
+**Note**: Response types must be imported from specific API modules to avoid naming conflicts:
+
+```rust
+use schematic_schema::openai::Model;
+use schematic_schema::anthropic::CreateMessageResponse;
+```
 
 ## Generated Documentation
 
@@ -188,11 +202,17 @@ just full
 
 ```
 schema/
-├── Cargo.toml      # Auto-generated manifest
+├── Cargo.toml        # Auto-generated manifest
 └── src/
-    ├── lib.rs      # Module declarations
-    ├── prelude.rs  # Convenient re-exports
-    └── openai.rs   # OpenAI API client
+    ├── lib.rs        # Module declarations
+    ├── prelude.rs    # Convenient re-exports
+    ├── shared.rs     # RequestParts, SchematicError, reqwest re-export
+    ├── anthropic.rs  # Anthropic API client
+    ├── openai.rs     # OpenAI API client
+    ├── elevenlabs.rs # ElevenLabs API client
+    ├── huggingface.rs # HuggingFace Hub API client
+    ├── ollama.rs     # Ollama Native API client
+    └── ollamaopenai.rs # Ollama OpenAI API client
 ```
 
 ## Dependencies

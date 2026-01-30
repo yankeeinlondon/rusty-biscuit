@@ -99,3 +99,4 @@ release:
     @just just build --release
     @just just full
     @just docs
+

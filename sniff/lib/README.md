@@ -9,6 +9,8 @@
 - **Network Detection**: Interface enumeration with IPv4/IPv6 addresses and flags
 - **Filesystem Analysis**: Git repositories, monorepo tools, language detection, EditorConfig
 - **Package Management**: Unified abstraction for 110+ OS and language package managers
+- **Programs Detection**: 8 categories (editors, utilities, package managers, TTS, terminals, AI tools)
+- **Services Detection**: Init system detection and service listing across systemd, launchd, OpenRC, etc.
 - **Dependency Enrichment**: Network-based registry queries for latest versions
 - **Type-Safe Errors**: Structured error types with `thiserror`
 - **Serde Support**: Full serialization/deserialization for all types
@@ -117,6 +119,8 @@ sniff-lib/
 ├── network         # Network interfaces
 ├── filesystem      # Git, monorepo, languages
 ├── package         # Package manager abstraction
+├── programs        # Installed program detection (8 categories)
+├── services        # System service and init system detection
 └── error           # Error types
 ```
 
@@ -520,6 +524,103 @@ for dep in &enriched {
         println!("{}: {} (latest: {})", dep.name, dep.targeted_version, latest);
     }
 }
+```
+
+### Programs Module
+
+Detects installed programs across 8 categories with parallel execution and macOS app bundle support.
+
+**Key Types:**
+
+- `ProgramsInfo` - Aggregated detection results for all categories
+- `ProgramMetadata` - Trait for program metadata (display name, description, website)
+- `ExecutableSource` - How program was discovered (PATH vs macOS bundle)
+- `InstallOptions`, `InstallResult` - Installation infrastructure types
+
+**Categories:**
+
+| Category | Examples | Detection |
+|----------|----------|-----------|
+| Editors | vim, VS Code, Cursor, IntelliJ | PATH + macOS bundles |
+| Utilities | ripgrep, fzf, bat, jq, fd | PATH lookup |
+| Language PMs | cargo, npm, pip, poetry | PATH lookup |
+| OS PMs | homebrew, apt, dnf, pacman | PATH lookup |
+| TTS Clients | say, espeak, piper | PATH + macOS bundles |
+| Terminal Apps | alacritty, wezterm, kitty | PATH + macOS bundles |
+| Headless Audio | afplay, pacat, aplay | PATH lookup |
+| AI CLI | claude, aider, goose | PATH lookup |
+
+**Example:**
+
+```rust
+use sniff_lib::programs::ProgramsInfo;
+
+// Detect all installed programs (parallel)
+let programs = ProgramsInfo::detect();
+
+println!("Editors: {:?}", programs.editors);
+println!("Utilities: {:?}", programs.utilities);
+println!("AI CLI tools: {:?}", programs.ai_cli);
+
+// Access metadata
+for editor in &programs.editors {
+    println!("{}: {}", editor.display_name(), editor.description());
+}
+```
+
+**macOS App Bundle Detection:**
+
+```rust
+use sniff_lib::programs::find_program_with_source;
+
+// Returns (Option<PathBuf>, ExecutableSource)
+let (path, source) = find_program_with_source("code");
+match source {
+    ExecutableSource::Path => println!("Found in PATH"),
+    ExecutableSource::MacOsBundle(bundle) => println!("Found in {}", bundle),
+    ExecutableSource::NotFound => println!("Not installed"),
+}
+```
+
+### Services Module
+
+Detects system services across multiple init systems.
+
+**Key Types:**
+
+- `Services` - Init system detection result with service list
+- `ServiceInfo` - Individual service (name, running state, PID)
+- `ServiceState` - Filter enum (All, Running, Stopped)
+- `InitSystem` - Detected init system (systemd, launchd, OpenRC, etc.)
+
+**Supported Init Systems:**
+
+- systemd (Linux)
+- launchd (macOS)
+- OpenRC (Gentoo, Alpine)
+- runit (Void Linux)
+- S6 (s6-rc)
+- Dinit
+- Windows SCM
+
+**Example:**
+
+```rust
+use sniff_lib::services::{detect_services, ServiceState};
+
+let services = detect_services();
+
+if let Some(init) = &services.init_system {
+    println!("Init system: {:?}", init);
+}
+
+// Filter by state
+let running: Vec<_> = services.services
+    .iter()
+    .filter(|s| s.running)
+    .collect();
+
+println!("Running services: {}", running.len());
 ```
 
 ## Error Handling

@@ -7,44 +7,103 @@
 <td><img src="../assets/sniff-512.png" style="max-width='25%'" width=200px /></td>
 <td>
 <h2>Sniff</h2>
-<p>A shared library and CLI which </p>
+<p>A comprehensive cross-platform system and repository detection tool.</p>
 
 <ul>
-  <li>hardware, network, filesystem, programs</li>
-  <li>cross-platform</li>
-  <li>automatic failover between providers</li>
+  <li>OS, hardware, network, filesystem detection</li>
+  <li>Program inventory (editors, utilities, package managers, etc.)</li>
+  <li>System services and init system detection</li>
+  <li>Git repository and monorepo analysis</li>
+  <li>Cross-platform with automatic provider failover</li>
 </ul>
-
-<p>
-  This library provides the sound effects found in the <code>so-you-say</code> and <code>effect</code> CLIs.
-</p>
 </td>
 </tr>
 </table>
 
 ## Modules
 
-1. Sniff Library `sniff/lib`
+### 1. Sniff Library (`sniff/lib`)
 
-    - a set of utilities for detecting information about the host computer
-    - leverages the `hardware-query`, `sysinfo`, and `getifaddrs` to detect hardware and network setup on the host machine
-    - we use `sysinfo`
+A comprehensive Rust library for system detection:
 
-2. Sniff CLI `sniff/cli`
+- **OS Detection**: Distribution, kernel, architecture, package managers, locale, timezone
+- **Hardware Detection**: CPU (with SIMD), GPU (Metal support), memory, storage
+- **Network Detection**: Interface enumeration with IPv4/IPv6 addresses
+- **Filesystem Analysis**: Git repos, monorepo tools, language detection, EditorConfig
+- **Programs Module**: Detect installed programs across 8 categories
+- **Services Module**: Detect and list system services across init systems
 
-    - a simple CLI which exposes the metadata which the **Sniff** library can procure.
+See [sniff/lib/README.md](lib/README.md) for detailed API documentation.
 
-## CLI Usage
+### 2. Sniff CLI (`sniff/cli`)
 
-**Syntax:**
+A feature-rich CLI exposing all library capabilities:
 
-> **sniff** [_options_]
+- **Flexible Output**: Text (with verbosity levels) or JSON
+- **Section Filtering**: Include-only mode, skip mode, and detail filters
+- **Deep Mode**: Network queries for remote git branches and package versions
+- **Program Detection**: List installed editors, utilities, package managers, and more
 
+See [sniff/cli/README.md](cli/README.md) for complete CLI documentation.
 
-### Switches
+## Quick Start
 
-- `--base`, `-b` \<dir\>
+```bash
+# Install
+cargo install --path sniff/cli
 
-    - some utilities are evaluated from the perspective of the ${CWD} so using this switch allows you to relocate to a different directory
+# Detect everything
+sniff
 
+# JSON output
+sniff --json
 
+# Show only hardware
+sniff --hardware
+
+# Show installed programs
+sniff --programs
+
+# Show system services
+sniff --services
+
+# Deep mode (queries remotes and registries)
+sniff --deep
+```
+
+## Detection Categories
+
+| Category | Description |
+|----------|-------------|
+| **OS** | Distribution, kernel, architecture, package managers |
+| **Hardware** | CPU, GPU, memory, storage |
+| **Network** | Interfaces, IPv4/IPv6 addresses |
+| **Filesystem** | Git repos, monorepos, languages |
+| **Programs** | Editors, utilities, package managers, TTS, terminals, AI tools |
+| **Services** | System services with init system detection |
+
+## Project Structure
+
+```
+sniff/
+├── cli/              # Binary crate (`sniff` command)
+│   ├── src/
+│   │   ├── main.rs   # CLI parsing, config, enrichment
+│   │   └── output.rs # Text/JSON rendering with filtering
+│   └── Cargo.toml
+└── lib/              # Library crate
+    ├── src/
+    │   ├── lib.rs                    # Public API, SniffConfig
+    │   ├── os.rs                     # OS detection
+    │   ├── hardware.rs               # CPU, GPU, memory, storage
+    │   ├── network.rs                # Network interfaces
+    │   ├── filesystem/               # Git, repo, languages
+    │   ├── package/                  # Package manager abstraction
+    │   ├── programs/                 # Program detection (8 categories)
+    │   └── services/                 # System service detection
+    └── Cargo.toml
+```
+
+## License
+
+Part of the Dockhand monorepo. See top-level LICENSE file.

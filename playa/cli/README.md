@@ -11,6 +11,17 @@ Play a file:
 playa path/to/audio.wav
 ```
 
+Play with speed/volume control:
+
+```bash
+playa --fast audio.mp3        # 1.25x speed
+playa --slow audio.mp3        # 0.75x speed
+playa --quiet audio.mp3       # 50% volume
+playa --loud audio.mp3        # 150% volume
+playa --speed 1.5 audio.mp3   # Custom speed (0.5-2.0)
+playa --volume 0.8 audio.mp3  # Custom volume (0.0-2.0)
+```
+
 Play a built-in sound effect:
 
 ```bash
@@ -23,26 +34,45 @@ List built-in sound effects:
 playa --list-effects
 ```
 
-Show player metadata:
+Show available players table:
 
 ```bash
-playa --meta
+playa --players
 ```
 
-## Output (metadata)
+Display playback metadata during playback:
 
-The `--meta` flag renders a markdown table with these columns:
+```bash
+playa --meta audio.wav
+```
+
+## CLI Options
+
+| Option | Description |
+|--------|-------------|
+| `--players` | Show table of available players and their capabilities |
+| `--meta` | Display playback metadata (player, volume, speed, codec, format) |
+| `--effect <NAME>` | Play a built-in sound effect by name |
+| `--list-effects` | List all available sound effects |
+| `--fast` | Play at 1.25x speed |
+| `--slow` | Play at 0.75x speed |
+| `--quiet` | Play at 50% volume |
+| `--loud` | Play at 150% volume |
+| `--speed <N>` | Custom playback speed (0.5 to 2.0) |
+| `--volume <N>` | Custom volume level (0.0 to 2.0) |
+
+## Output (--players)
+
+The `--players` flag renders a markdown table with these columns:
 
 - Software (markdown link to the official website)
 - Codec Support
 - File Formats
 
-After the table, a single markdown list item is printed listing the programs not
-found on the host.
+Missing players are dimmed in grey with a note at the bottom.
 
 ## Notes
 
-- Rendering uses the `shared::markdown::Markdown` terminal renderer, which handles
-  tables and formatting.
+- Rendering uses the `darkmatter-lib` markdown terminal renderer for tables.
 - Playback uses the Playa library's detection and player matching.
-- This CLI enables the full `sound-effects` set, which adds ~30MB to the binary.
+- This CLI enables the full `sound-effects` feature by default (~30MB binary).

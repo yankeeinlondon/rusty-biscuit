@@ -177,3 +177,49 @@ lint *args="":
             echo "- no justfile for the area **$area**" >&2
         fi
     done
+
+# commits all the staged changes using GPT 5.2 (via Opencode)
+commit:
+    @echo "Committing staged changes in .claude to git"
+    @echo ""
+    @opencode run commit "-f" --model "opencode/gpt-5.2"
+
+# Update docs and then update the skill for the Schematic package
+skill-schematic:
+    @echo "Fixing documentation drift and rebuilding the skill for the Schematic Package"
+    @echo "-------------------------------------------------------------------------------"
+    claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-schematic.md)"\'
+    @echo ""
+    @echo "Schematic Skill has been rebuilt"
+    @echo ""
+    @so-you-say "The Schematic package has synced it's documents for drift and updated the skill tree."
+
+# Update docs and then update the skill for the darkmatter package
+skill-darkmatter:
+    @echo "Fixing documentation drift and rebuilding the skill for the Darkmatter Package"
+    @echo "-------------------------------------------------------------------------------"
+    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-darkmatter.md)"\'
+    @echo ""
+    @echo "Darkmatter Skill has been rebuilt"
+    @echo ""
+    @so-you-say "The darkmatter package has synced it's documents for drift and updated the skill tree."
+
+# Update docs and then update the skill for the Sniff package
+skill-sniff:
+    @echo "Fixing documentation drift and rebuilding the skill for the Sniff Package"
+    @echo "-------------------------------------------------------------------------------"
+    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-sniff.md)"\'
+    @echo ""
+    @echo "Sniff skill has been rebuilt"
+    @echo ""
+    @so-you-say "The Sniff package has synced it's documents for drift and updated the skill tree."
+
+# Update docs and then update the skill for the Playa package
+skill-playa:
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Playa{{RESET}} Package"
+    @echo "-------------------------------------------------------------------------------"
+    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-playa.md)"\'
+    @echo ""
+    @echo "The Playa skill has been rebuilt"
+    @echo ""
+    @so-you-say "The playa package has synced it's documents for drift and updated the skill tree."

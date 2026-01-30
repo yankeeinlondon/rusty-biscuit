@@ -196,12 +196,28 @@ The generator produces per-API module files:
 
 ```
 schema/src/
-├── lib.rs         # Module declarations
-├── prelude.rs     # Convenient re-exports
-└── openai.rs      # OpenAI API client code
+├── lib.rs           # Module declarations
+├── prelude.rs       # Convenient re-exports
+├── shared.rs        # RequestParts, SchematicError, reqwest re-export
+├── anthropic.rs     # Anthropic API client
+├── openai.rs        # OpenAI API client
+├── elevenlabs.rs    # ElevenLabs API client
+├── huggingface.rs   # HuggingFace Hub API client
+├── ollama.rs        # Ollama Native API client (generated separately)
+└── ollamaopenai.rs  # Ollama OpenAI API client (generated separately)
 ```
 
 ## Generator Conventions & Assumptions
+
+### Available APIs
+
+The CLI supports these API names:
+
+```
+anthropic, openai, elevenlabs, huggingface, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all
+```
+
+**Note**: `all` excludes Ollama and EMQX APIs (must generate individually due to shared modules).
 
 ### Module Naming
 
@@ -389,6 +405,10 @@ impl From<RetrieveModelRequest> for OpenAIRequest { ... }
 pub struct OpenAI {
     client: reqwest::Client,
     base_url: String,
+    env_auth: Vec<String>,
+    auth_strategy: schematic_define::AuthStrategy,
+    env_username: Option<String>,
+    headers: Vec<(String, String)>,
 }
 
 impl OpenAI {
@@ -396,6 +416,20 @@ impl OpenAI {
 
     pub fn new() -> Self { ... }
     pub fn with_base_url(base_url: impl Into<String>) -> Self { ... }
+    pub fn with_client(client: reqwest::Client) -> Self { ... }
+    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self { ... }
+
+    /// Create a variant with different configuration (base URL, credentials, auth strategy)
+    pub fn variant(&self, base_url: impl Into<String>, env_auth: Vec<String>, strategy: UpdateStrategy) -> Self { ... }
+
+    /// Access the underlying HTTP client for custom requests
+    pub fn http_client(&self) -> &reqwest::Client { ... }
+
+    /// Get the base URL for this client
+    pub fn api_base_url(&self) -> &str { ... }
+
+    /// Get the API key header name and value (if using ApiKey auth)
+    pub fn api_key_header(&self) -> Option<(String, String)> { ... }
 
     pub async fn request<T: serde::de::DeserializeOwned>(
         &self,

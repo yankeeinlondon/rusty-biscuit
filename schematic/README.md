@@ -91,6 +91,19 @@ async fn main() -> Result<(), SchematicError> {
 | [schematic-gen](./gen/)                 | Code generator CLI/library     | [README](./gen/README.md)         |
 | [schematic-schema](./schema/)           | Generated API clients          | [README](./schema/README.md)      |
 
+## Available APIs
+
+| API | Endpoints | Auth | Description |
+|-----|-----------|------|-------------|
+| Anthropic | 4 | API Key (`X-Api-Key`) | Claude Messages API with tool use |
+| OpenAI | 3 | Bearer | Models API (list, retrieve, delete) |
+| HuggingFace Hub | 28+ | Bearer | Models, datasets, spaces, repos |
+| ElevenLabs | 45+ REST, 2 WebSocket | API Key (`xi-api-key`) | TTS, voices, audio generation |
+| Ollama Native | 11 | None | Local inference (generate, chat, embed) |
+| Ollama OpenAI | 4 | None | OpenAI-compatible subset |
+| EMQX Basic | 30+ | Basic | MQTT broker REST API |
+| EMQX Bearer | 32+ | Bearer | MQTT broker with token auth |
+
 ## Key Features
 
 - **Type-safe requests**: Each endpoint gets a strongly-typed request struct with `new()` constructors

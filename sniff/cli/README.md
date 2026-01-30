@@ -99,6 +99,49 @@ sniff --repo
 sniff --language
 ```
 
+**Programs Filters:**
+
+```bash
+# Show all installed programs
+sniff --programs
+# Show only editors (vim, vs code, etc.)
+sniff --editors
+# Show only CLI utilities (ripgrep, fzf, etc.)
+sniff --utilities
+# Show only language package managers (cargo, npm, pip, etc.)
+sniff --language-package-managers
+# Show only OS package managers (homebrew, apt, etc.)
+sniff --os-package-managers
+# Show only TTS clients (say, espeak, piper, etc.)
+sniff --tts-clients
+# Show only terminal apps (alacritty, wezterm, etc.)
+sniff --terminal-apps
+# Show only headless audio players (afplay, pacat, etc.)
+sniff --audio
+```
+
+**Programs Output Formats:**
+
+```bash
+# Markdown table output (default for programs)
+sniff --programs --markdown
+# JSON output with simple format (backward compatible)
+sniff --programs --json
+# JSON output with full metadata
+sniff --programs --json --json-format full
+```
+
+**Services Filter:**
+
+```bash
+# Show system services
+sniff --services
+# Filter by service state
+sniff --services --state all       # All services (default)
+sniff --services --state running   # Only running services
+sniff --services --state stopped   # Only stopped services
+```
+
 **Note:** Filter flags are mutually exclusive. For example, `sniff --cpu --memory` will error because you can only specify one filter at a time.
 
 ### Deep Mode
@@ -220,6 +263,47 @@ Returns a structured JSON object with all detection results:
 }
 ```
 
+### Programs Output
+
+```bash
+sniff --programs --json | jq .
+```
+
+Returns installed programs organized by category:
+
+```json
+{
+  "editors": ["vim", "code", "cursor"],
+  "utilities": ["ripgrep", "fzf", "bat", "jq"],
+  "language_package_managers": ["cargo", "npm", "pip"],
+  "os_package_managers": ["homebrew"],
+  "tts_clients": ["say"],
+  "terminal_apps": ["wezterm", "alacritty"],
+  "headless_audio": ["afplay"],
+  "ai_cli": ["claude", "aider"]
+}
+```
+
+With `--json-format full`, includes rich metadata (display name, description, website, version, source).
+
+### Services Output
+
+```bash
+sniff --services --json | jq .
+```
+
+Returns init system and service list:
+
+```json
+{
+  "init_system": "launchd",
+  "services": [
+    {"name": "com.apple.mDNSResponder", "running": true, "pid": 123},
+    {"name": "com.docker.service", "running": true, "pid": 456}
+  ]
+}
+```
+
 ## Architecture
 
 ### CLI Layer (`sniff/cli`)
@@ -243,7 +327,7 @@ The CLI binary provides:
 
 ### Library Layer (`sniff/lib`)
 
-The library provides modular detection across four domains:
+The library provides modular detection across six domains:
 
 **OS Module:**
 
@@ -291,6 +375,33 @@ The library provides modular detection across four domains:
    - Async queries to package registries (crates.io, npm, PyPI)
    - Latest version resolution for `--deep` mode
    - Manager-specific network implementations (Cargo, npm, pnpm, Yarn, Bun)
+
+**Programs Module:**
+
+Detects installed programs across 8 categories with parallel execution:
+
+- **Editors**: vim, VS Code, Cursor, IntelliJ, Sublime, etc.
+- **Utilities**: ripgrep, fzf, bat, jq, fd, delta, etc.
+- **Language Package Managers**: cargo, npm, pip, poetry, go, etc.
+- **OS Package Managers**: homebrew, apt, dnf, pacman, etc.
+- **TTS Clients**: say, espeak, piper, etc.
+- **Terminal Apps**: alacritty, wezterm, kitty, iTerm2, etc.
+- **Headless Audio**: afplay, pacat, aplay, etc.
+- **AI CLI Tools**: claude, aider, goose, etc.
+
+Features:
+- macOS app bundle detection (checks `/Applications` when PATH fails)
+- `ExecutableSource` tracking (PATH vs macOS bundle)
+- Version extraction via multiple strategies
+- Rich metadata: display name, description, website
+
+**Services Module:**
+
+Detects system services across multiple init systems:
+
+- **Supported**: systemd, launchd, OpenRC, runit, S6, Dinit, Windows SCM
+- **Capabilities**: Service listing, state filtering (running/stopped), PID tracking
+- **Evidence**: Tracks detection method for debugging
 
 ### Package Manager Abstraction (`package/mod.rs`)
 
@@ -400,11 +511,24 @@ sniff/
     │   │   ├── git.rs                # Git repository detection
     │   │   ├── repo.rs               # Monorepo and package detection
     │   │   └── languages.rs          # Language analysis
-    │   └── package/
-    │       ├── mod.rs                # Package manager types
-    │       ├── registry.rs           # Manager registry
-    │       ├── network.rs            # Async version resolution
-    │       └── stubs.rs              # PackageInfo type
+    │   ├── package/
+    │   │   ├── mod.rs                # Package manager types
+    │   │   ├── registry.rs           # Manager registry
+    │   │   ├── network.rs            # Async version resolution
+    │   │   └── stubs.rs              # PackageInfo type
+    │   ├── programs/
+    │   │   ├── mod.rs                # ProgramsInfo coordination
+    │   │   ├── editors.rs            # Editor detection
+    │   │   ├── utilities.rs          # CLI utility detection
+    │   │   ├── pkg_mngrs.rs          # Package manager detection
+    │   │   ├── tts_clients.rs        # TTS client detection
+    │   │   ├── terminal_apps.rs      # Terminal emulator detection
+    │   │   ├── headless_audio.rs     # Audio player detection
+    │   │   ├── ai_cli.rs             # AI CLI tools detection
+    │   │   ├── macos_bundle.rs       # macOS app bundle detection
+    │   │   └── enums.rs              # Program enum definitions
+    │   └── services/
+    │       └── mod.rs                # Init system and service detection
     └── Cargo.toml
 ```
 

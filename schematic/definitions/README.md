@@ -15,11 +15,15 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 
 | API | Module | Definition Function | Endpoints | Description |
 |-----|--------|---------------------|-----------|-------------|
+| Anthropic | `anthropic` | `define_anthropic_api()` | 4 | Anthropic Messages API for Claude AI and agent tool use |
 | OpenAI | `openai` | `define_openai_api()` | 3 | OpenAI Models API (list, retrieve, delete models) |
-| HuggingFace Hub | `huggingface` | `define_huggingface_hub_api()` | 26 | Hugging Face Hub API (models, datasets, spaces, repos) |
+| HuggingFace Hub | `huggingface` | `define_huggingface_hub_api()` | 28+ | Hugging Face Hub API (models, datasets, spaces, repos) |
 | Ollama Native | `ollama` | `define_ollama_native_api()` | 11 | Ollama local inference API (generate, chat, embeddings) |
 | Ollama OpenAI | `ollama` | `define_ollama_openai_api()` | 4 | Ollama OpenAI-compatible API |
-| ElevenLabs | `elevenlabs` | `define_elevenlabs_api()` | 42 | ElevenLabs TTS API (voices, text-to-speech, audio) |
+| ElevenLabs REST | `elevenlabs` | `define_elevenlabs_rest_api()` | 45+ | ElevenLabs TTS REST API (voices, text-to-speech, audio) |
+| ElevenLabs WebSocket | `elevenlabs` | `define_elevenlabs_websocket_api()` | 2 | ElevenLabs TTS WebSocket streaming API |
+| EMQX Basic | `emqx` | `define_emqx_basic_api()` | 30+ | EMQX MQTT Broker REST API with Basic auth |
+| EMQX Bearer | `emqx` | `define_emqx_bearer_api()` | 32+ | EMQX MQTT Broker REST API with Bearer token auth |
 
 ## Usage
 
@@ -44,6 +48,14 @@ let model = Model {
 ### Direct Module Access
 
 ```rust
+use schematic_definitions::anthropic::define_anthropic_api;
+
+let api = define_anthropic_api();
+assert_eq!(api.name, "Anthropic");
+assert_eq!(api.endpoints.len(), 4);
+```
+
+```rust
 use schematic_definitions::openai::{define_openai_api, Model, ListModelsResponse};
 
 let api = define_openai_api();
@@ -63,11 +75,24 @@ assert_eq!(openai_api.name, "OllamaOpenAI");
 ```
 
 ```rust
-use schematic_definitions::elevenlabs::define_elevenlabs_api;
+use schematic_definitions::elevenlabs::{define_elevenlabs_rest_api, define_elevenlabs_websocket_api};
 
-let api = define_elevenlabs_api();
-assert_eq!(api.name, "ElevenLabs");
-assert_eq!(api.endpoints.len(), 42);
+let rest_api = define_elevenlabs_rest_api();
+assert_eq!(rest_api.name, "ElevenLabs");
+assert!(rest_api.endpoints.len() >= 45);
+
+let ws_api = define_elevenlabs_websocket_api();
+assert_eq!(ws_api.name, "ElevenLabsTTS");
+```
+
+```rust
+use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
+
+let basic_api = define_emqx_basic_api();
+assert_eq!(basic_api.name, "EmqxBasic");
+
+let bearer_api = define_emqx_bearer_api();
+assert_eq!(bearer_api.name, "EmqxBearer");
 ```
 
 ## OpenAI API
