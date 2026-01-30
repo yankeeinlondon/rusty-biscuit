@@ -47,7 +47,7 @@ pub enum DocumentConversionError {
     InvalidPath(String),
 }
 
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum License {
     Proprietary,
     Mit,
@@ -63,7 +63,7 @@ pub enum License {
 }
 
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Library {
     /// The package manager used to install this library
     package_manager: LanguagePackageManager,
@@ -148,7 +148,7 @@ impl Library {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Software {
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -180,7 +180,7 @@ impl Software {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum KindCategory {
     Library(Library),
     Software(Software),

@@ -12,7 +12,12 @@ path = "src/lib.rs"
 name = "research-dev"
 path = "src/main.rs"
 
+[[bin]]
+name = "migrate_json_to_sqlite"
+path = "src/bin/migrate_json_to_sqlite.rs"
+
 [dependencies]
+clap = { version = "4.5", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
 dotenvy = "0.15.7"
@@ -30,6 +35,7 @@ ai-pipeline = { path = "../../ai-pipeline/lib" }
 semver = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "migrate", "macros"] }
 serde_yaml = "0.9"
 # shared dependency removed - tools migrated to ai-pipeline
 darkmatter-lib = { path = "../../darkmatter/lib" }

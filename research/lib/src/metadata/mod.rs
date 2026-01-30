@@ -14,6 +14,7 @@
 //! Migration happens automatically during [`crate::ResearchMetadata::load()`].
 
 pub mod content_policy;
+pub mod db;
 pub mod inventory;
 pub mod migration;
 pub mod migration_v2;
@@ -29,5 +30,6 @@ pub use types::{
 pub use v0::MetadataV0;
 
 pub use content_policy::{ContentExpiry, ContentPolicy};
+pub use db::{DbError, DbPool, DbResult, ResearchInventoryDb, init_memory_pool, init_pool, run_migrations};
 pub use inventory::{InventoryError, ResearchInventory};
 pub use topic::{ContentType, Document, DocumentConversionError, Flow, KindCategory, Library, License, Software, Topic};
