@@ -180,7 +180,7 @@ lint *args="":
 
 # commits all the staged changes using GPT 5.2 (via Opencode)
 commit:
-    @echo "Committing staged changes in .claude to git"
+    @echo "Committing staged changes in the Rusty Biscuit monorepo to git"
     @echo ""
     @opencode run commit "-f" --model "opencode/gpt-5.2"
 
