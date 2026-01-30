@@ -233,3 +233,23 @@ skill-queue:
     @echo "The Queue skill has been rebuilt"
     @echo ""
     @so-you-say "The Queue package has synced it's documents for drift and updated the skill tree."
+
+# Update docs and then update the skill for the Queue package
+skill-biscuit-speaks:
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}biscuit-speaks{{RESET}} Package"
+    @echo "-------------------------------------------------------------------------------"
+    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-biscuit-speaks.md)"\'
+    @echo ""
+    @echo "The {{BOLD}}biscuit-speaks{{RESET}} skill has been rebuilt"
+    @echo ""
+    @so-you-say "The biscuit-speaks package has synced it's documents for drift and updated the skill tree."
+
+# Update docs and then update the skill for the Queue package
+skill-tree-hugger:
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}tree-hugger{{RESET}} Package"
+    @echo "-------------------------------------------------------------------------------"
+    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-tree-hugger.md)"\'
+    @echo ""
+    @echo "The {{BOLD}}tree-hugger{{RESET}} skill has been rebuilt"
+    @echo ""
+    @so-you-say "The tree-hugger package has synced it's documents for drift and updated the skill tree."

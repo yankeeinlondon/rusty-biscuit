@@ -191,6 +191,7 @@ When running in Wezterm, Queue creates a split layout:
 
 This repository has local Claude Code skills in `.claude/skills/`:
 
+- `biscuit-speaks` - Cross-platform TTS with multi-provider support (ElevenLabs, Say, eSpeak, Kokoro, etc.)
 - `biscuit-terminal` - **Terminal authority**: detection, image rendering (viuer), mermaid diagrams
 - `darkmatter` - Markdown parsing/rendering (delegates terminal rendering to biscuit-terminal)
 - `playa` - Audio playback via host players, format detection, 53 embedded sound effects
@@ -216,7 +217,8 @@ When working in this repository, you **must** follow these workflows:
    - Working in CLI modules (`research/cli`, etc.)? Use the `clap` skill
    - Working in `darkmatter/`? Use the `darkmatter` skill
    - Working in `biscuit-terminal/`? Use the `biscuit-terminal` skill
-   - Working in `playa/` or `so-you-say/`? Use the `playa` skill
+   - Working in `biscuit-speaks/` or `so-you-say/`? Use the `biscuit-speaks` skill
+   - Working in `playa/`? Use the `playa` skill
    - Working in `sniff/`? Use the `sniff` skill
 
 3. **Dependency Management**: Before introducing new dependencies:
