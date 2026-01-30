@@ -486,6 +486,7 @@ dependencies = [
  "tracing-subscriber",
  "unic-langid",
  "unicode-width 0.2.2",
+ "viuer",
 ]
 
 [[package]]
@@ -1176,6 +1177,7 @@ name = "darkmatter-lib"
 version = "0.1.0"
 dependencies = [
  "biscuit-hash",
+ "biscuit-terminal",
  "comfy-table",
  "html-escape",
  "insta",
@@ -1203,7 +1205,6 @@ dependencies = [
  "two-face",
  "unicode-width 0.2.2",
  "url",
- "viuer",
 ]
 
 [[package]]

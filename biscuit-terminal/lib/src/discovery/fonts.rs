@@ -67,8 +67,15 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::PathBuf;
 use crate::discovery::config_paths::get_terminal_config_path;
 use crate::discovery::detection::{get_terminal_app, is_tty, TerminalApp};
+
+/// Type alias for font name config parser entries.
+type FontNameConfigEntry = (PathBuf, fn(&str) -> Option<String>);
+
+/// Type alias for font size config parser entries.
+type FontSizeConfigEntry = (PathBuf, fn(&str) -> Option<u32>);
 
 /// Represents common font ligatures that may be available in terminal fonts.
 ///
@@ -444,7 +451,7 @@ const NERD_FONT_BASE_NAMES: &[&str] = &[
 pub fn is_nerd_font_name(font_name: &str) -> bool {
     let lower = font_name.to_lowercase();
     // Normalize: remove spaces for comparison (JetBrains Mono -> jetbrainsmono)
-    let normalized = lower.replace(' ', "").replace('-', "");
+    let normalized = lower.replace([' ', '-'], "");
 
     // 1. Check for explicit "Nerd Font" or "NF" markers (definite match)
     if lower.contains("nerd font") || lower.ends_with(" nf") || lower.contains(" nf ") {
@@ -455,7 +462,7 @@ pub fn is_nerd_font_name(font_name: &str) -> bool {
     // These are fonts that have Nerd Font patched versions available
     for base in NERD_FONT_BASE_NAMES {
         let base_lower = base.to_lowercase();
-        let base_normalized = base_lower.replace(' ', "").replace('-', "");
+        let base_normalized = base_lower.replace([' ', '-'], "");
 
         // Exact match (normalized)
         if normalized == base_normalized {
@@ -1093,18 +1100,16 @@ fn parse_ghostty_font_name(content: &str) -> Option<String> {
 /// to get actual running values including defaults.
 fn parse_ghostty_font_size(content: &str) -> Option<u32> {
     // First try parsing the config file
-    if let Some(value) = parse_ghostty_config_value(content, "font-size") {
-        if let Ok(size) = value.parse::<f64>() {
+    if let Some(value) = parse_ghostty_config_value(content, "font-size")
+        && let Ok(size) = value.parse::<f64>() {
             return Some(size as u32);
         }
-    }
 
     // Fall back to querying Ghostty for its actual config
-    if let Some(value) = query_ghostty_config("font-size") {
-        if let Ok(size) = value.parse::<f64>() {
+    if let Some(value) = query_ghostty_config("font-size")
+        && let Ok(size) = value.parse::<f64>() {
             return Some(size as u32);
         }
-    }
 
     None
 }
@@ -1120,14 +1125,13 @@ fn parse_ghostty_config_value(content: &str, key: &str) -> Option<String> {
         }
 
         // Look for key = value
-        if line.starts_with(key) {
-            if let Some(eq_pos) = line.find('=') {
+        if line.starts_with(key)
+            && let Some(eq_pos) = line.find('=') {
                 let value = line[eq_pos + 1..].trim();
                 if !value.is_empty() {
                     return Some(value.to_string());
                 }
             }
-        }
     }
     None
 }
@@ -1151,14 +1155,13 @@ fn query_ghostty_config(key: &str) -> Option<String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     for line in stdout.lines() {
         let line = line.trim();
-        if line.starts_with(key) {
-            if let Some(eq_pos) = line.find('=') {
+        if line.starts_with(key)
+            && let Some(eq_pos) = line.find('=') {
                 let value = line[eq_pos + 1..].trim();
                 if !value.is_empty() {
                     return Some(value.to_string());
                 }
             }
-        }
     }
     None
 }
@@ -1274,8 +1277,8 @@ fn parse_kitty_font_name(content: &str) -> Option<String> {
         }
 
         // Look for font_family <name> (space-separated, not =)
-        if line.starts_with("font_family") {
-            let value = line["font_family".len()..].trim();
+        if let Some(stripped) = line.strip_prefix("font_family") {
+            let value = stripped.trim();
             if !value.is_empty() {
                 return Some(value.to_string());
             }
@@ -1297,8 +1300,8 @@ fn parse_kitty_font_size(content: &str) -> Option<u32> {
         }
 
         // Look for font_size N (space-separated)
-        if line.starts_with("font_size") {
-            let value = line["font_size".len()..].trim();
+        if let Some(stripped) = line.strip_prefix("font_size") {
+            let value = stripped.trim();
             if let Ok(size) = value.parse::<f64>() {
                 return Some(size as u32);
             }
@@ -1332,8 +1335,8 @@ fn parse_alacritty_font_name(content: &str) -> Option<String> {
         }
 
         // Look for family = "Name" in font.normal section
-        if in_font_normal && line.starts_with("family") {
-            if let Some(eq_pos) = line.find('=') {
+        if in_font_normal && line.starts_with("family")
+            && let Some(eq_pos) = line.find('=') {
                 let value = line[eq_pos + 1..].trim();
                 // Remove quotes
                 let value = value.trim_matches('"').trim_matches('\'');
@@ -1341,7 +1344,6 @@ fn parse_alacritty_font_name(content: &str) -> Option<String> {
                     return Some(value.to_string());
                 }
             }
-        }
     }
     None
 }
@@ -1372,14 +1374,13 @@ fn parse_alacritty_font_size(content: &str) -> Option<u32> {
         }
 
         // Look for size = N in [font] section
-        if in_font_section && line.starts_with("size") {
-            if let Some(eq_pos) = line.find('=') {
+        if in_font_section && line.starts_with("size")
+            && let Some(eq_pos) = line.find('=') {
                 let value = line[eq_pos + 1..].trim();
                 if let Ok(size) = value.parse::<f64>() {
                     return Some(size as u32);
                 }
             }
-        }
     }
     None
 }
@@ -1398,23 +1399,23 @@ fn fallback_font_name_scan() -> Option<String> {
     let home = std::path::Path::new(&home);
 
     // Define config files to try with their parsers
-    let configs: &[(&std::path::Path, fn(&str) -> Option<String>)] = &[
+    let configs: Vec<FontNameConfigEntry> = vec![
         // Alacritty (common issue: doesn't set TERM_PROGRAM)
-        (&home.join(".config/alacritty/alacritty.toml"), parse_alacritty_font_name),
-        (&home.join(".config/alacritty/alacritty.yml"), parse_alacritty_font_name),
+        (home.join(".config/alacritty/alacritty.toml"), parse_alacritty_font_name),
+        (home.join(".config/alacritty/alacritty.yml"), parse_alacritty_font_name),
         // Kitty
-        (&home.join(".config/kitty/kitty.conf"), parse_kitty_font_name),
+        (home.join(".config/kitty/kitty.conf"), parse_kitty_font_name),
         // Wezterm
-        (&home.join(".config/wezterm/wezterm.lua"), parse_wezterm_font_name),
-        (&home.join(".wezterm.lua"), parse_wezterm_font_name),
+        (home.join(".config/wezterm/wezterm.lua"), parse_wezterm_font_name),
+        (home.join(".wezterm.lua"), parse_wezterm_font_name),
         // Ghostty
-        (&home.join(".config/ghostty/config"), parse_ghostty_font_name),
+        (home.join(".config/ghostty/config"), parse_ghostty_font_name),
     ];
 
     for (path, parser) in configs {
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Some(font) = parser(&content) {
+        if path.exists()
+            && let Ok(content) = fs::read_to_string(&path)
+                && let Some(font) = parser(&content) {
                     tracing::debug!(
                         "fallback_font_name_scan(): found font '{}' in {:?}",
                         font,
@@ -1422,8 +1423,6 @@ fn fallback_font_name_scan() -> Option<String> {
                     );
                     return Some(font);
                 }
-            }
-        }
     }
 
     // Try iTerm2 on macOS
@@ -1448,23 +1447,23 @@ fn fallback_font_size_scan() -> Option<u32> {
     let home = std::path::Path::new(&home);
 
     // Define config files to try with their parsers
-    let configs: &[(&std::path::Path, fn(&str) -> Option<u32>)] = &[
+    let configs: Vec<FontSizeConfigEntry> = vec![
         // Alacritty (common issue: doesn't set TERM_PROGRAM)
-        (&home.join(".config/alacritty/alacritty.toml"), parse_alacritty_font_size),
-        (&home.join(".config/alacritty/alacritty.yml"), parse_alacritty_font_size),
+        (home.join(".config/alacritty/alacritty.toml"), parse_alacritty_font_size),
+        (home.join(".config/alacritty/alacritty.yml"), parse_alacritty_font_size),
         // Kitty
-        (&home.join(".config/kitty/kitty.conf"), parse_kitty_font_size),
+        (home.join(".config/kitty/kitty.conf"), parse_kitty_font_size),
         // Wezterm
-        (&home.join(".config/wezterm/wezterm.lua"), parse_wezterm_font_size),
-        (&home.join(".wezterm.lua"), parse_wezterm_font_size),
+        (home.join(".config/wezterm/wezterm.lua"), parse_wezterm_font_size),
+        (home.join(".wezterm.lua"), parse_wezterm_font_size),
         // Ghostty
-        (&home.join(".config/ghostty/config"), parse_ghostty_font_size),
+        (home.join(".config/ghostty/config"), parse_ghostty_font_size),
     ];
 
     for (path, parser) in configs {
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Some(size) = parser(&content) {
+        if path.exists()
+            && let Ok(content) = fs::read_to_string(&path)
+                && let Some(size) = parser(&content) {
                     tracing::debug!(
                         "fallback_font_size_scan(): found size {} in {:?}",
                         size,
@@ -1472,8 +1471,6 @@ fn fallback_font_size_scan() -> Option<u32> {
                     );
                     return Some(size);
                 }
-            }
-        }
     }
 
     // Try iTerm2 on macOS

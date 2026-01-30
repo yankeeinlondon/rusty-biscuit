@@ -1,16 +1,18 @@
 # biscuit-terminal
 
-Terminal capability detection and utilities for Rust applications.
+Terminal capability detection, rendering utilities, and image/diagram display for Rust applications.
 
 ## Features
 
+- **Terminal App Detection**: Recognize 12+ terminal emulators with capability profiles
+- **Image Rendering**: Inline images via Kitty/iTerm2 protocols with security guards
+- **Mermaid Diagrams**: Render diagrams to terminal using mmdc CLI with viuer
 - **OS Detection**: Identify operating system and Linux distribution
-- **Terminal App Detection**: Recognize 12+ terminal emulators
 - **Font Detection**: Extract font name and size from terminal config files
 - **Color Support**: Query color depth, mode (light/dark), and background color
 - **Escape Code Analysis**: Calculate visual line widths, detect escape codes
 - **Clipboard**: OSC52 clipboard support for compatible terminals
-- **Config Paths**: Find terminal configuration files
+- **Styled Output**: Composable rendering components (Prose, Table, List)
 
 ## Quick Start
 
@@ -41,6 +43,7 @@ fn main() {
 - `discovery::mode_2027` - Unicode grapheme cluster support
 - `discovery::eval` - Escape code analysis utilities
 - `components::terminal_image` - Terminal image rendering (Kitty/iTerm2 with fallbacks)
+- `components::mermaid` - Mermaid diagram rendering via mmdc CLI
 
 ## Terminal Images (TerminalImage)
 
@@ -70,10 +73,66 @@ fn main() {
 - Uses `inline=1;preserveAspectRatio=1;width=<user spec>;size=auto`.
 - Appends a cursor advance based on measured cell height to avoid prompt collisions; avoids extra escape clutter that previously caused ENOENT errors in iTerm.
 
+### Security Features
+
+`TerminalImage` includes built-in security guards:
+
+- **Path traversal protection**: Rejects paths containing `..` or absolute paths outside the base path
+- **File size limits**: Configurable maximum file size (prevents memory exhaustion)
+- **Remote URL blocking**: Only local files are allowed; remote URLs return an error
+
+```rust
+// Path traversal is blocked
+let result = TerminalImage::new(Path::new("../../../etc/passwd"));
+assert!(matches!(result, Err(TerminalImageError::PathTraversalBlocked { .. })));
+
+// Large files are rejected
+let result = TerminalImage::new_with_max_size(Path::new("huge.png"), 1_000_000);
+```
+
 ### Gotchas and notes
 - If `cell_size` cannot be detected, default 8×16 is used; images may appear slightly off if the terminal font has a very different aspect. Provide a width in columns (e.g., `|80`) to get predictable sizing.
-- Large images: we don’t upscale the default 50% case; explicit widths can upscale.
-- Unsupported terminals: you’ll see the generated alt text instead of an image.
+- Large images: we don't upscale the default 50% case; explicit widths can upscale.
+- Unsupported terminals: you'll see the generated alt text instead of an image.
+
+## Mermaid Diagrams (MermaidRenderer)
+
+`MermaidRenderer` renders Mermaid diagrams to the terminal using the `mmdc` CLI tool.
+
+### Basic Usage
+
+```rust
+use biscuit_terminal::components::mermaid::MermaidRenderer;
+
+let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
+
+match renderer.render_for_terminal() {
+    Ok(()) => println!("Diagram rendered!"),
+    Err(_) => println!("{}", renderer.fallback_code_block()),
+}
+```
+
+### CLI Detection
+
+The module uses a fallback chain:
+1. **Direct `mmdc`**: If in PATH, use directly
+2. **npx fallback**: If `npx` is available, use `npx mmdc` with a warning
+3. **Error**: If neither is available, return an error
+
+### Icon Pack Support
+
+Mermaid diagrams support icons via `--iconPacks`:
+- `@iconify-json/fa7-brands` - Font Awesome 7 brand icons
+- `@iconify-json/lucide` - Lucide icons
+- `@iconify-json/carbon` - Carbon Design icons
+- `@iconify-json/system-uicons` - System UI icons
+
+Usage: `A[icon:fa7-brands:github]`
+
+### Security Features
+
+- **Size limit**: Diagrams over 10KB are rejected (prevents CLI abuse)
+- **Terminal check**: Only renders when image protocols are supported
 
 ## Terminal Detection
 

@@ -52,6 +52,23 @@ pub enum TerminalImageError {
     /// Terminal does not support image rendering.
     #[error("Terminal does not support image rendering")]
     UnsupportedTerminal,
+
+    /// Path traversal attempt detected (security violation).
+    #[error("Path traversal blocked: '{path}' is outside allowed base path")]
+    PathTraversalBlocked { path: String },
+
+    /// File exceeds maximum allowed size.
+    #[error("File too large: {size} bytes exceeds limit of {max_size} bytes")]
+    FileTooLarge { size: u64, max_size: u64 },
+
+    /// Remote URLs are not allowed.
+    #[error("Remote URLs not allowed: '{url}'")]
+    RemoteUrlBlocked { url: String },
+
+    /// viuer rendering error.
+    #[cfg(feature = "viuer")]
+    #[error("viuer rendering error: {message}")]
+    ViuerError { message: String },
 }
 
 /// Width specification for image rendering.
@@ -283,6 +300,194 @@ impl TerminalImage {
             ImageSupport::ITerm => self.render_as_iterm2(crate::terminal::Terminal::width()),
             ImageSupport::None => Ok(self.generate_alt_text()),
         }
+    }
+
+    /// Render the image using options that may include viuer rendering.
+    ///
+    /// This method respects the `use_viuer` flag in options and applies
+    /// security guards (path traversal, file size, remote URL blocking).
+    ///
+    /// ## Arguments
+    ///
+    /// * `options` - Configuration options for rendering
+    ///
+    /// ## Errors
+    ///
+    /// Returns error if:
+    /// - Path traversal is detected (when `base_path` is set)
+    /// - File exceeds `max_file_size`
+    /// - Remote URL detected when `allow_remote` is false
+    /// - Image loading or rendering fails
+    pub fn render_with_options(
+        &self,
+        options: &crate::components::image_options::TerminalImageOptions,
+    ) -> Result<(), TerminalImageError> {
+        // Security check: remote URL blocking
+        self.validate_not_remote_url(options.allow_remote)?;
+
+        // Security check: path traversal
+        self.validate_path_traversal(&options.base_path)?;
+
+        // Security check: file size
+        self.validate_file_size(options.max_file_size)?;
+
+        // Render using viuer or fall back to protocol-based rendering
+        #[cfg(feature = "viuer")]
+        if options.use_viuer {
+            return self.render_with_viuer(options);
+        }
+
+        // Fall back to protocol-based rendering (prints alt text for now)
+        // Protocol-based methods return strings; this method outputs directly
+        let term = crate::terminal::Terminal::new();
+        let output = self.render_to_terminal(&term)?;
+        print!("{}", output);
+        Ok(())
+    }
+
+    /// Render the image using the viuer crate.
+    ///
+    /// This method uses viuer's `print_from_file` function which handles
+    /// protocol auto-detection (Kitty, iTerm2, Sixel, half-block fallback).
+    ///
+    /// ## Security
+    ///
+    /// This method does NOT perform security checks. Use `render_with_options`
+    /// for security-validated rendering.
+    ///
+    /// ## Arguments
+    ///
+    /// * `options` - Configuration options (width, etc.)
+    ///
+    /// ## Errors
+    ///
+    /// Returns error if viuer rendering fails.
+    #[cfg(feature = "viuer")]
+    pub fn render_with_viuer(
+        &self,
+        options: &crate::components::image_options::TerminalImageOptions,
+    ) -> Result<(), TerminalImageError> {
+        let config = self.build_viuer_config(options);
+
+        viuer::print_from_file(&self.filename, &config).map_err(|e| {
+            TerminalImageError::ViuerError {
+                message: e.to_string(),
+            }
+        })?;
+
+        Ok(())
+    }
+
+    /// Build a viuer Config from TerminalImageOptions.
+    #[cfg(feature = "viuer")]
+    fn build_viuer_config(
+        &self,
+        options: &crate::components::image_options::TerminalImageOptions,
+    ) -> viuer::Config {
+        let term_width = crate::terminal::Terminal::width();
+        let term_width = if term_width == 0 { 80 } else { term_width };
+        let available_width = term_width.saturating_sub(self.margin_left + self.margin_right);
+
+        // Convert ImageWidth to viuer's cell-based width
+        let width_cells = match &options.width {
+            ImageWidth::Fill => Some(available_width),
+            ImageWidth::Percent(pct) => Some(((available_width as f32) * pct) as u32),
+            ImageWidth::Characters(chars) => Some((*chars).min(available_width)),
+        };
+
+        viuer::Config {
+            width: width_cells,
+            height: None, // Let viuer compute height to preserve aspect ratio
+            x: self.margin_left as u16,
+            y: 0,
+            transparent: true,
+            truecolor: true,
+            absolute_offset: false,
+            restore_cursor: false,
+            ..Default::default()
+        }
+    }
+
+    /// Validate that the path is not a remote URL.
+    ///
+    /// ## Arguments
+    ///
+    /// * `allow_remote` - Whether remote URLs are allowed
+    ///
+    /// ## Errors
+    ///
+    /// Returns `TerminalImageError::RemoteUrlBlocked` if the filename looks like
+    /// a URL and remote URLs are not allowed.
+    fn validate_not_remote_url(&self, allow_remote: bool) -> Result<(), TerminalImageError> {
+        if !allow_remote {
+            let lower = self.filename.to_lowercase();
+            if lower.starts_with("http://") || lower.starts_with("https://") {
+                return Err(TerminalImageError::RemoteUrlBlocked {
+                    url: self.filename.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Validate that the path does not escape the base path.
+    ///
+    /// ## Arguments
+    ///
+    /// * `base_path` - Optional base path for security boundary
+    ///
+    /// ## Errors
+    ///
+    /// Returns `TerminalImageError::PathTraversalBlocked` if the file path
+    /// escapes the base path after canonicalization.
+    fn validate_path_traversal(
+        &self,
+        base_path: &Option<std::path::PathBuf>,
+    ) -> Result<(), TerminalImageError> {
+        if let Some(base) = base_path {
+            // Canonicalize both paths for comparison
+            let canonical_file = std::fs::canonicalize(&self.filename).map_err(|e| {
+                TerminalImageError::InvalidPath {
+                    path: self.filename.clone(),
+                    reason: e.to_string(),
+                }
+            })?;
+
+            let canonical_base =
+                std::fs::canonicalize(base).map_err(|e| TerminalImageError::InvalidPath {
+                    path: base.to_string_lossy().to_string(),
+                    reason: e.to_string(),
+                })?;
+
+            if !canonical_file.starts_with(&canonical_base) {
+                return Err(TerminalImageError::PathTraversalBlocked {
+                    path: self.filename.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Validate that the file size is within the allowed limit.
+    ///
+    /// ## Arguments
+    ///
+    /// * `max_size` - Maximum allowed file size in bytes
+    ///
+    /// ## Errors
+    ///
+    /// Returns `TerminalImageError::FileTooLarge` if the file exceeds the limit.
+    fn validate_file_size(&self, max_size: u64) -> Result<(), TerminalImageError> {
+        let metadata = std::fs::metadata(&self.filename)?;
+        let size = metadata.len();
+
+        if size > max_size {
+            return Err(TerminalImageError::FileTooLarge {
+                size,
+                max_size,
+            });
+        }
+        Ok(())
     }
 
     /// Render the image using Kitty protocol.
@@ -1160,5 +1365,320 @@ mod tests {
         let spec = format!("{}|150%", file_path.display());
         let result = TerminalImage::from_spec(&spec);
         assert!(result.is_err());
+    }
+
+    // Security error type tests
+    #[test]
+    fn test_error_path_traversal_blocked_message() {
+        let err = TerminalImageError::PathTraversalBlocked {
+            path: "/etc/passwd".to_string(),
+        };
+        assert!(err.to_string().contains("Path traversal blocked"));
+        assert!(err.to_string().contains("/etc/passwd"));
+    }
+
+    #[test]
+    fn test_error_file_too_large_message() {
+        let err = TerminalImageError::FileTooLarge {
+            size: 20_000_000,
+            max_size: 10_000_000,
+        };
+        assert!(err.to_string().contains("File too large"));
+        assert!(err.to_string().contains("20000000"));
+        assert!(err.to_string().contains("10000000"));
+    }
+
+    #[test]
+    fn test_error_remote_url_blocked_message() {
+        let err = TerminalImageError::RemoteUrlBlocked {
+            url: "https://example.com/image.png".to_string(),
+        };
+        assert!(err.to_string().contains("Remote URLs not allowed"));
+        assert!(err.to_string().contains("https://example.com"));
+    }
+
+    #[cfg(feature = "viuer")]
+    #[test]
+    fn test_error_viuer_error_message() {
+        let err = TerminalImageError::ViuerError {
+            message: "Protocol not supported".to_string(),
+        };
+        assert!(err.to_string().contains("viuer rendering error"));
+        assert!(err.to_string().contains("Protocol not supported"));
+    }
+
+    // Security validation tests
+    #[test]
+    fn test_validate_not_remote_url_allows_local_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path).unwrap();
+        assert!(img.validate_not_remote_url(false).is_ok());
+    }
+
+    #[test]
+    fn test_validate_not_remote_url_blocks_http() {
+        let mut img = TerminalImage::default();
+        img.filename = "http://example.com/image.png".to_string();
+
+        let result = img.validate_not_remote_url(false);
+        assert!(matches!(
+            result,
+            Err(TerminalImageError::RemoteUrlBlocked { .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_not_remote_url_blocks_https() {
+        let mut img = TerminalImage::default();
+        img.filename = "https://example.com/image.png".to_string();
+
+        let result = img.validate_not_remote_url(false);
+        assert!(matches!(
+            result,
+            Err(TerminalImageError::RemoteUrlBlocked { .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_not_remote_url_allows_when_permitted() {
+        let mut img = TerminalImage::default();
+        img.filename = "https://example.com/image.png".to_string();
+
+        // When allow_remote is true, should succeed
+        assert!(img.validate_not_remote_url(true).is_ok());
+    }
+
+    #[test]
+    fn test_validate_not_remote_url_case_insensitive() {
+        let mut img = TerminalImage::default();
+        img.filename = "HTTPS://EXAMPLE.COM/IMAGE.PNG".to_string();
+
+        let result = img.validate_not_remote_url(false);
+        assert!(matches!(
+            result,
+            Err(TerminalImageError::RemoteUrlBlocked { .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_path_traversal_allows_within_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub_dir = dir.path().join("images");
+        std::fs::create_dir(&sub_dir).unwrap();
+
+        let file_path = sub_dir.join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path).unwrap();
+        let base_path = Some(dir.path().to_path_buf());
+
+        assert!(img.validate_path_traversal(&base_path).is_ok());
+    }
+
+    #[test]
+    fn test_validate_path_traversal_blocks_escape() {
+        let dir = tempfile::tempdir().unwrap();
+        let sibling_dir = tempfile::tempdir().unwrap();
+
+        let file_path = sibling_dir.path().join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path).unwrap();
+        let base_path = Some(dir.path().to_path_buf());
+
+        let result = img.validate_path_traversal(&base_path);
+        assert!(matches!(
+            result,
+            Err(TerminalImageError::PathTraversalBlocked { .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_path_traversal_allows_no_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path).unwrap();
+
+        // No base path means all paths are allowed
+        assert!(img.validate_path_traversal(&None).is_ok());
+    }
+
+    #[test]
+    fn test_validate_file_size_allows_small_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        let png_data = create_test_png();
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&png_data)
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path).unwrap();
+
+        // Allow files up to 1MB (our test PNG is tiny)
+        assert!(img.validate_file_size(1024 * 1024).is_ok());
+    }
+
+    #[test]
+    fn test_validate_file_size_blocks_large_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        let png_data = create_test_png();
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&png_data)
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path).unwrap();
+
+        // Set max size to 10 bytes (our PNG is larger)
+        let result = img.validate_file_size(10);
+        assert!(matches!(
+            result,
+            Err(TerminalImageError::FileTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_file_size_exact_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        let png_data = create_test_png();
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&png_data)
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path).unwrap();
+        let file_size = std::fs::metadata(&file_path).unwrap().len();
+
+        // Exact limit should pass
+        assert!(img.validate_file_size(file_size).is_ok());
+
+        // One byte less should fail
+        let result = img.validate_file_size(file_size - 1);
+        assert!(matches!(
+            result,
+            Err(TerminalImageError::FileTooLarge { .. })
+        ));
+    }
+
+    // viuer config building tests
+    #[cfg(feature = "viuer")]
+    #[test]
+    fn test_build_viuer_config_fill_width() {
+        use crate::components::image_options::TerminalImageOptions;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path).unwrap();
+        let options = TerminalImageOptions::builder()
+            .width(ImageWidth::Fill)
+            .build();
+
+        let config = img.build_viuer_config(&options);
+
+        // Should have a width set (terminal width or default 80)
+        assert!(config.width.is_some());
+        assert!(config.transparent);
+        assert!(config.truecolor);
+    }
+
+    #[cfg(feature = "viuer")]
+    #[test]
+    fn test_build_viuer_config_percent_width() {
+        use crate::components::image_options::TerminalImageOptions;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path).unwrap();
+        let options = TerminalImageOptions::builder()
+            .width(ImageWidth::Percent(0.5))
+            .build();
+
+        let config = img.build_viuer_config(&options);
+
+        // 50% of available width
+        assert!(config.width.is_some());
+    }
+
+    #[cfg(feature = "viuer")]
+    #[test]
+    fn test_build_viuer_config_characters_width() {
+        use crate::components::image_options::TerminalImageOptions;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path)
+            .unwrap()
+            .with_margins(0, 0);
+        let options = TerminalImageOptions::builder()
+            .width(ImageWidth::Characters(40))
+            .build();
+
+        let config = img.build_viuer_config(&options);
+
+        // Should cap at available width or use 40
+        assert!(config.width.is_some());
+        // With margins of 0, and terminal width >= 40, should be 40
+        // (or less if terminal is narrower)
+        assert!(config.width.unwrap() <= 40 || config.width.unwrap() <= 80);
+    }
+
+    #[cfg(feature = "viuer")]
+    #[test]
+    fn test_build_viuer_config_respects_margins() {
+        use crate::components::image_options::TerminalImageOptions;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path)
+            .unwrap()
+            .with_margins(10, 10);
+        let options = TerminalImageOptions::builder()
+            .width(ImageWidth::Fill)
+            .build();
+
+        let config = img.build_viuer_config(&options);
+
+        // x offset should match left margin
+        assert_eq!(config.x, 10);
     }
 }

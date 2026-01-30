@@ -81,6 +81,28 @@ fn test_detection_functions_dont_panic() {
 }
 
 #[test]
+fn test_image_support_with_reason_provides_details() {
+    use biscuit_terminal::discovery::detection::image_support_with_reason;
+
+    let result = image_support_with_reason();
+
+    // Reason should always be non-empty
+    assert!(!result.reason.is_empty(), "Reason should not be empty");
+
+    // Method should always be one of the expected values
+    let valid_methods = ["tty_check", "viuer", "env_heuristic"];
+    assert!(
+        valid_methods.contains(&result.method.as_str()),
+        "Method '{}' should be one of {:?}",
+        result.method,
+        valid_methods
+    );
+
+    // The support field should match what image_support() returns
+    assert_eq!(result.support, image_support());
+}
+
+#[test]
 fn test_dimensions_are_consistent() {
     let (w, h) = dimensions();
     assert_eq!(terminal_width(), w, "terminal_width() should match dimensions().0");

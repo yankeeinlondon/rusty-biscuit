@@ -104,7 +104,7 @@ pub fn join_lines<T: Into<String>>(blocks: Vec<T>) -> String {
 /// This must not only strip out all escape codes from the content as a
 /// simple first measure, but also consider the length based on grapheme
 /// clusters.
-pub fn plain_text_length(eval: &String, term: Option<&Terminal>) -> u32 {
+pub fn plain_text_length(eval: &str, term: Option<&Terminal>) -> u32 {
     let _ = term;
     visible_width(eval)
 }
@@ -473,19 +473,17 @@ fn color_wrapper(fg: &Color, bg: &Color, term: Option<&Terminal>) -> (String, St
         used = true;
     }
 
-    if !matches!(fg, Color::Reset) {
-        if let Some(seq) = ansi_color_sequence(fg, false, term) {
+    if !matches!(fg, Color::Reset)
+        && let Some(seq) = ansi_color_sequence(fg, false, term) {
             prefix.push_str(&seq);
             used = true;
         }
-    }
 
-    if !matches!(bg, Color::Reset) {
-        if let Some(seq) = ansi_color_sequence(bg, true, term) {
+    if !matches!(bg, Color::Reset)
+        && let Some(seq) = ansi_color_sequence(bg, true, term) {
             prefix.push_str(&seq);
             used = true;
         }
-    }
 
     let suffix = if used {
         "\x1b[0m".to_string()

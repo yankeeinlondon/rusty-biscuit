@@ -5,7 +5,7 @@ use terminal_size::{Height, Width, terminal_size};
 use termini::{NumberCapability, StringCapability, TermInfo};
 
 /// The type of image support (if any) of a terminal
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ImageSupport {
     None,
     /// the highest quality image support comes from the
@@ -24,6 +24,20 @@ pub enum ImageSupport {
     /// one of the earlier image formats but slowly being phased out,
     /// even it's originator iTERM2 now supports the Kitty protocol.
     ITerm,
+}
+
+/// Detailed result of image support detection, including the reason for the decision.
+///
+/// This is useful for debugging why a particular image protocol was selected
+/// or why images are not supported.
+#[derive(Debug, Clone)]
+pub struct ImageSupportResult {
+    /// The detected image support level
+    pub support: ImageSupport,
+    /// Human-readable reason for the detection result
+    pub reason: String,
+    /// The detection method used (e.g., "viuer", "env_heuristic", "tty_check")
+    pub method: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -502,6 +516,16 @@ pub fn dimensions() -> (u32, u32) {
 /// - `ITerm` - iTerm2 image protocol (legacy)
 /// - `None` - No image support
 ///
+/// ## Detection Strategy
+///
+/// When the `viuer` feature is enabled (default), this function uses viuer's
+/// runtime detection which actually queries the terminal:
+/// 1. `viuer::get_kitty_support()` - Probes for Kitty Graphics Protocol
+/// 2. `viuer::is_iterm_supported()` - Checks for iTerm2 inline images
+///
+/// Falls back to environment variable heuristics when viuer detection
+/// returns no support or when the `viuer` feature is disabled.
+///
 /// ## Examples
 ///
 /// ```
@@ -514,25 +538,182 @@ pub fn dimensions() -> (u32, u32) {
 /// }
 /// ```
 pub fn image_support() -> ImageSupport {
+    image_support_with_reason().support
+}
+
+/// Detect image display support with detailed reasoning.
+///
+/// This function provides the same detection as [`image_support()`] but also
+/// returns information about why a particular protocol was selected or why
+/// images are not supported. Useful for debugging detection issues.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::discovery::detection::image_support_with_reason;
+///
+/// let result = image_support_with_reason();
+/// println!("Support: {:?}", result.support);
+/// println!("Reason: {}", result.reason);
+/// println!("Method: {}", result.method);
+/// ```
+pub fn image_support_with_reason() -> ImageSupportResult {
+    // First check: must be a TTY
     if !is_tty() {
-        return ImageSupport::None;
+        return ImageSupportResult {
+            support: ImageSupport::None,
+            reason: "stdout is not a TTY (piped or redirected)".to_string(),
+            method: "tty_check".to_string(),
+        };
     }
 
+    // When viuer feature is enabled, use its runtime detection first
+    // viuer actually queries the terminal, so it's more accurate than env heuristics
+    #[cfg(feature = "viuer")]
+    {
+        use viuer::{KittySupport, get_kitty_support, is_iterm_supported};
+
+        // Check for Kitty Graphics Protocol support
+        match get_kitty_support() {
+            KittySupport::Local | KittySupport::Remote => {
+                let support_type = match get_kitty_support() {
+                    KittySupport::Local => "local files only",
+                    KittySupport::Remote => "full remote support",
+                    KittySupport::None => unreachable!(),
+                };
+                tracing::debug!(
+                    image_support = "Kitty",
+                    kitty_level = support_type,
+                    method = "viuer",
+                    "Detected Kitty graphics protocol via viuer"
+                );
+                return ImageSupportResult {
+                    support: ImageSupport::Kitty,
+                    reason: format!("viuer detected Kitty graphics protocol ({})", support_type),
+                    method: "viuer".to_string(),
+                };
+            }
+            KittySupport::None => {
+                tracing::trace!(
+                    method = "viuer",
+                    "viuer reports no Kitty support, checking iTerm2"
+                );
+            }
+        }
+
+        // Check for iTerm2 inline images support
+        if is_iterm_supported() {
+            tracing::debug!(
+                image_support = "ITerm",
+                method = "viuer",
+                "Detected iTerm2 inline images via viuer"
+            );
+            return ImageSupportResult {
+                support: ImageSupport::ITerm,
+                reason: "viuer detected iTerm2 inline images support".to_string(),
+                method: "viuer".to_string(),
+            };
+        }
+
+        tracing::trace!(
+            method = "viuer",
+            "viuer reports no image protocol support, falling back to env heuristics"
+        );
+    }
+
+    // Fallback: environment variable heuristics
+    // These are less accurate but work when viuer detection fails or is disabled
+    image_support_from_env()
+}
+
+/// Detect image support using environment variable heuristics only.
+///
+/// This is used as a fallback when viuer detection is not available or fails.
+/// It checks `TERM_PROGRAM` and `TERM` environment variables to infer support.
+fn image_support_from_env() -> ImageSupportResult {
+    // Check TERM_PROGRAM for known terminals
     if let Ok(term_program) = env::var("TERM_PROGRAM") {
         match term_program.as_str() {
-            "kitty" | "WezTerm" | "Warp" | "ghostty" | "konsole" | "wast" | "iTerm.app" => {
-                return ImageSupport::Kitty;
+            // Terminals with Kitty Graphics Protocol support
+            "kitty" | "WezTerm" | "Warp" | "ghostty" | "konsole" | "wast" => {
+                tracing::debug!(
+                    image_support = "Kitty",
+                    term_program = %term_program,
+                    method = "env_heuristic",
+                    "Detected Kitty support from TERM_PROGRAM"
+                );
+                return ImageSupportResult {
+                    support: ImageSupport::Kitty,
+                    reason: format!(
+                        "TERM_PROGRAM={} indicates Kitty graphics protocol support",
+                        term_program
+                    ),
+                    method: "env_heuristic".to_string(),
+                };
+            }
+            // iTerm2 - can use either protocol, but prefer its native protocol
+            // when viuer didn't detect Kitty support
+            "iTerm.app" | "iterm2" => {
+                tracing::debug!(
+                    image_support = "ITerm",
+                    term_program = %term_program,
+                    method = "env_heuristic",
+                    "Detected iTerm2 support from TERM_PROGRAM"
+                );
+                return ImageSupportResult {
+                    support: ImageSupport::ITerm,
+                    reason: format!(
+                        "TERM_PROGRAM={} indicates iTerm2 inline images support",
+                        term_program
+                    ),
+                    method: "env_heuristic".to_string(),
+                };
             }
             _ => {}
         }
     }
 
-    let term = env::var("TERM").unwrap_or_default();
-    if term.contains("kitty") {
-        return ImageSupport::Kitty;
+    // Check ITERM_SESSION_ID for iTerm2 detection
+    if env::var("ITERM_SESSION_ID").is_ok() || env::var("ITERM_PROFILE").is_ok() {
+        tracing::debug!(
+            image_support = "ITerm",
+            method = "env_heuristic",
+            "Detected iTerm2 from session environment variables"
+        );
+        return ImageSupportResult {
+            support: ImageSupport::ITerm,
+            reason: "ITERM_SESSION_ID or ITERM_PROFILE indicates iTerm2".to_string(),
+            method: "env_heuristic".to_string(),
+        };
     }
 
-    ImageSupport::None
+    // Check TERM variable for kitty
+    let term = env::var("TERM").unwrap_or_default();
+    if term.contains("kitty") {
+        tracing::debug!(
+            image_support = "Kitty",
+            term = %term,
+            method = "env_heuristic",
+            "Detected Kitty support from TERM variable"
+        );
+        return ImageSupportResult {
+            support: ImageSupport::Kitty,
+            reason: format!("TERM={} indicates Kitty graphics protocol support", term),
+            method: "env_heuristic".to_string(),
+        };
+    }
+
+    // No image support detected
+    tracing::debug!(
+        image_support = "None",
+        method = "env_heuristic",
+        "No image protocol support detected"
+    );
+    ImageSupportResult {
+        support: ImageSupport::None,
+        reason: "No image protocol support detected from environment".to_string(),
+        method: "env_heuristic".to_string(),
+    }
 }
 
 /// Detect if the terminal supports OSC8 hyperlinks.
@@ -958,20 +1139,19 @@ pub use crate::discovery::osc_queries::{osc10_support, osc11_support, osc12_supp
 /// ```
 pub fn detect_connection() -> Connection {
     // Check for Mosh first (it also sets SSH_CLIENT sometimes)
-    if let Ok(mosh_conn) = env::var("MOSH_CONNECTION") {
-        if !mosh_conn.is_empty() {
+    if let Ok(mosh_conn) = env::var("MOSH_CONNECTION")
+        && !mosh_conn.is_empty() {
             return Connection::MoshClient(MoshClient {
                 connection: mosh_conn,
             });
         }
-    }
 
     // Check for SSH connection
     // SSH_CLIENT format: "client_ip client_port server_port"
     if let Ok(ssh_client) = env::var("SSH_CLIENT") {
         let parts: Vec<&str> = ssh_client.split_whitespace().collect();
-        if parts.len() >= 3 {
-            if let (Ok(source_port), Ok(server_port)) =
+        if parts.len() >= 3
+            && let (Ok(source_port), Ok(server_port)) =
                 (parts[1].parse::<u32>(), parts[2].parse::<u32>())
             {
                 let tty_path = env::var("SSH_TTY").ok();
@@ -982,9 +1162,312 @@ pub fn detect_connection() -> Connection {
                     tty_path,
                 });
             }
-        }
     }
 
     Connection::Local
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    /// Helper to set environment variables with automatic cleanup.
+    ///
+    /// In Rust 2024, env::set_var and env::remove_var are unsafe because
+    /// modifying environment variables can cause undefined behavior when
+    /// other threads are reading them. In test code, we use serial_test
+    /// to ensure these tests run sequentially.
+    struct ScopedEnv {
+        vars: Vec<(String, Option<String>)>,
+    }
+
+    impl ScopedEnv {
+        fn new() -> Self {
+            Self { vars: Vec::new() }
+        }
+
+        fn set(&mut self, key: &str, value: &str) {
+            let old = env::var(key).ok();
+            self.vars.push((key.to_string(), old));
+            // SAFETY: Tests using ScopedEnv are marked with #[serial] to prevent
+            // concurrent access to environment variables.
+            unsafe { env::set_var(key, value) };
+        }
+
+        fn remove(&mut self, key: &str) {
+            let old = env::var(key).ok();
+            self.vars.push((key.to_string(), old));
+            // SAFETY: Tests using ScopedEnv are marked with #[serial] to prevent
+            // concurrent access to environment variables.
+            unsafe { env::remove_var(key) };
+        }
+    }
+
+    impl Drop for ScopedEnv {
+        fn drop(&mut self) {
+            for (key, old_value) in self.vars.drain(..).rev() {
+                // SAFETY: Tests using ScopedEnv are marked with #[serial] to prevent
+                // concurrent access to environment variables.
+                unsafe {
+                    match old_value {
+                        Some(v) => env::set_var(&key, v),
+                        None => env::remove_var(&key),
+                    }
+                }
+            }
+        }
+    }
+
+    // ========================================================================
+    // ImageSupport enum tests
+    // ========================================================================
+
+    #[test]
+    fn test_image_support_eq() {
+        assert_eq!(ImageSupport::None, ImageSupport::None);
+        assert_eq!(ImageSupport::Kitty, ImageSupport::Kitty);
+        assert_eq!(ImageSupport::ITerm, ImageSupport::ITerm);
+        assert_ne!(ImageSupport::None, ImageSupport::Kitty);
+        assert_ne!(ImageSupport::Kitty, ImageSupport::ITerm);
+    }
+
+    #[test]
+    fn test_image_support_debug() {
+        let debug_none = format!("{:?}", ImageSupport::None);
+        assert!(debug_none.contains("None"));
+
+        let debug_kitty = format!("{:?}", ImageSupport::Kitty);
+        assert!(debug_kitty.contains("Kitty"));
+
+        let debug_iterm = format!("{:?}", ImageSupport::ITerm);
+        assert!(debug_iterm.contains("ITerm"));
+    }
+
+    #[test]
+    fn test_image_support_clone() {
+        let support = ImageSupport::Kitty;
+        let cloned = support.clone();
+        assert_eq!(support, cloned);
+    }
+
+    // ========================================================================
+    // ImageSupportResult struct tests
+    // ========================================================================
+
+    #[test]
+    fn test_image_support_result_fields() {
+        let result = ImageSupportResult {
+            support: ImageSupport::Kitty,
+            reason: "test reason".to_string(),
+            method: "test_method".to_string(),
+        };
+
+        assert_eq!(result.support, ImageSupport::Kitty);
+        assert_eq!(result.reason, "test reason");
+        assert_eq!(result.method, "test_method");
+    }
+
+    #[test]
+    fn test_image_support_result_debug() {
+        let result = ImageSupportResult {
+            support: ImageSupport::ITerm,
+            reason: "viuer detected iTerm2".to_string(),
+            method: "viuer".to_string(),
+        };
+
+        let debug = format!("{:?}", result);
+        assert!(debug.contains("ITerm"));
+        assert!(debug.contains("viuer"));
+    }
+
+    #[test]
+    fn test_image_support_result_clone() {
+        let result = ImageSupportResult {
+            support: ImageSupport::None,
+            reason: "not a tty".to_string(),
+            method: "tty_check".to_string(),
+        };
+
+        let cloned = result.clone();
+        assert_eq!(cloned.support, result.support);
+        assert_eq!(cloned.reason, result.reason);
+        assert_eq!(cloned.method, result.method);
+    }
+
+    // ========================================================================
+    // image_support_from_env tests (environment heuristics)
+    // ========================================================================
+
+    #[test]
+    #[serial]
+    fn test_image_support_from_env_kitty_term_program() {
+        let mut env = ScopedEnv::new();
+        env.set("TERM_PROGRAM", "kitty");
+        env.remove("ITERM_SESSION_ID");
+        env.remove("ITERM_PROFILE");
+
+        let result = image_support_from_env();
+        assert_eq!(result.support, ImageSupport::Kitty);
+        assert!(result.reason.contains("TERM_PROGRAM"));
+        assert_eq!(result.method, "env_heuristic");
+    }
+
+    #[test]
+    #[serial]
+    fn test_image_support_from_env_wezterm() {
+        let mut env = ScopedEnv::new();
+        env.set("TERM_PROGRAM", "WezTerm");
+        env.remove("ITERM_SESSION_ID");
+        env.remove("ITERM_PROFILE");
+
+        let result = image_support_from_env();
+        assert_eq!(result.support, ImageSupport::Kitty);
+        assert!(result.reason.contains("WezTerm"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_image_support_from_env_ghostty() {
+        let mut env = ScopedEnv::new();
+        env.set("TERM_PROGRAM", "ghostty");
+        env.remove("ITERM_SESSION_ID");
+        env.remove("ITERM_PROFILE");
+
+        let result = image_support_from_env();
+        assert_eq!(result.support, ImageSupport::Kitty);
+        assert!(result.reason.contains("ghostty"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_image_support_from_env_iterm2_term_program() {
+        let mut env = ScopedEnv::new();
+        env.set("TERM_PROGRAM", "iTerm.app");
+        env.remove("ITERM_SESSION_ID");
+        env.remove("ITERM_PROFILE");
+
+        let result = image_support_from_env();
+        assert_eq!(result.support, ImageSupport::ITerm);
+        assert!(result.reason.contains("iTerm"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_image_support_from_env_iterm2_session_id() {
+        let mut env = ScopedEnv::new();
+        env.remove("TERM_PROGRAM");
+        env.set("ITERM_SESSION_ID", "w0t0p0:12345678-1234-1234-1234-123456789abc");
+        env.remove("ITERM_PROFILE");
+
+        let result = image_support_from_env();
+        assert_eq!(result.support, ImageSupport::ITerm);
+        assert!(result.reason.contains("ITERM_SESSION_ID"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_image_support_from_env_iterm2_profile() {
+        let mut env = ScopedEnv::new();
+        env.remove("TERM_PROGRAM");
+        env.remove("ITERM_SESSION_ID");
+        env.set("ITERM_PROFILE", "Default");
+
+        let result = image_support_from_env();
+        assert_eq!(result.support, ImageSupport::ITerm);
+        assert!(result.reason.contains("ITERM_PROFILE"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_image_support_from_env_kitty_term_var() {
+        let mut env = ScopedEnv::new();
+        env.remove("TERM_PROGRAM");
+        env.remove("ITERM_SESSION_ID");
+        env.remove("ITERM_PROFILE");
+        env.set("TERM", "xterm-kitty");
+
+        let result = image_support_from_env();
+        assert_eq!(result.support, ImageSupport::Kitty);
+        assert!(result.reason.contains("TERM="));
+        assert!(result.reason.contains("kitty"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_image_support_from_env_none() {
+        let mut env = ScopedEnv::new();
+        env.remove("TERM_PROGRAM");
+        env.remove("ITERM_SESSION_ID");
+        env.remove("ITERM_PROFILE");
+        env.set("TERM", "xterm-256color");
+
+        let result = image_support_from_env();
+        assert_eq!(result.support, ImageSupport::None);
+        assert!(result.reason.contains("No image protocol"));
+    }
+
+    // ========================================================================
+    // image_support and image_support_with_reason tests
+    // ========================================================================
+
+    #[test]
+    fn test_image_support_returns_support_field() {
+        // This test verifies that image_support() returns the same value
+        // as image_support_with_reason().support
+        let simple = image_support();
+        let detailed = image_support_with_reason();
+        assert_eq!(simple, detailed.support);
+    }
+
+    #[test]
+    fn test_image_support_with_reason_has_non_empty_fields() {
+        let result = image_support_with_reason();
+
+        // Reason should always be non-empty
+        assert!(!result.reason.is_empty(), "Reason should not be empty");
+
+        // Method should always be non-empty
+        assert!(!result.method.is_empty(), "Method should not be empty");
+
+        // Method should be one of the expected values
+        let valid_methods = ["tty_check", "viuer", "env_heuristic"];
+        assert!(
+            valid_methods.contains(&result.method.as_str()),
+            "Method '{}' should be one of {:?}",
+            result.method,
+            valid_methods
+        );
+    }
+
+    // ========================================================================
+    // Feature flag tests
+    // ========================================================================
+
+    #[test]
+    #[cfg(feature = "viuer")]
+    fn test_viuer_feature_enabled() {
+        // When viuer feature is enabled, the detection should work
+        // Note: we can't test the actual viuer detection results in unit tests
+        // because they depend on the runtime terminal environment
+        let result = image_support_with_reason();
+
+        // Should complete without panic
+        assert!(!result.reason.is_empty());
+    }
+
+    #[test]
+    #[cfg(not(feature = "viuer"))]
+    fn test_viuer_feature_disabled() {
+        // When viuer is disabled, should fall back to env heuristics
+        let result = image_support_with_reason();
+
+        // If not a TTY, method will be "tty_check"
+        // Otherwise, method should be "env_heuristic"
+        assert!(
+            result.method == "tty_check" || result.method == "env_heuristic",
+            "Without viuer, method should be tty_check or env_heuristic, got: {}",
+            result.method
+        );
+    }
+}
