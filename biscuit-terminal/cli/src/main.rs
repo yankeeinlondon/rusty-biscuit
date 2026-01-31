@@ -2428,6 +2428,384 @@ fn parse_xy_data(data: &[String]) -> color_eyre::Result<Vec<f64>> {
     Ok(values)
 }
 
+/// Example data for timeline --example
+const TIMELINE_EXAMPLE: &[&str] = &[
+    "2002: LinkedIn",
+    "2004: Facebook",
+    "2005: YouTube",
+    "2006: Twitter",
+    "2010: Instagram",
+    "2011: Snapchat",
+];
+const TIMELINE_EXAMPLE_CMD: &str = "bt timeline --title \"Social Media History\" \"2002: LinkedIn\" \"2004: Facebook\" \"2005: YouTube\" \"2006: Twitter\" \"2010: Instagram\" \"2011: Snapchat\"";
+
+/// Render a timeline diagram to the terminal.
+fn render_timeline(
+    title: Option<&str>,
+    width: Option<&str>,
+    sections: &[String],
+    inverse: bool,
+    example: bool,
+    events: &[String],
+    json: bool,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::mermaid::MermaidTheme;
+    use std::io::Write;
+
+    let _ = std::io::stdout().flush();
+
+    // Use example data if --example flag is set
+    let (events, eff_title): (Vec<String>, Option<&str>) = if example {
+        (
+            TIMELINE_EXAMPLE.iter().map(|s| s.to_string()).collect(),
+            Some("Social Media History"),
+        )
+    } else {
+        (events.to_vec(), title)
+    };
+
+    if events.is_empty() && sections.is_empty() {
+        return Err(color_eyre::eyre::eyre!(
+            "No events provided. Use format: \"YYYY: Event description\""
+        ));
+    }
+
+    // Validate event format
+    for event in &events {
+        if !event.contains(':') {
+            return Err(color_eyre::eyre::eyre!(
+                "Invalid event format '{}'. Expected 'YYYY: Description'",
+                event
+            ));
+        }
+    }
+
+    // Build the timeline
+    let mut lines = vec!["timeline".to_string()];
+
+    if let Some(t) = eff_title {
+        lines.push(format!("    title {}", t));
+    }
+
+    // If no sections, add all events directly
+    if sections.is_empty() {
+        for event in &events {
+            lines.push(format!("    {}", event));
+        }
+    } else {
+        // With sections, we need to interleave section headers and events
+        // For now, put all events under the first section if sections are provided
+        // Users can use multiple --section flags for grouping
+        for (i, section) in sections.iter().enumerate() {
+            lines.push(format!("    section {}", section));
+            // Put a portion of events under each section
+            let events_per_section = events.len().div_ceil(sections.len());
+            let start = i * events_per_section;
+            let end = ((i + 1) * events_per_section).min(events.len());
+            for event in events.get(start..end).unwrap_or(&[]) {
+                lines.push(format!("        {}", event));
+            }
+        }
+    }
+
+    let instructions = lines.join("\n");
+
+    if json {
+        let output = serde_json::json!({
+            "type": "timeline",
+            "inverse": inverse,
+            "title": eff_title,
+            "sections": sections,
+            "events": events,
+            "instructions": instructions,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    // Configure renderer
+    let renderer = if inverse {
+        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        MermaidRenderer::new(&instructions)
+            .with_theme(theme)
+            .with_transparent_background(false)
+    } else {
+        MermaidRenderer::for_terminal(&instructions)
+    };
+
+    // Render
+    let png_path = match renderer.render_to_temp_png() {
+        Ok(path) => path,
+        Err(e) => return handle_mermaid_error(e, &instructions, "timeline"),
+    };
+
+    // Display
+    let image_width = match width {
+        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
+        None => ImageWidth::Percent(0.5),
+    };
+
+    let terminal = Terminal::new();
+    let term_image = TerminalImage::new(&png_path)
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
+        .with_width(image_width);
+
+    match term_image.render_to_terminal(&terminal) {
+        Ok(output) => print!("{}", output),
+        Err(e) => {
+            let _ = std::fs::remove_file(&png_path);
+            return Err(color_eyre::eyre::eyre!("Failed to display timeline: {}", e));
+        }
+    }
+
+    let _ = std::fs::remove_file(&png_path);
+    settle_terminal();
+
+    if example {
+        print_example_command(TIMELINE_EXAMPLE_CMD);
+    }
+
+    Ok(())
+}
+
+/// Example data for state-diagram --example
+const STATE_DIAGRAM_EXAMPLE: &[&str] = &[
+    "[*] --> Idle",
+    "Idle --> Running: start",
+    "Running --> Idle: stop",
+    "Running --> Error: failure",
+    "Error --> Idle: reset",
+    "Idle --> [*]: shutdown",
+];
+const STATE_DIAGRAM_EXAMPLE_CMD: &str = "bt state-diagram --title \"Process States\" \"[*] --> Idle\" \"Idle --> Running: start\" \"Running --> Idle: stop\" \"Running --> Error: failure\" \"Error --> Idle: reset\" \"Idle --> [*]: shutdown\"";
+
+/// Render a state diagram to the terminal.
+fn render_state_diagram(
+    title: Option<&str>,
+    width: Option<&str>,
+    inverse: bool,
+    example: bool,
+    transitions: &[String],
+    json: bool,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::mermaid::MermaidTheme;
+    use std::io::Write;
+
+    let _ = std::io::stdout().flush();
+
+    // Use example data if --example flag is set
+    let (transitions, eff_title): (Vec<String>, Option<&str>) = if example {
+        (
+            STATE_DIAGRAM_EXAMPLE.iter().map(|s| s.to_string()).collect(),
+            Some("Process States"),
+        )
+    } else {
+        (transitions.to_vec(), title)
+    };
+
+    if transitions.is_empty() {
+        return Err(color_eyre::eyre::eyre!(
+            "No transitions provided. Use format: \"State1 --> State2\" or \"[*] --> State\""
+        ));
+    }
+
+    // Build the state diagram
+    let mut lines = vec!["stateDiagram-v2".to_string()];
+
+    // Add title if provided (using note or direction for now, title isn't directly supported)
+    // Actually, stateDiagram doesn't have a title directive, we'll skip it for the diagram itself
+    // but include it in JSON output
+
+    for transition in &transitions {
+        lines.push(format!("    {}", transition));
+    }
+
+    let instructions = lines.join("\n");
+
+    if json {
+        let output = serde_json::json!({
+            "type": "state-diagram",
+            "inverse": inverse,
+            "title": eff_title,
+            "transitions": transitions,
+            "instructions": instructions,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    // Configure renderer
+    let renderer = if inverse {
+        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        MermaidRenderer::new(&instructions)
+            .with_theme(theme)
+            .with_transparent_background(false)
+    } else {
+        MermaidRenderer::for_terminal(&instructions)
+    };
+
+    // Render
+    let png_path = match renderer.render_to_temp_png() {
+        Ok(path) => path,
+        Err(e) => return handle_mermaid_error(e, &instructions, "state diagram"),
+    };
+
+    // Display
+    let image_width = match width {
+        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
+        None => ImageWidth::Percent(0.5),
+    };
+
+    let terminal = Terminal::new();
+    let term_image = TerminalImage::new(&png_path)
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
+        .with_width(image_width);
+
+    match term_image.render_to_terminal(&terminal) {
+        Ok(output) => print!("{}", output),
+        Err(e) => {
+            let _ = std::fs::remove_file(&png_path);
+            return Err(color_eyre::eyre::eyre!("Failed to display state diagram: {}", e));
+        }
+    }
+
+    let _ = std::fs::remove_file(&png_path);
+    settle_terminal();
+
+    if example {
+        print_example_command(STATE_DIAGRAM_EXAMPLE_CMD);
+    }
+
+    Ok(())
+}
+
+/// Example data for erd --example
+/// Note: Mermaid ERD requires each attribute on its own line inside the entity block
+const ERD_EXAMPLE_ENTITIES: &[&str] = &[
+    "Customer {\n        int id PK\n        string name\n        string email\n    }",
+    "Order {\n        int id PK\n        date orderDate\n        int customerId FK\n    }",
+    "Product {\n        int id PK\n        string name\n        decimal price\n    }",
+    "OrderItem {\n        int orderId FK\n        int productId FK\n        int quantity\n    }",
+];
+const ERD_EXAMPLE_RELATIONSHIPS: &[&str] = &[
+    "Customer ||--o{ Order : places",
+    "Order ||--|{ OrderItem : contains",
+    "Product ||--o{ OrderItem : \"ordered in\"",
+];
+const ERD_EXAMPLE_CMD: &str = "bt erd --title \"E-Commerce Schema\" \\\n  --entity \"Customer { int id PK }\" \\\n  --entity \"Order { int id PK }\" \\\n  \"Customer ||--o{ Order : places\"";
+
+/// Render an ERD to the terminal.
+fn render_erd(
+    title: Option<&str>,
+    width: Option<&str>,
+    entities: &[String],
+    inverse: bool,
+    example: bool,
+    relationships: &[String],
+    json: bool,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::mermaid::MermaidTheme;
+    use std::io::Write;
+
+    let _ = std::io::stdout().flush();
+
+    // Use example data if --example flag is set
+    let (entities, relationships, eff_title): (Vec<String>, Vec<String>, Option<&str>) = if example {
+        (
+            ERD_EXAMPLE_ENTITIES.iter().map(|s| s.to_string()).collect(),
+            ERD_EXAMPLE_RELATIONSHIPS.iter().map(|s| s.to_string()).collect(),
+            Some("E-Commerce Schema"),
+        )
+    } else {
+        (entities.to_vec(), relationships.to_vec(), title)
+    };
+
+    if relationships.is_empty() && entities.is_empty() {
+        return Err(color_eyre::eyre::eyre!(
+            "No relationships or entities provided. Use format: \"Entity1 ||--o{{ Entity2 : label\""
+        ));
+    }
+
+    // Build the ERD
+    let mut lines = vec!["erDiagram".to_string()];
+
+    // Add title if provided
+    if let Some(t) = eff_title {
+        // ERD doesn't have native title support, but we can add it as a note
+        // For now, we'll just skip it in the diagram
+        let _ = t; // suppress unused warning
+    }
+
+    // Add entity definitions
+    for entity in &entities {
+        lines.push(format!("    {}", entity));
+    }
+
+    // Add relationships
+    for rel in &relationships {
+        lines.push(format!("    {}", rel));
+    }
+
+    let instructions = lines.join("\n");
+
+    if json {
+        let output = serde_json::json!({
+            "type": "erd",
+            "inverse": inverse,
+            "title": eff_title,
+            "entities": entities,
+            "relationships": relationships,
+            "instructions": instructions,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    // Configure renderer
+    let renderer = if inverse {
+        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        MermaidRenderer::new(&instructions)
+            .with_theme(theme)
+            .with_transparent_background(false)
+    } else {
+        MermaidRenderer::for_terminal(&instructions)
+    };
+
+    // Render
+    let png_path = match renderer.render_to_temp_png() {
+        Ok(path) => path,
+        Err(e) => return handle_mermaid_error(e, &instructions, "ERD"),
+    };
+
+    // Display
+    let image_width = match width {
+        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
+        None => ImageWidth::Percent(0.5),
+    };
+
+    let terminal = Terminal::new();
+    let term_image = TerminalImage::new(&png_path)
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
+        .with_width(image_width);
+
+    match term_image.render_to_terminal(&terminal) {
+        Ok(output) => print!("{}", output),
+        Err(e) => {
+            let _ = std::fs::remove_file(&png_path);
+            return Err(color_eyre::eyre::eyre!("Failed to display ERD: {}", e));
+        }
+    }
+
+    let _ = std::fs::remove_file(&png_path);
+    settle_terminal();
+
+    if example {
+        print_example_command(ERD_EXAMPLE_CMD);
+    }
+
+    Ok(())
+}
+
 /// Handle Mermaid rendering errors with user-friendly output.
 ///
 /// Parses mmdc errors to extract syntax information and formats

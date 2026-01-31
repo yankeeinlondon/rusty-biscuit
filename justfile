@@ -275,6 +275,18 @@ skill-biscuit-hash:
         so-you-say "The biscuit-hash package has synced it's documents for drift and updated the skill tree."; \
     fi
 
+# Update docs and then update the skill for the biscuit-terminal package
+skill-biscuit-terminal:
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}biscuit-terminal{{RESET}} Package"
+    @echo "---------------------------------------------------------------------------------"
+    @unset ANTHROPIC_API_KEY
+    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-biscuit-terminal.md)"\'
+    @echo ""
+    @echo "The {{BOLD}}biscuit-terminal{{RESET}} skill has been rebuilt"
+    @echo ""
+    @if command -v so-you-say >/dev/null 2>&1; then \
+        so-you-say "The biscuit-terminal package has synced it's documents for drift and updated the skill tree."; \
+
 # Update docs and then update the skill for the tree-huger package
 skill-tree-hugger:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}tree-hugger{{RESET}} Package"
