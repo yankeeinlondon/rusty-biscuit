@@ -53,6 +53,38 @@ Protocol selection:
 - **iTerm2 protocol**: iTerm2 (even if Kitty advertised)
 - **Fallback**: Alt text for unsupported terminals
 
+### Shell Completions
+
+Enable tab completion for your shell:
+
+**Dynamic completions (recommended)** - includes image file filtering:
+
+```bash
+# Bash
+echo 'source <(COMPLETE=bash bt)' >> ~/.bashrc
+
+# Zsh
+echo 'source <(COMPLETE=zsh bt)' >> ~/.zshrc
+
+# Fish
+echo 'COMPLETE=fish bt | source' >> ~/.config/fish/config.fish
+```
+
+**Static completions** - generates a script once:
+
+```bash
+bt --completions bash >> ~/.bashrc
+bt --completions zsh > ~/.zfunc/_bt
+bt --completions fish > ~/.config/fish/completions/bt.fish
+bt --completions powershell >> $PROFILE
+```
+
+For detailed setup instructions:
+
+```bash
+bt --completions help
+```
+
 ### Content Analysis
 
 Analyze text content for escape codes and visual widths:

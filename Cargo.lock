@@ -443,6 +443,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "biscuit-hash-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "biscuit-hash",
+ "clap 4.5.54",
+ "clap_complete",
+ "predicates",
+ "tempfile",
+]
+
+[[package]]
 name = "biscuit-speaks"
 version = "0.1.0"
 dependencies = [
@@ -496,6 +508,7 @@ dependencies = [
  "assert_cmd",
  "biscuit-terminal",
  "clap 4.5.54",
+ "clap_complete",
  "color-eyre",
  "predicates",
  "serde",
@@ -786,6 +799,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "430b4dc2b5e3861848de79627b2bedc9f3342c7da5173a14eaa5d0f8dc18ae5d"
 dependencies = [
  "clap 4.5.54",
+ "clap_lex",
+ "is_executable",
+ "shlex",
 ]
 
 [[package]]
@@ -1170,6 +1186,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "clap 4.5.54",
+ "clap_complete",
  "color-eyre",
  "darkmatter-lib",
  "open",
@@ -2704,6 +2721,15 @@ name = "is_ci"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7655c9839580ee829dfacba1d1278c2b7883e50a277ff7541299489d6bdfdc45"
+
+[[package]]
+name = "is_executable"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baabb8b4867b26294d818bf3f651a454b6901431711abb96e296245888d6e8c4"
+dependencies = [
+ "windows-sys 0.60.2",
+]
 
 [[package]]
 name = "is_terminal_polyfill"
@@ -5462,6 +5488,7 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "clap 4.5.54",
+ "clap_complete",
  "darkmatter-lib",
  "predicates",
  "serde",

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-biscuit-hash = { path = "../../biscuit-hash" }
+biscuit-hash = { path = "../../biscuit-hash/lib" }
 ignore = "0.4"
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0"

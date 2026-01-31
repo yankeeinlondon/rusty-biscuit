@@ -137,8 +137,10 @@ pub use cli::Cli;
 
 mod cli {
     use clap::{ArgGroup, Parser};
+    use clap_complete::Shell;
+    use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
     use darkmatter_lib::markdown::highlighting::ThemePair;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     /// Command-line interface for the darkmatter markdown renderer.
     ///
@@ -148,8 +150,28 @@ mod cli {
     #[command(group = ArgGroup::new("output-mode")
         .args(["html", "show_html", "ast", "clean", "clean_save", "toc", "toc_filename", "delta"])
         .multiple(false))]
+    #[command(after_help = "\
+SHELL COMPLETIONS:
+  Enable tab completions with --completions <SHELL>
+
+  Bash (add to ~/.bashrc):
+    source <(COMPLETE=bash md)
+
+  Zsh (add to ~/.zshrc):
+    source <(COMPLETE=zsh md)
+
+  Fish (add to ~/.config/fish/config.fish):
+    COMPLETE=fish md | source
+
+  PowerShell (add to $PROFILE):
+    $env:COMPLETE = \"powershell\"; md | Out-String | Invoke-Expression; Remove-Item Env:\\COMPLETE
+
+  Run 'md --completions <SHELL>' to see the setup command for your shell.
+  Completions filter to .md and .dm files, including one directory level deep.
+")]
     pub struct Cli {
         /// Input file path (reads from stdin if not provided, use "-" for explicit stdin)
+        #[arg(add = ArgValueCompleter::new(complete_markdown_files))]
         pub input: Option<PathBuf>,
 
         /// Theme for prose content (kebab-case name)
@@ -224,6 +246,76 @@ mod cli {
         /// Increase verbosity (-v INFO, -vv DEBUG, -vvv TRACE, -vvvv TRACE with file/line)
         #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
         pub verbose: u8,
+
+        /// Generate shell completions for the specified shell
+        #[arg(long, value_name = "SHELL")]
+        pub completions: Option<Shell>,
+    }
+
+    /// Completes markdown files (.md, .dm) in current directory and one level deep.
+    fn complete_markdown_files(current: &std::ffi::OsStr) -> Vec<CompletionCandidate> {
+        let current_str = current.to_string_lossy();
+        let mut candidates = Vec::new();
+
+        let is_markdown = |p: &Path| {
+            p.extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("dm"))
+                .unwrap_or(false)
+        };
+
+        // Current directory files
+        if let Ok(entries) = std::fs::read_dir(".") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file()
+                    && is_markdown(&path)
+                    && let Some(name) = path.file_name()
+                {
+                    let name = name.to_string_lossy();
+                    if name.starts_with(current_str.as_ref()) {
+                        candidates.push(CompletionCandidate::new(name.into_owned()));
+                    }
+                }
+            }
+        }
+
+        // One level deep in subdirectories
+        if let Ok(entries) = std::fs::read_dir(".") {
+            for entry in entries.flatten() {
+                let dir_path = entry.path();
+                if dir_path.is_dir() {
+                    // Skip hidden directories
+                    if dir_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.starts_with('.'))
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
+
+                    if let Ok(subentries) = std::fs::read_dir(&dir_path) {
+                        for subentry in subentries.flatten() {
+                            let file_path = subentry.path();
+                            if file_path.is_file() && is_markdown(&file_path) {
+                                // Strip leading "./" for cleaner display
+                                let relative = file_path
+                                    .strip_prefix("./")
+                                    .unwrap_or(&file_path)
+                                    .to_string_lossy();
+                                if relative.starts_with(current_str.as_ref()) {
+                                    candidates.push(CompletionCandidate::new(relative.into_owned()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        candidates.sort_by(|a, b| a.get_value().cmp(b.get_value()));
+        candidates
     }
 }
 

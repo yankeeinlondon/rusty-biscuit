@@ -136,6 +136,26 @@ md README.md -vvv    # TRACE level
 md README.md -vvvv   # TRACE with file/line info
 ```
 
+### Shell Completions
+
+Enable tab completions that filter to `.md` and `.dm` files (including one directory level deep):
+
+```bash
+# Bash (add to ~/.bashrc)
+source <(COMPLETE=bash md)
+
+# Zsh (add to ~/.zshrc)
+source <(COMPLETE=zsh md)
+
+# Fish (add to ~/.config/fish/config.fish)
+COMPLETE=fish md | source
+
+# PowerShell (add to $PROFILE)
+$env:COMPLETE = "powershell"; md | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE
+```
+
+Run `md --completions <SHELL>` to see the setup command for your shell.
+
 ## All Options
 
 ```
@@ -162,6 +182,7 @@ Options:
       --line-numbers            Include line numbers in code blocks
       --no-images               Disable image rendering
       --mermaid                 Render mermaid diagrams as images
+      --completions <SHELL>     Generate shell completions setup command
   -v, --verbose...              Increase verbosity
   -h, --help                    Print help
   -V, --version                 Print version
@@ -180,6 +201,7 @@ Options:
 | **Document diffing** | Structural comparison with change analysis |
 | **TOC extraction** | Hierarchical heading structure |
 | **Cleanup tools** | Normalize formatting, align tables |
+| **Shell completions** | Bash, Zsh, Fish, PowerShell with markdown file filtering |
 
 ## Mermaid Support
 

@@ -125,6 +125,20 @@ enum Command {
     /// Run lint diagnostics on the file(s)
     Lint(LintArgs),
     /// Generate shell completions
+    #[command(after_help = "\
+Examples:
+  # Bash (add to ~/.bashrc)
+  hug completions bash >> ~/.bashrc
+
+  # Zsh (add to ~/.zshrc, ensure fpath includes the directory)
+  hug completions zsh > ~/.zfunc/_hug
+
+  # Fish
+  hug completions fish > ~/.config/fish/completions/hug.fish
+
+  # PowerShell (add to $PROFILE)
+  hug completions powershell >> $PROFILE
+")]
     Completions(CompletionsArgs),
 }
 

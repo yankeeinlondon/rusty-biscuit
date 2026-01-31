@@ -20,6 +20,86 @@ fn test_version_flag() {
 }
 
 #[test]
+fn test_completions_bash_shows_setup() {
+    cargo_bin_cmd!("sniff")
+        .args(["--completions", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("source <(COMPLETE=bash sniff)"))
+        .stdout(predicate::str::contains("~/.bashrc"));
+}
+
+#[test]
+fn test_completions_zsh_shows_setup() {
+    cargo_bin_cmd!("sniff")
+        .args(["--completions", "zsh"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("source <(COMPLETE=zsh sniff)"))
+        .stdout(predicate::str::contains("~/.zshrc"));
+}
+
+#[test]
+fn test_completions_fish_shows_setup() {
+    cargo_bin_cmd!("sniff")
+        .args(["--completions", "fish"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("COMPLETE=fish sniff | source"))
+        .stdout(predicate::str::contains("config.fish"));
+}
+
+#[test]
+fn test_completions_powershell_shows_setup() {
+    cargo_bin_cmd!("sniff")
+        .args(["--completions", "powershell"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("$env:COMPLETE"))
+        .stdout(predicate::str::contains("$PROFILE"));
+}
+
+#[test]
+fn test_dynamic_completions_bash() {
+    // Test that dynamic completions work when COMPLETE env var is set
+    cargo_bin_cmd!("sniff")
+        .env("COMPLETE", "bash")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("_clap_complete_sniff"))
+        .stdout(predicate::str::contains("COMPREPLY"));
+}
+
+#[test]
+fn test_dynamic_completions_zsh() {
+    cargo_bin_cmd!("sniff")
+        .env("COMPLETE", "zsh")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("#compdef sniff"))
+        .stdout(predicate::str::contains("_clap_dynamic_completer_sniff"));
+}
+
+#[test]
+fn test_dynamic_completions_fish() {
+    cargo_bin_cmd!("sniff")
+        .env("COMPLETE", "fish")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("complete --keep-order --exclusive --command sniff"));
+}
+
+#[test]
+fn test_help_mentions_completions() {
+    cargo_bin_cmd!("sniff")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--completions"))
+        .stdout(predicate::str::contains("SHELL COMPLETIONS"));
+}
+
+#[test]
 fn test_json_output() {
     cargo_bin_cmd!("sniff")
         .arg("--json")

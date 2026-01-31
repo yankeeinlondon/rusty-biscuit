@@ -1,4 +1,5 @@
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::CompleteEnv;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter_cli::Cli;
 use darkmatter_lib::markdown::highlighting::{
@@ -55,10 +56,20 @@ fn init_tracing(verbose: u8) {
 
 fn main() -> Result<()> {
     color_eyre::install()?;
+
+    // Handle dynamic shell completions (invoked by shell completion scripts)
+    CompleteEnv::with_factory(Cli::command).complete();
+
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
-    // Handle --list-themes first (no input needed)
+    // Handle --completions first (no input needed)
+    if let Some(shell) = cli.completions {
+        print_completions(shell);
+        return Ok(());
+    }
+
+    // Handle --list-themes (no input needed)
     if cli.list_themes {
         list_themes();
         return Ok(());
@@ -255,6 +266,44 @@ fn list_themes() {
     }
     println!("\nUse --theme <name> to set prose theme");
     println!("Use --code-theme <name> to override code theme");
+}
+
+/// Prints shell completions setup instructions.
+///
+/// With dynamic completions, the shell sources a command that calls back to the CLI.
+/// This outputs the appropriate setup command for each shell.
+fn print_completions(shell: clap_complete::Shell) {
+    use clap_complete::Shell;
+
+    let (setup_cmd, config_file) = match shell {
+        Shell::Bash => (
+            r#"source <(COMPLETE=bash md)"#,
+            "~/.bashrc",
+        ),
+        Shell::Zsh => (
+            r#"source <(COMPLETE=zsh md)"#,
+            "~/.zshrc",
+        ),
+        Shell::Fish => (
+            r#"COMPLETE=fish md | source"#,
+            "~/.config/fish/config.fish",
+        ),
+        Shell::PowerShell => (
+            r#"$env:COMPLETE = "powershell"; md | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE"#,
+            "$PROFILE",
+        ),
+        Shell::Elvish => (
+            r#"eval (E:COMPLETE=elvish md | slurp)"#,
+            "~/.elvish/rc.elv",
+        ),
+        _ => {
+            eprintln!("Shell {:?} is not supported for dynamic completions", shell);
+            return;
+        }
+    };
+
+    println!("# Add this line to {}:", config_file);
+    println!("{}", setup_cmd);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

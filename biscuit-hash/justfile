@@ -8,31 +8,41 @@ default:
     if command -v md &> /dev/null; then
         md just.md
     fi
-    echo "biscuit-hash Library"
-    echo "===================="
+    echo "biscuit-hash Library & CLI"
+    echo "=========================="
     echo
     just --list | grep -v 'default'
 
 # build library and CLI
 build *args="":
-    @echo "Building biscuit-hash..."
-    @echo
+    @echo "Building {{BOLD}}biscuit-hash{{RESET}} library..."
     @cargo build -p biscuit-hash {{args}}
-    @echo
+    @echo ""
+    @echo "Building {{BOLD}}biscuit-hash-cli{{RESET}}..."
+    @cargo build -p biscuit-hash-cli {{args}}
 
 # test library and CLI
 test *args="":
     @echo "Testing {{BOLD}}biscuit-hash{{RESET}} library"
+    @cargo test -p biscuit-hash --all-features -- {{args}}
     @echo ""
-    @cargo test -p biscuit-hash --all-features  -- {{args}}
+    @echo "Testing {{BOLD}}biscuit-hash-cli{{RESET}}"
+    @cargo test -p biscuit-hash-cli -- {{args}}
 
 # lint with clippy
 lint *args="":
-    @cargo clippy -p biscuit-hash -- {{args}}
+    @cargo clippy -p biscuit-hash -p biscuit-hash-cli -- {{args}}
 
+# install CLI binary
+install *args="":
+    @cargo install --path cli {{args}}
 
 # build and show the docs for the library code
 docs:
     @echo "Build and then show latest docs for the biscuit-hash library code"
     @echo ""
     @cargo doc -p biscuit-hash --open
+
+# run CLI in development mode
+cli *args="":
+    @cargo run -p biscuit-hash-cli -- {{args}}

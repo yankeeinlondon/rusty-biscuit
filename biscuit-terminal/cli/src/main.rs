@@ -19,13 +19,42 @@ use biscuit_terminal::{
     terminal::Terminal,
     utils::escape_codes,
 };
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::engine::{ArgValueCompleter, PathCompleter};
+use clap_complete::Shell;
 use serde::Serialize;
 
 /// Terminal information utility
 #[derive(Parser, Debug)]
 #[command(name = "bt")]
 #[command(author, version, about = "Display terminal metadata and capabilities")]
+#[command(after_help = "\
+SHELL COMPLETIONS:
+  Two methods are available:
+
+  DYNAMIC (recommended, includes image file filtering):
+    # Bash
+    echo 'source <(COMPLETE=bash bt)' >> ~/.bashrc
+
+    # Zsh
+    echo 'source <(COMPLETE=zsh bt)' >> ~/.zshrc
+
+    # Fish
+    echo 'COMPLETE=fish bt | source' >> ~/.config/fish/config.fish
+
+  STATIC (generates a completion script):
+    # Bash
+    bt --completions bash >> ~/.bashrc
+
+    # Zsh (ensure fpath includes the directory)
+    bt --completions zsh > ~/.zfunc/_bt
+
+    # Fish
+    bt --completions fish > ~/.config/fish/completions/bt.fish
+
+    # PowerShell
+    bt --completions powershell >> $PROFILE
+")]
 struct Args {
     /// Output in JSON format
     #[arg(long)]
@@ -37,9 +66,18 @@ struct Args {
 
     /// Display an image in the terminal.
     ///
-    /// Supports width specification: "file.jpg|50%" or "file.jpg|80"
-    #[arg(long, value_name = "FILEPATH")]
+    /// Supports width specification: "file.jpg|50%" or "file.jpg|80".
+    /// Supports PNG, JPG, JPEG, and GIF formats.
+    #[arg(long, value_name = "FILEPATH", add = ArgValueCompleter::new(image_completer()))]
     image: Option<String>,
+
+    /// Generate shell completions and exit.
+    ///
+    /// Outputs completion scripts for the specified shell to stdout.
+    /// Redirect the output to the appropriate file for your shell.
+    /// Use --completions help for setup instructions.
+    #[arg(long, value_name = "SHELL")]
+    completions: Option<String>,
 
     /// Content to analyze (positional; multiple values are joined with spaces)
     #[arg(value_name = "CONTENT")]
@@ -212,6 +250,10 @@ struct UnderlineInfo {
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
+    // Handle dynamic completions (COMPLETE env var)
+    // This must run before any other initialization
+    clap_complete::CompleteEnv::with_factory(Args::command).complete();
+
     // Setup logging if RUST_LOG is set
     if std::env::var("RUST_LOG").is_ok() {
         tracing_subscriber::fmt()
@@ -220,6 +262,11 @@ fn main() -> color_eyre::Result<()> {
     }
 
     let args = Args::parse();
+
+    // Handle --completions flag (generates static completion scripts)
+    if let Some(ref shell_arg) = args.completions {
+        return handle_completions(shell_arg);
+    }
 
     // Handle --image flag
     if let Some(ref image_spec) = args.image {
@@ -250,6 +297,97 @@ fn main() -> color_eyre::Result<()> {
     }
 
     Ok(())
+}
+
+/// Handles the --completions flag.
+///
+/// If "help" is provided, shows setup instructions.
+/// Otherwise, generates shell completion scripts.
+fn handle_completions(shell_arg: &str) -> color_eyre::Result<()> {
+    let shell_lower = shell_arg.to_lowercase();
+
+    if shell_lower == "help" {
+        print_completions_help();
+        return Ok(());
+    }
+
+    let shell = match shell_lower.as_str() {
+        "bash" => Shell::Bash,
+        "elvish" => Shell::Elvish,
+        "fish" => Shell::Fish,
+        "powershell" | "pwsh" => Shell::PowerShell,
+        "zsh" => Shell::Zsh,
+        _ => {
+            eprintln!(
+                "error: invalid shell '{}'\n\nValid shells: bash, elvish, fish, powershell, zsh\n\nUse 'bt --completions help' for setup instructions.",
+                shell_arg
+            );
+            std::process::exit(1);
+        }
+    };
+
+    print_completions(shell);
+    Ok(())
+}
+
+/// Prints shell completions to stdout.
+fn print_completions(shell: Shell) {
+    let mut cmd = Args::command();
+    clap_complete::generate(shell, &mut cmd, "bt", &mut std::io::stdout());
+}
+
+/// Prints help about setting up shell completions.
+fn print_completions_help() {
+    println!(
+        r#"bt Shell Completions Setup
+
+Two methods are available for enabling tab completion:
+
+DYNAMIC COMPLETIONS (recommended)
+=================================
+Dynamic completions call bt at completion time, providing:
+- Image file filtering (only *.png, *.jpg, *.jpeg, *.gif)
+- Always up-to-date with current bt version
+
+Setup:
+  Bash:  echo 'source <(COMPLETE=bash bt)' >> ~/.bashrc
+  Zsh:   echo 'source <(COMPLETE=zsh bt)' >> ~/.zshrc
+  Fish:  echo 'COMPLETE=fish bt | source' >> ~/.config/fish/config.fish
+
+STATIC COMPLETIONS
+==================
+Static completions generate a script once. Faster but less features.
+
+Setup:
+  Bash:       bt --completions bash >> ~/.bashrc
+  Zsh:        bt --completions zsh > ~/.zfunc/_bt
+  Fish:       bt --completions fish > ~/.config/fish/completions/bt.fish
+  PowerShell: bt --completions powershell >> $PROFILE
+
+After setup, restart your shell or source the file to activate completions.
+"#
+    );
+}
+
+/// Creates a path completer that filters for image files.
+///
+/// Completes files with extensions: png, jpg, jpeg, gif (case-insensitive).
+/// Also completes directories to allow navigation.
+fn image_completer() -> PathCompleter {
+    PathCompleter::any().filter(|path| {
+        // Always allow directories for navigation
+        if path.is_dir() {
+            return true;
+        }
+
+        // Check for image extensions
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| {
+                let ext_lower = ext.to_lowercase();
+                matches!(ext_lower.as_str(), "png" | "jpg" | "jpeg" | "gif")
+            })
+    })
 }
 
 /// Render an image to the terminal.

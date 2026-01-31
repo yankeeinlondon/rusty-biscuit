@@ -1,4 +1,6 @@
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::Shell;
+use clap_complete::CompleteEnv;
 use sniff_lib::package::enrich_dependencies;
 use sniff_lib::programs::ProgramsInfo;
 use sniff_lib::services::{ServiceState, detect_services};
@@ -136,6 +138,11 @@ struct Cli {
     /// Filter services by state (only used with --services)
     #[arg(long, value_enum, default_value = "running", help_heading = "Services Flags")]
     state: ServiceStateArg,
+
+    // === Shell completions ===
+    /// Generate shell completions for the specified shell
+    #[arg(long, value_name = "SHELL", help_heading = "Shell Completions")]
+    completions: Option<Shell>,
 }
 
 /// Service state filter for --services flag.
@@ -368,11 +375,40 @@ FILTER FLAGS (mutually exclusive):
     sniff --cpu               # Show only CPU details
     sniff --git               # Show only git status
     sniff --cpu --memory      # ERROR: mutually exclusive
+
+SHELL COMPLETIONS:
+  Enable tab completions with --completions <SHELL>
+
+  Bash (add to ~/.bashrc):
+    source <(COMPLETE=bash sniff)
+
+  Zsh (add to ~/.zshrc):
+    source <(COMPLETE=zsh sniff)
+
+  Fish (add to ~/.config/fish/config.fish):
+    COMPLETE=fish sniff | source
+
+  PowerShell (add to $PROFILE):
+    $env:COMPLETE = \"powershell\"; sniff | Out-String | Invoke-Expression; Remove-Item Env:\\COMPLETE
+
+  Elvish (add to ~/.elvish/rc.elv):
+    eval (E:COMPLETE=elvish sniff | slurp)
+
+  Run 'sniff --completions <SHELL>' to see the setup command for your shell.
 ";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Handle dynamic shell completions (invoked by shell completion scripts)
+    CompleteEnv::with_factory(Cli::command).complete();
+
     let cli = Cli::parse();
+
+    // Handle --completions first (prints setup instructions)
+    if let Some(shell) = cli.completions {
+        print_completions(shell);
+        return Ok(());
+    }
 
     // Validate mutually exclusive filter flags early
     if let Err(e) = cli.validate_filter_flags() {
@@ -510,6 +546,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Prints shell completions setup instructions.
+///
+/// With dynamic completions, the shell sources a command that calls back to the CLI.
+/// This outputs the appropriate setup command for each shell.
+fn print_completions(shell: Shell) {
+    let (setup_cmd, config_file) = match shell {
+        Shell::Bash => ("source <(COMPLETE=bash sniff)", "~/.bashrc"),
+        Shell::Zsh => ("source <(COMPLETE=zsh sniff)", "~/.zshrc"),
+        Shell::Fish => ("COMPLETE=fish sniff | source", "~/.config/fish/config.fish"),
+        Shell::PowerShell => (
+            r#"$env:COMPLETE = "powershell"; sniff | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE"#,
+            "$PROFILE",
+        ),
+        Shell::Elvish => ("eval (E:COMPLETE=elvish sniff | slurp)", "~/.elvish/rc.elv"),
+        _ => {
+            eprintln!("Shell {:?} is not supported for dynamic completions", shell);
+            return;
+        }
+    };
+
+    println!("# Add this line to {}:", config_file);
+    println!("{}", setup_cmd);
 }
 
 /// Enriches all dependencies in a SniffResult with latest versions from package registries.
