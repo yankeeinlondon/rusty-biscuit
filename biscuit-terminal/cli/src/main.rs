@@ -101,7 +101,7 @@ enum Command {
     /// Creates a Mermaid flowchart and renders it to the terminal.
     /// Default direction is left-to-right (LR).
     #[command(after_long_help = "\
-EXAMPLES:
+\x1b[1m\x1b[4mExamples:\x1b[0m
   Basic flowchart (left-to-right):
     bt flowchart \"A --> B --> C\"
 
@@ -158,7 +158,7 @@ EXAMPLES:
     /// Creates a Mermaid gitGraph and renders it to the terminal.
     /// Git commands include: commit, branch, checkout, merge, cherry-pick.
     #[command(name = "git-graph", after_long_help = "\
-EXAMPLES:
+\x1b[1m\x1b[4mExamples:\x1b[0m
   Simple commit history:
     bt git-graph \"commit\" \"commit\" \"commit\"
 
@@ -183,7 +183,7 @@ EXAMPLES:
   JSON output (for scripting):
     bt git-graph --json \"commit\" \"branch dev\"
 
-GIT COMMANDS:
+\x1b[1m\x1b[4mGit commands:\x1b[0m
   commit                    Add a commit to the current branch
   commit id: \"abc\"          Commit with custom ID
   commit tag: \"v1.0\"        Commit with a tag

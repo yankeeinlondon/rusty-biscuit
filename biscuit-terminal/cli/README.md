@@ -200,6 +200,14 @@ When adding or updating CLI commands, follow these conventions:
 
 2. **Use long flag names in examples**: Always use long flag names (e.g., `--title`, `--width`) instead of short aliases (e.g., `-t`, `-w`) in documentation and examples. This improves readability and makes it clear what each flag does.
 
+3. **Section header styling**: Custom section headers in `after_long_help` should match clap's built-in styling (bold + underline) using ANSI escape codes. Use sentence case (e.g., "Examples:" not "EXAMPLES:"):
+   ```
+   \x1b[1m\x1b[4mExamples:\x1b[0m
+   ```
+   - `\x1b[1m` = bold
+   - `\x1b[4m` = underline
+   - `\x1b[0m` = reset
+
 ## License
 
 AGPL-3.0
