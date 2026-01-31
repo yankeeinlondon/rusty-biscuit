@@ -1,6 +1,7 @@
 pub mod block_quote;
 pub mod image_options;
 pub mod mermaid;
+pub mod mermaid_cache;
 pub mod prose;
 pub mod renderable;
 pub mod table;

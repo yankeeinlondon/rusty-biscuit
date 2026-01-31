@@ -119,6 +119,102 @@ impl RgbColor {
     }
 }
 
+/// An RGB color with:
+///
+/// - a fallback for terminals with limited color support.
+/// - OKLCH values for HDR mapping (lightness, chroma, hue)
+///
+/// The OKLCH color space is used for perceptually uniform color
+/// manipulation. Values are stored as f32:
+/// - `oklch_l`: Lightness (0.0 to 1.0)
+/// - `oklch_c`: Chroma (0.0 to ~0.4 for in-gamut colors)
+/// - `oklch_h`: Hue (0.0 to 360.0 degrees)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HdrColor {
+    red: Octet,
+    green: Octet,
+    blue: Octet,
+    fallback: BasicColor,
+    /// OKLCH Lightness (0.0 to 1.0)
+    oklch_l: f32,
+    /// OKLCH Chroma (0.0 to ~0.4)
+    oklch_c: f32,
+    /// OKLCH Hue (0.0 to 360.0 degrees)
+    oklch_h: f32,
+}
+
+impl HdrColor {
+    /// Creates a new HDR color with RGB values, fallback, and OKLCH components.
+    #[inline]
+    pub const fn new(
+        red: u8,
+        green: u8,
+        blue: u8,
+        fallback: BasicColor,
+        oklch_l: f32,
+        oklch_c: f32,
+        oklch_h: f32,
+    ) -> Self {
+        Self {
+            red: Octet::new(red),
+            green: Octet::new(green),
+            blue: Octet::new(blue),
+            fallback,
+            oklch_l,
+            oklch_c,
+            oklch_h,
+        }
+    }
+
+    /// Returns the red channel value.
+    #[inline]
+    pub const fn red(&self) -> u8 {
+        self.red.value()
+    }
+
+    /// Returns the green channel value.
+    #[inline]
+    pub const fn green(&self) -> u8 {
+        self.green.value()
+    }
+
+    /// Returns the blue channel value.
+    #[inline]
+    pub const fn blue(&self) -> u8 {
+        self.blue.value()
+    }
+
+    /// Returns the fallback color for terminals with limited color support.
+    #[inline]
+    pub const fn fallback(&self) -> BasicColor {
+        self.fallback
+    }
+
+    /// Returns the OKLCH lightness component (0.0 to 1.0).
+    #[inline]
+    pub const fn oklch_l(&self) -> f32 {
+        self.oklch_l
+    }
+
+    /// Returns the OKLCH chroma component (0.0 to ~0.4 for in-gamut colors).
+    #[inline]
+    pub const fn oklch_c(&self) -> f32 {
+        self.oklch_c
+    }
+
+    /// Returns the OKLCH hue component (0.0 to 360.0 degrees).
+    #[inline]
+    pub const fn oklch_h(&self) -> f32 {
+        self.oklch_h
+    }
+
+    /// Returns the OKLCH components as a tuple (lightness, chroma, hue).
+    #[inline]
+    pub const fn oklch(&self) -> (f32, f32, f32) {
+        (self.oklch_l, self.oklch_c, self.oklch_h)
+    }
+}
+
 /// Use any of the named CSS/Web Colors.
 ///
 /// These correspond to the 148 named colors defined in the CSS Color Module Level 4
@@ -661,6 +757,92 @@ pub static WEB_COLOR_LOOKUP: LazyLock<HashMap<WebColor, RgbColor>> = LazyLock::n
     m
 });
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Tailwind {
+    // “specials” commonly present in Tailwind palettes
+    Inherit,
+    Current,
+    Transparent,
+    Black,
+    White,
+
+    // Red
+    Red50, Red100, Red200, Red300, Red400, Red500, Red600, Red700, Red800, Red900, Red950,
+    // Orange
+    Orange50, Orange100, Orange200, Orange300, Orange400, Orange500, Orange600, Orange700, Orange800, Orange900, Orange950,
+    // Amber
+    Amber50, Amber100, Amber200, Amber300, Amber400, Amber500, Amber600, Amber700, Amber800, Amber900, Amber950,
+    // Yellow
+    Yellow50, Yellow100, Yellow200, Yellow300, Yellow400, Yellow500, Yellow600, Yellow700, Yellow800, Yellow900, Yellow950,
+    // Lime
+    Lime50, Lime100, Lime200, Lime300, Lime400, Lime500, Lime600, Lime700, Lime800, Lime900, Lime950,
+    // Green
+    Green50, Green100, Green200, Green300, Green400, Green500, Green600, Green700, Green800, Green900, Green950,
+    // Emerald
+    Emerald50, Emerald100, Emerald200, Emerald300, Emerald400, Emerald500, Emerald600, Emerald700, Emerald800, Emerald900, Emerald950,
+    // Teal
+    Teal50, Teal100, Teal200, Teal300, Teal400, Teal500, Teal600, Teal700, Teal800, Teal900, Teal950,
+    // Cyan
+    Cyan50, Cyan100, Cyan200, Cyan300, Cyan400, Cyan500, Cyan600, Cyan700, Cyan800, Cyan900, Cyan950,
+    // Sky
+    Sky50, Sky100, Sky200, Sky300, Sky400, Sky500, Sky600, Sky700, Sky800, Sky900, Sky950,
+    // Blue
+    Blue50, Blue100, Blue200, Blue300, Blue400, Blue500, Blue600, Blue700, Blue800, Blue900, Blue950,
+    // Indigo
+    Indigo50, Indigo100, Indigo200, Indigo300, Indigo400, Indigo500, Indigo600, Indigo700, Indigo800, Indigo900, Indigo950,
+    // Violet
+    Violet50, Violet100, Violet200, Violet300, Violet400, Violet500, Violet600, Violet700, Violet800, Violet900, Violet950,
+    // Purple
+    Purple50, Purple100, Purple200, Purple300, Purple400, Purple500, Purple600, Purple700, Purple800, Purple900, Purple950,
+    // Fuchsia
+    Fuchsia50, Fuchsia100, Fuchsia200, Fuchsia300, Fuchsia400, Fuchsia500, Fuchsia600, Fuchsia700, Fuchsia800, Fuchsia900, Fuchsia950,
+    // Pink
+    Pink50, Pink100, Pink200, Pink300, Pink400, Pink500, Pink600, Pink700, Pink800, Pink900, Pink950,
+    // Rose
+    Rose50, Rose100, Rose200, Rose300, Rose400, Rose500, Rose600, Rose700, Rose800, Rose900, Rose950,
+
+    // Slate
+    Slate50, Slate100, Slate200, Slate300, Slate400, Slate500, Slate600, Slate700, Slate800, Slate900, Slate950,
+    // Gray
+    Gray50, Gray100, Gray200, Gray300, Gray400, Gray500, Gray600, Gray700, Gray800, Gray900, Gray950,
+    // Zinc
+    Zinc50, Zinc100, Zinc200, Zinc300, Zinc400, Zinc500, Zinc600, Zinc700, Zinc800, Zinc900, Zinc950,
+    // Neutral
+    Neutral50, Neutral100, Neutral200, Neutral300, Neutral400, Neutral500, Neutral600, Neutral700, Neutral800, Neutral900, Neutral950,
+    // Stone
+    Stone50, Stone100, Stone200, Stone300, Stone400, Stone500, Stone600, Stone700, Stone800, Stone900, Stone950,
+}
+
+impl Tailwind {
+    /// Returns the Tailwind v4 theme variable name (without `var(...)`).
+    pub const fn css_var_name(self) -> &'static str {
+        use Tailwind::*;
+        match self {
+            Inherit => "inherit",
+            Current => "currentColor",
+            Transparent => "transparent",
+            Black => "--color-black",
+            White => "--color-white",
+
+            // The rest are generated by build.rs into `tailwind_color_hex.rs`,
+            // but we also want a stable var-name mapping for all variants.
+            _ => {
+                // NOTE: We override this via generated code too if you want.
+                // This placeholder keeps this function total; the generated impl below
+                // is the one you will actually use for var names and hex.
+                "UNSUPPORTED"
+            }
+        }
+    }
+}
+
+// build.rs will generate these:
+//
+// impl TailwindColor {
+//   pub const fn var(self) -> &'static str { ... "var(--color-slate-50)" ... }
+//   pub const fn hex(self) -> &'static str { ... "#f8fafc" ... } // nearest sRGB hex
+// }
+
 /// An enumeration for specifying color for the terminal
 pub enum Color {
     /// Use a basic color which can be used in any terminal
@@ -670,6 +852,8 @@ pub enum Color {
     Rgb(RgbColor),
     /// Use a named CSS/Web color
     Web(WebColor),
+
+    Tailwind(Tailwind),
     /// Use the terminal's default foreground color
     DefaultForeground,
     /// Use the terminal's default background color

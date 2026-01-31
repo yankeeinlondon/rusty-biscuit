@@ -2,7 +2,30 @@
 
 Terminal capability detection, rendering utilities, and image/diagram display for Rust applications.
 
-## Features
+## Cargo Features
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `viuer` | Yes | Enable image rendering via [viuer](https://crates.io/crates/viuer) (Kitty/iTerm2 protocols) |
+| `clap` | No | Derive `clap::ValueEnum` on enums for CLI integration with shell completions |
+
+### When to use the `clap` feature
+
+Enable the `clap` feature if you're building a CLI application that uses types like `QuadrantTheme` as command-line arguments:
+
+```toml
+[dependencies]
+biscuit-terminal = { version = "0.1", features = ["clap"] }
+```
+
+This derives `clap::ValueEnum` on supported enums, enabling:
+- Shell tab-completion for enum values (e.g., `--theme <TAB>` shows `default`, `magic-quadrangle`)
+- Automatic `--help` text listing valid values
+- Direct use in clap argument definitions with `#[arg(value_enum)]`
+
+**Don't enable this feature** if you're using the library programmatically without clap - it adds an unnecessary dependency.
+
+## Capabilities
 
 - **Terminal App Detection**: Recognize 12+ terminal emulators with capability profiles
 - **Image Rendering**: Inline images via Kitty/iTerm2 protocols with security guards
@@ -135,6 +158,79 @@ let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
     .with_scale(3)                          // Higher resolution (default: 2)
     .with_transparent_background(true);     // Blend with terminal background
 ```
+
+### Quadrant Chart Configuration
+
+Use `MermaidConfig` to customize quadrant chart styling:
+
+```rust
+use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidConfig};
+
+let config = MermaidConfig::new()
+    .with_point_label_font_size(18)    // Font size for point labels (default: 12)
+    .with_point_radius(10)             // Default point radius (default: 5)
+    .with_quadrant_fill(1, "#1e2a1e")  // Top-right (quadrant-1) fill color
+    .with_quadrant_fill(3, "#2a1e1e"); // Bottom-left (quadrant-3) fill color
+
+let renderer = MermaidRenderer::new("quadrantChart\n    Item: [0.5, 0.5]")
+    .with_config(config);
+```
+
+**Quadrant numbering** (matches Mermaid convention):
+```
+        +-------------+-------------+
+        |  quadrant-2 |  quadrant-1 |
+        |  (top-left) | (top-right) |
+        +-------------+-------------+
+        |  quadrant-3 |  quadrant-4 |
+        |(bottom-left)|(bottom-right)|
+        +-------------+-------------+
+```
+
+### Quadrant Themes
+
+Use preset themes for common quadrant chart styles:
+
+```rust
+use biscuit_terminal::components::mermaid::{MermaidConfig, QuadrantTheme};
+use biscuit_terminal::terminal::Terminal;
+
+// Magic Quadrangle style: subtle green top-right, red bottom-left
+// Colors automatically adapt to terminal light/dark mode
+let color_mode = Terminal::color_mode();
+let config = QuadrantTheme::MagicQuadrangle.apply(MermaidConfig::new(), color_mode);
+
+// Parse theme from string
+let theme = QuadrantTheme::parse("magic-quadrangle").unwrap();
+```
+
+**Available themes:**
+
+| Theme | Description |
+|-------|-------------|
+| `QuadrantTheme::Default` | Standard Mermaid colors (no customization) |
+| `QuadrantTheme::MagicQuadrangle` | Gartner-style: subtle green top-right (leaders), subtle red bottom-left (niche). Top-left and bottom-right use a neutral color. Colors adapt to terminal color mode. |
+
+**Magic Quadrangle colors by terminal mode:**
+
+| Mode | Top-right (q1) | Top-left (q2) | Bottom-left (q3) | Bottom-right (q4) |
+|------|----------------|---------------|------------------|-------------------|
+| Dark | `#1e2a1e` (green tint) | `#1a1a1a` (neutral) | `#2a1e1e` (red tint) | `#1a1a1a` (neutral) |
+| Light | `#f6faf6` (green tint) | `#f8f8f8` (neutral) | `#faf6f6` (red tint) | `#f8f8f8` (neutral) |
+
+The neutral quadrants (q2, q4) use the same color - a dark grey in dark mode, light grey in light mode - creating visual balance while highlighting the key diagonal (top-right leaders vs bottom-left niche).
+
+### Inline Point Styling
+
+Individual points can override defaults using comma-separated properties:
+```
+Item A: [0.3, 0.6] color: #ff3300, radius: 12
+Item B: [0.7, 0.4] color: #00ff00
+```
+
+**Important:** Multiple properties must be comma-separated. Space-only separation causes parsing errors (e.g., `color: #ff3300 radius: 10` fails).
+
+Available properties: `color`, `radius`, `stroke-color`, `stroke-width`
 
 ### Themes
 
@@ -349,6 +445,17 @@ bt image photo.png
 
 # Render a flowchart
 bt flowchart "A --> B --> C"
+
+# Render a quadrant chart
+bt quadrant --title "Priority Matrix" \
+            --x-axis "Low Effort --> High Effort" \
+            --y-axis "Low Impact --> High Impact" \
+            "Task A: [0.2, 0.8]" "Task B: [0.7, 0.3]"
+
+# Render a quadrant chart with magic-quadrangle theme
+bt quadrant --theme magic-quadrangle \
+            --title "Market Position" \
+            "Leaders: [0.8, 0.85]" "Niche: [0.25, 0.2]"
 
 # Render a git graph
 bt git-graph "commit" "branch feature" "commit" "checkout main" "merge feature"

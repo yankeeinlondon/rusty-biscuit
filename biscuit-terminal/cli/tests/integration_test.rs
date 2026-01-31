@@ -310,3 +310,267 @@ fn test_completions_invalid_shell() {
         .stderr(predicate::str::contains("invalid shell"))
         .stderr(predicate::str::contains("Valid shells:"));
 }
+
+// =============================================================================
+// Pie Chart Command Tests
+// =============================================================================
+
+#[test]
+fn test_pie_chart_help() {
+    cargo_bin_cmd!("bt")
+        .arg("pie-chart")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Render a pie chart"))
+        .stdout(predicate::str::contains("--title"))
+        .stdout(predicate::str::contains("--inverse"))
+        .stdout(predicate::str::contains("--show-data"));
+}
+
+#[test]
+fn test_pie_chart_json_simple_format() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("pie-chart")
+        .arg("--json")
+        .arg("Dogs: 386")
+        .arg("Cats: 85")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    assert_eq!(parsed.get("type").unwrap(), "pie-chart");
+    let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
+    assert!(instructions.contains("\"Dogs\" : 386"));
+    assert!(instructions.contains("\"Cats\" : 85"));
+}
+
+#[test]
+fn test_pie_chart_json_semicolon_format() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("pie-chart")
+        .arg("--json")
+        .arg("Dogs: 386; Cats: 85; Birds: 15")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
+    assert!(instructions.contains("\"Dogs\" : 386"));
+    assert!(instructions.contains("\"Cats\" : 85"));
+    assert!(instructions.contains("\"Birds\" : 15"));
+}
+
+#[test]
+fn test_pie_chart_json_official_mermaid_format() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("pie-chart")
+        .arg("--json")
+        .arg("\"Dogs\" : 386")
+        .arg("\"Cats\" : 85")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
+    assert!(instructions.contains("\"Dogs\" : 386"));
+    assert!(instructions.contains("\"Cats\" : 85"));
+}
+
+#[test]
+fn test_pie_chart_json_with_title() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("pie-chart")
+        .arg("--json")
+        .arg("--title")
+        .arg("Pet Distribution")
+        .arg("Dogs: 386")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    assert_eq!(parsed.get("title").unwrap(), "Pet Distribution");
+    let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
+    assert!(instructions.contains("title Pet Distribution"));
+}
+
+#[test]
+fn test_pie_chart_json_with_show_data() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("pie-chart")
+        .arg("--json")
+        .arg("--show-data")
+        .arg("Dogs: 386")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    assert_eq!(parsed.get("show_data").unwrap(), true);
+    let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
+    assert!(instructions.starts_with("pie showData"));
+}
+
+#[test]
+fn test_pie_chart_requires_data() {
+    cargo_bin_cmd!("bt")
+        .arg("pie-chart")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("required"));
+}
+
+#[test]
+fn test_pie_chart_json_with_custom_colors() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("pie-chart")
+        .arg("--json")
+        .arg("TypeScript: 45 #3178c6")
+        .arg("Rust: 35 #dea584")
+        .arg("Python: 20")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
+    // Should have init directive with colors
+    assert!(instructions.contains("%%{init:"));
+    assert!(instructions.contains("'pie1': '#3178c6'"));
+    assert!(instructions.contains("'pie2': '#dea584'"));
+    // Python has no color, so no pie3
+    assert!(!instructions.contains("pie3"));
+    // Data should be clean (no color in the data lines)
+    assert!(instructions.contains("\"TypeScript\" : 45"));
+    assert!(instructions.contains("\"Rust\" : 35"));
+}
+
+#[test]
+fn test_pie_chart_json_with_color_prefix() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("pie-chart")
+        .arg("--json")
+        .arg("TypeScript: 45 color: #3178c6")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
+    assert!(instructions.contains("'pie1': '#3178c6'"));
+    assert!(instructions.contains("\"TypeScript\" : 45"));
+}
+
+#[test]
+fn test_pie_chart_semicolon_with_colors() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("pie-chart")
+        .arg("--json")
+        .arg("A: 10 #ff0000; B: 20 #00ff00; C: 30")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
+    assert!(instructions.contains("'pie1': '#ff0000'"));
+    assert!(instructions.contains("'pie2': '#00ff00'"));
+    assert!(!instructions.contains("pie3")); // C has no color
+}
+
+#[test]
+fn test_pie_chart_example_flag_uses_example_data() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("pie-chart")
+        .arg("--json")
+        .arg("--example")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
+    // Example uses TypeScript, Rust, Python with colors
+    assert!(instructions.contains("TypeScript"));
+    assert!(instructions.contains("Rust"));
+    assert!(instructions.contains("Python"));
+    assert!(instructions.contains("#3178C6")); // TypeScript blue
+}
+
+#[test]
+fn test_flowchart_example_flag() {
+    let output = cargo_bin_cmd!("bt")
+        .arg("flowchart")
+        .arg("--json")
+        .arg("--example")
+        .output()
+        .expect("Failed to execute command");
+
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    let instructions = parsed.get("instructions").unwrap().as_str().unwrap();
+    assert!(instructions.contains("flowchart"));
+    assert!(instructions.contains("Start"));
+    assert!(instructions.contains("Decision"));
+}
+
+#[test]
+fn test_example_flag_does_not_require_data() {
+    // Without --example, data is required
+    cargo_bin_cmd!("bt")
+        .arg("pie-chart")
+        .assert()
+        .failure();
+
+    // With --example, data is not required
+    cargo_bin_cmd!("bt")
+        .arg("pie-chart")
+        .arg("--json")
+        .arg("--example")
+        .assert()
+        .success();
+}

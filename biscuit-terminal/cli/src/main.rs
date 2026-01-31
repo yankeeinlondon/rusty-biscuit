@@ -11,7 +11,7 @@ use std::path::Path;
 
 use biscuit_terminal::{
     components::{
-        mermaid::MermaidRenderer,
+        mermaid::{MermaidRenderer, QuadrantTheme},
         terminal_image::{parse_filepath_and_width, parse_width_spec, ImageWidth, TerminalImage},
     },
     discovery::{
@@ -26,6 +26,41 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::engine::{ArgValueCompleter, PathCompleter};
 use clap_complete::Shell;
 use serde::Serialize;
+
+/// Brief pause after image rendering.
+///
+/// This is a minimal delay to ensure the terminal has finished processing
+/// image data before we print any following text.
+fn settle_terminal() {
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    // Small delay for terminal processing
+    std::thread::sleep(std::time::Duration::from_millis(10));
+}
+
+/// Prints the command used to generate an example diagram.
+///
+/// Uses bold text for header and dim text for command.
+/// Avoids terminal color mode queries which can interfere with Kitty graphics protocol.
+fn print_example_command(cmd: &str) {
+    // Check NO_COLOR environment variable
+    let no_color = std::env::var("NO_COLOR").is_ok();
+
+    if no_color {
+        println!();
+        println!("Command:");
+        println!("{}", cmd);
+    } else {
+        // Use bold for header - terminal's default foreground color is already appropriate
+        let bold = "\x1b[1m";
+        let dim = "\x1b[2m";
+        let reset = "\x1b[0m";
+
+        println!();
+        println!("{}Command:{}", bold, reset);
+        println!("{}{}{}", dim, cmd, reset);
+    }
+}
 
 /// Terminal information utility
 #[derive(Parser, Debug)]
@@ -86,6 +121,7 @@ struct Args {
 
 /// CLI subcommands
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)]
 enum Command {
     /// Display an image in the terminal
     #[command(display_order = 1)]
@@ -104,6 +140,9 @@ enum Command {
     /// Default direction is left-to-right (LR).
     #[command(after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
+  Render an example flowchart:
+    bt flowchart --example
+
   Basic flowchart (left-to-right):
     bt flowchart \"A --> B --> C\"
 
@@ -151,17 +190,244 @@ enum Command {
         #[arg(long, short = 'w')]
         width: Option<String>,
 
+        /// Render an example diagram and show the command used
+        #[arg(long, short = 'e')]
+        example: bool,
+
         /// Flowchart node and edge definitions (e.g., "A --> B --> C")
-        #[arg(value_name = "CONTENT", required = true)]
+        #[arg(value_name = "CONTENT", required_unless_present = "example")]
         content: Vec<String>,
+    },
+
+    /// Render a quadrant chart from data points
+    ///
+    /// Creates a Mermaid quadrantChart and renders it to the terminal.
+    /// Data points are specified as "Label: [x, y]" where x and y are 0.0-1.0.
+    #[command(display_order = 3, after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Render an example quadrant chart:
+    bt quadrant --example
+
+  Basic quadrant chart:
+    bt quadrant \"Item A: [0.3, 0.6]\" \"Item B: [0.7, 0.4]\"
+
+  With axis labels:
+    bt quadrant --x-axis \"Low --> High\" --y-axis \"Small --> Large\" \\
+                \"Item: [0.5, 0.5]\"
+
+  With quadrant descriptions:
+    bt quadrant --top-left \"Expand\" --top-right \"Promote\" \\
+                --bottom-left \"Review\" --bottom-right \"Improve\" \\
+                \"A: [0.3, 0.7]\" \"B: [0.8, 0.2]\"
+
+  With title:
+    bt quadrant --title \"Priority Matrix\" \"Task A: [0.2, 0.8]\"
+
+  Full example:
+    bt quadrant --title \"Campaign Analysis\" \\
+                --x-axis \"Low Reach --> High Reach\" \\
+                --y-axis \"Low Engagement --> High Engagement\" \\
+                --top-left \"Expand\" --top-right \"Promote\" \\
+                --bottom-left \"Re-evaluate\" --bottom-right \"Improve\" \\
+                \"Campaign A: [0.3, 0.6]\" \"Campaign B: [0.7, 0.4]\"
+
+  Inverted colors (solid background):
+    bt quadrant --inverse \"Item: [0.5, 0.5]\"
+
+  Custom width:
+    bt quadrant --width 60% \"Item: [0.5, 0.5]\"
+
+  Custom point styling:
+    bt quadrant --point-radius 12 --label-size 16 \"Item: [0.5, 0.5]\"
+
+  Magic Quadrangle theme (subtle green top-right, red bottom-left):
+    bt quadrant --theme magic-quadrangle \"Leaders: [0.8, 0.8]\" \"Niche: [0.2, 0.2]\"
+
+  Custom quadrant colors:
+    bt quadrant --q1-fill \"#e8f5e9\" --q3-fill \"#ffebee\" \\
+                \"Item A: [0.7, 0.8]\" \"Item B: [0.3, 0.2]\"
+
+  Per-point inline styling (color, radius):
+    bt quadrant \"Item A: [0.3, 0.6] color: #ff3300, radius: 10\" \\
+                \"Item B: [0.7, 0.4] color: #00ff00\"
+
+  JSON output (for scripting):
+    bt quadrant --json \"Item: [0.5, 0.5]\"
+")]
+    Quadrant {
+        /// X-axis label (e.g., \"Low --> High\")
+        #[arg(long = "x-axis", short = 'x', allow_hyphen_values = true)]
+        x_axis: Option<String>,
+
+        /// Y-axis label (e.g., \"Small --> Large\")
+        #[arg(long = "y-axis", short = 'y', allow_hyphen_values = true)]
+        y_axis: Option<String>,
+
+        /// Chart title (appears at top of diagram)
+        #[arg(long, short = 't', allow_hyphen_values = true)]
+        title: Option<String>,
+
+        /// Top-left quadrant label (quadrant-1)
+        #[arg(long = "top-left", short = 'l', visible_alias = "tl", allow_hyphen_values = true)]
+        top_left: Option<String>,
+
+        /// Top-right quadrant label (quadrant-2)
+        #[arg(long = "top-right", short = 'r', visible_alias = "tr", allow_hyphen_values = true)]
+        top_right: Option<String>,
+
+        /// Bottom-left quadrant label (quadrant-3)
+        #[arg(long = "bottom-left", visible_alias = "bl", allow_hyphen_values = true)]
+        bottom_left: Option<String>,
+
+        /// Bottom-right quadrant label (quadrant-4)
+        #[arg(long = "bottom-right", visible_alias = "br", allow_hyphen_values = true)]
+        bottom_right: Option<String>,
+
+        /// Use inverted colors with solid background
+        #[arg(long)]
+        inverse: bool,
+
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
+        ///
+        /// Default is 50% of terminal width. Aspect ratio is always preserved.
+        #[arg(long, short = 'w')]
+        width: Option<String>,
+
+        /// Default point radius (default: 5)
+        ///
+        /// Sets the size of all data points. Individual points can override
+        /// this using inline syntax: "Item: [0.5, 0.5] radius: 10"
+        #[arg(long)]
+        point_radius: Option<u32>,
+
+        /// Point label font size (default: 18 for ≤6 points, 15 for >6)
+        ///
+        /// Sets the font size for data point labels. The default adjusts
+        /// based on point count for better readability.
+        #[arg(long)]
+        label_size: Option<u32>,
+
+        /// Quadrant color theme preset
+        #[arg(long, value_enum, default_value_t = QuadrantTheme::Default)]
+        theme: QuadrantTheme,
+
+        /// Top-right quadrant (q1) fill color (hex, e.g., "#e8f5e9")
+        #[arg(long = "q1-fill")]
+        q1_fill: Option<String>,
+
+        /// Top-left quadrant (q2) fill color (hex, e.g., "#ffffff")
+        #[arg(long = "q2-fill")]
+        q2_fill: Option<String>,
+
+        /// Bottom-left quadrant (q3) fill color (hex, e.g., "#ffebee")
+        #[arg(long = "q3-fill")]
+        q3_fill: Option<String>,
+
+        /// Bottom-right quadrant (q4) fill color (hex, e.g., "#ffffff")
+        #[arg(long = "q4-fill")]
+        q4_fill: Option<String>,
+
+        /// Render an example diagram and show the command used
+        #[arg(long, short = 'e')]
+        example: bool,
+
+        /// Data points as "Label: [x, y]" where x and y are 0.0-1.0
+        #[arg(value_name = "POINTS", required_unless_present = "example")]
+        points: Vec<String>,
+    },
+
+    /// Render a pie chart from data values
+    ///
+    /// Creates a Mermaid pie chart and renders it to the terminal.
+    /// Data points are specified as "Label: value" pairs.
+    #[command(name = "pie-chart", display_order = 4, after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Render an example pie chart:
+    bt pie-chart --example
+
+  Basic pie chart (separate arguments):
+    bt pie-chart \"Dogs: 386\" \"Cats: 85\" \"Birds: 15\"
+
+  With semicolon-delimited string:
+    bt pie-chart \"Dogs: 386; Cats: 85; Birds: 15\"
+
+  Official Mermaid syntax (quotes around labels):
+    bt pie-chart '\"Dogs\" : 386' '\"Cats\" : 85'
+
+  With title:
+    bt pie-chart --title \"Pet Distribution\" \"Dogs: 386\" \"Cats: 85\"
+
+  Inverted colors (solid background):
+    bt pie-chart --inverse \"Dogs: 386\" \"Cats: 85\"
+
+  Custom width:
+    bt pie-chart --width 40% \"Dogs: 386\" \"Cats: 85\"
+
+  Show percentages on slices:
+    bt pie-chart --show-data \"Dogs: 386\" \"Cats: 85\"
+
+  Custom slice colors (brand colors):
+    bt pie-chart \"TypeScript: 45 #3178c6\" \"Rust: 35 #dea584\" \"Python: 20\"
+
+  Custom colors with 'color:' prefix:
+    bt pie-chart \"TypeScript: 45 color: #3178c6\" \"Rust: 35 color: #dea584\"
+
+  JSON output (for scripting):
+    bt pie-chart --json \"Dogs: 386\" \"Cats: 85\"
+
+\x1b[1m\x1b[4mInput Formats:\x1b[0m
+  Simplified:    \"Label: value\" (quotes around label optional)
+  Semicolon:     \"Label1: 10; Label2: 20; Label3: 30\"
+  Official:      '\"Label\" : value' (Mermaid's native syntax)
+
+\x1b[1m\x1b[4mCustom Colors:\x1b[0m
+  Add a hex color at the end of any data point:
+    \"Label: value #rrggbb\"       (shorthand)
+    \"Label: value color: #rrggbb\" (explicit)
+
+  Slices without colors use Mermaid's default palette.
+")]
+    PieChart {
+        /// Use inverted colors with solid background
+        ///
+        /// Instead of transparent background matching the terminal, renders with
+        /// a solid background (white in dark mode, black in light mode) and
+        /// contrasting shapes.
+        #[arg(long)]
+        inverse: bool,
+
+        /// Add a title above the chart
+        #[arg(long, short = 't')]
+        title: Option<String>,
+
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
+        ///
+        /// Default is 50% of terminal width. Aspect ratio is always preserved.
+        #[arg(long, short = 'w')]
+        width: Option<String>,
+
+        /// Show data values on the pie slices
+        #[arg(long)]
+        show_data: bool,
+
+        /// Render an example diagram and show the command used
+        #[arg(long, short = 'e')]
+        example: bool,
+
+        /// Data points as "Label: value" pairs (e.g., "Dogs: 386" "Cats: 85")
+        #[arg(value_name = "DATA", required_unless_present = "example")]
+        data: Vec<String>,
     },
 
     /// Render a git graph from git commands
     ///
     /// Creates a Mermaid gitGraph and renders it to the terminal.
     /// Git commands include: commit, branch, checkout, merge, cherry-pick.
-    #[command(name = "git-graph", display_order = 3, after_long_help = "\
+    #[command(name = "git-graph", display_order = 5, after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
+  Render an example git graph:
+    bt git-graph --example
+
   Simple commit history:
     bt git-graph \"commit\" \"commit\" \"commit\"
 
@@ -214,9 +480,343 @@ enum Command {
         #[arg(long, short = 'w')]
         width: Option<String>,
 
+        /// Render an example diagram and show the command used
+        #[arg(long, short = 'e')]
+        example: bool,
+
         /// Git graph commands (commit, branch <name>, checkout <name>, merge <name>)
-        #[arg(value_name = "COMMANDS", required = true)]
+        #[arg(value_name = "COMMANDS", required_unless_present = "example")]
         commands: Vec<String>,
+    },
+
+    /// Render a bar chart from data values
+    ///
+    /// Creates a Mermaid XY chart with bar series and renders it to the terminal.
+    /// Data can be provided as JSON array, comma-separated, or space-separated values.
+    #[command(name = "bar-chart", display_order = 7, after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Render an example bar chart:
+    bt bar-chart --example
+
+  Basic bar chart (space-separated):
+    bt bar-chart 1 8 7 5
+
+  Comma-separated values:
+    bt bar-chart \"1,8,7,5\"
+
+  JSON array format:
+    bt bar-chart \"[1,8,7,5]\"
+
+  With axis labels:
+    bt bar-chart --x-axis \"Q1,Q2,Q3,Q4\" --y-axis Sales 10 20 15 25
+
+  With title:
+    bt bar-chart --title \"Quarterly Sales\" 10 20 15 25
+
+  Horizontal bars:
+    bt bar-chart --horizontal 1 8 7 5
+
+  Show data labels on bars:
+    bt bar-chart --show-data-label 1 8 7 5
+
+  Add a line series:
+    bt bar-chart --line 1 8 7 5
+
+  Custom width and aspect ratio:
+    bt bar-chart --width 60% --aspect-ratio 2.0 1 8 7 5
+
+  Inverted colors (solid background):
+    bt bar-chart --inverse 1 8 7 5
+
+\x1b[1m\x1b[4mInput Formats:\x1b[0m
+  JSON:          \"[1, 8, 7, 5]\"
+  Comma-sep:     \"1,8,7,5\"  or  \"1, 8, 7, 5\"
+  Space-sep:     1 8 7 5
+")]
+    BarChart {
+        /// Chart title
+        #[arg(long, short = 't')]
+        title: Option<String>,
+
+        /// X-axis label or comma-separated category labels
+        #[arg(long = "x-axis", short = 'x')]
+        x_axis: Option<String>,
+
+        /// Y-axis label
+        #[arg(long = "y-axis", short = 'y')]
+        y_axis: Option<String>,
+
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
+        #[arg(long, short = 'w')]
+        width: Option<String>,
+
+        /// Render bars horizontally instead of vertically
+        #[arg(long)]
+        horizontal: bool,
+
+        /// Show data labels on bars
+        #[arg(long)]
+        show_data_label: bool,
+
+        /// Aspect ratio (width/height). Default: 1.5
+        #[arg(long)]
+        aspect_ratio: Option<f32>,
+
+        /// Also render data as a line
+        #[arg(long)]
+        line: bool,
+
+        /// Use inverted colors with solid background
+        #[arg(long)]
+        inverse: bool,
+
+        /// Render an example chart and show the command used
+        #[arg(long, short = 'e')]
+        example: bool,
+
+        /// Data values (JSON array, comma-separated, or space-separated)
+        #[arg(value_name = "DATA", required_unless_present = "example")]
+        data: Vec<String>,
+    },
+
+    /// Render a line chart from data values
+    ///
+    /// Creates a Mermaid XY chart with line series and renders it to the terminal.
+    /// Same input formats as bar-chart.
+    #[command(name = "line-chart", display_order = 8, after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Render an example line chart:
+    bt line-chart --example
+
+  Basic line chart:
+    bt line-chart 1 8 7 5 9 3
+
+  With axis labels:
+    bt line-chart --x-axis \"Mon,Tue,Wed,Thu,Fri\" --y-axis Temperature 20 22 19 21 23
+
+  With title:
+    bt line-chart --title \"Weekly Temps\" 20 22 19 21 23
+
+  Show data points:
+    bt line-chart --show-data-label 1 8 7 5
+
+  Also add bars:
+    bt line-chart --bar 1 8 7 5
+
+  Custom width:
+    bt line-chart --width 60% 1 8 7 5
+
+\x1b[1m\x1b[4mInput Formats:\x1b[0m
+  JSON:          \"[1, 8, 7, 5]\"
+  Comma-sep:     \"1,8,7,5\"  or  \"1, 8, 7, 5\"
+  Space-sep:     1 8 7 5
+")]
+    LineChart {
+        /// Chart title
+        #[arg(long, short = 't')]
+        title: Option<String>,
+
+        /// X-axis label or comma-separated category labels
+        #[arg(long = "x-axis", short = 'x')]
+        x_axis: Option<String>,
+
+        /// Y-axis label
+        #[arg(long = "y-axis", short = 'y')]
+        y_axis: Option<String>,
+
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
+        #[arg(long, short = 'w')]
+        width: Option<String>,
+
+        /// Render horizontally instead of vertically
+        #[arg(long)]
+        horizontal: bool,
+
+        /// Show data labels on points
+        #[arg(long)]
+        show_data_label: bool,
+
+        /// Aspect ratio (width/height). Default: 1.5
+        #[arg(long)]
+        aspect_ratio: Option<f32>,
+
+        /// Also render data as bars
+        #[arg(long)]
+        bar: bool,
+
+        /// Use inverted colors with solid background
+        #[arg(long)]
+        inverse: bool,
+
+        /// Render an example chart and show the command used
+        #[arg(long, short = 'e')]
+        example: bool,
+
+        /// Data values (JSON array, comma-separated, or space-separated)
+        #[arg(value_name = "DATA", required_unless_present = "example")]
+        data: Vec<String>,
+    },
+
+    /// Render a timeline diagram
+    ///
+    /// Creates a Mermaid timeline showing events over time periods.
+    /// Events are specified as "YYYY: Event description" format.
+    #[command(name = "timeline", display_order = 9, after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Render an example timeline:
+    bt timeline --example
+
+  Basic timeline:
+    bt timeline \"2020: Project started\" \"2021: First release\" \"2022: Major update\"
+
+  With title:
+    bt timeline --title \"Company History\" \"2020: Founded\" \"2022: IPO\"
+
+  With sections (grouped time periods):
+    bt timeline --section \"Early Years\" \"2020: Founded\" \"2021: Seed funding\" \\
+                --section \"Growth\" \"2022: Series A\" \"2023: Expansion\"
+
+  Custom width:
+    bt timeline --width 60% \"2020: Event A\" \"2021: Event B\"
+
+  Inverted colors:
+    bt timeline --inverse \"2020: Event\" \"2021: Event\"
+
+\x1b[1m\x1b[4mInput Format:\x1b[0m
+  Each event: \"YYYY: Description\" where YYYY is a year or time period
+  Sections group related events with --section \"Section Name\"
+")]
+    Timeline {
+        /// Timeline title
+        #[arg(long, short = 't')]
+        title: Option<String>,
+
+        /// Display width: percentage (e.g., \"50%\"), characters (e.g., \"80ch\"), or \"fill\"
+        #[arg(long, short = 'w')]
+        width: Option<String>,
+
+        /// Section name (can be used multiple times, applies to following events)
+        #[arg(long, short = 's', action = clap::ArgAction::Append)]
+        section: Vec<String>,
+
+        /// Use inverted colors with solid background
+        #[arg(long)]
+        inverse: bool,
+
+        /// Render an example timeline and show the command used
+        #[arg(long, short = 'e')]
+        example: bool,
+
+        /// Timeline events as \"YYYY: Description\"
+        #[arg(value_name = "EVENTS", required_unless_present = "example")]
+        events: Vec<String>,
+    },
+
+    /// Render a state diagram
+    ///
+    /// Creates a Mermaid state diagram showing states and transitions.
+    /// Uses the same syntax as flowchart for defining states and transitions.
+    #[command(name = "state-diagram", display_order = 10, after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Render an example state diagram:
+    bt state-diagram --example
+
+  Basic state diagram:
+    bt state-diagram \"[*] --> Idle\" \"Idle --> Running\" \"Running --> [*]\"
+
+  With state descriptions:
+    bt state-diagram \"[*] --> Idle\" \"Idle --> Running: start\" \"Running --> Stopped: stop\"
+
+  With title:
+    bt state-diagram --title \"Process States\" \"[*] --> Ready\" \"Ready --> Running\"
+
+  Custom width:
+    bt state-diagram --width 60% \"[*] --> A\" \"A --> B\"
+
+  Inverted colors:
+    bt state-diagram --inverse \"[*] --> A\" \"A --> [*]\"
+
+\x1b[1m\x1b[4mSyntax:\x1b[0m
+  [*]           Start/end state
+  State1 --> State2          Transition
+  State1 --> State2: label   Labeled transition
+")]
+    StateDiagram {
+        /// Diagram title
+        #[arg(long, short = 't')]
+        title: Option<String>,
+
+        /// Display width: percentage (e.g., \"50%\"), characters (e.g., \"80ch\"), or \"fill\"
+        #[arg(long, short = 'w')]
+        width: Option<String>,
+
+        /// Use inverted colors with solid background
+        #[arg(long)]
+        inverse: bool,
+
+        /// Render an example state diagram and show the command used
+        #[arg(long, short = 'e')]
+        example: bool,
+
+        /// State transitions (e.g., \"[*] --> Idle\", \"Idle --> Running\")
+        #[arg(value_name = "TRANSITIONS", required_unless_present = "example")]
+        transitions: Vec<String>,
+    },
+
+    /// Render an entity relationship diagram (ERD)
+    ///
+    /// Creates a Mermaid ERD showing entities and their relationships.
+    #[command(name = "erd", display_order = 11, after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Render an example ERD:
+    bt erd --example
+
+  Basic ERD with relationships:
+    bt erd \"Customer ||--o{ Order : places\" \"Order ||--|{ LineItem : contains\"
+
+  Entity with attributes:
+    bt erd --entity \"Customer { id int PK, name string, email string }\" \\
+           --entity \"Order { id int PK, date date, customer_id int FK }\" \\
+           \"Customer ||--o{ Order : places\"
+
+  With title:
+    bt erd --title \"E-Commerce Schema\" \"Customer ||--o{ Order : places\"
+
+  Custom width:
+    bt erd --width 60% \"A ||--o{ B : has\"
+
+\x1b[1m\x1b[4mRelationship Syntax:\x1b[0m
+  ||--||   One to one
+  ||--o{   One to many
+  }o--o{   Many to many
+  ||--o|   One to zero or one
+
+  Entity1 <rel> Entity2 : label
+")]
+    Erd {
+        /// Diagram title
+        #[arg(long, short = 't')]
+        title: Option<String>,
+
+        /// Display width: percentage (e.g., \"50%\"), characters (e.g., \"80ch\"), or \"fill\"
+        #[arg(long, short = 'w')]
+        width: Option<String>,
+
+        /// Entity definition (can be used multiple times)
+        #[arg(long, short = 'E', action = clap::ArgAction::Append)]
+        entity: Vec<String>,
+
+        /// Use inverted colors with solid background
+        #[arg(long)]
+        inverse: bool,
+
+        /// Render an example ERD and show the command used
+        #[arg(long, short = 'e')]
+        example: bool,
+
+        /// Relationships (e.g., \"Customer ||--o{ Order : places\")
+        #[arg(value_name = "RELATIONSHIPS", required_unless_present = "example")]
+        relationships: Vec<String>,
     },
 }
 
@@ -414,6 +1014,7 @@ fn main() -> color_eyre::Result<()> {
             inverse,
             ref title,
             ref width,
+            example,
             ref content,
         }) => {
             return render_flowchart(
@@ -421,7 +1022,68 @@ fn main() -> color_eyre::Result<()> {
                 inverse,
                 title.as_deref(),
                 width.as_deref(),
+                example,
                 content,
+                args.json,
+            );
+        }
+        Some(Command::Quadrant {
+            ref x_axis,
+            ref y_axis,
+            ref title,
+            ref top_left,
+            ref top_right,
+            ref bottom_left,
+            ref bottom_right,
+            inverse,
+            ref width,
+            point_radius,
+            label_size,
+            ref theme,
+            ref q1_fill,
+            ref q2_fill,
+            ref q3_fill,
+            ref q4_fill,
+            example,
+            ref points,
+        }) => {
+            return render_quadrant(
+                x_axis.as_deref(),
+                y_axis.as_deref(),
+                title.as_deref(),
+                top_left.as_deref(),
+                top_right.as_deref(),
+                bottom_left.as_deref(),
+                bottom_right.as_deref(),
+                inverse,
+                width.as_deref(),
+                point_radius,
+                label_size,
+                *theme,
+                q1_fill.as_deref(),
+                q2_fill.as_deref(),
+                q3_fill.as_deref(),
+                q4_fill.as_deref(),
+                example,
+                points,
+                args.json,
+            );
+        }
+        Some(Command::PieChart {
+            inverse,
+            ref title,
+            ref width,
+            show_data,
+            example,
+            ref data,
+        }) => {
+            return render_pie_chart(
+                inverse,
+                title.as_deref(),
+                width.as_deref(),
+                show_data,
+                example,
+                data,
                 args.json,
             );
         }
@@ -429,13 +1091,127 @@ fn main() -> color_eyre::Result<()> {
             inverse,
             ref title,
             ref width,
+            example,
             ref commands,
         }) => {
             return render_git_graph(
                 inverse,
                 title.as_deref(),
                 width.as_deref(),
+                example,
                 commands,
+                args.json,
+            );
+        }
+        Some(Command::BarChart {
+            ref title,
+            ref x_axis,
+            ref y_axis,
+            ref width,
+            horizontal,
+            show_data_label,
+            aspect_ratio,
+            line,
+            inverse,
+            example,
+            ref data,
+        }) => {
+            return render_xy_chart(
+                XyChartType::Bar,
+                title.as_deref(),
+                x_axis.as_deref(),
+                y_axis.as_deref(),
+                width.as_deref(),
+                horizontal,
+                show_data_label,
+                aspect_ratio,
+                line,       // add_line for bar chart
+                false,      // add_bar is false since we're a bar chart
+                inverse,
+                example,
+                data,
+                args.json,
+            );
+        }
+        Some(Command::LineChart {
+            ref title,
+            ref x_axis,
+            ref y_axis,
+            ref width,
+            horizontal,
+            show_data_label,
+            aspect_ratio,
+            bar,
+            inverse,
+            example,
+            ref data,
+        }) => {
+            return render_xy_chart(
+                XyChartType::Line,
+                title.as_deref(),
+                x_axis.as_deref(),
+                y_axis.as_deref(),
+                width.as_deref(),
+                horizontal,
+                show_data_label,
+                aspect_ratio,
+                false,      // add_line is false since we're a line chart
+                bar,        // add_bar for line chart
+                inverse,
+                example,
+                data,
+                args.json,
+            );
+        }
+        Some(Command::Timeline {
+            ref title,
+            ref width,
+            ref section,
+            inverse,
+            example,
+            ref events,
+        }) => {
+            return render_timeline(
+                title.as_deref(),
+                width.as_deref(),
+                section,
+                inverse,
+                example,
+                events,
+                args.json,
+            );
+        }
+        Some(Command::StateDiagram {
+            ref title,
+            ref width,
+            inverse,
+            example,
+            ref transitions,
+        }) => {
+            return render_state_diagram(
+                title.as_deref(),
+                width.as_deref(),
+                inverse,
+                example,
+                transitions,
+                args.json,
+            );
+        }
+        Some(Command::Erd {
+            ref title,
+            ref width,
+            ref entity,
+            inverse,
+            example,
+            ref relationships,
+        }) => {
+            return render_erd(
+                title.as_deref(),
+                width.as_deref(),
+                entity,
+                inverse,
+                example,
+                relationships,
                 args.json,
             );
         }
@@ -542,6 +1318,21 @@ After setup, restart your shell or source the file to activate completions.
 
 /// Creates a path completer that filters for image files.
 ///
+/// Formats an axis label for Mermaid quadrant charts.
+///
+/// If the label contains ` --> `, it's split into left and right parts:
+///   "Low --> High" becomes `"Low" --> "High"`
+///
+/// Otherwise, the entire label is quoted (appears at axis start):
+///   "My Label" becomes `"My Label"`
+fn format_axis_label(label: &str) -> String {
+    if let Some((left, right)) = label.split_once(" --> ") {
+        format!("\"{}\" --> \"{}\"", left.trim(), right.trim())
+    } else {
+        format!("\"{}\"", label)
+    }
+}
+
 /// Completes files with extensions: png, jpg, jpeg, gif (case-insensitive).
 /// Also completes directories to allow navigation.
 fn image_completer() -> PathCompleter {
@@ -596,6 +1387,16 @@ fn render_image(image_spec: &str) -> color_eyre::Result<()> {
     Ok(())
 }
 
+/// Example data for flowchart --example
+/// Note: Each element is joined with newlines in the flowchart body
+const FLOWCHART_EXAMPLE: &[&str] = &[
+    "A[Start] --> B{Decision}",
+    "B -->|Yes| C[Success]",
+    "B -->|No| D[Retry]",
+    "D --> B",
+];
+const FLOWCHART_EXAMPLE_CMD: &str = r#"bt flowchart "A[Start] --> B{Decision}" "B -->|Yes| C[Success]" "B -->|No| D[Retry]" "D --> B""#;
+
 /// Render a flowchart to the terminal.
 ///
 /// Creates a Mermaid flowchart with the given content and renders it
@@ -606,13 +1407,25 @@ fn render_flowchart(
     inverse: bool,
     title: Option<&str>,
     width: Option<&str>,
+    example: bool,
     content: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::mermaid::MermaidTheme;
+    use std::io::Write;
+
+    let _ = std::io::stdout().flush();
+
+    // Use example data if --example flag is set
+    let content: Vec<String> = if example {
+        FLOWCHART_EXAMPLE.iter().map(|s| s.to_string()).collect()
+    } else {
+        content.to_vec()
+    };
 
     let direction = if vertical { "TD" } else { "LR" };
-    let body = content.join(" ");
+    // Join content with newlines and indentation for proper Mermaid syntax
+    let body = content.join("\n    ");
 
     // Build mermaid instructions with optional title frontmatter
     let instructions = if let Some(title) = title {
@@ -682,8 +1495,554 @@ fn render_flowchart(
     // Clean up temp file
     let _ = std::fs::remove_file(&png_path);
 
+    // Let terminal settle after image rendering
+    settle_terminal();
+
+    // Print command used if example mode
+    if example {
+        print_example_command(FLOWCHART_EXAMPLE_CMD);
+    }
+
     Ok(())
 }
+
+/// Example data for quadrant --example
+const QUADRANT_EXAMPLE: &[&str] = &[
+    "Campaign A: [0.3, 0.78]",
+    "Campaign B: [0.45, 0.23]",
+    "Campaign C: [0.57, 0.69]",
+    "Campaign D: [0.78, 0.34]",
+    "Campaign E: [0.40, 0.34]",
+    "Campaign F: [0.65, 0.78]",
+];
+const QUADRANT_EXAMPLE_CMD: &str = r#"bt quadrant --title "Campaign Analysis" --x-axis "Low Reach --> High Reach" --y-axis "Low Engagement --> High Engagement" "Campaign A: [0.3, 0.78]" "Campaign B: [0.45, 0.23]" "Campaign C: [0.57, 0.69]" "Campaign D: [0.78, 0.34]" "Campaign E: [0.40, 0.34]" "Campaign F: [0.65, 0.78]""#;
+
+/// Render a quadrant chart to the terminal.
+///
+/// Creates a Mermaid quadrantChart with the given configuration and data points,
+/// then renders it using the MermaidRenderer.
+#[allow(clippy::too_many_arguments)]
+fn render_quadrant(
+    x_axis: Option<&str>,
+    y_axis: Option<&str>,
+    title: Option<&str>,
+    top_left: Option<&str>,
+    top_right: Option<&str>,
+    bottom_left: Option<&str>,
+    bottom_right: Option<&str>,
+    inverse: bool,
+    width: Option<&str>,
+    point_radius: Option<u32>,
+    label_size: Option<u32>,
+    theme: QuadrantTheme,
+    q1_fill: Option<&str>,
+    q2_fill: Option<&str>,
+    q3_fill: Option<&str>,
+    q4_fill: Option<&str>,
+    example: bool,
+    points: &[String],
+    json: bool,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::mermaid::{MermaidConfig, MermaidTheme};
+    use std::io::Write;
+
+    let _ = std::io::stdout().flush();
+
+    // Use example data if --example flag is set
+    let (title, x_axis, y_axis, points): (Option<&str>, Option<&str>, Option<&str>, Vec<String>) = if example {
+        (
+            Some("Campaign Analysis"),
+            Some("Low Reach --> High Reach"),
+            Some("Low Engagement --> High Engagement"),
+            QUADRANT_EXAMPLE.iter().map(|s| s.to_string()).collect(),
+        )
+    } else {
+        (title, x_axis, y_axis, points.to_vec())
+    };
+
+    // Build the quadrantChart body
+    let mut body_lines = Vec::new();
+
+    // Title goes inside the chart body for quadrantChart (unlike other diagrams)
+    if let Some(t) = title {
+        body_lines.push(format!("    title \"{}\"", t));
+    }
+
+    // Axis labels: if contains " --> ", format as "Left" --> "Right"
+    // Otherwise, quote the whole string for a centered label
+    if let Some(x) = x_axis {
+        body_lines.push(format!("    x-axis {}", format_axis_label(x)));
+    }
+    if let Some(y) = y_axis {
+        body_lines.push(format!("    y-axis {}", format_axis_label(y)));
+    }
+
+    // Quadrant descriptions (1=top-left, 2=top-right, 3=bottom-left, 4=bottom-right)
+    if let Some(tl) = top_left {
+        body_lines.push(format!("    quadrant-1 \"{}\"", tl));
+    }
+    if let Some(tr) = top_right {
+        body_lines.push(format!("    quadrant-2 \"{}\"", tr));
+    }
+    if let Some(bl) = bottom_left {
+        body_lines.push(format!("    quadrant-3 \"{}\"", bl));
+    }
+    if let Some(br) = bottom_right {
+        body_lines.push(format!("    quadrant-4 \"{}\"", br));
+    }
+
+    // Data points
+    for point in &points {
+        body_lines.push(format!("    {}", point));
+    }
+
+    let body = body_lines.join("\n");
+    let instructions = format!("quadrantChart\n{}", body);
+
+    if json {
+        let output = serde_json::json!({
+            "type": "quadrant",
+            "x_axis": x_axis,
+            "y_axis": y_axis,
+            "title": title,
+            "top_left": top_left,
+            "top_right": top_right,
+            "bottom_left": bottom_left,
+            "bottom_right": bottom_right,
+            "inverse": inverse,
+            "width": width,
+            "point_radius": point_radius,
+            "label_size": label_size,
+            "theme": theme.as_str(),
+            "q1_fill": q1_fill,
+            "q2_fill": q2_fill,
+            "q3_fill": q3_fill,
+            "q4_fill": q4_fill,
+            "instructions": instructions,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    // Build Mermaid config with styling options
+    // Default label size: 18 for <= 6 points, 15 for > 6 points
+    let config = {
+        let mut cfg = MermaidConfig::new();
+
+        // Apply point styling
+        if let Some(r) = point_radius {
+            cfg = cfg.with_point_radius(r);
+        }
+        let effective_label_size = label_size.unwrap_or(
+            if points.len() <= 6 { 18 } else { 15 }
+        );
+        cfg = cfg.with_point_label_font_size(effective_label_size);
+
+        // Apply theme preset (sets default quadrant colors based on terminal color mode)
+        let color_mode = Terminal::color_mode();
+        cfg = theme.apply(cfg, color_mode);
+
+        // Apply individual fill overrides (these take precedence over theme)
+        if let Some(color) = q1_fill {
+            cfg = cfg.with_quadrant_fill(1, color);
+        }
+        if let Some(color) = q2_fill {
+            cfg = cfg.with_quadrant_fill(2, color);
+        }
+        if let Some(color) = q3_fill {
+            cfg = cfg.with_quadrant_fill(3, color);
+        }
+        if let Some(color) = q4_fill {
+            cfg = cfg.with_quadrant_fill(4, color);
+        }
+
+        cfg
+    };
+
+    // Configure renderer based on inverse flag, applying config for point styling
+    let renderer = if inverse {
+        // Inverse: solid background with opposite theme
+        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        MermaidRenderer::new(&instructions)
+            .with_theme(theme)
+            .with_transparent_background(false)
+            .with_config(config)
+    } else {
+        // Default: transparent background with theme matching terminal
+        MermaidRenderer::for_terminal(&instructions)
+            .with_config(config)
+    };
+
+    // Render the diagram to a temp PNG file
+    let png_path = match renderer.render_to_temp_png() {
+        Ok(path) => path,
+        Err(e) => {
+            return handle_mermaid_error(e, &instructions, "quadrant chart");
+        }
+    };
+
+    // Parse width specification: default to 50% if not specified
+    let image_width = match width {
+        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
+        None => ImageWidth::Percent(0.5),
+    };
+
+    // Use TerminalImage to display
+    let terminal = Terminal::new();
+    let term_image = TerminalImage::new(&png_path)
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
+        .with_width(image_width);
+
+    match term_image.render_to_terminal(&terminal) {
+        Ok(output) => print!("{}", output),
+        Err(e) => {
+            // Clean up before returning error
+            let _ = std::fs::remove_file(&png_path);
+            return Err(color_eyre::eyre::eyre!("Failed to display quadrant chart: {}", e));
+        }
+    }
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(&png_path);
+
+    // Let terminal settle after image rendering
+    settle_terminal();
+
+    // Print command used if example mode
+    if example {
+        print_example_command(QUADRANT_EXAMPLE_CMD);
+    }
+
+    Ok(())
+}
+
+/// A parsed pie chart entry with optional color.
+struct PieEntry {
+    /// The Mermaid-formatted data line (e.g., `"Label" : value`)
+    line: String,
+    /// Optional hex color for this slice (e.g., `#3178c6`)
+    color: Option<String>,
+}
+
+/// Parses pie chart data from various input formats.
+///
+/// Supports three formats:
+/// 1. Simple: `"Label: value"` - quotes around label optional
+/// 2. Semicolon-delimited: `"Label1: 10; Label2: 20"`
+/// 3. Official Mermaid: `"\"Label\" : value"` - with quotes around label
+///
+/// Each format also supports an optional color suffix:
+/// - `"Label: value color: #hex"` or `"Label: value #hex"`
+///
+/// Returns a vector of parsed entries with their optional colors.
+fn parse_pie_data(data: &[String]) -> Vec<PieEntry> {
+    let mut result = Vec::new();
+
+    for item in data {
+        // Check if this is a semicolon-delimited string
+        if item.contains(';') {
+            // Split by semicolon and process each part
+            for part in item.split(';') {
+                let part = part.trim();
+                if !part.is_empty() && let Some(parsed) = parse_single_pie_entry(part) {
+                    result.push(parsed);
+                }
+            }
+        } else {
+            // Single entry
+            if let Some(parsed) = parse_single_pie_entry(item) {
+                result.push(parsed);
+            }
+        }
+    }
+
+    result
+}
+
+/// Extracts a hex color from the end of a string.
+///
+/// Looks for patterns like:
+/// - `color: #3178c6` or `color:#3178c6`
+/// - `#3178c6` (standalone at end)
+///
+/// Returns (remaining_string, Some(color)) if found, or (original, None) if not.
+fn extract_color(s: &str) -> (&str, Option<String>) {
+    let s = s.trim();
+
+    // Try "color: #hex" or "color:#hex" pattern first
+    if let Some(color_idx) = s.to_lowercase().rfind("color:") {
+        let before = s[..color_idx].trim();
+        let color_part = s[color_idx + 6..].trim(); // Skip "color:"
+
+        if let Some(color) = parse_hex_color(color_part) {
+            return (before, Some(color));
+        }
+    }
+
+    // Try standalone #hex at the end
+    // Find the last whitespace and check if what follows is a hex color
+    if let Some(last_space) = s.rfind(char::is_whitespace) {
+        let potential_color = s[last_space + 1..].trim();
+        if let Some(color) = parse_hex_color(potential_color) {
+            return (s[..last_space].trim(), Some(color));
+        }
+    }
+
+    (s, None)
+}
+
+/// Parses a hex color string, returning it normalized if valid.
+///
+/// Accepts: `#rgb`, `#rrggbb`, `#rrggbbaa`
+fn parse_hex_color(s: &str) -> Option<String> {
+    let s = s.trim();
+    if !s.starts_with('#') {
+        return None;
+    }
+
+    let hex_part = &s[1..];
+    // Valid lengths: 3 (#rgb), 6 (#rrggbb), or 8 (#rrggbbaa)
+    if !matches!(hex_part.len(), 3 | 6 | 8) {
+        return None;
+    }
+
+    // Check all characters are valid hex
+    if !hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+
+    Some(s.to_string())
+}
+
+/// Parses a single pie chart entry into Mermaid format with optional color.
+///
+/// Handles:
+/// - `Label: value` → `"Label" : value`
+/// - `"Label" : value` → `"Label" : value` (passthrough)
+/// - `"Label": value` → `"Label" : value`
+///
+/// Also extracts optional color from end:
+/// - `Label: value color: #hex`
+/// - `Label: value #hex`
+fn parse_single_pie_entry(entry: &str) -> Option<PieEntry> {
+    let entry = entry.trim();
+    if entry.is_empty() {
+        return None;
+    }
+
+    // Extract color from the end first (before parsing the rest)
+    let (entry_without_color, color) = extract_color(entry);
+
+    // Check if it's already in official Mermaid format (starts with quote)
+    if let Some(stripped) = entry_without_color.strip_prefix('"') {
+        // Find the closing quote
+        if let Some(close_quote_idx) = stripped.find('"') {
+            let label = &stripped[..close_quote_idx];
+            let rest = &stripped[close_quote_idx + 1..]; // Skip the closing quote
+
+            // Find the colon and value
+            if let Some(colon_idx) = rest.find(':') {
+                let value = rest[colon_idx + 1..].trim();
+                if !value.is_empty() {
+                    return Some(PieEntry {
+                        line: format!("\"{}\" : {}", label, value),
+                        color,
+                    });
+                }
+            }
+        }
+        // If parsing failed, try the simple format below
+    }
+
+    // Simple format: Label: value
+    if let Some(colon_idx) = entry_without_color.find(':') {
+        let label = entry_without_color[..colon_idx].trim();
+        let value = entry_without_color[colon_idx + 1..].trim();
+
+        if !label.is_empty() && !value.is_empty() {
+            // Remove surrounding quotes if present
+            let label = label.trim_matches('"');
+            return Some(PieEntry {
+                line: format!("\"{}\" : {}", label, value),
+                color,
+            });
+        }
+    }
+
+    None
+}
+
+/// Builds the Mermaid init directive for pie chart colors.
+///
+/// If any entries have colors, generates:
+/// `%%{init: {'themeVariables': {'pie1': '#color', 'pie2': '#color', ...}}}%%`
+fn build_pie_init_directive(entries: &[PieEntry]) -> Option<String> {
+    let color_vars: Vec<String> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(i, entry)| {
+            entry.color.as_ref().map(|c| format!("'pie{}': '{}'", i + 1, c))
+        })
+        .collect();
+
+    if color_vars.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "%%{{init: {{'themeVariables': {{{}}}}}}}%%",
+            color_vars.join(", ")
+        ))
+    }
+}
+
+/// Example data for pie-chart --example
+const PIE_CHART_EXAMPLE: &[&str] = &["TypeScript: 45 #3178C6", "Rust: 35 #A72145", "Python: 20"];
+const PIE_CHART_EXAMPLE_CMD: &str = r#"bt pie-chart "TypeScript: 45 #3178C6" "Rust: 35 #A72145" "Python: 20""#;
+
+/// Render a pie chart to the terminal.
+///
+/// Creates a Mermaid pie chart with the given data and renders it
+/// using the MermaidRenderer.
+fn render_pie_chart(
+    inverse: bool,
+    title: Option<&str>,
+    width: Option<&str>,
+    show_data: bool,
+    example: bool,
+    data: &[String],
+    json: bool,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::mermaid::MermaidTheme;
+    use std::io::Write;
+
+    let _ = std::io::stdout().flush();
+
+    // Use example data if --example flag is set
+    let data: Vec<String> = if example {
+        PIE_CHART_EXAMPLE.iter().map(|s| s.to_string()).collect()
+    } else {
+        data.to_vec()
+    };
+
+    // Parse the input data into Mermaid format (with optional colors)
+    let parsed_entries = parse_pie_data(&data);
+
+    if parsed_entries.is_empty() {
+        return Err(color_eyre::eyre::eyre!(
+            "No valid data points provided. Use format: \"Label: value\""
+        ));
+    }
+
+    // Build the init directive for custom colors (if any)
+    let init_directive = build_pie_init_directive(&parsed_entries);
+
+    // Build the pie chart body
+    let show_data_str = if show_data { " showData" } else { "" };
+    let title_line = title.map(|t| format!("    title {}", t)).unwrap_or_default();
+
+    let data_lines: String = parsed_entries
+        .iter()
+        .map(|e| format!("    {}", e.line))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Combine all parts: init directive (optional) + pie declaration + title (optional) + data
+    let mut instructions_parts = Vec::new();
+
+    if let Some(ref init) = init_directive {
+        instructions_parts.push(init.clone());
+    }
+
+    if title_line.is_empty() {
+        instructions_parts.push(format!("pie{}\n{}", show_data_str, data_lines));
+    } else {
+        instructions_parts.push(format!("pie{}\n{}\n{}", show_data_str, title_line, data_lines));
+    }
+
+    let instructions = instructions_parts.join("\n");
+
+    if json {
+        let output = serde_json::json!({
+            "type": "pie-chart",
+            "inverse": inverse,
+            "title": title,
+            "width": width,
+            "show_data": show_data,
+            "instructions": instructions,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    // Configure renderer based on inverse flag
+    let renderer = if inverse {
+        // Inverse: solid background with opposite theme
+        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        MermaidRenderer::new(&instructions)
+            .with_theme(theme)
+            .with_transparent_background(false)
+    } else {
+        // Default: transparent background with theme matching terminal
+        MermaidRenderer::for_terminal(&instructions)
+    };
+
+    // Render the diagram to a temp PNG file
+    let png_path = match renderer.render_to_temp_png() {
+        Ok(path) => path,
+        Err(e) => {
+            return handle_mermaid_error(e, &instructions, "pie chart");
+        }
+    };
+
+    // Parse width specification: default to 50% if not specified
+    let image_width = match width {
+        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
+        None => ImageWidth::Percent(0.5),
+    };
+
+    // Use TerminalImage to display
+    let terminal = Terminal::new();
+    let term_image = TerminalImage::new(&png_path)
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
+        .with_width(image_width);
+
+    match term_image.render_to_terminal(&terminal) {
+        Ok(output) => print!("{}", output),
+        Err(e) => {
+            // Clean up before returning error
+            let _ = std::fs::remove_file(&png_path);
+            return Err(color_eyre::eyre::eyre!("Failed to display pie chart: {}", e));
+        }
+    }
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(&png_path);
+
+    // Let terminal settle after image rendering
+    settle_terminal();
+
+    // Print command used if example mode
+    if example {
+        print_example_command(PIE_CHART_EXAMPLE_CMD);
+    }
+
+    Ok(())
+}
+
+/// Example data for git-graph --example
+const GIT_GRAPH_EXAMPLE: &[&str] = &[
+    "commit",
+    "commit",
+    "branch feature",
+    "checkout feature",
+    "commit",
+    "commit",
+    "checkout main",
+    "commit",
+    "merge feature",
+    "commit",
+];
+const GIT_GRAPH_EXAMPLE_CMD: &str = r#"bt git-graph "commit" "commit" "branch feature" "checkout feature" "commit" "commit" "checkout main" "commit" "merge feature" "commit""#;
 
 /// Render a git graph to the terminal.
 ///
@@ -693,10 +2052,21 @@ fn render_git_graph(
     inverse: bool,
     title: Option<&str>,
     width: Option<&str>,
+    example: bool,
     commands: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::mermaid::MermaidTheme;
+    use std::io::Write;
+
+    let _ = std::io::stdout().flush();
+
+    // Use example data if --example flag is set
+    let commands: Vec<String> = if example {
+        GIT_GRAPH_EXAMPLE.iter().map(|s| s.to_string()).collect()
+    } else {
+        commands.to_vec()
+    };
 
     let body = commands
         .iter()
@@ -768,7 +2138,294 @@ fn render_git_graph(
     // Clean up temp file
     let _ = std::fs::remove_file(&png_path);
 
+    // Let terminal settle after image rendering
+    settle_terminal();
+
+    // Print command used if example mode
+    if example {
+        print_example_command(GIT_GRAPH_EXAMPLE_CMD);
+    }
+
     Ok(())
+}
+
+/// XY chart type selector
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum XyChartType {
+    Bar,
+    Line,
+}
+
+/// Example data for bar-chart --example
+const BAR_CHART_EXAMPLE: &[&str] = &["12", "28", "45", "38", "22", "55"];
+const BAR_CHART_EXAMPLE_CMD: &str = "bt bar-chart --title \"Monthly Revenue\" --x-axis \"Jan,Feb,Mar,Apr,May,Jun\" --y-axis \"$ (thousands)\" 12 28 45 38 22 55";
+
+/// Example data for line-chart --example
+const LINE_CHART_EXAMPLE: &[&str] = &["20", "22", "19", "23", "25", "21", "24"];
+const LINE_CHART_EXAMPLE_CMD: &str = "bt line-chart --title \"Weekly Temperature\" --x-axis \"Mon,Tue,Wed,Thu,Fri,Sat,Sun\" --y-axis \"°C\" 20 22 19 23 25 21 24";
+
+/// Render an XY chart (bar or line) to the terminal.
+///
+/// Uses Mermaid's xychart-beta syntax.
+#[allow(clippy::too_many_arguments)]
+fn render_xy_chart(
+    chart_type: XyChartType,
+    title: Option<&str>,
+    x_axis: Option<&str>,
+    y_axis: Option<&str>,
+    width: Option<&str>,
+    horizontal: bool,
+    show_data_label: bool,
+    aspect_ratio: Option<f32>,
+    add_line: bool,
+    add_bar: bool,
+    inverse: bool,
+    example: bool,
+    data: &[String],
+    json: bool,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::mermaid::MermaidTheme;
+    use std::io::Write;
+
+    let _ = std::io::stdout().flush();
+
+    // Use example data if --example flag is set
+    let (data, use_example_labels): (Vec<String>, bool) = if example {
+        let example_data = match chart_type {
+            XyChartType::Bar => BAR_CHART_EXAMPLE,
+            XyChartType::Line => LINE_CHART_EXAMPLE,
+        };
+        (example_data.iter().map(|s| s.to_string()).collect(), true)
+    } else {
+        (data.to_vec(), false)
+    };
+
+    // Parse input data
+    let values = parse_xy_data(&data)?;
+
+    if values.is_empty() {
+        return Err(color_eyre::eyre::eyre!(
+            "No valid data values provided. Use format: \"1 2 3\" or \"[1,2,3]\" or \"1,2,3\""
+        ));
+    }
+
+    // Get example titles/labels for example mode
+    let (eff_title, eff_x_axis, eff_y_axis) = if use_example_labels {
+        match chart_type {
+            XyChartType::Bar => (
+                Some("Monthly Revenue"),
+                Some("Jan,Feb,Mar,Apr,May,Jun"),
+                Some("$ (thousands)"),
+            ),
+            XyChartType::Line => (
+                Some("Weekly Temperature"),
+                Some("Mon,Tue,Wed,Thu,Fri,Sat,Sun"),
+                Some("°C"),
+            ),
+        }
+    } else {
+        (title, x_axis, y_axis)
+    };
+
+    // Build init directive for configuration
+    let aspect = aspect_ratio.unwrap_or(1.5);
+    let init_config = format!(
+        "%%{{init: {{\"xychart\": {{\"showTitle\": {}, \"xAxis\": {{\"showLabel\": {}}}, \"yAxis\": {{\"showLabel\": {}}}}}}}}}%%",
+        eff_title.is_some(),
+        eff_x_axis.is_some(),
+        eff_y_axis.is_some()
+    );
+
+    // Build chart declaration
+    let orientation = if horizontal { "horizontal" } else { "" };
+    let chart_decl = format!("xychart-beta {}", orientation).trim().to_string();
+
+    // Build x-axis line
+    let x_axis_line = if let Some(labels) = eff_x_axis {
+        // Check if it contains commas (categories) or is just a label
+        if labels.contains(',') {
+            let cats: Vec<&str> = labels.split(',').map(|s| s.trim()).collect();
+            format!("    x-axis [{}]", cats.join(", "))
+        } else {
+            format!("    x-axis \"{}\"", labels)
+        }
+    } else {
+        // Generate default labels based on data count
+        let default_labels: Vec<String> = (1..=values.len()).map(|i| i.to_string()).collect();
+        format!("    x-axis [{}]", default_labels.join(", "))
+    };
+
+    // Build y-axis line
+    let y_axis_line = if let Some(label) = eff_y_axis {
+        format!("    y-axis \"{}\"", label)
+    } else {
+        String::new()
+    };
+
+    // Build title line
+    let title_line = eff_title.map(|t| format!("    title \"{}\"", t)).unwrap_or_default();
+
+    // Build data series
+    let data_str: String = values.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ");
+
+    let primary_series = match chart_type {
+        XyChartType::Bar => format!("    bar [{}]", data_str),
+        XyChartType::Line => format!("    line [{}]", data_str),
+    };
+
+    let secondary_series = if add_line && chart_type == XyChartType::Bar {
+        format!("\n    line [{}]", data_str)
+    } else if add_bar && chart_type == XyChartType::Line {
+        format!("\n    bar [{}]", data_str)
+    } else {
+        String::new()
+    };
+
+    // Combine all parts
+    let mut parts = vec![init_config, chart_decl];
+    if !title_line.is_empty() {
+        parts.push(title_line);
+    }
+    parts.push(x_axis_line);
+    if !y_axis_line.is_empty() {
+        parts.push(y_axis_line);
+    }
+    parts.push(primary_series);
+    if !secondary_series.is_empty() {
+        parts.push(secondary_series.trim().to_string());
+    }
+
+    let instructions = parts.join("\n");
+
+    if json {
+        let output = serde_json::json!({
+            "type": match chart_type {
+                XyChartType::Bar => "bar-chart",
+                XyChartType::Line => "line-chart",
+            },
+            "inverse": inverse,
+            "title": eff_title,
+            "x_axis": eff_x_axis,
+            "y_axis": eff_y_axis,
+            "horizontal": horizontal,
+            "show_data_label": show_data_label,
+            "aspect_ratio": aspect,
+            "add_line": add_line,
+            "add_bar": add_bar,
+            "values": values,
+            "instructions": instructions,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    // Configure renderer based on inverse flag
+    let renderer = if inverse {
+        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        MermaidRenderer::new(&instructions)
+            .with_theme(theme)
+            .with_transparent_background(false)
+    } else {
+        MermaidRenderer::for_terminal(&instructions)
+    };
+
+    // Render the diagram to a temp PNG file
+    let png_path = match renderer.render_to_temp_png() {
+        Ok(path) => path,
+        Err(e) => {
+            let chart_name = match chart_type {
+                XyChartType::Bar => "bar chart",
+                XyChartType::Line => "line chart",
+            };
+            return handle_mermaid_error(e, &instructions, chart_name);
+        }
+    };
+
+    // Parse width specification: default to 50% if not specified
+    let image_width = match width {
+        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
+        None => ImageWidth::Percent(0.5),
+    };
+
+    // Use TerminalImage to display
+    let terminal = Terminal::new();
+    let term_image = TerminalImage::new(&png_path)
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
+        .with_width(image_width);
+
+    match term_image.render_to_terminal(&terminal) {
+        Ok(output) => print!("{}", output),
+        Err(e) => {
+            let _ = std::fs::remove_file(&png_path);
+            let chart_name = match chart_type {
+                XyChartType::Bar => "bar chart",
+                XyChartType::Line => "line chart",
+            };
+            return Err(color_eyre::eyre::eyre!("Failed to display {}: {}", chart_name, e));
+        }
+    }
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(&png_path);
+
+    // Let terminal settle after image rendering
+    settle_terminal();
+
+    // Print command used if example mode
+    if example {
+        let cmd = match chart_type {
+            XyChartType::Bar => BAR_CHART_EXAMPLE_CMD,
+            XyChartType::Line => LINE_CHART_EXAMPLE_CMD,
+        };
+        print_example_command(cmd);
+    }
+
+    Ok(())
+}
+
+/// Parse XY chart data from various input formats.
+///
+/// Supports:
+/// - JSON array: "[1, 8, 7, 5]"
+/// - Comma-separated: "1,8,7,5" or "1, 8, 7, 5"
+/// - Space-separated arguments: "1" "8" "7" "5"
+fn parse_xy_data(data: &[String]) -> color_eyre::Result<Vec<f64>> {
+    let mut values = Vec::new();
+
+    for item in data {
+        let trimmed = item.trim();
+
+        // Try JSON array first
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let inner = &trimmed[1..trimmed.len() - 1];
+            for part in inner.split(',') {
+                let v: f64 = part.trim().parse().map_err(|_| {
+                    color_eyre::eyre::eyre!("Invalid number in JSON array: '{}'", part.trim())
+                })?;
+                values.push(v);
+            }
+            continue;
+        }
+
+        // Try comma-separated
+        if trimmed.contains(',') {
+            for part in trimmed.split(',') {
+                let v: f64 = part.trim().parse().map_err(|_| {
+                    color_eyre::eyre::eyre!("Invalid number: '{}'", part.trim())
+                })?;
+                values.push(v);
+            }
+            continue;
+        }
+
+        // Single value
+        let v: f64 = trimmed.parse().map_err(|_| {
+            color_eyre::eyre::eyre!("Invalid number: '{}'", trimmed)
+        })?;
+        values.push(v);
+    }
+
+    Ok(values)
 }
 
 /// Handle Mermaid rendering errors with user-friendly output.
@@ -799,20 +2456,20 @@ fn handle_mermaid_error(
 
                 // Extract useful lines from stderr (skip JS callstack and useless line numbers)
                 for line in stderr.lines() {
-                    // Include the context line that shows actual mermaid code (starts with ...)
-                    if line.starts_with("...") {
+                    // Include:
+                    // - Context lines showing actual mermaid code (starts with ...)
+                    // - Error pointer lines (contains ^ and dashes)
+                    // - "Expecting" lines describing what was expected
+                    // Skip: "Error: Parse error on line X:", JS callstack lines
+                    let is_context_line = line.starts_with("...");
+                    let is_pointer_line =
+                        line.contains("^") && line.chars().filter(|c| *c == '-').count() > 3;
+                    let is_expecting_line =
+                        line.starts_with("Expecting") || line.contains("Expecting '");
+
+                    if is_context_line || is_pointer_line || is_expecting_line {
                         eprintln!("{}", line);
                     }
-                    // Include the error pointer line (contains ^ and dashes)
-                    else if line.contains("^") && line.chars().filter(|c| *c == '-').count() > 3 {
-                        eprintln!("{}", line);
-                    }
-                    // Include the "Expecting" line
-                    else if line.starts_with("Expecting") || line.contains("Expecting '") {
-                        eprintln!("{}", line);
-                    }
-                    // Skip "Error: Parse error on line X:" - not useful to CLI users
-                    // Skip JS callstack lines (contain file paths or "at ")
                 }
 
                 // Show the mermaid block that was defined
@@ -1051,12 +2708,12 @@ fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     if let Some(font) = &metadata.font {
         println!("  Name:       {}", font);
     } else {
-        println!("  Name:       {}", format!("{}n/a{}", dim, reset));
+        println!("  Name:       {}n/a{}", dim, reset);
     }
     if let Some(size) = metadata.font_size {
         println!("  Size:       {}pt", size);
     } else {
-        println!("  Size:       {}", format!("{}n/a{}", dim, reset));
+        println!("  Size:       {}n/a{}", dim, reset);
     }
     println!(
         "  Nerd Font:  {}",

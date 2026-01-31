@@ -59,6 +59,116 @@ const ICON_PACKS: &[&str] = &[
 /// Default scale factor for rendering (2x for better resolution on modern displays).
 const DEFAULT_SCALE: u32 = 2;
 
+/// Minimum recommended mmdc version for optimal feature support.
+///
+/// Version 10.6.0 introduced significant improvements including:
+/// - Better SVG rendering
+/// - Improved icon pack support
+/// - More stable async diagram generation
+///
+/// Older versions will work but may have rendering quirks.
+pub const MMDC_MIN_VERSION: &str = "10.6.0";
+
+/// Parsed version for comparison operations.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MmdcVersion {
+    /// Major version number
+    pub major: u32,
+    /// Minor version number
+    pub minor: u32,
+    /// Patch version number
+    pub patch: u32,
+}
+
+impl MmdcVersion {
+    /// Parse a version string in the format "X.Y.Z".
+    ///
+    /// Returns `None` if the version string cannot be parsed.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::components::mermaid::MmdcVersion;
+    ///
+    /// let v = MmdcVersion::parse("10.6.0").unwrap();
+    /// assert_eq!(v.major, 10);
+    /// assert_eq!(v.minor, 6);
+    /// assert_eq!(v.patch, 0);
+    ///
+    /// assert!(MmdcVersion::parse("invalid").is_none());
+    /// ```
+    pub fn parse(version: &str) -> Option<Self> {
+        let parts: Vec<&str> = version.trim().split('.').collect();
+        if parts.len() < 3 {
+            return None;
+        }
+        Some(Self {
+            major: parts[0].parse().ok()?,
+            minor: parts[1].parse().ok()?,
+            patch: parts[2].parse().ok()?,
+        })
+    }
+
+    /// Returns the minimum recommended version.
+    pub fn minimum() -> Self {
+        Self::parse(MMDC_MIN_VERSION).expect("MMDC_MIN_VERSION is valid")
+    }
+
+    /// Returns true if this version meets the minimum recommended version.
+    pub fn meets_minimum(&self) -> bool {
+        self >= &Self::minimum()
+    }
+}
+
+impl std::fmt::Display for MmdcVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+    }
+}
+
+/// Detects the installed mmdc version.
+///
+/// Runs `mmdc --version` and parses the output. Returns `None` if mmdc
+/// is not installed or the version cannot be determined.
+///
+/// ## Examples
+///
+/// ```rust,no_run
+/// use biscuit_terminal::components::mermaid::{detect_mmdc_version, MmdcVersion};
+///
+/// if let Some(version) = detect_mmdc_version() {
+///     println!("mmdc version: {}", version);
+///     if !version.meets_minimum() {
+///         eprintln!("Warning: mmdc {} is older than recommended {}", version, MmdcVersion::minimum());
+///     }
+/// }
+/// ```
+pub fn detect_mmdc_version() -> Option<MmdcVersion> {
+    // Try direct mmdc first, then npx
+    let output = Command::new("mmdc")
+        .arg("--version")
+        .output()
+        .or_else(|_| {
+            Command::new("npx")
+                .args(["--yes", "mmdc", "--version"])
+                .output()
+        })
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let version_str = String::from_utf8_lossy(&output.stdout);
+    // mmdc outputs something like "10.9.1" or "@mermaid-js/mermaid-cli 10.9.1"
+    // Extract just the version number
+    let version_part = version_str
+        .split_whitespace()
+        .find(|s| s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false))?;
+
+    MmdcVersion::parse(version_part)
+}
+
 /// Mermaid theme options.
 ///
 /// These correspond to the built-in themes available in mermaid-cli.
@@ -166,6 +276,219 @@ fn command_exists(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Preset themes for quadrant charts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
+pub enum QuadrantTheme {
+    /// Default Mermaid colors (no customization)
+    #[default]
+    Default,
+    /// Magic Quadrangle style (Gartner-inspired): subtle green for top-right (leaders),
+    /// subtle red for bottom-left (niche players). Top-left and bottom-right use a
+    /// neutral color (darker in dark mode, lighter in light mode).
+    /// Colors adapt to terminal color mode.
+    #[cfg_attr(feature = "clap", clap(name = "magic-quadrangle"))]
+    MagicQuadrangle,
+}
+
+impl QuadrantTheme {
+    /// Applies this theme's colors to a MermaidConfig.
+    ///
+    /// Colors are adapted based on the terminal's color mode:
+    /// - Dark mode: Uses dark colors with subtle green/red tints
+    /// - Light mode: Uses light colors with subtle green/red tints
+    ///
+    /// The Magic Quadrangle theme uses:
+    /// - Top-right (q1): subtle green (leaders)
+    /// - Bottom-left (q3): subtle red (niche players)
+    /// - Top-left (q2) and bottom-right (q4): same neutral color (darker in dark mode, lighter in light mode)
+    pub fn apply(
+        self,
+        mut config: MermaidConfig,
+        color_mode: crate::discovery::detection::ColorMode,
+    ) -> MermaidConfig {
+        use crate::discovery::detection::ColorMode;
+
+        match self {
+            QuadrantTheme::Default => config,
+            QuadrantTheme::MagicQuadrangle => {
+                match color_mode {
+                    ColorMode::Light => {
+                        // Light mode: very subtle tints against light background
+                        // Green for top-right (quadrant-1, "leaders") - barely visible green tint
+                        config.quadrant1_fill = Some("#f6faf6".to_string());
+                        // Red for bottom-left (quadrant-3, "niche players") - barely visible red tint
+                        config.quadrant3_fill = Some("#faf6f6".to_string());
+                        // Top-left (q2) and bottom-right (q4): same light neutral grey
+                        let neutral = "#f8f8f8".to_string();
+                        config.quadrant2_fill = Some(neutral.clone());
+                        config.quadrant4_fill = Some(neutral);
+                    }
+                    ColorMode::Dark | ColorMode::Unknown => {
+                        // Dark mode: dark colors with subtle tints
+                        // Green for top-right (quadrant-1, "leaders") - dark with green undertone
+                        config.quadrant1_fill = Some("#1e2a1e".to_string());
+                        // Red for bottom-left (quadrant-3, "niche players") - dark with red undertone
+                        config.quadrant3_fill = Some("#2a1e1e".to_string());
+                        // Top-left (q2) and bottom-right (q4): same dark neutral grey
+                        let neutral = "#1a1a1a".to_string();
+                        config.quadrant2_fill = Some(neutral.clone());
+                        config.quadrant4_fill = Some(neutral);
+                    }
+                }
+                config
+            }
+        }
+    }
+
+    /// Returns the theme name as a string.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QuadrantTheme::Default => "default",
+            QuadrantTheme::MagicQuadrangle => "magic-quadrangle",
+        }
+    }
+
+    /// Parses a theme name string into a QuadrantTheme.
+    ///
+    /// Returns None if the string doesn't match a known theme.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "default" => Some(QuadrantTheme::Default),
+            "magic-quadrangle" | "magic_quadrangle" | "magicquadrangle" => {
+                Some(QuadrantTheme::MagicQuadrangle)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Configuration options for Mermaid diagrams.
+///
+/// These options are passed to mmdc via a temporary config file.
+/// Only non-None values are included in the generated config.
+#[derive(Debug, Clone, Default)]
+pub struct MermaidConfig {
+    /// Quadrant chart: point label font size (default: 12)
+    pub point_label_font_size: Option<u32>,
+    /// Quadrant chart: default point radius (default: 5)
+    pub point_radius: Option<u32>,
+    /// Quadrant chart: top-right (quadrant-1) fill color
+    pub quadrant1_fill: Option<String>,
+    /// Quadrant chart: top-left (quadrant-2) fill color
+    pub quadrant2_fill: Option<String>,
+    /// Quadrant chart: bottom-left (quadrant-3) fill color
+    pub quadrant3_fill: Option<String>,
+    /// Quadrant chart: bottom-right (quadrant-4) fill color
+    pub quadrant4_fill: Option<String>,
+}
+
+impl MermaidConfig {
+    /// Creates a new empty configuration.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the point label font size for quadrant charts.
+    pub fn with_point_label_font_size(mut self, size: u32) -> Self {
+        self.point_label_font_size = Some(size);
+        self
+    }
+
+    /// Sets the default point radius for quadrant charts.
+    pub fn with_point_radius(mut self, radius: u32) -> Self {
+        self.point_radius = Some(radius);
+        self
+    }
+
+    /// Sets the fill color for a specific quadrant.
+    ///
+    /// Quadrant numbering:
+    /// - 1 = top-right
+    /// - 2 = top-left
+    /// - 3 = bottom-left
+    /// - 4 = bottom-right
+    pub fn with_quadrant_fill(mut self, quadrant: u8, color: impl Into<String>) -> Self {
+        let color = color.into();
+        match quadrant {
+            1 => self.quadrant1_fill = Some(color),
+            2 => self.quadrant2_fill = Some(color),
+            3 => self.quadrant3_fill = Some(color),
+            4 => self.quadrant4_fill = Some(color),
+            _ => {} // Ignore invalid quadrant numbers
+        }
+        self
+    }
+
+    /// Returns true if any configuration options are set.
+    pub fn has_options(&self) -> bool {
+        self.point_label_font_size.is_some()
+            || self.point_radius.is_some()
+            || self.quadrant1_fill.is_some()
+            || self.quadrant2_fill.is_some()
+            || self.quadrant3_fill.is_some()
+            || self.quadrant4_fill.is_some()
+    }
+
+    /// Generates the JSON configuration for mmdc.
+    ///
+    /// Returns None if no options are set.
+    pub fn to_json(&self) -> Option<String> {
+        if !self.has_options() {
+            return None;
+        }
+
+        let mut quadrant_config = Vec::new();
+        let mut theme_vars = Vec::new();
+
+        // Quadrant chart specific options
+        if let Some(size) = self.point_label_font_size {
+            quadrant_config.push(format!("\"pointLabelFontSize\": {}", size));
+        }
+        if let Some(radius) = self.point_radius {
+            quadrant_config.push(format!("\"pointRadius\": {}", radius));
+        }
+
+        // Theme variables for quadrant fills
+        if let Some(ref color) = self.quadrant1_fill {
+            theme_vars.push(format!("\"quadrant1Fill\": \"{}\"", color));
+        }
+        if let Some(ref color) = self.quadrant2_fill {
+            theme_vars.push(format!("\"quadrant2Fill\": \"{}\"", color));
+        }
+        if let Some(ref color) = self.quadrant3_fill {
+            theme_vars.push(format!("\"quadrant3Fill\": \"{}\"", color));
+        }
+        if let Some(ref color) = self.quadrant4_fill {
+            theme_vars.push(format!("\"quadrant4Fill\": \"{}\"", color));
+        }
+
+        // Build the JSON structure
+        let mut sections = Vec::new();
+
+        if !quadrant_config.is_empty() {
+            sections.push(format!(
+                "\"quadrantChart\": {{\n    {}\n  }}",
+                quadrant_config.join(",\n    ")
+            ));
+        }
+
+        if !theme_vars.is_empty() {
+            sections.push(format!(
+                "\"themeVariables\": {{\n    {}\n  }}",
+                theme_vars.join(",\n    ")
+            ));
+        }
+
+        if sections.is_empty() {
+            return None;
+        }
+
+        Some(format!("{{\n  {}\n}}", sections.join(",\n  ")
+        ))
+    }
+}
+
 /// A Mermaid diagram renderer for terminal output.
 ///
 /// This struct handles rendering Mermaid diagrams to the terminal using the
@@ -201,6 +524,8 @@ pub struct MermaidRenderer {
     scale: u32,
     /// Use transparent background
     transparent_background: bool,
+    /// Additional configuration options
+    config: MermaidConfig,
 }
 
 impl MermaidRenderer {
@@ -222,6 +547,7 @@ impl MermaidRenderer {
             theme: MermaidTheme::default(),
             scale: DEFAULT_SCALE,
             transparent_background: false,
+            config: MermaidConfig::default(),
         }
     }
 
@@ -248,6 +574,7 @@ impl MermaidRenderer {
             theme: MermaidTheme::for_color_mode(color_mode),
             scale: DEFAULT_SCALE,
             transparent_background: true,
+            config: MermaidConfig::default(),
         }
     }
 
@@ -299,6 +626,27 @@ impl MermaidRenderer {
     /// ```
     pub fn with_transparent_background(mut self, transparent: bool) -> Self {
         self.transparent_background = transparent;
+        self
+    }
+
+    /// Sets additional Mermaid configuration options.
+    ///
+    /// These options are passed to mmdc via a temporary config file.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidConfig};
+    ///
+    /// let config = MermaidConfig::new()
+    ///     .with_point_label_font_size(16)
+    ///     .with_point_radius(10);
+    ///
+    /// let renderer = MermaidRenderer::new("quadrantChart\n    A: [0.5, 0.5]")
+    ///     .with_config(config);
+    /// ```
+    pub fn with_config(mut self, config: MermaidConfig) -> Self {
+        self.config = config;
         self
     }
 
@@ -389,10 +737,16 @@ impl MermaidRenderer {
     /// This method:
     /// 1. Validates diagram size (< 10KB)
     /// 2. Checks if the terminal supports image rendering
-    /// 3. Creates temporary input file with diagram instructions
-    /// 4. Executes mmdc with dark theme and icon pack support
+    /// 3. **Checks cache for existing render** (cache hit avoids mmdc invocation)
+    /// 4. If cache miss, renders via mmdc and stores in cache
     /// 5. Displays the output PNG with viuer
-    /// 6. Cleans up temporary files
+    ///
+    /// ## Caching
+    ///
+    /// Rendered diagrams are cached based on all render parameters:
+    /// - Diagram source, theme, scale, config, transparency, title, mmdc version
+    /// - Cache is stored in OS temp directory and managed by the OS
+    /// - On cache hit, mmdc is not invoked (significant performance improvement)
     ///
     /// ## Icon Pack Support
     ///
@@ -426,6 +780,8 @@ impl MermaidRenderer {
     #[cfg(feature = "viuer")]
     #[tracing::instrument(skip(self))]
     pub fn render_for_terminal(&self) -> Result<(), MermaidRenderError> {
+        use super::mermaid_cache::{MermaidCache, MermaidCacheKey};
+
         // 1. Validate size
         if self.instructions.len() > MAX_DIAGRAM_SIZE {
             tracing::error!(
@@ -445,10 +801,44 @@ impl MermaidRenderer {
             return Err(MermaidRenderError::NoImageSupport);
         }
 
-        // 3. Render the diagram to a temporary PNG file
-        let output_path = self.render_to_temp_png()?;
+        // 3. Get mmdc version (with warning for old versions)
+        let mmdc_version = self.get_mmdc_version_with_warning();
 
-        // 4. Display with viuer
+        // 4. Check cache
+        let cache = MermaidCache::new();
+        let cache_key = MermaidCacheKey::new(
+            &self.instructions,
+            self.theme,
+            self.scale,
+            &self.config,
+            self.transparent_background,
+            self.title.as_deref(),
+            &mmdc_version,
+        );
+
+        let output_path = if let Some(cached_path) = cache.get(&cache_key) {
+            // Cache hit - use cached render
+            tracing::info!(path = ?cached_path, "Using cached mermaid render");
+            cached_path
+        } else {
+            // Cache miss - render and store
+            let rendered_path = self.render_to_temp_png()?;
+
+            // Store in cache (ignore errors - cache is optional)
+            match cache.store(&cache_key, &rendered_path) {
+                Ok(cached_path) => {
+                    // Clean up the temp file, use cached version
+                    let _ = std::fs::remove_file(&rendered_path);
+                    cached_path
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to cache mermaid render");
+                    rendered_path
+                }
+            }
+        };
+
+        // 5. Display with viuer
         let config = viuer::Config {
             absolute_offset: false,
             ..Default::default()
@@ -461,11 +851,37 @@ impl MermaidRenderer {
 
         tracing::debug!("Displayed diagram in terminal");
 
-        // 5. Cleanup output file
-        let _ = std::fs::remove_file(&output_path);
-        tracing::trace!("Cleaned up temporary output file");
-
         Ok(())
+    }
+
+    /// Gets the mmdc version, caching the result and warning if it's below minimum.
+    fn get_mmdc_version_with_warning(&self) -> String {
+        use std::sync::OnceLock;
+
+        static MMDC_VERSION: OnceLock<String> = OnceLock::new();
+        static VERSION_WARNING_SHOWN: OnceLock<bool> = OnceLock::new();
+
+        let version = MMDC_VERSION.get_or_init(|| {
+            detect_mmdc_version()
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        });
+
+        // Show warning once if version is known and below minimum
+        if version != "unknown" {
+            VERSION_WARNING_SHOWN.get_or_init(|| {
+                if let Some(parsed) = MmdcVersion::parse(version) && !parsed.meets_minimum() {
+                    eprintln!(
+                        "Warning: mmdc {} is older than recommended {}. Consider updating: npm update -g @mermaid-js/mermaid-cli",
+                        parsed, MmdcVersion::minimum()
+                    );
+                    return true;
+                }
+                false
+            });
+        }
+
+        version.clone()
     }
 
     /// Renders the diagram to the terminal (stub when viuer is disabled).
@@ -502,6 +918,16 @@ impl MermaidRenderer {
 
         // Write instructions to input file
         std::fs::write(input_file.path(), &self.instructions)?;
+
+        // Create config file if we have configuration options
+        let config_file = if let Some(config_json) = self.config.to_json() {
+            let cf = Builder::new().suffix(".json").tempfile()?;
+            std::fs::write(cf.path(), &config_json)?;
+            tracing::debug!(path = ?cf.path(), "Created temporary config file");
+            Some(cf)
+        } else {
+            None
+        };
 
         // Output path (alongside input, will be returned to caller for cleanup)
         let output_path = input_file.path().with_extension("png");
@@ -550,6 +976,11 @@ impl MermaidRenderer {
         // Add transparent background if requested
         if self.transparent_background {
             cmd.args(["--backgroundColor", "transparent"]);
+        }
+
+        // Add config file if we have one
+        if let Some(ref cf) = config_file {
+            cmd.args(["--configFile", cf.path().to_str().unwrap()]);
         }
 
         // Add icon packs
@@ -623,6 +1054,15 @@ impl MermaidRenderer {
         let input_file = Builder::new().suffix(".mmd").tempfile()?;
         std::fs::write(input_file.path(), &self.instructions)?;
 
+        // Create config file if we have configuration options
+        let config_file = if let Some(config_json) = self.config.to_json() {
+            let cf = Builder::new().suffix(".json").tempfile()?;
+            std::fs::write(cf.path(), &config_json)?;
+            Some(cf)
+        } else {
+            None
+        };
+
         // Determine how to run mmdc
         let use_npx = if command_exists("mmdc") {
             false
@@ -655,6 +1095,11 @@ impl MermaidRenderer {
         // Add transparent background if requested
         if self.transparent_background {
             cmd.args(["--backgroundColor", "transparent"]);
+        }
+
+        // Add config file if we have one
+        if let Some(ref cf) = config_file {
+            cmd.args(["--configFile", cf.path().to_str().unwrap()]);
         }
 
         // Add icon packs
@@ -1070,5 +1515,207 @@ mod tests {
         let debug_str = format!("{:?}", renderer);
         assert!(debug_str.contains("MermaidRenderer"));
         assert!(debug_str.contains("flowchart"));
+    }
+
+    #[test]
+    fn test_mermaid_config_default() {
+        let config = MermaidConfig::new();
+        assert!(config.point_label_font_size.is_none());
+        assert!(config.point_radius.is_none());
+        assert!(!config.has_options());
+        assert!(config.to_json().is_none());
+    }
+
+    #[test]
+    fn test_mermaid_config_with_point_label_font_size() {
+        let config = MermaidConfig::new().with_point_label_font_size(16);
+        assert_eq!(config.point_label_font_size, Some(16));
+        assert!(config.has_options());
+        let json = config.to_json().unwrap();
+        assert!(json.contains("\"pointLabelFontSize\": 16"));
+    }
+
+    #[test]
+    fn test_mermaid_config_with_point_radius() {
+        let config = MermaidConfig::new().with_point_radius(10);
+        assert_eq!(config.point_radius, Some(10));
+        assert!(config.has_options());
+        let json = config.to_json().unwrap();
+        assert!(json.contains("\"pointRadius\": 10"));
+    }
+
+    #[test]
+    fn test_mermaid_config_with_both_options() {
+        let config = MermaidConfig::new()
+            .with_point_label_font_size(14)
+            .with_point_radius(8);
+        assert_eq!(config.point_label_font_size, Some(14));
+        assert_eq!(config.point_radius, Some(8));
+        assert!(config.has_options());
+        let json = config.to_json().unwrap();
+        assert!(json.contains("\"pointLabelFontSize\": 14"));
+        assert!(json.contains("\"pointRadius\": 8"));
+        assert!(json.contains("\"quadrantChart\""));
+    }
+
+    #[test]
+    fn test_mermaid_renderer_with_config() {
+        let config = MermaidConfig::new()
+            .with_point_label_font_size(16)
+            .with_point_radius(12);
+        let renderer = MermaidRenderer::new("quadrantChart\n    A: [0.5, 0.5]")
+            .with_config(config);
+        // Just verify it builds without panicking
+        assert!(renderer.instructions().contains("quadrantChart"));
+    }
+
+    #[test]
+    fn test_quadrant_theme_default() {
+        use crate::discovery::detection::ColorMode;
+        assert_eq!(QuadrantTheme::Default.as_str(), "default");
+        let config = QuadrantTheme::Default.apply(MermaidConfig::new(), ColorMode::Dark);
+        assert!(config.quadrant1_fill.is_none());
+        assert!(config.quadrant3_fill.is_none());
+    }
+
+    #[test]
+    fn test_quadrant_theme_magic_quadrangle_dark() {
+        use crate::discovery::detection::ColorMode;
+        assert_eq!(QuadrantTheme::MagicQuadrangle.as_str(), "magic-quadrangle");
+        let config = QuadrantTheme::MagicQuadrangle.apply(MermaidConfig::new(), ColorMode::Dark);
+        // Dark mode: dark colors with subtle tints
+        // q1 (top-right): green tint for "leaders"
+        assert_eq!(config.quadrant1_fill, Some("#1e2a1e".to_string()));
+        // q3 (bottom-left): red tint for "niche players"
+        assert_eq!(config.quadrant3_fill, Some("#2a1e1e".to_string()));
+        // q2 (top-left) and q4 (bottom-right): same dark neutral grey
+        assert_eq!(config.quadrant2_fill, Some("#1a1a1a".to_string()));
+        assert_eq!(config.quadrant4_fill, Some("#1a1a1a".to_string()));
+    }
+
+    #[test]
+    fn test_quadrant_theme_magic_quadrangle_light() {
+        use crate::discovery::detection::ColorMode;
+        let config = QuadrantTheme::MagicQuadrangle.apply(MermaidConfig::new(), ColorMode::Light);
+        // Light mode: light colors with subtle tints
+        // q1 (top-right): green tint for "leaders"
+        assert_eq!(config.quadrant1_fill, Some("#f6faf6".to_string()));
+        // q3 (bottom-left): red tint for "niche players"
+        assert_eq!(config.quadrant3_fill, Some("#faf6f6".to_string()));
+        // q2 (top-left) and q4 (bottom-right): same light neutral grey
+        assert_eq!(config.quadrant2_fill, Some("#f8f8f8".to_string()));
+        assert_eq!(config.quadrant4_fill, Some("#f8f8f8".to_string()));
+    }
+
+    #[test]
+    fn test_quadrant_theme_from_str() {
+        assert_eq!(QuadrantTheme::parse("default"), Some(QuadrantTheme::Default));
+        assert_eq!(QuadrantTheme::parse("magic-quadrangle"), Some(QuadrantTheme::MagicQuadrangle));
+        assert_eq!(QuadrantTheme::parse("magic_quadrangle"), Some(QuadrantTheme::MagicQuadrangle));
+        assert_eq!(QuadrantTheme::parse("MAGIC-QUADRANGLE"), Some(QuadrantTheme::MagicQuadrangle));
+        assert_eq!(QuadrantTheme::parse("unknown"), None);
+    }
+
+    #[test]
+    fn test_mermaid_config_with_quadrant_fill() {
+        let config = MermaidConfig::new()
+            .with_quadrant_fill(1, "#ff0000")
+            .with_quadrant_fill(3, "#00ff00");
+        assert_eq!(config.quadrant1_fill, Some("#ff0000".to_string()));
+        assert_eq!(config.quadrant3_fill, Some("#00ff00".to_string()));
+        assert!(config.quadrant2_fill.is_none());
+        assert!(config.quadrant4_fill.is_none());
+    }
+
+    #[test]
+    fn test_mermaid_config_quadrant_fill_json() {
+        let config = MermaidConfig::new()
+            .with_quadrant_fill(1, "#e8f5e9")
+            .with_quadrant_fill(3, "#ffebee");
+        let json = config.to_json().unwrap();
+        assert!(json.contains("\"themeVariables\""));
+        assert!(json.contains("\"quadrant1Fill\": \"#e8f5e9\""));
+        assert!(json.contains("\"quadrant3Fill\": \"#ffebee\""));
+    }
+
+    #[test]
+    fn test_mermaid_config_combined_options_json() {
+        let config = MermaidConfig::new()
+            .with_point_label_font_size(18)
+            .with_quadrant_fill(1, "#e8f5e9");
+        let json = config.to_json().unwrap();
+        assert!(json.contains("\"quadrantChart\""));
+        assert!(json.contains("\"pointLabelFontSize\": 18"));
+        assert!(json.contains("\"themeVariables\""));
+        assert!(json.contains("\"quadrant1Fill\": \"#e8f5e9\""));
+    }
+
+    // === MmdcVersion Tests ===
+
+    #[test]
+    fn test_mmdc_version_parse_valid() {
+        let v = MmdcVersion::parse("10.6.0").unwrap();
+        assert_eq!(v.major, 10);
+        assert_eq!(v.minor, 6);
+        assert_eq!(v.patch, 0);
+
+        let v2 = MmdcVersion::parse("11.0.1").unwrap();
+        assert_eq!(v2.major, 11);
+        assert_eq!(v2.minor, 0);
+        assert_eq!(v2.patch, 1);
+    }
+
+    #[test]
+    fn test_mmdc_version_parse_with_whitespace() {
+        let v = MmdcVersion::parse("  10.9.1  ").unwrap();
+        assert_eq!(v.major, 10);
+        assert_eq!(v.minor, 9);
+        assert_eq!(v.patch, 1);
+    }
+
+    #[test]
+    fn test_mmdc_version_parse_invalid() {
+        assert!(MmdcVersion::parse("invalid").is_none());
+        assert!(MmdcVersion::parse("10.6").is_none());
+        assert!(MmdcVersion::parse("10").is_none());
+        assert!(MmdcVersion::parse("").is_none());
+        assert!(MmdcVersion::parse("a.b.c").is_none());
+    }
+
+    #[test]
+    fn test_mmdc_version_comparison() {
+        let v10_6_0 = MmdcVersion::parse("10.6.0").unwrap();
+        let v10_6_1 = MmdcVersion::parse("10.6.1").unwrap();
+        let v10_7_0 = MmdcVersion::parse("10.7.0").unwrap();
+        let v11_0_0 = MmdcVersion::parse("11.0.0").unwrap();
+        let v9_9_9 = MmdcVersion::parse("9.9.9").unwrap();
+
+        assert!(v10_6_1 > v10_6_0);
+        assert!(v10_7_0 > v10_6_0);
+        assert!(v11_0_0 > v10_6_0);
+        assert!(v9_9_9 < v10_6_0);
+    }
+
+    #[test]
+    fn test_mmdc_version_minimum() {
+        let min = MmdcVersion::minimum();
+        assert_eq!(min.to_string(), MMDC_MIN_VERSION);
+    }
+
+    #[test]
+    fn test_mmdc_version_meets_minimum() {
+        let old = MmdcVersion::parse("9.5.0").unwrap();
+        let exact = MmdcVersion::parse(MMDC_MIN_VERSION).unwrap();
+        let newer = MmdcVersion::parse("11.0.0").unwrap();
+
+        assert!(!old.meets_minimum());
+        assert!(exact.meets_minimum());
+        assert!(newer.meets_minimum());
+    }
+
+    #[test]
+    fn test_mmdc_version_display() {
+        let v = MmdcVersion::parse("10.9.1").unwrap();
+        assert_eq!(v.to_string(), "10.9.1");
     }
 }

@@ -85,6 +85,71 @@ bt flowchart --json "A --> B"                      # Output as JSON
 - Syntax errors show the location and expected tokens
 - Returns non-zero exit code on errors
 
+### Quadrant Chart Rendering
+
+Render Mermaid quadrant charts directly in the terminal:
+
+```bash
+bt quadrant "Item A: [0.3, 0.6]" "Item B: [0.7, 0.4]"
+bt quadrant --x-axis "Low --> High" --y-axis "Small --> Large" "Item: [0.5, 0.5]"
+bt quadrant --title "Priority Matrix" "Task A: [0.2, 0.8]" "Task B: [0.6, 0.3]"
+bt quadrant --theme magic-quadrangle "Leaders: [0.8, 0.8]" "Niche: [0.2, 0.2]"
+bt quadrant --inverse "Item: [0.5, 0.5]"               # Solid background, inverted colors
+bt quadrant --width 60% "Item: [0.5, 0.5]"             # Render at 60% terminal width
+bt quadrant --json "Item: [0.5, 0.5]"                  # Output as JSON
+```
+
+**Data points** are specified as `"Label: [x, y]"` where x and y are values between 0.0 and 1.0.
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-x`/`--x-axis` | X-axis label (e.g., "Low Reach --> High Reach") |
+| `-y`/`--y-axis` | Y-axis label (e.g., "Low Engagement --> High Engagement") |
+| `-t`/`--title` | Chart title (appears at top of diagram) |
+| `--top-right`/`--tr` | Top-right quadrant label (Mermaid's quadrant-1) |
+| `--top-left`/`--tl` | Top-left quadrant label (Mermaid's quadrant-2) |
+| `--bottom-left`/`--bl` | Bottom-left quadrant label (Mermaid's quadrant-3) |
+| `--bottom-right`/`--br` | Bottom-right quadrant label (Mermaid's quadrant-4) |
+| `--point-radius` | Default point radius (default: 5) |
+| `--label-size` | Point label font size (default: 18 for ≤6 points, 15 for >6) |
+| `--theme` | Color theme preset (`default`, `magic-quadrangle`) |
+| `--q1-fill` to `--q4-fill` | Individual quadrant fill colors (hex) |
+| `--inverse` | Solid background with contrasting colors |
+| `-w`/`--width` | Width: percentages (`50%`), characters (`80ch`), or `fill` |
+
+**Quadrant numbering** (matches Mermaid convention):
+```
+        +-------------+-------------+
+        |  quadrant-2 |  quadrant-1 |
+        |  (top-left) | (top-right) |
+        +-------------+-------------+
+        |  quadrant-3 |  quadrant-4 |
+        |(bottom-left)|(bottom-right)|
+        +-------------+-------------+
+```
+
+**Themes:**
+- `default`: Standard Mermaid colors
+- `magic-quadrangle`: Gartner-style with subtle green top-right (leaders), subtle red bottom-left (niche players), and neutral colors for top-left and bottom-right. Colors automatically adapt to terminal light/dark mode.
+
+> **Tip:** With shell completions enabled, typing `--theme <TAB>` will show available theme options.
+
+**Inline point styling** - individual points can override defaults using comma-separated properties:
+```bash
+bt quadrant "Item A: [0.3, 0.6] color: #ff3300, radius: 12" \
+            "Item B: [0.7, 0.4] color: #00ff00"
+```
+
+Available inline properties: `color`, `radius`, `stroke-color`, `stroke-width`
+
+> **Note:** Multiple properties must be comma-separated. Space-only separation causes parsing errors.
+
+**Requirements:**
+- `mmdc` (Mermaid CLI): Install with `npm install -g @mermaid-js/mermaid-cli`
+- Falls back to `npx` if mmdc is not installed
+
 ### Git Graph Rendering
 
 Render Mermaid git graphs directly in the terminal:
@@ -183,6 +248,14 @@ bt flowchart "Start --> Process --> End"
 # Render a git graph showing a feature branch workflow
 bt git-graph "commit" "branch feature" "commit" "commit" "checkout main" "merge feature"
 
+# Render a quadrant chart for priority analysis
+bt quadrant --title "Priority Matrix" \
+            --x-axis "Low Effort --> High Effort" \
+            --y-axis "Low Impact --> High Impact" \
+            --top-left "Quick Wins" --top-right "Major Projects" \
+            --bottom-left "Fill-ins" --bottom-right "Thankless Tasks" \
+            "Task A: [0.2, 0.8]" "Task B: [0.7, 0.3]"
+
 # Analyze escape code output
 echo -e "\x1b[32mGreen\x1b[0m" | xargs bt
 ```
@@ -191,6 +264,19 @@ echo -e "\x1b[32mGreen\x1b[0m" | xargs bt
 
 - `NO_COLOR`: When set, disables colored output in pretty-print mode
 - `RUST_LOG`: Enables tracing output (e.g., `RUST_LOG=debug bt`)
+
+## Library Integration
+
+This CLI uses `biscuit-terminal` with the `clap` feature enabled, which provides:
+- Shell completions for enum-based arguments (e.g., `--theme` shows `default`, `magic-quadrangle`)
+- Automatic help text listing valid enum values
+
+If you're building your own CLI using `biscuit-terminal`, enable the feature:
+
+```toml
+[dependencies]
+biscuit-terminal = { version = "0.1", features = ["clap"] }
+```
 
 ## CLI Documentation Guidelines
 

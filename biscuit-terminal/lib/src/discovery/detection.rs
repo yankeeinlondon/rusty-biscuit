@@ -567,8 +567,14 @@ pub fn image_support_with_reason() -> ImageSupportResult {
         };
     }
 
-    // When viuer feature is enabled, use its runtime detection first
-    // viuer actually queries the terminal, so it's more accurate than env heuristics
+    // Check for terminals with KNOWN Kitty support first (via environment variables).
+    // This avoids sending terminal probes that can cause response leakage issues
+    // on some terminals (notably Ghostty where responses arrive asynchronously).
+    if let Some(result) = image_support_from_known_terminals() {
+        return result;
+    }
+
+    // For unknown terminals, use viuer's runtime detection if available
     #[cfg(feature = "viuer")]
     {
         use viuer::{KittySupport, get_kitty_support, is_iterm_supported};
@@ -621,9 +627,98 @@ pub fn image_support_with_reason() -> ImageSupportResult {
         );
     }
 
-    // Fallback: environment variable heuristics
-    // These are less accurate but work when viuer detection fails or is disabled
+    // Fallback: environment variable heuristics for remaining cases
     image_support_from_env()
+}
+
+/// Detect image support for terminals with KNOWN Kitty/iTerm2 support.
+///
+/// This function checks environment variables to identify terminals where we
+/// definitively know the image protocol support without needing to probe.
+/// Probing (via viuer) can cause issues on some terminals like Ghostty where
+/// terminal responses arrive asynchronously and leak to the display.
+///
+/// Returns `Some(result)` if a known terminal is detected, `None` otherwise.
+fn image_support_from_known_terminals() -> Option<ImageSupportResult> {
+    // Terminals with definitive Kitty Graphics Protocol support.
+    // These don't need probing - we know they support it.
+    const KITTY_TERMINALS: &[&str] = &[
+        "ghostty",  // Ghostty supports Kitty protocol on all platforms
+        "kitty",    // Kitty is the originator of the protocol
+        "WezTerm",  // WezTerm has full Kitty support
+        "Warp",     // Warp supports Kitty protocol
+        "konsole",  // Konsole supports Kitty protocol
+        "wast",     // Wast supports Kitty protocol
+    ];
+
+    // Check TERM_PROGRAM for known Kitty-supporting terminals
+    if let Ok(term_program) = env::var("TERM_PROGRAM") {
+        for &known in KITTY_TERMINALS {
+            if term_program.eq_ignore_ascii_case(known) {
+                tracing::debug!(
+                    image_support = "Kitty",
+                    term_program = %term_program,
+                    method = "known_terminal",
+                    "Detected Kitty support from known terminal (no probe needed)"
+                );
+                return Some(ImageSupportResult {
+                    support: ImageSupport::Kitty,
+                    reason: format!(
+                        "{} is known to support Kitty graphics protocol",
+                        term_program
+                    ),
+                    method: "known_terminal".to_string(),
+                });
+            }
+        }
+
+        // iTerm2 - known to support its native protocol (prefer over Kitty probing)
+        if term_program == "iTerm.app" || term_program.eq_ignore_ascii_case("iterm2") {
+            tracing::debug!(
+                image_support = "ITerm",
+                term_program = %term_program,
+                method = "known_terminal",
+                "Detected iTerm2 support from known terminal (no probe needed)"
+            );
+            return Some(ImageSupportResult {
+                support: ImageSupport::ITerm,
+                reason: format!("{} is known to support iTerm2 inline images", term_program),
+                method: "known_terminal".to_string(),
+            });
+        }
+    }
+
+    // Check TERM variable for kitty
+    if let Ok(term) = env::var("TERM") && term.contains("kitty") {
+        tracing::debug!(
+            image_support = "Kitty",
+            term = %term,
+            method = "known_terminal",
+            "Detected Kitty support from TERM variable (no probe needed)"
+        );
+        return Some(ImageSupportResult {
+            support: ImageSupport::Kitty,
+            reason: format!("TERM={} indicates Kitty terminal", term),
+            method: "known_terminal".to_string(),
+        });
+    }
+
+    // Check iTerm2-specific environment variables
+    if env::var("ITERM_SESSION_ID").is_ok() || env::var("ITERM_PROFILE").is_ok() {
+        tracing::debug!(
+            image_support = "ITerm",
+            method = "known_terminal",
+            "Detected iTerm2 from session environment variables (no probe needed)"
+        );
+        return Some(ImageSupportResult {
+            support: ImageSupport::ITerm,
+            reason: "iTerm2 detected from ITERM_SESSION_ID or ITERM_PROFILE".to_string(),
+            method: "known_terminal".to_string(),
+        });
+    }
+
+    // No known terminal detected - caller should use probing or other heuristics
+    None
 }
 
 /// Detect image support using environment variable heuristics only.
