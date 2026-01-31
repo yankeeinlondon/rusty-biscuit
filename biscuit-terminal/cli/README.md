@@ -60,11 +60,25 @@ Render Mermaid flowcharts directly in the terminal:
 ```bash
 bt flowchart "A --> B --> C"                    # Left-to-right (default)
 bt flowchart --vertical "A --> B --> C"         # Top-down
+bt flowchart --inverse "A --> B --> C"          # Solid background, inverted colors
 bt flowchart "A[Input] --> B{Decision}" "B -->|Yes| C[Output]"
 bt flowchart --json "A --> B"                   # Output as JSON
 ```
 
-Requires `mmdc` (Mermaid CLI) or `npx` for rendering. Falls back to a code block if image rendering is not supported.
+**Features:**
+- **Color mode detection**: Automatically uses light or dark theme based on terminal background
+- **Transparent background**: Blends seamlessly with terminal (default)
+- **Inverse mode**: Solid background with contrasting colors (`--inverse`)
+- **High resolution**: 2x scale for sharp rendering on modern displays
+
+**Requirements:**
+- `mmdc` (Mermaid CLI): Install with `npm install -g @mermaid-js/mermaid-cli`
+- Falls back to `npx` if mmdc is not installed
+- Falls back to a code block if image rendering is not supported
+
+**Error handling:**
+- Syntax errors show the location and expected tokens
+- Returns non-zero exit code on errors
 
 ### Shell Completions
 

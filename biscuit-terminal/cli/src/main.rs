@@ -105,10 +105,19 @@ enum Command {
     ///   bt flowchart "A --> B --> C"
     ///   bt flowchart --vertical "Start --> Middle --> End"
     ///   bt flowchart "A[Input] --> B{Decision}" "B -->|Yes| C[Output]"
+    ///   bt flowchart --inverse "A --> B"  # Solid background with inverted colors
     Flowchart {
         /// Render top-down instead of left-right
         #[arg(long)]
         vertical: bool,
+
+        /// Use inverted colors with solid background
+        ///
+        /// Instead of transparent background matching the terminal, renders with
+        /// a solid background (white in dark mode, black in light mode) and
+        /// contrasting shapes.
+        #[arg(long)]
+        inverse: bool,
 
         /// Flowchart node and edge definitions (e.g., "A --> B --> C")
         #[arg(value_name = "CONTENT", required = true)]
@@ -307,9 +316,10 @@ fn main() -> color_eyre::Result<()> {
         }
         Some(Command::Flowchart {
             vertical,
+            inverse,
             ref content,
         }) => {
-            return render_flowchart(vertical, content, args.json);
+            return render_flowchart(vertical, inverse, content, args.json);
         }
         None => {
             // Default behavior: content analysis or terminal metadata
@@ -473,7 +483,14 @@ fn render_image(image_spec: &str) -> color_eyre::Result<()> {
 /// Creates a Mermaid flowchart with the given content and renders it
 /// using the MermaidRenderer. Default direction is left-right (LR),
 /// use `vertical` for top-down (TD).
-fn render_flowchart(vertical: bool, content: &[String], json: bool) -> color_eyre::Result<()> {
+fn render_flowchart(
+    vertical: bool,
+    inverse: bool,
+    content: &[String],
+    json: bool,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::mermaid::MermaidTheme;
+
     let direction = if vertical { "TD" } else { "LR" };
     let body = content.join(" ");
     let instructions = format!("flowchart {}\n    {}", direction, body);
@@ -482,21 +499,30 @@ fn render_flowchart(vertical: bool, content: &[String], json: bool) -> color_eyr
         let output = serde_json::json!({
             "type": "flowchart",
             "direction": direction,
+            "inverse": inverse,
             "instructions": instructions,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
         return Ok(());
     }
 
-    let renderer = MermaidRenderer::new(&instructions);
+    // Configure renderer based on inverse flag
+    let renderer = if inverse {
+        // Inverse: solid background with opposite theme
+        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        MermaidRenderer::new(&instructions)
+            .with_theme(theme)
+            .with_transparent_background(false)
+    } else {
+        // Default: transparent background with theme matching terminal
+        MermaidRenderer::for_terminal(&instructions)
+    };
 
     // Render the diagram to a temp PNG file
     let png_path = match renderer.render_to_temp_png() {
         Ok(path) => path,
         Err(e) => {
-            eprintln!("Failed to render flowchart: {}", e);
-            renderer.print_fallback();
-            return Ok(());
+            return handle_flowchart_error(e, &instructions);
         }
     };
 
@@ -509,8 +535,9 @@ fn render_flowchart(vertical: bool, content: &[String], json: bool) -> color_eyr
     match term_image.render_to_terminal(&terminal) {
         Ok(output) => print!("{}", output),
         Err(e) => {
-            eprintln!("Failed to display flowchart: {}", e);
-            renderer.print_fallback();
+            // Clean up before returning error
+            let _ = std::fs::remove_file(&png_path);
+            return Err(color_eyre::eyre::eyre!("Failed to display flowchart: {}", e));
         }
     }
 
@@ -518,6 +545,82 @@ fn render_flowchart(vertical: bool, content: &[String], json: bool) -> color_eyr
     let _ = std::fs::remove_file(&png_path);
 
     Ok(())
+}
+
+/// Handle flowchart rendering errors with user-friendly output.
+///
+/// Parses mmdc errors to extract syntax information and formats
+/// them nicely without JavaScript callstacks.
+fn handle_flowchart_error(
+    error: biscuit_terminal::components::mermaid::MermaidRenderError,
+    instructions: &str,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::mermaid::MermaidRenderError;
+
+    // Check for NO_COLOR
+    let no_color = std::env::var("NO_COLOR").is_ok();
+    let red = if no_color { "" } else { "\x1b[31m" };
+    let bold = if no_color { "" } else { "\x1b[1m" };
+    let dim = if no_color { "" } else { "\x1b[2m" };
+    let reset = if no_color { "" } else { "\x1b[0m" };
+
+    match error {
+        MermaidRenderError::MmdcExecutionFailed { stderr, .. } => {
+            // Check if this is a parse/syntax error
+            if stderr.contains("Parse error") || stderr.contains("Expecting") {
+                // Add breathing room before error
+                eprintln!();
+                eprintln!("{}{}Error:{} Mermaid Syntax Error\n", red, bold, reset);
+
+                // Extract useful lines from stderr (skip JS callstack and useless line numbers)
+                for line in stderr.lines() {
+                    // Include the context line that shows actual mermaid code (starts with ...)
+                    if line.starts_with("...") {
+                        eprintln!("{}", line);
+                    }
+                    // Include the error pointer line (contains ^ and dashes)
+                    else if line.contains("^") && line.chars().filter(|c| *c == '-').count() > 3 {
+                        eprintln!("{}", line);
+                    }
+                    // Include the "Expecting" line
+                    else if line.starts_with("Expecting") || line.contains("Expecting '") {
+                        eprintln!("{}", line);
+                    }
+                    // Skip "Error: Parse error on line X:" - not useful to CLI users
+                    // Skip JS callstack lines (contain file paths or "at ")
+                }
+
+                // Show the mermaid block that was defined
+                eprintln!(
+                    "\n{}Mermaid block was defined as:{}\n",
+                    dim, reset
+                );
+                eprintln!("```mermaid\n{}\n```", instructions);
+            } else {
+                // Non-syntax error, show the full error (with breathing room)
+                eprintln!();
+                eprintln!("{}{}Error:{} {}", red, bold, reset, stderr);
+            }
+        }
+        MermaidRenderError::MmdcNotFound => {
+            eprintln!(
+                "{}{}Error:{} mmdc CLI not found.\n\nInstall with: npm install -g @mermaid-js/mermaid-cli",
+                red, bold, reset
+            );
+        }
+        MermaidRenderError::NpmNotFound => {
+            eprintln!(
+                "{}{}Error:{} npm not found.\n\nInstall Node.js and npm to render Mermaid diagrams.",
+                red, bold, reset
+            );
+        }
+        _ => {
+            eprintln!("{}{}Error:{} {}", red, bold, reset, error);
+        }
+    }
+
+    // Return error to get non-zero exit code
+    std::process::exit(1);
 }
 
 fn collect_metadata() -> TerminalMetadata {

@@ -56,6 +56,65 @@ const ICON_PACKS: &[&str] = &[
     "@iconify-json/system-uicons",
 ];
 
+/// Default scale factor for rendering (2x for better resolution on modern displays).
+const DEFAULT_SCALE: u32 = 2;
+
+/// Mermaid theme options.
+///
+/// These correspond to the built-in themes available in mermaid-cli.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MermaidTheme {
+    /// Dark theme - light text on dark background (default for dark terminals)
+    #[default]
+    Dark,
+    /// Default/light theme - dark text on light background
+    Default,
+    /// Forest theme - green tones
+    Forest,
+    /// Neutral theme - grayscale, works well with transparent backgrounds
+    Neutral,
+}
+
+impl MermaidTheme {
+    /// Returns the theme string for mmdc CLI.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MermaidTheme::Dark => "dark",
+            MermaidTheme::Default => "default",
+            MermaidTheme::Forest => "forest",
+            MermaidTheme::Neutral => "neutral",
+        }
+    }
+
+    /// Returns the appropriate theme for a given color mode.
+    ///
+    /// - Dark terminals get `Dark` theme
+    /// - Light terminals get `Default` theme
+    /// - Unknown defaults to `Dark`
+    pub fn for_color_mode(mode: crate::discovery::detection::ColorMode) -> Self {
+        use crate::discovery::detection::ColorMode;
+        match mode {
+            ColorMode::Light => MermaidTheme::Default,
+            ColorMode::Dark | ColorMode::Unknown => MermaidTheme::Dark,
+        }
+    }
+
+    /// Returns the inverse theme (for solid background rendering).
+    ///
+    /// - Dark → Default (light)
+    /// - Default → Dark
+    /// - Forest → Dark
+    /// - Neutral → Dark
+    pub fn inverse(self) -> Self {
+        match self {
+            MermaidTheme::Dark => MermaidTheme::Default,
+            MermaidTheme::Default => MermaidTheme::Dark,
+            MermaidTheme::Forest => MermaidTheme::Dark,
+            MermaidTheme::Neutral => MermaidTheme::Dark,
+        }
+    }
+}
+
 /// Errors that can occur during terminal rendering of Mermaid diagrams.
 #[derive(Error, Debug)]
 pub enum MermaidRenderError {
@@ -136,10 +195,18 @@ pub struct MermaidRenderer {
     instructions: String,
     /// Optional title for alt text
     title: Option<String>,
+    /// Theme for rendering
+    theme: MermaidTheme,
+    /// Scale factor for output resolution (default: 2)
+    scale: u32,
+    /// Use transparent background
+    transparent_background: bool,
 }
 
 impl MermaidRenderer {
     /// Creates a new MermaidRenderer with the given diagram instructions.
+    ///
+    /// Uses default settings: dark theme, 2x scale, opaque background.
     ///
     /// ## Examples
     ///
@@ -152,7 +219,87 @@ impl MermaidRenderer {
         Self {
             instructions: instructions.into(),
             title: None,
+            theme: MermaidTheme::default(),
+            scale: DEFAULT_SCALE,
+            transparent_background: false,
         }
+    }
+
+    /// Creates a MermaidRenderer configured for the current terminal.
+    ///
+    /// Automatically detects color mode and sets appropriate theme.
+    /// Uses transparent background for better terminal integration.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust,no_run
+    /// use biscuit_terminal::components::mermaid::MermaidRenderer;
+    ///
+    /// let renderer = MermaidRenderer::for_terminal("flowchart LR\n    A --> B");
+    /// // Theme and background are automatically configured
+    /// ```
+    pub fn for_terminal<S: Into<String>>(instructions: S) -> Self {
+        use crate::terminal::Terminal;
+
+        let color_mode = Terminal::color_mode();
+        Self {
+            instructions: instructions.into(),
+            title: None,
+            theme: MermaidTheme::for_color_mode(color_mode),
+            scale: DEFAULT_SCALE,
+            transparent_background: true,
+        }
+    }
+
+    /// Sets the theme for rendering.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidTheme};
+    ///
+    /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
+    ///     .with_theme(MermaidTheme::Neutral);
+    /// ```
+    pub fn with_theme(mut self, theme: MermaidTheme) -> Self {
+        self.theme = theme;
+        self
+    }
+
+    /// Sets the scale factor for output resolution.
+    ///
+    /// Higher values produce sharper images but larger files.
+    /// Default is 2 (good for most modern displays).
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_terminal::components::mermaid::MermaidRenderer;
+    ///
+    /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
+    ///     .with_scale(3); // Extra sharp
+    /// ```
+    pub fn with_scale(mut self, scale: u32) -> Self {
+        self.scale = scale.max(1); // Minimum scale of 1
+        self
+    }
+
+    /// Enables transparent background for better terminal integration.
+    ///
+    /// When enabled, the diagram background will be transparent,
+    /// allowing it to blend with the terminal's background color.
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// use biscuit_terminal::components::mermaid::MermaidRenderer;
+    ///
+    /// let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
+    ///     .with_transparent_background(true);
+    /// ```
+    pub fn with_transparent_background(mut self, transparent: bool) -> Self {
+        self.transparent_background = transparent;
+        self
     }
 
     /// Sets a title for the diagram (used for alt text).
@@ -394,13 +541,21 @@ impl MermaidRenderer {
             Command::new("mmdc")
         };
 
-        let output = cmd
-            .args(["-i", input_file.path().to_str().unwrap()])
+        // Add common arguments
+        cmd.args(["-i", input_file.path().to_str().unwrap()])
             .args(["-o", output_path.to_str().unwrap()])
-            .args(["--theme", "dark"])
-            .arg("--iconPacks")
-            .args(ICON_PACKS)
-            .output();
+            .args(["--theme", self.theme.as_str()])
+            .args(["--scale", &self.scale.to_string()]);
+
+        // Add transparent background if requested
+        if self.transparent_background {
+            cmd.args(["--backgroundColor", "transparent"]);
+        }
+
+        // Add icon packs
+        cmd.arg("--iconPacks").args(ICON_PACKS);
+
+        let output = cmd.output();
 
         // Handle errors
         let output = match output {
@@ -491,13 +646,21 @@ impl MermaidRenderer {
             Command::new("mmdc")
         };
 
-        let output = cmd
-            .args(["-i", input_file.path().to_str().unwrap()])
+        // Add common arguments
+        cmd.args(["-i", input_file.path().to_str().unwrap()])
             .args(["-o", output_path.to_str().unwrap()])
-            .args(["--theme", "dark"])
-            .arg("--iconPacks")
-            .args(ICON_PACKS)
-            .output()?;
+            .args(["--theme", self.theme.as_str()])
+            .args(["--scale", &self.scale.to_string()]);
+
+        // Add transparent background if requested
+        if self.transparent_background {
+            cmd.args(["--backgroundColor", "transparent"]);
+        }
+
+        // Add icon packs
+        cmd.arg("--iconPacks").args(ICON_PACKS);
+
+        let output = cmd.output()?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();

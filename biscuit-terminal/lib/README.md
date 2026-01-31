@@ -104,12 +104,53 @@ let result = TerminalImage::new_with_max_size(Path::new("huge.png"), 1_000_000);
 ```rust
 use biscuit_terminal::components::mermaid::MermaidRenderer;
 
+// Simple usage with default settings
 let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
 
 match renderer.render_for_terminal() {
     Ok(()) => println!("Diagram rendered!"),
     Err(_) => println!("{}", renderer.fallback_code_block()),
 }
+```
+
+### Terminal-Aware Rendering
+
+For best results, use `for_terminal()` which automatically detects color mode:
+
+```rust
+use biscuit_terminal::components::mermaid::MermaidRenderer;
+
+// Automatically uses appropriate theme and transparent background
+let renderer = MermaidRenderer::for_terminal("flowchart LR\n    A --> B");
+renderer.render_for_terminal()?;
+```
+
+### Theme and Rendering Options
+
+```rust
+use biscuit_terminal::components::mermaid::{MermaidRenderer, MermaidTheme};
+
+let renderer = MermaidRenderer::new("flowchart LR\n    A --> B")
+    .with_theme(MermaidTheme::Dark)        // dark, default, forest, neutral
+    .with_scale(3)                          // Higher resolution (default: 2)
+    .with_transparent_background(true);     // Blend with terminal background
+```
+
+### Themes
+
+- **`MermaidTheme::Dark`**: Light text on dark background (default for dark terminals)
+- **`MermaidTheme::Default`**: Dark text on light background (default for light terminals)
+- **`MermaidTheme::Forest`**: Green tones
+- **`MermaidTheme::Neutral`**: Grayscale, works well with transparent backgrounds
+
+Use `MermaidTheme::for_color_mode()` to automatically select based on terminal:
+
+```rust
+use biscuit_terminal::components::mermaid::MermaidTheme;
+use biscuit_terminal::terminal::Terminal;
+
+let theme = MermaidTheme::for_color_mode(Terminal::color_mode());
+let inverse_theme = theme.inverse();  // For solid background rendering
 ```
 
 ### CLI Detection
