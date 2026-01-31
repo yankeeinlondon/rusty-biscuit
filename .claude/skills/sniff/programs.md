@@ -45,14 +45,16 @@ Searches:
 2. `/Applications/*.app/Contents/MacOS/`
 3. `~/Applications/*.app/Contents/MacOS/`
 
-## CLI Filters
+## CLI Subcommands
 
 ```bash
-sniff --programs           # All categories
-sniff --editors            # Just editors
-sniff --utilities          # Just utilities
-sniff --tts-clients        # TTS programs
-sniff --headless-audio     # Audio players
+sniff programs             # All categories (text output)
+sniff editors              # Just editors
+sniff utilities            # Just utilities
+sniff tts-clients          # TTS programs
+sniff audio                # Audio players
+sniff programs --json      # JSON output
+sniff programs --markdown  # Markdown table output
 ```
 
 ## Parallel Detection

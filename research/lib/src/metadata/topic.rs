@@ -3,7 +3,7 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sniff_lib::package::LanguagePackageManager;
-use ai_pipeline::models::model_capability::ModelCapability;
+use unchained_ai::models::model_capability::ModelCapability;
 use thiserror::Error;
 
 /// The type/provenance of a research document.

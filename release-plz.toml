@@ -82,12 +82,12 @@ name = "sniff-lib"
 changelog_path = "sniff/lib/CHANGELOG.md"
 
 [[package]]
-name = "ai-pipeline"
-changelog_path = "ai-pipeline/lib/CHANGELOG.md"
+name = "unchained-ai"
+changelog_path = "unchained-ai/lib/CHANGELOG.md"
 
 [[package]]
-name = "ai-pipeline-gen"
-changelog_path = "ai-pipeline/gen/CHANGELOG.md"
+name = "unchained-ai-gen"
+changelog_path = "unchained-ai/gen/CHANGELOG.md"
 
 [[package]]
 name = "model_id"

@@ -38,47 +38,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ai-pipeline"
-version = "0.1.0"
-dependencies = [
- "futures",
- "lazy_static",
- "model_id",
- "reqwest",
- "rig-core",
- "scraper",
- "serde",
- "serde_json",
- "serde_yaml 0.9.34+deprecated",
- "serial_test",
- "strum 0.27.2",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tracing-test",
- "url",
- "wiremock",
-]
-
-[[package]]
-name = "ai-pipeline-gen"
-version = "0.1.0"
-dependencies = [
- "ai-pipeline",
- "chrono",
- "clap 4.5.54",
- "reqwest",
- "serde",
- "serde_json",
- "strum 0.27.2",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "aligned"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4745,7 +4704,6 @@ dependencies = [
 name = "research-lib"
 version = "0.1.0"
 dependencies = [
- "ai-pipeline",
  "biscuit-speaks",
  "chrono",
  "clap 4.5.54",
@@ -4776,6 +4734,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
+ "unchained-ai",
  "walkdir",
  "wiremock",
  "xxhash-rust",
@@ -6908,6 +6867,47 @@ name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
+
+[[package]]
+name = "unchained-ai"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "lazy_static",
+ "model_id",
+ "reqwest",
+ "rig-core",
+ "scraper",
+ "serde",
+ "serde_json",
+ "serde_yaml 0.9.34+deprecated",
+ "serial_test",
+ "strum 0.27.2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-test",
+ "url",
+ "wiremock",
+]
+
+[[package]]
+name = "unchained-ai-gen"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap 4.5.54",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "strum 0.27.2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "unchained-ai",
+]
 
 [[package]]
 name = "unic-langid"

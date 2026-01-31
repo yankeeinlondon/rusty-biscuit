@@ -38,13 +38,14 @@ for svc in services {
 | `Failed` | Exited with error |
 | `Unknown` | State cannot be determined |
 
-## CLI Filters
+## CLI Subcommand
 
 ```bash
-sniff --services                     # All services
-sniff --services --state running     # Only running
-sniff --services --state stopped     # Only stopped
-sniff --services --json              # JSON output
+sniff services                       # Running services (default, text output)
+sniff services --state all           # All services
+sniff services --state running       # Only running
+sniff services --state stopped       # Only stopped
+sniff services --json                # JSON output
 ```
 
 ## Evidence Tracking

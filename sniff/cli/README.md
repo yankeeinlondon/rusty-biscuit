@@ -26,123 +26,100 @@ cargo install --path sniff/cli
 ### Basic Usage
 
 ```bash
-# Detect everything (default)
+# Detect everything (JSON output, no subcommand)
 sniff
 
 # Detect with a specific base directory
 sniff --base /path/to/project
-
-# Get JSON output
-sniff --json
 
 # Enable verbose output (show more details)
 sniff -v        # Level 1: more details
 sniff -vv       # Level 2: even more details
 ```
 
-### Section Selection
+### Output Modes
 
-**Include-Only Mode** (combine multiple sections):
+The CLI has two output modes depending on whether a subcommand is used:
+
+| Mode | Output | Use Case |
+|------|--------|----------|
+| No subcommand (`sniff`) | JSON (all data) | Programmatic consumption, piping to `jq` |
+| With subcommand (`sniff cpu`) | Text (default) | Human-readable output |
 
 ```bash
-# Show only hardware section
-sniff --hardware
-# Show only filesystem section
-sniff --filesystem
-# Combine network and filesystem
-sniff --network --filesystem
+# Full system info as JSON (no subcommand)
+sniff
+
+# Subcommand with text output (default)
+sniff cpu
+
+# Subcommand with JSON output
+sniff cpu --json
 ```
 
-**Skip Mode** (when no include flags specified):
+### Section Subcommands
+
+Use subcommands to filter output to specific sections.
+
+**Top-Level Sections:**
 
 ```bash
-# Skip hardware detection
-sniff --skip-hardware
-# Skip network detection
-sniff --skip-network
-# Skip filesystem detection
-sniff --skip-filesystem
+sniff os          # OS information (name, kernel, locale, timezone)
+sniff hardware    # Hardware information (CPU, GPU, memory, storage)
+sniff network     # Network information (interfaces, IP addresses)
+sniff filesystem  # Filesystem information (git, languages, monorepo)
 ```
 
-### Filter Flags (Mutually Exclusive)
-
-Filter flags show only specific subsections. Only one filter flag can be used at a time.
-
-**Top-Level Filters:**
+**Hardware Details:**
 
 ```bash
-# Show only OS information
-sniff --os
+sniff cpu         # CPU information
+sniff gpu         # GPU information
+sniff memory      # Memory information
+sniff storage     # Storage/disk information
 ```
 
-**Hardware Subsection Filters:**
+**Filesystem Details:**
 
 ```bash
-# Show only CPU information
-sniff --cpu
-# Show only GPU information
-sniff --gpu
-# Show only memory information
-sniff --memory
-# Show only storage information
-sniff --storage
+sniff git         # Git repository information
+sniff repo        # Repository/monorepo structure
+sniff language    # Language detection results
 ```
 
-**Filesystem Subsection Filters:**
+**Programs Subcommands:**
 
 ```bash
-# Show only git repository information
-sniff --git
-# Show only repository/monorepo structure
-sniff --repo
-# Show only language detection results
-sniff --language
-```
-
-**Programs Filters:**
-
-```bash
-# Show all installed programs
-sniff --programs
-# Show only editors (vim, vs code, etc.)
-sniff --editors
-# Show only CLI utilities (ripgrep, fzf, etc.)
-sniff --utilities
-# Show only language package managers (cargo, npm, pip, etc.)
-sniff --language-package-managers
-# Show only OS package managers (homebrew, apt, etc.)
-sniff --os-package-managers
-# Show only TTS clients (say, espeak, piper, etc.)
-sniff --tts-clients
-# Show only terminal apps (alacritty, wezterm, etc.)
-sniff --terminal-apps
-# Show only headless audio players (afplay, pacat, etc.)
-sniff --audio
+sniff programs                   # All installed programs
+sniff editors                    # Editors (vim, VS Code, etc.)
+sniff utilities                  # CLI utilities (ripgrep, fzf, etc.)
+sniff language-package-managers  # Language package managers (cargo, npm, pip)
+sniff os-package-managers        # OS package managers (homebrew, apt, etc.)
+sniff tts-clients                # TTS clients (say, espeak, piper, etc.)
+sniff terminal-apps              # Terminal apps (alacritty, wezterm, etc.)
+sniff audio                      # Headless audio players (afplay, pacat, etc.)
 ```
 
 **Programs Output Formats:**
 
 ```bash
 # Markdown table output (default for programs)
-sniff --programs --markdown
+sniff programs --markdown
 # JSON output with simple format (backward compatible)
-sniff --programs --json
+sniff programs --json
 # JSON output with full metadata
-sniff --programs --json --json-format full
+sniff programs --json --json-format full
 ```
 
-**Services Filter:**
+**Services Subcommand:**
 
 ```bash
-# Show system services
-sniff --services
-# Filter by service state
-sniff --services --state all       # All services (default)
-sniff --services --state running   # Only running services
-sniff --services --state stopped   # Only stopped services
+sniff services                   # Running services (default)
+sniff services --state all       # All services
+sniff services --state running   # Only running services
+sniff services --state stopped   # Only stopped services
+sniff services --json            # JSON output
 ```
-
-**Note:** Filter flags are mutually exclusive. For example, `sniff --cpu --memory` will error because you can only specify one filter at a time.
 
 ### Deep Mode
 
@@ -153,7 +130,7 @@ Enable deep inspection for enhanced repository information:
 sniff --deep
 
 # Show git info with remote branch details
-sniff --git --deep -v
+sniff git --deep -v
 ```
 
 Deep mode provides:
@@ -229,7 +206,8 @@ Monorepo: CargoWorkspace
 ### JSON Output
 
 ```bash
-sniff --json | jq .
+# Full system info as JSON (no subcommand)
+sniff | jq .
 ```
 
 Returns a structured JSON object with all detection results:
@@ -266,7 +244,7 @@ Returns a structured JSON object with all detection results:
 ### Programs Output
 
 ```bash
-sniff --programs --json | jq .
+sniff programs --json | jq .
 ```
 
 Returns installed programs organized by category:
@@ -289,7 +267,7 @@ With `--json-format full`, includes rich metadata (display name, description, we
 ### Services Output
 
 ```bash
-sniff --services --json | jq .
+sniff services --json | jq .
 ```
 
 Returns init system and service list:
@@ -311,19 +289,15 @@ Returns init system and service list:
 The CLI binary provides:
 
 - **Argument Parsing**: Uses `clap` with derive API for clean, type-safe CLI definitions
-- **Output Filtering**: Two modes for controlling output:
-    - **Include-Only Mode**: Combine `--hardware`, `--network`, `--filesystem` flags
-    - **Filter Mode**: Mutually exclusive detail filters like `--cpu`, `--git`, `--repo`
+- **Subcommand Filtering**: Use subcommands like `hardware`, `cpu`, `git` to show specific sections
 - **Text Rendering**: Multi-level verbosity with human-readable formatting
 - **JSON Serialization**: Full structured output for programmatic use
 - **Dependency Enrichment**: Async network queries to package registries in `--deep` mode
 
 **Key Files:**
 
-- `main.rs:219-310` - Main detection flow and configuration
-- `main.rs:312-359` - Dependency enrichment for `--deep` mode
-- `output.rs:79-169` - Output rendering with filter support
-- `main.rs:89-180` - Filter flag validation and selection logic
+- `main.rs` - CLI argument parsing with clap subcommands, detection flow
+- `output.rs` - Output rendering for text and JSON formats
 
 ### Library Layer (`sniff/lib`)
 
@@ -441,19 +415,27 @@ Text output supports three verbosity levels:
 - **Level 1** (`-v`): Extended details, full package lists, recent commits
 - **Level 2** (`-vv`): Maximum detail, file lists, git diffs, EditorConfig sections
 
-### Filter Mode vs Include-Only Mode
+### Subcommand-Based Filtering
 
-**Include-Only Mode** (combinable):
+The CLI uses subcommands for filtering (not flags):
 
-- Triggered by `--hardware`, `--network`, `--filesystem`
-- Multiple flags can be combined
-- Skip flags are ignored in this mode
+```bash
+# Correct: use subcommands
+sniff hardware
+sniff cpu
+sniff git
 
-**Filter Mode** (mutually exclusive):
+# Incorrect (old flag-based syntax, no longer supported)
+# sniff --hardware
+# sniff --cpu
+# sniff --git
+```
 
-- Triggered by detail-level flags like `--cpu`, `--git`, `--repo`
-- Only one filter flag allowed at a time
-- Shows only the specific subsection requested
+Each subcommand outputs text by default. Use `--json` for JSON output:
+
+```bash
+sniff cpu --json
+```
 
 ### Dependency Enrichment
 
@@ -551,9 +533,6 @@ sniff/
 cargo test -p sniff-cli
 cargo test -p sniff-lib
 
-# Test filter flag validation
-cargo test -p sniff-cli filter_flag_validation
-
 # Test CLI parsing
 cargo test -p sniff-cli cli_parsing
 ```
@@ -563,11 +542,11 @@ cargo test -p sniff-cli cli_parsing
 ### CI/CD Integration
 
 ```bash
-# Capture build environment metadata
-sniff --json > build-context.json
+# Capture build environment metadata (JSON output by default)
+sniff > build-context.json
 
 # Check if running in a monorepo
-if sniff --repo --json | jq -e '.filesystem.repo.is_monorepo'; then
+if sniff repo --json | jq -e '.is_monorepo'; then
     echo "Detected monorepo"
 fi
 ```
@@ -576,33 +555,33 @@ fi
 
 ```bash
 # Check available package managers
-sniff --os -v | grep "Package Managers"
+sniff os -v | grep "Package Managers"
 
 # Verify GPU support before running ML workloads
-sniff --gpu --json | jq '.hardware.gpu[0].capabilities'
+sniff gpu --json | jq '.[0].capabilities'
 ```
 
 ### System Inventory
 
 ```bash
-# Full system report with maximum verbosity
-sniff -vv > system-report.txt
+# Full system report as JSON
+sniff > system-report.json
 
-# Quick hardware summary
-sniff --hardware
+# Quick hardware summary (text output)
+sniff hardware
 ```
 
 ### Repository Analysis
 
 ```bash
 # Analyze codebase languages
-sniff --language -v
+sniff language -v
 
 # Check git status across monorepo packages
-sniff --git --deep -v
+sniff git --deep -v
 
 # Inspect dependencies with latest versions
-sniff --repo --deep --json | jq '.filesystem.repo.packages[].dependencies'
+sniff repo --deep --json | jq '.packages[].dependencies'
 ```
 
 ## Limitations

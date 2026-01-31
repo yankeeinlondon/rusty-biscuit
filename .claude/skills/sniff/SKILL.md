@@ -39,13 +39,18 @@ let result = detect_with_config(config)?;
 ## CLI
 
 ```bash
-sniff                      # Full system info
-sniff --hardware           # Hardware only
-sniff --programs           # All programs
-sniff --editors            # Just editors
-sniff --services           # System services
-sniff --json               # JSON output
+sniff                      # Full system info (JSON output)
+sniff hardware             # Hardware only (text output)
+sniff cpu                  # Just CPU info
+sniff programs             # All programs
+sniff editors              # Just editors
+sniff services             # System services
+sniff hardware --json      # Subcommand with JSON output
 ```
+
+**Output modes:**
+- No subcommand: JSON (all data)
+- With subcommand: Text (default), `--json` for JSON
 
 ## Detailed Topics
 

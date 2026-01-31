@@ -1,0 +1,58 @@
+set dotenv-load
+set positional-arguments
+
+BOLD := '\033[1m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+YELLOW2 := '\033[38;5;3m'
+BLACK := '\033[30m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+WHITE := '\033[37m'
+
+default:
+    @echo
+    @echo "Unchained AI"
+    @echo "-----------"
+    @echo ""
+    @just --list | grep -v 'default'
+    @echo
+
+
+# build Unchained AI library
+build *args="":
+    @echo ""
+    @echo "Unchained AI Lib + Gen"
+    @echo "--------------------_"
+    @echo ""
+    @cargo build -p unchained-ai {{args}}
+    @cargo build -p unchained-ai-gen {{args}}
+
+# run tests across research modules
+test *args="":
+    @echo ""
+    @echo "Testing Unchained AI"
+    @echo "-------------------"
+    @echo ""
+    @cargo test -p unchained-ai {{args}}
+    @cargo test -p unchained-ai-gen {{args}}
+
+lint *args="":
+    @echo ""
+    @echo "Linting Unchained AI"
+    @echo "-------------------"
+    @echo ""
+    @cargo clippy -p unchained-ai -p unchained-ai-gen {{args}}
+
+
+
+# run the debug release of the Research CLI
+cli *args="":
+    @cargo run -p darkmatter -- {{args}}
+
+docs:
+  @cargo clean --doc && cargo doc --no-deps --lib

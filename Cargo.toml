@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
-members = ["ai-pipeline/gen", "ai-pipeline/lib", "biscuit-hash/cli", "biscuit-hash/lib", "biscuit-speaks", "biscuit-terminal/cli", "biscuit-terminal/lib", "darkmatter/cli", "darkmatter/lib", "model_id", "playa/cli", "playa/lib", "queue/cli", "queue/lib", "research/cli", "research/lib", "schematic/define", "schematic/definitions", "schematic/gen", "sniff/cli", "sniff/lib", "so-you-say", "tabby", "tabby/ui", "tree-hugger/cli", "tree-hugger/lib", "tui"]
+members = ["biscuit-hash/cli", "biscuit-hash/lib", "biscuit-speaks", "biscuit-terminal/cli", "biscuit-terminal/lib", "darkmatter/cli", "darkmatter/lib", "model_id", "playa/cli", "playa/lib", "queue/cli", "queue/lib", "research/cli", "research/lib", "schematic/define", "schematic/definitions", "schematic/gen", "sniff/cli", "sniff/lib", "so-you-say", "tabby", "tabby/ui", "tree-hugger/cli", "tree-hugger/lib", "tui", "unchained-ai/gen", "unchained-ai/lib"]
 exclude = ["schematic/schema"]

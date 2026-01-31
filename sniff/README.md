@@ -40,7 +40,7 @@ See [sniff/lib/README.md](lib/README.md) for detailed API documentation.
 A feature-rich CLI exposing all library capabilities:
 
 - **Flexible Output**: Text (with verbosity levels) or JSON
-- **Section Filtering**: Include-only mode, skip mode, and detail filters
+- **Subcommand Filtering**: Use subcommands to show specific sections
 - **Deep Mode**: Network queries for remote git branches and package versions
 - **Program Detection**: List installed editors, utilities, package managers, and more
 
@@ -52,23 +52,26 @@ See [sniff/cli/README.md](cli/README.md) for complete CLI documentation.
 # Install
 cargo install --path sniff/cli
 
-# Detect everything
+# Detect everything (JSON output)
 sniff
 
-# JSON output
-sniff --json
+# Show only hardware (text output)
+sniff hardware
 
-# Show only hardware
-sniff --hardware
+# Show only CPU info
+sniff cpu
 
 # Show installed programs
-sniff --programs
+sniff programs
 
 # Show system services
-sniff --services
+sniff services
 
 # Deep mode (queries remotes and registries)
 sniff --deep
+
+# JSON output for subcommands
+sniff hardware --json
 ```
 
 ## Detection Categories

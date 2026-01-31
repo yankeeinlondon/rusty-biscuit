@@ -6,8 +6,8 @@
 //! ## Tool Integration
 //!
 //! Phase 1 prompts (research prompts) have access to web search and scraping tools:
-//! - [`BraveSearchTool`](ai_pipeline::rigging::tools::BraveSearchTool) - Web search via Brave Search API
-//! - [`ScreenScrapeTool`](ai_pipeline::rigging::tools::ScreenScrapeTool) - Web page content extraction
+//! - [`BraveSearchTool`](unchained_ai::rigging::tools::BraveSearchTool) - Web search via Brave Search API
+//! - [`ScreenScrapeTool`](unchained_ai::rigging::tools::ScreenScrapeTool) - Web page content extraction
 //!
 //! Phase 2 prompts (synthesis) run without tools as they consolidate existing content.
 
@@ -31,8 +31,8 @@ use rig::completion::{AssistantContent, CompletionModel, Message, Prompt, Prompt
 use rig::message::{ToolResultContent, UserContent};
 use rig::providers::{gemini, openai};
 use serde::{Deserialize, Serialize};
-use ai_pipeline::rigging::providers::client_adaptors::zai;
-use ai_pipeline::rigging::tools::{BravePlan, BraveSearchTool, ScreenScrapeTool};
+use unchained_ai::rigging::providers::client_adaptors::zai;
+use unchained_ai::rigging::tools::{BravePlan, BraveSearchTool, ScreenScrapeTool};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

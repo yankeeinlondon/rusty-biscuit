@@ -16,10 +16,10 @@ The repository is organized into the following packages:
 
 ```txt
 dockhand/
-├── ai-pipeline
-│   ├── cli/          # Binary: `research` (FUTURE)
-│   └── lib/          # Core research library
-│   └── service/      # Server to abstract AI pipelining functionality (FUTURE)
+├── unchained-ai/     # AI pipeline primitives and provider integrations
+│   ├── cli/          # Binary: `unchained` (FUTURE)
+│   ├── gen/          # Binary: `gen-models` (provider model enum generator)
+│   └── lib/          # Core AI pipeline library
 ├── biscuit-hash/     # Best-in-class hashing algorithms
 │   ├── cli/          # Binary: `bh` (hash CLI)
 │   └── lib/          # xxHash, BLAKE3, Argon2id hashing

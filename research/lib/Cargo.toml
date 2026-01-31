@@ -31,13 +31,13 @@ pulldown-cmark-to-cmark = "22.0.0"
 regex = "1.11"
 reqwest = { version = "0.12", features = ["json"] }
 rig-core = "0.29.0"
-ai-pipeline = { path = "../../ai-pipeline/lib" }
+unchained-ai = { path = "../../unchained-ai/lib" }
 semver = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono", "migrate", "macros"] }
 serde_yaml = "0.9"
-# shared dependency removed - tools migrated to ai-pipeline
+# shared dependency removed - tools migrated to unchained-ai
 darkmatter-lib = { path = "../../darkmatter/lib" }
 thiserror = "2.0"
 tokio = { version = "1.48.0", features = ["full", "tokio-macros"] }

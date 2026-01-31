@@ -42,16 +42,29 @@ Output includes:
 Render images inline using the terminal's graphics protocol:
 
 ```bash
-bt --image photo.jpg           # Default 50% width
-bt --image "photo.jpg|75%"     # 75% of terminal width
-bt --image "photo.jpg|80"      # Fixed 80 columns
-bt --image "photo.jpg|fill"    # Fill available width
+bt image photo.jpg           # Default 50% width
+bt image "photo.jpg|75%"     # 75% of terminal width
+bt image "photo.jpg|80"      # Fixed 80 columns
+bt image "photo.jpg|fill"    # Fill available width
 ```
 
 Protocol selection:
 - **Kitty protocol**: Kitty, WezTerm, Ghostty, Konsole, Warp
 - **iTerm2 protocol**: iTerm2 (even if Kitty advertised)
 - **Fallback**: Alt text for unsupported terminals
+
+### Flowchart Rendering
+
+Render Mermaid flowcharts directly in the terminal:
+
+```bash
+bt flowchart "A --> B --> C"                    # Left-to-right (default)
+bt flowchart --vertical "A --> B --> C"         # Top-down
+bt flowchart "A[Input] --> B{Decision}" "B -->|Yes| C[Output]"
+bt flowchart --json "A --> B"                   # Output as JSON
+```
+
+Requires `mmdc` (Mermaid CLI) or `npx` for rendering. Falls back to a code block if image rendering is not supported.
 
 ### Shell Completions
 
@@ -109,7 +122,10 @@ bt
 bt --json | jq '.image_support'
 
 # Display an image
-bt --image ./screenshot.png
+bt image ./screenshot.png
+
+# Render a flowchart
+bt flowchart "Start --> Process --> End"
 
 # Analyze escape code output
 echo -e "\x1b[32mGreen\x1b[0m" | xargs bt

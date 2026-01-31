@@ -2,7 +2,7 @@ set dotenv-load
 set positional-arguments
 
 # List of areas in this monorepo
-areas := "biscuit-hash biscuit-speaks biscuit-terminal playa playa-cli ai-pipeline research so-you-say tree-hugger tree-hugger-cli darkmatter sniff"
+areas := "biscuit-hash biscuit-speaks biscuit-terminal playa playa-cli unchained-ai research so-you-say tree-hugger tree-hugger-cli darkmatter sniff"
 
 BOLD := '\033[1m'
 RESET := '\033[0m'
@@ -128,11 +128,11 @@ gen-models *args="":
     echo ""
     echo -e "{{BOLD}}Gen Models{{RESET}} (latest debug build)"
     echo "---------------------------------"
-    cargo run -p ai-pipeline-gen -- {{args}}
+    cargo run -p unchained-ai-gen -- {{args}}
 
 # generate models for a specific provider
 gen-models-for provider:
-    @cargo run -p ai-pipeline-gen -- --providers {{provider}}
+    @cargo run -p unchained-ai-gen -- --providers {{provider}}
 
 # show the Documentation for crates.io for the Darkmatter package
 darkmatter-docs:
@@ -196,7 +196,7 @@ skill-schematic:
     @echo "Schematic Skill has been rebuilt"
     @echo ""
     @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The Schematic package has synced it's documents for drift and updated the skill tree." \
+        so-you-say "The Schematic package has synced it's documents for drift and updated the skill tree."; \
     fi
 
 # Update docs and then update the skill for the darkmatter package
@@ -208,7 +208,7 @@ skill-darkmatter:
     @echo "Darkmatter Skill has been rebuilt"
     @echo ""
     @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The darkmatter package has synced it's documents for drift and updated the skill tree." \
+        so-you-say "The darkmatter package has synced it's documents for drift and updated the skill tree."; \
     fi
 
 # Update docs and then update the skill for the Sniff package
@@ -221,7 +221,7 @@ skill-sniff:
     @echo "Sniff skill has been rebuilt"
     @echo ""
     @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The Sniff package has synced it's documents for drift and updated the skill tree." \
+        so-you-say "The Sniff package has synced it's documents for drift and updated the skill tree."; \
     fi
 # Update docs and then update the skill for the Playa package
 skill-playa:
@@ -233,7 +233,7 @@ skill-playa:
     @echo "The Playa skill has been rebuilt"
     @echo ""
     @if command -v so-you-say >/dev/null 2>&1; then \
-        @so-you-say "The playa package has synced it's documents for drift and updated the skill tree." \
+        @so-you-say "The playa package has synced it's documents for drift and updated the skill tree."; \
     fi
 
 # Update docs and then update the skill for the Queue package
@@ -246,7 +246,7 @@ skill-queue:
     @echo "The Queue skill has been rebuilt"
     @echo ""
     @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The Queue package has synced it's documents for drift and updated the skill tree." \
+        so-you-say "The Queue package has synced it's documents for drift and updated the skill tree."; \
     fi
 
 # Update docs and then update the skill for the biscuit-speak package
@@ -259,7 +259,7 @@ skill-biscuit-speaks:
     @echo "The {{BOLD}}biscuit-speaks{{RESET}} skill has been rebuilt"
     @echo ""
     @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The biscuit-speaks package has synced it's documents for drift and updated the skill tree." \
+        so-you-say "The biscuit-speaks package has synced it's documents for drift and updated the skill tree."; \
     fi
 
 # Update docs and then update the skill for the biscuit-hash package
@@ -272,7 +272,7 @@ skill-biscuit-hash:
     @echo "The {{BOLD}}biscuit-hash{{RESET}} skill has been rebuilt"
     @echo ""
     @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The biscuit-hash package has synced it's documents for drift and updated the skill tree." \
+        so-you-say "The biscuit-hash package has synced it's documents for drift and updated the skill tree."; \
     fi
 
 # Update docs and then update the skill for the tree-huger package
@@ -285,7 +285,7 @@ skill-tree-hugger:
     @echo "The {{BOLD}}tree-hugger{{RESET}} skill has been rebuilt"
     @echo ""
     @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The tree-hugger package has synced it's documents for drift and updated the skill tree." \
+        so-you-say "The tree-hugger package has synced it's documents for drift and updated the skill tree."; \
     fi
 
 # Update docs and then update the skill for the Research package
@@ -298,5 +298,5 @@ skill-research:
     @echo "The {{BOLD}}research{{RESET}} skill has been rebuilt"
     @echo ""
     @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "The research package has synced it's documents for drift and updated the skill tree." \
+        so-you-say "The research package has synced it's documents for drift and updated the skill tree."; \
     fi

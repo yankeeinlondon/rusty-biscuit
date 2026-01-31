@@ -1,10 +1,10 @@
-use clap::{CommandFactory, Parser};
-use clap_complete::Shell;
+use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
+use clap_complete::Shell;
 use sniff_lib::package::enrich_dependencies;
 use sniff_lib::programs::ProgramsInfo;
-use sniff_lib::services::{ServiceState, detect_services};
-use sniff_lib::{SniffConfig, SniffResult, detect_with_config};
+use sniff_lib::services::{detect_services, ServiceState};
+use sniff_lib::{detect_with_config, SniffConfig, SniffResult};
 use std::path::PathBuf;
 
 mod output;
@@ -15,366 +15,313 @@ use output::OutputFilter;
 #[command(name = "sniff", version, about, after_help = AFTER_HELP)]
 struct Cli {
     /// Base directory for filesystem analysis
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     base: Option<PathBuf>,
 
-    /// Output as JSON instead of text
-    #[arg(long)]
+    /// Output as JSON instead of text (with subcommand) or force JSON (no subcommand)
+    #[arg(long, global = true)]
     json: bool,
 
-    /// Output programs as a markdown table
-    #[arg(long, conflicts_with = "json", help_heading = "Programs Flags")]
-    markdown: bool,
-
-    /// Increase output verbosity
-    #[arg(short, long, action = clap::ArgAction::Count)]
-    verbose: u8,
-
-    // === Skip flags (default behavior) ===
-    /// Skip hardware detection
-    #[arg(long)]
-    skip_hardware: bool,
-
-    /// Skip network detection
-    #[arg(long)]
-    skip_network: bool,
-
-    /// Skip filesystem detection
-    #[arg(long)]
-    skip_filesystem: bool,
-
-    // === Include-only flags ===
-    /// Include ONLY hardware section (enables include-only mode)
-    #[arg(long)]
-    hardware: bool,
-
-    /// Include ONLY network section (enables include-only mode)
-    #[arg(long)]
-    network: bool,
-
-    /// Include ONLY filesystem section (enables include-only mode)
-    #[arg(long)]
-    filesystem: bool,
-
     /// Enable deep git inspection (queries remotes for branch info)
-    #[arg(long)]
+    #[arg(long, global = true)]
     deep: bool,
 
-    // === Filter flags (mutually exclusive) ===
-    /// Show only OS information
-    #[arg(long, help_heading = "Filter Flags")]
-    os: bool,
+    /// Increase output verbosity
+    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    verbose: u8,
 
-    /// Show only git repository information
-    #[arg(long, help_heading = "Filter Flags")]
-    git: bool,
-
-    /// Show only repository/monorepo structure
-    #[arg(long, help_heading = "Filter Flags")]
-    repo: bool,
-
-    /// Show only language detection
-    #[arg(long, help_heading = "Filter Flags")]
-    language: bool,
-
-    /// Show only CPU information
-    #[arg(long, help_heading = "Filter Flags")]
-    cpu: bool,
-
-    /// Show only GPU information
-    #[arg(long, help_heading = "Filter Flags")]
-    gpu: bool,
-
-    /// Show only memory information
-    #[arg(long, help_heading = "Filter Flags")]
-    memory: bool,
-
-    /// Show only storage information
-    #[arg(long, help_heading = "Filter Flags")]
-    storage: bool,
-
-    // === Programs filter flags ===
-    /// Show only installed programs detection
-    #[arg(long, help_heading = "Programs Flags")]
-    programs: bool,
-
-    /// Show only installed editors
-    #[arg(long, help_heading = "Programs Flags")]
-    editors: bool,
-
-    /// Show only installed utilities
-    #[arg(long, help_heading = "Programs Flags")]
-    utilities: bool,
-
-    /// Show only language package managers
-    #[arg(long, help_heading = "Programs Flags")]
-    language_package_managers: bool,
-
-    /// Show only OS package managers
-    #[arg(long, help_heading = "Programs Flags")]
-    os_package_managers: bool,
-
-    /// Show only TTS clients
-    #[arg(long, help_heading = "Programs Flags")]
-    tts_clients: bool,
-
-    /// Show only terminal apps
-    #[arg(long, help_heading = "Programs Flags")]
-    terminal_apps: bool,
-
-    /// Show only headless audio players
-    #[arg(long, help_heading = "Programs Flags")]
-    audio: bool,
-
-    /// JSON output format: "simple" (default, backward compatible) or "full" (rich metadata)
-    #[arg(long, value_name = "FORMAT", help_heading = "Programs Flags")]
-    json_format: Option<String>,
-
-    // === Services flags ===
-    /// Show only system services (init system and service list)
-    #[arg(long, help_heading = "Services Flags")]
-    services: bool,
-
-    /// Filter services by state (only used with --services)
-    #[arg(long, value_enum, default_value = "running", help_heading = "Services Flags")]
-    state: ServiceStateArg,
-
-    // === Shell completions ===
     /// Generate shell completions for the specified shell
     #[arg(long, value_name = "SHELL", help_heading = "Shell Completions")]
     completions: Option<Shell>,
+
+    /// Subcommand to filter output to a specific section
+    #[command(subcommand)]
+    command: Option<Commands>,
 }
 
-/// Service state filter for --services flag.
+/// Subcommands for filtering output to specific sections.
+///
+/// Each subcommand shows only the specified section of system information.
+/// Without a subcommand, all data is output as JSON.
+#[derive(Subcommand, Debug, Clone)]
+pub enum Commands {
+    // === Top-level sections ===
+    /// Show only OS information (name, kernel, locale, timezone)
+    Os,
+
+    /// Show only hardware information (CPU, GPU, memory, storage)
+    Hardware,
+
+    /// Show only network information (interfaces, IP addresses)
+    Network,
+
+    /// Show only filesystem information (git, languages, monorepo)
+    Filesystem,
+
+    // === Hardware detail sections ===
+    /// Show only CPU information
+    Cpu,
+
+    /// Show only GPU information
+    Gpu,
+
+    /// Show only memory information
+    Memory,
+
+    /// Show only storage/disk information
+    Storage,
+
+    // === Filesystem detail sections ===
+    /// Show only git repository information
+    Git,
+
+    /// Show only repository/monorepo structure
+    Repo,
+
+    /// Show only language detection results
+    Language,
+
+    // === Programs sections ===
+    /// Show all installed programs detection
+    Programs {
+        /// Output as a markdown table
+        #[arg(long, conflicts_with = "json")]
+        markdown: bool,
+
+        /// JSON output format: "simple" (default) or "full" (rich metadata)
+        #[arg(long, value_name = "FORMAT")]
+        json_format: Option<String>,
+    },
+
+    /// Show only installed editors
+    Editors {
+        /// Output as a markdown table
+        #[arg(long, conflicts_with = "json")]
+        markdown: bool,
+
+        /// JSON output format: "simple" (default) or "full" (rich metadata)
+        #[arg(long, value_name = "FORMAT")]
+        json_format: Option<String>,
+    },
+
+    /// Show only installed utilities
+    Utilities {
+        /// Output as a markdown table
+        #[arg(long, conflicts_with = "json")]
+        markdown: bool,
+
+        /// JSON output format: "simple" (default) or "full" (rich metadata)
+        #[arg(long, value_name = "FORMAT")]
+        json_format: Option<String>,
+    },
+
+    /// Show only language package managers
+    LanguagePackageManagers {
+        /// Output as a markdown table
+        #[arg(long, conflicts_with = "json")]
+        markdown: bool,
+
+        /// JSON output format: "simple" (default) or "full" (rich metadata)
+        #[arg(long, value_name = "FORMAT")]
+        json_format: Option<String>,
+    },
+
+    /// Show only OS package managers
+    OsPackageManagers {
+        /// Output as a markdown table
+        #[arg(long, conflicts_with = "json")]
+        markdown: bool,
+
+        /// JSON output format: "simple" (default) or "full" (rich metadata)
+        #[arg(long, value_name = "FORMAT")]
+        json_format: Option<String>,
+    },
+
+    /// Show only TTS clients
+    TtsClients {
+        /// Output as a markdown table
+        #[arg(long, conflicts_with = "json")]
+        markdown: bool,
+
+        /// JSON output format: "simple" (default) or "full" (rich metadata)
+        #[arg(long, value_name = "FORMAT")]
+        json_format: Option<String>,
+    },
+
+    /// Show only terminal apps
+    TerminalApps {
+        /// Output as a markdown table
+        #[arg(long, conflicts_with = "json")]
+        markdown: bool,
+
+        /// JSON output format: "simple" (default) or "full" (rich metadata)
+        #[arg(long, value_name = "FORMAT")]
+        json_format: Option<String>,
+    },
+
+    /// Show only headless audio players
+    Audio {
+        /// Output as a markdown table
+        #[arg(long, conflicts_with = "json")]
+        markdown: bool,
+
+        /// JSON output format: "simple" (default) or "full" (rich metadata)
+        #[arg(long, value_name = "FORMAT")]
+        json_format: Option<String>,
+    },
+
+    // === Services section ===
+    /// Show only system services (init system and service list)
+    Services {
+        /// Filter services by state
+        #[arg(long, value_enum, default_value = "running")]
+        state: ServiceStateArg,
+    },
+}
+
+impl Commands {
+    /// Convert command to the corresponding output filter.
+    pub fn to_output_filter(&self) -> OutputFilter {
+        match self {
+            // Top-level sections
+            Commands::Os => OutputFilter::Os,
+            Commands::Hardware => OutputFilter::Hardware,
+            Commands::Network => OutputFilter::Network,
+            Commands::Filesystem => OutputFilter::Filesystem,
+
+            // Hardware detail sections
+            Commands::Cpu => OutputFilter::Cpu,
+            Commands::Gpu => OutputFilter::Gpu,
+            Commands::Memory => OutputFilter::Memory,
+            Commands::Storage => OutputFilter::Storage,
+
+            // Filesystem detail sections
+            Commands::Git => OutputFilter::Git,
+            Commands::Repo => OutputFilter::Repo,
+            Commands::Language => OutputFilter::Language,
+
+            // Programs sections
+            Commands::Programs { .. } => OutputFilter::Programs,
+            Commands::Editors { .. } => OutputFilter::Editors,
+            Commands::Utilities { .. } => OutputFilter::Utilities,
+            Commands::LanguagePackageManagers { .. } => OutputFilter::LanguagePackageManagers,
+            Commands::OsPackageManagers { .. } => OutputFilter::OsPackageManagers,
+            Commands::TtsClients { .. } => OutputFilter::TtsClients,
+            Commands::TerminalApps { .. } => OutputFilter::TerminalApps,
+            Commands::Audio { .. } => OutputFilter::HeadlessAudio,
+
+            // Services section
+            Commands::Services { .. } => OutputFilter::Services,
+        }
+    }
+
+    /// Check if this is a programs-related command.
+    pub fn is_programs_mode(&self) -> bool {
+        matches!(
+            self,
+            Commands::Programs { .. }
+                | Commands::Editors { .. }
+                | Commands::Utilities { .. }
+                | Commands::LanguagePackageManagers { .. }
+                | Commands::OsPackageManagers { .. }
+                | Commands::TtsClients { .. }
+                | Commands::TerminalApps { .. }
+                | Commands::Audio { .. }
+        )
+    }
+
+    /// Get markdown flag if this is a programs command.
+    pub fn markdown(&self) -> bool {
+        match self {
+            Commands::Programs { markdown, .. }
+            | Commands::Editors { markdown, .. }
+            | Commands::Utilities { markdown, .. }
+            | Commands::LanguagePackageManagers { markdown, .. }
+            | Commands::OsPackageManagers { markdown, .. }
+            | Commands::TtsClients { markdown, .. }
+            | Commands::TerminalApps { markdown, .. }
+            | Commands::Audio { markdown, .. } => *markdown,
+            _ => false,
+        }
+    }
+
+    /// Get json_format if this is a programs command.
+    pub fn json_format(&self) -> Option<&str> {
+        match self {
+            Commands::Programs { json_format, .. }
+            | Commands::Editors { json_format, .. }
+            | Commands::Utilities { json_format, .. }
+            | Commands::LanguagePackageManagers { json_format, .. }
+            | Commands::OsPackageManagers { json_format, .. }
+            | Commands::TtsClients { json_format, .. }
+            | Commands::TerminalApps { json_format, .. }
+            | Commands::Audio { json_format, .. } => json_format.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Get state filter if this is a services command.
+    pub fn state(&self) -> Option<ServiceStateArg> {
+        match self {
+            Commands::Services { state } => Some(*state),
+            _ => None,
+        }
+    }
+}
+
+/// Service state filter for services subcommand.
 #[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
 pub enum ServiceStateArg {
-    #[default]
     All,
+    #[default]
     Running,
     Stopped,
 }
 
-impl Cli {
-    /// Collect all active filter flags into a vector of flag names.
-    ///
-    /// Filter flags are mutually exclusive: only one can be active at a time.
-    /// Note: --hardware, --network, --filesystem are include-only flags (not filter flags)
-    /// and can be combined with each other.
-    fn active_filter_flags(&self) -> Vec<&'static str> {
-        let mut flags = Vec::new();
-
-        // The --os flag is a filter (shows only OS section)
-        if self.os {
-            flags.push("--os");
-        }
-
-        // Detail-level filter flags (mutually exclusive)
-        if self.git {
-            flags.push("--git");
-        }
-        if self.repo {
-            flags.push("--repo");
-        }
-        if self.language {
-            flags.push("--language");
-        }
-        if self.cpu {
-            flags.push("--cpu");
-        }
-        if self.gpu {
-            flags.push("--gpu");
-        }
-        if self.memory {
-            flags.push("--memory");
-        }
-        if self.storage {
-            flags.push("--storage");
-        }
-
-        // Programs filter flags
-        if self.programs {
-            flags.push("--programs");
-        }
-        if self.editors {
-            flags.push("--editors");
-        }
-        if self.utilities {
-            flags.push("--utilities");
-        }
-        if self.language_package_managers {
-            flags.push("--language-package-managers");
-        }
-        if self.os_package_managers {
-            flags.push("--os-package-managers");
-        }
-        if self.tts_clients {
-            flags.push("--tts-clients");
-        }
-        if self.terminal_apps {
-            flags.push("--terminal-apps");
-        }
-        if self.audio {
-            flags.push("--audio");
-        }
-
-        // Services filter flag
-        if self.services {
-            flags.push("--services");
-        }
-
-        flags
-    }
-
-    /// Validate that at most one filter flag is active.
-    ///
-    /// ## Errors
-    ///
-    /// Returns an error if more than one filter flag is specified.
-    fn validate_filter_flags(&self) -> Result<(), String> {
-        let active = self.active_filter_flags();
-        if active.len() > 1 {
-            Err(format!(
-                "{} are mutually exclusive. Only one filter flag can be used at a time.",
-                active.join(" and ")
-            ))
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Determine the output filter based on active filter flags.
-    ///
-    /// Returns specific filter variants for single-section requests to enable flattening.
-    /// When multiple sections are requested, returns `OutputFilter::All`.
-    fn output_filter(&self) -> OutputFilter {
-        // Detail-level filter flags (mutually exclusive)
-        if self.cpu {
-            return OutputFilter::Cpu;
-        }
-        if self.gpu {
-            return OutputFilter::Gpu;
-        }
-        if self.memory {
-            return OutputFilter::Memory;
-        }
-        if self.storage {
-            return OutputFilter::Storage;
-        }
-        if self.git {
-            return OutputFilter::Git;
-        }
-        if self.repo {
-            return OutputFilter::Repo;
-        }
-        if self.language {
-            return OutputFilter::Language;
-        }
-
-        // Programs filter flags
-        if self.programs {
-            return OutputFilter::Programs;
-        }
-        if self.editors {
-            return OutputFilter::Editors;
-        }
-        if self.utilities {
-            return OutputFilter::Utilities;
-        }
-        if self.language_package_managers {
-            return OutputFilter::LanguagePackageManagers;
-        }
-        if self.os_package_managers {
-            return OutputFilter::OsPackageManagers;
-        }
-        if self.tts_clients {
-            return OutputFilter::TtsClients;
-        }
-        if self.terminal_apps {
-            return OutputFilter::TerminalApps;
-        }
-        if self.audio {
-            return OutputFilter::HeadlessAudio;
-        }
-        if self.services {
-            return OutputFilter::Services;
-        }
-        if self.markdown {
-            return OutputFilter::Programs;
-        }
-
-        // Top-level section flags
-        // When used alone, return specific filter for flattening
-        // When combined, return All for normal structure
-        let sections = [
-            (self.os, OutputFilter::Os),
-            (self.hardware, OutputFilter::Hardware),
-            (self.network, OutputFilter::Network),
-            (self.filesystem, OutputFilter::Filesystem),
-        ];
-
-        let active_sections: Vec<OutputFilter> = sections
-            .iter()
-            .filter_map(|&(flag, filter)| if flag { Some(filter) } else { None })
-            .collect();
-
-        // If exactly one section is requested, return its specific filter (enables flattening)
-        if active_sections.len() == 1 {
-            return active_sections[0];
-        }
-
-        // Multiple sections or no flags = return All
-        OutputFilter::All
-    }
-
-    /// Check if any programs-related filter flag is active.
-    fn is_programs_mode(&self) -> bool {
-        self.programs
-            || self.editors
-            || self.utilities
-            || self.language_package_managers
-            || self.os_package_managers
-            || self.tts_clients
-            || self.terminal_apps
-            || self.audio
-            || self.markdown
-    }
-}
-
 const AFTER_HELP: &str = "\
-INCLUDE-ONLY MODE:
-  When --hardware, --network, or --filesystem flags are used, sniff enters
-  include-only mode. Only the specified sections are output; skip flags are ignored.
+SUBCOMMANDS:
+  Use subcommands to filter output to specific sections. Without a subcommand,
+  all system data is output as JSON.
 
-  Examples:
-    sniff --hardware              # Output only hardware section
-    sniff --network --filesystem  # Output network and filesystem, skip hardware
-    sniff --hardware --skip-network  # Skip flag ignored in include-only mode
+  Top-level sections:
+    sniff os          Show only OS information
+    sniff hardware    Show only hardware information
+    sniff network     Show only network information
+    sniff filesystem  Show only filesystem information
 
-  Without include flags, existing skip flag behavior is preserved:
-    sniff --skip-hardware         # Output network and filesystem
+  Hardware details:
+    sniff cpu         Show only CPU information
+    sniff gpu         Show only GPU information
+    sniff memory      Show only memory information
+    sniff storage     Show only storage/disk information
 
-FILTER FLAGS (mutually exclusive):
-  Filter flags show only specific subsections of output. Only one filter flag
-  can be used at a time. Combining multiple filter flags produces an error.
+  Filesystem details:
+    sniff git         Show only git repository information
+    sniff repo        Show only repository/monorepo structure
+    sniff language    Show only language detection results
 
-  Top-level filters:
-    --os          Show only OS information (name, kernel, locale, timezone)
-    --filesystem  Show only filesystem information (git, languages, monorepo)
-    --hardware    Show only hardware information (CPU, GPU, memory, storage)
+  Programs (with --markdown and --json-format options):
+    sniff programs    Show all installed programs
+    sniff editors     Show only installed editors
+    sniff utilities   Show only installed utilities
+    sniff audio       Show only headless audio players
+    ...and more (see sniff --help)
 
-  Detail-level filters:
-    --git         Show only git repository information
-    --repo        Show only repository/monorepo structure
-    --language    Show only language detection results
-    --cpu         Show only CPU information
-    --gpu         Show only GPU information
-    --memory      Show only memory information
-    --storage     Show only storage/disk information
+  Services:
+    sniff services              Show running services (default)
+    sniff services --state all  Show all services
 
-  Examples:
-    sniff --cpu               # Show only CPU details
-    sniff --git               # Show only git status
-    sniff --cpu --memory      # ERROR: mutually exclusive
+OUTPUT MODES:
+  - No subcommand: JSON output (all data)
+  - With subcommand: Text output by default, use --json for JSON
+
+EXAMPLES:
+  sniff                    # Full system info as JSON
+  sniff cpu                # CPU info as text
+  sniff cpu --json         # CPU info as JSON
+  sniff --json cpu         # Same as above (flag position flexible)
+  sniff programs --markdown  # Programs as markdown table
+  sniff -b /path/to/repo filesystem  # Analyze specific directory
 
 SHELL COMPLETIONS:
   Enable tab completions with --completions <SHELL>
@@ -410,41 +357,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    // Validate mutually exclusive filter flags early
-    if let Err(e) = cli.validate_filter_flags() {
-        eprintln!("Error: {}", e);
-        std::process::exit(1);
-    }
-
-    // Determine output filter
-    let output_filter = cli.output_filter();
+    // Determine output filter based on subcommand
+    let output_filter = cli
+        .command
+        .as_ref()
+        .map(Commands::to_output_filter)
+        .unwrap_or(OutputFilter::All);
 
     // Handle programs mode separately (doesn't use SniffResult)
-    if cli.is_programs_mode() {
-        let programs = ProgramsInfo::detect();
-        if cli.json {
-            let format = cli.json_format.as_deref().unwrap_or("simple");
-            output::print_programs_json(&programs, output_filter, format)?;
-        } else {
-            output::print_programs_markdown(&programs, cli.verbose, output_filter);
+    if let Some(ref cmd) = cli.command {
+        if cmd.is_programs_mode() {
+            let programs = ProgramsInfo::detect();
+            if cli.json {
+                let format = cmd.json_format().unwrap_or("simple");
+                output::print_programs_json(&programs, output_filter, format)?;
+            } else if cmd.markdown() {
+                output::print_programs_markdown(&programs, cli.verbose, output_filter);
+            } else {
+                // Default: text output (using markdown renderer for now)
+                output::print_programs_markdown(&programs, cli.verbose, output_filter);
+            }
+            return Ok(());
         }
-        return Ok(());
-    }
 
-    // Handle services mode separately (doesn't use SniffResult)
-    if cli.services {
-        let services_info = detect_services();
-        let state_filter = match cli.state {
-            ServiceStateArg::All => ServiceState::All,
-            ServiceStateArg::Running => ServiceState::Running,
-            ServiceStateArg::Stopped => ServiceState::Stopped,
-        };
-        if cli.json {
-            output::print_services_json(&services_info, state_filter)?;
-        } else {
-            output::print_services_text(&services_info, cli.verbose, state_filter);
+        // Handle services mode separately (doesn't use SniffResult)
+        if let Some(state_arg) = cmd.state() {
+            let services_info = detect_services();
+            let state_filter = match state_arg {
+                ServiceStateArg::All => ServiceState::All,
+                ServiceStateArg::Running => ServiceState::Running,
+                ServiceStateArg::Stopped => ServiceState::Stopped,
+            };
+            if cli.json {
+                output::print_services_json(&services_info, state_filter)?;
+            } else {
+                output::print_services_text(&services_info, cli.verbose, state_filter);
+            }
+            return Ok(());
         }
-        return Ok(());
     }
 
     // Canonicalize path if provided
@@ -487,36 +437,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         OutputFilter::Git | OutputFilter::Repo | OutputFilter::Language => {
             config = config.skip_os().skip_hardware().skip_network();
         }
-        // All: respect include-only mode or skip flags
+        // All: no subcommand means full detection
         OutputFilter::All => {
-            let include_only_mode = cli.hardware || cli.network || cli.filesystem;
-
-            if include_only_mode {
-                // In include-only mode (multiple sections selected), skip everything not included
-                // Always skip OS in include-only mode (it's not individually selectable)
-                config = config.skip_os();
-
-                if !cli.hardware {
-                    config = config.skip_hardware();
-                }
-                if !cli.network {
-                    config = config.skip_network();
-                }
-                if !cli.filesystem {
-                    config = config.skip_filesystem();
-                }
-            } else {
-                // Default behavior: respect skip flags
-                if cli.skip_hardware {
-                    config = config.skip_hardware();
-                }
-                if cli.skip_network {
-                    config = config.skip_network();
-                }
-                if cli.skip_filesystem {
-                    config = config.skip_filesystem();
-                }
-            }
+            // No filtering - detect everything
         }
         // Programs and Services filters are handled earlier in main, should not reach here
         OutputFilter::Programs
@@ -539,7 +462,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         result = enrich_result_dependencies(result).await;
     }
 
-    if cli.json {
+    // Output logic:
+    // - No subcommand: always JSON
+    // - With subcommand: text by default, --json for JSON
+    let use_json = cli.command.is_none() || cli.json;
+
+    if use_json {
         output::print_json(&result, output_filter)?;
     } else {
         output::print_text(&result, cli.verbose, output_filter);
@@ -631,251 +559,367 @@ mod tests {
         Cli::try_parse_from(std::iter::once("sniff").chain(args.iter().copied()))
     }
 
-    mod filter_flag_validation {
+    mod subcommand_parsing {
         use super::*;
 
         #[test]
-        fn no_filter_flags_is_valid() {
+        fn no_subcommand_parses() {
             let cli = parse_args(&[]).unwrap();
-            assert!(cli.validate_filter_flags().is_ok());
+            assert!(cli.command.is_none());
         }
 
         #[test]
-        fn single_os_flag_is_valid() {
-            let cli = parse_args(&["--os"]).unwrap();
-            assert!(cli.validate_filter_flags().is_ok());
+        fn os_subcommand_parses() {
+            let cli = parse_args(&["os"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Os)));
         }
 
         #[test]
-        fn single_cpu_flag_is_valid() {
-            let cli = parse_args(&["--cpu"]).unwrap();
-            assert!(cli.validate_filter_flags().is_ok());
+        fn cpu_subcommand_parses() {
+            let cli = parse_args(&["cpu"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Cpu)));
         }
 
         #[test]
-        fn single_gpu_flag_is_valid() {
-            let cli = parse_args(&["--gpu"]).unwrap();
-            assert!(cli.validate_filter_flags().is_ok());
+        fn gpu_subcommand_parses() {
+            let cli = parse_args(&["gpu"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Gpu)));
         }
 
         #[test]
-        fn single_memory_flag_is_valid() {
-            let cli = parse_args(&["--memory"]).unwrap();
-            assert!(cli.validate_filter_flags().is_ok());
+        fn memory_subcommand_parses() {
+            let cli = parse_args(&["memory"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Memory)));
         }
 
         #[test]
-        fn single_storage_flag_is_valid() {
-            let cli = parse_args(&["--storage"]).unwrap();
-            assert!(cli.validate_filter_flags().is_ok());
+        fn storage_subcommand_parses() {
+            let cli = parse_args(&["storage"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Storage)));
         }
 
         #[test]
-        fn single_git_flag_is_valid() {
-            let cli = parse_args(&["--git"]).unwrap();
-            assert!(cli.validate_filter_flags().is_ok());
+        fn git_subcommand_parses() {
+            let cli = parse_args(&["git"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Git)));
         }
 
         #[test]
-        fn single_repo_flag_is_valid() {
-            let cli = parse_args(&["--repo"]).unwrap();
-            assert!(cli.validate_filter_flags().is_ok());
+        fn repo_subcommand_parses() {
+            let cli = parse_args(&["repo"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Repo)));
         }
 
         #[test]
-        fn single_language_flag_is_valid() {
-            let cli = parse_args(&["--language"]).unwrap();
-            assert!(cli.validate_filter_flags().is_ok());
+        fn language_subcommand_parses() {
+            let cli = parse_args(&["language"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Language)));
         }
 
         #[test]
-        fn single_filesystem_flag_is_valid() {
-            let cli = parse_args(&["--filesystem"]).unwrap();
-            assert!(cli.validate_filter_flags().is_ok());
+        fn filesystem_subcommand_parses() {
+            let cli = parse_args(&["filesystem"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Filesystem)));
         }
 
         #[test]
-        fn single_hardware_flag_is_valid() {
-            let cli = parse_args(&["--hardware"]).unwrap();
-            assert!(cli.validate_filter_flags().is_ok());
+        fn hardware_subcommand_parses() {
+            let cli = parse_args(&["hardware"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Hardware)));
         }
 
         #[test]
-        fn single_audio_flag_is_valid() {
-            let cli = parse_args(&["--audio"]).unwrap();
-            assert!(cli.validate_filter_flags().is_ok());
+        fn network_subcommand_parses() {
+            let cli = parse_args(&["network"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Network)));
         }
 
         #[test]
-        fn cpu_and_memory_are_mutually_exclusive() {
-            let cli = parse_args(&["--cpu", "--memory"]).unwrap();
-            let result = cli.validate_filter_flags();
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(err.contains("--cpu"));
-            assert!(err.contains("--memory"));
-            assert!(err.contains("mutually exclusive"));
+        fn audio_subcommand_parses() {
+            let cli = parse_args(&["audio"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Audio { .. })));
         }
 
         #[test]
-        fn git_and_repo_are_mutually_exclusive() {
-            // --filesystem is an include-only flag, not a filter flag
-            // Test with two detail-level filter flags instead
-            let cli = parse_args(&["--git", "--repo"]).unwrap();
-            let result = cli.validate_filter_flags();
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(err.contains("--git"));
-            assert!(err.contains("--repo"));
-            assert!(err.contains("mutually exclusive"));
+        fn programs_subcommand_parses() {
+            let cli = parse_args(&["programs"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Programs { .. })));
         }
 
         #[test]
-        fn filesystem_can_combine_with_filter() {
-            // --filesystem is an include-only flag, can combine with filter flags
-            // (though the filter flag takes precedence)
-            let cli = parse_args(&["--filesystem", "--git"]).unwrap();
-            let result = cli.validate_filter_flags();
-            // Only --git is a filter flag, so only 1 active = valid
-            assert!(result.is_ok());
-        }
-
-        #[test]
-        fn hardware_can_combine_with_filter() {
-            // --hardware is an include-only flag, not a filter flag
-            let cli = parse_args(&["--hardware", "--cpu"]).unwrap();
-            let result = cli.validate_filter_flags();
-            // Only --cpu is a filter flag, so only 1 active = valid
-            assert!(result.is_ok());
-        }
-
-        #[test]
-        fn os_and_storage_are_mutually_exclusive() {
-            let cli = parse_args(&["--os", "--storage"]).unwrap();
-            let result = cli.validate_filter_flags();
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(err.contains("--os"));
-            assert!(err.contains("--storage"));
-        }
-
-        #[test]
-        fn three_flags_are_mutually_exclusive() {
-            let cli = parse_args(&["--cpu", "--gpu", "--memory"]).unwrap();
-            let result = cli.validate_filter_flags();
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(err.contains("--cpu"));
-            assert!(err.contains("--gpu"));
-            assert!(err.contains("--memory"));
-        }
-
-        #[test]
-        fn all_detail_level_flags_are_mutually_exclusive() {
-            let cli = parse_args(&[
-                "--git",
-                "--repo",
-                "--language",
-                "--cpu",
-                "--gpu",
-                "--memory",
-                "--storage",
-            ])
-            .unwrap();
-            let result = cli.validate_filter_flags();
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            // All should be mentioned
-            assert!(err.contains("--git"));
-            assert!(err.contains("--repo"));
-            assert!(err.contains("--language"));
-            assert!(err.contains("--cpu"));
-            assert!(err.contains("--gpu"));
-            assert!(err.contains("--memory"));
-            assert!(err.contains("--storage"));
-        }
-
-        #[test]
-        fn error_message_format_is_correct() {
-            let cli = parse_args(&["--cpu", "--memory"]).unwrap();
-            let result = cli.validate_filter_flags();
-            let err = result.unwrap_err();
-            // Should follow the format: "X and Y are mutually exclusive..."
-            assert!(err.contains("and"));
-            assert!(err.contains("Only one filter flag can be used at a time"));
+        fn services_subcommand_parses() {
+            let cli = parse_args(&["services"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Services { .. })));
         }
     }
 
-    mod active_filter_flags {
+    mod to_output_filter {
         use super::*;
 
         #[test]
-        fn returns_empty_when_no_flags() {
-            let cli = parse_args(&[]).unwrap();
-            assert!(cli.active_filter_flags().is_empty());
+        fn os_maps_to_os_filter() {
+            let cmd = Commands::Os;
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Os);
         }
 
         #[test]
-        fn returns_single_flag() {
-            let cli = parse_args(&["--cpu"]).unwrap();
-            let flags = cli.active_filter_flags();
-            assert_eq!(flags, vec!["--cpu"]);
+        fn hardware_maps_to_hardware_filter() {
+            let cmd = Commands::Hardware;
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Hardware);
         }
 
         #[test]
-        fn returns_multiple_flags_in_order() {
-            let cli = parse_args(&["--cpu", "--gpu", "--memory"]).unwrap();
-            let flags = cli.active_filter_flags();
-            // Order matches the order in active_filter_flags implementation
-            assert_eq!(flags, vec!["--cpu", "--gpu", "--memory"]);
+        fn network_maps_to_network_filter() {
+            let cmd = Commands::Network;
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Network);
         }
 
         #[test]
-        fn os_comes_before_detail_flags() {
-            let cli = parse_args(&["--cpu", "--os", "--git"]).unwrap();
-            let flags = cli.active_filter_flags();
-            // --os comes before detail flags in the implementation
-            // Note: --hardware and --filesystem are NOT filter flags
-            assert_eq!(flags, vec!["--os", "--git", "--cpu"]);
+        fn filesystem_maps_to_filesystem_filter() {
+            let cmd = Commands::Filesystem;
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Filesystem);
         }
 
         #[test]
-        fn hardware_is_not_a_filter_flag() {
-            // --hardware is an include-only flag, not a filter flag
-            let cli = parse_args(&["--hardware"]).unwrap();
-            let flags = cli.active_filter_flags();
-            assert!(flags.is_empty());
+        fn cpu_maps_to_cpu_filter() {
+            let cmd = Commands::Cpu;
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Cpu);
         }
 
         #[test]
-        fn filesystem_is_not_a_filter_flag() {
-            // --filesystem is an include-only flag, not a filter flag
-            let cli = parse_args(&["--filesystem"]).unwrap();
-            let flags = cli.active_filter_flags();
-            assert!(flags.is_empty());
+        fn gpu_maps_to_gpu_filter() {
+            let cmd = Commands::Gpu;
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Gpu);
+        }
+
+        #[test]
+        fn memory_maps_to_memory_filter() {
+            let cmd = Commands::Memory;
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Memory);
+        }
+
+        #[test]
+        fn storage_maps_to_storage_filter() {
+            let cmd = Commands::Storage;
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Storage);
+        }
+
+        #[test]
+        fn git_maps_to_git_filter() {
+            let cmd = Commands::Git;
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Git);
+        }
+
+        #[test]
+        fn repo_maps_to_repo_filter() {
+            let cmd = Commands::Repo;
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Repo);
+        }
+
+        #[test]
+        fn language_maps_to_language_filter() {
+            let cmd = Commands::Language;
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Language);
+        }
+
+        #[test]
+        fn programs_maps_to_programs_filter() {
+            let cmd = Commands::Programs {
+                markdown: false,
+                json_format: None,
+            };
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Programs);
+        }
+
+        #[test]
+        fn editors_maps_to_editors_filter() {
+            let cmd = Commands::Editors {
+                markdown: false,
+                json_format: None,
+            };
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Editors);
+        }
+
+        #[test]
+        fn audio_maps_to_headless_audio_filter() {
+            let cmd = Commands::Audio {
+                markdown: false,
+                json_format: None,
+            };
+            assert_eq!(cmd.to_output_filter(), OutputFilter::HeadlessAudio);
+        }
+
+        #[test]
+        fn services_maps_to_services_filter() {
+            let cmd = Commands::Services {
+                state: ServiceStateArg::Running,
+            };
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Services);
         }
     }
 
-    mod cli_parsing {
+    mod services_state_default {
         use super::*;
 
         #[test]
-        fn filter_flags_do_not_conflict_with_skip_flags() {
-            // Filter flags and skip flags should be independent in parsing
-            let cli = parse_args(&["--cpu", "--skip-hardware"]).unwrap();
-            assert!(cli.cpu);
-            assert!(cli.skip_hardware);
-            // But validation should fail for filter flag combinations
-            assert!(cli.validate_filter_flags().is_ok()); // Only one filter flag
+        fn services_defaults_to_running() {
+            let cli = parse_args(&["services"]).unwrap();
+            if let Some(Commands::Services { state }) = cli.command {
+                assert!(matches!(state, ServiceStateArg::Running));
+            } else {
+                panic!("Expected Services command");
+            }
         }
 
         #[test]
-        fn filter_flags_work_with_other_options() {
-            let cli = parse_args(&["--cpu", "--json", "-v"]).unwrap();
-            assert!(cli.cpu);
+        fn services_accepts_all_state() {
+            let cli = parse_args(&["services", "--state", "all"]).unwrap();
+            if let Some(Commands::Services { state }) = cli.command {
+                assert!(matches!(state, ServiceStateArg::All));
+            } else {
+                panic!("Expected Services command");
+            }
+        }
+
+        #[test]
+        fn services_accepts_stopped_state() {
+            let cli = parse_args(&["services", "--state", "stopped"]).unwrap();
+            if let Some(Commands::Services { state }) = cli.command {
+                assert!(matches!(state, ServiceStateArg::Stopped));
+            } else {
+                panic!("Expected Services command");
+            }
+        }
+    }
+
+    mod global_flags {
+        use super::*;
+
+        #[test]
+        fn json_flag_before_subcommand() {
+            let cli = parse_args(&["--json", "cpu"]).unwrap();
             assert!(cli.json);
+            assert!(matches!(cli.command, Some(Commands::Cpu)));
+        }
+
+        #[test]
+        fn json_flag_after_subcommand() {
+            let cli = parse_args(&["cpu", "--json"]).unwrap();
+            assert!(cli.json);
+            assert!(matches!(cli.command, Some(Commands::Cpu)));
+        }
+
+        #[test]
+        fn verbose_flag_before_subcommand() {
+            let cli = parse_args(&["-v", "cpu"]).unwrap();
             assert_eq!(cli.verbose, 1);
-            assert!(cli.validate_filter_flags().is_ok());
+            assert!(matches!(cli.command, Some(Commands::Cpu)));
+        }
+
+        #[test]
+        fn verbose_flag_after_subcommand() {
+            let cli = parse_args(&["cpu", "-v"]).unwrap();
+            assert_eq!(cli.verbose, 1);
+            assert!(matches!(cli.command, Some(Commands::Cpu)));
+        }
+
+        #[test]
+        fn deep_flag_works_globally() {
+            let cli = parse_args(&["--deep", "git"]).unwrap();
+            assert!(cli.deep);
+            assert!(matches!(cli.command, Some(Commands::Git)));
+        }
+
+        #[test]
+        fn base_flag_works_globally() {
+            let cli = parse_args(&["-b", "/tmp", "filesystem"]).unwrap();
+            assert_eq!(cli.base, Some(PathBuf::from("/tmp")));
+            assert!(matches!(cli.command, Some(Commands::Filesystem)));
+        }
+
+        #[test]
+        fn multiple_verbose_flags() {
+            let cli = parse_args(&["-vvv", "cpu"]).unwrap();
+            assert_eq!(cli.verbose, 3);
+        }
+    }
+
+    mod programs_flags {
+        use super::*;
+
+        #[test]
+        fn programs_markdown_flag() {
+            let cli = parse_args(&["programs", "--markdown"]).unwrap();
+            if let Some(Commands::Programs { markdown, .. }) = cli.command {
+                assert!(markdown);
+            } else {
+                panic!("Expected Programs command");
+            }
+        }
+
+        #[test]
+        fn programs_json_format_flag() {
+            let cli = parse_args(&["programs", "--json-format", "full"]).unwrap();
+            if let Some(Commands::Programs { json_format, .. }) = cli.command {
+                assert_eq!(json_format, Some("full".to_string()));
+            } else {
+                panic!("Expected Programs command");
+            }
+        }
+
+        #[test]
+        fn editors_markdown_flag() {
+            let cli = parse_args(&["editors", "--markdown"]).unwrap();
+            if let Some(Commands::Editors { markdown, .. }) = cli.command {
+                assert!(markdown);
+            } else {
+                panic!("Expected Editors command");
+            }
+        }
+    }
+
+    mod is_programs_mode {
+        use super::*;
+
+        #[test]
+        fn programs_is_programs_mode() {
+            let cmd = Commands::Programs {
+                markdown: false,
+                json_format: None,
+            };
+            assert!(cmd.is_programs_mode());
+        }
+
+        #[test]
+        fn editors_is_programs_mode() {
+            let cmd = Commands::Editors {
+                markdown: false,
+                json_format: None,
+            };
+            assert!(cmd.is_programs_mode());
+        }
+
+        #[test]
+        fn audio_is_programs_mode() {
+            let cmd = Commands::Audio {
+                markdown: false,
+                json_format: None,
+            };
+            assert!(cmd.is_programs_mode());
+        }
+
+        #[test]
+        fn cpu_is_not_programs_mode() {
+            let cmd = Commands::Cpu;
+            assert!(!cmd.is_programs_mode());
+        }
+
+        #[test]
+        fn services_is_not_programs_mode() {
+            let cmd = Commands::Services {
+                state: ServiceStateArg::Running,
+            };
+            assert!(!cmd.is_programs_mode());
         }
     }
 }

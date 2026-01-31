@@ -10,7 +10,10 @@
 use std::path::Path;
 
 use biscuit_terminal::{
-    components::terminal_image::{parse_filepath_and_width, parse_width_spec, TerminalImage},
+    components::{
+        mermaid::MermaidRenderer,
+        terminal_image::{parse_filepath_and_width, parse_width_spec, TerminalImage},
+    },
     discovery::{
         clipboard,
         detection::{multiplex_support, Connection, MultiplexSupport},
@@ -19,7 +22,7 @@ use biscuit_terminal::{
     terminal::Terminal,
     utils::escape_codes,
 };
-use clap::{CommandFactory, Parser};
+use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::engine::{ArgValueCompleter, PathCompleter};
 use clap_complete::Shell;
 use serde::Serialize;
@@ -57,31 +60,60 @@ SHELL COMPLETIONS:
 ")]
 struct Args {
     /// Output in JSON format
-    #[arg(long)]
+    #[arg(long, global = true)]
     json: bool,
 
     /// Verbose output (show more details)
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     verbose: bool,
-
-    /// Display an image in the terminal.
-    ///
-    /// Supports width specification: "file.jpg|50%" or "file.jpg|80".
-    /// Supports PNG, JPG, JPEG, and GIF formats.
-    #[arg(long, value_name = "FILEPATH", add = ArgValueCompleter::new(image_completer()))]
-    image: Option<String>,
 
     /// Generate shell completions and exit.
     ///
     /// Outputs completion scripts for the specified shell to stdout.
     /// Redirect the output to the appropriate file for your shell.
     /// Use --completions help for setup instructions.
-    #[arg(long, value_name = "SHELL")]
+    #[arg(long, value_name = "SHELL", global = true)]
     completions: Option<String>,
+
+    #[command(subcommand)]
+    command: Option<Command>,
 
     /// Content to analyze (positional; multiple values are joined with spaces)
     #[arg(value_name = "CONTENT")]
     content: Vec<String>,
+}
+
+/// CLI subcommands
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Display an image in the terminal
+    ///
+    /// Supports width specification: "file.jpg|50%" or "file.jpg|80".
+    /// Supports PNG, JPG, JPEG, and GIF formats.
+    Image {
+        /// Image file path with optional width spec (e.g., "photo.jpg|75%")
+        #[arg(value_name = "FILEPATH", add = ArgValueCompleter::new(image_completer()))]
+        filepath: String,
+    },
+
+    /// Render a flowchart from node definitions
+    ///
+    /// Creates a Mermaid flowchart and renders it to the terminal.
+    /// Default direction is left-to-right (LR).
+    ///
+    /// Examples:
+    ///   bt flowchart "A --> B --> C"
+    ///   bt flowchart --vertical "Start --> Middle --> End"
+    ///   bt flowchart "A[Input] --> B{Decision}" "B -->|Yes| C[Output]"
+    Flowchart {
+        /// Render top-down instead of left-right
+        #[arg(long)]
+        vertical: bool,
+
+        /// Flowchart node and edge definitions (e.g., "A --> B --> C")
+        #[arg(value_name = "CONTENT", required = true)]
+        content: Vec<String>,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -268,9 +300,20 @@ fn main() -> color_eyre::Result<()> {
         return handle_completions(shell_arg);
     }
 
-    // Handle --image flag
-    if let Some(ref image_spec) = args.image {
-        return render_image(image_spec);
+    // Handle subcommands
+    match args.command {
+        Some(Command::Image { ref filepath }) => {
+            return render_image(filepath);
+        }
+        Some(Command::Flowchart {
+            vertical,
+            ref content,
+        }) => {
+            return render_flowchart(vertical, content, args.json);
+        }
+        None => {
+            // Default behavior: content analysis or terminal metadata
+        }
     }
 
     let content = if args.content.is_empty() {
@@ -421,6 +464,58 @@ fn render_image(image_spec: &str) -> color_eyre::Result<()> {
 
     // Output the result
     print!("{}", output);
+
+    Ok(())
+}
+
+/// Render a flowchart to the terminal.
+///
+/// Creates a Mermaid flowchart with the given content and renders it
+/// using the MermaidRenderer. Default direction is left-right (LR),
+/// use `vertical` for top-down (TD).
+fn render_flowchart(vertical: bool, content: &[String], json: bool) -> color_eyre::Result<()> {
+    let direction = if vertical { "TD" } else { "LR" };
+    let body = content.join(" ");
+    let instructions = format!("flowchart {}\n    {}", direction, body);
+
+    if json {
+        let output = serde_json::json!({
+            "type": "flowchart",
+            "direction": direction,
+            "instructions": instructions,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    let renderer = MermaidRenderer::new(&instructions);
+
+    // Render the diagram to a temp PNG file
+    let png_path = match renderer.render_to_temp_png() {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("Failed to render flowchart: {}", e);
+            renderer.print_fallback();
+            return Ok(());
+        }
+    };
+
+    // Use TerminalImage to display (same approach as `bt image`)
+    // This handles terminal detection and fallback gracefully
+    let terminal = Terminal::new();
+    let term_image = TerminalImage::new(&png_path)
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+
+    match term_image.render_to_terminal(&terminal) {
+        Ok(output) => print!("{}", output),
+        Err(e) => {
+            eprintln!("Failed to display flowchart: {}", e);
+            renderer.print_fallback();
+        }
+    }
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(&png_path);
 
     Ok(())
 }

@@ -14,7 +14,7 @@
 
 use chrono::{DateTime, Utc};
 use sniff_lib::package::LanguagePackageManager;
-use ai_pipeline::models::model_capability::ModelCapability;
+use unchained_ai::models::model_capability::ModelCapability;
 
 use super::{DbError, DbResult, i64_to_u64, u64_to_i64};
 use crate::metadata::{ContentType, Document, Flow, KindCategory, Library, License, Software, Topic};
