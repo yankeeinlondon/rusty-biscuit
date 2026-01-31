@@ -58,12 +58,14 @@ Protocol selection:
 Render Mermaid flowcharts directly in the terminal:
 
 ```bash
-bt flowchart "A --> B --> C"                    # Left-to-right (default)
-bt flowchart --vertical "A --> B --> C"         # Top-down
-bt flowchart --inverse "A --> B --> C"          # Solid background, inverted colors
-bt flowchart -t "My Process" "A --> B --> C"    # With title
+bt flowchart "A --> B --> C"                       # Left-to-right (default)
+bt flowchart --vertical "A --> B --> C"            # Top-down
+bt flowchart --inverse "A --> B --> C"             # Solid background, inverted colors
+bt flowchart --title "My Process" "A --> B --> C"  # With title
+bt flowchart --width 50% "A --> B --> C"           # Render at 50% terminal width
+bt flowchart --width 80ch "A --> B"                # Render at 80 characters wide
 bt flowchart "A[Input] --> B{Decision}" "B -->|Yes| C[Output]"
-bt flowchart --json "A --> B"                   # Output as JSON
+bt flowchart --json "A --> B"                      # Output as JSON
 ```
 
 **Features:**
@@ -71,6 +73,8 @@ bt flowchart --json "A --> B"                   # Output as JSON
 - **Transparent background**: Blends seamlessly with terminal (default)
 - **Inverse mode**: Solid background with contrasting colors (`--inverse`)
 - **High resolution**: 2x scale for sharp rendering on modern displays
+- **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill` (default: 50%)
+- **Aspect ratio preservation**: Images always maintain correct proportions via viuer
 
 **Requirements:**
 - `mmdc` (Mermaid CLI): Install with `npm install -g @mermaid-js/mermaid-cli`
@@ -80,6 +84,40 @@ bt flowchart --json "A --> B"                   # Output as JSON
 **Error handling:**
 - Syntax errors show the location and expected tokens
 - Returns non-zero exit code on errors
+
+### Git Graph Rendering
+
+Render Mermaid git graphs directly in the terminal:
+
+```bash
+bt git-graph "commit" "branch develop" "checkout develop" "commit"
+bt git-graph --inverse "commit" "commit" "commit"
+bt git-graph --title "Feature Branch" "commit" "branch feature" "commit" "checkout main" "merge feature"
+bt git-graph --width 50% "commit" "commit"      # Render at 50% terminal width
+bt git-graph --width 80ch "commit"              # Render at 80 characters wide
+bt git-graph --json "commit" "branch feature"   # Output as JSON
+```
+
+**Git commands:**
+- `commit` - Add a commit to the current branch
+- `commit id: "abc123"` - Commit with custom ID
+- `commit tag: "v1.0"` - Commit with a tag
+- `branch <name>` - Create a new branch
+- `checkout <name>` - Switch to a branch
+- `merge <name>` - Merge a branch into the current branch
+- `cherry-pick id: "abc123"` - Cherry-pick a commit
+
+**Features:**
+- **Color mode detection**: Automatically uses light or dark theme based on terminal background
+- **Transparent background**: Blends seamlessly with terminal (default)
+- **Inverse mode**: Solid background with contrasting colors (`--inverse`)
+- **Title support**: Add a title above the diagram (`-t`/`--title`)
+- **Width control**: `-w`/`--width` accepts percentages (`50%`), characters (`80ch` or `80`), or `fill` (default: 50%)
+- **Aspect ratio preservation**: Images always maintain correct proportions via viuer
+
+**Requirements:**
+- `mmdc` (Mermaid CLI): Install with `npm install -g @mermaid-js/mermaid-cli`
+- Falls back to `npx` if mmdc is not installed
 
 ### Shell Completions
 
@@ -142,6 +180,9 @@ bt image ./screenshot.png
 # Render a flowchart
 bt flowchart "Start --> Process --> End"
 
+# Render a git graph showing a feature branch workflow
+bt git-graph "commit" "branch feature" "commit" "commit" "checkout main" "merge feature"
+
 # Analyze escape code output
 echo -e "\x1b[32mGreen\x1b[0m" | xargs bt
 ```
@@ -150,6 +191,14 @@ echo -e "\x1b[32mGreen\x1b[0m" | xargs bt
 
 - `NO_COLOR`: When set, disables colored output in pretty-print mode
 - `RUST_LOG`: Enables tracing output (e.g., `RUST_LOG=debug bt`)
+
+## CLI Documentation Guidelines
+
+When adding or updating CLI commands, follow these conventions:
+
+1. **Command-specific examples**: Each subcommand should have its own examples section in `--help` output (using clap's `after_long_help` attribute). Examples should be specific to that command.
+
+2. **Use long flag names in examples**: Always use long flag names (e.g., `--title`, `--width`) instead of short aliases (e.g., `-t`, `-w`) in documentation and examples. This improves readability and makes it clear what each flag does.
 
 ## License
 

@@ -12,7 +12,7 @@ use std::path::Path;
 use biscuit_terminal::{
     components::{
         mermaid::MermaidRenderer,
-        terminal_image::{parse_filepath_and_width, parse_width_spec, TerminalImage},
+        terminal_image::{parse_filepath_and_width, parse_width_spec, ImageWidth, TerminalImage},
     },
     discovery::{
         clipboard,
@@ -100,13 +100,31 @@ enum Command {
     ///
     /// Creates a Mermaid flowchart and renders it to the terminal.
     /// Default direction is left-to-right (LR).
-    ///
-    /// Examples:
-    ///   bt flowchart "A --> B --> C"
-    ///   bt flowchart --vertical "Start --> Middle --> End"
-    ///   bt flowchart "A[Input] --> B{Decision}" "B -->|Yes| C[Output]"
-    ///   bt flowchart --inverse "A --> B"  # Solid background with inverted colors
-    ///   bt flowchart --title "My Process" "A --> B --> C"
+    #[command(after_long_help = "\
+EXAMPLES:
+  Basic flowchart (left-to-right):
+    bt flowchart \"A --> B --> C\"
+
+  Top-down direction:
+    bt flowchart --vertical \"Start --> Middle --> End\"
+
+  With node labels and shapes:
+    bt flowchart \"A[Input] --> B{Decision}\" \"B -->|Yes| C[Output]\" \"B -->|No| D[Retry]\"
+
+  With title:
+    bt flowchart --title \"My Process\" \"A --> B --> C\"
+
+  Inverted colors (solid background):
+    bt flowchart --inverse \"A --> B --> C\"
+
+  Custom width:
+    bt flowchart --width 30% \"A --> B\"    # 30% of terminal width
+    bt flowchart --width 80ch \"A --> B\"   # 80 characters wide
+    bt flowchart --width fill \"A --> B\"   # Full terminal width
+
+  JSON output (for scripting):
+    bt flowchart --json \"A --> B\"
+")]
     Flowchart {
         /// Render top-down instead of left-right
         #[arg(long)]
@@ -124,9 +142,78 @@ enum Command {
         #[arg(long, short = 't')]
         title: Option<String>,
 
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
+        ///
+        /// Default is 50% of terminal width. Aspect ratio is always preserved.
+        #[arg(long, short = 'w')]
+        width: Option<String>,
+
         /// Flowchart node and edge definitions (e.g., "A --> B --> C")
         #[arg(value_name = "CONTENT", required = true)]
         content: Vec<String>,
+    },
+
+    /// Render a git graph from git commands
+    ///
+    /// Creates a Mermaid gitGraph and renders it to the terminal.
+    /// Git commands include: commit, branch, checkout, merge, cherry-pick.
+    #[command(name = "git-graph", after_long_help = "\
+EXAMPLES:
+  Simple commit history:
+    bt git-graph \"commit\" \"commit\" \"commit\"
+
+  Feature branch workflow:
+    bt git-graph \"commit\" \"branch feature\" \"checkout feature\" \"commit\" \"commit\" \\
+                 \"checkout main\" \"merge feature\"
+
+  With commit IDs and tags:
+    bt git-graph \"commit id: \\\"abc123\\\"\" \"commit tag: \\\"v1.0\\\"\"
+
+  With title:
+    bt git-graph --title \"Release Flow\" \"commit\" \"branch release\" \"commit\"
+
+  Inverted colors (solid background):
+    bt git-graph --inverse \"commit\" \"commit\"
+
+  Custom width:
+    bt git-graph --width 30% \"commit\" \"commit\"   # 30% of terminal width
+    bt git-graph --width 80ch \"commit\"            # 80 characters wide
+    bt git-graph --width fill \"commit\"            # Full terminal width
+
+  JSON output (for scripting):
+    bt git-graph --json \"commit\" \"branch dev\"
+
+GIT COMMANDS:
+  commit                    Add a commit to the current branch
+  commit id: \"abc\"          Commit with custom ID
+  commit tag: \"v1.0\"        Commit with a tag
+  branch <name>             Create a new branch
+  checkout <name>           Switch to a branch
+  merge <name>              Merge a branch into current
+  cherry-pick id: \"abc\"     Cherry-pick a commit
+")]
+    GitGraph {
+        /// Use inverted colors with solid background
+        ///
+        /// Instead of transparent background matching the terminal, renders with
+        /// a solid background (white in dark mode, black in light mode) and
+        /// contrasting shapes.
+        #[arg(long)]
+        inverse: bool,
+
+        /// Add a title above the diagram
+        #[arg(long, short = 't')]
+        title: Option<String>,
+
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
+        ///
+        /// Default is 50% of terminal width. Aspect ratio is always preserved.
+        #[arg(long, short = 'w')]
+        width: Option<String>,
+
+        /// Git graph commands (commit, branch <name>, checkout <name>, merge <name>)
+        #[arg(value_name = "COMMANDS", required = true)]
+        commands: Vec<String>,
     },
 }
 
@@ -323,9 +410,31 @@ fn main() -> color_eyre::Result<()> {
             vertical,
             inverse,
             ref title,
+            ref width,
             ref content,
         }) => {
-            return render_flowchart(vertical, inverse, title.as_deref(), content, args.json);
+            return render_flowchart(
+                vertical,
+                inverse,
+                title.as_deref(),
+                width.as_deref(),
+                content,
+                args.json,
+            );
+        }
+        Some(Command::GitGraph {
+            inverse,
+            ref title,
+            ref width,
+            ref commands,
+        }) => {
+            return render_git_graph(
+                inverse,
+                title.as_deref(),
+                width.as_deref(),
+                commands,
+                args.json,
+            );
         }
         None => {
             // Default behavior: content analysis or terminal metadata
@@ -493,6 +602,7 @@ fn render_flowchart(
     vertical: bool,
     inverse: bool,
     title: Option<&str>,
+    width: Option<&str>,
     content: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
@@ -517,6 +627,7 @@ fn render_flowchart(
             "direction": direction,
             "inverse": inverse,
             "title": title,
+            "width": width,
             "instructions": instructions,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
@@ -539,15 +650,22 @@ fn render_flowchart(
     let png_path = match renderer.render_to_temp_png() {
         Ok(path) => path,
         Err(e) => {
-            return handle_flowchart_error(e, &instructions);
+            return handle_mermaid_error(e, &instructions, "flowchart");
         }
+    };
+
+    // Parse width specification: default to 50% if not specified
+    let image_width = match width {
+        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
+        None => ImageWidth::Percent(0.5),
     };
 
     // Use TerminalImage to display (same approach as `bt image`)
     // This handles terminal detection and fallback gracefully
     let terminal = Terminal::new();
     let term_image = TerminalImage::new(&png_path)
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
+        .with_width(image_width);
 
     match term_image.render_to_terminal(&terminal) {
         Ok(output) => print!("{}", output),
@@ -564,13 +682,100 @@ fn render_flowchart(
     Ok(())
 }
 
-/// Handle flowchart rendering errors with user-friendly output.
+/// Render a git graph to the terminal.
+///
+/// Creates a Mermaid gitGraph with the given commands and renders it
+/// using the MermaidRenderer.
+fn render_git_graph(
+    inverse: bool,
+    title: Option<&str>,
+    width: Option<&str>,
+    commands: &[String],
+    json: bool,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::mermaid::MermaidTheme;
+
+    let body = commands
+        .iter()
+        .map(|cmd| format!("    {}", cmd))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Build mermaid instructions with optional title frontmatter
+    let instructions = if let Some(title) = title {
+        format!("---\ntitle: {}\n---\ngitGraph\n{}", title, body)
+    } else {
+        format!("gitGraph\n{}", body)
+    };
+
+    if json {
+        let output = serde_json::json!({
+            "type": "git-graph",
+            "inverse": inverse,
+            "title": title,
+            "width": width,
+            "instructions": instructions,
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    // Configure renderer based on inverse flag
+    let renderer = if inverse {
+        // Inverse: solid background with opposite theme
+        let theme = MermaidTheme::for_color_mode(Terminal::color_mode()).inverse();
+        MermaidRenderer::new(&instructions)
+            .with_theme(theme)
+            .with_transparent_background(false)
+    } else {
+        // Default: transparent background with theme matching terminal
+        MermaidRenderer::for_terminal(&instructions)
+    };
+
+    // Render the diagram to a temp PNG file
+    let png_path = match renderer.render_to_temp_png() {
+        Ok(path) => path,
+        Err(e) => {
+            return handle_mermaid_error(e, &instructions, "git-graph");
+        }
+    };
+
+    // Parse width specification: default to 50% if not specified
+    let image_width = match width {
+        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
+        None => ImageWidth::Percent(0.5),
+    };
+
+    // Use TerminalImage to display (same approach as `bt image`)
+    // This handles terminal detection and fallback gracefully
+    let terminal = Terminal::new();
+    let term_image = TerminalImage::new(&png_path)
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
+        .with_width(image_width);
+
+    match term_image.render_to_terminal(&terminal) {
+        Ok(output) => print!("{}", output),
+        Err(e) => {
+            // Clean up before returning error
+            let _ = std::fs::remove_file(&png_path);
+            return Err(color_eyre::eyre::eyre!("Failed to display git graph: {}", e));
+        }
+    }
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(&png_path);
+
+    Ok(())
+}
+
+/// Handle Mermaid rendering errors with user-friendly output.
 ///
 /// Parses mmdc errors to extract syntax information and formats
 /// them nicely without JavaScript callstacks.
-fn handle_flowchart_error(
+fn handle_mermaid_error(
     error: biscuit_terminal::components::mermaid::MermaidRenderError,
     instructions: &str,
+    diagram_type: &str,
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::mermaid::MermaidRenderError;
 
@@ -609,8 +814,8 @@ fn handle_flowchart_error(
 
                 // Show the mermaid block that was defined
                 eprintln!(
-                    "\n{}Mermaid block was defined as:{}\n",
-                    dim, reset
+                    "\n{}Mermaid {} was defined as:{}\n",
+                    dim, diagram_type, reset
                 );
                 eprintln!("```mermaid\n{}\n```", instructions);
             } else {

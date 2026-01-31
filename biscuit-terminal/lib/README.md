@@ -175,6 +175,53 @@ Usage: `A[icon:fa7-brands:github]`
 - **Size limit**: Diagrams over 10KB are rejected (prevents CLI abuse)
 - **Terminal check**: Only renders when image protocols are supported
 
+### Display Notes
+
+**Aspect Ratio Preservation**: When the `viuer` feature is enabled (default), `TerminalImage::render_to_terminal()` uses the [viuer](https://crates.io/crates/viuer) crate for rendering. Viuer correctly preserves aspect ratio by:
+
+1. Specifying only the width (in terminal columns)
+2. Letting viuer calculate the correct height based on the image's pixel dimensions and terminal cell size
+
+This ensures images display at correct proportions regardless of the specified width.
+
+```rust
+use biscuit_terminal::components::terminal_image::{TerminalImage, ImageWidth};
+use biscuit_terminal::terminal::Terminal;
+
+// Default width is 50% of terminal
+let term_image = TerminalImage::new(&png_path)?;
+
+// Or specify a width - aspect ratio is always preserved
+let term_image = TerminalImage::new(&png_path)?
+    .with_width(ImageWidth::Percent(0.5));  // 50% of terminal width
+
+let term_image = TerminalImage::new(&png_path)?
+    .with_width(ImageWidth::Characters(80));  // 80 columns wide
+
+let term_image = TerminalImage::new(&png_path)?
+    .with_width(ImageWidth::Fill);  // Full terminal width
+
+// Render to terminal
+let terminal = Terminal::new();
+term_image.render_to_terminal(&terminal)?;
+```
+
+### Width Specification Parsing
+
+Use `parse_width_spec` to parse user-provided width strings:
+
+```rust
+use biscuit_terminal::components::terminal_image::{parse_width_spec, ImageWidth};
+
+// Supported formats:
+parse_width_spec("50%");   // ImageWidth::Percent(0.5)
+parse_width_spec("80ch");  // ImageWidth::Characters(80)
+parse_width_spec("80");    // ImageWidth::Characters(80)
+parse_width_spec("fill");  // ImageWidth::Fill
+```
+
+The `ch` suffix provides explicit character-based sizing, useful for CLI tools accepting width from users.
+
 ## Terminal Detection
 
 The library detects these terminal emulators:
@@ -296,6 +343,15 @@ bt
 
 # Output as JSON
 bt --json
+
+# Render an inline image
+bt image photo.png
+
+# Render a flowchart
+bt flowchart "A --> B --> C"
+
+# Render a git graph
+bt git-graph "commit" "branch feature" "commit" "checkout main" "merge feature"
 ```
 
 ## License

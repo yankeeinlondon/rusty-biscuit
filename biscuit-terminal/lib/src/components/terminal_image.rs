@@ -272,6 +272,9 @@ impl TerminalImage {
     /// This is the primary rendering method that handles protocol selection
     /// based on terminal capabilities.
     ///
+    /// When the `viuer` feature is enabled and the terminal supports images,
+    /// this method uses viuer for rendering, which correctly preserves aspect ratio.
+    ///
     /// ## Arguments
     ///
     /// * `term` - Terminal with detected capabilities
@@ -289,17 +292,72 @@ impl TerminalImage {
         term: &crate::terminal::Terminal,
     ) -> Result<String, TerminalImageError> {
         use crate::discovery::detection::ImageSupport;
-        use crate::discovery::detection::TerminalApp;
 
-        match term.image_support {
-            // iTerm advertises Kitty in some setups; prefer native iTerm protocol when the app is iTerm2.
-            ImageSupport::Kitty if matches!(term.app, TerminalApp::ITerm2) => {
-                self.render_as_iterm2(crate::terminal::Terminal::width())
-            }
-            ImageSupport::Kitty => self.render_as_kitty(crate::terminal::Terminal::width()),
-            ImageSupport::ITerm => self.render_as_iterm2(crate::terminal::Terminal::width()),
-            ImageSupport::None => Ok(self.generate_alt_text()),
+        // When viuer feature is enabled and terminal supports images, use viuer
+        // for proper aspect ratio preservation
+        #[cfg(feature = "viuer")]
+        if !matches!(term.image_support, ImageSupport::None) {
+            // viuer prints directly, so we render and return empty string
+            self.render_via_viuer()?;
+            return Ok(String::new());
         }
+
+        // Fallback to protocol-based rendering (or alt text if no image support)
+        #[cfg(not(feature = "viuer"))]
+        {
+            use crate::discovery::detection::TerminalApp;
+
+            match term.image_support {
+                // iTerm advertises Kitty in some setups; prefer native iTerm protocol when the app is iTerm2.
+                ImageSupport::Kitty if matches!(term.app, TerminalApp::ITerm2) => {
+                    self.render_as_iterm2(crate::terminal::Terminal::width())
+                }
+                ImageSupport::Kitty => self.render_as_kitty(crate::terminal::Terminal::width()),
+                ImageSupport::ITerm => self.render_as_iterm2(crate::terminal::Terminal::width()),
+                ImageSupport::None => Ok(self.generate_alt_text()),
+            }
+        }
+
+        #[cfg(feature = "viuer")]
+        Ok(self.generate_alt_text())
+    }
+
+    /// Render the image using viuer with the instance's width setting.
+    ///
+    /// This is a convenience method that creates options from the instance's
+    /// width field and renders using viuer.
+    #[cfg(feature = "viuer")]
+    fn render_via_viuer(&self) -> Result<(), TerminalImageError> {
+        let term_width = crate::terminal::Terminal::width();
+        let term_width = if term_width == 0 { 80 } else { term_width };
+        let available_width = term_width.saturating_sub(self.margin_left + self.margin_right);
+
+        // Convert ImageWidth to viuer's cell-based width
+        let width_cells = match &self.width {
+            ImageWidth::Fill => Some(available_width),
+            ImageWidth::Percent(pct) => Some(((available_width as f32) * pct) as u32),
+            ImageWidth::Characters(chars) => Some((*chars).min(available_width)),
+        };
+
+        let config = viuer::Config {
+            width: width_cells,
+            height: None, // Let viuer compute height to preserve aspect ratio
+            x: self.margin_left as u16,
+            y: 0,
+            transparent: true,
+            truecolor: true,
+            absolute_offset: false,
+            restore_cursor: false,
+            ..Default::default()
+        };
+
+        viuer::print_from_file(&self.filename, &config).map_err(|e| {
+            TerminalImageError::ViuerError {
+                message: e.to_string(),
+            }
+        })?;
+
+        Ok(())
     }
 
     /// Render the image using options that may include viuer rendering.
@@ -508,42 +566,24 @@ impl TerminalImage {
             ImageWidth::Characters(chars) => (*chars).min(available_width),
         };
 
-        // Use measured cell size when available for correct aspect ratio.
+        // Use measured cell size when available for correct aspect ratio calculation.
         let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
             .map(|cs| (cs.width.max(1), cs.height.max(1)))
             .unwrap_or((8u32, 16u32));
 
-        let target_pixel_width = target_cells * cell_pixel_width;
+        // Don't resize the image - send it at original resolution and let Kitty handle scaling.
+        // This preserves maximum quality and lets Kitty's aspect ratio preservation work correctly.
+        let png_data = self.encode_as_png(&img)?;
 
-        // Calculate pixel dimensions preserving aspect ratio
-        let aspect_ratio = img.height() as f32 / img.width() as f32;
-        // Only prevent upscaling when no explicit width is specified (default 50%)
-        let display_pixel_width = match &self.width {
-            ImageWidth::Percent(pct) if *pct == 0.5 => target_pixel_width.min(img.width()),
-            _ => target_pixel_width,
-        };
-        let display_pixel_height = (display_pixel_width as f32 * aspect_ratio) as u32;
+        // Calculate expected rows for cursor advancement:
+        // Kitty preserves aspect ratio when only c= is specified (no r=).
+        // rows = cols * (image_height / image_width) * (cell_width / cell_height)
+        let image_aspect = img.height() as f32 / img.width() as f32;
+        let cell_aspect = cell_pixel_width as f32 / cell_pixel_height as f32;
+        let display_cells_height = (target_cells as f32 * image_aspect * cell_aspect).ceil() as u32;
 
-        // Resize image if needed
-        let resized = if display_pixel_width != img.width() || display_pixel_height != img.height()
-        {
-            img.resize_exact(
-                display_pixel_width.max(1),
-                display_pixel_height.max(1),
-                image::imageops::FilterType::Lanczos3,
-            )
-        } else {
-            img
-        };
-
-        let png_data = self.encode_as_png(&resized)?;
-
-        // Calculate cell height based on aspect ratio and measured cell height
-        let display_cells_height =
-            (display_pixel_height as f32 / cell_pixel_height as f32).ceil() as u32;
-
-        // Pass cell dimensions (not pixels) to Kitty and advance cursor below the image
-        let image = self.render_kitty_cells(&png_data, target_cells, display_cells_height.max(1));
+        // Only specify columns (c=), let Kitty calculate rows to preserve aspect ratio
+        let image = self.render_kitty_width_only(&png_data, target_cells);
         let cursor_advance = format!("\x1b[{}B\r\n", display_cells_height.max(1));
         Ok(format!("{}{}", image, cursor_advance))
     }
@@ -672,6 +712,46 @@ impl TerminalImage {
         self.render_kitty_cells(png_data, width, height)
     }
 
+    /// Render image using Kitty protocol with only width specified.
+    ///
+    /// By omitting the `r=` (rows) parameter, Kitty automatically calculates
+    /// the number of rows needed to preserve the image's aspect ratio.
+    /// This is the preferred method for aspect-ratio-correct rendering.
+    ///
+    /// ## Arguments
+    ///
+    /// * `png_data` - PNG-encoded image bytes
+    /// * `width_cells` - Display width in terminal columns
+    pub fn render_kitty_width_only(&self, png_data: &[u8], width_cells: u32) -> String {
+        let base64_data = self.encode_as_base64(png_data);
+        let chunk_size = 4096;
+        let mut result = String::new();
+
+        let chunks: Vec<&str> = base64_data
+            .as_bytes()
+            .chunks(chunk_size)
+            .map(|c| std::str::from_utf8(c).unwrap_or(""))
+            .collect();
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            let is_last = i == chunks.len() - 1;
+            let more = if is_last { 0 } else { 1 };
+
+            if i == 0 {
+                // First chunk: specify only c= (columns), omit r= (rows)
+                // Kitty will automatically calculate rows to preserve aspect ratio
+                result.push_str(&format!(
+                    "\x1b_Gf=100,a=T,t=d,c={},m={};{}\x1b\\",
+                    width_cells, more, chunk
+                ));
+            } else {
+                result.push_str(&format!("\x1b_Gm={};{}\x1b\\", more, chunk));
+            }
+        }
+
+        result
+    }
+
     /// Render image using the iTerm2 inline images protocol.
     ///
     /// ## Arguments
@@ -739,6 +819,7 @@ pub fn calculate_display_dimensions(
 /// - Empty or whitespace: Default to 50% (`ImageWidth::Percent(0.5)`)
 /// - `"fill"`: `ImageWidth::Fill`
 /// - Number with `%` suffix: `ImageWidth::Percent(value / 100.0)`
+/// - Number with `ch` suffix: `ImageWidth::Characters(value)` (e.g., "40ch")
 /// - Bare number: `ImageWidth::Characters(value)`
 ///
 /// ## Examples
@@ -749,6 +830,7 @@ pub fn calculate_display_dimensions(
 /// assert!(matches!(parse_width_spec("50%").unwrap(), ImageWidth::Percent(p) if (p - 0.5).abs() < 0.001));
 /// assert!(matches!(parse_width_spec("fill").unwrap(), ImageWidth::Fill));
 /// assert!(matches!(parse_width_spec("80").unwrap(), ImageWidth::Characters(80)));
+/// assert!(matches!(parse_width_spec("40ch").unwrap(), ImageWidth::Characters(40)));
 /// ```
 ///
 /// ## Errors
@@ -785,6 +867,23 @@ pub fn parse_width_spec(spec: &str) -> Result<ImageWidth, TerminalImageError> {
         }
 
         return Ok(ImageWidth::Percent(pct_val / 100.0));
+    }
+
+    // Handle character width with "ch" suffix (e.g., "40ch")
+    if let Some(char_str) = trimmed.strip_suffix("ch") {
+        let char_val: u32 = char_str.trim().parse().map_err(|_| {
+            TerminalImageError::InvalidWidthSpec {
+                spec: spec.to_string(),
+            }
+        })?;
+
+        if char_val == 0 {
+            return Err(TerminalImageError::InvalidWidthSpec {
+                spec: spec.to_string(),
+            });
+        }
+
+        return Ok(ImageWidth::Characters(char_val));
     }
 
     // Handle bare number (characters)
@@ -964,6 +1063,24 @@ mod tests {
             parse_width_spec("1").unwrap(),
             ImageWidth::Characters(1)
         ));
+    }
+
+    #[test]
+    fn test_parse_width_spec_characters_with_ch_suffix() {
+        assert!(matches!(
+            parse_width_spec("40ch").unwrap(),
+            ImageWidth::Characters(40)
+        ));
+        assert!(matches!(
+            parse_width_spec("100ch").unwrap(),
+            ImageWidth::Characters(100)
+        ));
+        assert!(matches!(
+            parse_width_spec(" 25ch ").unwrap(),
+            ImageWidth::Characters(25)
+        ));
+        // 0ch should be invalid
+        assert!(parse_width_spec("0ch").is_err());
     }
 
     #[test]
