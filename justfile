@@ -208,6 +208,7 @@ skill-darkmatter:
 skill-sniff:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Sniff{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
+    @unset ANTHROPIC_API_KEY
     @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-sniff.md)"\'
     @echo ""
     @echo "Sniff skill has been rebuilt"
@@ -218,6 +219,7 @@ skill-sniff:
 skill-playa:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Playa{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
+    @unset ANTHROPIC_API_KEY
     @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-playa.md)"\'
     @echo ""
     @echo "The Playa skill has been rebuilt"
@@ -228,36 +230,51 @@ skill-playa:
 skill-queue:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Queue{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
+    @unset ANTHROPIC_API_KEY
     @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-queue.md)"\'
     @echo ""
     @echo "The Queue skill has been rebuilt"
     @echo ""
     @so-you-say "The Queue package has synced it's documents for drift and updated the skill tree."
 
-# Update docs and then update the skill for the Queue package
+# Update docs and then update the skill for the biscuit-speak package
 skill-biscuit-speaks:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}biscuit-speaks{{RESET}} Package"
-    @echo "-------------------------------------------------------------------------------"
+    @echo "---------------------------------------------------------------------------------"
+    @unset ANTHROPIC_API_KEY
     @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-biscuit-speaks.md)"\'
     @echo ""
     @echo "The {{BOLD}}biscuit-speaks{{RESET}} skill has been rebuilt"
     @echo ""
     @so-you-say "The biscuit-speaks package has synced it's documents for drift and updated the skill tree."
 
-# Update docs and then update the skill for the Queue package
+# Update docs and then update the skill for the biscuit-hash package
+skill-biscuit-hash:
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}biscuit-hash{{RESET}} Package"
+    @echo "---------------------------------------------------------------------------------"
+    @unset ANTHROPIC_API_KEY
+    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-biscuit-hash.md)"\'
+    @echo ""
+    @echo "The {{BOLD}}biscuit-hash{{RESET}} skill has been rebuilt"
+    @echo ""
+    @so-you-say "The biscuit-hash package has synced it's documents for drift and updated the skill tree."
+
+# Update docs and then update the skill for the tree-huger package
 skill-tree-hugger:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}tree-hugger{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
+    @unset ANTHROPIC_API_KEY
     @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-tree-hugger.md)"\'
     @echo ""
     @echo "The {{BOLD}}tree-hugger{{RESET}} skill has been rebuilt"
     @echo ""
     @so-you-say "The tree-hugger package has synced it's documents for drift and updated the skill tree."
 
-# Update docs and then update the skill for the Queue package
+# Update docs and then update the skill for the Research package
 skill-research:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}research{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
+    @unset ANTHROPIC_API_KEY
     @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-research.md)"\'
     @echo ""
     @echo "The {{BOLD}}research{{RESET}} skill has been rebuilt"

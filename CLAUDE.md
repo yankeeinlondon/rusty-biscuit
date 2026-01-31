@@ -20,6 +20,9 @@ dockhand/
 │   ├── cli/          # Binary: `research` (FUTURE)
 │   └── lib/          # Core research library
 │   └── service/      # Server to abstract AI pipelining functionality (FUTURE)
+├── biscuit-hash/     # Best-in-class hashing algorithms
+│   ├── cli/          # Binary: `bh` (hash CLI)
+│   └── lib/          # xxHash, BLAKE3, Argon2id hashing
 ├── biscuit-terminal/ # Terminal detection and rich rendering
 │   ├── cli/          # Binary: `bt` (terminal inspector)
 │   └── lib/          # Terminal capabilities, image rendering, escape codes
@@ -191,6 +194,7 @@ When running in Wezterm, Queue creates a split layout:
 
 This repository has local Claude Code skills in `.claude/skills/`:
 
+- `biscuit-hash` - Hashing trifecta: xxHash (fast), BLAKE3 (crypto), Argon2id (passwords)
 - `biscuit-speaks` - Cross-platform TTS with multi-provider support (ElevenLabs, Say, eSpeak, Kokoro, etc.)
 - `biscuit-terminal` - **Terminal authority**: detection, image rendering (viuer), mermaid diagrams
 - `darkmatter` - Markdown parsing/rendering (delegates terminal rendering to biscuit-terminal)

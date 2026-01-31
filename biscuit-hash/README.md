@@ -31,22 +31,22 @@ just -f biscuit-hash/justfile install
 
 ```sh
 # Hash content with xxHash (default, fast non-cryptographic)
-hash "hello world"
+bh "hello world"
 # => 5020219685658847592
 
 # Hash file contents
-hash --file path/to/file.txt
+bh --file path/to/file.txt
 
 # Use BLAKE3 cryptographic hash
-hash --crypto "hello world"
+bh --crypto "hello world"
 # => d74981efa70a0c880b8d8c1985d075dbcbf679b99a5f9914e5aaf96b831a9e24
 
 # Hash a password with Argon2id (produces PHC format)
-hash --password "mysecret"
+bh --password "mysecret"
 # => $argon2id$v=19$m=19456,t=2,p=1$...
 
 # Password from stdin (more secure - not in shell history)
-echo "mysecret" | hash --password -
+echo "mysecret" | bh --password -
 ```
 
 ### CLI Flags
@@ -65,17 +65,17 @@ Enable tab completions by adding one line to your shell config:
 
 **Bash** (`~/.bashrc`):
 ```sh
-source <(COMPLETE=bash hash)
+source <(COMPLETE=bash bh)
 ```
 
 **Zsh** (`~/.zshrc`):
 ```sh
-source <(COMPLETE=zsh hash)
+source <(COMPLETE=zsh bh)
 ```
 
 **Fish** (`~/.config/fish/config.fish`):
 ```sh
-COMPLETE=fish hash | source
+COMPLETE=fish bh | source
 ```
 
 ## Library Usage
