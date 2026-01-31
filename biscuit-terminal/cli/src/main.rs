@@ -31,6 +31,7 @@ use serde::Serialize;
 #[derive(Parser, Debug)]
 #[command(name = "bt")]
 #[command(author, version, about = "Display terminal metadata and capabilities")]
+#[command(disable_help_subcommand = true)]
 #[command(after_help = "\
 SHELL COMPLETIONS:
   Two methods are available:
@@ -60,11 +61,11 @@ SHELL COMPLETIONS:
 ")]
 struct Args {
     /// Output in JSON format
-    #[arg(long, global = true)]
+    #[arg(long, global = true, display_order = 100)]
     json: bool,
 
     /// Verbose output (show more details)
-    #[arg(short, long, global = true)]
+    #[arg(short, long, global = true, display_order = 101)]
     verbose: bool,
 
     /// Generate shell completions and exit.
@@ -72,7 +73,7 @@ struct Args {
     /// Outputs completion scripts for the specified shell to stdout.
     /// Redirect the output to the appropriate file for your shell.
     /// Use --completions help for setup instructions.
-    #[arg(long, value_name = "SHELL", global = true)]
+    #[arg(long, value_name = "SHELL", global = true, display_order = 102)]
     completions: Option<String>,
 
     #[command(subcommand)]
@@ -87,6 +88,7 @@ struct Args {
 #[derive(Subcommand, Debug)]
 enum Command {
     /// Display an image in the terminal
+    #[command(display_order = 1)]
     ///
     /// Supports width specification: "file.jpg|50%" or "file.jpg|80".
     /// Supports PNG, JPG, JPEG, and GIF formats.
@@ -125,6 +127,7 @@ enum Command {
   JSON output (for scripting):
     bt flowchart --json \"A --> B\"
 ")]
+    #[command(display_order = 2)]
     Flowchart {
         /// Render top-down instead of left-right
         #[arg(long)]
@@ -157,7 +160,7 @@ enum Command {
     ///
     /// Creates a Mermaid gitGraph and renders it to the terminal.
     /// Git commands include: commit, branch, checkout, merge, cherry-pick.
-    #[command(name = "git-graph", after_long_help = "\
+    #[command(name = "git-graph", display_order = 3, after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
   Simple commit history:
     bt git-graph \"commit\" \"commit\" \"commit\"
