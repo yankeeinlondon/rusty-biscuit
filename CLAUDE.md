@@ -24,8 +24,8 @@ dockhand/
 │   ├── cli/          # Binary: `bh` (hash CLI)
 │   └── lib/          # xxHash, BLAKE3, Argon2id hashing
 ├── biscuit-terminal/ # Terminal detection and rich rendering
-│   ├── cli/          # Binary: `bt` (terminal inspector)
-│   └── lib/          # Terminal capabilities, image rendering, escape codes
+│   ├── cli/          # Binary: `bt` (terminal inspector + diagram renderer)
+│   └── lib/          # Terminal capabilities, image rendering, mermaid diagrams
 ├── darkmatter-cli/   # Binary: `md` (markdown terminal renderer)
 ├── darkmatter-lib/   # Markdown parsing, mermaid diagrams, syntax highlighting
 ├── queue/            # TUI command scheduler
@@ -201,6 +201,7 @@ This repository has local Claude Code skills in `.claude/skills/`:
 - `playa` - Audio playback via host players, format detection, 53 embedded sound effects
 - `research` - AI-powered library research with two-phase LLM pipeline
 - `sniff` - System detection (OS, hardware, network, programs, services)
+- `so-you-say` - TTS CLI (`speak` binary) wrapping biscuit-speaks
 - `clap` - Command-line argument parsing
 - `color-eyre` - Error reporting
 - `ratatui` - Terminal UI framework
@@ -223,7 +224,8 @@ When working in this repository, you **must** follow these workflows:
    - Working in CLI modules (`research/cli`, etc.)? Use the `clap` skill
    - Working in `darkmatter/`? Use the `darkmatter` skill
    - Working in `biscuit-terminal/`? Use the `biscuit-terminal` skill
-   - Working in `biscuit-speaks/` or `so-you-say/`? Use the `biscuit-speaks` skill
+   - Working in `biscuit-speaks/`? Use the `biscuit-speaks` skill
+   - Working in `so-you-say/`? Use the `so-you-say` skill
    - Working in `playa/`? Use the `playa` skill
    - Working in `sniff/`? Use the `sniff` skill
 

@@ -1,6 +1,6 @@
 # bt Command
 
-The `bt` CLI tool for terminal inspection, image rendering, and content analysis.
+The `bt` CLI tool for terminal inspection, image rendering, Mermaid diagrams, and content analysis.
 
 ## Installation
 
@@ -12,9 +12,30 @@ just -f biscuit-terminal/justfile install
 cargo install --path biscuit-terminal/cli
 ```
 
-## Commands
+## Commands Overview
 
-### Terminal Inspection (Default)
+| Command | Description |
+|---------|-------------|
+| `bt` | Terminal inspection (default) |
+| `bt image` | Render inline images |
+| `bt flowchart` | Flowchart diagrams |
+| `bt quadrant` | Quadrant charts |
+| `bt pie-chart` | Pie charts |
+| `bt git-graph` | Git history diagrams |
+| `bt bar-chart` | Bar charts |
+| `bt line-chart` | Line charts |
+| `bt timeline` | Timeline diagrams |
+| `bt state-diagram` | State machine diagrams |
+| `bt erd` | Entity relationship diagrams |
+
+All diagram commands support:
+- `--example` / `-e`: Render example with command shown
+- `--width` / `-w`: Width spec (`50%`, `80ch`, `fill`)
+- `--inverse`: Solid background with inverted colors
+- `--title` / `-t`: Add title above diagram
+- `--json`: Output as JSON (for scripting)
+
+## Terminal Inspection (Default)
 
 ```bash
 bt              # Pretty-printed output
@@ -33,13 +54,13 @@ Output sections:
 - **Locale**: Raw, BCP47 tag, encoding
 - **Config**: Path to terminal config file
 
-### Image Rendering
+## Image Rendering
 
 ```bash
-bt --image photo.jpg           # Default 50% width
-bt --image "photo.jpg|75%"     # 75% of terminal
-bt --image "photo.jpg|80"      # Fixed 80 columns
-bt --image "photo.jpg|fill"    # Fill available width
+bt image photo.jpg           # Default 50% width
+bt image "photo.jpg|75%"     # 75% of terminal
+bt image "photo.jpg|80"      # Fixed 80 columns
+bt image "photo.jpg|fill"    # Fill available width
 ```
 
 Protocol selection:
@@ -47,7 +68,43 @@ Protocol selection:
 - **iTerm2**: iTerm2 (forced even if Kitty advertised)
 - **Fallback**: Alt text for unsupported terminals
 
-### Content Analysis
+## Diagram Commands
+
+See [Mermaid Diagrams](./mermaid-diagrams.md) for comprehensive diagram documentation.
+
+### Quick Examples
+
+```bash
+# Flowchart
+bt flowchart "A --> B --> C"
+bt flowchart --vertical "Start --> Process --> End"
+
+# Quadrant chart
+bt quadrant "Task A: [0.2, 0.8]" "Task B: [0.7, 0.3]"
+bt quadrant --theme magic-quadrangle "Leaders: [0.8, 0.8]"
+
+# Pie chart
+bt pie-chart "Dogs: 386" "Cats: 85" "Birds: 15"
+bt pie-chart --show-data "TypeScript: 45 #3178c6" "Rust: 35"
+
+# Git graph
+bt git-graph "commit" "branch feature" "commit" "merge feature"
+
+# Bar/Line charts
+bt bar-chart 10 20 15 25
+bt line-chart --x-axis "Mon,Tue,Wed" 20 22 19
+
+# Timeline
+bt timeline "2020: Founded" "2022: Series A" "2024: IPO"
+
+# State diagram
+bt state-diagram "[*] --> Idle" "Idle --> Running" "Running --> [*]"
+
+# ERD
+bt erd "Customer ||--o{ Order : places"
+```
+
+## Content Analysis
 
 ```bash
 bt "Hello World"
@@ -61,77 +118,16 @@ Output:
 - OSC8 link presence
 - Total character length
 
-## Examples
-
-### Quick Terminal Check
+## Shell Completions
 
 ```bash
-$ bt
-Terminal Metadata
-═══════════════════════════════════════
+# Dynamic (recommended)
+echo 'source <(COMPLETE=bash bt)' >> ~/.bashrc    # Bash
+echo 'source <(COMPLETE=zsh bt)' >> ~/.zshrc      # Zsh
 
-Basic Info
-  App:        Wezterm
-  OS:         MacOS
-  Size:       120 x 40
-  Is TTY:     yes
-  In CI:      no
-
-Fonts
-  Name:       JetBrains Mono
-  Size:       14pt
-  Nerd Font:  yes
-  Ligatures:  likely
-
-Colors
-  Depth:      TrueColor
-  Mode:       Dark
-  Background: #1e1e2e (30, 30, 46)
-  ...
-```
-
-### JSON Output for Scripting
-
-```bash
-# Check image support
-bt --json | jq '.image_support'
-# "Kitty"
-
-# Get color depth
-bt --json | jq '.color_depth'
-# "TrueColor"
-
-# Check if in CI
-bt --json | jq '.is_ci'
-# false
-```
-
-### Display Images
-
-```bash
-# Default width (50%)
-bt --image ./screenshot.png
-
-# Full width
-bt --image "./diagram.svg|fill"
-
-# Thumbnail
-bt --image "./photo.jpg|25%"
-```
-
-### Analyze Styled Content
-
-```bash
-# Check if content has escape codes
-$ bt "$(echo -e '\x1b[1mBold\x1b[0m')"
-
-Content Analysis
-══════════════════
-  Lines:        1
-  Line lengths: 4
-  Total length: 4
-  Color codes:  yes
-  OSC8 links:   no
+# Static
+bt --completions bash >> ~/.bashrc
+bt --completions zsh > ~/.zfunc/_bt
 ```
 
 ## Environment Variables
@@ -219,4 +215,5 @@ bt --json | jq '{font, font_size, is_nerd_font}'
 ## Related
 
 - [Terminal Struct](./terminal-struct.md) - Same data as library API
-- [Image Rendering](./image-rendering.md) - `--image` implementation details
+- [Image Rendering](./image-rendering.md) - Image implementation details
+- [Mermaid Diagrams](./mermaid-diagrams.md) - Comprehensive diagram documentation

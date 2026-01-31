@@ -191,6 +191,7 @@ commit:
 skill-schematic:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Schematic{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
+    @unset ANTHROPIC_API_KEY
     @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-schematic.md)"\'
     @echo ""
     @echo "Schematic Skill has been rebuilt"
@@ -286,6 +287,7 @@ skill-biscuit-terminal:
     @echo ""
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "The biscuit-terminal package has synced it's documents for drift and updated the skill tree."; \
+    fi
 
 # Update docs and then update the skill for the tree-huger package
 skill-tree-hugger:
@@ -300,15 +302,27 @@ skill-tree-hugger:
         so-you-say "The tree-hugger package has synced it's documents for drift and updated the skill tree."; \
     fi
 
+
 # Update docs and then update the skill for the Research package
 skill-research:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}research{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY
-    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-research.md)"\'
+    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-research.md)"\'
     @echo ""
     @echo "The {{BOLD}}research{{RESET}} skill has been rebuilt"
     @echo ""
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "The research package has synced it's documents for drift and updated the skill tree."; \
+    fi
+
+# Update docs and then update the skill for the so-you-say package
+skill-so-you-say:
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}so-you-say{{RESET}} Package"
+    @echo "-------------------------------------------------------------------------------"
+    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-so-you-say.md)"\'
+    @echo ""
+    @echo "The {{BOLD}}so-you-say{{RESET}} skill has been rebuilt"
+    @echo ""
+    @if command -v so-you-say >/dev/null 2>&1; then \
+        so-you-say "The so-you-say package has synced it's documents for drift and updated the skill tree."; \
     fi

@@ -8,7 +8,8 @@ use biscuit_speaks::{
     KokoroTtsProvider, Language, SayProvider, SapiProvider, SpeakResult, SpeedLevel, TtsConfig,
     TtsError, TtsFailoverStrategy, TtsProvider, TtsVoiceInventory, Voice, VoiceQuality, VolumeLevel,
 };
-use clap::{Parser, ValueEnum};
+use clap::{CommandFactory, Parser, ValueEnum};
+use clap_complete::{generate, Shell};
 use inquire::Select;
 use owo_colors::OwoColorize;
 use darkmatter_lib::markdown::output::terminal::{TerminalOptions, for_terminal};
@@ -129,6 +130,10 @@ struct Cli {
         long_help = "Refresh the TTS provider and voice cache. Clears the cached voice data (~/.biscuit-speaks-cache.json) and repopulates it with fresh data from all available providers. Use this after installing new voices or if voice listings appear stale."
     )]
     refresh_cache: bool,
+
+    /// Generate shell completions and exit
+    #[arg(long, value_enum, value_name = "SHELL")]
+    completions: Option<Shell>,
 
     /// Text to speak (reads from stdin if not provided)
     text: Vec<String>,
@@ -825,6 +830,14 @@ fn print_voices(provider: TtsProvider, voices: &[Voice], lang_filter: Option<&st
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+
+    // Handle --completions flag
+    if let Some(shell) = cli.completions {
+        let mut cmd = Cli::command();
+        let bin_name = cmd.get_name().to_string();
+        generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
+        return Ok(());
+    }
 
     // Handle --refresh-cache flag (does not exit early - continues with other operations)
     if cli.refresh_cache {

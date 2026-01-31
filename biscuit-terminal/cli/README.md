@@ -1,6 +1,6 @@
 # biscuit-terminal-cli
 
-A CLI tool (`bt`) for inspecting terminal capabilities and rendering images.
+A CLI tool (`bt`) for inspecting terminal capabilities, rendering images, and generating Mermaid diagrams.
 
 ## Installation
 
@@ -13,6 +13,22 @@ Or from the workspace root:
 ```bash
 just -f biscuit-terminal/justfile install
 ```
+
+## Commands Overview
+
+| Command | Description |
+|---------|-------------|
+| `bt` | Terminal inspection (default) |
+| `bt image` | Render inline images |
+| `bt flowchart` | Flowchart diagrams |
+| `bt quadrant` | Quadrant charts |
+| `bt pie-chart` | Pie charts |
+| `bt git-graph` | Git history diagrams |
+| `bt bar-chart` | Bar charts |
+| `bt line-chart` | Line charts |
+| `bt timeline` | Timeline diagrams |
+| `bt state-diagram` | State machine diagrams |
+| `bt erd` | Entity relationship diagrams |
 
 ## Usage
 
@@ -184,6 +200,82 @@ bt git-graph --json "commit" "branch feature"   # Output as JSON
 - `mmdc` (Mermaid CLI): Install with `npm install -g @mermaid-js/mermaid-cli`
 - Falls back to `npx` if mmdc is not installed
 
+### Pie Chart Rendering
+
+Render Mermaid pie charts:
+
+```bash
+bt pie-chart "Dogs: 386" "Cats: 85" "Birds: 15"
+bt pie-chart --title "Pet Distribution" "Dogs: 386" "Cats: 85"
+bt pie-chart --show-data "TypeScript: 45" "Rust: 35"  # Show percentages
+bt pie-chart "TypeScript: 45 #3178c6" "Rust: 35 #dea584"  # Custom colors
+```
+
+### Bar Chart Rendering
+
+Render Mermaid bar charts:
+
+```bash
+bt bar-chart 10 20 15 25
+bt bar-chart --x-axis "Q1,Q2,Q3,Q4" --y-axis Sales 10 20 15 25
+bt bar-chart --horizontal 1 8 7 5
+bt bar-chart --show-data-label 1 8 7 5
+bt bar-chart --line 10 20 15 25  # Add trend line
+```
+
+Input formats: JSON array `"[1,8,7]"`, comma-separated `"1,8,7"`, or space-separated `1 8 7`
+
+### Line Chart Rendering
+
+Render Mermaid line charts:
+
+```bash
+bt line-chart 1 8 7 5 9 3
+bt line-chart --x-axis "Mon,Tue,Wed" --y-axis Temperature 20 22 19
+bt line-chart --bar 1 8 7 5  # Add bars under line
+```
+
+### Timeline Rendering
+
+Render Mermaid timelines:
+
+```bash
+bt timeline "2020: Project started" "2021: First release" "2022: Major update"
+bt timeline --title "Company History" "2020: Founded" "2022: IPO"
+bt timeline --section "Early Years" "2020: Founded" --section "Growth" "2022: Series A"
+```
+
+### State Diagram Rendering
+
+Render Mermaid state diagrams:
+
+```bash
+bt state-diagram "[*] --> Idle" "Idle --> Running" "Running --> [*]"
+bt state-diagram "[*] --> Idle" "Idle --> Running: start" "Running --> Stopped: stop"
+```
+
+Syntax: `[*]` = start/end state, `State1 --> State2: label` = labeled transition
+
+### ERD Rendering
+
+Render Mermaid entity relationship diagrams:
+
+```bash
+bt erd "Customer ||--o{ Order : places" "Order ||--|{ LineItem : contains"
+bt erd --entity "Customer { id int PK, name string }" "Customer ||--o{ Order : places"
+```
+
+Relationships: `||--||` (one-to-one), `||--o{` (one-to-many), `}o--o{` (many-to-many)
+
+### Common Diagram Options
+
+All diagram commands support:
+- `--example` / `-e`: Render example with command shown
+- `--width` / `-w`: Width spec (`50%`, `80ch`, `80`, `fill`)
+- `--inverse`: Solid background with inverted colors
+- `--title` / `-t`: Add title above diagram
+- `--json`: Output as JSON for scripting
+
 ### Shell Completions
 
 Enable tab completion for your shell:
@@ -255,6 +347,21 @@ bt quadrant --title "Priority Matrix" \
             --top-left "Quick Wins" --top-right "Major Projects" \
             --bottom-left "Fill-ins" --bottom-right "Thankless Tasks" \
             "Task A: [0.2, 0.8]" "Task B: [0.7, 0.3]"
+
+# Render a pie chart
+bt pie-chart "Dogs: 386" "Cats: 85" "Birds: 15"
+
+# Render a bar chart
+bt bar-chart --x-axis "Q1,Q2,Q3,Q4" 10 20 15 25
+
+# Render a timeline
+bt timeline "2020: Started" "2022: Launch" "2024: Expansion"
+
+# Render a state diagram
+bt state-diagram "[*] --> Idle" "Idle --> Running" "Running --> [*]"
+
+# Render an ERD
+bt erd "Customer ||--o{ Order : places"
 
 # Analyze escape code output
 echo -e "\x1b[32mGreen\x1b[0m" | xargs bt

@@ -16,7 +16,7 @@ WHITE := '\033[37m'
 
 default:
     @echo
-    @echo "Research"
+    @echo "so-you-say"
     @echo "------------------------------------"
     @echo ""
     @just --list | grep -v 'default'
@@ -45,11 +45,11 @@ lint *args="":
     @echo ""
     @cargo clippy 
 
-# install the `research` binary into the executable path
+# install the `speak` binary into the executable path
 install:
     @cargo build --release -p so-you-say
     @cargo install --path "." --locked
 
-# run the debug release of the Research CLI
+# run the debug release of the so-you-say CLI
 cli *args="":
     @cargo run -p so-you-say -- {{args}}
