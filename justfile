@@ -184,7 +184,7 @@ commit:
     @echo ""
     @opencode run commit "-f" --model "opencode/gpt-5.2"
     @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "git commits completed in rusty-biscuit monorepo" \
+        so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
 
 # Update docs and then update the skill for the Schematic package
