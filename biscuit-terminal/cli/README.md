@@ -61,6 +61,7 @@ Render Mermaid flowcharts directly in the terminal:
 bt flowchart "A --> B --> C"                    # Left-to-right (default)
 bt flowchart --vertical "A --> B --> C"         # Top-down
 bt flowchart --inverse "A --> B --> C"          # Solid background, inverted colors
+bt flowchart -t "My Process" "A --> B --> C"    # With title
 bt flowchart "A[Input] --> B{Decision}" "B -->|Yes| C[Output]"
 bt flowchart --json "A --> B"                   # Output as JSON
 ```

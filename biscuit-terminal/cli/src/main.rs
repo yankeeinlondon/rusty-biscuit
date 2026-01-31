@@ -106,6 +106,7 @@ enum Command {
     ///   bt flowchart --vertical "Start --> Middle --> End"
     ///   bt flowchart "A[Input] --> B{Decision}" "B -->|Yes| C[Output]"
     ///   bt flowchart --inverse "A --> B"  # Solid background with inverted colors
+    ///   bt flowchart --title "My Process" "A --> B --> C"
     Flowchart {
         /// Render top-down instead of left-right
         #[arg(long)]
@@ -118,6 +119,10 @@ enum Command {
         /// contrasting shapes.
         #[arg(long)]
         inverse: bool,
+
+        /// Add a title above the diagram
+        #[arg(long, short = 't')]
+        title: Option<String>,
 
         /// Flowchart node and edge definitions (e.g., "A --> B --> C")
         #[arg(value_name = "CONTENT", required = true)]
@@ -317,9 +322,10 @@ fn main() -> color_eyre::Result<()> {
         Some(Command::Flowchart {
             vertical,
             inverse,
+            ref title,
             ref content,
         }) => {
-            return render_flowchart(vertical, inverse, content, args.json);
+            return render_flowchart(vertical, inverse, title.as_deref(), content, args.json);
         }
         None => {
             // Default behavior: content analysis or terminal metadata
@@ -486,6 +492,7 @@ fn render_image(image_spec: &str) -> color_eyre::Result<()> {
 fn render_flowchart(
     vertical: bool,
     inverse: bool,
+    title: Option<&str>,
     content: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
@@ -493,13 +500,23 @@ fn render_flowchart(
 
     let direction = if vertical { "TD" } else { "LR" };
     let body = content.join(" ");
-    let instructions = format!("flowchart {}\n    {}", direction, body);
+
+    // Build mermaid instructions with optional title frontmatter
+    let instructions = if let Some(title) = title {
+        format!(
+            "---\ntitle: {}\n---\nflowchart {}\n    {}",
+            title, direction, body
+        )
+    } else {
+        format!("flowchart {}\n    {}", direction, body)
+    };
 
     if json {
         let output = serde_json::json!({
             "type": "flowchart",
             "direction": direction,
             "inverse": inverse,
+            "title": title,
             "instructions": instructions,
         });
         println!("{}", serde_json::to_string_pretty(&output)?);
