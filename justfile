@@ -191,8 +191,7 @@ commit:
 skill-schematic:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Schematic{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY
-    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-schematic.md)"\'
+    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-schematic.md)"\'
     @echo ""
     @echo "Schematic Skill has been rebuilt"
     @echo ""
@@ -204,7 +203,7 @@ skill-schematic:
 skill-darkmatter:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Darkmatter{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
-    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-darkmatter.md)"\'
+    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-darkmatter.md)"\'
     @echo ""
     @echo "Darkmatter Skill has been rebuilt"
     @echo ""
@@ -216,8 +215,7 @@ skill-darkmatter:
 skill-sniff:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Sniff{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY
-    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-sniff.md)"\'
+    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-sniff.md)"\'
     @echo ""
     @echo "Sniff skill has been rebuilt"
     @echo ""
@@ -228,8 +226,7 @@ skill-sniff:
 skill-playa:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Playa{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY
-    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-playa.md)"\'
+    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-playa.md)"\'
     @echo ""
     @echo "The Playa skill has been rebuilt"
     @echo ""
@@ -241,8 +238,7 @@ skill-playa:
 skill-queue:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}Queue{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY
-    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-queue.md)"\'
+    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-queue.md)"\'
     @echo ""
     @echo "The Queue skill has been rebuilt"
     @echo ""
@@ -254,8 +250,7 @@ skill-queue:
 skill-biscuit-speaks:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}biscuit-speaks{{RESET}} Package"
     @echo "---------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY
-    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-biscuit-speaks.md)"\'
+    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-biscuit-speaks.md)"\'
     @echo ""
     @echo "The {{BOLD}}biscuit-speaks{{RESET}} skill has been rebuilt"
     @echo ""
@@ -267,8 +262,7 @@ skill-biscuit-speaks:
 skill-biscuit-hash:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}biscuit-hash{{RESET}} Package"
     @echo "---------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY
-    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-biscuit-hash.md)"\'
+    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-biscuit-hash.md)"\'
     @echo ""
     @echo "The {{BOLD}}biscuit-hash{{RESET}} skill has been rebuilt"
     @echo ""
@@ -280,8 +274,7 @@ skill-biscuit-hash:
 skill-biscuit-terminal:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}biscuit-terminal{{RESET}} Package"
     @echo "---------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY
-    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-biscuit-terminal.md)"\'
+    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-biscuit-terminal.md)"\'
     @echo ""
     @echo "The {{BOLD}}biscuit-terminal{{RESET}} skill has been rebuilt"
     @echo ""
@@ -293,8 +286,7 @@ skill-biscuit-terminal:
 skill-tree-hugger:
     @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}tree-hugger{{RESET}} Package"
     @echo "-------------------------------------------------------------------------------"
-    @unset ANTHROPIC_API_KEY
-    @claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-tree-hugger.md)"\'
+    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-tree-hugger.md)"\'
     @echo ""
     @echo "The {{BOLD}}tree-hugger{{RESET}} skill has been rebuilt"
     @echo ""

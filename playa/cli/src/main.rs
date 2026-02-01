@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use clap::{Parser, ValueHint};
+use clap::{CommandFactory, Parser, ValueHint};
+use clap_complete::CompleteEnv;
 use sniff_lib::programs::InstalledHeadlessAudio;
 
 use playa::{all_players, AudioFileFormat, AudioPlayer, Codec, Playa, SoundEffect, PLAYER_LOOKUP};
@@ -13,9 +14,23 @@ const ITALIC: &str = "\x1b[3m";
 const RESET: &str = "\x1b[0m";
 const TABLE_DIVIDER: char = '\u{2502}';
 
+const AFTER_HELP: &str = "\
+Shell Completions:
+  Enable completions by adding one of the following to your shell config:
+
+  # Bash (~/.bashrc)
+  source <(COMPLETE=bash playa)
+
+  # Zsh (~/.zshrc)
+  source <(COMPLETE=zsh playa)
+
+  # Fish (~/.config/fish/config.fish)
+  COMPLETE=fish playa | source";
+
 #[derive(Parser)]
 #[command(name = "playa")]
 #[command(about = "Play audio using the host's installed players", long_about = None)]
+#[command(after_help = AFTER_HELP)]
 struct Cli {
     /// Show a table of available players
     #[arg(long)]
@@ -103,6 +118,8 @@ impl Cli {
 }
 
 fn main() {
+    CompleteEnv::with_factory(Cli::command).complete();
+
     let cli = Cli::parse();
 
     if cli.list_effects {

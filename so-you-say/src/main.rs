@@ -9,7 +9,7 @@ use biscuit_speaks::{
     TtsError, TtsFailoverStrategy, TtsProvider, TtsVoiceInventory, Voice, VoiceQuality, VolumeLevel,
 };
 use clap::{CommandFactory, Parser, ValueEnum};
-use clap_complete::{generate, Shell};
+use clap_complete::CompleteEnv;
 use inquire::Select;
 use owo_colors::OwoColorize;
 use darkmatter_lib::markdown::output::terminal::{TerminalOptions, for_terminal};
@@ -71,10 +71,24 @@ impl From<GenderArg> for Gender {
 /// // Speak text from stdin
 /// // echo "Hello world" | so-you-say
 /// ```
+const AFTER_HELP: &str = "\
+\x1b[1m\x1b[4mShell Completions\x1b[0m
+  Enable tab completions by adding one of the following to your shell config:
+
+  # Bash (~/.bashrc)
+  source <(COMPLETE=bash speak)
+
+  # Zsh (~/.zshrc)
+  source <(COMPLETE=zsh speak)
+
+  # Fish (~/.config/fish/config.fish)
+  COMPLETE=fish speak | source";
+
 #[derive(Parser)]
 #[command(name = "so-you-say")]
 #[command(about = "Convert text to speech using system TTS", long_about = None)]
 #[command(version)]
+#[command(after_help = AFTER_HELP)]
 struct Cli {
     /// List available TTS providers and exit
     #[arg(long)]
@@ -130,10 +144,6 @@ struct Cli {
         long_help = "Refresh the TTS provider and voice cache. Clears the cached voice data (~/.biscuit-speaks-cache.json) and repopulates it with fresh data from all available providers. Use this after installing new voices or if voice listings appear stale."
     )]
     refresh_cache: bool,
-
-    /// Generate shell completions and exit
-    #[arg(long, value_enum, value_name = "SHELL")]
-    completions: Option<Shell>,
 
     /// Text to speak (reads from stdin if not provided)
     text: Vec<String>,
@@ -829,15 +839,9 @@ fn print_voices(provider: TtsProvider, voices: &[Voice], lang_filter: Option<&st
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
+    CompleteEnv::with_factory(Cli::command).complete();
 
-    // Handle --completions flag
-    if let Some(shell) = cli.completions {
-        let mut cmd = Cli::command();
-        let bin_name = cmd.get_name().to_string();
-        generate(shell, &mut cmd, bin_name, &mut std::io::stdout());
-        return Ok(());
-    }
+    let cli = Cli::parse();
 
     // Handle --refresh-cache flag (does not exit early - continues with other operations)
     if cli.refresh_cache {

@@ -132,6 +132,16 @@ enum Command {
         /// Image file path with optional width spec (e.g., "photo.jpg|75%")
         #[arg(value_name = "FILEPATH", add = ArgValueCompleter::new(image_completer()))]
         filepath: String,
+
+        /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
+        ///
+        /// Overrides inline width spec (e.g., "file.jpg|50%"). Aspect ratio is always preserved.
+        #[arg(long, short = 'w')]
+        width: Option<String>,
+
+        /// Output rendering metadata to stderr (filename, file size, render time)
+        #[arg(long)]
+        meta: bool,
     },
 
     /// Render a flowchart from node definitions
@@ -193,6 +203,10 @@ enum Command {
         /// Render an example diagram and show the command used
         #[arg(long, short = 'e')]
         example: bool,
+
+        /// Output rendering metadata to stderr (filename, cache hit, file size, render time)
+        #[arg(long)]
+        meta: bool,
 
         /// Flowchart node and edge definitions (e.g., "A --> B --> C")
         #[arg(value_name = "CONTENT", required_unless_present = "example")]
@@ -331,6 +345,10 @@ enum Command {
         #[arg(long, short = 'e')]
         example: bool,
 
+        /// Output rendering metadata to stderr (filename, cache hit, file size, render time)
+        #[arg(long)]
+        meta: bool,
+
         /// Data points as "Label: [x, y]" where x and y are 0.0-1.0
         #[arg(value_name = "POINTS", required_unless_present = "example")]
         points: Vec<String>,
@@ -414,6 +432,10 @@ enum Command {
         #[arg(long, short = 'e')]
         example: bool,
 
+        /// Output rendering metadata to stderr (filename, cache hit, file size, render time)
+        #[arg(long)]
+        meta: bool,
+
         /// Data points as "Label: value" pairs (e.g., "Dogs: 386" "Cats: 85")
         #[arg(value_name = "DATA", required_unless_present = "example")]
         data: Vec<String>,
@@ -483,6 +505,10 @@ enum Command {
         /// Render an example diagram and show the command used
         #[arg(long, short = 'e')]
         example: bool,
+
+        /// Output rendering metadata to stderr (filename, cache hit, file size, render time)
+        #[arg(long)]
+        meta: bool,
 
         /// Git graph commands (commit, branch <name>, checkout <name>, merge <name>)
         #[arg(value_name = "COMMANDS", required_unless_present = "example")]
@@ -574,6 +600,10 @@ enum Command {
         #[arg(long, short = 'e')]
         example: bool,
 
+        /// Output rendering metadata to stderr (filename, cache hit, file size, render time)
+        #[arg(long)]
+        meta: bool,
+
         /// Data values (JSON array, comma-separated, or space-separated)
         #[arg(value_name = "DATA", required_unless_present = "example")]
         data: Vec<String>,
@@ -652,6 +682,10 @@ enum Command {
         #[arg(long, short = 'e')]
         example: bool,
 
+        /// Output rendering metadata to stderr (filename, cache hit, file size, render time)
+        #[arg(long)]
+        meta: bool,
+
         /// Data values (JSON array, comma-separated, or space-separated)
         #[arg(value_name = "DATA", required_unless_present = "example")]
         data: Vec<String>,
@@ -707,6 +741,10 @@ enum Command {
         #[arg(long, short = 'e')]
         example: bool,
 
+        /// Output rendering metadata to stderr (filename, cache hit, file size, render time)
+        #[arg(long)]
+        meta: bool,
+
         /// Timeline events as \"YYYY: Description\"
         #[arg(value_name = "EVENTS", required_unless_present = "example")]
         events: Vec<String>,
@@ -757,6 +795,10 @@ enum Command {
         /// Render an example state diagram and show the command used
         #[arg(long, short = 'e')]
         example: bool,
+
+        /// Output rendering metadata to stderr (filename, cache hit, file size, render time)
+        #[arg(long)]
+        meta: bool,
 
         /// State transitions (e.g., \"[*] --> Idle\", \"Idle --> Running\")
         #[arg(value_name = "TRANSITIONS", required_unless_present = "example")]
@@ -813,6 +855,10 @@ enum Command {
         /// Render an example ERD and show the command used
         #[arg(long, short = 'e')]
         example: bool,
+
+        /// Output rendering metadata to stderr (filename, cache hit, file size, render time)
+        #[arg(long)]
+        meta: bool,
 
         /// Relationships (e.g., \"Customer ||--o{ Order : places\")
         #[arg(value_name = "RELATIONSHIPS", required_unless_present = "example")]
@@ -921,6 +967,21 @@ struct ContentAnalysis {
     total_length: u32,
 }
 
+/// Metadata about a rendered image or diagram.
+///
+/// Output to stderr as JSON when --meta flag is used.
+#[derive(Debug, Serialize)]
+struct RenderMeta {
+    /// Absolute path to the rendered/loaded image file
+    filename: String,
+    /// Whether this was a cache hit (true) or generated fresh (false)
+    cache_hit: bool,
+    /// File size in bytes
+    file_size_bytes: u64,
+    /// Time to render/load in milliseconds
+    render_time_ms: u64,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
 enum ConnectionInfo {
@@ -1006,8 +1067,8 @@ fn main() -> color_eyre::Result<()> {
 
     // Handle subcommands
     match args.command {
-        Some(Command::Image { ref filepath }) => {
-            return render_image(filepath);
+        Some(Command::Image { ref filepath, ref width, meta }) => {
+            return render_image(filepath, width.as_deref(), meta);
         }
         Some(Command::Flowchart {
             vertical,
@@ -1015,6 +1076,7 @@ fn main() -> color_eyre::Result<()> {
             ref title,
             ref width,
             example,
+            meta,
             ref content,
         }) => {
             return render_flowchart(
@@ -1023,6 +1085,7 @@ fn main() -> color_eyre::Result<()> {
                 title.as_deref(),
                 width.as_deref(),
                 example,
+                meta,
                 content,
                 args.json,
             );
@@ -1045,6 +1108,7 @@ fn main() -> color_eyre::Result<()> {
             ref q3_fill,
             ref q4_fill,
             example,
+            meta,
             ref points,
         }) => {
             return render_quadrant(
@@ -1065,6 +1129,7 @@ fn main() -> color_eyre::Result<()> {
                 q3_fill.as_deref(),
                 q4_fill.as_deref(),
                 example,
+                meta,
                 points,
                 args.json,
             );
@@ -1075,6 +1140,7 @@ fn main() -> color_eyre::Result<()> {
             ref width,
             show_data,
             example,
+            meta,
             ref data,
         }) => {
             return render_pie_chart(
@@ -1083,6 +1149,7 @@ fn main() -> color_eyre::Result<()> {
                 width.as_deref(),
                 show_data,
                 example,
+                meta,
                 data,
                 args.json,
             );
@@ -1092,6 +1159,7 @@ fn main() -> color_eyre::Result<()> {
             ref title,
             ref width,
             example,
+            meta,
             ref commands,
         }) => {
             return render_git_graph(
@@ -1099,6 +1167,7 @@ fn main() -> color_eyre::Result<()> {
                 title.as_deref(),
                 width.as_deref(),
                 example,
+                meta,
                 commands,
                 args.json,
             );
@@ -1114,6 +1183,7 @@ fn main() -> color_eyre::Result<()> {
             line,
             inverse,
             example,
+            meta,
             ref data,
         }) => {
             return render_xy_chart(
@@ -1129,6 +1199,7 @@ fn main() -> color_eyre::Result<()> {
                 false,      // add_bar is false since we're a bar chart
                 inverse,
                 example,
+                meta,
                 data,
                 args.json,
             );
@@ -1144,6 +1215,7 @@ fn main() -> color_eyre::Result<()> {
             bar,
             inverse,
             example,
+            meta,
             ref data,
         }) => {
             return render_xy_chart(
@@ -1159,6 +1231,7 @@ fn main() -> color_eyre::Result<()> {
                 bar,        // add_bar for line chart
                 inverse,
                 example,
+                meta,
                 data,
                 args.json,
             );
@@ -1169,6 +1242,7 @@ fn main() -> color_eyre::Result<()> {
             ref section,
             inverse,
             example,
+            meta,
             ref events,
         }) => {
             return render_timeline(
@@ -1177,6 +1251,7 @@ fn main() -> color_eyre::Result<()> {
                 section,
                 inverse,
                 example,
+                meta,
                 events,
                 args.json,
             );
@@ -1186,6 +1261,7 @@ fn main() -> color_eyre::Result<()> {
             ref width,
             inverse,
             example,
+            meta,
             ref transitions,
         }) => {
             return render_state_diagram(
@@ -1193,6 +1269,7 @@ fn main() -> color_eyre::Result<()> {
                 width.as_deref(),
                 inverse,
                 example,
+                meta,
                 transitions,
                 args.json,
             );
@@ -1203,6 +1280,7 @@ fn main() -> color_eyre::Result<()> {
             ref entity,
             inverse,
             example,
+            meta,
             ref relationships,
         }) => {
             return render_erd(
@@ -1211,6 +1289,7 @@ fn main() -> color_eyre::Result<()> {
                 entity,
                 inverse,
                 example,
+                meta,
                 relationships,
                 args.json,
             );
@@ -1355,9 +1434,14 @@ fn image_completer() -> PathCompleter {
 /// Render an image to the terminal.
 ///
 /// Supports width specification syntax: "file.jpg|50%" or "file.jpg|80"
-fn render_image(image_spec: &str) -> color_eyre::Result<()> {
-    // Parse the filepath and optional width
-    let (filepath, width_spec) = parse_filepath_and_width(image_spec)
+/// CLI `--width` flag takes precedence over inline spec.
+fn render_image(image_spec: &str, cli_width: Option<&str>, meta: bool) -> color_eyre::Result<()> {
+    use std::time::Instant;
+
+    let start_time = Instant::now();
+
+    // Parse the filepath and optional inline width
+    let (filepath, inline_width_spec) = parse_filepath_and_width(image_spec)
         .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
 
     // Resolve path relative to CWD
@@ -1367,8 +1451,9 @@ fn render_image(image_spec: &str) -> color_eyre::Result<()> {
     let mut term_image = TerminalImage::new(path)
         .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
 
-    // Apply width if specified
-    if let Some(ref ws) = width_spec {
+    // CLI --width takes precedence over inline spec (e.g., "file.jpg|50%")
+    let effective_width_spec = cli_width.or(inline_width_spec.as_deref());
+    if let Some(ws) = effective_width_spec {
         term_image.width = parse_width_spec(ws)
             .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
         term_image.width_raw = Some(format!("|{}", ws));
@@ -1384,6 +1469,25 @@ fn render_image(image_spec: &str) -> color_eyre::Result<()> {
     // Output the result
     print!("{}", output);
 
+    // Output metadata if requested
+    if meta {
+        let render_time_ms = start_time.elapsed().as_millis() as u64;
+        let absolute_path = std::fs::canonicalize(path)
+            .unwrap_or_else(|_| path.to_path_buf());
+        let file_size_bytes = std::fs::metadata(path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        let render_meta = RenderMeta {
+            filename: absolute_path.to_string_lossy().to_string(),
+            cache_hit: false, // Images are loaded directly, no caching
+            file_size_bytes,
+            render_time_ms,
+        };
+
+        eprintln!("{}", serde_json::to_string(&render_meta)?);
+    }
+
     Ok(())
 }
 
@@ -1397,6 +1501,76 @@ const FLOWCHART_EXAMPLE: &[&str] = &[
 ];
 const FLOWCHART_EXAMPLE_CMD: &str = r#"bt flowchart "A[Start] --> B{Decision}" "B -->|Yes| C[Success]" "B -->|No| D[Retry]" "D --> B""#;
 
+/// Display a mermaid diagram and optionally output metadata.
+///
+/// This helper function:
+/// 1. Renders the diagram using the cached renderer
+/// 2. Displays it in the terminal
+/// 3. Optionally outputs metadata to stderr
+///
+/// Returns the render metadata (path, cache_hit, file_size, render_time) for further use.
+fn display_mermaid_diagram(
+    renderer: &MermaidRenderer,
+    instructions: &str,
+    diagram_type: &str,
+    width: Option<&str>,
+    meta: bool,
+) -> color_eyre::Result<()> {
+    use std::time::Instant;
+
+    let start_time = Instant::now();
+
+    // Render the diagram to a cached PNG file
+    let (png_path, cache_hit) = match renderer.render_to_cached_png() {
+        Ok((path, hit)) => (path, hit),
+        Err(e) => {
+            return handle_mermaid_error(e, instructions, diagram_type);
+        }
+    };
+
+    let render_time_ms = start_time.elapsed().as_millis() as u64;
+
+    // Parse width specification: default to 50% if not specified
+    let image_width = match width {
+        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
+        None => ImageWidth::Percent(0.5),
+    };
+
+    // Use TerminalImage to display
+    let terminal = Terminal::new();
+    let term_image = TerminalImage::new(&png_path)
+        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
+        .with_width(image_width);
+
+    match term_image.render_to_terminal(&terminal) {
+        Ok(output) => print!("{}", output),
+        Err(e) => {
+            return Err(color_eyre::eyre::eyre!("Failed to display {}: {}", diagram_type, e));
+        }
+    }
+
+    // Output metadata if requested
+    if meta {
+        let file_size_bytes = std::fs::metadata(&png_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        let render_meta = RenderMeta {
+            filename: png_path.to_string_lossy().to_string(),
+            cache_hit,
+            file_size_bytes,
+            render_time_ms,
+        };
+
+        eprintln!("{}", serde_json::to_string(&render_meta)?);
+    }
+
+    // Let terminal settle after image rendering
+    settle_terminal();
+
+    Ok(())
+}
+
 /// Render a flowchart to the terminal.
 ///
 /// Creates a Mermaid flowchart with the given content and renders it
@@ -1408,6 +1582,7 @@ fn render_flowchart(
     title: Option<&str>,
     width: Option<&str>,
     example: bool,
+    meta: bool,
     content: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
@@ -1462,41 +1637,8 @@ fn render_flowchart(
         MermaidRenderer::for_terminal(&instructions)
     };
 
-    // Render the diagram to a temp PNG file
-    let png_path = match renderer.render_to_temp_png() {
-        Ok(path) => path,
-        Err(e) => {
-            return handle_mermaid_error(e, &instructions, "flowchart");
-        }
-    };
-
-    // Parse width specification: default to 50% if not specified
-    let image_width = match width {
-        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
-        None => ImageWidth::Percent(0.5),
-    };
-
-    // Use TerminalImage to display (same approach as `bt image`)
-    // This handles terminal detection and fallback gracefully
-    let terminal = Terminal::new();
-    let term_image = TerminalImage::new(&png_path)
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
-        .with_width(image_width);
-
-    match term_image.render_to_terminal(&terminal) {
-        Ok(output) => print!("{}", output),
-        Err(e) => {
-            // Clean up before returning error
-            let _ = std::fs::remove_file(&png_path);
-            return Err(color_eyre::eyre::eyre!("Failed to display flowchart: {}", e));
-        }
-    }
-
-    // Clean up temp file
-    let _ = std::fs::remove_file(&png_path);
-
-    // Let terminal settle after image rendering
-    settle_terminal();
+    // Display the diagram
+    display_mermaid_diagram(&renderer, &instructions, "flowchart", width, meta)?;
 
     // Print command used if example mode
     if example {
@@ -1540,6 +1682,7 @@ fn render_quadrant(
     q3_fill: Option<&str>,
     q4_fill: Option<&str>,
     example: bool,
+    meta: bool,
     points: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
@@ -1673,40 +1816,8 @@ fn render_quadrant(
             .with_config(config)
     };
 
-    // Render the diagram to a temp PNG file
-    let png_path = match renderer.render_to_temp_png() {
-        Ok(path) => path,
-        Err(e) => {
-            return handle_mermaid_error(e, &instructions, "quadrant chart");
-        }
-    };
-
-    // Parse width specification: default to 50% if not specified
-    let image_width = match width {
-        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
-        None => ImageWidth::Percent(0.5),
-    };
-
-    // Use TerminalImage to display
-    let terminal = Terminal::new();
-    let term_image = TerminalImage::new(&png_path)
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
-        .with_width(image_width);
-
-    match term_image.render_to_terminal(&terminal) {
-        Ok(output) => print!("{}", output),
-        Err(e) => {
-            // Clean up before returning error
-            let _ = std::fs::remove_file(&png_path);
-            return Err(color_eyre::eyre::eyre!("Failed to display quadrant chart: {}", e));
-        }
-    }
-
-    // Clean up temp file
-    let _ = std::fs::remove_file(&png_path);
-
-    // Let terminal settle after image rendering
-    settle_terminal();
+    // Display the diagram
+    display_mermaid_diagram(&renderer, &instructions, "quadrant chart", width, meta)?;
 
     // Print command used if example mode
     if example {
@@ -1909,6 +2020,7 @@ fn render_pie_chart(
     width: Option<&str>,
     show_data: bool,
     example: bool,
+    meta: bool,
     data: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
@@ -1986,40 +2098,8 @@ fn render_pie_chart(
         MermaidRenderer::for_terminal(&instructions)
     };
 
-    // Render the diagram to a temp PNG file
-    let png_path = match renderer.render_to_temp_png() {
-        Ok(path) => path,
-        Err(e) => {
-            return handle_mermaid_error(e, &instructions, "pie chart");
-        }
-    };
-
-    // Parse width specification: default to 50% if not specified
-    let image_width = match width {
-        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
-        None => ImageWidth::Percent(0.5),
-    };
-
-    // Use TerminalImage to display
-    let terminal = Terminal::new();
-    let term_image = TerminalImage::new(&png_path)
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
-        .with_width(image_width);
-
-    match term_image.render_to_terminal(&terminal) {
-        Ok(output) => print!("{}", output),
-        Err(e) => {
-            // Clean up before returning error
-            let _ = std::fs::remove_file(&png_path);
-            return Err(color_eyre::eyre::eyre!("Failed to display pie chart: {}", e));
-        }
-    }
-
-    // Clean up temp file
-    let _ = std::fs::remove_file(&png_path);
-
-    // Let terminal settle after image rendering
-    settle_terminal();
+    // Display the diagram
+    display_mermaid_diagram(&renderer, &instructions, "pie chart", width, meta)?;
 
     // Print command used if example mode
     if example {
@@ -2053,6 +2133,7 @@ fn render_git_graph(
     title: Option<&str>,
     width: Option<&str>,
     example: bool,
+    meta: bool,
     commands: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
@@ -2105,41 +2186,8 @@ fn render_git_graph(
         MermaidRenderer::for_terminal(&instructions)
     };
 
-    // Render the diagram to a temp PNG file
-    let png_path = match renderer.render_to_temp_png() {
-        Ok(path) => path,
-        Err(e) => {
-            return handle_mermaid_error(e, &instructions, "git-graph");
-        }
-    };
-
-    // Parse width specification: default to 50% if not specified
-    let image_width = match width {
-        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
-        None => ImageWidth::Percent(0.5),
-    };
-
-    // Use TerminalImage to display (same approach as `bt image`)
-    // This handles terminal detection and fallback gracefully
-    let terminal = Terminal::new();
-    let term_image = TerminalImage::new(&png_path)
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
-        .with_width(image_width);
-
-    match term_image.render_to_terminal(&terminal) {
-        Ok(output) => print!("{}", output),
-        Err(e) => {
-            // Clean up before returning error
-            let _ = std::fs::remove_file(&png_path);
-            return Err(color_eyre::eyre::eyre!("Failed to display git graph: {}", e));
-        }
-    }
-
-    // Clean up temp file
-    let _ = std::fs::remove_file(&png_path);
-
-    // Let terminal settle after image rendering
-    settle_terminal();
+    // Display the diagram
+    display_mermaid_diagram(&renderer, &instructions, "git-graph", width, meta)?;
 
     // Print command used if example mode
     if example {
@@ -2181,6 +2229,7 @@ fn render_xy_chart(
     add_bar: bool,
     inverse: bool,
     example: bool,
+    meta: bool,
     data: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
@@ -2329,47 +2378,12 @@ fn render_xy_chart(
         MermaidRenderer::for_terminal(&instructions)
     };
 
-    // Render the diagram to a temp PNG file
-    let png_path = match renderer.render_to_temp_png() {
-        Ok(path) => path,
-        Err(e) => {
-            let chart_name = match chart_type {
-                XyChartType::Bar => "bar chart",
-                XyChartType::Line => "line chart",
-            };
-            return handle_mermaid_error(e, &instructions, chart_name);
-        }
+    // Display the diagram
+    let chart_name = match chart_type {
+        XyChartType::Bar => "bar chart",
+        XyChartType::Line => "line chart",
     };
-
-    // Parse width specification: default to 50% if not specified
-    let image_width = match width {
-        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
-        None => ImageWidth::Percent(0.5),
-    };
-
-    // Use TerminalImage to display
-    let terminal = Terminal::new();
-    let term_image = TerminalImage::new(&png_path)
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
-        .with_width(image_width);
-
-    match term_image.render_to_terminal(&terminal) {
-        Ok(output) => print!("{}", output),
-        Err(e) => {
-            let _ = std::fs::remove_file(&png_path);
-            let chart_name = match chart_type {
-                XyChartType::Bar => "bar chart",
-                XyChartType::Line => "line chart",
-            };
-            return Err(color_eyre::eyre::eyre!("Failed to display {}: {}", chart_name, e));
-        }
-    }
-
-    // Clean up temp file
-    let _ = std::fs::remove_file(&png_path);
-
-    // Let terminal settle after image rendering
-    settle_terminal();
+    display_mermaid_diagram(&renderer, &instructions, chart_name, width, meta)?;
 
     // Print command used if example mode
     if example {
@@ -2446,6 +2460,7 @@ fn render_timeline(
     sections: &[String],
     inverse: bool,
     example: bool,
+    meta: bool,
     events: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
@@ -2533,33 +2548,8 @@ fn render_timeline(
         MermaidRenderer::for_terminal(&instructions)
     };
 
-    // Render
-    let png_path = match renderer.render_to_temp_png() {
-        Ok(path) => path,
-        Err(e) => return handle_mermaid_error(e, &instructions, "timeline"),
-    };
-
-    // Display
-    let image_width = match width {
-        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
-        None => ImageWidth::Percent(0.5),
-    };
-
-    let terminal = Terminal::new();
-    let term_image = TerminalImage::new(&png_path)
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
-        .with_width(image_width);
-
-    match term_image.render_to_terminal(&terminal) {
-        Ok(output) => print!("{}", output),
-        Err(e) => {
-            let _ = std::fs::remove_file(&png_path);
-            return Err(color_eyre::eyre::eyre!("Failed to display timeline: {}", e));
-        }
-    }
-
-    let _ = std::fs::remove_file(&png_path);
-    settle_terminal();
+    // Display the diagram
+    display_mermaid_diagram(&renderer, &instructions, "timeline", width, meta)?;
 
     if example {
         print_example_command(TIMELINE_EXAMPLE_CMD);
@@ -2585,6 +2575,7 @@ fn render_state_diagram(
     width: Option<&str>,
     inverse: bool,
     example: bool,
+    meta: bool,
     transitions: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
@@ -2644,33 +2635,8 @@ fn render_state_diagram(
         MermaidRenderer::for_terminal(&instructions)
     };
 
-    // Render
-    let png_path = match renderer.render_to_temp_png() {
-        Ok(path) => path,
-        Err(e) => return handle_mermaid_error(e, &instructions, "state diagram"),
-    };
-
-    // Display
-    let image_width = match width {
-        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
-        None => ImageWidth::Percent(0.5),
-    };
-
-    let terminal = Terminal::new();
-    let term_image = TerminalImage::new(&png_path)
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
-        .with_width(image_width);
-
-    match term_image.render_to_terminal(&terminal) {
-        Ok(output) => print!("{}", output),
-        Err(e) => {
-            let _ = std::fs::remove_file(&png_path);
-            return Err(color_eyre::eyre::eyre!("Failed to display state diagram: {}", e));
-        }
-    }
-
-    let _ = std::fs::remove_file(&png_path);
-    settle_terminal();
+    // Display the diagram
+    display_mermaid_diagram(&renderer, &instructions, "state diagram", width, meta)?;
 
     if example {
         print_example_command(STATE_DIAGRAM_EXAMPLE_CMD);
@@ -2701,6 +2667,7 @@ fn render_erd(
     entities: &[String],
     inverse: bool,
     example: bool,
+    meta: bool,
     relationships: &[String],
     json: bool,
 ) -> color_eyre::Result<()> {
@@ -2771,33 +2738,8 @@ fn render_erd(
         MermaidRenderer::for_terminal(&instructions)
     };
 
-    // Render
-    let png_path = match renderer.render_to_temp_png() {
-        Ok(path) => path,
-        Err(e) => return handle_mermaid_error(e, &instructions, "ERD"),
-    };
-
-    // Display
-    let image_width = match width {
-        Some(w) => parse_width_spec(w).map_err(|e| color_eyre::eyre::eyre!("{}", e))?,
-        None => ImageWidth::Percent(0.5),
-    };
-
-    let terminal = Terminal::new();
-    let term_image = TerminalImage::new(&png_path)
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
-        .with_width(image_width);
-
-    match term_image.render_to_terminal(&terminal) {
-        Ok(output) => print!("{}", output),
-        Err(e) => {
-            let _ = std::fs::remove_file(&png_path);
-            return Err(color_eyre::eyre::eyre!("Failed to display ERD: {}", e));
-        }
-    }
-
-    let _ = std::fs::remove_file(&png_path);
-    settle_terminal();
+    // Display the diagram
+    display_mermaid_diagram(&renderer, &instructions, "ERD", width, meta)?;
 
     if example {
         print_example_command(ERD_EXAMPLE_CMD);

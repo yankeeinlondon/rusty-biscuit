@@ -854,6 +854,83 @@ impl MermaidRenderer {
         Ok(())
     }
 
+    /// Renders the diagram to a cached PNG file, returning the path and cache hit status.
+    ///
+    /// This method checks the cache first and only renders if needed:
+    /// - On cache hit: Returns the cached path and `true`
+    /// - On cache miss: Renders via mmdc, stores in cache, returns the path and `false`
+    ///
+    /// The returned path is in the cache directory and should NOT be deleted by the caller.
+    ///
+    /// ## Errors
+    ///
+    /// Returns error if:
+    /// - Terminal doesn't support image rendering
+    /// - mmdc is not available or execution fails
+    /// - Diagram is too large
+    #[cfg(feature = "viuer")]
+    #[tracing::instrument(skip(self))]
+    pub fn render_to_cached_png(&self) -> Result<(std::path::PathBuf, bool), MermaidRenderError> {
+        use super::mermaid_cache::{MermaidCache, MermaidCacheKey};
+
+        // 1. Validate size
+        if self.instructions.len() > MAX_DIAGRAM_SIZE {
+            tracing::error!(
+                size = self.instructions.len(),
+                max = MAX_DIAGRAM_SIZE,
+                "Diagram too large for mmdc"
+            );
+            return Err(MermaidRenderError::ContentTooLarge {
+                size: self.instructions.len(),
+                max: MAX_DIAGRAM_SIZE,
+            });
+        }
+
+        // 2. Get mmdc version
+        let mmdc_version = self.get_mmdc_version_with_warning();
+
+        // 3. Check cache
+        let cache = MermaidCache::new();
+        let cache_key = MermaidCacheKey::new(
+            &self.instructions,
+            self.theme,
+            self.scale,
+            &self.config,
+            self.transparent_background,
+            self.title.as_deref(),
+            &mmdc_version,
+        );
+
+        if let Some(cached_path) = cache.get(&cache_key) {
+            // Cache hit
+            tracing::info!(path = ?cached_path, "Using cached mermaid render");
+            return Ok((cached_path, true));
+        }
+
+        // Cache miss - render and store
+        let rendered_path = self.render_to_temp_png()?;
+
+        // Store in cache
+        match cache.store(&cache_key, &rendered_path) {
+            Ok(cached_path) => {
+                // Clean up the temp file, use cached version
+                let _ = std::fs::remove_file(&rendered_path);
+                Ok((cached_path, false))
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to cache mermaid render");
+                // Return the temp file path if caching failed
+                Ok((rendered_path, false))
+            }
+        }
+    }
+
+    /// Renders the diagram to a cached PNG file (stub when viuer is disabled).
+    #[cfg(not(feature = "viuer"))]
+    pub fn render_to_cached_png(&self) -> Result<(std::path::PathBuf, bool), MermaidRenderError> {
+        Err(MermaidRenderError::NoImageSupport)
+    }
+
     /// Gets the mmdc version, caching the result and warning if it's below minimum.
     fn get_mmdc_version_with_warning(&self) -> String {
         use std::sync::OnceLock;
