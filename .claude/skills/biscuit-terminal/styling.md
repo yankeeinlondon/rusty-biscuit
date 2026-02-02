@@ -50,9 +50,17 @@ The `Prose` struct allows styled text with inline tokens:
 
 ```rust
 use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::Renderable;
 
-let prose = Prose::default();
-// (Implementation is still in progress - render() is todo!())
+// Create prose with inline styling
+let prose = Prose::new("Hello {{bold}}world{{reset}}!");
+let output = prose.render(None);
+// → "Hello \x1b[1mworld\x1b[0m!\x1b[0m"
+
+// With builder pattern
+let prose = Prose::new("<b>Important</b> message")
+    .with_word_wrap(WordWrap::WrapProse(None))
+    .with_left_margin(Margin::Chars(4));
 ```
 
 ### Atomic Tokens
@@ -66,7 +74,8 @@ Single-point style changes that require manual reset:
 {{yellow}}    {{cyan}}      {{magenta}}
 {{bright-red}} {{bright-green}} ...
 {{bg-red}}    {{bg-blue}}   ...
-{{reset}}     {{reset_fg}}  {{reset_bg}}
+{{reset}}     {{reset-fg}}  {{reset-bg}}
+{{normal-font-weight}} {{not-italic}} {{not-underline}} {{not-strikethrough}}
 ```
 
 Example:

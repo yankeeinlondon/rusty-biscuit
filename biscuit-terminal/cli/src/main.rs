@@ -864,6 +864,62 @@ enum Command {
         #[arg(value_name = "RELATIONSHIPS", required_unless_present = "example")]
         relationships: Vec<String>,
     },
+
+    /// Render prose text with inline styling tokens
+    ///
+    /// Renders text with inline styling using atomic tokens ({{bold}}, {{red}})
+    /// and block tags (<b>, <i>, <a href="...">).
+    #[command(display_order = 20, after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Atomic tokens:
+    bt prose \"Hello {{bold}}world{{reset}}!\"
+    bt prose \"{{red}}Error:{{reset}} Something went wrong\"
+    bt prose \"{{bg-yellow}}Warning{{reset}}: Check this\"
+
+  Block tags:
+    bt prose \"<b>Bold</b> and <i>italic</i> text\"
+    bt prose \"<u>Underlined</u> and <~>strikethrough</~>\"
+    bt prose \"Visit <a href='https://example.com'>our site</a>\"
+    bt prose \"<red>Error message</red>\"
+
+  With margins:
+    bt prose --left-margin 4 \"Indented text\"
+    bt prose -l 2 -r 2 \"Centered with margins\"
+
+  Disable word wrapping:
+    bt prose --no-wrap \"Long line that should not wrap\"
+
+\x1b[1m\x1b[4mAtomic Tokens:\x1b[0m
+  Styles:     {{bold}}, {{dim}}, {{italic}}, {{underline}}, {{strikethrough}}
+  Colors:     {{red}}, {{blue}}, {{green}}, {{yellow}}, {{cyan}}, {{magenta}}
+  Bright:     {{bright-red}}, {{bright-blue}}, etc.
+  Background: {{bg-red}}, {{bg-blue}}, etc.
+  Reset:      {{reset}}, {{reset-fg}}, {{reset-bg}}
+  Undo style: {{normal-font-weight}}, {{not-italic}}, {{not-underline}}, {{not-strikethrough}}
+
+\x1b[1m\x1b[4mBlock Tags:\x1b[0m
+  <b>bold</b>       <i>italic</i>         <u>underline</u>
+  <uu>double-ul</uu>  <~>strikethrough</~>
+  <a href=\"URL\">link</a>
+  <red>colored</red>  <rgb 255,0,0>rgb color</rgb>
+")]
+    Prose {
+        /// Content with {{tokens}} and <block>tags</block>
+        #[arg(value_name = "CONTENT")]
+        content: Vec<String>,
+
+        /// Disable word wrapping
+        #[arg(long)]
+        no_wrap: bool,
+
+        /// Left margin in characters
+        #[arg(long, short = 'l')]
+        left_margin: Option<u32>,
+
+        /// Right margin in characters
+        #[arg(long, short = 'r')]
+        right_margin: Option<u32>,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -1293,6 +1349,14 @@ fn main() -> color_eyre::Result<()> {
                 relationships,
                 args.json,
             );
+        }
+        Some(Command::Prose {
+            ref content,
+            no_wrap,
+            left_margin,
+            right_margin,
+        }) => {
+            return render_prose(content, no_wrap, left_margin, right_margin);
         }
         None => {
             // Default behavior: content analysis or terminal metadata
@@ -3166,4 +3230,52 @@ fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
     }
 
     println!();
+}
+
+/// Render prose content with styling tokens to the terminal.
+fn render_prose(
+    content: &[String],
+    no_wrap: bool,
+    left_margin: Option<u32>,
+    right_margin: Option<u32>,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::utils::layout::{Layout, Margin, WordWrap};
+
+    // Join all content pieces with spaces
+    let text = content.join(" ");
+
+    if text.is_empty() {
+        return Err(color_eyre::eyre::eyre!(
+            "No content provided. Usage: bt prose \"Hello {{bold}}world{{reset}}!\""
+        ));
+    }
+
+    // Build the Prose component
+    let mut prose = Prose::new(&text);
+
+    // Configure word wrapping
+    if no_wrap {
+        prose = prose.with_word_wrap(WordWrap::None);
+    } else {
+        prose = prose.with_word_wrap(WordWrap::WrapProse(None));
+    }
+
+    // Configure margins
+    if let Some(left) = left_margin {
+        prose = prose.with_left_margin(Margin::Chars(left));
+    }
+    if let Some(right) = right_margin {
+        prose = prose.with_right_margin(Margin::Chars(right));
+    }
+
+    // Render using fallback_render for terminal-aware output
+    let term = Terminal::new();
+    let layout = Layout::default();
+    let output = prose.fallback_render(&term, Some(&layout));
+
+    println!("{}", output);
+
+    Ok(())
 }

@@ -72,8 +72,13 @@ static ATOMIC_TOKENS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::
     m.insert("reset", "\x1b[0m");
     m.insert("reset-fg", "\x1b[39m");
     m.insert("reset-bg", "\x1b[49m");
-    m.insert("reset_fg", "\x1b[39m"); // underscore variant
-    m.insert("reset_bg", "\x1b[49m"); // underscore variant
+
+    // Style-specific reset tokens
+    m.insert("normal-font-weight", "\x1b[22m"); // Resets bold and dim
+    m.insert("not-italic", "\x1b[23m");
+    m.insert("not-underline", "\x1b[24m");
+    m.insert("not-strikethrough", "\x1b[29m");
+    m.insert("not-inverse", "\x1b[27m");
 
     // Basic foreground colors
     m.insert("black", "\x1b[30m");
