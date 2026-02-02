@@ -1,6 +1,7 @@
-use std::{collections::HashMap, sync::LazyLock};
+use std::{borrow::Cow, collections::HashMap, sync::LazyLock};
 
 use crate::{components::renderable::RenderableWrapper, terminal::Terminal};
+use thiserror::Error;
 
 /// A single byte value (0-255) representing one RGB color channel.
 ///
@@ -24,11 +25,33 @@ use crate::{components::renderable::RenderableWrapper, terminal::Terminal};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Octet(u8);
 
+/// Error returned when an invalid value is provided for `Octet`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum OctetError {
+    #[error("value {0} is out of range for Octet (must be 0-255)")]
+    OutOfRange(i32),
+}
+
 impl Octet {
     /// Creates a new `Octet` from a `u8` value.
     #[inline]
     pub const fn new(value: u8) -> Self {
         Self(value)
+    }
+
+    /// Creates a new `Octet` from an integer value, validating it's in range 0-255.
+    ///
+    /// ## Errors
+    ///
+    /// Returns `OctetError::OutOfRange` if the value is not in the range 0-255.
+    #[inline]
+    pub fn try_from_int<T: Into<i32>>(value: T) -> Result<Self, OctetError> {
+        let v = value.into();
+        if (0..=255).contains(&v) {
+            Ok(Self(v as u8))
+        } else {
+            Err(OctetError::OutOfRange(v))
+        }
     }
 
     /// Returns the inner `u8` value.
@@ -45,11 +68,111 @@ impl From<u8> for Octet {
     }
 }
 
+impl TryFrom<u16> for Octet {
+    type Error = OctetError;
+
+    #[inline]
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        if value <= 255 {
+            Ok(Self(value as u8))
+        } else {
+            Err(OctetError::OutOfRange(value as i32))
+        }
+    }
+}
+
+impl TryFrom<u32> for Octet {
+    type Error = OctetError;
+
+    #[inline]
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        if value <= 255 {
+            Ok(Self(value as u8))
+        } else {
+            Err(OctetError::OutOfRange(value as i32))
+        }
+    }
+}
+
+impl TryFrom<u64> for Octet {
+    type Error = OctetError;
+
+    #[inline]
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        if value <= 255 {
+            Ok(Self(value as u8))
+        } else {
+            Err(OctetError::OutOfRange(value as i32))
+        }
+    }
+}
+
+impl TryFrom<i8> for Octet {
+    type Error = OctetError;
+
+    #[inline]
+    fn try_from(value: i8) -> Result<Self, Self::Error> {
+        if value >= 0 {
+            Ok(Self(value as u8))
+        } else {
+            Err(OctetError::OutOfRange(value as i32))
+        }
+    }
+}
+
+impl TryFrom<i16> for Octet {
+    type Error = OctetError;
+
+    #[inline]
+    fn try_from(value: i16) -> Result<Self, Self::Error> {
+        if (0..=255).contains(&value) {
+            Ok(Self(value as u8))
+        } else {
+            Err(OctetError::OutOfRange(value as i32))
+        }
+    }
+}
+
+impl TryFrom<i32> for Octet {
+    type Error = OctetError;
+
+    #[inline]
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        if (0..=255).contains(&value) {
+            Ok(Self(value as u8))
+        } else {
+            Err(OctetError::OutOfRange(value))
+        }
+    }
+}
+
+impl TryFrom<i64> for Octet {
+    type Error = OctetError;
+
+    #[inline]
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        if (0..=255).contains(&value) {
+            Ok(Self(value as u8))
+        } else {
+            Err(OctetError::OutOfRange(value as i32))
+        }
+    }
+}
+
 impl From<Octet> for u8 {
     #[inline]
     fn from(octet: Octet) -> Self {
         octet.0
     }
+}
+
+pub trait TermColor<'a> {
+    /// wraps the content passed in with the escape-codes required
+    /// to start and stop the foreground color rendering.
+    fn fg(self, content: impl Into<Cow<'a, str>>) -> String;
+    /// wraps the content passed in with the escape-codes required
+    /// to start and stop the background color rendering.
+    fn bg(self, content: impl Into<Cow<'a, str>>) -> String;
 }
 
 /// Basic 8 color mode (ANSI colors 0-7 and bright variants 8-15).
@@ -73,6 +196,87 @@ pub enum BasicColor {
     BrightWhite,
 }
 
+const ESC: &'static str = "\x1b[";
+/// resets foreground color to the default
+const DEFAULT_FOREGROUND: &'static str = "\x1b[39";
+/// resets background color to the default
+const DEFAULT_BACKGROUND: &'static str = "\x1b[49";
+
+static BASIC_COLOR_LOOKUP: LazyLock<HashMap<BasicColor, (&'static str, &'static str)>> =
+    LazyLock::new(|| {
+        let mut m = HashMap::with_capacity(25);
+
+        m.insert(BasicColor::Black, ("30", "40"));
+        m.insert(BasicColor::Red, ("31", "41"));
+        m.insert(BasicColor::Green, ("32", "42"));
+        m.insert(BasicColor::Yellow, ("33", "43"));
+        m.insert(BasicColor::Blue, ("34", "44"));
+        m.insert(BasicColor::Magenta, ("35", "45"));
+        m.insert(BasicColor::Cyan, ("36", "46"));
+        m.insert(BasicColor::White, ("37", "47"));
+
+        m.insert(BasicColor::BrightBlack, ("90", "100"));
+        m.insert(BasicColor::BrightRed, ("91", "101"));
+        m.insert(BasicColor::BrightGreen, ("92", "102"));
+        m.insert(BasicColor::BrightYellow, ("93", "103"));
+        m.insert(BasicColor::BrightBlue, ("94", "104"));
+        m.insert(BasicColor::BrightMagenta, ("95", "105"));
+        m.insert(BasicColor::BrightCyan, ("96", "106"));
+        m.insert(BasicColor::BrightWhite, ("97", "107"));
+
+        m
+    });
+
+/// specify color target as either foreground or background
+pub enum FgBg {
+    Foreground,
+    Background,
+}
+
+impl BasicColor {
+    /// returns the escape-code to START the color coding
+    fn start(self, pos: FgBg) -> String {
+        let codes = BASIC_COLOR_LOOKUP.get(&self).unwrap();
+        match pos {
+            FgBg::Foreground => format!("{}{}", ESC, codes.0),
+            FgBg::Background => format!("{}{}", ESC, codes.1),
+        }
+    }
+    /// returns the escape-code to END the color coding
+    fn end(self, pos: FgBg) -> String {
+        match pos {
+            FgBg::Foreground => format!("{}", DEFAULT_FOREGROUND),
+            FgBg::Background => format!("{}", DEFAULT_BACKGROUND),
+        }
+    }
+}
+
+impl<'a> TermColor<'a> for BasicColor {
+    /// wraps the content passed in with the escape-codes required
+    /// to start and stop the foreground color rendering.
+    fn fg(self, content: impl Into<Cow<'a, str>>) -> String {
+        let content = content.into();
+        format!(
+            "{}{}{}",
+            self.start(FgBg::Foreground),
+            content,
+            self.end(FgBg::Foreground)
+        )
+    }
+
+    /// wraps the content passed in with the escape-codes required
+    /// to start and stop the background color rendering.
+    fn bg(self, content: impl Into<Cow<'a, str>>) -> String {
+        let content = content.into();
+        format!(
+            "{}{}{}",
+            self.start(FgBg::Background),
+            content,
+            self.end(FgBg::Background)
+        )
+    }
+}
+
 /// An RGB color with a fallback for terminals with limited color support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RgbColor {
@@ -80,6 +284,34 @@ pub struct RgbColor {
     green: Octet,
     blue: Octet,
     fallback: BasicColor,
+}
+
+impl<'a> TermColor<'a> for RgbColor {
+    /// wraps the content passed in with the escape-codes required
+    /// to start and stop the foreground color rendering.
+    fn fg(self, content: impl Into<Cow<'a, str>>) -> String {
+        let content = content.into();
+        format!(
+            "\x1b[38;2;{};{};{}m{}\x1b[39m",
+            self.red(),
+            self.green(),
+            self.blue(),
+            content
+        )
+    }
+
+    /// wraps the content passed in with the escape-codes required
+    /// to start and stop the background color rendering.
+    fn bg(self, content: impl Into<Cow<'a, str>>) -> String {
+        let content = content.into();
+        format!(
+            "\x1b[48;2;{};{};{}m{}\x1b[49m",
+            self.red(),
+            self.green(),
+            self.blue(),
+            content
+        )
+    }
 }
 
 impl RgbColor {
@@ -141,6 +373,30 @@ pub struct HdrColor {
     oklch_c: f32,
     /// OKLCH Hue (0.0 to 360.0 degrees)
     oklch_h: f32,
+}
+
+impl<'a> TermColor<'a> for HdrColor {
+    fn fg(self, content: impl Into<Cow<'a, str>>) -> String {
+        let content = content.into();
+        format!(
+            "\x1b[38;2;{};{};{}m{}\x1b[39m",
+            self.red(),
+            self.green(),
+            self.blue(),
+            content
+        )
+    }
+
+    fn bg(self, content: impl Into<Cow<'a, str>>) -> String {
+        let content = content.into();
+        format!(
+            "\x1b[48;2;{};{};{}m{}\x1b[49m",
+            self.red(),
+            self.green(),
+            self.blue(),
+            content
+        )
+    }
 }
 
 impl HdrColor {
@@ -519,6 +775,26 @@ pub enum WebColor {
     YellowGreen,
 }
 
+impl<'a> TermColor<'a> for WebColor {
+    /// Wraps the content passed in with the escape-codes required
+    /// to start and stop the foreground color rendering.
+    fn fg(self, content: impl Into<Cow<'a, str>>) -> String {
+        let rgb = WEB_COLOR_LOOKUP
+            .get(&self)
+            .expect("WebColor should have an RGB mapping in WEB_COLOR_LOOKUP");
+        rgb.fg(content)
+    }
+
+    /// Wraps the content passed in with the escape-codes required
+    /// to start and stop the background color rendering.
+    fn bg(self, content: impl Into<Cow<'a, str>>) -> String {
+        let rgb = WEB_COLOR_LOOKUP
+            .get(&self)
+            .expect("WebColor should have an RGB mapping in WEB_COLOR_LOOKUP");
+        rgb.bg(content)
+    }
+}
+
 /// Lookup table mapping CSS named colors to their RGB values with ANSI fallbacks.
 ///
 /// Fallback colors are chosen to be the closest perceptual match from the basic
@@ -767,50 +1043,270 @@ pub enum Tailwind {
     White,
 
     // Red
-    Red50, Red100, Red200, Red300, Red400, Red500, Red600, Red700, Red800, Red900, Red950,
+    Red50,
+    Red100,
+    Red200,
+    Red300,
+    Red400,
+    Red500,
+    Red600,
+    Red700,
+    Red800,
+    Red900,
+    Red950,
     // Orange
-    Orange50, Orange100, Orange200, Orange300, Orange400, Orange500, Orange600, Orange700, Orange800, Orange900, Orange950,
+    Orange50,
+    Orange100,
+    Orange200,
+    Orange300,
+    Orange400,
+    Orange500,
+    Orange600,
+    Orange700,
+    Orange800,
+    Orange900,
+    Orange950,
     // Amber
-    Amber50, Amber100, Amber200, Amber300, Amber400, Amber500, Amber600, Amber700, Amber800, Amber900, Amber950,
+    Amber50,
+    Amber100,
+    Amber200,
+    Amber300,
+    Amber400,
+    Amber500,
+    Amber600,
+    Amber700,
+    Amber800,
+    Amber900,
+    Amber950,
     // Yellow
-    Yellow50, Yellow100, Yellow200, Yellow300, Yellow400, Yellow500, Yellow600, Yellow700, Yellow800, Yellow900, Yellow950,
+    Yellow50,
+    Yellow100,
+    Yellow200,
+    Yellow300,
+    Yellow400,
+    Yellow500,
+    Yellow600,
+    Yellow700,
+    Yellow800,
+    Yellow900,
+    Yellow950,
     // Lime
-    Lime50, Lime100, Lime200, Lime300, Lime400, Lime500, Lime600, Lime700, Lime800, Lime900, Lime950,
+    Lime50,
+    Lime100,
+    Lime200,
+    Lime300,
+    Lime400,
+    Lime500,
+    Lime600,
+    Lime700,
+    Lime800,
+    Lime900,
+    Lime950,
     // Green
-    Green50, Green100, Green200, Green300, Green400, Green500, Green600, Green700, Green800, Green900, Green950,
+    Green50,
+    Green100,
+    Green200,
+    Green300,
+    Green400,
+    Green500,
+    Green600,
+    Green700,
+    Green800,
+    Green900,
+    Green950,
     // Emerald
-    Emerald50, Emerald100, Emerald200, Emerald300, Emerald400, Emerald500, Emerald600, Emerald700, Emerald800, Emerald900, Emerald950,
+    Emerald50,
+    Emerald100,
+    Emerald200,
+    Emerald300,
+    Emerald400,
+    Emerald500,
+    Emerald600,
+    Emerald700,
+    Emerald800,
+    Emerald900,
+    Emerald950,
     // Teal
-    Teal50, Teal100, Teal200, Teal300, Teal400, Teal500, Teal600, Teal700, Teal800, Teal900, Teal950,
+    Teal50,
+    Teal100,
+    Teal200,
+    Teal300,
+    Teal400,
+    Teal500,
+    Teal600,
+    Teal700,
+    Teal800,
+    Teal900,
+    Teal950,
     // Cyan
-    Cyan50, Cyan100, Cyan200, Cyan300, Cyan400, Cyan500, Cyan600, Cyan700, Cyan800, Cyan900, Cyan950,
+    Cyan50,
+    Cyan100,
+    Cyan200,
+    Cyan300,
+    Cyan400,
+    Cyan500,
+    Cyan600,
+    Cyan700,
+    Cyan800,
+    Cyan900,
+    Cyan950,
     // Sky
-    Sky50, Sky100, Sky200, Sky300, Sky400, Sky500, Sky600, Sky700, Sky800, Sky900, Sky950,
+    Sky50,
+    Sky100,
+    Sky200,
+    Sky300,
+    Sky400,
+    Sky500,
+    Sky600,
+    Sky700,
+    Sky800,
+    Sky900,
+    Sky950,
     // Blue
-    Blue50, Blue100, Blue200, Blue300, Blue400, Blue500, Blue600, Blue700, Blue800, Blue900, Blue950,
+    Blue50,
+    Blue100,
+    Blue200,
+    Blue300,
+    Blue400,
+    Blue500,
+    Blue600,
+    Blue700,
+    Blue800,
+    Blue900,
+    Blue950,
     // Indigo
-    Indigo50, Indigo100, Indigo200, Indigo300, Indigo400, Indigo500, Indigo600, Indigo700, Indigo800, Indigo900, Indigo950,
+    Indigo50,
+    Indigo100,
+    Indigo200,
+    Indigo300,
+    Indigo400,
+    Indigo500,
+    Indigo600,
+    Indigo700,
+    Indigo800,
+    Indigo900,
+    Indigo950,
     // Violet
-    Violet50, Violet100, Violet200, Violet300, Violet400, Violet500, Violet600, Violet700, Violet800, Violet900, Violet950,
+    Violet50,
+    Violet100,
+    Violet200,
+    Violet300,
+    Violet400,
+    Violet500,
+    Violet600,
+    Violet700,
+    Violet800,
+    Violet900,
+    Violet950,
     // Purple
-    Purple50, Purple100, Purple200, Purple300, Purple400, Purple500, Purple600, Purple700, Purple800, Purple900, Purple950,
+    Purple50,
+    Purple100,
+    Purple200,
+    Purple300,
+    Purple400,
+    Purple500,
+    Purple600,
+    Purple700,
+    Purple800,
+    Purple900,
+    Purple950,
     // Fuchsia
-    Fuchsia50, Fuchsia100, Fuchsia200, Fuchsia300, Fuchsia400, Fuchsia500, Fuchsia600, Fuchsia700, Fuchsia800, Fuchsia900, Fuchsia950,
+    Fuchsia50,
+    Fuchsia100,
+    Fuchsia200,
+    Fuchsia300,
+    Fuchsia400,
+    Fuchsia500,
+    Fuchsia600,
+    Fuchsia700,
+    Fuchsia800,
+    Fuchsia900,
+    Fuchsia950,
     // Pink
-    Pink50, Pink100, Pink200, Pink300, Pink400, Pink500, Pink600, Pink700, Pink800, Pink900, Pink950,
+    Pink50,
+    Pink100,
+    Pink200,
+    Pink300,
+    Pink400,
+    Pink500,
+    Pink600,
+    Pink700,
+    Pink800,
+    Pink900,
+    Pink950,
     // Rose
-    Rose50, Rose100, Rose200, Rose300, Rose400, Rose500, Rose600, Rose700, Rose800, Rose900, Rose950,
+    Rose50,
+    Rose100,
+    Rose200,
+    Rose300,
+    Rose400,
+    Rose500,
+    Rose600,
+    Rose700,
+    Rose800,
+    Rose900,
+    Rose950,
 
     // Slate
-    Slate50, Slate100, Slate200, Slate300, Slate400, Slate500, Slate600, Slate700, Slate800, Slate900, Slate950,
+    Slate50,
+    Slate100,
+    Slate200,
+    Slate300,
+    Slate400,
+    Slate500,
+    Slate600,
+    Slate700,
+    Slate800,
+    Slate900,
+    Slate950,
     // Gray
-    Gray50, Gray100, Gray200, Gray300, Gray400, Gray500, Gray600, Gray700, Gray800, Gray900, Gray950,
+    Gray50,
+    Gray100,
+    Gray200,
+    Gray300,
+    Gray400,
+    Gray500,
+    Gray600,
+    Gray700,
+    Gray800,
+    Gray900,
+    Gray950,
     // Zinc
-    Zinc50, Zinc100, Zinc200, Zinc300, Zinc400, Zinc500, Zinc600, Zinc700, Zinc800, Zinc900, Zinc950,
+    Zinc50,
+    Zinc100,
+    Zinc200,
+    Zinc300,
+    Zinc400,
+    Zinc500,
+    Zinc600,
+    Zinc700,
+    Zinc800,
+    Zinc900,
+    Zinc950,
     // Neutral
-    Neutral50, Neutral100, Neutral200, Neutral300, Neutral400, Neutral500, Neutral600, Neutral700, Neutral800, Neutral900, Neutral950,
+    Neutral50,
+    Neutral100,
+    Neutral200,
+    Neutral300,
+    Neutral400,
+    Neutral500,
+    Neutral600,
+    Neutral700,
+    Neutral800,
+    Neutral900,
+    Neutral950,
     // Stone
-    Stone50, Stone100, Stone200, Stone300, Stone400, Stone500, Stone600, Stone700, Stone800, Stone900, Stone950,
+    Stone50,
+    Stone100,
+    Stone200,
+    Stone300,
+    Stone400,
+    Stone500,
+    Stone600,
+    Stone700,
+    Stone800,
+    Stone900,
+    Stone950,
 }
 
 // Generated Tailwind color implementations from build.rs
@@ -819,9 +1315,7 @@ include!(concat!(env!("OUT_DIR"), "/tailwind_colors.rs"));
 
 /// An enumeration for specifying color for the terminal
 pub enum Color {
-    /// Use a basic color which can be used in any terminal
-    /// which supports color
-    Basic(BasicColor),
+    BasicColor(BasicColor),
     /// Specify a bespoke RGB color value (with a `BasicColor` as a fallback)
     Rgb(RgbColor),
     /// Use a named CSS/Web color
@@ -851,7 +1345,6 @@ impl RenderableWrapper for BasicColorWrapper {
         format!("\x1b[{}m{}\x1b[0m", color_code(self.0), content)
     }
 }
-
 
 /// Wrapper for RGB colors that implements `RenderableWrapper`.
 #[derive(Debug, Clone, Copy)]
@@ -904,7 +1397,6 @@ impl RenderableWrapper for RgbColorWrapper {
         }
     }
 }
-
 
 /// Wrapper for web colors that implements `RenderableWrapper`.
 #[derive(Debug, Clone, Copy)]
@@ -1033,7 +1525,6 @@ impl RenderableWrapper for TailwindColorWrapper {
     }
 }
 
-
 /// Helper function to convert BasicColor to ANSI color code
 fn color_code(color: BasicColor) -> u8 {
     match color {
@@ -1126,32 +1617,68 @@ mod tests {
         // Tailwind v4 uses OKLCH, so exact hex may differ slightly
         // The official slate-500 from Tailwind v4 is oklch(0.554 0.046 257.417)
         // Our conversion should be very close to #62748e (the sRGB fallback)
-        assert!((slate_500.red() as i16 - 100).abs() < 5, "slate-500 red should be ~100");
-        assert!((slate_500.green() as i16 - 116).abs() < 5, "slate-500 green should be ~116");
-        assert!((slate_500.blue() as i16 - 139).abs() < 5, "slate-500 blue should be ~139");
+        assert!(
+            (slate_500.red() as i16 - 100).abs() < 5,
+            "slate-500 red should be ~100"
+        );
+        assert!(
+            (slate_500.green() as i16 - 116).abs() < 5,
+            "slate-500 green should be ~116"
+        );
+        assert!(
+            (slate_500.blue() as i16 - 139).abs() < 5,
+            "slate-500 blue should be ~139"
+        );
 
         let slate_950 = Tailwind::Slate950.to_hdr_color().unwrap();
-        assert!((slate_950.red() as i16).abs() < 10, "slate-950 red should be ~2");
-        assert!((slate_950.green() as i16 - 6).abs() < 10, "slate-950 green should be ~6");
-        assert!((slate_950.blue() as i16 - 23).abs() < 10, "slate-950 blue should be ~23");
+        assert!(
+            (slate_950.red() as i16).abs() < 10,
+            "slate-950 red should be ~2"
+        );
+        assert!(
+            (slate_950.green() as i16 - 6).abs() < 10,
+            "slate-950 green should be ~6"
+        );
+        assert!(
+            (slate_950.blue() as i16 - 23).abs() < 10,
+            "slate-950 blue should be ~23"
+        );
 
         // Red-500: oklch(0.637 0.237 25.331) -> approximately #ef4444
         let red_500 = Tailwind::Red500.to_hdr_color().unwrap();
         assert!(red_500.red() > 220, "red-500 should have high red channel");
-        assert!(red_500.green() < 100, "red-500 should have low green channel");
+        assert!(
+            red_500.green() < 100,
+            "red-500 should have low green channel"
+        );
         assert!(red_500.blue() < 100, "red-500 should have low blue channel");
 
         // Blue-500: oklch(0.623 0.214 259.815) -> approximately #3b82f6
         let blue_500 = Tailwind::Blue500.to_hdr_color().unwrap();
         assert!(blue_500.red() < 100, "blue-500 should have low red channel");
-        assert!(blue_500.green() > 100 && blue_500.green() < 150, "blue-500 green should be ~130");
-        assert!(blue_500.blue() > 230, "blue-500 should have high blue channel");
+        assert!(
+            blue_500.green() > 100 && blue_500.green() < 150,
+            "blue-500 green should be ~130"
+        );
+        assert!(
+            blue_500.blue() > 230,
+            "blue-500 should have high blue channel"
+        );
 
         // Indigo-500: oklch(0.585 0.233 277.117) -> approximately #6366f1
         let indigo_500 = Tailwind::Indigo500.to_hdr_color().unwrap();
-        assert!(indigo_500.red() > 80 && indigo_500.red() < 120, "indigo-500 red should be ~99");
-        assert!(indigo_500.green() > 80 && indigo_500.green() < 130, "indigo-500 green should be ~102");
-        assert!(indigo_500.blue() > 200, "indigo-500 should have high blue channel");
+        assert!(
+            indigo_500.red() > 80 && indigo_500.red() < 120,
+            "indigo-500 red should be ~99"
+        );
+        assert!(
+            indigo_500.green() > 80 && indigo_500.green() < 130,
+            "indigo-500 green should be ~102"
+        );
+        assert!(
+            indigo_500.blue() > 200,
+            "indigo-500 should have high blue channel"
+        );
     }
 
     /// Test that all concrete color variants return Some for to_hdr_color
@@ -1159,13 +1686,27 @@ mod tests {
     fn all_concrete_colors_return_some() {
         // Test a sample from each family
         let families = [
-            Tailwind::Slate500, Tailwind::Gray500, Tailwind::Zinc500,
-            Tailwind::Neutral500, Tailwind::Stone500, Tailwind::Red500,
-            Tailwind::Orange500, Tailwind::Amber500, Tailwind::Yellow500,
-            Tailwind::Lime500, Tailwind::Green500, Tailwind::Emerald500,
-            Tailwind::Teal500, Tailwind::Cyan500, Tailwind::Sky500,
-            Tailwind::Blue500, Tailwind::Indigo500, Tailwind::Violet500,
-            Tailwind::Purple500, Tailwind::Fuchsia500, Tailwind::Pink500,
+            Tailwind::Slate500,
+            Tailwind::Gray500,
+            Tailwind::Zinc500,
+            Tailwind::Neutral500,
+            Tailwind::Stone500,
+            Tailwind::Red500,
+            Tailwind::Orange500,
+            Tailwind::Amber500,
+            Tailwind::Yellow500,
+            Tailwind::Lime500,
+            Tailwind::Green500,
+            Tailwind::Emerald500,
+            Tailwind::Teal500,
+            Tailwind::Cyan500,
+            Tailwind::Sky500,
+            Tailwind::Blue500,
+            Tailwind::Indigo500,
+            Tailwind::Violet500,
+            Tailwind::Purple500,
+            Tailwind::Fuchsia500,
+            Tailwind::Pink500,
             Tailwind::Rose500,
         ];
 
@@ -1221,17 +1762,27 @@ mod tests {
         let hex = Tailwind::Slate500.hex().unwrap();
         assert!(hex.starts_with('#'), "Hex should start with #");
         assert_eq!(hex.len(), 7, "Hex should be 7 characters (#rrggbb)");
-        assert!(hex[1..].chars().all(|c| c.is_ascii_hexdigit()), "Hex should contain only hex digits");
+        assert!(
+            hex[1..].chars().all(|c| c.is_ascii_hexdigit()),
+            "Hex should contain only hex digits"
+        );
     }
 
     /// Test that neutral grays are truly achromatic (no color cast)
     #[test]
     fn neutral_grays_are_achromatic() {
         for shade in [
-            Tailwind::Neutral50, Tailwind::Neutral100, Tailwind::Neutral200,
-            Tailwind::Neutral300, Tailwind::Neutral400, Tailwind::Neutral500,
-            Tailwind::Neutral600, Tailwind::Neutral700, Tailwind::Neutral800,
-            Tailwind::Neutral900, Tailwind::Neutral950,
+            Tailwind::Neutral50,
+            Tailwind::Neutral100,
+            Tailwind::Neutral200,
+            Tailwind::Neutral300,
+            Tailwind::Neutral400,
+            Tailwind::Neutral500,
+            Tailwind::Neutral600,
+            Tailwind::Neutral700,
+            Tailwind::Neutral800,
+            Tailwind::Neutral900,
+            Tailwind::Neutral950,
         ] {
             let color = shade.to_hdr_color().unwrap();
             let r = color.red() as i16;
@@ -1243,7 +1794,10 @@ mod tests {
             assert!(
                 (r - g).abs() <= 1 && (g - b).abs() <= 1,
                 "{:?} should be achromatic: RGB({}, {}, {})",
-                shade, r, g, b
+                shade,
+                r,
+                g,
+                b
             );
         }
     }

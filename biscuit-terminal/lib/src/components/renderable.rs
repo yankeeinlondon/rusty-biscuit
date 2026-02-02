@@ -1,4 +1,5 @@
 use crate::terminal::Terminal;
+use crate::utils::layout::Layout;
 
 /// A struct or enum which implements the **Renderable** trait
 /// can be reduced down to a string designed to be displayed
@@ -9,18 +10,18 @@ pub trait Renderable {
     /// renders without knowledge of the underlying terminal's
     /// capabilities with an "opportunistic" view that the
     /// terminal supports all capabilities.
-    fn render() -> String;
+    fn render(self, layout: Option<&Layout>) -> String;
 
     /// **Fallback Render**
     ///
     /// Renders the component based on the capabilities of the
     /// passed in `Terminal`. Will provide graceful fallbacks
     /// when possible.
-    fn fallback_render(term: &Terminal) -> String;
+    fn fallback_render(self, term: &Terminal, layout: Option<&Layout>) -> String;
 }
 
-/// A **RenderableWrapper** is a utility which operates at at
-/// a lower level than a **Renderable** component and takes in
+/// A `RenderableWrapper`` is a utility which operates at at
+/// a lower level than a `Renderable` **component** and takes in
 /// string content and outputs that string _wrapped_ in some
 /// sort of formatting.
 pub trait RenderableWrapper {

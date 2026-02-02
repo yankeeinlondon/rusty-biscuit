@@ -24,17 +24,65 @@ fn main() {
     println!("CI Environment: {}", if term.is_ci { "yes" } else { "no" });
     println!("Color Depth:    {:?}", term.color_depth);
     println!("Color Mode:     {:?}", Terminal::color_mode());
-    println!("Italics:        {}", if term.supports_italic { "yes" } else { "no" });
+    println!(
+        "Italics:        {}",
+        if term.supports_italic { "yes" } else { "no" }
+    );
     println!("Images:         {:?}", term.image_support);
-    println!("OSC8 Links:     {}", if term.osc_link_support { "yes" } else { "no" });
+    println!(
+        "OSC8 Links:     {}",
+        if term.osc_link_support { "yes" } else { "no" }
+    );
 
     println!("\n=== Underline Support ===\n");
-    println!("Straight: {}", if term.underline_support.straight { "yes" } else { "no" });
-    println!("Double:   {}", if term.underline_support.double { "yes" } else { "no" });
-    println!("Curly:    {}", if term.underline_support.curly { "yes" } else { "no" });
-    println!("Dotted:   {}", if term.underline_support.dotted { "yes" } else { "no" });
-    println!("Dashed:   {}", if term.underline_support.dashed { "yes" } else { "no" });
-    println!("Colored:  {}", if term.underline_support.colored { "yes" } else { "no" });
+    println!(
+        "Straight: {}",
+        if term.underline_support.straight {
+            "yes"
+        } else {
+            "no"
+        }
+    );
+    println!(
+        "Double:   {}",
+        if term.underline_support.double {
+            "yes"
+        } else {
+            "no"
+        }
+    );
+    println!(
+        "Curly:    {}",
+        if term.underline_support.curly {
+            "yes"
+        } else {
+            "no"
+        }
+    );
+    println!(
+        "Dotted:   {}",
+        if term.underline_support.dotted {
+            "yes"
+        } else {
+            "no"
+        }
+    );
+    println!(
+        "Dashed:   {}",
+        if term.underline_support.dashed {
+            "yes"
+        } else {
+            "no"
+        }
+    );
+    println!(
+        "Colored:  {}",
+        if term.underline_support.colored {
+            "yes"
+        } else {
+            "no"
+        }
+    );
 
     if let Some(config) = &term.config_file {
         println!("\n=== Config ===\n");

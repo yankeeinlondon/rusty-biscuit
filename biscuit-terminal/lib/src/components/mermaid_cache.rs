@@ -537,7 +537,12 @@ mod tests {
     #[test]
     fn test_cache_new() {
         let cache = MermaidCache::new();
-        assert!(cache.cache_dir().to_string_lossy().contains("mermaid-cache"));
+        assert!(
+            cache
+                .cache_dir()
+                .to_string_lossy()
+                .contains("mermaid-cache")
+        );
     }
 
     #[test]
@@ -549,9 +554,8 @@ mod tests {
 
     #[test]
     fn test_cache_get_miss() {
-        let cache = MermaidCache::with_cache_dir(
-            std::env::temp_dir().join("mermaid-cache-test-miss"),
-        );
+        let cache =
+            MermaidCache::with_cache_dir(std::env::temp_dir().join("mermaid-cache-test-miss"));
 
         let key = MermaidCacheKey::new(
             "nonexistent",
@@ -568,9 +572,8 @@ mod tests {
 
     #[test]
     fn test_cache_store_and_get() {
-        let cache = MermaidCache::with_cache_dir(
-            std::env::temp_dir().join("mermaid-cache-test-store"),
-        );
+        let cache =
+            MermaidCache::with_cache_dir(std::env::temp_dir().join("mermaid-cache-test-store"));
         cache.clear().ok(); // Clean up from previous runs
 
         let key = MermaidCacheKey::new(
@@ -603,9 +606,8 @@ mod tests {
 
     #[test]
     fn test_cache_entry_count() {
-        let cache = MermaidCache::with_cache_dir(
-            std::env::temp_dir().join("mermaid-cache-test-count"),
-        );
+        let cache =
+            MermaidCache::with_cache_dir(std::env::temp_dir().join("mermaid-cache-test-count"));
         cache.clear().ok();
 
         assert_eq!(cache.entry_count(), 0);
@@ -633,9 +635,8 @@ mod tests {
 
     #[test]
     fn test_cache_size_bytes() {
-        let cache = MermaidCache::with_cache_dir(
-            std::env::temp_dir().join("mermaid-cache-test-size"),
-        );
+        let cache =
+            MermaidCache::with_cache_dir(std::env::temp_dir().join("mermaid-cache-test-size"));
         cache.clear().ok();
 
         assert_eq!(cache.size_bytes(), 0);

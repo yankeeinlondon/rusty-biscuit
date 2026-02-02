@@ -162,9 +162,12 @@ pub fn detect_mmdc_version() -> Option<MmdcVersion> {
     let version_str = String::from_utf8_lossy(&output.stdout);
     // mmdc outputs something like "10.9.1" or "@mermaid-js/mermaid-cli 10.9.1"
     // Extract just the version number
-    let version_part = version_str
-        .split_whitespace()
-        .find(|s| s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false))?;
+    let version_part = version_str.split_whitespace().find(|s| {
+        s.chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+    })?;
 
     MmdcVersion::parse(version_part)
 }
@@ -484,8 +487,7 @@ impl MermaidConfig {
             return None;
         }
 
-        Some(format!("{{\n  {}\n}}", sections.join(",\n  ")
-        ))
+        Some(format!("{{\n  {}\n}}", sections.join(",\n  ")))
     }
 }
 
@@ -1284,8 +1286,7 @@ mod tests {
 
     #[test]
     fn test_mermaid_renderer_with_title() {
-        let renderer =
-            MermaidRenderer::new("flowchart LR\n    A --> B").with_title("My Flowchart");
+        let renderer = MermaidRenderer::new("flowchart LR\n    A --> B").with_title("My Flowchart");
         assert_eq!(renderer.title(), Some("My Flowchart"));
     }
 
@@ -1393,10 +1394,7 @@ mod tests {
 
     #[test]
     fn test_detect_diagram_type_gitgraph() {
-        assert_eq!(
-            detect_diagram_type("gitGraph\n    commit"),
-            "Git graph"
-        );
+        assert_eq!(detect_diagram_type("gitGraph\n    commit"), "Git graph");
     }
 
     #[test]
@@ -1425,8 +1423,7 @@ mod tests {
 
     #[test]
     fn test_alt_text_with_title() {
-        let renderer =
-            MermaidRenderer::new("flowchart LR\n    A --> B").with_title("Custom Title");
+        let renderer = MermaidRenderer::new("flowchart LR\n    A --> B").with_title("Custom Title");
         assert_eq!(renderer.alt_text(), "Custom Title");
     }
 
@@ -1481,15 +1478,20 @@ mod tests {
     #[test]
     fn test_error_display_display_error() {
         let error = MermaidRenderError::DisplayError("failed to render".to_string());
-        assert_eq!(error.to_string(), "Failed to display image: failed to render");
+        assert_eq!(
+            error.to_string(),
+            "Failed to display image: failed to render"
+        );
     }
 
     #[test]
     fn test_error_display_no_image_support() {
         let error = MermaidRenderError::NoImageSupport;
-        assert!(error
-            .to_string()
-            .contains("does not support image rendering"));
+        assert!(
+            error
+                .to_string()
+                .contains("does not support image rendering")
+        );
     }
 
     #[test]
@@ -1640,8 +1642,7 @@ mod tests {
         let config = MermaidConfig::new()
             .with_point_label_font_size(16)
             .with_point_radius(12);
-        let renderer = MermaidRenderer::new("quadrantChart\n    A: [0.5, 0.5]")
-            .with_config(config);
+        let renderer = MermaidRenderer::new("quadrantChart\n    A: [0.5, 0.5]").with_config(config);
         // Just verify it builds without panicking
         assert!(renderer.instructions().contains("quadrantChart"));
     }
@@ -1686,10 +1687,22 @@ mod tests {
 
     #[test]
     fn test_quadrant_theme_from_str() {
-        assert_eq!(QuadrantTheme::parse("default"), Some(QuadrantTheme::Default));
-        assert_eq!(QuadrantTheme::parse("magic-quadrangle"), Some(QuadrantTheme::MagicQuadrangle));
-        assert_eq!(QuadrantTheme::parse("magic_quadrangle"), Some(QuadrantTheme::MagicQuadrangle));
-        assert_eq!(QuadrantTheme::parse("MAGIC-QUADRANGLE"), Some(QuadrantTheme::MagicQuadrangle));
+        assert_eq!(
+            QuadrantTheme::parse("default"),
+            Some(QuadrantTheme::Default)
+        );
+        assert_eq!(
+            QuadrantTheme::parse("magic-quadrangle"),
+            Some(QuadrantTheme::MagicQuadrangle)
+        );
+        assert_eq!(
+            QuadrantTheme::parse("magic_quadrangle"),
+            Some(QuadrantTheme::MagicQuadrangle)
+        );
+        assert_eq!(
+            QuadrantTheme::parse("MAGIC-QUADRANGLE"),
+            Some(QuadrantTheme::MagicQuadrangle)
+        );
         assert_eq!(QuadrantTheme::parse("unknown"), None);
     }
 

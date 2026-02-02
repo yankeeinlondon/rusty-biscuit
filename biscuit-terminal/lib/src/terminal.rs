@@ -2,12 +2,13 @@ use std::path::PathBuf;
 
 use crate::discovery::config_paths::get_terminal_config_path;
 use crate::discovery::detection::{
-    ColorDepth, ColorMode, Connection, ImageSupport, TerminalApp, UnderlineSupport,
-    color_depth, color_mode, detect_connection, get_terminal_app, image_support,
-    is_tty, italics_support, osc8_link_support, terminal_height, terminal_width,
-    underline_support,
+    ColorDepth, ColorMode, Connection, ImageSupport, TerminalApp, UnderlineSupport, color_depth,
+    color_mode, detect_connection, get_terminal_app, image_support, is_tty, italics_support,
+    osc8_link_support, terminal_height, terminal_width, underline_support,
 };
-use crate::discovery::fonts::{detect_nerd_font, font_ligatures, font_name, font_size, FontLigature};
+use crate::discovery::fonts::{
+    FontLigature, detect_nerd_font, font_ligatures, font_name, font_size,
+};
 use crate::discovery::locale::{CharEncoding, TerminalLocale};
 use crate::discovery::os_detection::{
     LinuxDistro, OsType, detect_linux_distro, detect_os_type, is_ci,
@@ -38,8 +39,6 @@ fn new_terminal() -> Terminal {
         locale: TerminalLocale::default(),
     }
 }
-
-
 
 /// Represents a detected terminal environment with its capabilities.
 ///
@@ -207,6 +206,145 @@ impl Terminal {
     pub fn render<T: Into<String>>(_content: T) -> () {
         todo!()
     }
+
+    /// Create a builder for constructing Terminal with explicit values.
+    ///
+    /// The builder allows overriding auto-detected values, useful for testing
+    /// or when detection doesn't match the actual terminal capabilities.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::terminal::Terminal;
+    /// use biscuit_terminal::discovery::detection::ImageSupport;
+    ///
+    /// let term = Terminal::builder()
+    ///     .is_tty(true)
+    ///     .image_support(ImageSupport::Kitty)
+    ///     .build();
+    ///
+    /// assert!(term.is_tty);
+    /// assert_eq!(term.image_support, ImageSupport::Kitty);
+    /// ```
+    pub fn builder() -> TerminalBuilder {
+        TerminalBuilder::default()
+    }
+}
+
+/// Builder for constructing [`Terminal`] with explicit values.
+///
+/// Any field not explicitly set will use the auto-detected value.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::terminal::Terminal;
+/// use biscuit_terminal::discovery::detection::{ImageSupport, ColorDepth};
+///
+/// // Override specific values, auto-detect the rest
+/// let term = Terminal::builder()
+///     .is_tty(true)
+///     .image_support(ImageSupport::Kitty)
+///     .color_depth(ColorDepth::TrueColor)
+///     .build();
+/// ```
+#[derive(Default)]
+pub struct TerminalBuilder {
+    app: Option<TerminalApp>,
+    supports_italic: Option<bool>,
+    image_support: Option<ImageSupport>,
+    underline_support: Option<UnderlineSupport>,
+    osc_link_support: Option<bool>,
+    is_tty: Option<bool>,
+    color_depth: Option<ColorDepth>,
+    is_ci: Option<bool>,
+    is_nerd_font: Option<Option<bool>>,
+}
+
+impl TerminalBuilder {
+    /// Set the terminal application.
+    pub fn app(mut self, value: TerminalApp) -> Self {
+        self.app = Some(value);
+        self
+    }
+
+    /// Set whether italics are supported.
+    pub fn supports_italic(mut self, value: bool) -> Self {
+        self.supports_italic = Some(value);
+        self
+    }
+
+    /// Set the image support level.
+    pub fn image_support(mut self, value: ImageSupport) -> Self {
+        self.image_support = Some(value);
+        self
+    }
+
+    /// Set the underline support level.
+    pub fn underline_support(mut self, value: UnderlineSupport) -> Self {
+        self.underline_support = Some(value);
+        self
+    }
+
+    /// Set whether OSC8 links are supported.
+    pub fn osc_link_support(mut self, value: bool) -> Self {
+        self.osc_link_support = Some(value);
+        self
+    }
+
+    /// Set whether stdout is connected to a TTY.
+    pub fn is_tty(mut self, value: bool) -> Self {
+        self.is_tty = Some(value);
+        self
+    }
+
+    /// Set the color depth.
+    pub fn color_depth(mut self, value: ColorDepth) -> Self {
+        self.color_depth = Some(value);
+        self
+    }
+
+    /// Set whether running in CI environment.
+    pub fn is_ci(mut self, value: bool) -> Self {
+        self.is_ci = Some(value);
+        self
+    }
+
+    /// Set whether using a Nerd Font.
+    ///
+    /// - `Some(true)`: Nerd Font confirmed
+    /// - `Some(false)`: Explicitly not a Nerd Font
+    /// - `None`: Cannot determine
+    pub fn is_nerd_font(mut self, value: Option<bool>) -> Self {
+        self.is_nerd_font = Some(value);
+        self
+    }
+
+    /// Build the Terminal, using auto-detected values for unset fields.
+    pub fn build(self) -> Terminal {
+        let detected = new_terminal();
+        Terminal {
+            app: self.app.unwrap_or(detected.app),
+            supports_italic: self.supports_italic.unwrap_or(detected.supports_italic),
+            image_support: self.image_support.unwrap_or(detected.image_support),
+            underline_support: self.underline_support.unwrap_or(detected.underline_support),
+            osc_link_support: self.osc_link_support.unwrap_or(detected.osc_link_support),
+            is_tty: self.is_tty.unwrap_or(detected.is_tty),
+            color_depth: self.color_depth.unwrap_or(detected.color_depth),
+            is_ci: self.is_ci.unwrap_or(detected.is_ci),
+            is_nerd_font: self.is_nerd_font.unwrap_or(detected.is_nerd_font),
+            // Fields that aren't overridable via builder (OS/system detection)
+            os: detected.os,
+            distro: detected.distro,
+            config_file: detected.config_file,
+            font: detected.font,
+            font_size: detected.font_size,
+            font_ligatures: detected.font_ligatures,
+            remote: detected.remote,
+            char_encoding: detected.char_encoding,
+            locale: detected.locale,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -266,7 +404,10 @@ mod tests {
         let _font = &term.font;
         let _font_size = term.font_size;
         // font_ligatures is still unimplemented (always None)
-        assert!(term.font_ligatures.is_none(), "font_ligatures detection is not implemented");
+        assert!(
+            term.font_ligatures.is_none(),
+            "font_ligatures detection is not implemented"
+        );
     }
 
     #[test]
@@ -286,5 +427,60 @@ mod tests {
             Some(false) => {}
             None => {}
         }
+    }
+
+    #[test]
+    fn test_terminal_builder_overrides_is_tty() {
+        let term = Terminal::builder().is_tty(true).build();
+        assert!(term.is_tty);
+
+        let term = Terminal::builder().is_tty(false).build();
+        assert!(!term.is_tty);
+    }
+
+    #[test]
+    fn test_terminal_builder_overrides_image_support() {
+        let term = Terminal::builder()
+            .image_support(ImageSupport::Kitty)
+            .build();
+        assert_eq!(term.image_support, ImageSupport::Kitty);
+
+        let term = Terminal::builder()
+            .image_support(ImageSupport::None)
+            .build();
+        assert_eq!(term.image_support, ImageSupport::None);
+    }
+
+    #[test]
+    fn test_terminal_builder_overrides_color_depth() {
+        let term = Terminal::builder()
+            .color_depth(ColorDepth::TrueColor)
+            .build();
+        assert_eq!(term.color_depth, ColorDepth::TrueColor);
+    }
+
+    #[test]
+    fn test_terminal_builder_overrides_multiple_fields() {
+        let term = Terminal::builder()
+            .is_tty(true)
+            .image_support(ImageSupport::Kitty)
+            .color_depth(ColorDepth::TrueColor)
+            .is_ci(false)
+            .build();
+
+        assert!(term.is_tty);
+        assert_eq!(term.image_support, ImageSupport::Kitty);
+        assert_eq!(term.color_depth, ColorDepth::TrueColor);
+        assert!(!term.is_ci);
+    }
+
+    #[test]
+    fn test_terminal_builder_preserves_os_detection() {
+        let term = Terminal::builder().is_tty(true).build();
+        // OS detection should still work
+        #[cfg(target_os = "macos")]
+        assert_eq!(term.os, OsType::MacOS);
+        #[cfg(target_os = "linux")]
+        assert_eq!(term.os, OsType::Linux);
     }
 }

@@ -45,8 +45,14 @@ pub fn normalize_locale_to_tag(raw: &str) -> Option<String> {
     }
 
     // Split off encoding (.UTF-8) and modifier (@latin)
-    let (before_at, modifier) = raw.split_once('@').map(|(a, m)| (a, Some(m))).unwrap_or((raw, None));
-    let base = before_at.split_once('.').map(|(b, _enc)| b).unwrap_or(before_at);
+    let (before_at, modifier) = raw
+        .split_once('@')
+        .map(|(a, m)| (a, Some(m)))
+        .unwrap_or((raw, None));
+    let base = before_at
+        .split_once('.')
+        .map(|(b, _enc)| b)
+        .unwrap_or(before_at);
 
     // Convert to BCP47-ish: underscore -> hyphen.
     let mut tag = base.replace('_', "-");
@@ -99,8 +105,6 @@ fn windows_locale_tag() -> Option<String> {
     Some(s) // already like "en-US"
 }
 
-
-
 /// Effective locale for a specific category, following common precedence:
 /// LC_ALL > LC_<CATEGORY> > LANG > "C"
 pub fn effective_locale_for(category: LocaleCategory) -> String {
@@ -126,8 +130,6 @@ pub fn env_says_utf8() -> Option<bool> {
     let upper = v.to_ascii_uppercase();
     Some(upper.contains("UTF-8") || upper.contains("UTF8"))
 }
-
-
 
 /// The Character Encoding the Terminal is using.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,7 +173,10 @@ pub fn detect_char_encoding() -> CharEncoding {
         CharEncoding::Utf16
     } else if locale.contains("UTF-32") || locale.contains("UTF32") {
         CharEncoding::Utf32
-    } else if locale.contains("ISO-8859-1") || locale.contains("ISO8859-1") || locale.contains("LATIN1") {
+    } else if locale.contains("ISO-8859-1")
+        || locale.contains("ISO8859-1")
+        || locale.contains("LATIN1")
+    {
         CharEncoding::Latin1
     } else if locale.contains("CP1252") || locale.contains("WINDOWS-1252") {
         CharEncoding::Windows1252

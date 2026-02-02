@@ -97,7 +97,7 @@ use thiserror::Error;
 /// - Cause hangs waiting for responses that were already read
 static TERMINAL_QUERY_MUTEX: Mutex<()> = Mutex::new(());
 
-use crate::discovery::detection::{get_terminal_app, is_tty, TerminalApp};
+use crate::discovery::detection::{TerminalApp, get_terminal_app, is_tty};
 use crate::discovery::os_detection::is_ci;
 
 /// Errors that can occur when querying terminal colors via OSC sequences.
@@ -348,7 +348,11 @@ fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Option<RgbValue>
         return Some(color);
     }
 
-    tracing::debug!(code, "OSC{} color detection failed, no source available", code);
+    tracing::debug!(
+        code,
+        "OSC{} color detection failed, no source available",
+        code
+    );
     None
 }
 
@@ -414,22 +418,22 @@ fn parse_colorfgbg(value: &str, code: u8) -> Option<RgbValue> {
 /// - 8-15: Bright variants
 fn ansi_index_to_rgb(index: u8) -> Option<RgbValue> {
     match index {
-        0 => Some(RgbValue::new(0, 0, 0)),           // Black
-        1 => Some(RgbValue::new(205, 49, 49)),       // Red
-        2 => Some(RgbValue::new(13, 188, 121)),      // Green
-        3 => Some(RgbValue::new(229, 229, 16)),      // Yellow
-        4 => Some(RgbValue::new(36, 114, 200)),      // Blue
-        5 => Some(RgbValue::new(188, 63, 188)),      // Magenta
-        6 => Some(RgbValue::new(17, 168, 205)),      // Cyan
-        7 => Some(RgbValue::new(229, 229, 229)),     // White
-        8 => Some(RgbValue::new(102, 102, 102)),     // Bright Black (Gray)
-        9 => Some(RgbValue::new(241, 76, 76)),       // Bright Red
-        10 => Some(RgbValue::new(35, 209, 139)),     // Bright Green
-        11 => Some(RgbValue::new(245, 245, 67)),     // Bright Yellow
-        12 => Some(RgbValue::new(59, 142, 234)),     // Bright Blue
-        13 => Some(RgbValue::new(214, 112, 214)),    // Bright Magenta
-        14 => Some(RgbValue::new(41, 184, 219)),     // Bright Cyan
-        15 => Some(RgbValue::new(255, 255, 255)),    // Bright White
+        0 => Some(RgbValue::new(0, 0, 0)),        // Black
+        1 => Some(RgbValue::new(205, 49, 49)),    // Red
+        2 => Some(RgbValue::new(13, 188, 121)),   // Green
+        3 => Some(RgbValue::new(229, 229, 16)),   // Yellow
+        4 => Some(RgbValue::new(36, 114, 200)),   // Blue
+        5 => Some(RgbValue::new(188, 63, 188)),   // Magenta
+        6 => Some(RgbValue::new(17, 168, 205)),   // Cyan
+        7 => Some(RgbValue::new(229, 229, 229)),  // White
+        8 => Some(RgbValue::new(102, 102, 102)),  // Bright Black (Gray)
+        9 => Some(RgbValue::new(241, 76, 76)),    // Bright Red
+        10 => Some(RgbValue::new(35, 209, 139)),  // Bright Green
+        11 => Some(RgbValue::new(245, 245, 67)),  // Bright Yellow
+        12 => Some(RgbValue::new(59, 142, 234)),  // Bright Blue
+        13 => Some(RgbValue::new(214, 112, 214)), // Bright Magenta
+        14 => Some(RgbValue::new(41, 184, 219)),  // Bright Cyan
+        15 => Some(RgbValue::new(255, 255, 255)), // Bright White
         _ => None,
     }
 }
@@ -442,8 +446,8 @@ fn get_terminal_default_color(app: &TerminalApp, code: u8) -> Option<RgbValue> {
     match app {
         // Apple Terminal defaults to white background (light mode)
         TerminalApp::AppleTerminal => match code {
-            10 | 12 => Some(RgbValue::new(0, 0, 0)),         // Black text
-            11 => Some(RgbValue::new(255, 255, 255)),        // White background
+            10 | 12 => Some(RgbValue::new(0, 0, 0)),  // Black text
+            11 => Some(RgbValue::new(255, 255, 255)), // White background
             _ => None,
         },
 
@@ -460,20 +464,19 @@ fn get_terminal_default_color(app: &TerminalApp, code: u8) -> Option<RgbValue> {
         | TerminalApp::Konsole
         | TerminalApp::VsCode
         | TerminalApp::Wast => match code {
-            10 | 12 => Some(RgbValue::new(229, 229, 229)),   // Light text
-            11 => Some(RgbValue::new(30, 30, 30)),           // Dark background
+            10 | 12 => Some(RgbValue::new(229, 229, 229)), // Light text
+            11 => Some(RgbValue::new(30, 30, 30)),         // Dark background
             _ => None,
         },
 
         // Unknown terminal - default to dark mode (most common for terminal users)
         TerminalApp::Other(_) => match code {
-            10 | 12 => Some(RgbValue::new(229, 229, 229)),   // Light text
-            11 => Some(RgbValue::new(30, 30, 30)),           // Dark background
+            10 | 12 => Some(RgbValue::new(229, 229, 229)), // Light text
+            11 => Some(RgbValue::new(30, 30, 30)),         // Dark background
             _ => None,
         },
     }
 }
-
 
 /// Check if running inside a terminal multiplexer.
 ///
@@ -617,7 +620,9 @@ pub fn query_osc_actual(code: u8, timeout: Duration) -> Result<RgbValue, OscQuer
             let mut original: libc::termios = unsafe { std::mem::zeroed() };
 
             if unsafe { libc::tcgetattr(fd, &mut original) } != 0 {
-                return Err(OscQueryError::IoError("failed to get terminal attributes".into()));
+                return Err(OscQueryError::IoError(
+                    "failed to get terminal attributes".into(),
+                ));
             }
 
             let mut raw = original;
@@ -820,8 +825,6 @@ pub fn osc12_support() -> bool {
     *OSC12_SUPPORT.get_or_init(|| is_osc_query_supported_heuristic(12))
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -897,7 +900,11 @@ mod tests {
 
         // All 16 colors should be valid
         for i in 0..16 {
-            assert!(ansi_index_to_rgb(i).is_some(), "Index {} should be valid", i);
+            assert!(
+                ansi_index_to_rgb(i).is_some(),
+                "Index {} should be valid",
+                i
+            );
         }
     }
 
@@ -1001,7 +1008,11 @@ mod tests {
 
             let fg = get_terminal_default_color(&app, 10);
             assert!(fg.is_some(), "{:?} should have default fg", app);
-            assert!(fg.unwrap().is_light(), "{:?} should default to light fg", app);
+            assert!(
+                fg.unwrap().is_light(),
+                "{:?} should default to light fg",
+                app
+            );
         }
     }
 
@@ -1139,8 +1150,16 @@ mod tests {
     fn test_convert_16bit_to_8bit() {
         // Test boundary conditions
         assert_eq!(convert_16bit_to_8bit(0), 0);
-        assert_eq!(convert_16bit_to_8bit(0xffff), 255, "0xffff should map to 255, not 254");
-        assert_eq!(convert_16bit_to_8bit(0x8000), 128, "0x8000 should map to ~128");
+        assert_eq!(
+            convert_16bit_to_8bit(0xffff),
+            255,
+            "0xffff should map to 255, not 254"
+        );
+        assert_eq!(
+            convert_16bit_to_8bit(0x8000),
+            128,
+            "0x8000 should map to ~128"
+        );
 
         // Test some intermediate values
         assert_eq!(convert_16bit_to_8bit(0x0101), 1); // Roughly 1/255

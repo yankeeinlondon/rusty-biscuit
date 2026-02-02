@@ -35,9 +35,9 @@
 //! }
 //! ```
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 
-use crate::discovery::detection::{get_terminal_app, is_tty, TerminalApp};
+use crate::discovery::detection::{TerminalApp, get_terminal_app, is_tty};
 use crate::discovery::os_detection::is_ci;
 
 /// Check if terminal supports OSC52 clipboard operations.

@@ -43,6 +43,7 @@ clap = { version = "4", features = ["derive"], optional = true }
 
 # Temporary files (for mermaid rendering)
 tempfile = "3"
+chrono = { version = "0.4.43", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

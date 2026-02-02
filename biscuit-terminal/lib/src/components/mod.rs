@@ -7,3 +7,4 @@ pub mod renderable;
 pub mod table;
 pub mod terminal_image;
 pub mod text_block;
+pub mod todo;

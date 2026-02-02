@@ -20,8 +20,8 @@ use unicode_width::UnicodeWidthStr;
 static ANSI_ESCAPE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(concat!(
         r"\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]", // CSI sequences
-        r"|\x1b\].*?(?:\x07|\x1b\\)",                  // OSC sequences (BEL or ST terminator)
-        r"|\x1b[\x20-\x2f]*[\x40-\x5f]",               // Other escape sequences (Fe)
+        r"|\x1b\].*?(?:\x07|\x1b\\)",                 // OSC sequences (BEL or ST terminator)
+        r"|\x1b[\x20-\x2f]*[\x40-\x5f]",              // Other escape sequences (Fe)
     ))
     .expect("Invalid ANSI escape regex")
 });
@@ -32,8 +32,7 @@ static ANSI_ESCAPE_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// - params can be empty or contain key=value pairs separated by colons
 /// - URL is the hyperlink target
 static OSC8_LINK_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\x1b\]8;[^;]*;[^\x07\x1b]*(?:\x07|\x1b\\)")
-        .expect("Invalid OSC8 link regex")
+    Regex::new(r"\x1b\]8;[^;]*;[^\x07\x1b]*(?:\x07|\x1b\\)").expect("Invalid OSC8 link regex")
 });
 
 /// Strip all ANSI escape sequences from text.
@@ -338,10 +337,7 @@ mod tests {
     #[test]
     fn test_strip_ansi_codes_sgr() {
         assert_eq!(strip_ansi_codes("\x1b[31mred\x1b[0m"), "red");
-        assert_eq!(
-            strip_ansi_codes("\x1b[1;4;33mwarning\x1b[0m"),
-            "warning"
-        );
+        assert_eq!(strip_ansi_codes("\x1b[1;4;33mwarning\x1b[0m"), "warning");
     }
 
     #[test]

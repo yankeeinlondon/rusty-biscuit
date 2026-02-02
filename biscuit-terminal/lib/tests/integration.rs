@@ -4,13 +4,8 @@
 //! components integrate properly together.
 
 use biscuit_terminal::discovery::{
-    clipboard::*,
-    config_paths::*,
-    detection::*,
-    eval::*,
-    mode_2027::*,
+    clipboard::*, config_paths::*, detection::*, eval::*, mode_2027::*, os_detection::*,
     osc_queries::*,
-    os_detection::*,
 };
 use biscuit_terminal::terminal::Terminal;
 
@@ -43,8 +38,34 @@ fn test_terminal_default_equals_new() {
     let term2 = Terminal::default();
 
     // Compare OS and CI status (these should be consistent)
-    assert!(matches!(term1.os, OsType::MacOS | OsType::Linux | OsType::Windows | OsType::FreeBSD | OsType::NetBSD | OsType::OpenBSD | OsType::DragonFly | OsType::Illumos | OsType::Android | OsType::Ios | OsType::Unknown));
-    assert!(matches!(term2.os, OsType::MacOS | OsType::Linux | OsType::Windows | OsType::FreeBSD | OsType::NetBSD | OsType::OpenBSD | OsType::DragonFly | OsType::Illumos | OsType::Android | OsType::Ios | OsType::Unknown));
+    assert!(matches!(
+        term1.os,
+        OsType::MacOS
+            | OsType::Linux
+            | OsType::Windows
+            | OsType::FreeBSD
+            | OsType::NetBSD
+            | OsType::OpenBSD
+            | OsType::DragonFly
+            | OsType::Illumos
+            | OsType::Android
+            | OsType::Ios
+            | OsType::Unknown
+    ));
+    assert!(matches!(
+        term2.os,
+        OsType::MacOS
+            | OsType::Linux
+            | OsType::Windows
+            | OsType::FreeBSD
+            | OsType::NetBSD
+            | OsType::OpenBSD
+            | OsType::DragonFly
+            | OsType::Illumos
+            | OsType::Android
+            | OsType::Ios
+            | OsType::Unknown
+    ));
 }
 
 #[test]
@@ -105,8 +126,16 @@ fn test_image_support_with_reason_provides_details() {
 #[test]
 fn test_dimensions_are_consistent() {
     let (w, h) = dimensions();
-    assert_eq!(terminal_width(), w, "terminal_width() should match dimensions().0");
-    assert_eq!(terminal_height(), h, "terminal_height() should match dimensions().1");
+    assert_eq!(
+        terminal_width(),
+        w,
+        "terminal_width() should match dimensions().0"
+    );
+    assert_eq!(
+        terminal_height(),
+        h,
+        "terminal_height() should match dimensions().1"
+    );
 }
 
 #[test]
@@ -120,7 +149,10 @@ fn test_underline_support_consistency() {
 
     // If we have colored underlines, we should have straight underlines
     if support.colored {
-        assert!(support.straight, "Colored underline support implies straight support");
+        assert!(
+            support.straight,
+            "Colored underline support implies straight support"
+        );
     }
 }
 
@@ -209,7 +241,7 @@ fn test_clipboard_functions_dont_panic() {
 
 #[test]
 fn test_build_osc52_sequence_roundtrip() {
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+    use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 
     let content = "Hello, World!";
     let sequence = build_osc52_sequence(content, ClipboardTarget::Clipboard);
@@ -322,10 +354,16 @@ fn test_eval_complex_escape_sequences() {
 fn test_config_paths_for_known_terminals() {
     // Terminals that always have config paths
     let wezterm_path = get_terminal_config_path(&TerminalApp::Wezterm);
-    assert!(wezterm_path.is_some(), "Wezterm should always have a config path");
+    assert!(
+        wezterm_path.is_some(),
+        "Wezterm should always have a config path"
+    );
 
     let alacritty_path = get_terminal_config_path(&TerminalApp::Alacritty);
-    assert!(alacritty_path.is_some(), "Alacritty should always have a config path");
+    assert!(
+        alacritty_path.is_some(),
+        "Alacritty should always have a config path"
+    );
 
     // Terminals that return None
     let gnome_path = get_terminal_config_path(&TerminalApp::GnomeTerminal);
@@ -341,15 +379,18 @@ fn test_config_paths_multiple_for_alacritty() {
 
     #[cfg(not(target_os = "windows"))]
     {
-        assert!(paths.len() >= 2, "Alacritty should have multiple config paths");
+        assert!(
+            paths.len() >= 2,
+            "Alacritty should have multiple config paths"
+        );
 
         // Check for both .toml and .yml
-        let has_toml = paths.iter().any(|p| {
-            p.extension().map(|e| e == "toml").unwrap_or(false)
-        });
-        let has_yml = paths.iter().any(|p| {
-            p.extension().map(|e| e == "yml").unwrap_or(false)
-        });
+        let has_toml = paths
+            .iter()
+            .any(|p| p.extension().map(|e| e == "toml").unwrap_or(false));
+        let has_yml = paths
+            .iter()
+            .any(|p| p.extension().map(|e| e == "yml").unwrap_or(false));
 
         assert!(has_toml, "Should include .toml path");
         assert!(has_yml, "Should include .yml path");

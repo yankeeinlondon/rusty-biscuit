@@ -1,30 +1,10 @@
 use unicode_width::UnicodeWidthChar;
 
 use crate::{
-    components::renderable::RenderableWrapper,
     terminal::Terminal,
     utils::color::{BasicColor, Color, RgbColor, WEB_COLOR_LOOKUP},
+    utils::layout::{Margin, WordWrap},
 };
-
-pub enum MaxWidth {
-    None,
-    Chars(u32),
-    Percent(f32),
-}
-
-pub enum TextAlignment {
-    Left,
-    Center,
-    Right,
-}
-
-/// Allows for fixed or percentage based margins to be added to the
-/// block constraint.
-pub enum Margin {
-    None,
-    Chars(u32),
-    Percent(f32),
-}
 
 /// Splits the string content passed in into a vector of string based
 /// on any explicit new lines found in the content.
@@ -113,233 +93,6 @@ pub fn plain_text_length(eval: &str, term: Option<&Terminal>) -> u32 {
 pub fn split_line<T: Into<String>>(content: T, width: &u32) -> (String, String) {
     let content = content.into();
     split_at_visible_width(&content, *width)
-}
-
-/// truncates the line with the `truncate_indicator` string used as the closing
-/// part of the string and leaving the resultant string length equal to the `width`.
-///
-/// Note: this truncation must be smart and be aware of
-pub fn truncate<T: Into<String>>(content: T, truncate_indicator: &String, width: &u32) -> String {
-    let content = content.into();
-    if *width == 0 {
-        return String::new();
-    }
-
-    let indicator_width = visible_width(truncate_indicator);
-    if *width <= indicator_width {
-        let (head, _) = split_at_visible_width(truncate_indicator, *width);
-        return head;
-    }
-
-    if visible_width(&content) <= *width {
-        return content;
-    }
-
-    let target_width = width.saturating_sub(indicator_width);
-    let (head, _) = split_at_visible_width(&content, target_width);
-    format!("{}{}", head, truncate_indicator)
-}
-
-/// The **word_wrap** function follows the following logic:
-///
-/// 1. Split content into a vector of string so that we can work with
-///    lines of text which have no explicit line breaks and each line
-///    given an unlimited amount of space to be rendered to would represent
-///    a single line of text.
-///
-/// 2. Iterate over each line of text and:
-///
-///     - if `plain_text_length(line)` fits into the available width we're done ...
-///       the content does not need to be wrapped, truncated, etc.
-///     - if we're
-pub fn word_wrap<T: Into<String>>(content: T, strategy: WordWrap, width: u32) {
-    let lines = split_lines(content);
-
-    let _ = wrap_lines(lines, &strategy, width);
-}
-
-/// Describes the policy to use for wrapping text which goes beyond it's
-/// allotted length.
-pub enum WordWrap {
-    /// Will attempt to wrap words on wrap characters (e.g., whitespace,
-    /// `-`, etc.) but if unable to find a break character in the text
-    /// body then the text will be hyphenated at a hard break point.
-    ///
-    /// When the word wrapping logic is engaged _start_ looking for a good
-    /// place to break the line a certain number of characters before
-    /// max-width is reached.
-    ///
-    /// By default (e.g., when wrap gets `None`) we start looking for a line break
-    /// 8 characters before the reaching the end of the line but you can
-    /// override that with whatever you want.
-    ///
-    /// If we are NOT able find a
-    WrapProse(Option<u32>),
-
-    /// Instead of "wrapping", we will truncate any content that moves
-    /// beyond the
-    Truncate(String),
-    /// no word wrap, when the end of line (e.g., max-width) is reached
-    /// a new line is started but without any `-` or other markings to
-    /// indicate a "continuation" and no attempt is made to break at a
-    /// clean break character.
-    None,
-}
-
-/// The **WidthStrategy** determines if rows in the text block should
-/// be padded to ensure that they are always the length of the `max_width`.
-///
-/// This can be useful when you set a background color to be something
-/// other than the default color.
-pub enum RowFill {
-    /// if the background color _is **not**_ the default background color
-    /// then each row's width will be extended to the max width for the
-    /// text block. Otherwise, no additional padding is provided.
-    Auto,
-    /// pad each line to be precisely the length of the max width of the
-    /// block's constraint
-    Fill,
-    /// do not add any padding to force the width to match the max width
-    /// of the text constraint
-    Exact,
-}
-
-/// A **BlockConstraint** is used to define the layout constraints
-/// for terminal output.
-///
-/// This can be used to constrain the output to the terminal page,
-/// or a subset of the page (such as a "cell" in a table).
-pub struct BlockConstraint {
-    /// The maximum width allowed for the text in the block.
-    ///
-    /// - this is often set to the terminal's current width but
-    /// - it can be something less than this
-    pub max_width: MaxWidth,
-
-    /// the word wrap strategy for the block constraint
-    pub word_wrap: WordWrap,
-
-    pub alignment: TextAlignment,
-
-    pub left_margin: Margin,
-    pub right_margin: Margin,
-
-    /// always ensure there is a blank line _before_ the block
-    pub leading_blank_line: bool,
-    /// always ensure there is a blank line _after_ the block
-    pub trailing_blank_line: bool,
-
-    pub text_color: Color,
-    pub background_color: Color,
-    /// the width strategy to use for the given block constraint
-    pub row_fill_strategy: RowFill,
-}
-
-impl Default for BlockConstraint {
-    fn default() -> BlockConstraint {
-        BlockConstraint {
-            max_width: MaxWidth::None,
-            word_wrap: WordWrap::WrapProse(None),
-            alignment: TextAlignment::Left,
-
-            left_margin: Margin::None,
-            right_margin: Margin::None,
-
-            leading_blank_line: false,
-            trailing_blank_line: false,
-
-            text_color: Color::DefaultForeground,
-            background_color: Color::DefaultBackground,
-            row_fill_strategy: RowFill::Auto,
-        }
-    }
-}
-
-impl RenderableWrapper for BlockConstraint {
-    fn render<T: Into<String>>(self, _content: T) -> String {
-        self.render_with_term(_content.into(), None)
-    }
-
-    fn fallback_render<T: Into<String>>(
-        self,
-        _content: T,
-        _term: &crate::terminal::Terminal,
-    ) -> String {
-        self.render_with_term(_content.into(), Some(_term))
-    }
-}
-
-impl BlockConstraint {
-    fn render_with_term(self, content: String, term: Option<&Terminal>) -> String {
-        let terminal_width = Terminal::width();
-        let max_width = resolve_max_width(&self.max_width, terminal_width);
-        let left_margin = resolve_margin(&self.left_margin, max_width);
-        let right_margin = resolve_margin(&self.right_margin, max_width);
-        let content_width = max_width.saturating_sub(left_margin + right_margin);
-
-        let mut lines = wrap_lines(split_lines(content), &self.word_wrap, content_width);
-        if self.leading_blank_line {
-            lines.insert(0, String::new());
-        }
-        if self.trailing_blank_line {
-            lines.push(String::new());
-        }
-
-        let fill_rows = match self.row_fill_strategy {
-            RowFill::Fill => true,
-            RowFill::Auto => !is_default_background(&self.background_color),
-            RowFill::Exact => false,
-        };
-
-        let (prefix, suffix) = color_wrapper(&self.text_color, &self.background_color, term);
-        let mut rendered_lines = Vec::with_capacity(lines.len());
-
-        for line in lines {
-            let line_length = visible_width(&line);
-            let available = content_width.saturating_sub(line_length);
-            let left_padding = match self.alignment {
-                TextAlignment::Left => 0,
-                TextAlignment::Center => available / 2,
-                TextAlignment::Right => available,
-            };
-            let right_padding = if fill_rows {
-                available.saturating_sub(left_padding)
-            } else {
-                0
-            };
-
-            let mut row = String::new();
-            if left_margin > 0 {
-                row.push_str(&" ".repeat(left_margin as usize));
-            }
-            if left_padding > 0 {
-                row.push_str(&" ".repeat(left_padding as usize));
-            }
-            row.push_str(&line);
-            if right_padding > 0 {
-                row.push_str(&" ".repeat(right_padding as usize));
-            }
-            if right_margin > 0 {
-                row.push_str(&" ".repeat(right_margin as usize));
-            }
-
-            if prefix.is_empty() {
-                rendered_lines.push(row);
-            } else {
-                rendered_lines.push(format!("{}{}{}", prefix, row, suffix));
-            }
-        }
-
-        join_lines(rendered_lines)
-    }
-}
-
-fn resolve_max_width(max_width: &MaxWidth, term_width: u32) -> u32 {
-    match max_width {
-        MaxWidth::None => term_width,
-        MaxWidth::Chars(value) => *value,
-        MaxWidth::Percent(value) => percent_of(term_width, *value),
-    }
 }
 
 fn resolve_margin(margin: &Margin, width: u32) -> u32 {
@@ -474,16 +227,18 @@ fn color_wrapper(fg: &Color, bg: &Color, term: Option<&Terminal>) -> (String, St
     }
 
     if !matches!(fg, Color::Reset)
-        && let Some(seq) = ansi_color_sequence(fg, false, term) {
-            prefix.push_str(&seq);
-            used = true;
-        }
+        && let Some(seq) = ansi_color_sequence(fg, false, term)
+    {
+        prefix.push_str(&seq);
+        used = true;
+    }
 
     if !matches!(bg, Color::Reset)
-        && let Some(seq) = ansi_color_sequence(bg, true, term) {
-            prefix.push_str(&seq);
-            used = true;
-        }
+        && let Some(seq) = ansi_color_sequence(bg, true, term)
+    {
+        prefix.push_str(&seq);
+        used = true;
+    }
 
     let suffix = if used {
         "\x1b[0m".to_string()

@@ -96,7 +96,7 @@ pub enum Connection {
     MoshClient(MoshClient),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ColorDepth {
     /// no color support
     None,
@@ -643,12 +643,12 @@ fn image_support_from_known_terminals() -> Option<ImageSupportResult> {
     // Terminals with definitive Kitty Graphics Protocol support.
     // These don't need probing - we know they support it.
     const KITTY_TERMINALS: &[&str] = &[
-        "ghostty",  // Ghostty supports Kitty protocol on all platforms
-        "kitty",    // Kitty is the originator of the protocol
-        "WezTerm",  // WezTerm has full Kitty support
-        "Warp",     // Warp supports Kitty protocol
-        "konsole",  // Konsole supports Kitty protocol
-        "wast",     // Wast supports Kitty protocol
+        "ghostty", // Ghostty supports Kitty protocol on all platforms
+        "kitty",   // Kitty is the originator of the protocol
+        "WezTerm", // WezTerm has full Kitty support
+        "Warp",    // Warp supports Kitty protocol
+        "konsole", // Konsole supports Kitty protocol
+        "wast",    // Wast supports Kitty protocol
     ];
 
     // Check TERM_PROGRAM for known Kitty-supporting terminals
@@ -689,7 +689,9 @@ fn image_support_from_known_terminals() -> Option<ImageSupportResult> {
     }
 
     // Check TERM variable for kitty
-    if let Ok(term) = env::var("TERM") && term.contains("kitty") {
+    if let Ok(term) = env::var("TERM")
+        && term.contains("kitty")
+    {
         tracing::debug!(
             image_support = "Kitty",
             term = %term,
@@ -969,8 +971,6 @@ pub fn multiplex_support() -> MultiplexSupport {
     MultiplexSupport::None
 }
 
-
-
 /// Detect extended underline style support.
 ///
 /// Modern terminals support various underline styles beyond the basic
@@ -1235,11 +1235,12 @@ pub use crate::discovery::osc_queries::{osc10_support, osc11_support, osc12_supp
 pub fn detect_connection() -> Connection {
     // Check for Mosh first (it also sets SSH_CLIENT sometimes)
     if let Ok(mosh_conn) = env::var("MOSH_CONNECTION")
-        && !mosh_conn.is_empty() {
-            return Connection::MoshClient(MoshClient {
-                connection: mosh_conn,
-            });
-        }
+        && !mosh_conn.is_empty()
+    {
+        return Connection::MoshClient(MoshClient {
+            connection: mosh_conn,
+        });
+    }
 
     // Check for SSH connection
     // SSH_CLIENT format: "client_ip client_port server_port"
@@ -1248,15 +1249,15 @@ pub fn detect_connection() -> Connection {
         if parts.len() >= 3
             && let (Ok(source_port), Ok(server_port)) =
                 (parts[1].parse::<u32>(), parts[2].parse::<u32>())
-            {
-                let tty_path = env::var("SSH_TTY").ok();
-                return Connection::SshClient(SshClient {
-                    host: parts[0].to_string(),
-                    source_port,
-                    server_port,
-                    tty_path,
-                });
-            }
+        {
+            let tty_path = env::var("SSH_TTY").ok();
+            return Connection::SshClient(SshClient {
+                host: parts[0].to_string(),
+                source_port,
+                server_port,
+                tty_path,
+            });
+        }
     }
 
     Connection::Local
@@ -1452,7 +1453,10 @@ mod tests {
     fn test_image_support_from_env_iterm2_session_id() {
         let mut env = ScopedEnv::new();
         env.remove("TERM_PROGRAM");
-        env.set("ITERM_SESSION_ID", "w0t0p0:12345678-1234-1234-1234-123456789abc");
+        env.set(
+            "ITERM_SESSION_ID",
+            "w0t0p0:12345678-1234-1234-1234-123456789abc",
+        );
         env.remove("ITERM_PROFILE");
 
         let result = image_support_from_env();

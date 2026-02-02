@@ -309,9 +309,7 @@ mod tests {
 
     #[test]
     fn test_builder_partial_fields() {
-        let options = TerminalImageOptions::builder()
-            .max_file_size(1024)
-            .build();
+        let options = TerminalImageOptions::builder().max_file_size(1024).build();
 
         // Set field
         assert_eq!(options.max_file_size, 1024);
@@ -325,9 +323,7 @@ mod tests {
 
     #[test]
     fn test_is_size_allowed() {
-        let options = TerminalImageOptions::builder()
-            .max_file_size(1000)
-            .build();
+        let options = TerminalImageOptions::builder().max_file_size(1000).build();
 
         assert!(options.is_size_allowed(0));
         assert!(options.is_size_allowed(500));
@@ -393,8 +389,7 @@ mod tests {
 
     #[test]
     fn test_builder_is_clone() {
-        let builder = TerminalImageOptions::builder()
-            .max_file_size(2048);
+        let builder = TerminalImageOptions::builder().max_file_size(2048);
 
         let builder2 = builder.clone();
         let options1 = builder.build();

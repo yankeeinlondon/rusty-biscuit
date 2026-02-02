@@ -882,10 +882,7 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
             extract_version_from_release("version 24.04"),
             Some("24.04".to_string())
         );
-        assert_eq!(
-            extract_version_from_release("no version here"),
-            None
-        );
+        assert_eq!(extract_version_from_release("no version here"), None);
     }
 
     #[test]
@@ -908,7 +905,10 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
     fn test_parse_os_release_content_malformed() {
         let content = "NOT_A_VALID_KEY";
         let distro = parse_os_release_content(content);
-        assert!(distro.is_none(), "Malformed content without = should return None");
+        assert!(
+            distro.is_none(),
+            "Malformed content without = should return None"
+        );
     }
 
     #[test]
@@ -919,7 +919,10 @@ DISTRIB_DESCRIPTION="Ubuntu 22.04.3 LTS"
 # ID=fake
 "#;
         let distro = parse_os_release_content(content);
-        assert!(distro.is_none(), "File with only comments should return None");
+        assert!(
+            distro.is_none(),
+            "File with only comments should return None"
+        );
     }
 
     #[test]
@@ -1065,7 +1068,11 @@ DISTRIB_RELEASE=22.04
 
         for variant in variants {
             let display = format!("{}", variant);
-            assert!(!display.is_empty(), "{:?} should have non-empty display", variant);
+            assert!(
+                !display.is_empty(),
+                "{:?} should have non-empty display",
+                variant
+            );
         }
     }
 
@@ -1088,7 +1095,11 @@ DISTRIB_RELEASE=22.04
 
         for variant in variants {
             let display = format!("{}", variant);
-            assert!(!display.is_empty(), "{:?} should have non-empty display", variant);
+            assert!(
+                !display.is_empty(),
+                "{:?} should have non-empty display",
+                variant
+            );
         }
     }
 
@@ -1096,42 +1107,113 @@ DISTRIB_RELEASE=22.04
     fn test_infer_linux_family_comprehensive() {
         // Test all documented debian family distros
         let debian_ids = [
-            "debian", "ubuntu", "linuxmint", "mint", "pop", "pop_os",
-            "elementary", "elementaryos", "zorin", "zorinos", "kali",
-            "parrot", "raspbian", "pureos", "deepin", "mx", "mxlinux",
-            "lmde", "bunsenlabs", "antix", "sparky", "devuan", "tails"
+            "debian",
+            "ubuntu",
+            "linuxmint",
+            "mint",
+            "pop",
+            "pop_os",
+            "elementary",
+            "elementaryos",
+            "zorin",
+            "zorinos",
+            "kali",
+            "parrot",
+            "raspbian",
+            "pureos",
+            "deepin",
+            "mx",
+            "mxlinux",
+            "lmde",
+            "bunsenlabs",
+            "antix",
+            "sparky",
+            "devuan",
+            "tails",
         ];
         for id in debian_ids {
-            assert_eq!(infer_linux_family(id), LinuxFamily::Debian, "Failed for {}", id);
+            assert_eq!(
+                infer_linux_family(id),
+                LinuxFamily::Debian,
+                "Failed for {}",
+                id
+            );
         }
 
         // Test all documented redhat family distros
         let redhat_ids = [
-            "fedora", "rhel", "centos", "rocky", "rockylinux", "almalinux",
-            "alma", "ol", "oracle", "oraclelinux", "scientific", "springdale",
-            "clearos", "amazon", "amzn", "mageia", "openmandriva", "nobara"
+            "fedora",
+            "rhel",
+            "centos",
+            "rocky",
+            "rockylinux",
+            "almalinux",
+            "alma",
+            "ol",
+            "oracle",
+            "oraclelinux",
+            "scientific",
+            "springdale",
+            "clearos",
+            "amazon",
+            "amzn",
+            "mageia",
+            "openmandriva",
+            "nobara",
         ];
         for id in redhat_ids {
-            assert_eq!(infer_linux_family(id), LinuxFamily::RedHat, "Failed for {}", id);
+            assert_eq!(
+                infer_linux_family(id),
+                LinuxFamily::RedHat,
+                "Failed for {}",
+                id
+            );
         }
 
         // Test arch family
         let arch_ids = [
-            "arch", "archlinux", "manjaro", "endeavouros", "endeavour",
-            "garuda", "garudalinux", "artix", "arcolinux", "blackarch",
-            "archcraft", "rebornos", "bluestar", "cachyos"
+            "arch",
+            "archlinux",
+            "manjaro",
+            "endeavouros",
+            "endeavour",
+            "garuda",
+            "garudalinux",
+            "artix",
+            "arcolinux",
+            "blackarch",
+            "archcraft",
+            "rebornos",
+            "bluestar",
+            "cachyos",
         ];
         for id in arch_ids {
-            assert_eq!(infer_linux_family(id), LinuxFamily::Arch, "Failed for {}", id);
+            assert_eq!(
+                infer_linux_family(id),
+                LinuxFamily::Arch,
+                "Failed for {}",
+                id
+            );
         }
 
         // Test SUSE family
         let suse_ids = [
-            "opensuse", "opensuse-leap", "opensuse-tumbleweed", "suse",
-            "sles", "sled", "opensuse-microos", "gecko"
+            "opensuse",
+            "opensuse-leap",
+            "opensuse-tumbleweed",
+            "suse",
+            "sles",
+            "sled",
+            "opensuse-microos",
+            "gecko",
         ];
         for id in suse_ids {
-            assert_eq!(infer_linux_family(id), LinuxFamily::SUSE, "Failed for {}", id);
+            assert_eq!(
+                infer_linux_family(id),
+                LinuxFamily::SUSE,
+                "Failed for {}",
+                id
+            );
         }
     }
 }

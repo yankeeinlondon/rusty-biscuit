@@ -1,4 +1,4 @@
-![image](./assets/biscuit-512.png)
+![image|25](./assets/biscuit-512.png)
 
 Rusty Biscuit Monorepo
 ======================

@@ -17,7 +17,7 @@ use std::fmt::Alignment;
 use std::io::Cursor;
 use std::path::Path;
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use image::{DynamicImage, ImageFormat, ImageReader};
 
 use crate::components::renderable::Renderable;
@@ -34,7 +34,9 @@ pub enum TerminalImageError {
     InvalidPath { path: String, reason: String },
 
     /// Width specification could not be parsed.
-    #[error("Invalid width specification '{spec}': expected a number, percentage (e.g., '50%'), or 'fill'")]
+    #[error(
+        "Invalid width specification '{spec}': expected a number, percentage (e.g., '50%'), or 'fill'"
+    )]
     InvalidWidthSpec { spec: String },
 
     /// I/O error when reading the image file.
@@ -540,10 +542,7 @@ impl TerminalImage {
         let size = metadata.len();
 
         if size > max_size {
-            return Err(TerminalImageError::FileTooLarge {
-                size,
-                max_size,
-            });
+            return Err(TerminalImageError::FileTooLarge { size, max_size });
         }
         Ok(())
     }
@@ -871,11 +870,13 @@ pub fn parse_width_spec(spec: &str) -> Result<ImageWidth, TerminalImageError> {
 
     // Handle character width with "ch" suffix (e.g., "40ch")
     if let Some(char_str) = trimmed.strip_suffix("ch") {
-        let char_val: u32 = char_str.trim().parse().map_err(|_| {
-            TerminalImageError::InvalidWidthSpec {
-                spec: spec.to_string(),
-            }
-        })?;
+        let char_val: u32 =
+            char_str
+                .trim()
+                .parse()
+                .map_err(|_| TerminalImageError::InvalidWidthSpec {
+                    spec: spec.to_string(),
+                })?;
 
         if char_val == 0 {
             return Err(TerminalImageError::InvalidWidthSpec {
@@ -1297,7 +1298,7 @@ mod tests {
         assert!(result.contains("f=100")); // PNG format
         assert!(result.contains("a=T")); // Transmit and display
         assert!(result.contains("t=d")); // Direct transmission
-                                         // Should end with string terminator
+        // Should end with string terminator
         assert!(result.ends_with("\x1b\\"));
     }
 
@@ -1758,9 +1759,7 @@ mod tests {
             .write_all(&create_test_png())
             .unwrap();
 
-        let img = TerminalImage::new(&file_path)
-            .unwrap()
-            .with_margins(0, 0);
+        let img = TerminalImage::new(&file_path).unwrap().with_margins(0, 0);
         let options = TerminalImageOptions::builder()
             .width(ImageWidth::Characters(40))
             .build();
@@ -1786,9 +1785,7 @@ mod tests {
             .write_all(&create_test_png())
             .unwrap();
 
-        let img = TerminalImage::new(&file_path)
-            .unwrap()
-            .with_margins(10, 10);
+        let img = TerminalImage::new(&file_path).unwrap().with_margins(10, 10);
         let options = TerminalImageOptions::builder()
             .width(ImageWidth::Fill)
             .build();

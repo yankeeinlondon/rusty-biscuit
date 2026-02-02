@@ -15,7 +15,7 @@
 //! ```
 
 use super::detection::TerminalApp;
-use super::os_detection::{detect_os_type, OsType};
+use super::os_detection::{OsType, detect_os_type};
 use std::env;
 use std::path::{Path, PathBuf};
 

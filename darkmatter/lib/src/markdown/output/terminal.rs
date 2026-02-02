@@ -45,9 +45,64 @@ use syntect::parsing::{Scope, SyntaxReference};
 use terminal_size::{Width, terminal_size};
 use unicode_width::UnicodeWidthStr;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
-use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage};
+use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage, parse_width_spec};
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
+
+/// Parse image alt text to extract optional width specification.
+///
+/// The format is `alt text|width` where width can be:
+/// - `25%` - percentage of terminal width
+/// - `40ch` - character width
+/// - `40` - bare number (character width)
+/// - `fill` - fill available width
+///
+/// Width spec is only parsed if `|` is immediately followed by a digit.
+/// Otherwise the entire string (including `|`) is treated as alt text.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter_lib::markdown::output::terminal::parse_alt_and_width;
+/// use biscuit_terminal::components::terminal_image::ImageWidth;
+///
+/// // Width specification parsed
+/// let (alt, width) = parse_alt_and_width("my image|50%");
+/// assert_eq!(alt, "my image");
+/// assert!(matches!(width, Some(ImageWidth::Percent(p)) if (p - 0.5).abs() < 0.001));
+///
+/// // Character width
+/// let (alt, width) = parse_alt_and_width("photo|80");
+/// assert_eq!(alt, "photo");
+/// assert!(matches!(width, Some(ImageWidth::Characters(80))));
+///
+/// // No width spec - pipe not followed by digit
+/// let (alt, width) = parse_alt_and_width("chart | analysis");
+/// assert_eq!(alt, "chart | analysis");
+/// assert!(width.is_none());
+///
+/// // No pipe at all
+/// let (alt, width) = parse_alt_and_width("simple alt text");
+/// assert_eq!(alt, "simple alt text");
+/// assert!(width.is_none());
+/// ```
+pub fn parse_alt_and_width(alt_text: &str) -> (String, Option<ImageWidth>) {
+    // Find pipe followed immediately by a digit
+    if let Some(pipe_pos) = alt_text.find('|') {
+        let after_pipe = &alt_text[pipe_pos + 1..];
+        // Check if immediately followed by a digit (allowing leading whitespace for "| 50%")
+        let trimmed = after_pipe.trim_start();
+        if trimmed.starts_with(|c: char| c.is_ascii_digit()) {
+            // Try to parse as width spec
+            if let Ok(width) = parse_width_spec(after_pipe) {
+                let alt = alt_text[..pipe_pos].trim_end().to_string();
+                return (alt, Some(width));
+            }
+        }
+    }
+    // No valid width spec found - return original alt text
+    (alt_text.to_string(), None)
+}
 
 /// Color depth capability for terminal.
 ///
@@ -272,8 +327,10 @@ impl ImageRenderer {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
         // Build options for TerminalImage rendering
+        // Note: We don't set base_path here for security sandboxing.
+        // The base_path is used for resolving relative paths (in self.base_path),
+        // but we don't want to block images in sibling directories (e.g., ../assets/).
         let options = TerminalImageOptions::builder()
-            .base_path(base.clone())
             .max_file_size(MAX_IMAGE_FILE_SIZE)
             .allow_remote(false)
             .width(ImageWidth::Percent(0.5)) // Default to 50% width
@@ -334,6 +391,7 @@ impl ImageRenderer {
     ///
     /// * `image_path` - Path to the image (relative to base_path or absolute)
     /// * `alt_text` - Alt text to display in fallback placeholder
+    /// * `width` - Optional width specification for the image
     ///
     /// ## Returns
     ///
@@ -342,10 +400,11 @@ impl ImageRenderer {
         image.path = %image_path,
         image.graphics_supported = %self.graphics_supported()
     ))]
-    pub fn render_image(&self, image_path: &str, alt_text: &str) -> String {
+    pub fn render_image(&self, image_path: &str, alt_text: &str, width: Option<ImageWidth>) -> String {
         // Reject remote URLs (biscuit-terminal also checks, but we fail early)
         if image_path.starts_with("http://") || image_path.starts_with("https://") {
             tracing::debug!("Remote URLs not supported");
+            eprintln!("Warning: Remote image URLs not supported: {}", image_path);
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
@@ -359,23 +418,32 @@ impl ImageRenderer {
         // Check file exists before attempting to create TerminalImage
         if !full_path.exists() {
             tracing::debug!(path = %image_path, "Image file not found");
+            eprintln!("Warning: Image file not found: {}", full_path.display());
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
         // Fallback if graphics unsupported
         if !self.graphics_supported() {
             tracing::debug!("Graphics protocol not available");
+            // No warning here - this is expected behavior on terminals without graphics
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
         // Create TerminalImage from the path
-        let term_image = match TerminalImage::new(&full_path) {
+        let mut term_image = match TerminalImage::new(&full_path) {
             Ok(img) => img.with_alt_text(alt_text),
             Err(e) => {
                 tracing::debug!(path = %image_path, error = %e, "Failed to create TerminalImage");
+                eprintln!("Warning: Failed to load image '{}': {}", image_path, e);
                 return format!("▉ IMAGE[{}]\n", alt_text);
             }
         };
+
+        // Apply width if specified
+        if let Some(w) = width {
+            tracing::debug!(width = ?w, "Applying custom width");
+            term_image = term_image.with_width(w);
+        }
 
         // Render using viuer via TerminalImageOptions
         // render_with_options prints directly to stdout (viuer behavior)
@@ -387,6 +455,7 @@ impl ImageRenderer {
             }
             Err(e) => {
                 tracing::warn!(path = %image_path, error = %e, "Image render failed");
+                eprintln!("Warning: Failed to render image '{}': {}", image_path, e);
                 format!("▉ IMAGE[{}]\n", alt_text)
             }
         }
@@ -1170,6 +1239,10 @@ pub fn write_terminal<W: std::io::Write>(
                 current_image_path = dest_url.to_string();
             }
             InlineEvent::Standard(Event::End(TagEnd::Image)) => {
+                // Parse alt text to extract optional width specification
+                // Format: "alt text|width" where width is like "50%", "40ch", or "40"
+                let (parsed_alt, parsed_width) = parse_alt_and_width(&current_alt);
+
                 if let Some(ref renderer) = image_renderer {
                     // Flush accumulated output before viuer prints to stdout
                     if renderer.graphics_supported() {
@@ -1177,18 +1250,22 @@ pub fn write_terminal<W: std::io::Write>(
                         writer.flush().ok();
                         // Clear the wrapper by creating a new one (preserving max_width)
                         wrapper = LineWrapper::new(terminal_width as usize);
-                        // render_image prints via viuer
-                        renderer.render_image(&current_image_path, &current_alt);
+                        // render_image returns empty string on success, fallback text on failure
+                        let result = renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
+                        if !result.is_empty() {
+                            // viuer failed, print fallback text
+                            write!(writer, "{}", result).ok();
+                        }
                         writer.flush().ok();
                         just_rendered_image = true;
                     } else {
                         wrapper.push_with_newlines(
-                            &renderer.render_image(&current_image_path, &current_alt),
+                            &renderer.render_image(&current_image_path, &parsed_alt, parsed_width),
                         );
                         just_rendered_image = true;
                     }
                 } else {
-                    wrapper.push_with_newlines(&format!("▉ IMAGE[{}]\n", current_alt));
+                    wrapper.push_with_newlines(&format!("▉ IMAGE[{}]\n", parsed_alt));
                     just_rendered_image = true;
                 }
                 in_image = false;
@@ -5474,13 +5551,141 @@ More text after the table.
         assert!(plain.contains("and after"));
     }
 
+    /// Test image with width specification in alt text
+    #[test]
+    fn test_image_with_width_spec_in_alt() {
+        // Width spec should be parsed and removed from alt text in fallback
+        let md: Markdown = "![my diagram|50%](diagram.png)".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Alt text should NOT include the width spec
+        assert!(plain.contains("▉ IMAGE[my diagram]"));
+        assert!(!plain.contains("|50%"));
+    }
+
+    /// Test image with character width in alt text
+    #[test]
+    fn test_image_with_char_width_in_alt() {
+        let md: Markdown = "![photo|80](photo.jpg)".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        assert!(plain.contains("▉ IMAGE[photo]"));
+        assert!(!plain.contains("|80"));
+    }
+
+    /// Test image with pipe not followed by digit (not a width spec)
+    #[test]
+    fn test_image_with_pipe_in_alt_not_width() {
+        // Pipe followed by non-digit should remain in alt text
+        let md: Markdown = "![A | B comparison](chart.png)".into();
+        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let plain = strip_ansi_codes(&output);
+
+        // Full alt text including pipe should be preserved
+        assert!(plain.contains("▉ IMAGE[A | B comparison]"));
+    }
+
+    // ---- parse_alt_and_width() Tests ----
+
+    /// Test parse_alt_and_width with percentage width
+    #[test]
+    fn test_parse_alt_and_width_percentage() {
+        let (alt, width) = parse_alt_and_width("my image|50%");
+        assert_eq!(alt, "my image");
+        assert!(matches!(width, Some(ImageWidth::Percent(p)) if (p - 0.5).abs() < 0.001));
+    }
+
+    /// Test parse_alt_and_width with character width (bare number)
+    #[test]
+    fn test_parse_alt_and_width_characters() {
+        let (alt, width) = parse_alt_and_width("photo|80");
+        assert_eq!(alt, "photo");
+        assert!(matches!(width, Some(ImageWidth::Characters(80))));
+    }
+
+    /// Test parse_alt_and_width with ch suffix
+    #[test]
+    fn test_parse_alt_and_width_ch_suffix() {
+        let (alt, width) = parse_alt_and_width("diagram|40ch");
+        assert_eq!(alt, "diagram");
+        assert!(matches!(width, Some(ImageWidth::Characters(40))));
+    }
+
+    /// Test parse_alt_and_width with fill (not parsed - doesn't start with digit)
+    #[test]
+    fn test_parse_alt_and_width_fill() {
+        // 'fill' doesn't start with a digit, so the entire string is treated as alt text
+        let (alt, width) = parse_alt_and_width("banner|fill");
+        assert_eq!(alt, "banner|fill");
+        assert!(width.is_none());
+    }
+
+    /// Test parse_alt_and_width with no pipe
+    #[test]
+    fn test_parse_alt_and_width_no_pipe() {
+        let (alt, width) = parse_alt_and_width("simple alt text");
+        assert_eq!(alt, "simple alt text");
+        assert!(width.is_none());
+    }
+
+    /// Test parse_alt_and_width with pipe not followed by digit
+    #[test]
+    fn test_parse_alt_and_width_pipe_not_digit() {
+        let (alt, width) = parse_alt_and_width("chart | analysis");
+        assert_eq!(alt, "chart | analysis");
+        assert!(width.is_none());
+    }
+
+    /// Test parse_alt_and_width with pipe followed by letter
+    #[test]
+    fn test_parse_alt_and_width_pipe_letter() {
+        let (alt, width) = parse_alt_and_width("A|B comparison");
+        assert_eq!(alt, "A|B comparison");
+        assert!(width.is_none());
+    }
+
+    /// Test parse_alt_and_width with invalid width spec
+    #[test]
+    fn test_parse_alt_and_width_invalid_spec() {
+        // 0 is invalid, so fallback to full alt text
+        let (alt, width) = parse_alt_and_width("image|0");
+        assert_eq!(alt, "image|0");
+        assert!(width.is_none());
+    }
+
+    /// Test parse_alt_and_width with whitespace before number
+    #[test]
+    fn test_parse_alt_and_width_whitespace_before_number() {
+        let (alt, width) = parse_alt_and_width("image| 50%");
+        assert_eq!(alt, "image");
+        assert!(matches!(width, Some(ImageWidth::Percent(p)) if (p - 0.5).abs() < 0.001));
+    }
+
+    /// Test parse_alt_and_width trims trailing whitespace from alt
+    #[test]
+    fn test_parse_alt_and_width_trims_alt() {
+        let (alt, width) = parse_alt_and_width("my image |25%");
+        assert_eq!(alt, "my image");
+        assert!(matches!(width, Some(ImageWidth::Percent(p)) if (p - 0.25).abs() < 0.001));
+    }
+
+    /// Test parse_alt_and_width with empty alt text
+    #[test]
+    fn test_parse_alt_and_width_empty_alt() {
+        let (alt, width) = parse_alt_and_width("|50%");
+        assert_eq!(alt, "");
+        assert!(matches!(width, Some(ImageWidth::Percent(p)) if (p - 0.5).abs() < 0.001));
+    }
+
     // ---- ImageRenderer::render_image() Tests ----
 
     /// Test render_image with remote HTTP URL returns fallback
     #[test]
     fn test_render_image_rejects_http_url() {
         let renderer = ImageRenderer::new(None);
-        let result = renderer.render_image("http://example.com/image.png", "Alt");
+        let result = renderer.render_image("http://example.com/image.png", "Alt", None);
 
         assert!(result.contains("▉ IMAGE[Alt]"));
     }
@@ -5489,7 +5694,7 @@ More text after the table.
     #[test]
     fn test_render_image_rejects_https_url() {
         let renderer = ImageRenderer::new(None);
-        let result = renderer.render_image("https://example.com/image.png", "Alt");
+        let result = renderer.render_image("https://example.com/image.png", "Alt", None);
 
         assert!(result.contains("▉ IMAGE[Alt]"));
     }
@@ -5498,7 +5703,7 @@ More text after the table.
     #[test]
     fn test_render_image_missing_file() {
         let renderer = ImageRenderer::new(Some(&std::env::temp_dir()));
-        let result = renderer.render_image("nonexistent_file_12345.png", "Missing");
+        let result = renderer.render_image("nonexistent_file_12345.png", "Missing", None);
 
         assert!(result.contains("▉ IMAGE[Missing]"));
     }
@@ -5508,7 +5713,7 @@ More text after the table.
     fn test_render_image_relative_path() {
         let renderer = ImageRenderer::new(Some(&std::env::temp_dir()));
         // This file doesn't exist, so we get fallback, but path is resolved correctly
-        let result = renderer.render_image("subdir/image.png", "Test");
+        let result = renderer.render_image("subdir/image.png", "Test", None);
 
         assert!(result.contains("▉ IMAGE[Test]"));
     }
@@ -5517,7 +5722,7 @@ More text after the table.
     #[test]
     fn test_render_image_empty_alt() {
         let renderer = ImageRenderer::new(None);
-        let result = renderer.render_image("http://example.com/x.png", "");
+        let result = renderer.render_image("http://example.com/x.png", "", None);
 
         assert!(result.contains("▉ IMAGE[]"));
     }
@@ -5532,7 +5737,7 @@ More text after the table.
         let tmp = std::env::temp_dir().join("test_image_render_invalid.png");
         std::fs::write(&tmp, b"fake png data").unwrap();
 
-        let result = renderer.render_image(tmp.to_str().unwrap(), "Test");
+        let result = renderer.render_image(tmp.to_str().unwrap(), "Test", None);
 
         // Should get fallback text either because:
         // 1. graphics_supported is false, or
@@ -5559,7 +5764,7 @@ More text after the table.
         let renderer = ImageRenderer::new(Some(&base_dir));
 
         // Try to access file outside base via path traversal
-        let result = renderer.render_image("../outside_image.png", "Outside");
+        let result = renderer.render_image("../outside_image.png", "Outside", None);
 
         // Should return fallback (path escapes base)
         assert!(result.contains("▉ IMAGE[Outside]"));
@@ -5574,7 +5779,7 @@ More text after the table.
         let renderer = ImageRenderer::new(Some(&std::env::temp_dir()));
 
         // Use an absolute path (file doesn't exist)
-        let result = renderer.render_image("/nonexistent/absolute/path.png", "Abs");
+        let result = renderer.render_image("/nonexistent/absolute/path.png", "Abs", None);
 
         assert!(result.contains("▉ IMAGE[Abs]"));
     }
@@ -5583,7 +5788,7 @@ More text after the table.
     #[test]
     fn test_render_image_fallback_ends_with_newline() {
         let renderer = ImageRenderer::new(None);
-        let result = renderer.render_image("http://example.com/x.png", "Test");
+        let result = renderer.render_image("http://example.com/x.png", "Test", None);
 
         assert!(result.ends_with('\n'));
     }

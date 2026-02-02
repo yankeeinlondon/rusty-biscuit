@@ -1,11 +1,5 @@
 use crate::{components::renderable::Renderable, utils::color::Color};
 
-pub enum FontWeight {
-    Bold,
-    Normal,
-    Dim,
-}
-
 /// Provides uniform styling support to a block of text
 /// by wrapping the passed in block with
 #[allow(dead_code)]

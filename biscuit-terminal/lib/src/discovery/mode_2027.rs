@@ -33,7 +33,7 @@
 //! }
 //! ```
 
-use crate::discovery::detection::{get_terminal_app, is_tty, TerminalApp};
+use crate::discovery::detection::{TerminalApp, get_terminal_app, is_tty};
 
 /// Check if terminal supports Mode 2027 (grapheme cluster width).
 ///
