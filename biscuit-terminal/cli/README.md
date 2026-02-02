@@ -20,6 +20,7 @@ just -f biscuit-terminal/justfile install
 |---------|-------------|
 | `bt` | Terminal inspection (default) |
 | `bt image` | Render inline images |
+| `bt prose` | Render styled text with tokens |
 | `bt flowchart` | Flowchart diagrams |
 | `bt quadrant` | Quadrant charts |
 | `bt pie-chart` | Pie charts |
@@ -68,6 +69,29 @@ Protocol selection:
 - **Kitty protocol**: Kitty, WezTerm, Ghostty, Konsole, Warp
 - **iTerm2 protocol**: iTerm2 (even if Kitty advertised)
 - **Fallback**: Alt text for unsupported terminals
+
+### Prose Rendering
+
+Render styled text with inline tokens:
+
+```bash
+bt prose "Hello {{bold}}world{{reset}}!"
+bt prose "{{red}}Error:{{reset}} Something went wrong"
+bt prose "<b>Bold</b> and <i>italic</i> text"
+bt prose "<a href='https://example.com'>Click here</a>"
+bt prose --left-margin 4 "Indented content"
+bt prose --no-wrap "Long line without wrapping"
+```
+
+Token types:
+- **Atomic tokens**: `{{bold}}`, `{{italic}}`, `{{red}}`, `{{bg-blue}}`, `{{reset}}`
+- **Block tags**: `<b>`, `<i>`, `<u>`, `<uu>`, `<~>`, `<a href="...">`, `<red>`, `<rgb R,G,B>`
+- **Color support**: Basic colors, bright colors, web colors, Tailwind colors
+
+Options:
+- `-l`/`--left-margin`: Left margin in characters
+- `-r`/`--right-margin`: Right margin in characters
+- `--no-wrap`: Disable word wrapping
 
 ### Flowchart Rendering
 

@@ -340,7 +340,7 @@ impl ImageRenderer {
         tracing::debug!(
             graphics_supported = ?terminal.image_support,
             is_tty = terminal.is_tty,
-            terminal_width = Terminal::width(),
+            terminal_width = terminal.width(),
             base_path = %base.display(),
             "ImageRenderer initialized (via biscuit-terminal)"
         );
@@ -367,7 +367,7 @@ impl ImageRenderer {
     /// Returns the terminal width.
     #[inline]
     pub fn terminal_width(&self) -> u16 {
-        Terminal::width() as u16
+        self.terminal.width() as u16
     }
 
     /// Returns the base path for resolving relative image paths.

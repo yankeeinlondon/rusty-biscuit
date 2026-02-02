@@ -74,9 +74,9 @@ use biscuit_terminal::prelude::*;
 let term = Terminal::new();
 
 // the width of the terminal (in characters)
-let width = Terminal::width();
+let width = term.width();
 // the height of the terminal pane (in rows)
-let height = Terminal::height();
+let height = term.height();
 // the color mode (light/dark) this terminal is using
 let color_mode = Terminal::color_mode();
 // The default text color (what the RESET escape code will return to).

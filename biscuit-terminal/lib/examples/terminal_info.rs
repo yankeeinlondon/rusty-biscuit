@@ -16,8 +16,8 @@ fn main() {
     }
 
     println!("\n=== Dimensions ===\n");
-    println!("Width:  {} columns", Terminal::width());
-    println!("Height: {} rows", Terminal::height());
+    println!("Width:  {} columns", term.width());
+    println!("Height: {} rows", term.height());
 
     println!("\n=== Capabilities ===\n");
     println!("TTY:            {}", if term.is_tty { "yes" } else { "no" });

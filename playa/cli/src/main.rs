@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
-use clap::{CommandFactory, Parser, ValueHint};
+use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::CompleteEnv;
 use sniff_lib::programs::InstalledHeadlessAudio;
 
 use playa::{all_players, AudioFileFormat, AudioPlayer, Codec, Playa, SoundEffect, PLAYER_LOOKUP};
 
 #[cfg(feature = "audio-ducking")]
-use playa::ducking::{backend_name, create_backend, DuckConfig};
+use playa::ducking::{backend_name, create_backend, DuckConfig, DuckingBackend};
 use darkmatter_lib::markdown::output::terminal::{for_terminal, TerminalOptions};
 use darkmatter_lib::markdown::Markdown;
 use darkmatter_lib::testing::strip_ansi_codes;
@@ -30,26 +30,62 @@ Shell Completions:
   # Fish (~/.config/fish/config.fish)
   COMPLETE=fish playa | source";
 
+/// Play audio using the host's installed players
 #[derive(Parser)]
 #[command(name = "playa")]
 #[command(about = "Play audio using the host's installed players", long_about = None)]
 #[command(after_help = AFTER_HELP)]
 struct Cli {
-    /// Show a table of available players
-    #[arg(long)]
-    players: bool,
+    #[command(subcommand)]
+    command: Option<Command>,
 
+    /// Audio file to play (shorthand for `playa play <file>`)
+    #[arg(value_name = "AUDIO_FILE", value_hint = ValueHint::FilePath)]
+    audio_file: Option<PathBuf>,
+
+    #[command(flatten)]
+    playback: PlaybackOptions,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Play an audio file
+    Play {
+        /// Audio file to play
+        #[arg(value_name = "AUDIO_FILE", value_hint = ValueHint::FilePath)]
+        audio_file: PathBuf,
+
+        #[command(flatten)]
+        playback: PlaybackOptions,
+    },
+
+    /// Play a built-in sound effect
+    Effect {
+        /// Name of the sound effect to play
+        #[arg(value_name = "NAME")]
+        name: String,
+
+        #[command(flatten)]
+        playback: PlaybackOptions,
+    },
+
+    /// List available built-in sound effects
+    ListEffects,
+
+    /// Show a table of available audio players
+    Players,
+
+    /// Show audio ducking backend info
+    #[cfg(feature = "audio-ducking")]
+    DuckInfo,
+}
+
+/// Playback options shared between play and effect commands
+#[derive(Parser, Clone)]
+struct PlaybackOptions {
     /// Display playback metadata (player, volume, speed, codec, format)
     #[arg(long)]
     meta: bool,
-
-    /// Play a built-in sound effect
-    #[arg(long, value_name = "SOUND_EFFECT", conflicts_with_all = ["players", "list_effects"])]
-    effect: Option<String>,
-
-    /// List available built-in sound effects
-    #[arg(long, conflicts_with_all = ["players", "effect"])]
-    list_effects: bool,
 
     /// Play at 1.25x speed
     #[arg(long, conflicts_with = "slow")]
@@ -89,33 +125,10 @@ struct Cli {
     #[cfg(feature = "audio-ducking")]
     #[arg(long, value_name = "LEVEL", default_value = "0.2")]
     duck_floor: f32,
-
-    /// Show audio ducking backend info and exit
-    #[cfg(feature = "audio-ducking")]
-    #[arg(long)]
-    duck_info: bool,
-
-    /// Audio file to play
-    #[arg(
-        value_name = "AUDIO_FILE",
-        value_hint = ValueHint::FilePath,
-        required_unless_present_any = ["players", "list_effects", "effect", "duck_info"]
-    )]
-    audio_file: Option<PathBuf>,
 }
 
-impl Cli {
-    fn build_playa_from_path(&self, path: &PathBuf) -> Result<Playa, playa::InvalidAudio> {
-        let playa = Playa::from_path(path)?;
-        Ok(self.apply_playa_options(playa))
-    }
-
-    fn build_playa_from_effect(&self, effect: SoundEffect) -> Result<Playa, playa::InvalidAudio> {
-        let playa = Playa::from_bytes(effect.bytes().to_vec())?;
-        Ok(self.apply_playa_options(playa))
-    }
-
-    fn apply_playa_options(&self, mut playa: Playa) -> Playa {
+impl PlaybackOptions {
+    fn apply_to_playa(&self, mut playa: Playa) -> Playa {
         if let Some(speed) = self.speed {
             playa = playa.speed(speed);
         } else if self.fast {
@@ -146,7 +159,6 @@ impl Cli {
         playa
     }
 
-    /// Returns true if ducking is enabled and configured.
     #[cfg(feature = "audio-ducking")]
     fn has_ducking(&self) -> bool {
         !self.no_duck
@@ -170,54 +182,112 @@ async fn run_cli() {
 
     let cli = Cli::parse();
 
-    if cli.list_effects {
-        list_sound_effects();
-        return;
-    }
-
-    if cli.players {
-        let (markdown, missing) = build_metadata_markdown();
-        render_markdown(&markdown, &missing);
-        return;
-    }
-
-    if cli.duck_info {
-        print_duck_info();
-        return;
-    }
-
-    let playa = if let Some(effect_name) = cli.effect.as_deref() {
-        let Some(effect) = SoundEffect::from_name(effect_name) else {
-            eprintln!(
-                "Unknown sound effect: {effect_name}. Use `playa --list-effects` to see available effects."
-            );
-            std::process::exit(2);
-        };
-
-        match cli.build_playa_from_effect(effect) {
-            Ok(playa) => playa,
-            Err(error) => {
-                eprintln!("Failed to load sound effect: {error}");
-                std::process::exit(1);
+    match cli.command {
+        Some(Command::ListEffects) => {
+            list_sound_effects();
+        }
+        Some(Command::Players) => {
+            let (markdown, missing) = build_metadata_markdown();
+            render_markdown(&markdown, &missing);
+        }
+        Some(Command::DuckInfo) => {
+            print_duck_info().await;
+        }
+        Some(Command::Effect { name, playback }) => {
+            play_effect(&name, &playback).await;
+        }
+        Some(Command::Play {
+            audio_file,
+            playback,
+        }) => {
+            play_file(&audio_file, &playback).await;
+        }
+        None => {
+            // Default: play the audio file if provided
+            if let Some(ref audio_file) = cli.audio_file {
+                play_file(audio_file, &cli.playback).await;
+            } else {
+                // No subcommand and no file - show help
+                let _ = Cli::command().print_help();
+                println!();
             }
         }
-    } else {
-        let Some(ref path) = cli.audio_file else {
-            eprintln!("No audio file provided. Use `playa --players` to show available players.");
-            std::process::exit(2);
-        };
+    }
+}
 
-        match cli.build_playa_from_path(path) {
-            Ok(playa) => playa,
-            Err(error) => {
-                eprintln!("Failed to detect audio format: {error}");
-                std::process::exit(1);
+#[cfg(not(feature = "audio-ducking"))]
+fn run_cli_sync() {
+    CompleteEnv::with_factory(Cli::command).complete();
+
+    let cli = Cli::parse();
+
+    match cli.command {
+        Some(Command::ListEffects) => {
+            list_sound_effects();
+        }
+        Some(Command::Players) => {
+            let (markdown, missing) = build_metadata_markdown();
+            render_markdown(&markdown, &missing);
+        }
+        Some(Command::Effect { name, playback }) => {
+            play_effect_sync(&name, &playback);
+        }
+        Some(Command::Play {
+            audio_file,
+            playback,
+        }) => {
+            play_file_sync(&audio_file, &playback);
+        }
+        None => {
+            // Default: play the audio file if provided
+            if let Some(ref audio_file) = cli.audio_file {
+                play_file_sync(audio_file, &cli.playback);
+            } else {
+                // No subcommand and no file - show help
+                let _ = Cli::command().print_help();
+                println!();
             }
+        }
+    }
+}
+
+#[cfg(feature = "audio-ducking")]
+async fn play_file(path: &PathBuf, opts: &PlaybackOptions) {
+    let playa = match Playa::from_path(path) {
+        Ok(p) => opts.apply_to_playa(p),
+        Err(error) => {
+            eprintln!("Failed to detect audio format: {error}");
+            std::process::exit(1);
         }
     };
 
-    // Use async playback when ducking is enabled
-    if cli.has_ducking() {
+    if opts.has_ducking() {
+        if let Err(error) = playa.play_async().await {
+            eprintln!("Playback failed: {error}");
+            std::process::exit(1);
+        }
+    } else if let Err(error) = playa.play() {
+        eprintln!("Playback failed: {error}");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(feature = "audio-ducking")]
+async fn play_effect(name: &str, opts: &PlaybackOptions) {
+    let Some(effect) = SoundEffect::from_name(name) else {
+        eprintln!("Unknown sound effect: {name}. Use `playa list-effects` to see available effects.");
+        std::process::exit(2);
+    };
+
+    let playa = match Playa::from_bytes(effect.bytes().to_vec()) {
+        Ok(p) => opts.apply_to_playa(p),
+        Err(error) => {
+            eprintln!("Failed to load sound effect: {error}");
+            std::process::exit(1);
+        }
+    };
+
+    if opts.has_ducking() {
         if let Err(error) = playa.play_async().await {
             eprintln!("Playback failed: {error}");
             std::process::exit(1);
@@ -229,49 +299,33 @@ async fn run_cli() {
 }
 
 #[cfg(not(feature = "audio-ducking"))]
-fn run_cli_sync() {
-    CompleteEnv::with_factory(Cli::command).complete();
-
-    let cli = Cli::parse();
-
-    if cli.list_effects {
-        list_sound_effects();
-        return;
-    }
-
-    if cli.players {
-        let (markdown, missing) = build_metadata_markdown();
-        render_markdown(&markdown, &missing);
-        return;
-    }
-
-    let playa = if let Some(effect_name) = cli.effect.as_deref() {
-        let Some(effect) = SoundEffect::from_name(effect_name) else {
-            eprintln!(
-                "Unknown sound effect: {effect_name}. Use `playa --list-effects` to see available effects."
-            );
-            std::process::exit(2);
-        };
-
-        match cli.build_playa_from_effect(effect) {
-            Ok(playa) => playa,
-            Err(error) => {
-                eprintln!("Failed to load sound effect: {error}");
-                std::process::exit(1);
-            }
+fn play_file_sync(path: &PathBuf, opts: &PlaybackOptions) {
+    let playa = match Playa::from_path(path) {
+        Ok(p) => opts.apply_to_playa(p),
+        Err(error) => {
+            eprintln!("Failed to detect audio format: {error}");
+            std::process::exit(1);
         }
-    } else {
-        let Some(ref path) = cli.audio_file else {
-            eprintln!("No audio file provided. Use `playa --players` to show available players.");
-            std::process::exit(2);
-        };
+    };
 
-        match cli.build_playa_from_path(path) {
-            Ok(playa) => playa,
-            Err(error) => {
-                eprintln!("Failed to detect audio format: {error}");
-                std::process::exit(1);
-            }
+    if let Err(error) = playa.play() {
+        eprintln!("Playback failed: {error}");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(not(feature = "audio-ducking"))]
+fn play_effect_sync(name: &str, opts: &PlaybackOptions) {
+    let Some(effect) = SoundEffect::from_name(name) else {
+        eprintln!("Unknown sound effect: {name}. Use `playa list-effects` to see available effects.");
+        std::process::exit(2);
+    };
+
+    let playa = match Playa::from_bytes(effect.bytes().to_vec()) {
+        Ok(p) => opts.apply_to_playa(p),
+        Err(error) => {
+            eprintln!("Failed to load sound effect: {error}");
+            std::process::exit(1);
         }
     };
 
@@ -292,12 +346,12 @@ fn list_sound_effects() {
 
     println!("Available sound effects ({}):", effects.len());
     for effect in effects {
-        println!("- {}", effect.name());
+        println!("  {}", effect.name());
     }
 }
 
 #[cfg(feature = "audio-ducking")]
-fn print_duck_info() {
+async fn print_duck_info() {
     let backend = create_backend();
     let name = backend_name();
 
@@ -316,10 +370,50 @@ fn print_duck_info() {
         }
         "macos-media-keys" => {
             println!("Strategy: Media key pause/resume (fallback)");
-            println!("  - Sends play/pause media key to pause other audio");
-            println!("  - Resumes other audio after playback completes");
+            println!("  - Detects if media is playing before pausing");
+            println!("  - Only resumes if media was playing before ducking");
             println!("  - Used because your output device doesn't support software volume");
-            println!("  - Works with Spotify, Apple Music, YouTube, podcasts, etc.");
+            println!();
+
+            // Check if nowplaying-cli is available
+            let has_nowplaying = std::process::Command::new("which")
+                .arg("nowplaying-cli")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+
+            if has_nowplaying {
+                println!("Detection: Using nowplaying-cli (all apps supported)");
+            } else {
+                println!("Detection: AppleScript fallback (Spotify, Music, TIDAL, VLC, Podcasts)");
+                println!("  Tip: Install `nowplaying-cli` for browser/universal detection:");
+                println!("       brew install nowplaying-cli");
+            }
+            println!();
+
+            // Show current playback state
+            let snapshot = backend.snapshot().await;
+            match snapshot {
+                Ok(snap) => {
+                    let is_playing = snap
+                        .entries
+                        .first()
+                        .and_then(|e| e.channels.first())
+                        .map(|v| *v > 0.5)
+                        .unwrap_or(false);
+                    println!(
+                        "Current state: {}",
+                        if is_playing {
+                            "Media is PLAYING"
+                        } else {
+                            "No media playing (or paused)"
+                        }
+                    );
+                }
+                Err(e) => {
+                    println!("Could not detect playback state: {}", e);
+                }
+            }
         }
         "noop" => {
             println!("Strategy: No ducking (disabled or unavailable)");
@@ -572,141 +666,69 @@ mod tests {
         assert!(markdown.contains(&link_for_player(AudioPlayer::Mpv)));
     }
 
-    fn make_cli(
-        players: bool,
-        meta: bool,
-        effect: Option<String>,
-        list_effects: bool,
-        fast: bool,
-        slow: bool,
-        quiet: bool,
-        loud: bool,
-        speed: Option<f32>,
-        volume: Option<f32>,
-    ) -> Cli {
-        Cli {
-            players,
-            meta,
-            effect,
-            list_effects,
-            fast,
-            slow,
-            quiet,
-            loud,
-            speed,
-            volume,
+    #[test]
+    fn playback_options_default() {
+        let opts = PlaybackOptions {
+            meta: false,
+            fast: false,
+            slow: false,
+            quiet: false,
+            loud: false,
+            speed: None,
+            volume: None,
             #[cfg(feature = "audio-ducking")]
             no_duck: false,
             #[cfg(feature = "audio-ducking")]
             duck_ramp_ms: 1000,
             #[cfg(feature = "audio-ducking")]
             duck_floor: 0.2,
-            audio_file: Some(PathBuf::from("test.mp3")),
-        }
+        };
+        assert!(!opts.fast);
+        assert!(!opts.slow);
+        assert!(!opts.quiet);
+        assert!(!opts.loud);
+        assert!(opts.speed.is_none());
+        assert!(opts.volume.is_none());
     }
 
     #[test]
-    fn cli_default_no_speed_or_volume() {
-        let cli = make_cli(
-            false, false, None, false, false, false, false, false, None, None,
-        );
-        // With no audio file to test against, we just verify the struct is created
-        assert!(!cli.fast);
-        assert!(!cli.slow);
-        assert!(!cli.quiet);
-        assert!(!cli.loud);
-        assert!(cli.speed.is_none());
-        assert!(cli.volume.is_none());
+    fn playback_options_fast() {
+        let opts = PlaybackOptions {
+            meta: false,
+            fast: true,
+            slow: false,
+            quiet: false,
+            loud: false,
+            speed: None,
+            volume: None,
+            #[cfg(feature = "audio-ducking")]
+            no_duck: false,
+            #[cfg(feature = "audio-ducking")]
+            duck_ramp_ms: 1000,
+            #[cfg(feature = "audio-ducking")]
+            duck_floor: 0.2,
+        };
+        assert!(opts.fast);
     }
 
     #[test]
-    fn cli_fast_sets_speed() {
-        let cli = make_cli(
-            false, false, None, false, true, false, false, false, None, None,
-        );
-        assert!(cli.fast);
-    }
-
-    #[test]
-    fn cli_slow_sets_speed() {
-        let cli = make_cli(
-            false, false, None, false, false, true, false, false, None, None,
-        );
-        assert!(cli.slow);
-    }
-
-    #[test]
-    fn cli_quiet_sets_volume() {
-        let cli = make_cli(
-            false, false, None, false, false, false, true, false, None, None,
-        );
-        assert!(cli.quiet);
-    }
-
-    #[test]
-    fn cli_loud_sets_volume() {
-        let cli = make_cli(
-            false, false, None, false, false, false, false, true, None, None,
-        );
-        assert!(cli.loud);
-    }
-
-    #[test]
-    fn cli_explicit_speed_and_volume() {
-        let cli = make_cli(
-            false,
-            false,
-            None,
-            false,
-            false,
-            false,
-            false,
-            false,
-            Some(0.9),
-            Some(0.3),
-        );
-        assert_eq!(cli.speed, Some(0.9));
-        assert_eq!(cli.volume, Some(0.3));
-    }
-
-    #[test]
-    fn cli_meta_flag() {
-        let cli = make_cli(
-            false, true, None, false, false, false, false, false, None, None,
-        );
-        assert!(cli.meta);
-    }
-
-    #[test]
-    fn cli_players_flag() {
-        let cli = make_cli(
-            true, false, None, false, false, false, false, false, None, None,
-        );
-        assert!(cli.players);
-    }
-
-    #[test]
-    fn cli_effect_flag() {
-        let cli = make_cli(
-            false,
-            false,
-            Some("sad-trombone".to_string()),
-            false,
-            false,
-            false,
-            false,
-            false,
-            None,
-            None,
-        );
-        assert_eq!(cli.effect.as_deref(), Some("sad-trombone"));
-    }
-
-    #[test]
-    fn cli_list_effects_flag() {
-        let cli = make_cli(
-            false, false, None, true, false, false, false, false, None, None,
-        );
-        assert!(cli.list_effects);
+    fn playback_options_custom_speed_and_volume() {
+        let opts = PlaybackOptions {
+            meta: false,
+            fast: false,
+            slow: false,
+            quiet: false,
+            loud: false,
+            speed: Some(0.9),
+            volume: Some(0.3),
+            #[cfg(feature = "audio-ducking")]
+            no_duck: false,
+            #[cfg(feature = "audio-ducking")]
+            duck_ramp_ms: 1000,
+            #[cfg(feature = "audio-ducking")]
+            duck_floor: 0.2,
+        };
+        assert_eq!(opts.speed, Some(0.9));
+        assert_eq!(opts.volume, Some(0.3));
     }
 }

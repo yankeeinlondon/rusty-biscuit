@@ -121,6 +121,7 @@ struct Args {
 
 /// CLI subcommands
 #[derive(Subcommand, Debug)]
+#[command(disable_help_subcommand = true)]
 #[allow(clippy::large_enum_variant)]
 enum Command {
     /// Display an image in the terminal
@@ -980,6 +981,47 @@ enum Command {
         #[arg(long, short = 'a')]
         attribution: Option<String>,
     },
+
+    /// Render a bulleted list with hanging indents
+    ///
+    /// Each argument becomes a list item. Supports the same {{tokens}} and
+    /// <block>tags</block> as the prose command for styling individual items.
+    #[command(display_order = 13, after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Simple list:
+    bt list \"First item\" \"Second item\" \"Third item\"
+
+  With styled content:
+    bt list \"<bold>Important:</bold> First point\" \"<dim>Note:</dim> Second point\"
+
+  Custom bullet character:
+    bt list --bullet \"- \" \"Item one\" \"Item two\"
+
+  Arrow bullets:
+    bt list --bullet \"→ \" \"Step one\" \"Step two\" \"Step three\"
+
+  Checkbox style:
+    bt list --bullet \"☐ \" \"Task A\" \"Task B\" \"Task C\"
+
+  Long items wrap with hanging indent:
+    bt list \"This is a very long list item that will wrap to multiple lines while maintaining proper indentation\" \"Short item\"
+
+  No hanging indent:
+    bt list --no-hanging-indent \"Item without hanging indent on wrap\"
+")]
+    List {
+        /// List items with {{tokens}} and <block>tags</block>
+        #[arg(value_name = "ITEMS", required = true)]
+        items: Vec<String>,
+
+        /// Custom bullet string (default: \"• \")
+        #[arg(long, short = 'b', default_value = "• ")]
+        bullet: String,
+
+        /// Disable hanging indent on wrapped lines
+        #[arg(long)]
+        no_hanging_indent: bool,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -1423,6 +1465,13 @@ fn main() -> color_eyre::Result<()> {
             ref attribution,
         }) => {
             return render_quote(content, attribution.as_deref());
+        }
+        Some(Command::List {
+            ref items,
+            ref bullet,
+            no_hanging_indent,
+        }) => {
+            return render_list(items, bullet, no_hanging_indent);
         }
         None => {
             // Default behavior: content analysis or terminal metadata
@@ -2993,8 +3042,8 @@ fn collect_metadata() -> TerminalMetadata {
         app: format!("{:?}", terminal.app),
         os: terminal.os.to_string(),
         distro,
-        width: Terminal::width(),
-        height: Terminal::height(),
+        width: terminal.width(),
+        height: terminal.height(),
         is_tty: terminal.is_tty,
         is_ci: terminal.is_ci,
         color_depth: format!("{:?}", terminal.color_depth),
@@ -3331,7 +3380,7 @@ fn render_prose(
     if no_wrap {
         prose = prose.with_word_wrap(WordWrap::None);
     } else {
-        prose = prose.with_word_wrap(WordWrap::WrapProse(None));
+        prose = prose.with_word_wrap(WordWrap::WrapProse(None, None));
     }
 
     // Configure margins
@@ -3388,6 +3437,53 @@ fn render_quote(content: &[String], attribution: Option<&str>) -> color_eyre::Re
     let term = Terminal::new();
     let layout = Layout::default();
     let output = quote.fallback_render(&term, Some(&layout));
+
+    println!("{}", output);
+
+    Ok(())
+}
+
+/// Render a bulleted list with hanging indents.
+fn render_list(items: &[String], bullet: &str, no_hanging_indent: bool) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::list::UnorderedList;
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+    use biscuit_terminal::utils::layout::Layout;
+    use std::sync::Arc;
+
+    if items.is_empty() {
+        return Err(color_eyre::eyre::eyre!(
+            "No items provided. Usage: bt list \"First item\" \"Second item\" \"Third item\""
+        ));
+    }
+
+    // Convert each item to a Prose component wrapped in RenderableContent
+    let prose_items: Vec<RenderableContent> = items
+        .iter()
+        .map(|item| {
+            // Unescape common escape sequences (shell passes literal \n, \t, etc.)
+            let text = item
+                .replace("\\n", "\n")
+                .replace("\\t", "\t")
+                .replace("\\r", "\r");
+
+            let prose = Prose::new(&text);
+            RenderableContent::Component(Arc::new(prose))
+        })
+        .collect();
+
+    // Build the UnorderedList with custom bullet
+    let mut list = UnorderedList::from(prose_items).with_bullet(bullet);
+
+    // Disable hanging indent if requested
+    if no_hanging_indent {
+        list = list.without_hanging_indent();
+    }
+
+    // Render using fallback_render for terminal-aware output
+    let term = Terminal::new();
+    let layout = Layout::default();
+    let output = list.fallback_render(&term, Some(&layout));
 
     println!("{}", output);
 

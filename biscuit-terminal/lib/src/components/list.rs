@@ -1,12 +1,23 @@
 use crate::{
     components::renderable::{Renderable, RenderableContent},
     terminal::Terminal,
-    utils::layout::Layout,
+    utils::layout::{Layout, WordWrap},
 };
 
+
+/// An **OrderedList** contains a list of renderable items
+/// which will be rendered into an **ordered** list.
 #[derive(Debug)]
 pub struct OrderedList {
     items: Vec<RenderableContent>,
+}
+
+impl Default for OrderedList {
+    fn default() -> Self {
+        OrderedList {
+          items: vec![]
+        }
+    }
 }
 
 impl<T: Into<String>> From<Vec<T>> for OrderedList {
@@ -16,6 +27,7 @@ impl<T: Into<String>> From<Vec<T>> for OrderedList {
                 .into_iter()
                 .map(|f| RenderableContent::String(f.into()))
                 .collect(),
+            ..OrderedList::default()
         }
     }
 }
@@ -80,10 +92,20 @@ impl Renderable for OrderedList {
     }
 }
 
+/// An **UnorderedList** contains a list of renderable items
+/// which will be rendered into an **unordered** list, a bullet
+/// point will precede each line.
 #[derive(Debug)]
 pub struct UnorderedList {
     items: Vec<RenderableContent>,
     bullet: String,
+    hanging_indent: bool,
+}
+
+impl Default for UnorderedList {
+    fn default() -> Self {
+        UnorderedList { items: vec![], bullet: "• ".to_string(), hanging_indent: true }
+    }
 }
 
 impl<T: Into<String>> From<Vec<T>> for UnorderedList {
@@ -93,7 +115,16 @@ impl<T: Into<String>> From<Vec<T>> for UnorderedList {
                 .into_iter()
                 .map(|f| RenderableContent::String(f.into()))
                 .collect(),
-            bullet: "• ".to_string(),
+           ..UnorderedList::default()
+        }
+    }
+}
+
+impl From<Vec<RenderableContent>> for UnorderedList {
+    fn from(value: Vec<RenderableContent>) -> Self {
+        UnorderedList {
+            items: value,
+            ..UnorderedList::default()
         }
     }
 }
@@ -102,7 +133,7 @@ impl From<Vec<&RenderableContent>> for UnorderedList {
     fn from(value: Vec<&RenderableContent>) -> Self {
         UnorderedList {
             items: value.into_iter().cloned().collect(),
-            bullet: "• ".to_string(),
+            ..UnorderedList::default()
         }
     }
 }
@@ -119,9 +150,30 @@ impl UnorderedList {
         self
     }
 
+    /// Disable hanging indent on wrapped lines.
+    pub fn without_hanging_indent(mut self) -> Self {
+        self.hanging_indent = false;
+        self
+    }
+
+    /// Enable hanging indent on wrapped lines (default).
+    pub fn with_hanging_indent(mut self) -> Self {
+        self.hanging_indent = true;
+        self
+    }
+
     /// Render the list with bullets.
     fn render_content(&self, term: Option<&Terminal>, layout: Option<&Layout>) -> String {
         let mut result = String::new();
+        let bullet_width = crate::utils::block_constraint::visible_width(&self.bullet) as u32;
+        let mut item_layout = match layout {
+            Some(l) => l.clone(),
+            None => Layout::default(),
+        };
+        if self.hanging_indent {
+            item_layout.word_wrap = WordWrap::WrapProse(Some(8), Some(bullet_width));
+        }
+
 
         for (i, item) in self.items.iter().enumerate() {
             result.push_str(&self.bullet);
@@ -130,9 +182,9 @@ impl UnorderedList {
                 RenderableContent::String(s) => s.clone(),
                 RenderableContent::Component(component) => {
                     if let Some(t) = term {
-                        component.fallback_render(t, layout)
+                        component.fallback_render(t, Some(&item_layout))
                     } else {
-                        component.render(layout)
+                        component.render(Some(&item_layout))
                     }
                 }
             };

@@ -47,6 +47,10 @@ pub struct Terminal {
     pub char_encoding: CharEncoding,
     pub locale: TerminalLocale,
     pub config_file: Option<PathBuf>,
+
+    // Fixed dimensions (for testing or explicit overrides)
+    pub fixed_width: Option<u32>,
+    pub fixed_height: Option<u32>,
 }
 ```
 
@@ -55,13 +59,34 @@ pub struct Terminal {
 These query current state that can change at runtime:
 
 ```rust
-// Terminal dimensions (recalculated on each call)
-let width = Terminal::width();   // Returns 80 if detection fails
-let height = Terminal::height(); // Returns 24 if detection fails
+let term = Terminal::new();
 
-// Color mode (light/dark)
+// Terminal dimensions (recalculated on each call, or fixed if set via builder)
+let width = term.width();   // Returns 80 if detection fails
+let height = term.height(); // Returns 24 if detection fails
+
+// Color mode (light/dark) - static method
 let mode = Terminal::color_mode();
 ```
+
+## Builder Pattern
+
+Create a Terminal with overridden values (useful for testing):
+
+```rust
+let term = Terminal::builder()
+    .is_tty(true)
+    .image_support(ImageSupport::Kitty)
+    .color_depth(ColorDepth::TrueColor)
+    .width(120)   // Fixed width (overrides dynamic detection)
+    .height(40)   // Fixed height (overrides dynamic detection)
+    .build();
+```
+
+Available builder methods:
+- `app()`, `supports_italic()`, `image_support()`, `underline_support()`
+- `osc_link_support()`, `is_tty()`, `color_depth()`, `is_ci()`, `is_nerd_font()`
+- `width()`, `height()` (fixed dimensions)
 
 ## Key Enums
 

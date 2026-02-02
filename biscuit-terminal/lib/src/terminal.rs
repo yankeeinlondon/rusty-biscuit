@@ -37,6 +37,8 @@ fn new_terminal() -> Terminal {
         remote: detect_connection(),
         char_encoding: CharEncoding::default(),
         locale: TerminalLocale::default(),
+        fixed_width: None,
+        fixed_height: None,
     }
 }
 
@@ -112,6 +114,14 @@ pub struct Terminal {
     /// The detected locale which the terminal is reporting via environment
     /// variables (`LC_ALL`, `LC_CTYPE`, `LANG`)
     pub locale: TerminalLocale,
+
+    /// Fixed terminal width (columns). When `Some`, this overrides dynamic detection.
+    /// When `None`, width is queried dynamically via `terminal_width()`.
+    pub fixed_width: Option<u32>,
+
+    /// Fixed terminal height (rows). When `Some`, this overrides dynamic detection.
+    /// When `None`, height is queried dynamically via `terminal_height()`.
+    pub fixed_height: Option<u32>,
 }
 
 impl Default for Terminal {
@@ -141,6 +151,8 @@ impl From<&Terminal> for Terminal {
             remote: value.remote.clone(),
             char_encoding: value.char_encoding.clone(),
             locale: value.locale.clone(),
+            fixed_width: value.fixed_width,
+            fixed_height: value.fixed_height,
         }
     }
 }
@@ -182,6 +194,8 @@ impl Terminal {
 
     /// Get the terminal width in columns.
     ///
+    /// If a fixed width was set via the builder, returns that value.
+    /// Otherwise, queries the terminal dynamically.
     /// Returns 80 as a fallback if the terminal size cannot be determined.
     ///
     /// ## Examples
@@ -189,15 +203,18 @@ impl Terminal {
     /// ```
     /// use biscuit_terminal::terminal::Terminal;
     ///
-    /// let width = Terminal::width();
+    /// let term = Terminal::new();
+    /// let width = term.width();
     /// println!("Terminal is {} columns wide", width);
     /// ```
-    pub fn width() -> u32 {
-        terminal_width()
+    pub fn width(&self) -> u32 {
+        self.fixed_width.unwrap_or_else(terminal_width)
     }
 
     /// Get the terminal height in rows.
     ///
+    /// If a fixed height was set via the builder, returns that value.
+    /// Otherwise, queries the terminal dynamically.
     /// Returns 24 as a fallback if the terminal size cannot be determined.
     ///
     /// ## Examples
@@ -205,11 +222,12 @@ impl Terminal {
     /// ```
     /// use biscuit_terminal::terminal::Terminal;
     ///
-    /// let height = Terminal::height();
+    /// let term = Terminal::new();
+    /// let height = term.height();
     /// println!("Terminal is {} rows tall", height);
     /// ```
-    pub fn height() -> u32 {
-        terminal_height()
+    pub fn height(&self) -> u32 {
+        self.fixed_height.unwrap_or_else(terminal_height)
     }
 
     /// Detect whether the terminal is in "light" or "dark" mode.
@@ -314,6 +332,8 @@ pub struct TerminalBuilder {
     color_depth: Option<ColorDepth>,
     is_ci: Option<bool>,
     is_nerd_font: Option<Option<bool>>,
+    fixed_width: Option<u32>,
+    fixed_height: Option<u32>,
 }
 
 impl TerminalBuilder {
@@ -375,6 +395,26 @@ impl TerminalBuilder {
         self
     }
 
+    /// Set a fixed terminal width (columns).
+    ///
+    /// When set, `Terminal::width()` returns this value instead of
+    /// querying the terminal dynamically. Useful for testing or
+    /// rendering to a specific width.
+    pub fn width(mut self, value: u32) -> Self {
+        self.fixed_width = Some(value);
+        self
+    }
+
+    /// Set a fixed terminal height (rows).
+    ///
+    /// When set, `Terminal::height()` returns this value instead of
+    /// querying the terminal dynamically. Useful for testing or
+    /// rendering to a specific height.
+    pub fn height(mut self, value: u32) -> Self {
+        self.fixed_height = Some(value);
+        self
+    }
+
     /// Build the Terminal, using auto-detected values for unset fields.
     pub fn build(self) -> Terminal {
         let detected = new_terminal();
@@ -388,6 +428,8 @@ impl TerminalBuilder {
             color_depth: self.color_depth.unwrap_or(detected.color_depth),
             is_ci: self.is_ci.unwrap_or(detected.is_ci),
             is_nerd_font: self.is_nerd_font.unwrap_or(detected.is_nerd_font),
+            fixed_width: self.fixed_width,
+            fixed_height: self.fixed_height,
             // Fields that aren't overridable via builder (OS/system detection)
             os: detected.os,
             distro: detected.distro,

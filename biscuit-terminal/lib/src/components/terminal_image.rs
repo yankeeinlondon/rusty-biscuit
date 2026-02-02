@@ -301,7 +301,7 @@ impl TerminalImage {
         #[cfg(feature = "viuer")]
         if !matches!(term.image_support, ImageSupport::None) {
             // viuer prints directly, so we render and return empty string
-            self.render_via_viuer()?;
+            self.render_via_viuer(term)?;
             return Ok(String::new());
         }
 
@@ -313,10 +313,10 @@ impl TerminalImage {
             match term.image_support {
                 // iTerm advertises Kitty in some setups; prefer native iTerm protocol when the app is iTerm2.
                 ImageSupport::Kitty if matches!(term.app, TerminalApp::ITerm2) => {
-                    self.render_as_iterm2(crate::terminal::Terminal::width())
+                    self.render_as_iterm2(term.width())
                 }
-                ImageSupport::Kitty => self.render_as_kitty(crate::terminal::Terminal::width()),
-                ImageSupport::ITerm => self.render_as_iterm2(crate::terminal::Terminal::width()),
+                ImageSupport::Kitty => self.render_as_kitty(term.width()),
+                ImageSupport::ITerm => self.render_as_iterm2(term.width()),
                 ImageSupport::None => Ok(self.generate_alt_text()),
             }
         }
@@ -330,8 +330,8 @@ impl TerminalImage {
     /// This is a convenience method that creates options from the instance's
     /// width field and renders using viuer.
     #[cfg(feature = "viuer")]
-    fn render_via_viuer(&self) -> Result<(), TerminalImageError> {
-        let term_width = crate::terminal::Terminal::width();
+    fn render_via_viuer(&self, term: &crate::terminal::Terminal) -> Result<(), TerminalImageError> {
+        let term_width = term.width();
         let term_width = if term_width == 0 { 80 } else { term_width };
         let available_width = term_width.saturating_sub(self.margin_left + self.margin_right);
 
@@ -392,15 +392,16 @@ impl TerminalImage {
         // Security check: file size
         self.validate_file_size(options.max_file_size)?;
 
+        let term = crate::terminal::Terminal::new();
+
         // Render using viuer or fall back to protocol-based rendering
         #[cfg(feature = "viuer")]
         if options.use_viuer {
-            return self.render_with_viuer(options);
+            return self.render_with_viuer(options, &term);
         }
 
         // Fall back to protocol-based rendering (prints alt text for now)
         // Protocol-based methods return strings; this method outputs directly
-        let term = crate::terminal::Terminal::new();
         let output = self.render_to_terminal(&term)?;
         print!("{}", output);
         Ok(())
@@ -419,6 +420,7 @@ impl TerminalImage {
     /// ## Arguments
     ///
     /// * `options` - Configuration options (width, etc.)
+    /// * `term` - Terminal instance for width detection
     ///
     /// ## Errors
     ///
@@ -427,8 +429,9 @@ impl TerminalImage {
     pub fn render_with_viuer(
         &self,
         options: &crate::components::image_options::TerminalImageOptions,
+        term: &crate::terminal::Terminal,
     ) -> Result<(), TerminalImageError> {
-        let config = self.build_viuer_config(options);
+        let config = self.build_viuer_config(options, term);
 
         viuer::print_from_file(&self.filename, &config).map_err(|e| {
             TerminalImageError::ViuerError {
@@ -444,8 +447,9 @@ impl TerminalImage {
     fn build_viuer_config(
         &self,
         options: &crate::components::image_options::TerminalImageOptions,
+        term: &crate::terminal::Terminal,
     ) -> viuer::Config {
-        let term_width = crate::terminal::Terminal::width();
+        let term_width = term.width();
         let term_width = if term_width == 0 { 80 } else { term_width };
         let available_width = term_width.saturating_sub(self.margin_left + self.margin_right);
 
@@ -1704,6 +1708,7 @@ mod tests {
     #[test]
     fn test_build_viuer_config_fill_width() {
         use crate::components::image_options::TerminalImageOptions;
+        use crate::terminal::Terminal;
 
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.png");
@@ -1716,8 +1721,9 @@ mod tests {
         let options = TerminalImageOptions::builder()
             .width(ImageWidth::Fill)
             .build();
+        let term = Terminal::builder().width(80).build();
 
-        let config = img.build_viuer_config(&options);
+        let config = img.build_viuer_config(&options, &term);
 
         // Should have a width set (terminal width or default 80)
         assert!(config.width.is_some());
@@ -1729,6 +1735,7 @@ mod tests {
     #[test]
     fn test_build_viuer_config_percent_width() {
         use crate::components::image_options::TerminalImageOptions;
+        use crate::terminal::Terminal;
 
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.png");
@@ -1741,8 +1748,9 @@ mod tests {
         let options = TerminalImageOptions::builder()
             .width(ImageWidth::Percent(0.5))
             .build();
+        let term = Terminal::builder().width(80).build();
 
-        let config = img.build_viuer_config(&options);
+        let config = img.build_viuer_config(&options, &term);
 
         // 50% of available width
         assert!(config.width.is_some());
@@ -1752,6 +1760,7 @@ mod tests {
     #[test]
     fn test_build_viuer_config_characters_width() {
         use crate::components::image_options::TerminalImageOptions;
+        use crate::terminal::Terminal;
 
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.png");
@@ -1764,20 +1773,21 @@ mod tests {
         let options = TerminalImageOptions::builder()
             .width(ImageWidth::Characters(40))
             .build();
+        let term = Terminal::builder().width(80).build();
 
-        let config = img.build_viuer_config(&options);
+        let config = img.build_viuer_config(&options, &term);
 
         // Should cap at available width or use 40
         assert!(config.width.is_some());
-        // With margins of 0, and terminal width >= 40, should be 40
-        // (or less if terminal is narrower)
-        assert!(config.width.unwrap() <= 40 || config.width.unwrap() <= 80);
+        // With margins of 0, and terminal width 80 >= 40, should be 40
+        assert_eq!(config.width.unwrap(), 40);
     }
 
     #[cfg(feature = "viuer")]
     #[test]
     fn test_build_viuer_config_respects_margins() {
         use crate::components::image_options::TerminalImageOptions;
+        use crate::terminal::Terminal;
 
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.png");
@@ -1790,8 +1800,9 @@ mod tests {
         let options = TerminalImageOptions::builder()
             .width(ImageWidth::Fill)
             .build();
+        let term = Terminal::builder().width(80).build();
 
-        let config = img.build_viuer_config(&options);
+        let config = img.build_viuer_config(&options, &term);
 
         // x offset should match left margin
         assert_eq!(config.x, 10);

@@ -46,7 +46,7 @@ fn main() {
     let term = Terminal::new();
 
     println!("Running in {:?}", term.app);
-    println!("Terminal size: {}x{}", Terminal::width(), Terminal::height());
+    println!("Terminal size: {}x{}", term.width(), term.height());
 
     if term.supports_italic {
         println!("\x1b[3mItalic text!\x1b[0m");

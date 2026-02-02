@@ -25,8 +25,8 @@ let term = Terminal::new();
 // Static properties (detected once)
 println!("Terminal: {:?}, Image: {:?}", term.app, term.image_support);
 
-// Dynamic queries
-let (width, mode) = (Terminal::width(), Terminal::color_mode());
+// Dynamic queries (width/height are instance methods, color_mode is static)
+let (width, mode) = (term.width(), Terminal::color_mode());
 
 // Conditional rendering
 if term.supports_italic { println!("\x1b[3mItalic\x1b[0m"); }
@@ -92,9 +92,18 @@ let fg = match Terminal::color_mode() {
 
 *iTerm2 uses native protocol even if Kitty advertised.
 
-## bt CLI Diagram Commands
+## bt CLI Commands
 
 ```bash
+# Terminal inspection
+bt                              # Pretty-printed capabilities
+bt --json                       # JSON output for scripting
+
+# Styled text
+bt prose "Hello {{bold}}world{{reset}}!"
+bt prose "<red>Error</red>: message"
+
+# Diagrams (10 types)
 bt flowchart "A --> B --> C"
 bt quadrant "Task: [0.5, 0.5]"
 bt pie-chart "Dogs: 50" "Cats: 30"
@@ -106,26 +115,30 @@ bt state-diagram "[*] --> Idle" "Idle --> Running"
 bt erd "Customer ||--o{ Order : places"
 ```
 
-All support: `--example`, `--width`, `--inverse`, `--title`, `--json`
+Diagram options: `--example`, `--width`, `--inverse`, `--title`, `--json`
 
 ## Module Structure
 
 ```
 biscuit_terminal/
-├── terminal.rs           # Terminal struct
+├── terminal.rs           # Terminal struct + TerminalBuilder
 ├── discovery/            # Detection
-│   ├── detection.rs      # App, color, image
+│   ├── detection.rs      # App, color, image, multiplex
 │   ├── os_detection.rs   # OS, distro, CI
-│   ├── fonts.rs          # Font name, size
-│   ├── osc_queries.rs    # Color queries
+│   ├── fonts.rs          # Font name, size, cell_size
+│   ├── osc_queries.rs    # bg/fg/cursor color queries
+│   ├── clipboard.rs      # OSC52 clipboard
 │   └── eval.rs           # Escape analysis
 ├── components/           # Rendering
-│   ├── terminal_image.rs # Image (viuer)
+│   ├── terminal_image.rs # Image (Kitty/iTerm2 via viuer)
 │   ├── image_options.rs  # Security guards
 │   ├── mermaid.rs        # Diagram rendering
-│   └── prose.rs          # Styled text
+│   ├── prose.rs          # Styled text with tokens
+│   ├── list.rs           # OrderedList, UnorderedList
+│   └── text_block.rs     # Uniform block styling
 └── utils/
     ├── escape_codes.rs   # Strip/analyze
+    ├── layout.rs         # Layout, Margin, WordWrap
     └── styling.rs        # Terminal styles
 ```
 

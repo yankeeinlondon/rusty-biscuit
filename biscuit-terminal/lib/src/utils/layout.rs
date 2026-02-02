@@ -83,6 +83,8 @@ pub enum MaxWidth {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WordWrap {
+    /// **WrapProse**`(StartLooking, HangingIndent)`
+    ///
     /// Will attempt to wrap words on wrap characters (e.g., whitespace,
     /// `-`, etc.) but if unable to find a break character in the text
     /// body then the text will be hyphenated at a hard break point.
@@ -94,11 +96,19 @@ pub enum WordWrap {
     /// By default (e.g., when wrap gets `None`) we start looking for a line break
     /// 8 characters before the reaching the end of the line but you can
     /// override that with whatever you want.
-    WrapProse(Option<u32>),
+    ///
+    /// When a value is provided in the second parameter we use that to
+    /// indent lines after the first by that many spaces.
+    WrapProse(Option<u32>, Option<u32>),
 
+    /// **BespokeProse**`(StartLooking, BreakChars, HangingIndent)`
+    ///
     /// If you want to explicitly state the valid "break characters" which
     /// you hope to break on you can use this over the `WrapProse` option.
-    BespokeProse(Option<u32>, Vec<char>),
+    ///
+    /// When a value is provided in the third parameter we use that to
+    /// indent lines after the first by that many spaces.
+    BespokeProse(Option<u32>, Vec<char>, Option<u32>),
 
     /// Instead of "wrapping", we will truncate any content that moves
     /// beyond the end of the line. You can specify a string -- often an
@@ -116,6 +126,13 @@ pub enum WordWrap {
     None,
 }
 
+impl Default for WordWrap {
+    fn default() -> Self {
+        WordWrap::WrapProse(Some(8), None)
+    }
+}
+
+#[derive(Clone)]
 pub struct Layout {
     /// how much whitespace is required to the _left_ of this text block
     pub left_margin: Margin,
@@ -276,8 +293,12 @@ impl RenderableWrapper for Layout {
         self.apply_layout(&content.into(), terminal_width)
     }
 
-    fn fallback_render<T: Into<String>>(&self, content: T, term: &Terminal) -> String {
-        let terminal_width = Terminal::width();
+    fn fallback_render<T: Into<String>>(
+        &self,
+        content: T,
+        term: &Terminal
+    ) -> String {
+        let terminal_width = term.width();
         self.apply_layout(&content.into(), terminal_width)
     }
 }
@@ -335,7 +356,7 @@ mod tests {
     #[test]
     fn test_word_wrap_applied() {
         let layout = Layout {
-            word_wrap: WordWrap::WrapProse(None),
+            word_wrap: WordWrap::WrapProse(None, None),
             ..Layout::default()
         };
         // With default 80 width, a long line should wrap

@@ -69,10 +69,11 @@ fn test_terminal_default_equals_new() {
 }
 
 #[test]
-fn test_terminal_static_methods() {
-    // Static methods should work without panic
-    let width = Terminal::width();
-    let height = Terminal::height();
+fn test_terminal_dimension_methods() {
+    // Instance methods should work without panic
+    let term = Terminal::new();
+    let width = term.width();
+    let height = term.height();
     let _color_mode = Terminal::color_mode();
 
     // Dimensions should be reasonable

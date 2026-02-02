@@ -490,11 +490,27 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
 
     let mut wrapped = Vec::new();
     for line in lines {
+        let original_width = visible_width(&line);
         let mut remaining = line;
 
         loop {
+            // Check if remaining text fits - apply hanging indent if applicable
             if visible_width(&remaining) <= width {
-                wrapped.push(remaining);
+                let final_text = match strategy {
+                    WordWrap::WrapProse(_, hanging_indent)
+                    | WordWrap::BespokeProse(_, _, hanging_indent) => {
+                        let indent = hanging_indent.unwrap_or(0) as usize;
+                        let is_continuation = !wrapped.is_empty()
+                            || visible_width(&remaining) != original_width;
+                        if is_continuation && indent > 0 {
+                            format!("{}{}", " ".repeat(indent), remaining)
+                        } else {
+                            remaining
+                        }
+                    }
+                    _ => remaining,
+                };
+                wrapped.push(final_text);
                 break;
             }
 
@@ -513,17 +529,29 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                     }
                     remaining = tail;
                 }
-                WordWrap::WrapProse(offset) => {
+                WordWrap::WrapProse(offset, hanging_indent) => {
                     let search_offset = offset.unwrap_or(8);
+                    let indent = hanging_indent.unwrap_or(0) as usize;
+                    let is_continuation = !wrapped.is_empty()
+                        || visible_width(&remaining) != original_width;
+                    let effective_width = if is_continuation && indent > 0 {
+                        width.saturating_sub(indent as u32)
+                    } else {
+                        width
+                    };
+
                     if let Some((break_idx, break_len, is_whitespace)) =
-                        find_break_position(&remaining, width, search_offset)
+                        find_break_position(&remaining, effective_width, search_offset)
                     {
                         let split_at = if is_whitespace {
                             break_idx
                         } else {
                             break_idx + break_len
                         };
-                        let head = remaining[..split_at].to_string();
+                        let mut head = remaining[..split_at].to_string();
+                        if is_continuation && indent > 0 {
+                            head = format!("{}{}", " ".repeat(indent), head);
+                        }
                         let tail = if is_whitespace {
                             trim_leading_whitespace_preserve_escapes(
                                 &remaining[break_idx + break_len..],
@@ -536,17 +564,24 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                             break;
                         }
                         remaining = tail;
-                    } else if width <= 1 {
-                        let (head, tail) = split_at_visible_width(&remaining, width);
-                        wrapped.push(head);
+                    } else if effective_width <= 1 {
+                        let (head, tail) = split_at_visible_width(&remaining, effective_width);
+                        let mut final_head = head;
+                        if is_continuation && indent > 0 {
+                            final_head = format!("{}{}", " ".repeat(indent), final_head);
+                        }
+                        wrapped.push(final_head);
                         if tail.is_empty() {
                             break;
                         }
                         remaining = tail;
                     } else {
-                        let hyphen_width = width.saturating_sub(1);
+                        let hyphen_width = effective_width.saturating_sub(1);
                         let (mut head, tail) = split_at_visible_width(&remaining, hyphen_width);
                         head.push('-');
+                        if is_continuation && indent > 0 {
+                            head = format!("{}{}", " ".repeat(indent), head);
+                        }
                         wrapped.push(head);
                         if tail.is_empty() {
                             break;
@@ -554,17 +589,29 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                         remaining = tail;
                     }
                 }
-                WordWrap::BespokeProse(offset, break_chars) => {
+                WordWrap::BespokeProse(offset, break_chars, hanging_indent) => {
                     let search_offset = offset.unwrap_or(8);
+                    let indent = hanging_indent.unwrap_or(0) as usize;
+                    let is_continuation = !wrapped.is_empty()
+                        || visible_width(&remaining) != original_width;
+                    let effective_width = if is_continuation && indent > 0 {
+                        width.saturating_sub(indent as u32)
+                    } else {
+                        width
+                    };
+
                     if let Some((break_idx, break_len, is_whitespace)) =
-                        find_bespoke_break_position(&remaining, width, search_offset, break_chars)
+                        find_bespoke_break_position(&remaining, effective_width, search_offset, break_chars)
                     {
                         let split_at = if is_whitespace {
                             break_idx
                         } else {
                             break_idx + break_len
                         };
-                        let head = remaining[..split_at].to_string();
+                        let mut head = remaining[..split_at].to_string();
+                        if is_continuation && indent > 0 {
+                            head = format!("{}{}", " ".repeat(indent), head);
+                        }
                         let tail = if is_whitespace {
                             trim_leading_whitespace_preserve_escapes(
                                 &remaining[break_idx + break_len..],
@@ -577,17 +624,24 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                             break;
                         }
                         remaining = tail;
-                    } else if width <= 1 {
-                        let (head, tail) = split_at_visible_width(&remaining, width);
-                        wrapped.push(head);
+                    } else if effective_width <= 1 {
+                        let (head, tail) = split_at_visible_width(&remaining, effective_width);
+                        let mut final_head = head;
+                        if is_continuation && indent > 0 {
+                            final_head = format!("{}{}", " ".repeat(indent), final_head);
+                        }
+                        wrapped.push(final_head);
                         if tail.is_empty() {
                             break;
                         }
                         remaining = tail;
                     } else {
-                        let hyphen_width = width.saturating_sub(1);
+                        let hyphen_width = effective_width.saturating_sub(1);
                         let (mut head, tail) = split_at_visible_width(&remaining, hyphen_width);
                         head.push('-');
+                        if is_continuation && indent > 0 {
+                            head = format!("{}{}", " ".repeat(indent), head);
+                        }
                         wrapped.push(head);
                         if tail.is_empty() {
                             break;
@@ -652,7 +706,7 @@ mod tests {
     fn wrap_lines_wrapprose_breaks_on_space() {
         let lines = wrap_lines(
             vec!["hello world friend".to_string()],
-            &WordWrap::WrapProse(None),
+            &WordWrap::WrapProse(None, None),
             10,
         );
         assert_eq!(
@@ -669,12 +723,29 @@ mod tests {
     fn wrap_lines_wrapprose_hyphenates_long_words() {
         let lines = wrap_lines(
             vec!["abcdefghij".to_string()],
-            &WordWrap::WrapProse(None),
+            &WordWrap::WrapProse(None, None),
             5,
         );
         assert_eq!(
             lines,
             vec!["abcd-".to_string(), "efgh-".to_string(), "ij".to_string()]
+        );
+    }
+
+    #[test]
+    fn wrap_lines_wrapprose_with_hanging_indent() {
+        let lines = wrap_lines(
+            vec!["hello world friend".to_string()],
+            &WordWrap::WrapProse(None, Some(2)),
+            10,
+        );
+        assert_eq!(
+            lines,
+            vec![
+                "hello".to_string(),
+                "  world".to_string(),
+                "  friend".to_string()
+            ]
         );
     }
 
