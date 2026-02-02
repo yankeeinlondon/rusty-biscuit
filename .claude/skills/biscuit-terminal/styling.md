@@ -70,6 +70,8 @@ Single-point style changes that require manual reset:
 ```
 {{bold}}      {{dim}}       {{italic}}
 {{underline}} {{strikethrough}}
+{{double-underline}} {{curly-underline}} {{dotted-underline}} {{dashed-underline}}
+{{blink}}     {{inverse}}   {{hidden}}
 {{red}}       {{green}}     {{blue}}
 {{yellow}}    {{cyan}}      {{magenta}}
 {{bright-red}} {{bright-green}} ...
@@ -77,6 +79,8 @@ Single-point style changes that require manual reset:
 {{reset}}     {{reset-fg}}  {{reset-bg}}
 {{normal-font-weight}} {{not-italic}} {{not-underline}} {{not-strikethrough}}
 ```
+
+**Note:** Reset tokens (`reset`, `reset-fg`, `not-italic`, etc.) are atomic-only.
 
 Example:
 ```
@@ -86,19 +90,53 @@ Example:
 
 ### Block Tokens
 
-HTML-like tags that auto-reset:
+HTML-like tags that auto-reset. Same names as atomic tokens, with short aliases:
 
-| Token | Effect |
-|-------|--------|
-| `<i>text</i>` | Italic |
-| `<b>text</b>` | Bold |
-| `<u>text</u>` | Underline |
-| `<uu>text</uu>` | Double underline |
-| `<~>text</~>` | Strikethrough |
-| `<a href="...">text</a>` | OSC8 link |
-| `<rgb 255,128,0>text</rgb>` | RGB foreground |
-| `<red>text</red>` | Named color |
-| `<clipboard>fallback</clipboard>` | Clipboard content |
+| Token | Alias | Effect |
+|-------|-------|--------|
+| `<bold>` | `<b>` | Bold |
+| `<dim>` | | Dim |
+| `<italic>` | `<i>` | Italic |
+| `<underline>` | `<u>` | Underline |
+| `<double-underline>` | `<uu>` | Double underline |
+| `<curly-underline>` | | Curly underline |
+| `<dotted-underline>` | | Dotted underline |
+| `<dashed-underline>` | | Dashed underline |
+| `<blink>` | | Blinking |
+| `<inverse>` | `<reverse>` | Inverse video |
+| `<hidden>` | | Hidden |
+| `<strikethrough>` | `<~>` | Strikethrough |
+| `<a href="...">` | | OSC8 link |
+| `<rgb 255,128,0>` | | RGB foreground |
+| `<red>`, `<bright-red>` | | Basic/bright colors |
+| `<coral>`, `<alice-blue>` | | Web/CSS colors |
+| `<purple-500>`, `<slate-700>` | | Tailwind colors |
+| `<clipboard>` | | Clipboard content |
+
+#### Color Blocks
+
+```
+<red>basic color</red>
+<bright-red>bright variant</bright-red>
+<alice-blue>web/CSS color</alice-blue>
+<purple-500>Tailwind color</purple-500>
+<rgb 255,0,0>RGB color</rgb>
+```
+
+#### Hyperlinks
+
+OSC8 links with relative path support:
+```
+<a href="https://example.com">URL</a>
+<a href="/absolute/path">absolute file</a>
+<a href="./relative/path">relative to CWD</a>
+<a href="src/main.rs">relative to git/package root</a>
+```
+
+Relative paths (without `./`) resolve from:
+1. Package root (for monorepos: nearest Cargo.toml)
+2. Git repository root
+3. CWD (fallback)
 
 Example:
 ```

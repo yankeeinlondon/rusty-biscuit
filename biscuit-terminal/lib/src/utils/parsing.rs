@@ -65,6 +65,9 @@ static ATOMIC_TOKENS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::
     m.insert("italic", "\x1b[3m");
     m.insert("underline", "\x1b[4m");
     m.insert("double-underline", "\x1b[4:2m");
+    m.insert("curly-underline", "\x1b[4:3m");
+    m.insert("dotted-underline", "\x1b[4:4m");
+    m.insert("dashed-underline", "\x1b[4:5m");
     m.insert("strikethrough", "\x1b[9m");
     m.insert("inverse", "\x1b[7m");
 

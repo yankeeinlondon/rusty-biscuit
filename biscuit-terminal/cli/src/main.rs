@@ -891,17 +891,39 @@ enum Command {
 
 \x1b[1m\x1b[4mAtomic Tokens:\x1b[0m
   Styles:     {{bold}}, {{dim}}, {{italic}}, {{underline}}, {{strikethrough}}
+  Underline:  {{double-underline}}, {{curly-underline}}, {{dotted-underline}}, {{dashed-underline}}
+  More:       {{blink}}, {{inverse}}, {{hidden}}
   Colors:     {{red}}, {{blue}}, {{green}}, {{yellow}}, {{cyan}}, {{magenta}}
   Bright:     {{bright-red}}, {{bright-blue}}, etc.
   Background: {{bg-red}}, {{bg-blue}}, etc.
-  Reset:      {{reset}}, {{reset-fg}}, {{reset-bg}}
-  Undo style: {{normal-font-weight}}, {{not-italic}}, {{not-underline}}, {{not-strikethrough}}
+  Reset:      {{reset}}, {{reset-fg}}, {{reset-bg}} (atomic only)
+  Undo style: {{normal-font-weight}}, {{not-italic}}, {{not-underline}}, {{not-strikethrough}} (atomic only)
 
 \x1b[1m\x1b[4mBlock Tags:\x1b[0m
-  <b>bold</b>       <i>italic</i>         <u>underline</u>
-  <uu>double-ul</uu>  <~>strikethrough</~>
-  <a href=\"URL\">link</a>
-  <red>colored</red>  <rgb 255,0,0>rgb color</rgb>
+
+  \x1b[1mColor Blocks:\x1b[0m
+    Use a named color (basic, web, or Tailwind):
+      \x1b[1m<red>\x1b[2ma basic color\x1b[22m</red>\x1b[0m
+      \x1b[1m<bright-red>\x1b[2ma bright variant\x1b[22m</bright-red>\x1b[0m
+      \x1b[1m<alice-blue>\x1b[2ma web/CSS color\x1b[22m</alice-blue>\x1b[0m
+      \x1b[1m<purple-500>\x1b[2ma Tailwind color\x1b[22m</purple-500>\x1b[0m
+    Use a bespoke RGB color value:
+      \x1b[1m<rgb 255,0,0>\x1b[2musing an RGB color\x1b[22m</rgb>\x1b[0m
+
+  \x1b[1mHyperlinks:\x1b[0m
+    Create OSC8 hyperlinks (with fallback for unsupported terminals):
+      \x1b[1m<a href=https://google.com>\x1b[2mGoogle Search\x1b[22m</a>\x1b[0m
+      \x1b[1m<a href=/fully/qualified/path/file.ext>\x1b[2mAbsolute path\x1b[22m</a>\x1b[0m
+      \x1b[1m<a href=./relative/file.ext>\x1b[2mRelative from CWD\x1b[22m</a>\x1b[0m
+      \x1b[1m<a href=relative/file.ext>\x1b[2mRelative from git root\x1b[22m</a>\x1b[0m
+        (monorepo: package root > repo root)
+
+  \x1b[1mOther Styling:\x1b[0m
+    All atomic tokens \x1b[3m(except negations like \x1b[1mnot-italic\x1b[22m, \x1b[1mreset\x1b[22m, etc.)\x1b[0m work as block tags:
+      \x1b[1m<bold>\x1b[0m or \x1b[1m<b>\x1b[0m    \x1b[1m<italic>\x1b[0m or \x1b[1m<i>\x1b[0m    \x1b[1m<underline>\x1b[0m or \x1b[1m<u>\x1b[0m
+      \x1b[1m<double-underline>\x1b[0m or \x1b[1m<uu>\x1b[0m    \x1b[1m<strikethrough>\x1b[0m or \x1b[1m<~>\x1b[0m
+      \x1b[1m<curly-underline>\x1b[0m  \x1b[1m<dotted-underline>\x1b[0m  \x1b[1m<dashed-underline>\x1b[0m
+      \x1b[1m<dim>\x1b[0m  \x1b[1m<blink>\x1b[0m  \x1b[1m<inverse>\x1b[0m  \x1b[1m<hidden>\x1b[0m
 ")]
     Prose {
         /// Content with {{tokens}} and <block>tags</block>
