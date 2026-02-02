@@ -6,4 +6,3 @@ pub mod multiplex;
 pub mod styling;
 pub mod text;
 pub mod word_wrap;
-pub mod parsing;
