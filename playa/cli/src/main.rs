@@ -5,6 +5,9 @@ use clap_complete::CompleteEnv;
 use sniff_lib::programs::InstalledHeadlessAudio;
 
 use playa::{all_players, AudioFileFormat, AudioPlayer, Codec, Playa, SoundEffect, PLAYER_LOOKUP};
+
+#[cfg(feature = "audio-ducking")]
+use playa::ducking::{backend_name, create_backend, DuckConfig};
 use darkmatter_lib::markdown::output::terminal::{for_terminal, TerminalOptions};
 use darkmatter_lib::markdown::Markdown;
 use darkmatter_lib::testing::strip_ansi_codes;
@@ -72,11 +75,31 @@ struct Cli {
     #[arg(long, value_name = "LEVEL", conflicts_with_all = ["quiet", "loud"])]
     volume: Option<f32>,
 
+    /// Disable audio ducking (attenuating other audio during playback)
+    #[cfg(feature = "audio-ducking")]
+    #[arg(long)]
+    no_duck: bool,
+
+    /// Ducking ramp duration in milliseconds (default: 1000)
+    #[cfg(feature = "audio-ducking")]
+    #[arg(long, value_name = "MS", default_value = "1000")]
+    duck_ramp_ms: u32,
+
+    /// Ducking floor level (0.0 = silent, 1.0 = no ducking, default: 0.2)
+    #[cfg(feature = "audio-ducking")]
+    #[arg(long, value_name = "LEVEL", default_value = "0.2")]
+    duck_floor: f32,
+
+    /// Show audio ducking backend info and exit
+    #[cfg(feature = "audio-ducking")]
+    #[arg(long)]
+    duck_info: bool,
+
     /// Audio file to play
     #[arg(
         value_name = "AUDIO_FILE",
         value_hint = ValueHint::FilePath,
-        required_unless_present_any = ["players", "list_effects", "effect"]
+        required_unless_present_any = ["players", "list_effects", "effect", "duck_info"]
     )]
     audio_file: Option<PathBuf>,
 }
@@ -113,11 +136,100 @@ impl Cli {
             playa = playa.show_meta();
         }
 
+        #[cfg(feature = "audio-ducking")]
+        if !self.no_duck {
+            if let Ok(config) = DuckConfig::new(self.duck_ramp_ms, self.duck_floor) {
+                playa = playa.with_ducked_audio(config);
+            }
+        }
+
         playa
+    }
+
+    /// Returns true if ducking is enabled and configured.
+    #[cfg(feature = "audio-ducking")]
+    fn has_ducking(&self) -> bool {
+        !self.no_duck
     }
 }
 
+#[cfg(feature = "audio-ducking")]
+#[tokio::main]
+async fn main() {
+    run_cli().await;
+}
+
+#[cfg(not(feature = "audio-ducking"))]
 fn main() {
+    run_cli_sync();
+}
+
+#[cfg(feature = "audio-ducking")]
+async fn run_cli() {
+    CompleteEnv::with_factory(Cli::command).complete();
+
+    let cli = Cli::parse();
+
+    if cli.list_effects {
+        list_sound_effects();
+        return;
+    }
+
+    if cli.players {
+        let (markdown, missing) = build_metadata_markdown();
+        render_markdown(&markdown, &missing);
+        return;
+    }
+
+    if cli.duck_info {
+        print_duck_info();
+        return;
+    }
+
+    let playa = if let Some(effect_name) = cli.effect.as_deref() {
+        let Some(effect) = SoundEffect::from_name(effect_name) else {
+            eprintln!(
+                "Unknown sound effect: {effect_name}. Use `playa --list-effects` to see available effects."
+            );
+            std::process::exit(2);
+        };
+
+        match cli.build_playa_from_effect(effect) {
+            Ok(playa) => playa,
+            Err(error) => {
+                eprintln!("Failed to load sound effect: {error}");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        let Some(ref path) = cli.audio_file else {
+            eprintln!("No audio file provided. Use `playa --players` to show available players.");
+            std::process::exit(2);
+        };
+
+        match cli.build_playa_from_path(path) {
+            Ok(playa) => playa,
+            Err(error) => {
+                eprintln!("Failed to detect audio format: {error}");
+                std::process::exit(1);
+            }
+        }
+    };
+
+    // Use async playback when ducking is enabled
+    if cli.has_ducking() {
+        if let Err(error) = playa.play_async().await {
+            eprintln!("Playback failed: {error}");
+            std::process::exit(1);
+        }
+    } else if let Err(error) = playa.play() {
+        eprintln!("Playback failed: {error}");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(not(feature = "audio-ducking"))]
+fn run_cli_sync() {
     CompleteEnv::with_factory(Cli::command).complete();
 
     let cli = Cli::parse();
@@ -181,6 +293,41 @@ fn list_sound_effects() {
     println!("Available sound effects ({}):", effects.len());
     for effect in effects {
         println!("- {}", effect.name());
+    }
+}
+
+#[cfg(feature = "audio-ducking")]
+fn print_duck_info() {
+    let backend = create_backend();
+    let name = backend_name();
+
+    println!("Audio Ducking Backend Info");
+    println!("==========================");
+    println!("Selected backend: {}", name);
+    println!("Available: {}", if backend.is_available() { "yes" } else { "no" });
+    println!();
+
+    match name {
+        "macos-coreaudio" => {
+            println!("Strategy: Volume control via CoreAudio");
+            println!("  - Fades system audio volume down during playback");
+            println!("  - Restores original volume after playback");
+            println!("  - Works with devices that expose software volume control");
+        }
+        "macos-media-keys" => {
+            println!("Strategy: Media key pause/resume (fallback)");
+            println!("  - Sends play/pause media key to pause other audio");
+            println!("  - Resumes other audio after playback completes");
+            println!("  - Used because your output device doesn't support software volume");
+            println!("  - Works with Spotify, Apple Music, YouTube, podcasts, etc.");
+        }
+        "noop" => {
+            println!("Strategy: No ducking (disabled or unavailable)");
+            println!("  - Audio playback will not affect other audio sources");
+        }
+        _ => {
+            println!("Strategy: {}", name);
+        }
     }
 }
 
@@ -448,6 +595,12 @@ mod tests {
             loud,
             speed,
             volume,
+            #[cfg(feature = "audio-ducking")]
+            no_duck: false,
+            #[cfg(feature = "audio-ducking")]
+            duck_ramp_ms: 1000,
+            #[cfg(feature = "audio-ducking")]
+            duck_floor: 0.2,
             audio_file: Some(PathBuf::from("test.mp3")),
         }
     }

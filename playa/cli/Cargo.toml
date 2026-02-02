@@ -8,9 +8,15 @@ license = "AGPL-3.0-only"
 name = "playa"
 path = "src/main.rs"
 
+[features]
+default = []
+audio-ducking = ["playa/audio-ducking", "tokio"]
+audio-ducking-macos = ["audio-ducking", "playa/audio-ducking-macos"]
+
 [dependencies]
 clap = { version = "4.5.53", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 playa = { path = "../lib", features = ["sound-effects"] }
 darkmatter-lib = { path = "../../darkmatter/lib" }
 sniff-lib = { path = "../../sniff/lib" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }

@@ -7,6 +7,10 @@ edition = "2024"
 default = []  # Sound effects are NOT default - users must opt-in
 async = ["tokio"]
 
+# Audio ducking - attenuate system audio during playback
+audio-ducking = ["tokio"]
+audio-ducking-macos = ["audio-ducking", "coreaudio-sys"]
+
 # Umbrella feature for all effects (~30MB)
 sound-effects = ["sfx-ui", "sfx-cartoon", "sfx-reactions", "sfx-scifi", "sfx-atmosphere", "sfx-motion"]
 
@@ -23,8 +27,12 @@ infer = "0.19"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 sniff-lib = { path = "../../sniff/lib" }
 thiserror = "2.0"
-tokio = { version = "1", features = ["process", "io-util", "fs", "rt"], optional = true }
+tokio = { version = "1", features = ["process", "io-util", "fs", "rt", "time", "sync"], optional = true }
 url = "2.5"
+
+# Platform-specific dependencies for audio ducking
+[target.'cfg(target_os = "macos")'.dependencies]
+coreaudio-sys = { version = "0.2", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }

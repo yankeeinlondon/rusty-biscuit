@@ -6,6 +6,9 @@ use crate::playback::playa_with_player_and_options;
 use crate::player::{match_available_players, AudioPlayer, Player, PLAYER_LOOKUP};
 use crate::types::{AudioFormat, PlaybackOptions};
 
+#[cfg(feature = "audio-ducking")]
+use crate::ducking::{create_backend, DuckConfig, DuckGuard};
+
 /// Builder for audio playback with optional metadata display.
 ///
 /// `Playa` provides a fluent builder interface for configuring and playing audio.
@@ -33,6 +36,8 @@ pub struct Playa {
     audio: Audio,
     options: PlaybackOptions,
     show_meta: bool,
+    #[cfg(feature = "audio-ducking")]
+    duck_config: Option<DuckConfig>,
 }
 
 impl Playa {
@@ -42,6 +47,8 @@ impl Playa {
             audio,
             options: PlaybackOptions::default(),
             show_meta: false,
+            #[cfg(feature = "audio-ducking")]
+            duck_config: None,
         }
     }
 
@@ -88,6 +95,31 @@ impl Playa {
         self
     }
 
+    /// Enable audio ducking during playback.
+    ///
+    /// When enabled, system audio will be attenuated to the configured floor
+    /// level before playback starts, then restored to original levels after
+    /// playback completes.
+    ///
+    /// Requires the `audio-ducking` feature flag.
+    ///
+    /// ## Example
+    ///
+    /// ```ignore
+    /// use playa::{Playa, ducking::DuckConfig};
+    ///
+    /// // Play with default ducking (1s ramp, 0.2 floor)
+    /// Playa::from_path("audio.mp3")?
+    ///     .with_ducked_audio(DuckConfig::default())
+    ///     .play_async()
+    ///     .await?;
+    /// ```
+    #[cfg(feature = "audio-ducking")]
+    pub fn with_ducked_audio(mut self, config: DuckConfig) -> Self {
+        self.duck_config = Some(config);
+        self
+    }
+
     /// Return the detected audio format.
     pub fn format(&self) -> AudioFormat {
         self.audio.format()
@@ -97,6 +129,9 @@ impl Playa {
     ///
     /// If `show_meta()` was called, prints playback metadata to STDOUT before
     /// starting playback.
+    ///
+    /// Note: If ducking is configured, use [`play_async`] instead as ducking
+    /// requires an async runtime.
     pub fn play(self) -> Result<(), PlaybackError> {
         let format = self.audio.format();
         let player = self.select_player(format)?;
@@ -106,6 +141,47 @@ impl Playa {
         }
 
         playa_with_player_and_options(player, self.audio.into_data(), self.options)
+    }
+
+    /// Play the audio asynchronously with optional ducking support.
+    ///
+    /// This method supports audio ducking when configured via [`with_ducked_audio`].
+    /// If ducking fails to initialize, playback continues with a warning.
+    ///
+    /// Requires the `audio-ducking` feature flag for ducking support.
+    #[cfg(feature = "audio-ducking")]
+    pub async fn play_async(self) -> Result<(), PlaybackError> {
+        let format = self.audio.format();
+        let player = self.select_player(format)?;
+
+        if self.show_meta {
+            self.print_meta(player, format);
+        }
+
+        // Set up ducking if configured
+        let guard = if let Some(config) = self.duck_config {
+            let backend = create_backend();
+            match DuckGuard::new(backend, config).await {
+                Ok(guard) => Some(guard),
+                Err(e) => {
+                    eprintln!("Warning: audio ducking failed to initialize: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Play the audio (blocking call wrapped in spawn_blocking would be better,
+        // but for now we just call it directly since the player spawns a subprocess)
+        let result = playa_with_player_and_options(player, self.audio.into_data(), self.options);
+
+        // Explicitly restore ducking (guard drop would do this too, but explicit is clearer)
+        if let Some(guard) = guard {
+            guard.restore().await;
+        }
+
+        result
     }
 
     /// Select the best available player for the audio format and options.

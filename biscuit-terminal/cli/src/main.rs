@@ -902,28 +902,35 @@ enum Command {
 \x1b[1m\x1b[4mBlock Tags:\x1b[0m
 
   \x1b[1mColor Blocks:\x1b[0m
-    Use a named color (basic, web, or Tailwind):
+    Use a named color (basic colors, web colors, tailwind):
       \x1b[1m<red>\x1b[2ma basic color\x1b[22m</red>\x1b[0m
-      \x1b[1m<bright-red>\x1b[2ma bright variant\x1b[22m</bright-red>\x1b[0m
-      \x1b[1m<alice-blue>\x1b[2ma web/CSS color\x1b[22m</alice-blue>\x1b[0m
-      \x1b[1m<purple-500>\x1b[2ma Tailwind color\x1b[22m</purple-500>\x1b[0m
+      \x1b[1m<bright-red>\x1b[2ma bright variant of a basic color\x1b[22m</bright-red>\x1b[0m
+      \x1b[1m<alice-blue>\x1b[2ma web/CSS color variant\x1b[22m</alice-blue>\x1b[0m
+      \x1b[1m<purple-500>\x1b[2ma tailwind class variant\x1b[22m</purple-500>\x1b[0m
     Use a bespoke RGB color value:
       \x1b[1m<rgb 255,0,0>\x1b[2musing an RGB color\x1b[22m</rgb>\x1b[0m
 
   \x1b[1mHyperlinks:\x1b[0m
-    Create OSC8 hyperlinks (with fallback for unsupported terminals):
+    You can create OSC8 hyperlinks (with a fallback for terminals that don't support it):
       \x1b[1m<a href=https://google.com>\x1b[2mGoogle Search\x1b[22m</a>\x1b[0m
-      \x1b[1m<a href=/fully/qualified/path/file.ext>\x1b[2mAbsolute path\x1b[22m</a>\x1b[0m
-      \x1b[1m<a href=./relative/file.ext>\x1b[2mRelative from CWD\x1b[22m</a>\x1b[0m
-      \x1b[1m<a href=relative/file.ext>\x1b[2mRelative from git root\x1b[22m</a>\x1b[0m
-        (monorepo: package root > repo root)
+      \x1b[1m<a href=/fully/qualified/path/filename.ext>\x1b[2mSome File\x1b[22m</a>\x1b[0m
+      \x1b[1m<a href=./relative/filename.ext>\x1b[2mSome File\x1b[22m</a>\x1b[0m a relative file reference:
+        - relative from CWD
+      \x1b[1m<a href=relative/filename.ext>\x1b[2mSome File\x1b[22m</a>\x1b[0m a relative file reference, where:
+        - if in git repo then relative from either:
+          - if monorepo, root of the package the CWD is in
+          - repo's root
+        - will check in the order specified and resolve
 
   \x1b[1mOther Styling:\x1b[0m
-    All atomic tokens \x1b[3m(except negations like \x1b[1mnot-italic\x1b[22m, \x1b[1mreset\x1b[22m, etc.)\x1b[0m work as block tags:
-      \x1b[1m<bold>\x1b[0m or \x1b[1m<b>\x1b[0m    \x1b[1m<italic>\x1b[0m or \x1b[1m<i>\x1b[0m    \x1b[1m<underline>\x1b[0m or \x1b[1m<u>\x1b[0m
-      \x1b[1m<double-underline>\x1b[0m or \x1b[1m<uu>\x1b[0m    \x1b[1m<strikethrough>\x1b[0m or \x1b[1m<~>\x1b[0m
-      \x1b[1m<curly-underline>\x1b[0m  \x1b[1m<dotted-underline>\x1b[0m  \x1b[1m<dashed-underline>\x1b[0m
-      \x1b[1m<dim>\x1b[0m  \x1b[1m<blink>\x1b[0m  \x1b[1m<inverse>\x1b[0m  \x1b[1m<hidden>\x1b[0m
+    All atomic tokens -- \x1b[3mother than negations like \x1b[1mnot-italic\x1b[22m, \x1b[1mreset\x1b[22m, etc.\x1b[23m -- are
+    available as block tokens as well.
+    In addition we have some shortcut aliases for convenience:
+      \x1b[1m<u>\x1b[2m...\x1b[22m</u>\x1b[0m \x1b[3mprovides underlined text\x1b[23m
+      \x1b[1m<uu>\x1b[2m...\x1b[22m</uu>\x1b[0m \x1b[3mprovides double-underlined text\x1b[23m
+      \x1b[1m<~>\x1b[2m...\x1b[22m</~>\x1b[0m \x1b[3mprovides strikethrough text\x1b[23m
+      \x1b[1m<i>\x1b[2m...\x1b[22m</i>\x1b[0m \x1b[3mprovides italics text\x1b[23m
+      \x1b[1m<b>\x1b[2m...\x1b[22m</b>\x1b[0m \x1b[3mprovides bold text\x1b[23m
 ")]
     Prose {
         /// Content with {{tokens}} and <block>tags</block>
@@ -941,6 +948,37 @@ enum Command {
         /// Right margin in characters
         #[arg(long, short = 'r')]
         right_margin: Option<u32>,
+    },
+
+    /// Render styled text in a block quote
+    ///
+    /// Wraps prose content in a block quote with a left border.
+    /// Supports the same {{tokens}} and <block>tags</block> as the prose command.
+    #[command(display_order = 12, after_long_help = "\
+\x1b[1m\x1b[4mExamples:\x1b[0m
+  Simple quote:
+    bt quote \"To be or not to be\"
+
+  With attribution:
+    bt quote --attribution \"Shakespeare\" \"To be or not to be\"
+
+  With styling:
+    bt quote \"<bold>Important:</bold> This is <red>critical</red> information\"
+
+  Multiline (use \\n for newlines):
+    bt quote \"First line\\nSecond line\\nThird line\"
+
+  With attribution and styling:
+    bt quote -a \"Albert Einstein\" \"<i>Imagination is more important than knowledge.</i>\"
+")]
+    Quote {
+        /// Content with {{tokens}} and <block>tags</block>
+        #[arg(value_name = "CONTENT")]
+        content: Vec<String>,
+
+        /// Attribution (author/source) displayed below the quote
+        #[arg(long, short = 'a')]
+        attribution: Option<String>,
     },
 }
 
@@ -1379,6 +1417,12 @@ fn main() -> color_eyre::Result<()> {
             right_margin,
         }) => {
             return render_prose(content, no_wrap, left_margin, right_margin);
+        }
+        Some(Command::Quote {
+            ref content,
+            ref attribution,
+        }) => {
+            return render_quote(content, attribution.as_deref());
         }
         None => {
             // Default behavior: content analysis or terminal metadata
@@ -3274,6 +3318,12 @@ fn render_prose(
         ));
     }
 
+    // Unescape common escape sequences (shell passes literal \n, \t, etc.)
+    let text = text
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\\r", "\r");
+
     // Build the Prose component
     let mut prose = Prose::new(&text);
 
@@ -3296,6 +3346,48 @@ fn render_prose(
     let term = Terminal::new();
     let layout = Layout::default();
     let output = prose.fallback_render(&term, Some(&layout));
+
+    println!("{}", output);
+
+    Ok(())
+}
+
+/// Render prose content inside a block quote.
+fn render_quote(content: &[String], attribution: Option<&str>) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::block_quote::BlockQuote;
+    use biscuit_terminal::components::prose::Prose;
+    use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+    use biscuit_terminal::utils::layout::Layout;
+    use std::sync::Arc;
+
+    // Join all content pieces with spaces
+    let text = content.join(" ");
+
+    if text.is_empty() {
+        return Err(color_eyre::eyre::eyre!(
+            "No content provided. Usage: bt quote \"To be or not to be\" --attribution \"Shakespeare\""
+        ));
+    }
+
+    // Unescape common escape sequences (shell passes literal \n, \t, etc.)
+    let text = text
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\\r", "\r");
+
+    // Build the Prose component for the content
+    let prose = Prose::new(&text);
+
+    // Build the BlockQuote with the Prose content
+    let quote = BlockQuote::new(
+        RenderableContent::Component(Arc::new(prose)),
+        attribution,
+    );
+
+    // Render using fallback_render for terminal-aware output
+    let term = Terminal::new();
+    let layout = Layout::default();
+    let output = quote.fallback_render(&term, Some(&layout));
 
     println!("{}", output);
 

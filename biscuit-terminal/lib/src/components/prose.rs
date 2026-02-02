@@ -60,7 +60,7 @@ use crate::{
 /// - `<red>content</red>` for named color foreground text
 /// - `<clipboard>fallback</clipboard>` injects clipboard content or fallback
 ///
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Prose {
     /// the raw content as received
     content: String,

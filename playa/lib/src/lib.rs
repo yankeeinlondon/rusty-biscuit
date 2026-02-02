@@ -6,6 +6,9 @@ mod playback;
 mod player;
 mod types;
 
+#[cfg(feature = "audio-ducking")]
+pub mod ducking;
+
 #[cfg(any(
     feature = "sound-effects",
     feature = "sfx-ui",

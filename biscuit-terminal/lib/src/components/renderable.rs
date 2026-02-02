@@ -54,6 +54,22 @@ impl<T: Renderable + 'static> From<T> for RenderableContent {
     }
 }
 
+impl RenderableContent {
+    /// Returns the text content as a string.
+    ///
+    /// For String variants, returns the string directly.
+    /// For Component variants, renders using fallback with default terminal.
+    pub fn as_text(&self) -> String {
+        match self {
+            RenderableContent::String(s) => s.clone(),
+            RenderableContent::Component(c) => {
+                let term = Terminal::default();
+                c.fallback_render(&term, None)
+            }
+        }
+    }
+}
+
 impl From<String> for RenderableContent {
     fn from(value: String) -> Self {
         RenderableContent::String(value)
