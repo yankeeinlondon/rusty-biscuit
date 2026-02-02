@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{terminal::Terminal, utils::color::Color};
 
 pub trait Stylist {
@@ -11,8 +13,11 @@ pub trait Stylist {
     /// doesn't support.
     fn term_wrap<T: Into<String>>(&self, content: T, term: &Terminal) -> String;
 
-    fn set_char(&self) -> &'static str;
-    fn reset_char(&self) -> &'static str;
+    /// Returns the escape code sequence to enable this style.
+    fn set_char(&self) -> String;
+
+    /// Returns the escape code sequence to disable this style.
+    fn reset_char(&self) -> String;
 }
 
 const ESC: &'static str = "\x1b[";
@@ -77,9 +82,12 @@ pub fn dotted_underline<T: Into<String>>(content: T, terminal: Option<Terminal>)
     }
 }
 
-pub fn curly_underline<T: Into<String>>(content: T, terminal: Option<Terminal>) -> String {
+pub fn curly_underline<T: Into<String>>(content: T, terminal: Option<&Terminal>) -> String {
     let content = content.into();
-    let term = terminal.unwrap_or_default();
+    let term: Terminal = match terminal {
+        Some(terminal) => Terminal::from(terminal),
+        _ => Terminal::new_tty()
+    };
     if !term.is_tty {
         return content;
     }
@@ -107,6 +115,16 @@ pub fn dashed_underline<T: Into<String>>(content: T, terminal: Option<Terminal>)
     } else {
         content
     }
+}
+
+#[derive(Debug)]
+pub enum UnderliningRequest {
+    None,
+    Straight(Option<Color>),
+    Double(Option<Color>),
+    Dotted(Option<Color>),
+    Curly(Option<Color>),
+    Dashed(Option<Color>)
 }
 
 const UNDERLINE: &'static str = "4";
@@ -137,6 +155,7 @@ const NOT_INVERSE: &'static str = "27";
 ///
 /// **Note:** this _does not_ include boldfacing or dimming text
 /// as this is covered with the `FontWeight` struct.
+#[derive(Debug, Clone,  PartialEq, Eq, Serialize, Deserialize, Hash )]
 pub enum Style {
     /// italicize text
     Italic,
@@ -161,41 +180,63 @@ pub enum Style {
     NormalWeight,
 }
 
-impl Stylist for Style {
-    fn reset_char(&self) -> &'static str {
-        match self {
-            Style::Underline(_) => NOT_UNDERLINE,
-            Style::CurlyUnderline(_) => NOT_UNDERLINE,
-            Style::DashedUnderline(_) => NOT_UNDERLINE,
-            Style::DottedUnderline(_) => NOT_UNDERLINE,
-            Style::DoubleUnderline(_) => NOT_UNDERLINE,
-            Style::Italic => NOT_ITALIC,
-            Style::Blink => NOT_BLINK,
-            Style::BlinkFast => NOT_BLINK,
-            Style::Strikethrough => NOT_STRIKETHROUGH,
-            Style::Inverse => NOT_INVERSE,
+/// Helper to generate underline escape code with optional color.
+///
+/// Combines the underline style code with SGR 58 (underline color) if a color is provided.
+fn underline_with_color(underline_code: &str, color: &Option<Color>) -> String {
+    match color {
+        Some(c) => {
+            if let Some((r, g, b)) = c.to_rgb() {
+                format!("{};58;2;{};{};{}", underline_code, r, g, b)
+            } else {
+                underline_code.to_string()
+            }
+        }
+        None => underline_code.to_string(),
+    }
+}
 
-            Style::Bold => BOLD,
-            Style::Dim => DIM,
-            Style::NormalWeight => NORMAL,
+impl Stylist for Style {
+    fn reset_char(&self) -> String {
+        match self {
+            // Underlines with color need to reset both underline (24) and underline color (59)
+            Style::Underline(Some(_))
+            | Style::CurlyUnderline(Some(_))
+            | Style::DashedUnderline(Some(_))
+            | Style::DottedUnderline(Some(_))
+            | Style::DoubleUnderline(Some(_)) => format!("{};59", NOT_UNDERLINE),
+
+            // Underlines without color just reset underline
+            Style::Underline(None)
+            | Style::CurlyUnderline(None)
+            | Style::DashedUnderline(None)
+            | Style::DottedUnderline(None)
+            | Style::DoubleUnderline(None) => NOT_UNDERLINE.to_string(),
+
+            Style::Italic => NOT_ITALIC.to_string(),
+            Style::Blink | Style::BlinkFast => NOT_BLINK.to_string(),
+            Style::Strikethrough => NOT_STRIKETHROUGH.to_string(),
+            Style::Inverse => NOT_INVERSE.to_string(),
+
+            Style::Bold | Style::Dim | Style::NormalWeight => NORMAL.to_string(),
         }
     }
 
-    fn set_char(&self) -> &'static str {
+    fn set_char(&self) -> String {
         match self {
-            Style::Underline(color) => UNDERLINE,
-            Style::CurlyUnderline(color) => CURLY_UNDERLINE,
-            Style::DashedUnderline(color) => DASHED_UNDERLINE,
-            Style::DottedUnderline(color) => DOUBLE_UNDERLINE,
-            Style::DoubleUnderline(color) => DOUBLE_UNDERLINE,
-            Style::Italic => ITALIC,
-            Style::Blink => BLINK,
-            Style::BlinkFast => BLINK_FAST,
-            Style::Strikethrough => STRIKETHROUGH,
-            Style::Inverse => INVERSE,
-            Style::Bold => BOLD,
-            Style::Dim => DIM,
-            Style::NormalWeight => NORMAL,
+            Style::Underline(color) => underline_with_color(UNDERLINE, color),
+            Style::CurlyUnderline(color) => underline_with_color(CURLY_UNDERLINE, color),
+            Style::DashedUnderline(color) => underline_with_color(DASHED_UNDERLINE, color),
+            Style::DottedUnderline(color) => underline_with_color(DOTTED_UNDERLINE, color),
+            Style::DoubleUnderline(color) => underline_with_color(DOUBLE_UNDERLINE, color),
+            Style::Italic => ITALIC.to_string(),
+            Style::Blink => BLINK.to_string(),
+            Style::BlinkFast => BLINK_FAST.to_string(),
+            Style::Strikethrough => STRIKETHROUGH.to_string(),
+            Style::Inverse => INVERSE.to_string(),
+            Style::Bold => BOLD.to_string(),
+            Style::Dim => DIM.to_string(),
+            Style::NormalWeight => NORMAL.to_string(),
         }
     }
 
@@ -243,7 +284,18 @@ impl Stylist for Style {
                             false => content.into()
                         }
                     },
-
+                    &Style::Italic => match term.supports_italic {
+                        true => self.wrap(content),
+                        false => content.into()
+                    },
+                    // These styles are widely supported - apply when is_tty
+                    &Style::Blink => self.wrap(content),
+                    &Style::BlinkFast => self.wrap(content),
+                    &Style::Strikethrough => self.wrap(content),
+                    &Style::Inverse => self.wrap(content),
+                    &Style::Bold => self.wrap(content),
+                    &Style::Dim => self.wrap(content),
+                    &Style::NormalWeight => self.wrap(content),
                 }
             },
             false => content.into(),
@@ -259,6 +311,7 @@ const NORMAL: &'static str = "\x1b[22m";
 ///
 /// This allows for defining a desired _font weight_ for a renderable component prior
 /// to rendering.
+#[derive(Debug,PartialEq)]
 pub enum FontWeight {
     Normal,
     Bold,
@@ -286,15 +339,15 @@ impl Stylist for FontWeight {
         }
     }
 
-    fn set_char(&self) -> &'static str {
+    fn set_char(&self) -> String {
         match self {
-            FontWeight::Bold => "1",
-            FontWeight::Dim => "2",
-            FontWeight::Normal => "22",
+            FontWeight::Bold => "1".to_string(),
+            FontWeight::Dim => "2".to_string(),
+            FontWeight::Normal => "22".to_string(),
         }
     }
 
-    fn reset_char(&self) -> &'static str {
-        "22"
+    fn reset_char(&self) -> String {
+        "22".to_string()
     }
 }

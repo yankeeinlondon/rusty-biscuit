@@ -20,7 +20,7 @@ use std::path::Path;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use image::{DynamicImage, ImageFormat, ImageReader};
 
-use crate::components::renderable::Renderable;
+use crate::{components::renderable::Renderable, terminal::Terminal, utils::layout::Layout};
 
 /// Error types for terminal image operations.
 #[derive(Debug, thiserror::Error)]
@@ -92,6 +92,7 @@ impl Default for ImageWidth {
 }
 
 /// A terminal image component that can be rendered using various protocols.
+#[derive(Debug)]
 pub struct TerminalImage {
     /// Fully qualified filename (absolute path).
     pub filename: String,
@@ -137,7 +138,7 @@ impl Renderable for TerminalImage {
     /// Note: The Renderable trait uses associated functions (no `&self`),
     /// which limits their usefulness for stateful components like TerminalImage.
     /// Use the instance method `render_to_terminal()` instead for full functionality.
-    fn fallback_render(_term: &crate::terminal::Terminal) -> String {
+    fn fallback_render(&self, _term: &Terminal, _layout: Option<&Layout>) -> String {
         "[Image: use render_to_terminal() for actual rendering]".to_string()
     }
 
@@ -146,7 +147,7 @@ impl Renderable for TerminalImage {
     /// Note: The Renderable trait uses associated functions (no `&self`),
     /// which limits their usefulness for stateful components like TerminalImage.
     /// Use the instance method `render_to_terminal()` instead for full functionality.
-    fn render() -> String {
+    fn render(&self, _layout: Option<&Layout>) -> String {
         "[Image: use render_to_terminal() for actual rendering]".to_string()
     }
 }

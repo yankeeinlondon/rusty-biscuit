@@ -1,5 +1,7 @@
 use std::{borrow::Cow, collections::HashMap, sync::LazyLock};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{components::renderable::RenderableWrapper, terminal::Terminal};
 use thiserror::Error;
 
@@ -22,7 +24,7 @@ use thiserror::Error;
 /// // Get the inner value
 /// assert_eq!(green.value(), 128);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Octet(u8);
 
 /// Error returned when an invalid value is provided for `Octet`.
@@ -176,7 +178,7 @@ pub trait TermColor<'a> {
 }
 
 /// Basic 8 color mode (ANSI colors 0-7 and bright variants 8-15).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BasicColor {
     Black,
     Red,
@@ -228,6 +230,7 @@ static BASIC_COLOR_LOOKUP: LazyLock<HashMap<BasicColor, (&'static str, &'static 
     });
 
 /// specify color target as either foreground or background
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FgBg {
     Foreground,
     Background,
@@ -278,7 +281,7 @@ impl<'a> TermColor<'a> for BasicColor {
 }
 
 /// An RGB color with a fallback for terminals with limited color support.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RgbColor {
     red: Octet,
     green: Octet,
@@ -475,7 +478,7 @@ impl HdrColor {
 ///
 /// These correspond to the 148 named colors defined in the CSS Color Module Level 4
 /// specification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WebColor {
     /// Alice Blue color (240, 248, 255).
     AliceBlue,
@@ -1033,7 +1036,7 @@ pub static WEB_COLOR_LOOKUP: LazyLock<HashMap<WebColor, RgbColor>> = LazyLock::n
     m
 });
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Tailwind {
     // “specials” commonly present in Tailwind palettes
     Inherit,
@@ -1314,6 +1317,7 @@ pub enum Tailwind {
 include!(concat!(env!("OUT_DIR"), "/tailwind_colors.rs"));
 
 /// An enumeration for specifying color for the terminal
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Color {
     BasicColor(BasicColor),
     /// Specify a bespoke RGB color value (with a `BasicColor` as a fallback)
@@ -1335,12 +1339,12 @@ pub enum Color {
 pub struct BasicColorWrapper(pub BasicColor);
 
 impl RenderableWrapper for BasicColorWrapper {
-    fn render<T: Into<String>>(self, content: T) -> String {
+    fn render<T: Into<String>>(&self, content: T) -> String {
         let content = content.into();
         format!("\x1b[{}m{}\x1b[0m", color_code(self.0), content)
     }
 
-    fn fallback_render<T: Into<String>>(self, content: T, _term: &Terminal) -> String {
+    fn fallback_render<T: Into<String>>(&self, content: T, _term: &Terminal) -> String {
         let content = content.into();
         format!("\x1b[{}m{}\x1b[0m", color_code(self.0), content)
     }
@@ -1351,7 +1355,7 @@ impl RenderableWrapper for BasicColorWrapper {
 pub struct RgbColorWrapper(pub RgbColor);
 
 impl RenderableWrapper for RgbColorWrapper {
-    fn render<T: Into<String>>(self, content: T) -> String {
+    fn render<T: Into<String>>(&self, content: T) -> String {
         let content = content.into();
         let rgb = self.0;
         format!(
@@ -1363,7 +1367,7 @@ impl RenderableWrapper for RgbColorWrapper {
         )
     }
 
-    fn fallback_render<T: Into<String>>(self, content: T, term: &Terminal) -> String {
+    fn fallback_render<T: Into<String>>(&self, content: T, term: &Terminal) -> String {
         let content = content.into();
         let rgb = self.0;
         // Check terminal color depth and use appropriate encoding
@@ -1403,7 +1407,7 @@ impl RenderableWrapper for RgbColorWrapper {
 pub struct WebColorWrapper(pub WebColor);
 
 impl RenderableWrapper for WebColorWrapper {
-    fn render<T: Into<String>>(self, content: T) -> String {
+    fn render<T: Into<String>>(&self, content: T) -> String {
         let content = content.into();
         let rgb = WEB_COLOR_LOOKUP
             .get(&self.0)
@@ -1418,7 +1422,7 @@ impl RenderableWrapper for WebColorWrapper {
         )
     }
 
-    fn fallback_render<T: Into<String>>(self, content: T, term: &Terminal) -> String {
+    fn fallback_render<T: Into<String>>(&self, content: T, term: &Terminal) -> String {
         let content = content.into();
         let rgb = WEB_COLOR_LOOKUP
             .get(&self.0)
@@ -1461,7 +1465,7 @@ impl RenderableWrapper for WebColorWrapper {
 pub struct TailwindColorWrapper(pub Tailwind);
 
 impl RenderableWrapper for TailwindColorWrapper {
-    fn render<T: Into<String>>(self, content: T) -> String {
+    fn render<T: Into<String>>(&self, content: T) -> String {
         let content = content.into();
 
         // Get the HDR color; special values (Inherit/Current/Transparent) return None
@@ -1483,7 +1487,7 @@ impl RenderableWrapper for TailwindColorWrapper {
         }
     }
 
-    fn fallback_render<T: Into<String>>(self, content: T, term: &Terminal) -> String {
+    fn fallback_render<T: Into<String>>(&self, content: T, term: &Terminal) -> String {
         let content = content.into();
 
         // Get the HDR color; special values (Inherit/Current/Transparent) return None
@@ -1544,6 +1548,50 @@ fn color_code(color: BasicColor) -> u8 {
         BasicColor::BrightMagenta => 95,
         BasicColor::BrightCyan => 96,
         BasicColor::BrightWhite => 97,
+    }
+}
+
+/// Convert BasicColor to approximate RGB values.
+///
+/// These are the standard VGA/ANSI color values commonly used by terminals.
+pub fn basic_color_to_rgb(color: BasicColor) -> (u8, u8, u8) {
+    match color {
+        BasicColor::Black => (0, 0, 0),
+        BasicColor::Red => (128, 0, 0),
+        BasicColor::Green => (0, 128, 0),
+        BasicColor::Yellow => (128, 128, 0),
+        BasicColor::Blue => (0, 0, 128),
+        BasicColor::Magenta => (128, 0, 128),
+        BasicColor::Cyan => (0, 128, 128),
+        BasicColor::White => (192, 192, 192),
+        BasicColor::BrightBlack => (128, 128, 128),
+        BasicColor::BrightRed => (255, 0, 0),
+        BasicColor::BrightGreen => (0, 255, 0),
+        BasicColor::BrightYellow => (255, 255, 0),
+        BasicColor::BrightBlue => (0, 0, 255),
+        BasicColor::BrightMagenta => (255, 0, 255),
+        BasicColor::BrightCyan => (0, 255, 255),
+        BasicColor::BrightWhite => (255, 255, 255),
+    }
+}
+
+impl Color {
+    /// Returns RGB values (r, g, b) for this color, if available.
+    ///
+    /// Returns `None` for `DefaultForeground`, `DefaultBackground`, and `Reset`
+    /// since these don't have fixed RGB values.
+    pub fn to_rgb(&self) -> Option<(u8, u8, u8)> {
+        match self {
+            Color::BasicColor(c) => Some(basic_color_to_rgb(*c)),
+            Color::Rgb(rgb) => Some((rgb.red(), rgb.green(), rgb.blue())),
+            Color::Web(web) => {
+                WEB_COLOR_LOOKUP.get(web).map(|rgb| (rgb.red(), rgb.green(), rgb.blue()))
+            }
+            Color::Tailwind(tw) => {
+                tw.to_hdr_color().map(|hdr| (hdr.red(), hdr.green(), hdr.blue()))
+            }
+            Color::DefaultForeground | Color::DefaultBackground | Color::Reset => None,
+        }
     }
 }
 

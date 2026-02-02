@@ -1,9 +1,9 @@
 pub mod block_constraint;
 pub mod color;
 pub mod escape_codes;
-pub mod font_weight;
 pub mod layout;
 pub mod multiplex;
 pub mod styling;
 pub mod text;
 pub mod word_wrap;
+pub mod parsing;

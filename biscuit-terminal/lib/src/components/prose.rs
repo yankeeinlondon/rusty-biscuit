@@ -1,4 +1,8 @@
-use crate::components::renderable::Renderable;
+use crate::{
+    components::renderable::Renderable,
+    terminal::Terminal,
+    utils::layout::Layout
+};
 
 /// Prose content allows plain text to be passed in and that content will be parsed
 /// for two kinds of tokens:
@@ -43,7 +47,7 @@ use crate::components::renderable::Renderable;
 /// - `<red>content</red>` for named color foreground text
 /// - `<clipboard>fallback</clipboard>` injects clipboard content or fallback
 ///
-#[allow(dead_code)]
+#[derive(Debug)]
 pub struct Prose {
     /// the raw content as received
     content: String,
@@ -75,11 +79,11 @@ impl Default for Prose {
 }
 
 impl Renderable for Prose {
-    fn render() -> String {
+    fn render(&self, _layout: Option<&Layout>) -> String {
         todo!()
     }
 
-    fn fallback_render(_term: &crate::terminal::Terminal) -> String {
+    fn fallback_render(&self, _term: &Terminal, _layout: Option<&Layout>) -> String {
         todo!()
     }
 }

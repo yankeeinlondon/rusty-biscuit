@@ -1,4 +1,4 @@
-use crate::utils::color::Color;
+use crate::{components::renderable::{Renderable, RenderableWrapper}, utils::color::Color};
 
 /// The **TextAlignment** enumeration allows for
 /// terminal components to express how they should
@@ -161,4 +161,42 @@ impl Default for Layout {
             page_bg_color: None,
         }
     }
+}
+
+impl RenderableWrapper for Layout {
+    fn render<T: Into<String>>(&self, content: T) -> String {
+        todo!()
+    }
+
+    fn fallback_render<T: Into<String>>(&self, content: T, term: &crate::terminal::Terminal) -> String {
+        todo!()
+    }
+}
+
+impl Layout {
+
+    /// Add a new Layout by setting the `word_wrap` policy and optionally
+    /// setting the margins (left, right, top, bottom).
+    pub fn new(wrap: WordWrap, margin: Option<(Margin,Margin,Margin,Margin)>) -> Self {
+        match margin {
+            Some(margin) => {
+                Layout {
+                    word_wrap: wrap,
+                    left_margin: margin.0,
+                    right_margin: margin.1,
+                    top_margin: margin.2,
+                    bottom_margin: margin.3,
+                    ..Layout::default()
+                }
+            },
+            _ => Layout {
+                word_wrap: wrap,
+                ..Layout::default()
+            }
+        }
+    }
+
+
+
+
 }

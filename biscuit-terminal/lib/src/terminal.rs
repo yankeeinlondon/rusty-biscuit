@@ -59,6 +59,7 @@ fn new_terminal() -> Terminal {
 ///     println!("Config file: {:?}", config);
 /// }
 /// ```
+#[derive(Debug,Clone)]
 pub struct Terminal {
     /// The app/vendor of the terminal
     pub app: TerminalApp,
@@ -119,6 +120,18 @@ impl Default for Terminal {
     }
 }
 
+impl From<&Terminal> for Terminal {
+    fn from(value: &Terminal) -> Self {
+        Terminal {
+            app: value.app.clone(),
+            supports_italic: value.supports_italic.clone(),
+            image_support: value.image_support.clone(),
+            underline_support: value.underline_support.clone(),
+            osc_link_support: value.osc_link_support.clone(),
+        }
+    }
+}
+
 impl Terminal {
     /// Create a new Terminal instance with detected capabilities.
     ///
@@ -144,6 +157,14 @@ impl Terminal {
     /// ```
     pub fn new() -> Terminal {
         new_terminal()
+    }
+
+    /// Creates a new Terminal which sets the `is_tty` property to `true`.
+    pub fn new_tty() -> Terminal {
+        Terminal {
+            is_tty: true,
+            ..Terminal::default()
+        }
     }
 
     /// Get the terminal width in columns.

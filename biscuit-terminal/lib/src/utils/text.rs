@@ -4,8 +4,7 @@
 /// removed.
 pub fn content_length(content: &str) -> Vec<u32> {
     content
-        .lines
-        .into_iter()
+        .lines()
         .map(|line| {
             // Strip ANSI escape codes (e.g., \x1b[31m, \x1b[0m)
             // This pattern matches CSI sequences: ESC followed by [ and any characters until a letter

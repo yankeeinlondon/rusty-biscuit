@@ -2,10 +2,11 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
-use crate::components::renderable::Renderable;
+use crate::components::renderable::{Renderable, RenderableWrapper};
 use crate::terminal::Terminal;
-use crate::utils::styling::{FontWeight, Stylist};
+use crate::utils::styling::{FontWeight, Style, Stylist};
 use crate::utils::{
     color::{BasicColor, TermColor},
     layout::Layout,
@@ -35,7 +36,7 @@ pub static FB_CHECKBOX_CANCELLED: LazyLock<String> =
 pub static FB_CHECKBOX_BLOCKED: LazyLock<String> =
     LazyLock::new(|| format!("[{}]", BasicColor::BrightRed.fg("⏺")));
 
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Debug, Clone,  PartialEq, Eq, Serialize, Deserialize, Hash )]
 pub enum TodoState {
     Open,
     InProgress,
@@ -44,6 +45,7 @@ pub enum TodoState {
     Blocked,
 }
 
+#[derive(Debug, Clone,  PartialEq, Eq, Serialize, Deserialize, Hash )]
 pub struct TodoStateRep {
     pub nerd: &'static str,
     pub fallback: &'static str,
@@ -94,12 +96,14 @@ pub static TODO_CHAR_LOOKUP: LazyLock<HashMap<TodoState, TodoStateRep>> = LazyLo
     m
 });
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Hash )]
 pub struct Todo {
     state: TodoState,
     description: String,
     created: DateTime<Utc>,
     last_updated: DateTime<Utc>,
 }
+
 
 impl Default for Todo {
     fn default() -> Self {
@@ -112,10 +116,23 @@ impl Default for Todo {
     }
 }
 
+impl From<&Todo> for Todo {
+    /// allows the `state` and `description` of a Todo reference to
+    /// be cloned into a new Todo which has `created` and `last_updated`
+    /// set to now.
+    fn from(value: &Todo) -> Self {
+        Todo {
+            state: value.state.clone(),
+            description: value.description.clone(),
+            ..Todo::default()
+        }
+    }
+}
+
 impl Todo {
     /// Create a new TODO item with just a description, the TODO's state
     /// will start as being "open".
-    fn new<T: Into<String>>(desc: T) -> Todo {
+    pub fn new<T: Into<String>>(desc: T) -> Todo {
         Todo {
             description: desc.into(),
             ..Todo::default()
@@ -125,39 +142,52 @@ impl Todo {
     /// Reports the Todo item to the terminal. Using a nerd font representation
     /// if the terminal has detected that the font is a nerd font. Otherwise it
     /// uses basic characters which should be in all font variants.
-    pub fn to_terminal(self, term: Terminal) -> String {
-        let todo_icon = TODO_CHAR_LOOKUP.get(&self.state).unwrap_or_else(|| {
-            // Default to Open state if state not found
-            &TODO_CHAR_LOOKUP[&TodoState::Open]
-        });
+    fn to_terminal(&self, term: &Terminal) -> String {
+        let todo_icon = TODO_CHAR_LOOKUP
+            .get(&self.state)
+            .unwrap_or(&TODO_CHAR_LOOKUP[&TodoState::Open]);
 
         match self.state {
-            TodoState::Cancelled => {
-                FontWeight::Dim.wrap(format!("{} {}", todo_icon, self.description))
-            }
-            _ => format!("{} {}", todo_icon, self.description),
+            TodoState::Cancelled => match term.is_nerd_font {
+                Some(true) => {
+                    FontWeight::Dim.wrap(format!("{} {}", todo_icon.nerd, self.description))
+                }
+                _ => FontWeight::Dim.wrap(format!(
+                    "{} {}",
+                    todo_icon.fallback,
+                    Style::Strikethrough.term_wrap(&self.description, term)
+                )),
+            },
+            _ => match term.is_nerd_font {
+                Some(true) => {
+                    format!("{} {}", todo_icon.nerd, self.description)
+                }
+                _ => {
+                    format!("{} {}", todo_icon.fallback, self.description)
+                }
+            },
         }
     }
 }
 
 impl Renderable for Todo {
-    /// When we render _prior_ to having a concrete terminal and it's capabilities to
-    /// work with we will assume that the font is NOT a nerd font and conservatively
-    /// just use normal character strings to render a todo.
-    fn render(self, layout: Option<&Layout>) -> String {
+    fn render(&self, layout: Option<&Layout>) -> String {
+        let term = Terminal::new();
+
         match layout {
             Some(layout) => {
-                todo!()
-            }
-            _ => todo!(),
+                layout.render(self.to_terminal(&term))
+            },
+            _ => self.to_terminal(&term)
         }
     }
-    fn fallback_render(self, term: &Terminal, layout: Option<&Layout>) -> String {
+
+    fn fallback_render(&self, term: &Terminal, layout: Option<&Layout>) -> String {
         match layout {
             Some(layout) => {
-                todo!()
-            }
-            _ => todo!(),
+                layout.render(self.to_terminal(term))
+            },
+            _ => self.to_terminal(term)
         }
     }
 }
