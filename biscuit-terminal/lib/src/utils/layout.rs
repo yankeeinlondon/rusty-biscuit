@@ -28,6 +28,7 @@ impl Default for Alignment {
 
 /// The **Margin** allows for a fixed or percentage based margins to be
 /// added to the renderable component.
+#[derive(Debug,Clone,PartialEq)]
 pub enum Margin {
     None,
     Chars(u32),
@@ -46,6 +47,7 @@ impl Default for Margin {
 ///
 /// This can be useful when you set a background color to be something
 /// other than the default color.
+#[derive(Debug,Clone,PartialEq)]
 pub enum RowFill {
     /// if the background color _is **not**_ the default background color
     /// then each row's width will be extended to the max width for the
@@ -65,12 +67,14 @@ impl Default for RowFill {
     }
 }
 
+#[derive(Debug,Clone,PartialEq)]
 pub enum MaxWidth {
     None,
     Chars(u32),
     Percent(f32),
 }
 
+#[derive(Debug,Clone,PartialEq)]
 pub enum WordWrap {
     /// Will attempt to wrap words on wrap characters (e.g., whitespace,
     /// `-`, etc.) but if unable to find a break character in the text

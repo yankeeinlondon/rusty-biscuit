@@ -1,7 +1,7 @@
 use crate::{
     components::renderable::Renderable,
     terminal::Terminal,
-    utils::layout::Layout
+    utils::layout::{Layout, Margin, WordWrap}
 };
 
 /// Prose content allows plain text to be passed in and that content will be parsed
@@ -51,36 +51,62 @@ use crate::{
 pub struct Prose {
     /// the raw content as received
     content: String,
-    /// the content after having been parsed for template
-    parsed_content: Option<String>,
 
-    /// Whether the **word wrap** feature is turned on.
-    /// When on, an attempt to create clean line breaks
-    /// at natural word breakpoints will be made.
-    word_wrap: bool,
+    word_wrap: Option<WordWrap>,
     /// Optionally force a fixed number of blank characters at the
     /// start of each line to create a "left margin"
-    margin_left: Option<u32>,
+    left_margin: Option<Margin>,
     /// Optionally force a fixed number of blank characters at the
     /// end of each line to create a "right margin" effect
-    margin_right: Option<u32>,
+    right_margin: Option<Margin>,
 }
 
 impl Default for Prose {
     fn default() -> Prose {
         Prose {
             content: "".to_string(),
-            parsed_content: None,
-            word_wrap: true,
-            margin_left: None,
-            margin_right: None,
+            word_wrap: None,
+            left_margin: None,
+            right_margin: None,
         }
     }
 }
 
 impl Renderable for Prose {
-    fn render(&self, _layout: Option<&Layout>) -> String {
-        todo!()
+    fn render(&self, layout: Option<&Layout>) -> String {
+        let _layout = match layout {
+            Some(layout) => {
+              Layout {
+                  word_wrap: match &self.word_wrap {
+                      Some(wrap) => wrap.clone(),
+                      _ => layout.word_wrap.clone()
+                  },
+                  left_margin: match &self.left_margin {
+                      Some(margin) => margin.clone(),
+                      _ => layout.left_margin.clone()
+                  },
+                  right_margin: match &self.right_margin {
+                      Some(margin) => margin.clone(),
+                      _ => layout.right_margin.clone()
+                  },
+                  top_margin: layout.top_margin.clone(),
+                  bottom_margin: layout.bottom_margin.clone(),
+                  alignment: layout.alignment,
+                  row_fill_strategy: layout.row_fill_strategy.clone(),
+                  page_bg_color: layout.page_bg_color.clone(),
+              }
+            },
+            _ => {
+                Layout {
+                  word_wrap: self.word_wrap.clone().unwrap_or(WordWrap::None),
+                  left_margin: self.left_margin.clone().unwrap_or_default(),
+                  right_margin: self.right_margin.clone().unwrap_or_default(),
+                  ..Layout::default()
+                }
+            }
+        };
+        // TODO: Implement actual rendering logic using the layout
+
     }
 
     fn fallback_render(&self, _term: &Terminal, _layout: Option<&Layout>) -> String {
