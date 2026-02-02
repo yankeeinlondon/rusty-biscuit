@@ -18,6 +18,7 @@ cargo install --path biscuit-terminal/cli
 |---------|-------------|
 | `bt` | Terminal inspection (default) |
 | `bt image` | Render inline images |
+| `bt prose` | Render styled prose text |
 | `bt flowchart` | Flowchart diagrams |
 | `bt quadrant` | Quadrant charts |
 | `bt pie-chart` | Pie charts |
@@ -103,6 +104,31 @@ bt state-diagram "[*] --> Idle" "Idle --> Running" "Running --> [*]"
 # ERD
 bt erd "Customer ||--o{ Order : places"
 ```
+
+## Prose Command
+
+Render styled prose text with inline tokens:
+
+```bash
+# Atomic tokens
+bt prose "Hello {{bold}}world{{reset}}!"
+bt prose "{{red}}Error:{{reset}} Something went wrong"
+
+# Block tags
+bt prose "<b>Bold</b> and <i>italic</i> text"
+bt prose "<a href='https://example.com'>Click here</a>"
+
+# With margins
+bt prose --left-margin 4 "Indented content"
+bt prose -l 2 -r 2 "With margins on both sides"
+
+# Disable word wrapping
+bt prose --no-wrap "Long line that should not wrap"
+```
+
+Supported tokens:
+- **Atomic**: `{{bold}}`, `{{italic}}`, `{{red}}`, `{{bg-blue}}`, `{{reset}}`
+- **Block**: `<b>`, `<i>`, `<u>`, `<uu>`, `<~>`, `<a href="...">`, `<red>`, `<rgb R,G,B>`
 
 ## Content Analysis
 

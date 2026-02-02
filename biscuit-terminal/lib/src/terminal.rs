@@ -124,10 +124,23 @@ impl From<&Terminal> for Terminal {
     fn from(value: &Terminal) -> Self {
         Terminal {
             app: value.app.clone(),
-            supports_italic: value.supports_italic.clone(),
+            supports_italic: value.supports_italic,
             image_support: value.image_support.clone(),
             underline_support: value.underline_support.clone(),
-            osc_link_support: value.osc_link_support.clone(),
+            osc_link_support: value.osc_link_support,
+            is_tty: value.is_tty,
+            color_depth: value.color_depth.clone(),
+            os: value.os.clone(),
+            distro: value.distro.clone(),
+            config_file: value.config_file.clone(),
+            is_ci: value.is_ci,
+            font: value.font.clone(),
+            font_size: value.font_size,
+            font_ligatures: value.font_ligatures.clone(),
+            is_nerd_font: value.is_nerd_font,
+            remote: value.remote.clone(),
+            char_encoding: value.char_encoding.clone(),
+            locale: value.locale.clone(),
         }
     }
 }
@@ -223,9 +236,30 @@ impl Terminal {
         color_mode()
     }
 
-    /// Render content to the terminal (placeholder for future implementation).
-    pub fn render<T: Into<String>>(_content: T) -> () {
-        todo!()
+    /// Render content to the terminal with default layout.
+    ///
+    /// This is a convenience method that:
+    /// 1. Creates a new Terminal instance to detect capabilities
+    /// 2. Creates a default Layout
+    /// 3. Applies the layout with fallback rendering (respecting terminal capabilities)
+    /// 4. Prints the output to stdout
+    ///
+    /// ## Examples
+    ///
+    /// ```no_run
+    /// use biscuit_terminal::terminal::Terminal;
+    ///
+    /// Terminal::render("Hello, world!");
+    /// Terminal::render("Formatted {{bold}}text{{reset}}");
+    /// ```
+    pub fn render<T: Into<String>>(content: T) {
+        use crate::components::renderable::RenderableWrapper;
+        use crate::utils::layout::Layout;
+
+        let term = Terminal::new();
+        let layout = Layout::default();
+        let output = layout.fallback_render(content, &term);
+        print!("{}", output);
     }
 
     /// Create a builder for constructing Terminal with explicit values.

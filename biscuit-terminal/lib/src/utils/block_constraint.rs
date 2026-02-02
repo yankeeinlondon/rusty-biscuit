@@ -4,6 +4,7 @@ use crate::{
     terminal::Terminal,
     utils::color::{BasicColor, Color, RgbColor, WEB_COLOR_LOOKUP},
     utils::layout::{Margin, WordWrap},
+    utils::word_wrap::truncate,
 };
 
 /// Splits the string content passed in into a vector of string based
@@ -161,7 +162,7 @@ fn ansi_color_sequence(
         Color::DefaultForeground if !is_background => Some("\x1b[39m".to_string()),
         Color::DefaultBackground if is_background => Some("\x1b[49m".to_string()),
         Color::Reset => Some("\x1b[0m".to_string()),
-        Color::Basic(basic) => {
+        Color::BasicColor(basic) => {
             let code = basic_color_code(*basic) + if is_background { 10 } else { 0 };
             Some(format!("\x1b[{}m", code))
         }
@@ -292,7 +293,7 @@ fn escape_sequence_end(content: &str, start: usize) -> usize {
     }
 }
 
-fn visible_width(content: &str) -> u32 {
+pub fn visible_width(content: &str) -> u32 {
     let mut width = 0u32;
     let mut idx = 0usize;
     let bytes = content.as_bytes();
@@ -314,7 +315,7 @@ fn visible_width(content: &str) -> u32 {
     width
 }
 
-fn split_at_visible_width(content: &str, width: u32) -> (String, String) {
+pub fn split_at_visible_width(content: &str, width: u32) -> (String, String) {
     if width == 0 {
         return (String::new(), content.to_string());
     }
@@ -437,7 +438,52 @@ fn find_break_position(
     last_break
 }
 
-fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<String> {
+fn find_bespoke_break_position(
+    content: &str,
+    width: u32,
+    search_offset: u32,
+    break_chars: &[char],
+) -> Option<(usize, usize, bool)> {
+    let start_search = width.saturating_sub(search_offset);
+    let mut visible = 0u32;
+    let mut idx = 0usize;
+    let bytes = content.as_bytes();
+    let mut last_break: Option<(usize, usize, bool)> = None;
+
+    while idx < content.len() {
+        if bytes[idx] == 0x1b {
+            idx = escape_sequence_end(content, idx);
+            continue;
+        }
+
+        let ch = match content[idx..].chars().next() {
+            Some(ch) => ch,
+            None => break,
+        };
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0) as u32;
+        let ch_len = ch.len_utf8();
+
+        if ch_width == 0 {
+            idx += ch_len;
+            continue;
+        }
+
+        if visible.saturating_add(ch_width) > width {
+            break;
+        }
+
+        visible = visible.saturating_add(ch_width);
+        if visible >= start_search && (ch.is_whitespace() || break_chars.contains(&ch)) {
+            last_break = Some((idx, ch_len, ch.is_whitespace()));
+        }
+
+        idx += ch_len;
+    }
+
+    last_break
+}
+
+pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<String> {
     if width == 0 {
         return lines.into_iter().map(|_| String::new()).collect();
     }
@@ -454,7 +500,9 @@ fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<String
 
             match strategy {
                 WordWrap::Truncate(indicator) => {
-                    wrapped.push(truncate(remaining, indicator, &width));
+                    let default_indicator = String::from("…");
+                    let indicator_ref = indicator.as_ref().unwrap_or(&default_indicator);
+                    wrapped.push(truncate(remaining, indicator_ref, &width));
                     break;
                 }
                 WordWrap::None => {
@@ -469,6 +517,47 @@ fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<String
                     let search_offset = offset.unwrap_or(8);
                     if let Some((break_idx, break_len, is_whitespace)) =
                         find_break_position(&remaining, width, search_offset)
+                    {
+                        let split_at = if is_whitespace {
+                            break_idx
+                        } else {
+                            break_idx + break_len
+                        };
+                        let head = remaining[..split_at].to_string();
+                        let tail = if is_whitespace {
+                            trim_leading_whitespace_preserve_escapes(
+                                &remaining[break_idx + break_len..],
+                            )
+                        } else {
+                            remaining[split_at..].to_string()
+                        };
+                        wrapped.push(head);
+                        if tail.is_empty() {
+                            break;
+                        }
+                        remaining = tail;
+                    } else if width <= 1 {
+                        let (head, tail) = split_at_visible_width(&remaining, width);
+                        wrapped.push(head);
+                        if tail.is_empty() {
+                            break;
+                        }
+                        remaining = tail;
+                    } else {
+                        let hyphen_width = width.saturating_sub(1);
+                        let (mut head, tail) = split_at_visible_width(&remaining, hyphen_width);
+                        head.push('-');
+                        wrapped.push(head);
+                        if tail.is_empty() {
+                            break;
+                        }
+                        remaining = tail;
+                    }
+                }
+                WordWrap::BespokeProse(offset, break_chars) => {
+                    let search_offset = offset.unwrap_or(8);
+                    if let Some((break_idx, break_len, is_whitespace)) =
+                        find_bespoke_break_position(&remaining, width, search_offset, break_chars)
                     {
                         let split_at = if is_whitespace {
                             break_idx
@@ -593,7 +682,7 @@ mod tests {
     fn wrap_lines_truncate_strategy() {
         let lines = wrap_lines(
             vec!["abcdef".to_string()],
-            &WordWrap::Truncate("..".to_string()),
+            &WordWrap::Truncate(Some("..".to_string())),
             4,
         );
         assert_eq!(lines, vec!["ab..".to_string()]);

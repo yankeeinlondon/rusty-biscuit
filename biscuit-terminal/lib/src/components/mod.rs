@@ -1,12 +1,13 @@
 pub mod block_quote;
+pub mod compose;
 pub mod image_options;
+pub mod list;
 pub mod mermaid;
 pub mod mermaid_cache;
 pub mod prose;
 pub mod renderable;
+pub mod section;
 pub mod table;
 pub mod terminal_image;
 pub mod text_block;
 pub mod todo;
-pub mod compose;
-pub mod list;

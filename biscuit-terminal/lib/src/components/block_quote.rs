@@ -1,6 +1,10 @@
-use crate::{components::renderable::Renderable, utils::color::Color};
+use crate::{
+    components::renderable::Renderable,
+    terminal::Terminal,
+    utils::{color::Color, layout::Layout},
+};
 
-#[derive(Debug,Clone,PartialEq,Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockQuote {
     /// the content being wrapped in the block quote
     content: String,
@@ -21,7 +25,7 @@ impl Default for BlockQuote {
             attribution: None,
             text_color: None,
             bg_color: None,
-            left_block_color: None
+            left_block_color: None,
         }
     }
 }
@@ -33,19 +37,91 @@ impl BlockQuote {
             content: content.into(),
             attribution: match attribution {
                 Some(attribution) => Some(attribution.into()),
-                _ => None
+                _ => None,
             },
             ..BlockQuote::default()
         }
     }
+
+    /// Set the text color.
+    pub fn with_text_color(mut self, color: Color) -> Self {
+        self.text_color = Some(color);
+        self
+    }
+
+    /// Set the background color.
+    pub fn with_bg_color(mut self, color: Color) -> Self {
+        self.bg_color = Some(color);
+        self
+    }
+
+    /// Set the left block/border color.
+    pub fn with_left_block_color(mut self, color: Color) -> Self {
+        self.left_block_color = Some(color);
+        self
+    }
+
+    /// Render the block quote content with a left border.
+    fn render_content(&self, _term: Option<&Terminal>) -> String {
+        let mut result = String::new();
+
+        // Split content into lines and prefix each with the quote border
+        let border = "│ ";
+        for line in self.content.lines() {
+            result.push_str(border);
+            result.push_str(line);
+            result.push('\n');
+        }
+
+        // Add attribution if present
+        if let Some(ref attribution) = self.attribution {
+            result.push_str("│ ");
+            result.push_str("— ");
+            result.push_str(attribution);
+            result.push('\n');
+        }
+
+        // Remove trailing newline
+        if result.ends_with('\n') {
+            result.pop();
+        }
+
+        result
+    }
 }
 
 impl Renderable for BlockQuote {
-    fn render(&self, _layout: Option<&crate::utils::layout::Layout>) -> String {
-        todo!()
+    fn render(&self, _layout: Option<&Layout>) -> String {
+        self.render_content(None)
     }
 
-    fn fallback_render(&self, _term: &crate::terminal::Terminal, _layout: Option<&crate::utils::layout::Layout>) -> String {
-        todo!()
+    fn fallback_render(&self, term: &Terminal, _layout: Option<&Layout>) -> String {
+        self.render_content(Some(term))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_simple_block_quote() {
+        let quote = BlockQuote::new("Hello world", None::<&str>);
+        let result = quote.render(None);
+        assert_eq!(result, "│ Hello world");
+    }
+
+    #[test]
+    fn test_multiline_block_quote() {
+        let quote = BlockQuote::new("Line 1\nLine 2", None::<&str>);
+        let result = quote.render(None);
+        assert_eq!(result, "│ Line 1\n│ Line 2");
+    }
+
+    #[test]
+    fn test_block_quote_with_attribution() {
+        let quote = BlockQuote::new("To be or not to be", Some("Shakespeare"));
+        let result = quote.render(None);
+        assert_eq!(result, "│ To be or not to be\n│ — Shakespeare");
     }
 }

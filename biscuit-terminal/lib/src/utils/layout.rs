@@ -1,4 +1,11 @@
-use crate::{components::renderable::{Renderable, RenderableWrapper}, utils::color::Color};
+use crate::{
+    components::renderable::RenderableWrapper,
+    terminal::Terminal,
+    utils::{
+        block_constraint::{split_lines, visible_width, wrap_lines},
+        color::Color,
+    },
+};
 
 /// The **TextAlignment** enumeration allows for
 /// terminal components to express how they should
@@ -28,7 +35,7 @@ impl Default for Alignment {
 
 /// The **Margin** allows for a fixed or percentage based margins to be
 /// added to the renderable component.
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Margin {
     None,
     Chars(u32),
@@ -47,7 +54,7 @@ impl Default for Margin {
 ///
 /// This can be useful when you set a background color to be something
 /// other than the default color.
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RowFill {
     /// if the background color _is **not**_ the default background color
     /// then each row's width will be extended to the max width for the
@@ -67,14 +74,14 @@ impl Default for RowFill {
     }
 }
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum MaxWidth {
     None,
     Chars(u32),
     Percent(f32),
 }
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum WordWrap {
     /// Will attempt to wrap words on wrap characters (e.g., whitespace,
     /// `-`, etc.) but if unable to find a break character in the text
@@ -167,40 +174,174 @@ impl Default for Layout {
     }
 }
 
-impl RenderableWrapper for Layout {
-    fn render<T: Into<String>>(&self, content: T) -> String {
-        todo!()
-    }
-
-    fn fallback_render<T: Into<String>>(&self, content: T, term: &crate::terminal::Terminal) -> String {
-        todo!()
-    }
-}
-
 impl Layout {
-
     /// Add a new Layout by setting the `word_wrap` policy and optionally
     /// setting the margins (left, right, top, bottom).
-    pub fn new(wrap: WordWrap, margin: Option<(Margin,Margin,Margin,Margin)>) -> Self {
+    pub fn new(wrap: WordWrap, margin: Option<(Margin, Margin, Margin, Margin)>) -> Self {
         match margin {
-            Some(margin) => {
-                Layout {
-                    word_wrap: wrap,
-                    left_margin: margin.0,
-                    right_margin: margin.1,
-                    top_margin: margin.2,
-                    bottom_margin: margin.3,
-                    ..Layout::default()
-                }
+            Some(margin) => Layout {
+                word_wrap: wrap,
+                left_margin: margin.0,
+                right_margin: margin.1,
+                top_margin: margin.2,
+                bottom_margin: margin.3,
+                ..Layout::default()
             },
             _ => Layout {
                 word_wrap: wrap,
                 ..Layout::default()
-            }
+            },
         }
     }
 
+    /// Resolve a margin to a number of characters given a terminal width.
+    fn resolve_margin(margin: &Margin, terminal_width: u32) -> u32 {
+        match margin {
+            Margin::None => 0,
+            Margin::Chars(chars) => *chars,
+            Margin::Percent(pct) => ((terminal_width as f32) * pct / 100.0).round() as u32,
+        }
+    }
 
+    /// Apply the layout to content and render.
+    fn apply_layout(&self, content: &str, terminal_width: u32) -> String {
+        let left = Self::resolve_margin(&self.left_margin, terminal_width);
+        let right = Self::resolve_margin(&self.right_margin, terminal_width);
 
+        // Calculate available width for content
+        let available_width = terminal_width.saturating_sub(left).saturating_sub(right);
+        if available_width == 0 {
+            return String::new();
+        }
 
+        // Split content into lines
+        let lines = split_lines(content);
+
+        // Apply word wrapping
+        let wrapped_lines = match &self.word_wrap {
+            WordWrap::None => lines,
+            _ => wrap_lines(lines, &self.word_wrap, available_width),
+        };
+
+        // Build result with margins and alignment
+        let left_padding = " ".repeat(left as usize);
+        let mut result = String::new();
+
+        // Determine if we should fill rows
+        let should_fill = match &self.row_fill_strategy {
+            RowFill::Fill => true,
+            RowFill::Auto => self.page_bg_color.is_some(),
+            RowFill::Exact => false,
+        };
+
+        for line in wrapped_lines {
+            let line_width = visible_width(&line);
+            let padding_needed = available_width.saturating_sub(line_width);
+
+            // Apply alignment
+            let (pre_align, post_align) = match self.alignment {
+                Alignment::Left => (0, padding_needed),
+                Alignment::Right => (padding_needed, 0),
+                Alignment::Center => {
+                    let left_pad = padding_needed / 2;
+                    let right_pad = padding_needed - left_pad;
+                    (left_pad, right_pad)
+                }
+            };
+
+            result.push_str(&left_padding);
+            result.push_str(&" ".repeat(pre_align as usize));
+            result.push_str(&line);
+
+            if should_fill {
+                result.push_str(&" ".repeat(post_align as usize));
+            }
+
+            result.push('\n');
+        }
+
+        // Remove trailing newline
+        if result.ends_with('\n') {
+            result.pop();
+        }
+
+        result
+    }
+}
+
+impl RenderableWrapper for Layout {
+    fn render<T: Into<String>>(&self, content: T) -> String {
+        // Use a default terminal width of 80 when no terminal info available
+        let terminal_width = 80u32;
+        self.apply_layout(&content.into(), terminal_width)
+    }
+
+    fn fallback_render<T: Into<String>>(&self, content: T, term: &Terminal) -> String {
+        let terminal_width = Terminal::width();
+        self.apply_layout(&content.into(), terminal_width)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_layout_default() {
+        let layout = Layout::default();
+        assert_eq!(layout.alignment, Alignment::Left);
+        assert_eq!(layout.word_wrap, WordWrap::None);
+    }
+
+    #[test]
+    fn test_layout_left_margin() {
+        let layout = Layout {
+            left_margin: Margin::Chars(4),
+            ..Layout::default()
+        };
+        let result = layout.render("Hello");
+        assert!(result.starts_with("    Hello"));
+    }
+
+    #[test]
+    fn test_layout_center_alignment() {
+        let layout = Layout {
+            alignment: Alignment::Center,
+            ..Layout::default()
+        };
+        let result = layout.render("Hi");
+        // With 80 width and 2 char content, should have padding
+        assert!(result.contains("Hi"));
+    }
+
+    #[test]
+    fn test_margin_resolve_chars() {
+        let margin = Margin::Chars(10);
+        assert_eq!(Layout::resolve_margin(&margin, 100), 10);
+    }
+
+    #[test]
+    fn test_margin_resolve_percent() {
+        let margin = Margin::Percent(10.0);
+        assert_eq!(Layout::resolve_margin(&margin, 100), 10);
+    }
+
+    #[test]
+    fn test_margin_resolve_none() {
+        let margin = Margin::None;
+        assert_eq!(Layout::resolve_margin(&margin, 100), 0);
+    }
+
+    #[test]
+    fn test_word_wrap_applied() {
+        let layout = Layout {
+            word_wrap: WordWrap::WrapProse(None),
+            ..Layout::default()
+        };
+        // With default 80 width, a long line should wrap
+        let long_text = "a".repeat(100);
+        let result = layout.render(&long_text);
+        // Should have been split into multiple lines
+        assert!(result.contains('\n') || result.len() <= 80);
+    }
 }

@@ -1,4 +1,7 @@
-use crate::utils::{block_constraint::split_lines, layout::WordWrap};
+use crate::utils::{
+    block_constraint::{split_at_visible_width, split_lines, visible_width, wrap_lines},
+    layout::WordWrap,
+};
 
 
 
