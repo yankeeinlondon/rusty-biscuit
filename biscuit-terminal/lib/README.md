@@ -19,6 +19,7 @@ biscuit-terminal = { version = "0.1", features = ["clap"] }
 ```
 
 This derives `clap::ValueEnum` on supported enums, enabling:
+
 - Shell tab-completion for enum values (e.g., `--theme <TAB>` shows `default`, `magic-quadrangle`)
 - Automatic `--help` text listing valid values
 - Direct use in clap argument definitions with `#[arg(value_enum)]`
@@ -73,25 +74,30 @@ fn main() {
 `TerminalImage` renders inline images using the Kitty graphics protocol with automatic iTerm2 handling and a graceful text fallback.
 
 ### Width syntax
+
 - `path.png` → default 50% of available width
 - `path.png|50%` → percentage of available columns
 - `path.png|80` → fixed columns
 - `path.png|fill` → fill available width
 
 ### Protocol selection
+
 - Kitty-capable terminals (Kitty, WezTerm, Ghostty, etc.): use Kitty protocol
 - iTerm2: uses iTerm’s native inline images even if iTerm advertises Kitty, to avoid Kitty-path failures
 - Others / unsupported: falls back to alt text
 
 ### Aspect ratio handling
+
 - Uses measured cell size when available (`discovery::fonts::cell_size`) to compute pixel targets; falls back to 8×16 px cells. This keeps images from looking “squished” in terminals with non-2:1 cells (e.g., WezTerm).
 - Respects user width specs and preserves aspect ratio; explicit widths are allowed to upscale, while the implicit 50% keeps a no-upscale guard.
 
 ### Kitty specifics
+
 - Sends cell-based sizing (`c=`/`r=`) rather than pixel sizing for consistent layout.
 - Advances the cursor below the image after rendering so prompts don’t overlap.
 
 ### iTerm2 specifics
+
 - Forces iTerm path when `TERM_PROGRAM=iTerm.app`, even if Kitty is advertised.
 - Uses `inline=1;preserveAspectRatio=1;width=<user spec>;size=auto`.
 - Appends a cursor advance based on measured cell height to avoid prompt collisions; avoids extra escape clutter that previously caused ENOENT errors in iTerm.
@@ -114,6 +120,7 @@ let result = TerminalImage::new_with_max_size(Path::new("huge.png"), 1_000_000);
 ```
 
 ### Gotchas and notes
+
 - If `cell_size` cannot be detected, default 8×16 is used; images may appear slightly off if the terminal font has a very different aspect. Provide a width in columns (e.g., `|80`) to get predictable sizing.
 - Large images: we don't upscale the default 50% case; explicit widths can upscale.
 - Unsupported terminals: you'll see the generated alt text instead of an image.
@@ -177,6 +184,7 @@ let renderer = MermaidRenderer::new("quadrantChart\n    Item: [0.5, 0.5]")
 ```
 
 **Quadrant numbering** (matches Mermaid convention):
+
 ```
         +-------------+-------------+
         |  quadrant-2 |  quadrant-1 |
@@ -223,6 +231,7 @@ The neutral quadrants (q2, q4) use the same color - a dark grey in dark mode, li
 ### Inline Point Styling
 
 Individual points can override defaults using comma-separated properties:
+
 ```
 Item A: [0.3, 0.6] color: #ff3300, radius: 12
 Item B: [0.7, 0.4] color: #00ff00
@@ -252,6 +261,7 @@ let inverse_theme = theme.inverse();  // For solid background rendering
 ### CLI Detection
 
 The module uses a fallback chain:
+
 1. **Direct `mmdc`**: If in PATH, use directly
 2. **npx fallback**: If `npx` is available, use `npx mmdc` with a warning
 3. **Error**: If neither is available, return an error
@@ -259,6 +269,7 @@ The module uses a fallback chain:
 ### Icon Pack Support
 
 Mermaid diagrams support icons via `--iconPacks`:
+
 - `@iconify-json/fa7-brands` - Font Awesome 7 brand icons
 - `@iconify-json/lucide` - Lucide icons
 - `@iconify-json/carbon` - Carbon Design icons

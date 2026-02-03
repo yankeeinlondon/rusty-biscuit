@@ -124,11 +124,17 @@ impl OrderedList {
 
 impl Renderable for OrderedList {
     fn render(&self, term_width: Option<u32>) -> String {
-        self.render_content(None, term_width.unwrap_or(80))
+        let width = term_width.unwrap_or(80);
+        let available = self.layout.available_width(width);
+        let content = self.render_content(None, available);
+        self.layout.apply_layout(&content, width)
     }
 
     fn fallback_render(&self, term: &Terminal) -> String {
-        self.render_content(Some(term), term.width())
+        let width = term.width();
+        let available = self.layout.available_width(width);
+        let content = self.render_content(Some(term), available);
+        self.layout.apply_layout(&content, width)
     }
 
     fn layout(&self) -> &Layout {
@@ -286,11 +292,17 @@ impl UnorderedList {
 
 impl Renderable for UnorderedList {
     fn render(&self, term_width: Option<u32>) -> String {
-        self.render_content(None, term_width.unwrap_or(80))
+        let width = term_width.unwrap_or(80);
+        let available = self.layout.available_width(width);
+        let content = self.render_content(None, available);
+        self.layout.apply_layout(&content, width)
     }
 
     fn fallback_render(&self, term: &Terminal) -> String {
-        self.render_content(Some(term), term.width())
+        let width = term.width();
+        let available = self.layout.available_width(width);
+        let content = self.render_content(Some(term), available);
+        self.layout.apply_layout(&content, width)
     }
 
     fn layout(&self) -> &Layout {

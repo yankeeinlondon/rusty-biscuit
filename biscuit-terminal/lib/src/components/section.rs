@@ -64,7 +64,6 @@ impl Section {
     /// Render the section with heading styling based on level.
     fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
         let mut result = String::new();
-        let content_width = self.layout.available_width(term_width);
 
         // Apply heading style based on level
         let (prefix, style_open, style_close) = match self.level {
@@ -91,7 +90,7 @@ impl Section {
                     if let Some(t) = term {
                         component.fallback_render(t)
                     } else {
-                        component.render(Some(content_width))
+                        component.render(Some(term_width))
                     }
                 }
             };
@@ -110,11 +109,17 @@ impl Section {
 
 impl Renderable for Section {
     fn render(&self, term_width: Option<u32>) -> String {
-        self.render_content(None, term_width.unwrap_or(80))
+        let width = term_width.unwrap_or(80);
+        let available = self.layout.available_width(width);
+        let content = self.render_content(None, available);
+        self.layout.apply_layout(&content, width)
     }
 
     fn fallback_render(&self, term: &Terminal) -> String {
-        self.render_content(Some(term), term.width())
+        let width = term.width();
+        let available = self.layout.available_width(width);
+        let content = self.render_content(Some(term), available);
+        self.layout.apply_layout(&content, width)
     }
 
     fn layout(&self) -> &Layout {

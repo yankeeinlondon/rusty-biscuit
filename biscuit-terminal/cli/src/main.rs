@@ -884,8 +884,12 @@ enum Command {
     bt prose \"<red>Error message</red>\"
 
   With margins:
-    bt prose --left-margin 4 \"Indented text\"
-    bt prose -l 2 -r 2 \"Centered with margins\"
+    bt prose --margin-left 4 \"Indented text\"
+    bt prose -l 4 -r 4 \"Indented with margins\"
+
+  With alignment:
+    bt prose --alignment center \"Centered text\"
+    bt prose -a right \"Right-aligned text\"
 
   Disable word wrapping:
     bt prose --no-wrap \"Long line that should not wrap\"
@@ -944,11 +948,15 @@ enum Command {
 
         /// Left margin in characters
         #[arg(long, short = 'l')]
-        left_margin: Option<u32>,
+        margin_left: Option<u32>,
 
         /// Right margin in characters
         #[arg(long, short = 'r')]
-        right_margin: Option<u32>,
+        margin_right: Option<u32>,
+
+        /// Text alignment
+        #[arg(long, short = 'a', value_enum)]
+        alignment: Option<biscuit_terminal::utils::layout::Alignment>,
     },
 
     /// Render styled text in a block quote
@@ -978,8 +986,20 @@ enum Command {
         content: Vec<String>,
 
         /// Attribution (author/source) displayed below the quote
-        #[arg(long, short = 'a')]
+        #[arg(long)]
         attribution: Option<String>,
+
+        /// Left margin in characters
+        #[arg(long, short = 'l')]
+        margin_left: Option<u32>,
+
+        /// Right margin in characters
+        #[arg(long, short = 'r')]
+        margin_right: Option<u32>,
+
+        /// Text alignment
+        #[arg(long, short = 'a', value_enum)]
+        alignment: Option<biscuit_terminal::utils::layout::Alignment>,
     },
 
     /// Render a bulleted list with hanging indents
@@ -1021,6 +1041,18 @@ enum Command {
         /// Disable hanging indent on wrapped lines
         #[arg(long)]
         no_hanging_indent: bool,
+
+        /// Left margin in characters
+        #[arg(long, short = 'l')]
+        margin_left: Option<u32>,
+
+        /// Right margin in characters
+        #[arg(long, short = 'r')]
+        margin_right: Option<u32>,
+
+        /// Text alignment
+        #[arg(long, short = 'a', value_enum)]
+        alignment: Option<biscuit_terminal::utils::layout::Alignment>,
     },
 }
 
@@ -1455,23 +1487,30 @@ fn main() -> color_eyre::Result<()> {
         Some(Command::Prose {
             ref content,
             no_wrap,
-            left_margin,
-            right_margin,
+            margin_left,
+            margin_right,
+            alignment,
         }) => {
-            return render_prose(content, no_wrap, left_margin, right_margin);
+            return render_prose(content, no_wrap, margin_left, margin_right, alignment);
         }
         Some(Command::Quote {
             ref content,
             ref attribution,
+            margin_left,
+            margin_right,
+            alignment,
         }) => {
-            return render_quote(content, attribution.as_deref());
+            return render_quote(content, attribution.as_deref(), margin_left, margin_right, alignment);
         }
         Some(Command::List {
             ref items,
             ref bullet,
             no_hanging_indent,
+            margin_left,
+            margin_right,
+            alignment,
         }) => {
-            return render_list(items, bullet, no_hanging_indent);
+            return render_list(items, bullet, no_hanging_indent, margin_left, margin_right, alignment);
         }
         None => {
             // Default behavior: content analysis or terminal metadata
@@ -3351,8 +3390,9 @@ fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
 fn render_prose(
     content: &[String],
     no_wrap: bool,
-    left_margin: Option<u32>,
-    right_margin: Option<u32>,
+    margin_left: Option<u32>,
+    margin_right: Option<u32>,
+    alignment: Option<biscuit_terminal::utils::layout::Alignment>,
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::Renderable;
@@ -3384,11 +3424,16 @@ fn render_prose(
     }
 
     // Configure margins
-    if let Some(left) = left_margin {
+    if let Some(left) = margin_left {
         prose = prose.with_left_margin(Margin::Chars(left));
     }
-    if let Some(right) = right_margin {
+    if let Some(right) = margin_right {
         prose = prose.with_right_margin(Margin::Chars(right));
+    }
+
+    // Configure alignment
+    if let Some(align) = alignment {
+        prose = prose.alignment(align);
     }
 
     // Render using fallback_render for terminal-aware output
@@ -3401,10 +3446,17 @@ fn render_prose(
 }
 
 /// Render prose content inside a block quote.
-fn render_quote(content: &[String], attribution: Option<&str>) -> color_eyre::Result<()> {
+fn render_quote(
+    content: &[String],
+    attribution: Option<&str>,
+    margin_left: Option<u32>,
+    margin_right: Option<u32>,
+    alignment: Option<biscuit_terminal::utils::layout::Alignment>,
+) -> color_eyre::Result<()> {
     use biscuit_terminal::components::block_quote::BlockQuote;
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+    use biscuit_terminal::utils::layout::Margin;
     use std::sync::Arc;
 
     // Join all content pieces with spaces
@@ -3426,10 +3478,23 @@ fn render_quote(content: &[String], attribution: Option<&str>) -> color_eyre::Re
     let prose = Prose::new(&text);
 
     // Build the BlockQuote with the Prose content
-    let quote = BlockQuote::new(
+    let mut quote = BlockQuote::new(
         RenderableContent::Component(Arc::new(prose)),
         attribution,
     );
+
+    // Configure margins
+    if let Some(left) = margin_left {
+        quote = quote.left_margin(Margin::Chars(left));
+    }
+    if let Some(right) = margin_right {
+        quote = quote.right_margin(Margin::Chars(right));
+    }
+
+    // Configure alignment
+    if let Some(align) = alignment {
+        quote = quote.alignment(align);
+    }
 
     // Render using fallback_render for terminal-aware output
     let term = Terminal::new();
@@ -3441,10 +3506,18 @@ fn render_quote(content: &[String], attribution: Option<&str>) -> color_eyre::Re
 }
 
 /// Render a bulleted list with hanging indents.
-fn render_list(items: &[String], bullet: &str, no_hanging_indent: bool) -> color_eyre::Result<()> {
+fn render_list(
+    items: &[String],
+    bullet: &str,
+    no_hanging_indent: bool,
+    margin_left: Option<u32>,
+    margin_right: Option<u32>,
+    alignment: Option<biscuit_terminal::utils::layout::Alignment>,
+) -> color_eyre::Result<()> {
     use biscuit_terminal::components::list::UnorderedList;
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
+    use biscuit_terminal::utils::layout::Margin;
     use std::sync::Arc;
 
     if items.is_empty() {
@@ -3474,6 +3547,19 @@ fn render_list(items: &[String], bullet: &str, no_hanging_indent: bool) -> color
     // Disable hanging indent if requested
     if no_hanging_indent {
         list = list.without_hanging_indent();
+    }
+
+    // Configure margins
+    if let Some(left) = margin_left {
+        list = list.left_margin(Margin::Chars(left));
+    }
+    if let Some(right) = margin_right {
+        list = list.right_margin(Margin::Chars(right));
+    }
+
+    // Configure alignment
+    if let Some(align) = alignment {
+        list = list.alignment(align);
     }
 
     // Render using fallback_render for terminal-aware output

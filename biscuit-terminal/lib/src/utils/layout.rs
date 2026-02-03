@@ -30,6 +30,7 @@ pub trait RenderableWrapper {
 /// - both `TextAlignment::Right` and `TextAlignment::Center`
 ///   are only able to be expressed
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Alignment {
     Left,
     Center,

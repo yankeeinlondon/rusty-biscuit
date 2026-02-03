@@ -220,12 +220,16 @@ impl Table {
 }
 
 impl Renderable for Table {
-    fn render(&self, _term_width: Option<u32>) -> String {
-        self.render_content(None)
+    fn render(&self, term_width: Option<u32>) -> String {
+        let width = term_width.unwrap_or(80);
+        let content = self.render_content(None);
+        self.layout.apply_layout(&content, width)
     }
 
     fn fallback_render(&self, term: &Terminal) -> String {
-        self.render_content(Some(term))
+        let width = term.width();
+        let content = self.render_content(Some(term));
+        self.layout.apply_layout(&content, width)
     }
 
     fn layout(&self) -> &Layout {
