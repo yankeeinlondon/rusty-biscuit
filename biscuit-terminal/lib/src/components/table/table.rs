@@ -4,11 +4,22 @@ use crate::{
     utils::layout::Layout,
 };
 
+#[derive(Debug, Clone)]
+pub enum Currency {
+    USD,
+    GBP,
+    EUR,
+}
+
+
 /// Content for a table cell.
 #[derive(Debug, Clone)]
 pub enum TableCellContent {
     /// Text (which can include escape characters)
     Text(String),
+    // Integer(i64),
+    // Float(f64),
+    // Currency(Currency, f64)
 }
 
 impl<T: Into<String>> From<T> for TableCellContent {
@@ -120,6 +131,9 @@ impl Table {
                 if i < widths.len() {
                     let cell_width = match cell {
                         TableCellContent::Text(s) => s.len(),
+                        // &TableCellContent::Currency(c, amt) => format_currency(c, amt).len(),
+                        // &TableCellContent::Float(num) => format_float(num).len(),
+                        // &TableCellContent::Integer(num) => format_int(num).len(),
                     };
                     widths[i] = widths[i].max(cell_width);
                 }

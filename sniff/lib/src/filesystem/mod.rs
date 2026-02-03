@@ -30,9 +30,15 @@ pub struct FilesystemInfo {
 }
 
 /// Detect all filesystem information for a directory.
-pub fn detect_filesystem(root: &Path, deep: bool) -> Result<FilesystemInfo> {
+///
+/// ## Arguments
+///
+/// * `root` - The root directory to analyze
+/// * `deep` - Enable network operations for enhanced git info
+/// * `commit_count` - Number of recent commits to retrieve
+pub fn detect_filesystem(root: &Path, deep: bool, commit_count: usize) -> Result<FilesystemInfo> {
     let languages = detect_languages(root).ok();
-    let git = detect_git(root, deep)?;
+    let git = detect_git(root, deep, commit_count)?;
     let repo = detect_repo(root)?;
     let formatting = detect_formatting(root).ok().flatten();
 

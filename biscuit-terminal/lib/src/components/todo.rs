@@ -23,7 +23,7 @@ const NERD_CHECKBOX_IN_PROGRESS: &'static str = "\u{f0856}";
 /// an box off nerd icon representing a _cancelled_ **TODO**
 const NERD_CHECKBOX_CANCELLED: &'static str = "\u{f12ed}";
 
-const NERD_CHECKBOX_FILLED: &'static str = "\u{f012e}";
+// const NERD_CHECKBOX_FILLED: &'static str = "\u{f012e}";
 
 /// fallback representation for an _open_ **TODO**
 pub static FB_CHECKBOX_OPEN: &str = "[ ]";

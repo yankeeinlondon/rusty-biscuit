@@ -43,9 +43,12 @@ mod macos;
 #[cfg(all(target_os = "macos", feature = "audio-ducking-macos"))]
 mod media_keys;
 
+#[cfg(all(target_os = "linux", feature = "audio-ducking-linux"))]
+mod linux;
+
 pub use backend::{DuckResult, DuckingBackend, NoopBackend};
 pub use config::DuckConfig;
-pub use envelope::{compute_fade_steps, interpolate_volume, FadeStep};
+pub use envelope::{FadeStep, compute_fade_steps, interpolate_volume};
 pub use error::DuckingError;
 pub use factory::{backend_name, create_backend};
 pub use guard::DuckGuard;
@@ -56,6 +59,9 @@ pub use macos::MacOsBackend;
 
 #[cfg(all(target_os = "macos", feature = "audio-ducking-macos"))]
 pub use media_keys::MediaKeysBackend;
+
+#[cfg(all(target_os = "linux", feature = "audio-ducking-linux"))]
+pub use linux::{AlsaBackend, LinuxBackend};
 
 #[cfg(test)]
 mod tests;

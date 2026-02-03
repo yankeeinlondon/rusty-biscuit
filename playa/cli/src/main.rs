@@ -7,7 +7,7 @@ use sniff_lib::programs::InstalledHeadlessAudio;
 use playa::{all_players, AudioFileFormat, AudioPlayer, Codec, Playa, SoundEffect, PLAYER_LOOKUP};
 
 #[cfg(feature = "audio-ducking")]
-use playa::ducking::{backend_name, create_backend, DuckConfig, DuckingBackend};
+use playa::ducking::{backend_name, create_backend, DuckConfig};
 use darkmatter_lib::markdown::output::terminal::{for_terminal, TerminalOptions};
 use darkmatter_lib::markdown::Markdown;
 use darkmatter_lib::testing::strip_ansi_codes;
@@ -414,6 +414,42 @@ async fn print_duck_info() {
                     println!("Could not detect playback state: {}", e);
                 }
             }
+        }
+        "linux-pulse" => {
+            println!("Strategy: Per-application volume control via PulseAudio/PipeWire");
+            println!("  - Ducks individual applications (sink inputs)");
+            println!("  - Excludes Playa's own audio from ducking");
+            println!("  - Works with PipeWire's PulseAudio compatibility layer");
+            println!();
+
+            // Show current applications
+            let snapshot = backend.snapshot().await;
+            match snapshot {
+                Ok(snap) => {
+                    if snap.is_empty() {
+                        println!("Current state: No other applications playing audio");
+                    } else {
+                        println!("Applications that would be ducked ({}):", snap.len());
+                        for entry in &snap.entries {
+                            if let playa::ducking::SessionId::PulseSinkInput { index, name } = &entry.id {
+                                let vol = entry.channels.first().copied().unwrap_or(0.0) * 100.0;
+                                println!("  [{}] {} - {:.0}%", index, name, vol);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("Could not list applications: {}", e);
+                }
+            }
+        }
+        "linux-alsa" => {
+            println!("Strategy: System-wide volume control via ALSA (fallback)");
+            println!("  - Fades master volume down during playback");
+            println!("  - Affects ALL audio including Playa's output");
+            println!("  - Used because PulseAudio is not available");
+            println!();
+            println!("Tip: For per-application ducking, install PulseAudio or PipeWire");
         }
         "noop" => {
             println!("Strategy: No ducking (disabled or unavailable)");

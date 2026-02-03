@@ -8,15 +8,15 @@ use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use coreaudio_sys::{
-    kAudioDevicePropertyVolumeScalar, kAudioHardwarePropertyDefaultOutputDevice,
-    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
-    kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject, AudioObjectGetPropertyData,
-    AudioObjectID, AudioObjectPropertyAddress, AudioObjectSetPropertyData,
+    AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress,
+    AudioObjectSetPropertyData, kAudioDevicePropertyVolumeScalar,
+    kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyElementMain,
+    kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject,
 };
 
 use crate::ducking::{
-    compute_fade_steps, DuckConfig, DuckResult, DuckingBackend, DuckingError, SessionId,
-    SessionVolume, VolumeSnapshot,
+    DuckConfig, DuckResult, DuckingBackend, DuckingError, SessionId, SessionVolume, VolumeSnapshot,
+    compute_fade_steps,
 };
 
 /// macOS CoreAudio backend for audio ducking.
@@ -106,11 +106,7 @@ impl DuckingBackend for MacOsBackend {
         })
     }
 
-    fn fade_to_floor(
-        &self,
-        snapshot: &VolumeSnapshot,
-        config: &DuckConfig,
-    ) -> DuckResult<'_, ()> {
+    fn fade_to_floor(&self, snapshot: &VolumeSnapshot, config: &DuckConfig) -> DuckResult<'_, ()> {
         let snapshot = snapshot.clone();
         let config = *config;
 
@@ -138,11 +134,7 @@ impl DuckingBackend for MacOsBackend {
         })
     }
 
-    fn fade_restore(
-        &self,
-        snapshot: &VolumeSnapshot,
-        config: &DuckConfig,
-    ) -> DuckResult<'_, ()> {
+    fn fade_restore(&self, snapshot: &VolumeSnapshot, config: &DuckConfig) -> DuckResult<'_, ()> {
         let snapshot = snapshot.clone();
         let config = *config;
 
@@ -294,7 +286,11 @@ fn set_device_volume(device_id: AudioObjectID, volume: f32) -> Result<(), Duckin
 }
 
 /// Sets the volume for a specific channel.
-fn set_channel_volume(device_id: AudioObjectID, channel: u32, volume: f32) -> Result<(), DuckingError> {
+fn set_channel_volume(
+    device_id: AudioObjectID,
+    channel: u32,
+    volume: f32,
+) -> Result<(), DuckingError> {
     unsafe {
         let data_size = mem::size_of::<f32>() as u32;
 

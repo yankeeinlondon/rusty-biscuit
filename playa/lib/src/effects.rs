@@ -259,17 +259,23 @@ const DIT_HIT_1_BYTES: &[u8] = include_bytes!("../../effects/dit-hit-1.wav");
 #[cfg(feature = "sfx-ui")]
 const DIT_HIT_2_BYTES: &[u8] = include_bytes!("../../effects/dit-hit-2.wav");
 #[cfg(feature = "sfx-ui")]
-const ELECTRONIC_HIT_FX_01_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx-01_1.wav");
+const ELECTRONIC_HIT_FX_01_BYTES: &[u8] =
+    include_bytes!("../../effects/electronic-hit-fx-01_1.wav");
 #[cfg(feature = "sfx-ui")]
-const ELECTRONIC_HIT_FX_03_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx-03_1.wav");
+const ELECTRONIC_HIT_FX_03_BYTES: &[u8] =
+    include_bytes!("../../effects/electronic-hit-fx-03_1.wav");
 #[cfg(feature = "sfx-ui")]
-const ELECTRONIC_HIT_FX_06_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx-06_1.wav");
+const ELECTRONIC_HIT_FX_06_BYTES: &[u8] =
+    include_bytes!("../../effects/electronic-hit-fx-06_1.wav");
 #[cfg(feature = "sfx-ui")]
-const ELECTRONIC_HIT_FX_07_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx-07_1.wav");
+const ELECTRONIC_HIT_FX_07_BYTES: &[u8] =
+    include_bytes!("../../effects/electronic-hit-fx-07_1.wav");
 #[cfg(feature = "sfx-ui")]
-const ELECTRONIC_HIT_FX_14_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx-14_1.wav");
+const ELECTRONIC_HIT_FX_14_BYTES: &[u8] =
+    include_bytes!("../../effects/electronic-hit-fx-14_1.wav");
 #[cfg(feature = "sfx-ui")]
-const ELECTRONIC_HIT_FX_16_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx-16_1.wav");
+const ELECTRONIC_HIT_FX_16_BYTES: &[u8] =
+    include_bytes!("../../effects/electronic-hit-fx-16_1.wav");
 
 // === Cartoon Sounds (sfx-cartoon) ===
 #[cfg(feature = "sfx-cartoon")]
@@ -309,7 +315,8 @@ const SAD_TROMBONE_BYTES: &[u8] = include_bytes!("../../effects/sad-trombone.wav
 #[cfg(feature = "sfx-reactions")]
 const SMALL_GROUP_CHEER_BYTES: &[u8] = include_bytes!("../../effects/small-group-cheer.wav");
 #[cfg(feature = "sfx-reactions")]
-const FEMALE_ASTONISHED_GASP_BYTES: &[u8] = include_bytes!("../../effects/female-astonished-gasp.wav");
+const FEMALE_ASTONISHED_GASP_BYTES: &[u8] =
+    include_bytes!("../../effects/female-astonished-gasp.wav");
 #[cfg(feature = "sfx-reactions")]
 const SNEEZE_BYTES: &[u8] = include_bytes!("../../effects/sneeze.wav");
 
@@ -341,9 +348,11 @@ const PHASER_DOWN_3_BYTES: &[u8] = include_bytes!("../../effects/phaserDown3.ogg
 #[cfg(feature = "sfx-atmosphere")]
 const CREEPY_DARK_LOGO_BYTES: &[u8] = include_bytes!("../../effects/creepy-dark-logo.mp3");
 #[cfg(feature = "sfx-atmosphere")]
-const ELEMENTAL_MAGIC_SPELL_IMPACT_BYTES: &[u8] = include_bytes!("../../effects/elemental-magic-spell-impact.mp3");
+const ELEMENTAL_MAGIC_SPELL_IMPACT_BYTES: &[u8] =
+    include_bytes!("../../effects/elemental-magic-spell-impact.mp3");
 #[cfg(feature = "sfx-atmosphere")]
-const EPIC_ORCHESTRA_TRANSITION_BYTES: &[u8] = include_bytes!("../../effects/epic-orchestra-transition.wav");
+const EPIC_ORCHESTRA_TRANSITION_BYTES: &[u8] =
+    include_bytes!("../../effects/epic-orchestra-transition.wav");
 #[cfg(feature = "sfx-atmosphere")]
 const MYSTERIOUS_BASS_BYTES: &[u8] = include_bytes!("../../effects/mysterious-bass-pulse.wav");
 #[cfg(feature = "sfx-atmosphere")]

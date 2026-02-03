@@ -228,7 +228,8 @@ fn test_deep_flag_before_subcommand() {
         .args(["--deep", "git"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("=== Git ==="));
+        // New rich output format has Status and Meta sections
+        .stdout(predicate::str::contains("Status"));
 }
 
 #[test]
@@ -237,7 +238,8 @@ fn test_deep_flag_after_subcommand() {
         .args(["git", "--deep"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("=== Git ==="));
+        // New rich output format has Status and Meta sections
+        .stdout(predicate::str::contains("Status"));
 }
 
 // ============================================================================
@@ -568,7 +570,29 @@ fn test_git_subcommand_text_output() {
         .arg("git")
         .assert()
         .success()
-        .stdout(predicate::str::contains("=== Git ==="));
+        // New rich output format has Status and Meta sections
+        .stdout(predicate::str::contains("Status"))
+        .stdout(predicate::str::contains("Meta"));
+}
+
+#[test]
+fn test_git_subcommand_with_history_flag() {
+    // Test that the --history flag is accepted
+    cargo_bin_cmd!("sniff")
+        .args(["git", "--history", "3"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Status"));
+}
+
+#[test]
+fn test_git_subcommand_with_short_history_flag() {
+    // Test that the -h short flag is accepted
+    cargo_bin_cmd!("sniff")
+        .args(["git", "-h", "10"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Status"));
 }
 
 #[test]

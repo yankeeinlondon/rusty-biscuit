@@ -31,8 +31,7 @@ pub trait DuckingBackend: Send + Sync {
     ///
     /// This performs a gradual volume reduction over `config.ramp_ms()` milliseconds
     /// to avoid jarring audio transitions.
-    fn fade_to_floor(&self, snapshot: &VolumeSnapshot, config: &DuckConfig)
-        -> DuckResult<'_, ()>;
+    fn fade_to_floor(&self, snapshot: &VolumeSnapshot, config: &DuckConfig) -> DuckResult<'_, ()>;
 
     /// Restores all sessions to their original volumes from the snapshot.
     ///

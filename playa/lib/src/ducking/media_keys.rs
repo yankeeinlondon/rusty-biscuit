@@ -86,10 +86,7 @@ impl MediaKeysBackend {
             end try
         "#;
 
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(script)
-            .output();
+        let output = Command::new("osascript").arg("-e").arg(script).output();
 
         match output {
             Ok(out) if out.status.success() => {
@@ -220,10 +217,7 @@ impl MediaKeysBackend {
             end if
         "#;
 
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(script)
-            .output();
+        let output = Command::new("osascript").arg("-e").arg(script).output();
 
         match output {
             Ok(out) if out.status.success() => {
@@ -299,11 +293,7 @@ impl DuckingBackend for MediaKeysBackend {
         })
     }
 
-    fn fade_to_floor(
-        &self,
-        snapshot: &VolumeSnapshot,
-        _config: &DuckConfig,
-    ) -> DuckResult<'_, ()> {
+    fn fade_to_floor(&self, snapshot: &VolumeSnapshot, _config: &DuckConfig) -> DuckResult<'_, ()> {
         let snapshot = snapshot.clone();
 
         Box::pin(async move {
@@ -330,11 +320,7 @@ impl DuckingBackend for MediaKeysBackend {
         })
     }
 
-    fn fade_restore(
-        &self,
-        _snapshot: &VolumeSnapshot,
-        _config: &DuckConfig,
-    ) -> DuckResult<'_, ()> {
+    fn fade_restore(&self, _snapshot: &VolumeSnapshot, _config: &DuckConfig) -> DuckResult<'_, ()> {
         Box::pin(async move {
             // Only resume if we actually paused something that was playing
             let was_playing = self.was_playing.load(Ordering::SeqCst);

@@ -12,6 +12,7 @@ path = "src/main.rs"
 default = []
 audio-ducking = ["playa/audio-ducking", "tokio"]
 audio-ducking-macos = ["audio-ducking", "playa/audio-ducking-macos"]
+audio-ducking-linux = ["audio-ducking", "playa/audio-ducking-linux"]
 
 [dependencies]
 clap = { version = "4.5.53", features = ["derive", "wrap_help"] }

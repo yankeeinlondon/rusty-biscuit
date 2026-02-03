@@ -6,6 +6,159 @@ use std::path::{Path, PathBuf};
 
 use crate::{Result, SniffError};
 
+/// Git user configuration.
+///
+/// Contains user identity from git config (user.name, user.email).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GitConfig {
+    /// User name from git config (user.name).
+    pub user_name: Option<String>,
+    /// User email from git config (user.email).
+    pub user_email: Option<String>,
+}
+
+/// Parsed conventional commit.
+///
+/// Represents a commit message following the conventional commits spec:
+/// `type(scope): description`
+///
+/// ## Examples
+///
+/// ```
+/// use sniff_lib::filesystem::git::ConventionalCommit;
+///
+/// let commit = ConventionalCommit::parse("feat(cli): add new flag");
+/// assert_eq!(commit.operation, Some("feat".to_string()));
+/// assert_eq!(commit.scope, Some("cli".to_string()));
+/// assert_eq!(commit.description, "add new flag");
+///
+/// let plain = ConventionalCommit::parse("Regular commit message");
+/// assert_eq!(plain.operation, None);
+/// assert_eq!(plain.description, "Regular commit message");
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ConventionalCommit {
+    /// Commit type (feat, fix, chore, etc.) if conventional format.
+    pub operation: Option<String>,
+    /// Scope within parentheses if present.
+    pub scope: Option<String>,
+    /// The commit description (first line after type/scope).
+    pub description: String,
+}
+
+impl ConventionalCommit {
+    /// Parse a commit message into a conventional commit structure.
+    ///
+    /// Only parses the first line of the message. If the message doesn't
+    /// follow conventional commit format, returns a struct with only
+    /// the description populated.
+    pub fn parse(message: &str) -> Self {
+        let first_line = message.lines().next().unwrap_or("").trim();
+
+        // Pattern: type(scope): description  OR  type: description
+        // type must be alphanumeric (feat, fix, chore, etc.)
+        let mut chars = first_line.chars().peekable();
+        let mut operation = String::new();
+
+        // Extract type (alphanumeric characters)
+        while let Some(&c) = chars.peek() {
+            if c.is_alphanumeric() || c == '-' {
+                operation.push(c);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+
+        // Check if we have a valid type
+        if operation.is_empty() {
+            return Self {
+                operation: None,
+                scope: None,
+                description: first_line.to_string(),
+            };
+        }
+
+        // Check for scope in parentheses
+        let scope = if chars.peek() == Some(&'(') {
+            chars.next(); // consume '('
+            let mut scope_str = String::new();
+            while let Some(c) = chars.next() {
+                if c == ')' {
+                    break;
+                }
+                scope_str.push(c);
+            }
+            if scope_str.is_empty() {
+                None
+            } else {
+                Some(scope_str)
+            }
+        } else {
+            None
+        };
+
+        // Check for colon
+        if chars.peek() != Some(&':') {
+            // Not conventional format
+            return Self {
+                operation: None,
+                scope: None,
+                description: first_line.to_string(),
+            };
+        }
+        chars.next(); // consume ':'
+
+        // Skip whitespace after colon
+        while chars.peek() == Some(&' ') {
+            chars.next();
+        }
+
+        let description: String = chars.collect();
+
+        Self {
+            operation: Some(operation),
+            scope,
+            description,
+        }
+    }
+}
+
+/// File change status in the working tree.
+///
+/// Distinguishes between staged-only, modified-only, and both states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FileStatus {
+    /// File is staged (in index) but not modified in working tree.
+    Staged,
+    /// File is modified in working tree but not staged.
+    Modified,
+    /// File is both staged and has additional modifications.
+    Both,
+    /// File is new/untracked.
+    Untracked,
+}
+
+/// A file change with its status.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileChange {
+    /// Relative path from repository root.
+    pub path: PathBuf,
+    /// Status of the file.
+    pub status: FileStatus,
+}
+
+/// Tracking status for a remote.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteTrackingStatus {
+    /// Remote name (e.g., "origin").
+    pub remote: String,
+    /// Number of commits local is ahead of remote.
+    pub ahead: usize,
+    /// Number of commits local is behind remote.
+    pub behind: usize,
+}
+
 /// Git hosting provider types.
 ///
 /// Identifies the hosting platform for a Git repository based on its remote URL.
@@ -108,7 +261,7 @@ impl HostingProvider {
 /// use sniff_lib::filesystem::git::detect_git;
 /// use std::path::Path;
 ///
-/// let git_info = detect_git(Path::new("."), false).unwrap();
+/// let git_info = detect_git(Path::new("."), false, 10).unwrap();
 /// if let Some(info) = git_info {
 ///     println!("Repository: {:?}", info.repo_root);
 ///     println!("Branch: {:?}", info.current_branch);
@@ -121,6 +274,8 @@ pub struct GitInfo {
     pub repo_root: PathBuf,
     /// Current branch name (None for detached HEAD).
     pub current_branch: Option<String>,
+    /// All local branch names.
+    pub branches: Vec<String>,
     /// Whether the current path is inside a worktree (vs main repository).
     pub in_worktree: bool,
     /// Recent commits from HEAD (last 10 commits).
@@ -131,6 +286,14 @@ pub struct GitInfo {
     pub remotes: Vec<RemoteInfo>,
     /// Linked worktrees (keyed by branch name).
     pub worktrees: HashMap<String, WorktreeInfo>,
+    /// Git user configuration (user.name, user.email).
+    pub config: GitConfig,
+    /// Per-remote tracking status (ahead/behind counts).
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub tracking: Vec<RemoteTrackingStatus>,
+    /// File changes with their status (staged/modified/both/untracked).
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub file_changes: Vec<FileChange>,
 }
 
 /// Represents whether the local branch is behind remote tracking branches.
@@ -306,7 +469,7 @@ pub struct WorktreeInfo {
 /// use sniff_lib::filesystem::git::detect_git;
 /// use std::path::Path;
 ///
-/// let git_info = detect_git(Path::new("."), false).unwrap().unwrap();
+/// let git_info = detect_git(Path::new("."), false, 10).unwrap().unwrap();
 /// for dirty_file in &git_info.status.dirty {
 ///     println!("Modified: {:?}", dirty_file.filepath);
 ///     println!("Diff:\n{}", dirty_file.diff);
@@ -337,7 +500,7 @@ pub struct DirtyFile {
 /// use sniff_lib::filesystem::git::detect_git;
 /// use std::path::Path;
 ///
-/// let git_info = detect_git(Path::new("."), false).unwrap().unwrap();
+/// let git_info = detect_git(Path::new("."), false, 10).unwrap().unwrap();
 /// for untracked in &git_info.status.untracked {
 ///     println!("Untracked: {:?}", untracked.filepath);
 /// }
@@ -359,13 +522,19 @@ pub struct UntrackedFile {
 /// (e.g., fetching remote branch info, checking if local is behind remote).
 /// When `false`, only local repository information is gathered.
 ///
+/// ## Arguments
+///
+/// * `path` - The path to search from
+/// * `deep` - Enable network operations for enhanced remote info
+/// * `commit_count` - Number of recent commits to retrieve
+///
 /// ## Examples
 ///
 /// ```no_run
 /// use sniff_lib::filesystem::git::detect_git;
 /// use std::path::Path;
 ///
-/// let result = detect_git(Path::new("."), false).unwrap();
+/// let result = detect_git(Path::new("."), false, 10).unwrap();
 /// match result {
 ///     Some(info) => println!("Found repo at: {:?}", info.repo_root),
 ///     None => println!("Not a git repository"),
@@ -377,7 +546,7 @@ pub struct UntrackedFile {
 /// Returns an error if:
 /// - The repository exists but has no working directory (bare repo)
 /// - Git operations fail due to filesystem permissions or corruption
-pub fn detect_git(path: &Path, deep: bool) -> Result<Option<GitInfo>> {
+pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option<GitInfo>> {
     let repo = match Repository::discover(path) {
         Ok(r) => r,
         Err(_) => return Ok(None),
@@ -392,22 +561,29 @@ pub fn detect_git(path: &Path, deep: bool) -> Result<Option<GitInfo>> {
     let current_branch = head.as_ref().and_then(|h| h.shorthand()).map(String::from);
 
     let in_worktree = repo.is_worktree();
-    let recent = get_recent_commits(&repo, 10, deep);
-    let mut status = get_repo_status(&repo)?;
+    let recent = get_recent_commits(&repo, commit_count, deep);
+    let (mut status, file_changes) = get_repo_status_with_changes(&repo)?;
     if deep {
         status.is_behind = Some(check_behind_remotes(&repo));
     }
     let remotes = get_remotes(&repo, deep);
     let worktrees = get_worktrees(&repo);
+    let config = get_git_config(&repo);
+    let branches = get_local_branches(&repo);
+    let tracking = get_tracking_status(&repo, current_branch.as_deref());
 
     Ok(Some(GitInfo {
         repo_root,
         current_branch,
+        branches,
         in_worktree,
         recent,
         status,
         remotes,
         worktrees,
+        config,
+        tracking,
+        file_changes,
     }))
 }
 
@@ -453,7 +629,8 @@ fn get_recent_commits(repo: &Repository, count: usize, deep: bool) -> Vec<Commit
 }
 
 /// Gathers repository status including staged, unstaged, and untracked changes.
-fn get_repo_status(repo: &Repository) -> Result<RepoStatus> {
+/// Also returns file changes with their status for rich output.
+fn get_repo_status_with_changes(repo: &Repository) -> Result<(RepoStatus, Vec<FileChange>)> {
     let mut opts = StatusOptions::new();
     opts.include_untracked(true);
     // Recurse into untracked directories to get individual file paths
@@ -470,6 +647,7 @@ fn get_repo_status(repo: &Repository) -> Result<RepoStatus> {
     // Use HashSet for O(1) deduplication instead of Vec::contains which is O(n)
     let mut dirty_set: HashSet<PathBuf> = HashSet::new();
     let mut untracked_paths: Vec<PathBuf> = Vec::new();
+    let mut file_changes: Vec<FileChange> = Vec::new();
 
     for entry in statuses.iter() {
         let status = entry.status();
@@ -490,15 +668,37 @@ fn get_repo_status(repo: &Repository) -> Result<RepoStatus> {
             untracked_count += 1;
             if let Some(ref p) = path {
                 untracked_paths.push(p.clone());
+                file_changes.push(FileChange {
+                    path: p.clone(),
+                    status: FileStatus::Untracked,
+                });
             }
         }
 
         // Add to dirty set if staged or unstaged (but not untracked)
-        if (is_staged || is_unstaged)
+        if let Some(ref p) = path
             && !is_untracked
-            && let Some(p) = path
         {
-            dirty_set.insert(p);
+            if is_staged && is_unstaged {
+                // File is both staged and has additional modifications
+                file_changes.push(FileChange {
+                    path: p.clone(),
+                    status: FileStatus::Both,
+                });
+                dirty_set.insert(p.clone());
+            } else if is_staged {
+                file_changes.push(FileChange {
+                    path: p.clone(),
+                    status: FileStatus::Staged,
+                });
+                dirty_set.insert(p.clone());
+            } else if is_unstaged {
+                file_changes.push(FileChange {
+                    path: p.clone(),
+                    status: FileStatus::Modified,
+                });
+                dirty_set.insert(p.clone());
+            }
         }
     }
 
@@ -517,7 +717,7 @@ fn get_repo_status(repo: &Repository) -> Result<RepoStatus> {
     // Build untracked file details
     let untracked = build_untracked_files(&untracked_paths, &repo_root);
 
-    Ok(RepoStatus {
+    let repo_status = RepoStatus {
         is_dirty: staged > 0 || unstaged > 0 || untracked_count > 0,
         staged_count: staged,
         unstaged_count: unstaged,
@@ -525,7 +725,9 @@ fn get_repo_status(repo: &Repository) -> Result<RepoStatus> {
         dirty,
         untracked,
         is_behind: None, // Populated by detect_git when deep=true
-    })
+    };
+
+    Ok((repo_status, file_changes))
 }
 
 /// Gets HEAD commit SHA and upstream tracking branch commit SHA.
@@ -671,6 +873,75 @@ fn build_untracked_files(paths: &[PathBuf], repo_root: &Option<PathBuf>) -> Vec<
             }
         })
         .collect()
+}
+
+/// Gets git user configuration (user.name, user.email).
+fn get_git_config(repo: &Repository) -> GitConfig {
+    let config = match repo.config() {
+        Ok(c) => c,
+        Err(_) => return GitConfig::default(),
+    };
+
+    GitConfig {
+        user_name: config.get_string("user.name").ok(),
+        user_email: config.get_string("user.email").ok(),
+    }
+}
+
+/// Gets all local branch names.
+fn get_local_branches(repo: &Repository) -> Vec<String> {
+    let mut branches = Vec::new();
+
+    if let Ok(branch_iter) = repo.branches(Some(git2::BranchType::Local)) {
+        for branch_result in branch_iter {
+            if let Ok((branch, _)) = branch_result
+                && let Ok(Some(name)) = branch.name()
+            {
+                branches.push(name.to_string());
+            }
+        }
+    }
+
+    branches
+}
+
+/// Gets tracking status (ahead/behind) for each remote.
+fn get_tracking_status(repo: &Repository, current_branch: Option<&str>) -> Vec<RemoteTrackingStatus> {
+    let mut tracking = Vec::new();
+
+    let Some(branch_name) = current_branch else {
+        return tracking;
+    };
+
+    let Ok(local_branch) = repo.find_branch(branch_name, git2::BranchType::Local) else {
+        return tracking;
+    };
+
+    let Ok(local_commit) = local_branch.get().peel_to_commit() else {
+        return tracking;
+    };
+
+    // Check each remote for a tracking branch
+    if let Ok(remotes) = repo.remotes() {
+        for remote_name in remotes.iter().flatten() {
+            // Try to find the remote tracking branch (e.g., origin/main)
+            let remote_branch_name = format!("{}/{}", remote_name, branch_name);
+            if let Ok(remote_ref) =
+                repo.find_reference(&format!("refs/remotes/{}", remote_branch_name))
+                && let Ok(remote_commit) = remote_ref.peel_to_commit()
+                && let Ok((ahead, behind)) =
+                    repo.graph_ahead_behind(local_commit.id(), remote_commit.id())
+            {
+                tracking.push(RemoteTrackingStatus {
+                    remote: remote_name.to_string(),
+                    ahead,
+                    behind,
+                });
+            }
+        }
+    }
+
+    tracking
 }
 
 /// Retrieves all configured remotes with their URLs and hosting providers.
@@ -867,8 +1138,8 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
             .unwrap_or_default();
 
         // Check if worktree is dirty
-        let dirty = get_repo_status(&worktree_repo)
-            .map(|s| s.is_dirty)
+        let dirty = get_repo_status_with_changes(&worktree_repo)
+            .map(|(s, _)| s.is_dirty)
             .unwrap_or(false);
 
         worktrees.insert(
@@ -890,10 +1161,121 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    // ============================================================================
+    // ConventionalCommit parser tests
+    // ============================================================================
+
+    #[test]
+    fn test_conventional_commit_feat_with_scope() {
+        let commit = ConventionalCommit::parse("feat(cli): add new flag");
+        assert_eq!(commit.operation, Some("feat".to_string()));
+        assert_eq!(commit.scope, Some("cli".to_string()));
+        assert_eq!(commit.description, "add new flag");
+    }
+
+    #[test]
+    fn test_conventional_commit_fix_without_scope() {
+        let commit = ConventionalCommit::parse("fix: resolve memory leak");
+        assert_eq!(commit.operation, Some("fix".to_string()));
+        assert_eq!(commit.scope, None);
+        assert_eq!(commit.description, "resolve memory leak");
+    }
+
+    #[test]
+    fn test_conventional_commit_chore() {
+        let commit = ConventionalCommit::parse("chore(deps): update dependencies");
+        assert_eq!(commit.operation, Some("chore".to_string()));
+        assert_eq!(commit.scope, Some("deps".to_string()));
+        assert_eq!(commit.description, "update dependencies");
+    }
+
+    #[test]
+    fn test_conventional_commit_plain_message() {
+        let commit = ConventionalCommit::parse("Regular commit message");
+        assert_eq!(commit.operation, None);
+        assert_eq!(commit.scope, None);
+        assert_eq!(commit.description, "Regular commit message");
+    }
+
+    #[test]
+    fn test_conventional_commit_multiline() {
+        let commit = ConventionalCommit::parse("feat(api): add endpoint\n\nBody text here");
+        assert_eq!(commit.operation, Some("feat".to_string()));
+        assert_eq!(commit.scope, Some("api".to_string()));
+        assert_eq!(commit.description, "add endpoint");
+    }
+
+    #[test]
+    fn test_conventional_commit_empty_scope() {
+        let commit = ConventionalCommit::parse("feat(): description");
+        assert_eq!(commit.operation, Some("feat".to_string()));
+        assert_eq!(commit.scope, None);
+        assert_eq!(commit.description, "description");
+    }
+
+    #[test]
+    fn test_conventional_commit_breaking_change() {
+        // Breaking change indicator (!) is part of the type
+        let commit = ConventionalCommit::parse("feat!: breaking change");
+        // The '!' is not alphanumeric so parsing stops there
+        assert_eq!(commit.operation, None);
+        assert_eq!(commit.description, "feat!: breaking change");
+    }
+
+    #[test]
+    fn test_conventional_commit_hyphenated_type() {
+        let commit = ConventionalCommit::parse("bug-fix(core): fix issue");
+        assert_eq!(commit.operation, Some("bug-fix".to_string()));
+        assert_eq!(commit.scope, Some("core".to_string()));
+        assert_eq!(commit.description, "fix issue");
+    }
+
+    #[test]
+    fn test_conventional_commit_no_colon() {
+        let commit = ConventionalCommit::parse("feat something");
+        assert_eq!(commit.operation, None);
+        assert_eq!(commit.description, "feat something");
+    }
+
+    #[test]
+    fn test_conventional_commit_empty() {
+        let commit = ConventionalCommit::parse("");
+        assert_eq!(commit.operation, None);
+        assert_eq!(commit.description, "");
+    }
+
+    // ============================================================================
+    // FileStatus tests
+    // ============================================================================
+
+    #[test]
+    fn test_file_status_serialization() {
+        assert_eq!(
+            serde_json::to_string(&FileStatus::Staged).unwrap(),
+            "\"Staged\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FileStatus::Modified).unwrap(),
+            "\"Modified\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FileStatus::Both).unwrap(),
+            "\"Both\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FileStatus::Untracked).unwrap(),
+            "\"Untracked\""
+        );
+    }
+
+    // ============================================================================
+    // Repository detection tests
+    // ============================================================================
+
     #[test]
     fn test_non_git_directory_returns_none() {
         let dir = TempDir::new().unwrap();
-        let result = detect_git(dir.path(), false).unwrap();
+        let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_none());
     }
 
@@ -912,7 +1294,7 @@ mod tests {
         repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
             .unwrap();
 
-        let result = detect_git(dir.path(), false).unwrap();
+        let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
 
         let info = result.unwrap();
@@ -940,7 +1322,7 @@ mod tests {
         repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
             .unwrap();
 
-        let result = detect_git(dir.path(), false).unwrap();
+        let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
 
         let info = result.unwrap();
@@ -1027,7 +1409,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let repo = Repository::init(dir.path()).unwrap();
 
-        let status = get_repo_status(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
         assert!(!status.is_dirty);
         assert_eq!(status.staged_count, 0);
         assert_eq!(status.unstaged_count, 0);
@@ -1044,7 +1426,7 @@ mod tests {
         // Create an untracked file
         std::fs::write(dir.path().join("test.txt"), "content").unwrap();
 
-        let status = get_repo_status(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
         assert!(status.is_dirty);
         assert_eq!(status.untracked_count, 1);
         assert_eq!(status.untracked.len(), 1);
@@ -1077,7 +1459,7 @@ mod tests {
         // Modify the file (unstaged change)
         std::fs::write(&file_path, "modified content").unwrap();
 
-        let status = get_repo_status(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
         assert!(status.is_dirty);
         assert_eq!(status.unstaged_count, 1);
         assert_eq!(status.dirty.len(), 1);
@@ -1117,7 +1499,7 @@ mod tests {
             index.write().unwrap();
         }
 
-        let status = get_repo_status(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
         assert!(status.is_dirty);
         assert_eq!(status.staged_count, 1);
         assert_eq!(status.dirty.len(), 1);
@@ -1152,7 +1534,7 @@ mod tests {
             index.write().unwrap();
         }
 
-        let status = get_repo_status(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
         assert!(status.is_dirty);
         assert_eq!(status.staged_count, 1);
         assert_eq!(status.dirty.len(), 1);
@@ -1186,7 +1568,7 @@ mod tests {
         // Modify the nested file
         std::fs::write(&nested_file, "modified").unwrap();
 
-        let status = get_repo_status(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
         assert_eq!(status.dirty.len(), 1);
 
         let dirty = &status.dirty[0];
@@ -1205,7 +1587,7 @@ mod tests {
         // Create untracked file at root level (simpler case, avoids directory folding)
         std::fs::write(dir.path().join("untracked.txt"), "content").unwrap();
 
-        let status = get_repo_status(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
         assert_eq!(status.untracked.len(), 1);
 
         let untracked = &status.untracked[0];
@@ -1270,7 +1652,7 @@ mod tests {
         // Modify the file
         std::fs::write(&file_path, "line1\nmodified\nline3\n").unwrap();
 
-        let status = get_repo_status(&repo).unwrap();
+        let (status, _) = get_repo_status_with_changes(&repo).unwrap();
         assert_eq!(status.dirty.len(), 1);
 
         let diff = &status.dirty[0].diff;
@@ -1293,7 +1675,7 @@ mod tests {
         repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
             .unwrap();
 
-        let result = detect_git(dir.path(), false).unwrap();
+        let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
 
         let info = result.unwrap();
@@ -1321,7 +1703,7 @@ mod tests {
             .unwrap();
 
         // Without deep mode, branches should be None
-        let result = detect_git(dir.path(), false).unwrap();
+        let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
 
         let info = result.unwrap();
@@ -1346,7 +1728,7 @@ mod tests {
             .unwrap();
 
         // Without deep mode, is_behind should be None
-        let result = detect_git(dir.path(), false).unwrap();
+        let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
 
         let info = result.unwrap();
@@ -1369,7 +1751,7 @@ mod tests {
             .unwrap();
 
         // Without deep mode, commit remotes should be None
-        let result = detect_git(dir.path(), false).unwrap();
+        let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
 
         let info = result.unwrap();
@@ -1422,7 +1804,7 @@ mod tests {
             parent_commit = Some(commit_id);
         }
 
-        let result = detect_git(dir.path(), false).unwrap();
+        let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
 
         let info = result.unwrap();
@@ -1491,7 +1873,7 @@ mod tests {
             )
             .unwrap();
 
-        let result = detect_git(dir.path(), false).unwrap();
+        let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
 
         let info = result.unwrap();
@@ -1522,7 +1904,7 @@ mod tests {
         let _repo = Repository::init(dir.path()).unwrap();
 
         // Repo is initialized but has no commits
-        let result = detect_git(dir.path(), false).unwrap();
+        let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
 
         let info = result.unwrap();
@@ -1614,7 +1996,7 @@ mod tests {
             .unwrap();
 
         // Now detect from feature branch
-        let result = detect_git(dir.path(), false).unwrap();
+        let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
 
         let info = result.unwrap();
@@ -1641,7 +2023,7 @@ mod tests {
         repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
             .unwrap();
 
-        let result_main = detect_git(dir.path(), false).unwrap().unwrap();
+        let result_main = detect_git(dir.path(), false, 10).unwrap().unwrap();
         let main_messages: Vec<&str> = result_main
             .recent
             .iter()
@@ -1892,7 +2274,7 @@ mod tests {
             .unwrap();
 
         // Call detect_git with deep=false
-        let result = detect_git(dir.path(), false).unwrap();
+        let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
 
         let info = result.unwrap();
@@ -1973,7 +2355,7 @@ mod tests {
             parent_commit = Some(commit_id);
         }
 
-        let result = detect_git(dir.path(), false).unwrap();
+        let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
 
         let info = result.unwrap();

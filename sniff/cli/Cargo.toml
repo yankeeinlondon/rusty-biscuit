@@ -9,10 +9,12 @@ name = "sniff"
 path = "src/main.rs"
 
 [dependencies]
+chrono = "0.4"
 clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 darkmatter-lib = { path = "../../darkmatter/lib" }
 sniff-lib = { path = "../lib", features = ["network"] }
 strum = { version = "0.27", features = ["derive"] }

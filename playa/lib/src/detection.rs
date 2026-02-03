@@ -2,8 +2,8 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use reqwest::header::RANGE;
 use reqwest::Client;
+use reqwest::header::RANGE;
 use url::Url;
 
 use crate::error::DetectionError;
@@ -30,7 +30,10 @@ pub fn detect_audio_format_from_bytes(data: &[u8]) -> Result<AudioFormat, Detect
     }
 
     let file_format = format_from_mime(mime).ok_or(DetectionError::UnknownFormat)?;
-    Ok(AudioFormat::new(file_format, codec_from_format(file_format)))
+    Ok(AudioFormat::new(
+        file_format,
+        codec_from_format(file_format),
+    ))
 }
 
 /// Detect audio format from a file path.
@@ -106,7 +109,10 @@ fn audio_format_from_extension(path: &Path) -> Option<AudioFormat> {
         _ => None,
     }?;
 
-    Some(AudioFormat::new(file_format, codec_from_format(file_format)))
+    Some(AudioFormat::new(
+        file_format,
+        codec_from_format(file_format),
+    ))
 }
 
 #[cfg(test)]
@@ -147,8 +153,8 @@ mod tests {
 
     #[test]
     fn falls_back_to_extension() {
-        let format = audio_format_from_extension(Path::new("track.m4a"))
-            .expect("extension fallback");
+        let format =
+            audio_format_from_extension(Path::new("track.m4a")).expect("extension fallback");
         assert_eq!(format.file_format, AudioFileFormat::M4a);
         assert_eq!(format.codec, None);
     }

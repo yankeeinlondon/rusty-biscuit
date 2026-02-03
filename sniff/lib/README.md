@@ -340,7 +340,7 @@ use sniff_lib::filesystem::git::detect_git;
 use std::path::Path;
 
 // Standard mode (no network)
-let git = detect_git(Path::new("."), false)?;
+let git = detect_git(Path::new("."), false, 10)?;
 if let Some(info) = git {
     println!("Repository: {:?}", info.repo_root);
     println!("Branch: {:?}", info.current_branch);
@@ -353,7 +353,7 @@ if let Some(info) = git {
 }
 
 // Deep mode (queries remotes)
-let git_deep = detect_git(Path::new("."), true)?;
+let git_deep = detect_git(Path::new("."), true, 10)?;
 if let Some(info) = git_deep {
     for remote in &info.remotes {
         println!("Remote {}: {:?}", remote.name, remote.provider);

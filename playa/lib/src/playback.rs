@@ -10,7 +10,7 @@ use crate::detection::{
     detect_audio_format_from_bytes, detect_audio_format_from_path, detect_audio_format_from_url,
 };
 use crate::error::PlaybackError;
-use crate::player::{match_available_players, AudioPlayer, PLAYER_LOOKUP};
+use crate::player::{AudioPlayer, PLAYER_LOOKUP, match_available_players};
 use crate::types::{AudioFormat, PlaybackOptions};
 
 /// Detect the format and play audio with the best available player.
@@ -250,7 +250,9 @@ fn build_player_command(
                 .arg("-loglevel")
                 .arg("quiet");
             if let Some(vol) = options.volume {
-                command.arg("-volume").arg(((vol * 100.0) as i32).to_string());
+                command
+                    .arg("-volume")
+                    .arg(((vol * 100.0) as i32).to_string());
             }
             if let Some(speed) = options.speed {
                 // FFplay uses audio filter for tempo; clamp to 0.5-2.0
@@ -696,9 +698,7 @@ mod tests {
         assert!(args.contains(&OsStr::new("0.8")));
         // Speed effect should come after the source file
         let speed_pos = args.iter().position(|a| *a == OsStr::new("speed"));
-        let source_pos = args
-            .iter()
-            .position(|a| *a == OsStr::new("/tmp/test.wav"));
+        let source_pos = args.iter().position(|a| *a == OsStr::new("/tmp/test.wav"));
         assert!(
             speed_pos.unwrap() > source_pos.unwrap(),
             "speed effect should come after source"

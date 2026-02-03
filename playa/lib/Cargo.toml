@@ -10,6 +10,7 @@ async = ["tokio"]
 # Audio ducking - attenuate system audio during playback
 audio-ducking = ["tokio"]
 audio-ducking-macos = ["audio-ducking", "coreaudio-sys"]
+audio-ducking-linux = ["audio-ducking", "pulsectl-rs", "alsa"]
 
 # Umbrella feature for all effects (~30MB)
 sound-effects = ["sfx-ui", "sfx-cartoon", "sfx-reactions", "sfx-scifi", "sfx-atmosphere", "sfx-motion"]
@@ -33,6 +34,10 @@ url = "2.5"
 # Platform-specific dependencies for audio ducking
 [target.'cfg(target_os = "macos")'.dependencies]
 coreaudio-sys = { version = "0.2", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+pulsectl-rs = { version = "0.3", optional = true }
+alsa = { version = "0.11", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }

@@ -73,7 +73,12 @@ pub enum Commands {
 
     // === Filesystem detail sections ===
     /// Show only git repository information
-    Git,
+    #[command(disable_help_flag = true)]
+    Git {
+        /// Number of recent commits to display (default: 5)
+        #[arg(short = 'h', long, default_value = "5")]
+        history: usize,
+    },
 
     /// Show only repository/monorepo structure
     Repo,
@@ -196,7 +201,7 @@ impl Commands {
             Commands::Storage => OutputFilter::Storage,
 
             // Filesystem detail sections
-            Commands::Git => OutputFilter::Git,
+            Commands::Git { .. } => OutputFilter::Git,
             Commands::Repo => OutputFilter::Repo,
             Commands::Language => OutputFilter::Language,
 
@@ -265,6 +270,14 @@ impl Commands {
         match self {
             Commands::Services { state } => Some(*state),
             _ => None,
+        }
+    }
+
+    /// Get history count if this is a git command.
+    pub fn history(&self) -> usize {
+        match self {
+            Commands::Git { history } => *history,
+            _ => 5, // default
         }
     }
 }
@@ -414,6 +427,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config = config.deep(true);
     }
 
+    // Set commit count from history flag (or default 5)
+    let history_count = cli.command.as_ref().map_or(5, |c| c.history());
+    config = config.commit_count(history_count);
+
     // Apply skip logic based on filter mode
     match output_filter {
         // Top-level section filters: skip all OTHER sections
@@ -470,7 +487,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if use_json {
         output::print_json(&result, output_filter)?;
     } else {
-        output::print_text(&result, cli.verbose, output_filter);
+        output::print_text(&result, cli.verbose, output_filter, history_count);
     }
 
     Ok(())
@@ -601,7 +618,37 @@ mod tests {
         #[test]
         fn git_subcommand_parses() {
             let cli = parse_args(&["git"]).unwrap();
-            assert!(matches!(cli.command, Some(Commands::Git)));
+            assert!(matches!(cli.command, Some(Commands::Git { .. })));
+        }
+
+        #[test]
+        fn git_subcommand_with_history_flag() {
+            let cli = parse_args(&["git", "--history", "10"]).unwrap();
+            if let Some(Commands::Git { history }) = cli.command {
+                assert_eq!(history, 10);
+            } else {
+                panic!("Expected Git command");
+            }
+        }
+
+        #[test]
+        fn git_subcommand_with_short_history_flag() {
+            let cli = parse_args(&["git", "-h", "3"]).unwrap();
+            if let Some(Commands::Git { history }) = cli.command {
+                assert_eq!(history, 3);
+            } else {
+                panic!("Expected Git command");
+            }
+        }
+
+        #[test]
+        fn git_subcommand_default_history() {
+            let cli = parse_args(&["git"]).unwrap();
+            if let Some(Commands::Git { history }) = cli.command {
+                assert_eq!(history, 5);
+            } else {
+                panic!("Expected Git command");
+            }
         }
 
         #[test]
@@ -706,7 +753,7 @@ mod tests {
 
         #[test]
         fn git_maps_to_git_filter() {
-            let cmd = Commands::Git;
+            let cmd = Commands::Git { history: 5 };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Git);
         }
 
@@ -827,7 +874,7 @@ mod tests {
         fn deep_flag_works_globally() {
             let cli = parse_args(&["--deep", "git"]).unwrap();
             assert!(cli.deep);
-            assert!(matches!(cli.command, Some(Commands::Git)));
+            assert!(matches!(cli.command, Some(Commands::Git { .. })));
         }
 
         #[test]

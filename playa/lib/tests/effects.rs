@@ -9,7 +9,7 @@
 
 use std::collections::HashSet;
 
-use playa::{detect_audio_format_from_bytes, AudioFileFormat, SoundEffect};
+use playa::{AudioFileFormat, SoundEffect, detect_audio_format_from_bytes};
 
 // ============================================================================
 // Test Helpers
@@ -569,8 +569,8 @@ fn format_distribution_matches_expectations() {
 
 #[test]
 fn effects_create_valid_playa_instances() {
-    use playa::Playa;
     use SoundEffect::*;
+    use playa::Playa;
 
     // Test one effect from each category
     let sample_effects = [
@@ -607,8 +607,8 @@ fn effects_create_valid_playa_instances() {
 
 #[test]
 fn playa_format_matches_detection() {
-    use playa::Playa;
     use SoundEffect::*;
+    use playa::Playa;
 
     // Test all effects to ensure Playa reports same format as direct detection
     let all_effects: Vec<SoundEffect> = vec![

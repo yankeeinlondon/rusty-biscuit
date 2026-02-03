@@ -47,7 +47,9 @@ pub enum PlaybackError {
         format: AudioFormat,
     },
     /// No installed player supports the required capabilities.
-    #[error("no player for {format:?} with required capabilities (speed: {needs_speed}, volume: {needs_volume})")]
+    #[error(
+        "no player for {format:?} with required capabilities (speed: {needs_speed}, volume: {needs_volume})"
+    )]
     NoPlayerWithCapabilities {
         /// The requested audio format.
         format: AudioFormat,

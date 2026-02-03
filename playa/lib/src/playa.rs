@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use crate::audio::Audio;
 use crate::error::{InvalidAudio, PlaybackError};
 use crate::playback::playa_with_player_and_options;
-use crate::player::{match_available_players, AudioPlayer, Player, PLAYER_LOOKUP};
+use crate::player::{AudioPlayer, PLAYER_LOOKUP, Player, match_available_players};
 use crate::types::{AudioFormat, PlaybackOptions};
 
 #[cfg(feature = "audio-ducking")]
-use crate::ducking::{create_backend, DuckConfig, DuckGuard};
+use crate::ducking::{DuckConfig, DuckGuard, create_backend};
 
 /// Builder for audio playback with optional metadata display.
 ///

@@ -73,12 +73,17 @@ impl TextBlock {
     }
 
     pub fn with_background_color(&mut self, color: Color) -> &Self {
-        self.fg_color = Some(color);
+        self.bg_color = Some(color);
         self
     }
 
     pub fn make_content_blink(&mut self) -> &Self {
         self.blink = true;
+        self
+    }
+
+    pub fn with_underline(&mut self, under: UnderliningRequest) -> &Self {
+        self.underline = under;
         self
     }
 

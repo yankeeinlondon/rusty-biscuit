@@ -326,7 +326,7 @@ pub static PLAYER_LOOKUP: LazyLock<HashMap<AudioPlayer, Player>> = LazyLock::new
             supplies_stream_output: false,
             is_open_source: true,
             resource_usage: ResourceUsage::Low,
-            supports_speed_control: true, // speed effect
+            supports_speed_control: true,  // speed effect
             supports_volume_control: true, // -v N
         },
     );
@@ -538,7 +538,10 @@ mod tests {
         for tier1 in &tier1_players {
             assert!(
                 players.iter().position(|p| p == tier1).unwrap()
-                    < players.iter().position(|p| *p == AudioPlayer::Mpg123).unwrap(),
+                    < players
+                        .iter()
+                        .position(|p| *p == AudioPlayer::Mpg123)
+                        .unwrap(),
                 "Tier 1 player {:?} should rank before mpg123",
                 tier1
             );
@@ -572,14 +575,20 @@ mod tests {
 
         assert_eq!(vlc_score.0, 5, "vlc should have capability score 5");
         assert_eq!(mplayer_score.0, 5, "mplayer should have capability score 5");
-        assert_eq!(gstreamer_score.0, 5, "gstreamer should have capability score 5");
+        assert_eq!(
+            gstreamer_score.0, 5,
+            "gstreamer should have capability score 5"
+        );
 
         // Tier 3 players with volume only = 3
         let paplay_score = player_score(AudioPlayer::PulseaudioPaplay);
         let pipewire_score = player_score(AudioPlayer::Pipewire);
 
         assert_eq!(paplay_score.0, 3, "paplay should have capability score 3");
-        assert_eq!(pipewire_score.0, 3, "pipewire should have capability score 3");
+        assert_eq!(
+            pipewire_score.0, 3,
+            "pipewire should have capability score 3"
+        );
 
         // Tier 3 players with stream only = 2
         let mpg123_score = player_score(AudioPlayer::Mpg123);
@@ -673,6 +682,10 @@ mod tests {
 
     #[test]
     fn all_players_returns_13() {
-        assert_eq!(all_players().len(), 13, "all_players() should return 13 players");
+        assert_eq!(
+            all_players().len(),
+            13,
+            "all_players() should return 13 players"
+        );
     }
 }

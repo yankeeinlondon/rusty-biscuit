@@ -51,7 +51,7 @@ pub struct SniffResult {
 ///     .base_dir(PathBuf::from("/some/path"))
 ///     .skip_network();
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SniffConfig {
     /// Base directory for filesystem analysis
     pub base_dir: Option<PathBuf>,
@@ -59,6 +59,8 @@ pub struct SniffConfig {
     pub include_cpu_usage: bool,
     /// Enable deep git inspection (network operations for remote info)
     pub deep: bool,
+    /// Number of recent commits to retrieve (default: 10)
+    pub commit_count: usize,
     /// Skip OS detection
     pub skip_os: bool,
     /// Skip hardware detection
@@ -67,6 +69,21 @@ pub struct SniffConfig {
     pub skip_network: bool,
     /// Skip filesystem detection
     pub skip_filesystem: bool,
+}
+
+impl Default for SniffConfig {
+    fn default() -> Self {
+        Self {
+            base_dir: None,
+            include_cpu_usage: false,
+            deep: false,
+            commit_count: 10,
+            skip_os: false,
+            skip_hardware: false,
+            skip_network: false,
+            skip_filesystem: false,
+        }
+    }
 }
 
 impl SniffConfig {
@@ -90,6 +107,12 @@ impl SniffConfig {
     /// Enable deep git inspection (fetches remote branch info, checks if behind).
     pub fn deep(mut self, enable: bool) -> Self {
         self.deep = enable;
+        self
+    }
+
+    /// Set the number of recent commits to retrieve (default: 10).
+    pub fn commit_count(mut self, count: usize) -> Self {
+        self.commit_count = count;
         self
     }
 
@@ -178,7 +201,7 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
         let base = config
             .base_dir
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        Some(filesystem::detect_filesystem(&base, config.deep)?)
+        Some(filesystem::detect_filesystem(&base, config.deep, config.commit_count)?)
     };
 
     Ok(SniffResult {

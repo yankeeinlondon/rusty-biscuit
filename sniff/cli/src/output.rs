@@ -1,10 +1,13 @@
 use std::path::Path;
 
+use biscuit_terminal::components::list::UnorderedList;
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::Renderable;
 use darkmatter_lib::markdown::Markdown;
 use darkmatter_lib::markdown::output::terminal::{TerminalOptions, for_terminal};
 use darkmatter_lib::render::link::Link;
 use sniff_lib::SniffResult;
-use sniff_lib::filesystem::git::BehindStatus;
+use sniff_lib::filesystem::git::{BehindStatus, ConventionalCommit, FileStatus};
 use sniff_lib::hardware::NtpStatus;
 use sniff_lib::programs::ProgramsInfo;
 use sniff_lib::services::{Service, ServiceState, ServicesInfo};
@@ -158,6 +161,45 @@ fn format_gpu_caps(caps: &sniff_lib::hardware::GpuCapabilities) -> Option<String
     }
 }
 
+/// Format a commit datetime to a relative date string and 12hr time string.
+///
+/// Returns a tuple of (date_string, time_string) where:
+/// - date_string is "Today", "Yesterday", or "YYYY-MM-DD"
+/// - time_string is in 12hr format with am/pm (e.g., "2:30pm")
+fn format_commit_datetime(timestamp: &chrono::DateTime<chrono::Utc>) -> (String, String) {
+    use chrono::{Local, Timelike};
+
+    // Convert to local timezone
+    let local_time = timestamp.with_timezone(&Local);
+    let today = Local::now().date_naive();
+    let commit_date = local_time.date_naive();
+
+    // Determine relative date
+    let date_str = if commit_date == today {
+        "Today".to_string()
+    } else if commit_date == today.pred_opt().unwrap_or(today) {
+        "Yesterday".to_string()
+    } else {
+        commit_date.format("%Y-%m-%d").to_string()
+    };
+
+    // Format time in 12hr format
+    let hour = local_time.hour();
+    let minute = local_time.minute();
+    let (hour_12, period) = if hour == 0 {
+        (12, "am")
+    } else if hour < 12 {
+        (hour, "am")
+    } else if hour == 12 {
+        (12, "pm")
+    } else {
+        (hour - 12, "pm")
+    };
+    let time_str = format!("{}:{:02}{}", hour_12, minute, period);
+
+    (date_str, time_str)
+}
+
 /// Format uptime in seconds to a human-readable string
 fn format_uptime(seconds: u64) -> String {
     let days = seconds / 86400;
@@ -199,7 +241,7 @@ fn format_uptime(seconds: u64) -> String {
     }
 }
 
-pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter) {
+pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter, history_count: usize) {
     // Get repo root for relative paths
     let repo_root = result
         .filesystem
@@ -268,7 +310,7 @@ pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter) {
             if let Some(ref filesystem) = result.filesystem
                 && let Some(ref git) = filesystem.git
             {
-                print_git_section(git, verbose, repo_root);
+                print_git_section(git, history_count);
             }
         }
         OutputFilter::Repo => {
@@ -677,86 +719,190 @@ fn print_storage_section(
     println!();
 }
 
-fn print_git_section(
+/// Print git information with rich terminal formatting.
+///
+/// Uses biscuit-terminal's Prose component for styled output with two sections:
+/// - **Status**: Recent commits (with conventional commit parsing), staged/modified/untracked files
+/// - **Meta**: Remote tracking status, branches, git config
+///
+/// ## Arguments
+///
+/// * `git` - Git repository information
+/// * `history_count` - Number of recent commits to display
+pub fn print_git_section(
     git: &sniff_lib::filesystem::git::GitInfo,
-    verbose: u8,
-    repo_root: Option<&Path>,
+    history_count: usize,
 ) {
-    println!("=== Git ===");
-    let root_str = relative_path(&git.repo_root, repo_root);
-    println!(
-        "Root: {}",
-        if root_str.is_empty() {
-            ".".to_string()
+    // === Status Section ===
+    let status_title = Prose::new("<b><u>Status</u></b>");
+    println!("\n{}\n", status_title.render(None));
+
+
+    let mut status_items: Vec<String> = Vec::new();
+
+    // Recent commits with conventional commit parsing
+    for commit in git.recent.iter().take(history_count) {
+        let cc = ConventionalCommit::parse(&commit.message);
+        let (date_str, time_str) = format_commit_datetime(&commit.timestamp);
+        let sha = commit.sha[0..7].to_string();
+
+        let commit_line = if let Some(ref op) = cc.operation {
+            let scope_part = cc.scope
+                .as_ref()
+                .map(|s| format!("(<dim>{}</dim>)", s))
+                .unwrap_or_default();
+            format!(
+                "[<b>{}</b>] <b><yellow>{}</yellow></b>{} <i>at</i> <blue><b>{}</b></blue> <i>on</i> <blue>{}</blue>: <dim>{}</dim>",
+                sha, op, scope_part, time_str, date_str, cc.description
+            )
         } else {
-            root_str
-        }
-    );
-    if let Some(ref branch) = git.current_branch {
-        println!("Branch: {}", branch);
-    }
-
-    if git.in_worktree {
-        println!("In Worktree: yes");
-    }
-
-    if let Some(commit) = git.recent.first() {
-        println!("HEAD: {} ({})", &commit.sha[..8], commit.author);
-        println!("Message: {}", commit.message.lines().next().unwrap_or(""));
-        if let Some(ref remotes) = commit.remotes {
-            println!("Synced to: {}", remotes.join(", "));
-        }
-    }
-
-    let dirty = if git.status.is_dirty {
-        "dirty"
-    } else {
-        "clean"
-    };
-    println!(
-        "Status: {} ({} staged, {} unstaged, {} untracked)",
-        dirty, git.status.staged_count, git.status.unstaged_count, git.status.untracked_count
-    );
-
-    if let Some(ref behind) = git.status.is_behind {
-        match behind {
-            BehindStatus::NotBehind => println!("Behind: no"),
-            BehindStatus::Behind(remotes) => {
-                println!("Behind: {}", remotes.join(", "));
-            }
-        }
-    }
-
-    if verbose > 0 && git.recent.len() > 1 {
-        println!("Recent commits:");
-        for commit in git.recent.iter().skip(1).take(5) {
-            let short_msg = commit.message.lines().next().unwrap_or("");
-            let truncated = if short_msg.len() > 50 {
-                format!("{}...", &short_msg[..47])
+            // Non-conventional commit
+            let first_line = commit.message.lines().next().unwrap_or("");
+            let truncated = if first_line.len() > 50 {
+                format!("{}...", &first_line[..47])
             } else {
-                short_msg.to_string()
+                first_line.to_string()
             };
-            print!("  {} - {}", &commit.sha[..8], truncated);
-            if verbose > 1
-                && let Some(ref remotes) = commit.remotes
-            {
-                print!(" [{}]", remotes.join(", "));
-            }
-            println!();
-        }
-        if git.recent.len() > 6 {
-            println!("  ... and {} more", git.recent.len() - 6);
-        }
+            format!(
+                "<dim>{}</dim> <i>on</i> <blue><b>{}</b></blue>",
+                truncated, date_str
+            )
+        };
+        status_items.push(commit_line);
     }
 
-    for remote in &git.remotes {
-        print!("Remote {}: {:?}", remote.name, remote.provider);
-        if let Some(ref branches) = remote.branches {
-            print!(" ({} branches)", branches.len());
-        }
-        println!();
+    // File changes grouped by status
+    let staged: Vec<_> = git.file_changes.iter()
+        .filter(|f| f.status == FileStatus::Staged || f.status == FileStatus::Both)
+        .collect();
+    let modified: Vec<_> = git.file_changes.iter()
+        .filter(|f| f.status == FileStatus::Modified || f.status == FileStatus::Both)
+        .collect();
+    let untracked: Vec<_> = git.file_changes.iter()
+        .filter(|f| f.status == FileStatus::Untracked)
+        .collect();
+
+    // Add staged files
+    for file in &staged {
+        let path = file.path.display().to_string();
+        let (dir, name) = split_path(&path);
+        let line = if dir.is_empty() {
+            format!("<lime>staged: <b>{}</b></lime>", name)
+        } else {
+            format!("<lime>staged: {}<b>{}</b></lime>", dir, name)
+        };
+        status_items.push(line);
     }
+
+    // Add modified files
+    for file in &modified {
+        let path = file.path.display().to_string();
+        let (dir, name) = split_path(&path);
+        let line = if dir.is_empty() {
+            format!("<red>modified: <b>{}</b></red>", name)
+        } else {
+            format!("<red>modified: {}<b>{}</b></red>", dir, name)
+        };
+        status_items.push(line);
+    }
+
+    // Add untracked files
+    for file in &untracked {
+        let path = file.path.display().to_string();
+        let (dir, name) = split_path(&path);
+        let line = if dir.is_empty() {
+            format!("<yellow>untracked: <b>{}</b></yellow>", name)
+        } else {
+            format!("<yellow>untracked: {}<b>{}</b></yellow>", dir, name)
+        };
+        status_items.push(line);
+    }
+
+    // Render status items as list
+    if !status_items.is_empty() {
+        let rendered_items: Vec<String> = status_items
+            .iter()
+            .map(|item| Prose::new(item.as_str()).render(None))
+            .collect();
+        let list = UnorderedList::new(rendered_items);
+        println!("{}", list.render(None));
+    } else {
+        let clean = Prose::new("<dim>No changes</dim>");
+        println!("  {}", clean.render(None));
+    }
+
+    // === Meta Section ===
+    let meta_title = Prose::new("<b><u>Meta</u></b>");
+    println!("\n{}\n", meta_title.render(None));
+
+    let mut meta_items: Vec<String> = Vec::new();
+
+    // Remote tracking status with heading
+    if !git.tracking.is_empty() {
+        let remotes: Vec<String> = git.tracking.iter()
+            .map(|t| format!(
+                "<b>{}</b>: <green>{} ahead</green>, <red>{} behind</red>",
+                t.remote, t.ahead, t.behind
+            ))
+            .collect();
+        let remotes_str = remotes.join(", ");
+        meta_items.push(format!("<b>Remotes:</b> {}", remotes_str));
+    }
+
+    // Branch info with heading
+    if let Some(ref current) = git.current_branch {
+        let other_branches: Vec<_> = git.branches.iter()
+            .filter(|b| *b != current)
+            .take(3)
+            .cloned()
+            .collect();
+
+        let branch_line = if other_branches.is_empty() {
+            format!("<b>Branches:</b> <b>{}</b>", current)
+        } else {
+            let others = other_branches.join(", ");
+            let more = if git.branches.len() > 4 {
+                format!(", +{} more", git.branches.len() - 4)
+            } else {
+                String::new()
+            };
+            format!("<b>Branches:</b> <b>{}</b> <dim>({}{})</dim>", current, others, more)
+        };
+        meta_items.push(branch_line);
+    }
+
+    // Git config with heading - format email with angle brackets
+    // Use Unicode angle brackets (〈 and 〉) to avoid HTML parsing issues
+    if let Some(ref name) = git.config.user_name {
+        let email_part = git.config.user_email
+            .as_ref()
+            .map(|e| format!(" <dim>〈{}〉</dim>", e))
+            .unwrap_or_default();
+        meta_items.push(format!("<b>Git Config:</b> <cyan>{}</cyan>{}", name, email_part));
+    }
+
+    // Render meta items as list
+    if !meta_items.is_empty() {
+        let rendered_items: Vec<String> = meta_items
+            .iter()
+            .map(|item| Prose::new(item.as_str()).render(None))
+            .collect();
+        let list = UnorderedList::new(rendered_items);
+        println!("{}", list.render(None));
+    }
+
     println!();
+}
+
+/// Split a path into directory and filename components.
+fn split_path(path: &str) -> (String, String) {
+    if let Some(pos) = path.rfind('/') {
+        let dir = &path[..=pos];
+        let name = &path[pos + 1..];
+        (dir.to_string(), name.to_string())
+    } else {
+        (String::new(), path.to_string())
+    }
 }
 
 fn print_repo_section(

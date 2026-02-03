@@ -4,8 +4,8 @@
 //! or panics. Since Rust's `Drop` trait cannot be async, restoration is handled
 //! via a channel-based background task.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::sync::mpsc;
 
