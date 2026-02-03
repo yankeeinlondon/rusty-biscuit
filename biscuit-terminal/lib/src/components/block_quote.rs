@@ -18,6 +18,7 @@ pub struct BlockQuote {
     text_color: Option<Color>,
     bg_color: Option<Color>,
     left_block_color: Option<Color>,
+    layout: Layout,
 }
 
 impl Default for BlockQuote {
@@ -28,6 +29,7 @@ impl Default for BlockQuote {
             text_color: None,
             bg_color: None,
             left_block_color: Some(Color::Tailwind(Tailwind::Gray500)),
+            layout: Layout::default(),
         }
     }
 }
@@ -94,14 +96,20 @@ impl BlockQuote {
     }
 
     /// Render the block quote content with a left border.
-    fn render_content(&self, term: Option<&Terminal>, layout: &Layout) -> String {
+    ///
+    /// The border "│ " consumes 2 columns, so child content width
+    /// is reduced accordingly.
+    fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
         let default_term = Terminal::new_tty();
         let term = term.unwrap_or(&default_term);
+
+        // Border "│ " is 2 visible characters wide
+        let _child_width = term_width.saturating_sub(2);
 
         let content: String = match &self.content {
             RenderableContent::String(s) => s.clone(),
             RenderableContent::Component(component) => {
-                component.fallback_render(term, Some(layout))
+                component.fallback_render(term)
             }
         };
         let mut result = String::new();
@@ -132,22 +140,24 @@ impl BlockQuote {
 }
 
 impl Renderable for BlockQuote {
-    fn render(&self, layout: Option<&Layout>) -> String {
-        let layout = match layout {
-            Some(layout) => layout,
-            _ => &Layout::default(),
-        };
-
-        self.render_content(None, layout)
+    fn render(&self, term_width: Option<u32>) -> String {
+        self.render_content(None, term_width.unwrap_or(80))
     }
 
-    fn fallback_render(&self, term: &Terminal, layout: Option<&Layout>) -> String {
-        let layout = match layout {
-            Some(layout) => layout,
-            _ => &Layout::default(),
-        };
+    fn fallback_render(&self, term: &Terminal) -> String {
+        self.render_content(Some(term), term.width())
+    }
 
-        self.render_content(Some(term), layout)
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
+    }
+
+    fn is_block_level(&self) -> bool {
+        true
     }
 }
 
@@ -383,7 +393,7 @@ mod tests {
         let quote = BlockQuote::from("Fallback test");
         let term = Terminal::default();
         let render_result = quote.render(None);
-        let fallback_result = quote.fallback_render(&term, None);
+        let fallback_result = quote.fallback_render(&term);
         assert_eq!(render_result, fallback_result);
     }
 

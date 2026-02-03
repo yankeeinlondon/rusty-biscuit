@@ -15,8 +15,8 @@
 //!
 //! ## Image Support
 //!
-//! This module requires the `viuer` feature to be enabled for actual image display.
-//! When `viuer` is not available, only the fallback code block is provided.
+//! Image display uses the `viuer` crate for terminal image rendering.
+//! When the terminal does not support images, only the fallback code block is provided.
 //!
 //! ## Examples
 //!
@@ -717,21 +717,12 @@ impl MermaidRenderer {
     /// Checks if the current terminal supports image rendering.
     ///
     /// Returns `true` if either Kitty or iTerm2 image protocols are supported.
-    #[cfg(feature = "viuer")]
     pub fn terminal_supports_images() -> bool {
         use crate::discovery::detection::ImageSupport;
         use crate::terminal::Terminal;
 
         let term = Terminal::new();
         !matches!(term.image_support, ImageSupport::None)
-    }
-
-    /// Checks if the current terminal supports image rendering.
-    ///
-    /// Always returns `false` when viuer feature is disabled.
-    #[cfg(not(feature = "viuer"))]
-    pub fn terminal_supports_images() -> bool {
-        false
     }
 
     /// Renders the diagram to the terminal using the local mmdc CLI.
@@ -779,7 +770,6 @@ impl MermaidRenderer {
     /// - mmdc is not installed or not in PATH
     /// - Diagram is too large (> 10KB)
     /// - mmdc execution fails (invalid syntax, etc.)
-    #[cfg(feature = "viuer")]
     #[tracing::instrument(skip(self))]
     pub fn render_for_terminal(&self) -> Result<(), MermaidRenderError> {
         use super::mermaid_cache::{MermaidCache, MermaidCacheKey};
@@ -870,7 +860,6 @@ impl MermaidRenderer {
     /// - Terminal doesn't support image rendering
     /// - mmdc is not available or execution fails
     /// - Diagram is too large
-    #[cfg(feature = "viuer")]
     #[tracing::instrument(skip(self))]
     pub fn render_to_cached_png(&self) -> Result<(std::path::PathBuf, bool), MermaidRenderError> {
         use super::mermaid_cache::{MermaidCache, MermaidCacheKey};
@@ -927,12 +916,6 @@ impl MermaidRenderer {
         }
     }
 
-    /// Renders the diagram to a cached PNG file (stub when viuer is disabled).
-    #[cfg(not(feature = "viuer"))]
-    pub fn render_to_cached_png(&self) -> Result<(std::path::PathBuf, bool), MermaidRenderError> {
-        Err(MermaidRenderError::NoImageSupport)
-    }
-
     /// Gets the mmdc version, caching the result and warning if it's below minimum.
     fn get_mmdc_version_with_warning(&self) -> String {
         use std::sync::OnceLock;
@@ -961,12 +944,6 @@ impl MermaidRenderer {
         }
 
         version.clone()
-    }
-
-    /// Renders the diagram to the terminal (stub when viuer is disabled).
-    #[cfg(not(feature = "viuer"))]
-    pub fn render_for_terminal(&self) -> Result<(), MermaidRenderError> {
-        Err(MermaidRenderError::NoImageSupport)
     }
 
     /// Renders the diagram to a temporary PNG file.

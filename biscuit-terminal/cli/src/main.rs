@@ -3356,7 +3356,7 @@ fn render_prose(
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::Renderable;
-    use biscuit_terminal::utils::layout::{Layout, Margin, WordWrap};
+    use biscuit_terminal::utils::layout::{Margin, WordWrap};
 
     // Join all content pieces with spaces
     let text = content.join(" ");
@@ -3393,8 +3393,7 @@ fn render_prose(
 
     // Render using fallback_render for terminal-aware output
     let term = Terminal::new();
-    let layout = Layout::default();
-    let output = prose.fallback_render(&term, Some(&layout));
+    let output = prose.fallback_render(&term);
 
     println!("{}", output);
 
@@ -3406,7 +3405,6 @@ fn render_quote(content: &[String], attribution: Option<&str>) -> color_eyre::Re
     use biscuit_terminal::components::block_quote::BlockQuote;
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
-    use biscuit_terminal::utils::layout::Layout;
     use std::sync::Arc;
 
     // Join all content pieces with spaces
@@ -3435,8 +3433,7 @@ fn render_quote(content: &[String], attribution: Option<&str>) -> color_eyre::Re
 
     // Render using fallback_render for terminal-aware output
     let term = Terminal::new();
-    let layout = Layout::default();
-    let output = quote.fallback_render(&term, Some(&layout));
+    let output = quote.fallback_render(&term);
 
     println!("{}", output);
 
@@ -3448,7 +3445,6 @@ fn render_list(items: &[String], bullet: &str, no_hanging_indent: bool) -> color
     use biscuit_terminal::components::list::UnorderedList;
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
-    use biscuit_terminal::utils::layout::Layout;
     use std::sync::Arc;
 
     if items.is_empty() {
@@ -3482,8 +3478,7 @@ fn render_list(items: &[String], bullet: &str, no_hanging_indent: bool) -> color
 
     // Render using fallback_render for terminal-aware output
     let term = Terminal::new();
-    let layout = Layout::default();
-    let output = list.fallback_render(&term, Some(&layout));
+    let output = list.fallback_render(&term);
 
     println!("{}", output);
 

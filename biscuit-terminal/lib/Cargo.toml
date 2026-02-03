@@ -15,8 +15,6 @@ path = "src/lib.rs"
 
 
 [features]
-default = ["viuer"]
-viuer = ["dep:viuer"]
 clap = ["dep:clap"]
 
 [dependencies]
@@ -35,8 +33,8 @@ regex = "1.11"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 unic-langid = "0.9.6"
 
-# Terminal image rendering (optional, default-enabled)
-viuer = { version = "0.11", features = ["print-file"], optional = true }
+# Terminal image rendering
+viuer = { version = "0.11", features = ["print-file"] }
 
 # CLI argument parsing (optional, for ValueEnum derive)
 clap = { version = "4", features = ["derive"], optional = true }

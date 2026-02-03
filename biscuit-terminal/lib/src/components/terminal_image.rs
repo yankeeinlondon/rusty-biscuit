@@ -68,7 +68,6 @@ pub enum TerminalImageError {
     RemoteUrlBlocked { url: String },
 
     /// viuer rendering error.
-    #[cfg(feature = "viuer")]
     #[error("viuer rendering error: {message}")]
     ViuerError { message: String },
 }
@@ -115,6 +114,9 @@ pub struct TerminalImage {
     pub margin_left: u32,
     /// Right margin in characters.
     pub margin_right: u32,
+
+    /// Layout configuration for the Renderable trait.
+    layout: Layout,
 }
 
 impl Default for TerminalImage {
@@ -128,6 +130,7 @@ impl Default for TerminalImage {
             alignment: Alignment::Left,
             margin_left: 0,
             margin_right: 0,
+            layout: Layout::default(),
         }
     }
 }
@@ -135,20 +138,26 @@ impl Default for TerminalImage {
 impl Renderable for TerminalImage {
     /// Fallback render using terminal capabilities.
     ///
-    /// Note: The Renderable trait uses associated functions (no `&self`),
-    /// which limits their usefulness for stateful components like TerminalImage.
-    /// Use the instance method `render_to_terminal()` instead for full functionality.
-    fn fallback_render(&self, _term: &Terminal, _layout: Option<&Layout>) -> String {
+    /// Note: Use the instance method `render_to_terminal()` instead
+    /// for full protocol-aware rendering.
+    fn fallback_render(&self, _term: &Terminal) -> String {
         "[Image: use render_to_terminal() for actual rendering]".to_string()
     }
 
     /// Optimistic render assuming Kitty protocol support.
     ///
-    /// Note: The Renderable trait uses associated functions (no `&self`),
-    /// which limits their usefulness for stateful components like TerminalImage.
-    /// Use the instance method `render_to_terminal()` instead for full functionality.
-    fn render(&self, _layout: Option<&Layout>) -> String {
+    /// Note: Use the instance method `render_to_terminal()` instead
+    /// for full protocol-aware rendering.
+    fn render(&self, _term_width: Option<u32>) -> String {
         "[Image: use render_to_terminal() for actual rendering]".to_string()
+    }
+
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
     }
 }
 
@@ -275,8 +284,8 @@ impl TerminalImage {
     /// This is the primary rendering method that handles protocol selection
     /// based on terminal capabilities.
     ///
-    /// When the `viuer` feature is enabled and the terminal supports images,
-    /// this method uses viuer for rendering, which correctly preserves aspect ratio.
+    /// When the terminal supports images, this method uses viuer for rendering,
+    /// which correctly preserves aspect ratio.
     ///
     /// ## Arguments
     ///
@@ -296,32 +305,13 @@ impl TerminalImage {
     ) -> Result<String, TerminalImageError> {
         use crate::discovery::detection::ImageSupport;
 
-        // When viuer feature is enabled and terminal supports images, use viuer
-        // for proper aspect ratio preservation
-        #[cfg(feature = "viuer")]
+        // When terminal supports images, use viuer for proper aspect ratio preservation
         if !matches!(term.image_support, ImageSupport::None) {
             // viuer prints directly, so we render and return empty string
             self.render_via_viuer(term)?;
             return Ok(String::new());
         }
 
-        // Fallback to protocol-based rendering (or alt text if no image support)
-        #[cfg(not(feature = "viuer"))]
-        {
-            use crate::discovery::detection::TerminalApp;
-
-            match term.image_support {
-                // iTerm advertises Kitty in some setups; prefer native iTerm protocol when the app is iTerm2.
-                ImageSupport::Kitty if matches!(term.app, TerminalApp::ITerm2) => {
-                    self.render_as_iterm2(term.width())
-                }
-                ImageSupport::Kitty => self.render_as_kitty(term.width()),
-                ImageSupport::ITerm => self.render_as_iterm2(term.width()),
-                ImageSupport::None => Ok(self.generate_alt_text()),
-            }
-        }
-
-        #[cfg(feature = "viuer")]
         Ok(self.generate_alt_text())
     }
 
@@ -329,7 +319,6 @@ impl TerminalImage {
     ///
     /// This is a convenience method that creates options from the instance's
     /// width field and renders using viuer.
-    #[cfg(feature = "viuer")]
     fn render_via_viuer(&self, term: &crate::terminal::Terminal) -> Result<(), TerminalImageError> {
         let term_width = term.width();
         let term_width = if term_width == 0 { 80 } else { term_width };
@@ -395,7 +384,6 @@ impl TerminalImage {
         let term = crate::terminal::Terminal::new();
 
         // Render using viuer or fall back to protocol-based rendering
-        #[cfg(feature = "viuer")]
         if options.use_viuer {
             return self.render_with_viuer(options, &term);
         }
@@ -425,7 +413,6 @@ impl TerminalImage {
     /// ## Errors
     ///
     /// Returns error if viuer rendering fails.
-    #[cfg(feature = "viuer")]
     pub fn render_with_viuer(
         &self,
         options: &crate::components::image_options::TerminalImageOptions,
@@ -443,7 +430,6 @@ impl TerminalImage {
     }
 
     /// Build a viuer Config from TerminalImageOptions.
-    #[cfg(feature = "viuer")]
     fn build_viuer_config(
         &self,
         options: &crate::components::image_options::TerminalImageOptions,
@@ -1520,7 +1506,6 @@ mod tests {
         assert!(err.to_string().contains("https://example.com"));
     }
 
-    #[cfg(feature = "viuer")]
     #[test]
     fn test_error_viuer_error_message() {
         let err = TerminalImageError::ViuerError {
@@ -1704,7 +1689,6 @@ mod tests {
     }
 
     // viuer config building tests
-    #[cfg(feature = "viuer")]
     #[test]
     fn test_build_viuer_config_fill_width() {
         use crate::components::image_options::TerminalImageOptions;
@@ -1731,7 +1715,6 @@ mod tests {
         assert!(config.truecolor);
     }
 
-    #[cfg(feature = "viuer")]
     #[test]
     fn test_build_viuer_config_percent_width() {
         use crate::components::image_options::TerminalImageOptions;
@@ -1756,7 +1739,6 @@ mod tests {
         assert!(config.width.is_some());
     }
 
-    #[cfg(feature = "viuer")]
     #[test]
     fn test_build_viuer_config_characters_width() {
         use crate::components::image_options::TerminalImageOptions;
@@ -1783,7 +1765,6 @@ mod tests {
         assert_eq!(config.width.unwrap(), 40);
     }
 
-    #[cfg(feature = "viuer")]
     #[test]
     fn test_build_viuer_config_respects_margins() {
         use crate::components::image_options::TerminalImageOptions;

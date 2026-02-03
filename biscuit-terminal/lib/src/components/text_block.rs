@@ -1,5 +1,5 @@
 use crate::{
-    components::renderable::{Renderable, RenderableWrapper},
+    components::renderable::Renderable,
     terminal::Terminal,
     utils::{
         color::Color,
@@ -22,6 +22,7 @@ pub struct TextBlock {
     strikethrough: bool,
     blink: bool,
     underline: UnderliningRequest,
+    layout: Layout,
 }
 
 impl Default for TextBlock {
@@ -34,7 +35,8 @@ impl Default for TextBlock {
             italic: false,
             strikethrough: false,
             blink: false,
-            underline: UnderliningRequest::None
+            underline: UnderliningRequest::None,
+            layout: Layout::default(),
         }
     }
 }
@@ -107,26 +109,24 @@ impl TextBlock {
 }
 
 impl Renderable for TextBlock {
-    fn render(&self, layout: Option<&Layout>) -> String {
+    fn render(&self, term_width: Option<u32>) -> String {
+        let width = term_width.unwrap_or(80);
         let term = Terminal::new_tty();
-        match layout {
-            Some(layout) => {
-                layout.render(self.to_terminal(&term))
-            },
-            _ => {
-                self.to_terminal(&term)
-            }
-        }
+        let content = self.to_terminal(&term);
+        self.layout.apply_layout(&content, width)
     }
 
-    fn fallback_render(&self, term: &Terminal, layout: Option<&Layout>) -> String {
-        match layout {
-            Some(layout) => {
-                layout.render(self.to_terminal(term))
-            },
-            _ => {
-                self.to_terminal(term)
-            }
-        }
+    fn fallback_render(&self, term: &Terminal) -> String {
+        let width = term.width();
+        let content = self.to_terminal(term);
+        self.layout.apply_layout(&content, width)
+    }
+
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
     }
 }

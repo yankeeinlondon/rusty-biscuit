@@ -1,11 +1,17 @@
 //! OS section output formatting.
+use biscuit_terminal::components::{prose::Prose, renderable::Renderable, table::table::{Table, TableColumn}, terminal_image::TerminalImage};
 
 use sniff_lib::hardware::NtpStatus;
 
 use super::format_uptime;
 
 pub fn print_os_section(os: &sniff_lib::OsInfo, verbose: u8) {
-    println!("=== OS ===");
+    let title = Prose::new("<b><u>Operating System:</u></b>").render(None);
+    println!(
+        "\n{}\n",
+        title
+    );
+    let logo = TerminalImage::from("../images/macOS-small.png");
 
     // Prefer long_version if available, otherwise fall back to name + version
     if let Some(ref long_ver) = os.long_version {

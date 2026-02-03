@@ -30,6 +30,8 @@ lint *args="":
 
 # install latest release version of CLI
 install *args="":
+    @cargo build --release -p sniff-lib
+    @cargo build --release -p sniff-cli
     @cargo install --path cli -- {{args}}
 
 # build and show the docs for the library code

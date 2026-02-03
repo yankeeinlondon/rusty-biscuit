@@ -1,11 +1,20 @@
 use crate::{
-    components::renderable::RenderableWrapper,
     terminal::Terminal,
     utils::{
         block_constraint::{split_lines, visible_width, wrap_lines},
         color::Color,
     },
 };
+
+/// A `RenderableWrapper` is a utility which operates at a
+/// lower level than a `Renderable` **component** and takes in
+/// string content and outputs that string _wrapped_ in some
+/// sort of formatting.
+pub trait RenderableWrapper {
+    fn render<T: Into<String>>(&self, content: T) -> String;
+
+    fn fallback_render<T: Into<String>>(&self, content: T, term: &Terminal) -> String;
+}
 
 /// The **TextAlignment** enumeration allows for
 /// terminal components to express how they should
@@ -40,11 +49,35 @@ pub enum Margin {
     None,
     Chars(u32),
     Percent(f32),
+    /// Lazy composition of a base margin plus additional character offset.
+    ///
+    /// Used when nesting components to accumulate margin without
+    /// resolving percentages prematurely.
+    Offset(Box<Margin>, u32),
 }
 
 impl Default for Margin {
     fn default() -> Self {
         Margin::None
+    }
+}
+
+impl Margin {
+    /// Compose this margin with additional character offset.
+    ///
+    /// Optimizes common cases:
+    /// - `None` + chars → `Chars(chars)`
+    /// - `Chars(a)` + chars → `Chars(a + chars)`
+    /// - other + chars → `Offset(base, chars)` (defers resolution)
+    pub fn add_chars(self, chars: u32) -> Margin {
+        if chars == 0 {
+            return self;
+        }
+        match self {
+            Margin::None => Margin::Chars(chars),
+            Margin::Chars(existing) => Margin::Chars(existing + chars),
+            other => Margin::Offset(Box::new(other), chars),
+        }
     }
 }
 
@@ -132,7 +165,7 @@ impl Default for WordWrap {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Layout {
     /// how much whitespace is required to the _left_ of this text block
     pub left_margin: Margin,
@@ -212,16 +245,26 @@ impl Layout {
     }
 
     /// Resolve a margin to a number of characters given a terminal width.
-    fn resolve_margin(margin: &Margin, terminal_width: u32) -> u32 {
+    pub fn resolve_margin(margin: &Margin, terminal_width: u32) -> u32 {
         match margin {
             Margin::None => 0,
             Margin::Chars(chars) => *chars,
             Margin::Percent(pct) => ((terminal_width as f32) * pct / 100.0).round() as u32,
+            Margin::Offset(base, chars) => {
+                Self::resolve_margin(base, terminal_width) + chars
+            }
         }
     }
 
+    /// Calculate the available content width after accounting for margins.
+    pub fn available_width(&self, terminal_width: u32) -> u32 {
+        let left = Self::resolve_margin(&self.left_margin, terminal_width);
+        let right = Self::resolve_margin(&self.right_margin, terminal_width);
+        terminal_width.saturating_sub(left).saturating_sub(right)
+    }
+
     /// Apply the layout to content and render.
-    fn apply_layout(&self, content: &str, terminal_width: u32) -> String {
+    pub fn apply_layout(&self, content: &str, terminal_width: u32) -> String {
         let left = Self::resolve_margin(&self.left_margin, terminal_width);
         let right = Self::resolve_margin(&self.right_margin, terminal_width);
 
@@ -286,23 +329,6 @@ impl Layout {
     }
 }
 
-impl RenderableWrapper for Layout {
-    fn render<T: Into<String>>(&self, content: T) -> String {
-        // Use a default terminal width of 80 when no terminal info available
-        let terminal_width = 80u32;
-        self.apply_layout(&content.into(), terminal_width)
-    }
-
-    fn fallback_render<T: Into<String>>(
-        &self,
-        content: T,
-        term: &Terminal
-    ) -> String {
-        let terminal_width = term.width();
-        self.apply_layout(&content.into(), terminal_width)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,7 +346,7 @@ mod tests {
             left_margin: Margin::Chars(4),
             ..Layout::default()
         };
-        let result = layout.render("Hello");
+        let result = layout.apply_layout("Hello", 80);
         assert!(result.starts_with("    Hello"));
     }
 
@@ -330,7 +356,7 @@ mod tests {
             alignment: Alignment::Center,
             ..Layout::default()
         };
-        let result = layout.render("Hi");
+        let result = layout.apply_layout("Hi", 80);
         // With 80 width and 2 char content, should have padding
         assert!(result.contains("Hi"));
     }
@@ -354,6 +380,79 @@ mod tests {
     }
 
     #[test]
+    fn test_margin_resolve_offset() {
+        let margin = Margin::Percent(10.0).add_chars(4);
+        assert_eq!(Layout::resolve_margin(&margin, 100), 14);
+    }
+
+    #[test]
+    fn test_margin_resolve_nested_offset() {
+        // Percent(10%) + 4 + 2 → at width 100: 10 + 4 + 2 = 16
+        let margin = Margin::Percent(10.0).add_chars(4).add_chars(2);
+        assert_eq!(Layout::resolve_margin(&margin, 100), 16);
+    }
+
+    #[test]
+    fn test_margin_add_chars_none_becomes_chars() {
+        assert_eq!(Margin::None.add_chars(4), Margin::Chars(4));
+    }
+
+    #[test]
+    fn test_margin_add_chars_chars_combines() {
+        assert_eq!(Margin::Chars(2).add_chars(4), Margin::Chars(6));
+    }
+
+    #[test]
+    fn test_margin_add_chars_zero_is_noop() {
+        assert_eq!(Margin::Chars(5).add_chars(0), Margin::Chars(5));
+        assert_eq!(Margin::None.add_chars(0), Margin::None);
+        assert_eq!(Margin::Percent(10.0).add_chars(0), Margin::Percent(10.0));
+    }
+
+    #[test]
+    fn test_margin_add_chars_percent_becomes_offset() {
+        let result = Margin::Percent(10.0).add_chars(4);
+        assert_eq!(result, Margin::Offset(Box::new(Margin::Percent(10.0)), 4));
+    }
+
+    #[test]
+    fn test_available_width_with_char_margins() {
+        let layout = Layout {
+            left_margin: Margin::Chars(10),
+            right_margin: Margin::Chars(10),
+            ..Layout::default()
+        };
+        assert_eq!(layout.available_width(80), 60);
+    }
+
+    #[test]
+    fn test_available_width_with_percent_margins() {
+        let layout = Layout {
+            left_margin: Margin::Percent(10.0),
+            right_margin: Margin::Percent(10.0),
+            ..Layout::default()
+        };
+        assert_eq!(layout.available_width(100), 80);
+    }
+
+    #[test]
+    fn test_available_width_saturates_to_zero() {
+        let layout = Layout {
+            left_margin: Margin::Chars(50),
+            right_margin: Margin::Chars(50),
+            ..Layout::default()
+        };
+        assert_eq!(layout.available_width(80), 0);
+    }
+
+    #[test]
+    fn test_layout_implements_debug() {
+        let layout = Layout::default();
+        let debug_str = format!("{:?}", layout);
+        assert!(debug_str.contains("Layout"));
+    }
+
+    #[test]
     fn test_word_wrap_applied() {
         let layout = Layout {
             word_wrap: WordWrap::WrapProse(None, None),
@@ -361,7 +460,7 @@ mod tests {
         };
         // With default 80 width, a long line should wrap
         let long_text = "a".repeat(100);
-        let result = layout.render(&long_text);
+        let result = layout.apply_layout(&long_text, 80);
         // Should have been split into multiple lines
         assert!(result.contains('\n') || result.len() <= 80);
     }

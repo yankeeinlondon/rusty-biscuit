@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::HashMap, sync::LazyLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{components::renderable::RenderableWrapper, terminal::Terminal};
+use crate::{utils::layout::RenderableWrapper, terminal::Terminal};
 use thiserror::Error;
 
 /// A single byte value (0-255) representing one RGB color channel.

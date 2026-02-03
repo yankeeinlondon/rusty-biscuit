@@ -271,12 +271,11 @@ impl Terminal {
     /// Terminal::render("Formatted {{bold}}text{{reset}}");
     /// ```
     pub fn render<T: Into<String>>(content: T) {
-        use crate::components::renderable::RenderableWrapper;
         use crate::utils::layout::Layout;
 
         let term = Terminal::new();
         let layout = Layout::default();
-        let output = layout.fallback_render(content, &term);
+        let output = layout.apply_layout(&content.into(), term.width());
         print!("{}", output);
     }
 

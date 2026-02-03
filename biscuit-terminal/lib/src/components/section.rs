@@ -36,6 +36,7 @@ pub struct Section {
     level: HeadingLevel,
     title: String,
     content: Vec<RenderableContent>,
+    layout: Layout,
 }
 
 impl Section {
@@ -45,6 +46,7 @@ impl Section {
             level,
             title: title.into(),
             content: Vec::new(),
+            layout: Layout::default(),
         }
     }
 
@@ -60,8 +62,9 @@ impl Section {
     }
 
     /// Render the section with heading styling based on level.
-    fn render_content(&self, term: Option<&Terminal>, layout: Option<&Layout>) -> String {
+    fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
         let mut result = String::new();
+        let content_width = self.layout.available_width(term_width);
 
         // Apply heading style based on level
         let (prefix, style_open, style_close) = match self.level {
@@ -86,9 +89,9 @@ impl Section {
                 RenderableContent::String(s) => s.clone(),
                 RenderableContent::Component(component) => {
                     if let Some(t) = term {
-                        component.fallback_render(t, layout)
+                        component.fallback_render(t)
                     } else {
-                        component.render(layout)
+                        component.render(Some(content_width))
                     }
                 }
             };
@@ -106,12 +109,24 @@ impl Section {
 }
 
 impl Renderable for Section {
-    fn render(&self, layout: Option<&Layout>) -> String {
-        self.render_content(None, layout)
+    fn render(&self, term_width: Option<u32>) -> String {
+        self.render_content(None, term_width.unwrap_or(80))
     }
 
-    fn fallback_render(&self, term: &Terminal, layout: Option<&Layout>) -> String {
-        self.render_content(Some(term), layout)
+    fn fallback_render(&self, term: &Terminal) -> String {
+        self.render_content(Some(term), term.width())
+    }
+
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
+    }
+
+    fn is_block_level(&self) -> bool {
+        true
     }
 }
 

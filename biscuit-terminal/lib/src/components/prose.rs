@@ -64,14 +64,8 @@ use crate::{
 pub struct Prose {
     /// the raw content as received
     content: String,
-
-    word_wrap: Option<WordWrap>,
-    /// Optionally force a fixed number of blank characters at the
-    /// start of each line to create a "left margin"
-    left_margin: Option<Margin>,
-    /// Optionally force a fixed number of blank characters at the
-    /// end of each line to create a "right margin" effect
-    right_margin: Option<Margin>,
+    /// Layout configuration for margins, alignment, word wrap, etc.
+    layout: Layout,
 }
 
 impl Prose {
@@ -79,27 +73,25 @@ impl Prose {
     pub fn new<T: Into<String>>(content: T) -> Self {
         Prose {
             content: content.into(),
-            word_wrap: None,
-            left_margin: None,
-            right_margin: None,
+            layout: Layout::default(),
         }
     }
 
     /// Set the word wrap strategy.
     pub fn with_word_wrap(mut self, wrap: WordWrap) -> Self {
-        self.word_wrap = Some(wrap);
+        self.layout.word_wrap = wrap;
         self
     }
 
     /// Set the left margin.
     pub fn with_left_margin(mut self, margin: Margin) -> Self {
-        self.left_margin = Some(margin);
+        self.layout.left_margin = margin;
         self
     }
 
     /// Set the right margin.
     pub fn with_right_margin(mut self, margin: Margin) -> Self {
-        self.right_margin = Some(margin);
+        self.layout.right_margin = margin;
         self
     }
 
@@ -233,84 +225,30 @@ impl Default for Prose {
     fn default() -> Prose {
         Prose {
             content: "".to_string(),
-            word_wrap: None,
-            left_margin: None,
-            right_margin: None,
+            layout: Layout::default(),
         }
     }
 }
 
 impl Renderable for Prose {
-    fn render(&self, layout: Option<&Layout>) -> String {
-        let _layout = match layout {
-            Some(layout) => {
-              Layout {
-                  word_wrap: match &self.word_wrap {
-                      Some(wrap) => wrap.clone(),
-                      _ => layout.word_wrap.clone()
-                  },
-                  left_margin: match &self.left_margin {
-                      Some(margin) => margin.clone(),
-                      _ => layout.left_margin.clone()
-                  },
-                  right_margin: match &self.right_margin {
-                      Some(margin) => margin.clone(),
-                      _ => layout.right_margin.clone()
-                  },
-                  top_margin: layout.top_margin.clone(),
-                  bottom_margin: layout.bottom_margin.clone(),
-                  alignment: layout.alignment,
-                  row_fill_strategy: layout.row_fill_strategy.clone(),
-                  page_bg_color: layout.page_bg_color.clone(),
-              }
-            },
-            _ => {
-                Layout {
-                  word_wrap: self.word_wrap.clone().unwrap_or(WordWrap::None),
-                  left_margin: self.left_margin.clone().unwrap_or_default(),
-                  right_margin: self.right_margin.clone().unwrap_or_default(),
-                  ..Layout::default()
-                }
-            }
-        };
-
-        self.parse_tokens(None)
+    fn render(&self, term_width: Option<u32>) -> String {
+        let width = term_width.unwrap_or(80);
+        let parsed = self.parse_tokens(None);
+        self.layout.apply_layout(&parsed, width)
     }
 
-    fn fallback_render(&self, term: &Terminal, layout: Option<&Layout>) -> String {
-        let _layout = match layout {
-            Some(layout) => {
-              Layout {
-                  word_wrap: match &self.word_wrap {
-                      Some(wrap) => wrap.clone(),
-                      _ => layout.word_wrap.clone()
-                  },
-                  left_margin: match &self.left_margin {
-                      Some(margin) => margin.clone(),
-                      _ => layout.left_margin.clone()
-                  },
-                  right_margin: match &self.right_margin {
-                      Some(margin) => margin.clone(),
-                      _ => layout.right_margin.clone()
-                  },
-                  top_margin: layout.top_margin.clone(),
-                  bottom_margin: layout.bottom_margin.clone(),
-                  alignment: layout.alignment,
-                  row_fill_strategy: layout.row_fill_strategy.clone(),
-                  page_bg_color: layout.page_bg_color.clone(),
-              }
-            },
-            _ => {
-                Layout {
-                  word_wrap: self.word_wrap.clone().unwrap_or(WordWrap::None),
-                  left_margin: self.left_margin.clone().unwrap_or_default(),
-                  right_margin: self.right_margin.clone().unwrap_or_default(),
-                  ..Layout::default()
-                }
-            }
-        };
+    fn fallback_render(&self, term: &Terminal) -> String {
+        let width = term.width();
+        let parsed = self.parse_tokens(Some(term));
+        self.layout.apply_layout(&parsed, width)
+    }
 
-        self.parse_tokens(Some(term))
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
     }
 }
 

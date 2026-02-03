@@ -192,8 +192,8 @@ pub fn print_git_section(git: &sniff_lib::filesystem::git::GitInfo, history_coun
                 .map(|s| format!("(<dim>{}</dim>)", s))
                 .unwrap_or_default();
             format!(
-                "[<b>{}</b>]{} <b><yellow>{}</yellow></b>{} <i>at</i> <blue><b>{}</b></blue> {}<blue>{}</blue>: <dim>{}</dim>",
-                sha, refs_part, op, scope_part, time_str, date_prefix, date_str, cc.description
+                "[<b>{}</b>] <b><yellow>{}</yellow></b>{} <i>at</i> <blue><b>{}</b></blue> {}<blue>{}</blue>{}: <dim>{}</dim>",
+                sha,  op, scope_part, time_str, date_prefix, date_str, refs_part, cc.description
             )
         } else {
             // Non-conventional commit
@@ -204,8 +204,8 @@ pub fn print_git_section(git: &sniff_lib::filesystem::git::GitInfo, history_coun
                 first_line.to_string()
             };
             format!(
-                "[<b>{}</b>]{} <dim>{}</dim> {}<blue><b>{}</b></blue>",
-                sha, refs_part, truncated, date_prefix, date_str
+                "[<b>{}</b>] <dim>{}</dim> {}<blue><b>{}</b></blue>{}",
+                sha,truncated, date_prefix, date_str,  refs_part,
             )
         };
         status_items.push(commit_line);

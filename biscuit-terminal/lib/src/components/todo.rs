@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::components::renderable::{Renderable, RenderableWrapper};
+use crate::components::renderable::Renderable;
 use crate::terminal::Terminal;
 use crate::utils::styling::{FontWeight, Style, Stylist};
 use crate::utils::{
@@ -96,12 +96,34 @@ pub static TODO_CHAR_LOOKUP: LazyLock<HashMap<TodoState, TodoStateRep>> = LazyLo
     m
 });
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Hash )]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Todo {
     state: TodoState,
     description: String,
     created: DateTime<Utc>,
     last_updated: DateTime<Utc>,
+    #[serde(skip)]
+    layout: Layout,
+}
+
+impl PartialEq for Todo {
+    fn eq(&self, other: &Self) -> bool {
+        self.state == other.state
+            && self.description == other.description
+            && self.created == other.created
+            && self.last_updated == other.last_updated
+    }
+}
+
+impl Eq for Todo {}
+
+impl std::hash::Hash for Todo {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.state.hash(state);
+        self.description.hash(state);
+        self.created.hash(state);
+        self.last_updated.hash(state);
+    }
 }
 
 
@@ -112,6 +134,7 @@ impl Default for Todo {
             description: "".to_string(),
             created: Utc::now(),
             last_updated: Utc::now(),
+            layout: Layout::default(),
         }
     }
 }
@@ -171,23 +194,24 @@ impl Todo {
 }
 
 impl Renderable for Todo {
-    fn render(&self, layout: Option<&Layout>) -> String {
+    fn render(&self, term_width: Option<u32>) -> String {
         let term = Terminal::new();
-
-        match layout {
-            Some(layout) => {
-                layout.render(self.to_terminal(&term))
-            },
-            _ => self.to_terminal(&term)
-        }
+        let width = term_width.unwrap_or_else(|| term.width());
+        let content = self.to_terminal(&term);
+        self.layout.apply_layout(&content, width)
     }
 
-    fn fallback_render(&self, term: &Terminal, layout: Option<&Layout>) -> String {
-        match layout {
-            Some(layout) => {
-                layout.render(self.to_terminal(term))
-            },
-            _ => self.to_terminal(term)
-        }
+    fn fallback_render(&self, term: &Terminal) -> String {
+        let width = term.width();
+        let content = self.to_terminal(term);
+        self.layout.apply_layout(&content, width)
+    }
+
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
     }
 }

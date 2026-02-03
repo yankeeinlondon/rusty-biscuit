@@ -68,6 +68,7 @@ pub struct Table {
     title: Option<String>,
     columns: Vec<TableColumn>,
     data: Vec<Vec<TableCellContent>>,
+    layout: Layout,
 }
 
 impl Default for Table {
@@ -76,6 +77,7 @@ impl Default for Table {
             title: None,
             columns: Vec::new(),
             data: Vec::new(),
+            layout: Layout::default(),
         }
     }
 }
@@ -218,12 +220,24 @@ impl Table {
 }
 
 impl Renderable for Table {
-    fn render(&self, _layout: Option<&Layout>) -> String {
+    fn render(&self, _term_width: Option<u32>) -> String {
         self.render_content(None)
     }
 
-    fn fallback_render(&self, term: &Terminal, _layout: Option<&Layout>) -> String {
+    fn fallback_render(&self, term: &Terminal) -> String {
         self.render_content(Some(term))
+    }
+
+    fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    fn layout_mut(&mut self) -> &mut Layout {
+        &mut self.layout
+    }
+
+    fn is_block_level(&self) -> bool {
+        true
     }
 }
 

@@ -518,13 +518,13 @@ pub fn dimensions() -> (u32, u32) {
 ///
 /// ## Detection Strategy
 ///
-/// When the `viuer` feature is enabled (default), this function uses viuer's
-/// runtime detection which actually queries the terminal:
+/// This function uses viuer's runtime detection which actually queries
+/// the terminal:
 /// 1. `viuer::get_kitty_support()` - Probes for Kitty Graphics Protocol
 /// 2. `viuer::is_iterm_supported()` - Checks for iTerm2 inline images
 ///
 /// Falls back to environment variable heuristics when viuer detection
-/// returns no support or when the `viuer` feature is disabled.
+/// returns no support.
 ///
 /// ## Examples
 ///
@@ -574,8 +574,7 @@ pub fn image_support_with_reason() -> ImageSupportResult {
         return result;
     }
 
-    // For unknown terminals, use viuer's runtime detection if available
-    #[cfg(feature = "viuer")]
+    // For unknown terminals, use viuer's runtime detection
     {
         use viuer::{KittySupport, get_kitty_support, is_iterm_supported};
 
@@ -1540,33 +1539,17 @@ mod tests {
     }
 
     // ========================================================================
-    // Feature flag tests
+    // viuer detection tests
     // ========================================================================
 
     #[test]
-    #[cfg(feature = "viuer")]
-    fn test_viuer_feature_enabled() {
-        // When viuer feature is enabled, the detection should work
+    fn test_viuer_detection_completes() {
+        // The detection should work without panicking
         // Note: we can't test the actual viuer detection results in unit tests
         // because they depend on the runtime terminal environment
         let result = image_support_with_reason();
 
         // Should complete without panic
         assert!(!result.reason.is_empty());
-    }
-
-    #[test]
-    #[cfg(not(feature = "viuer"))]
-    fn test_viuer_feature_disabled() {
-        // When viuer is disabled, should fall back to env heuristics
-        let result = image_support_with_reason();
-
-        // If not a TTY, method will be "tty_check"
-        // Otherwise, method should be "env_heuristic"
-        assert!(
-            result.method == "tty_check" || result.method == "env_heuristic",
-            "Without viuer, method should be tty_check or env_heuristic, got: {}",
-            result.method
-        );
     }
 }
