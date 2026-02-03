@@ -424,6 +424,32 @@ pub struct RemoteInfo {
     pub branches: Option<Vec<String>>,
 }
 
+/// Ref decoration for a commit (branch, tag, or remote tracking ref).
+///
+/// Represents refs that point to a specific commit, similar to
+/// `git log --decorate` output like `(HEAD -> main, origin/main)`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RefDecoration {
+    /// The ref name (e.g., "main", "origin/main", "v1.0.0").
+    pub name: String,
+    /// The type of ref.
+    pub kind: RefKind,
+    /// Whether HEAD points to this ref (only true for local branches).
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub is_head: bool,
+}
+
+/// Type of git reference.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RefKind {
+    /// Local branch (refs/heads/*)
+    LocalBranch,
+    /// Remote tracking branch (refs/remotes/*)
+    RemoteBranch,
+    /// Tag (refs/tags/*)
+    Tag,
+}
+
 /// Git commit metadata.
 ///
 /// Contains commit hash, message, author, and timestamp.
@@ -440,6 +466,9 @@ pub struct CommitInfo {
     /// Remotes that contain this commit (only populated with --deep flag).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remotes: Option<Vec<String>>,
+    /// Refs pointing to this commit (branches, tags, remote tracking refs).
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub refs: Vec<RefDecoration>,
 }
 
 /// Git worktree information.
@@ -587,6 +616,87 @@ pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option
     }))
 }
 
+/// Collects all refs (branches, remote tracking, tags) pointing to each commit.
+///
+/// Returns a HashMap from commit OID to a vector of ref decorations.
+fn collect_ref_decorations(repo: &Repository) -> HashMap<git2::Oid, Vec<RefDecoration>> {
+    let mut decorations: HashMap<git2::Oid, Vec<RefDecoration>> = HashMap::new();
+
+    // Get current HEAD target to mark the active branch
+    let head_target = repo
+        .head()
+        .ok()
+        .and_then(|h| {
+            if h.is_branch() {
+                h.shorthand().map(String::from)
+            } else {
+                None
+            }
+        });
+
+    // Iterate all references
+    let Ok(refs) = repo.references() else {
+        return decorations;
+    };
+
+    for reference in refs.flatten() {
+        let Some(name) = reference.name() else {
+            continue;
+        };
+
+        // Resolve the reference to its target commit
+        let Ok(target) = reference.peel_to_commit() else {
+            continue;
+        };
+        let oid = target.id();
+
+        // Determine ref kind and display name
+        let (kind, display_name) = if let Some(branch) = name.strip_prefix("refs/heads/") {
+            (RefKind::LocalBranch, branch.to_string())
+        } else if let Some(remote) = name.strip_prefix("refs/remotes/") {
+            (RefKind::RemoteBranch, remote.to_string())
+        } else if let Some(tag) = name.strip_prefix("refs/tags/") {
+            (RefKind::Tag, tag.to_string())
+        } else {
+            continue; // Skip other refs (notes, stash, etc.)
+        };
+
+        // Check if this is the HEAD branch
+        let is_head = kind == RefKind::LocalBranch
+            && head_target.as_ref().is_some_and(|h| h == &display_name);
+
+        let decoration = RefDecoration {
+            name: display_name,
+            kind,
+            is_head,
+        };
+
+        decorations.entry(oid).or_default().push(decoration);
+    }
+
+    // Sort decorations: HEAD branch first, then local branches, remote branches, tags
+    for refs in decorations.values_mut() {
+        refs.sort_by(|a, b| {
+            // HEAD branch comes first
+            if a.is_head != b.is_head {
+                return b.is_head.cmp(&a.is_head);
+            }
+            // Then by kind: LocalBranch < RemoteBranch < Tag
+            match (a.kind, b.kind) {
+                (RefKind::LocalBranch, RefKind::LocalBranch) => a.name.cmp(&b.name),
+                (RefKind::LocalBranch, _) => std::cmp::Ordering::Less,
+                (_, RefKind::LocalBranch) => std::cmp::Ordering::Greater,
+                (RefKind::RemoteBranch, RefKind::RemoteBranch) => a.name.cmp(&b.name),
+                (RefKind::RemoteBranch, _) => std::cmp::Ordering::Less,
+                (_, RefKind::RemoteBranch) => std::cmp::Ordering::Greater,
+                (RefKind::Tag, RefKind::Tag) => a.name.cmp(&b.name),
+            }
+        });
+    }
+
+    decorations
+}
+
 /// Gets the last N commits from HEAD using revwalk.
 ///
 /// When `deep` is true, also determines which remotes contain each commit.
@@ -600,6 +710,9 @@ fn get_recent_commits(repo: &Repository, count: usize, deep: bool) -> Vec<Commit
     if revwalk.push_head().is_err() {
         return commits;
     }
+
+    // Collect ref decorations once for all commits
+    let ref_decorations = collect_ref_decorations(repo);
 
     for oid_result in revwalk.take(count) {
         let Ok(oid) = oid_result else {
@@ -615,6 +728,9 @@ fn get_recent_commits(repo: &Repository, count: usize, deep: bool) -> Vec<Commit
             None
         };
 
+        // Get refs pointing to this commit
+        let refs = ref_decorations.get(&oid).cloned().unwrap_or_default();
+
         let author = commit.author();
         commits.push(CommitInfo {
             sha: commit.id().to_string(),
@@ -622,6 +738,7 @@ fn get_recent_commits(repo: &Repository, count: usize, deep: bool) -> Vec<Commit
             author: author.name().unwrap_or("Unknown").to_string(),
             timestamp: DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_default(),
             remotes,
+            refs,
         });
     }
 
@@ -2212,6 +2329,7 @@ mod tests {
             author: "Jane Doe".to_string(),
             timestamp: Utc.with_ymd_and_hms(2025, 1, 15, 10, 30, 0).unwrap(),
             remotes: Some(vec!["origin".to_string()]),
+            refs: vec![],
         };
 
         let json_with = serde_json::to_string(&commit_with_remotes).unwrap();
@@ -2232,6 +2350,7 @@ mod tests {
             author: "John Smith".to_string(),
             timestamp: Utc.with_ymd_and_hms(2025, 1, 14, 9, 0, 0).unwrap(),
             remotes: None,
+            refs: vec![],
         };
 
         let json_without = serde_json::to_string(&commit_without_remotes).unwrap();
@@ -2371,5 +2490,202 @@ mod tests {
         let messages: Vec<&str> = info.recent.iter().map(|c| c.message.as_str()).collect();
         assert!(!messages.contains(&"Commit 1"));
         assert!(!messages.contains(&"Commit 5"));
+    }
+
+    // ============================================================================
+    // RefDecoration tests
+    // ============================================================================
+
+    #[test]
+    fn test_ref_decoration_serialization() {
+        let local_head = RefDecoration {
+            name: "main".to_string(),
+            kind: RefKind::LocalBranch,
+            is_head: true,
+        };
+
+        let json = serde_json::to_string(&local_head).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["name"], "main");
+        assert_eq!(parsed["kind"], "LocalBranch");
+        assert_eq!(parsed["is_head"], true);
+
+        // Test without is_head (should be omitted due to skip_serializing_if)
+        let remote_branch = RefDecoration {
+            name: "origin/main".to_string(),
+            kind: RefKind::RemoteBranch,
+            is_head: false,
+        };
+
+        let json = serde_json::to_string(&remote_branch).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["name"], "origin/main");
+        assert_eq!(parsed["kind"], "RemoteBranch");
+        // is_head should be absent when false
+        assert!(parsed.get("is_head").is_none());
+    }
+
+    #[test]
+    fn test_ref_kind_variants() {
+        assert_eq!(
+            serde_json::to_string(&RefKind::LocalBranch).unwrap(),
+            "\"LocalBranch\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RefKind::RemoteBranch).unwrap(),
+            "\"RemoteBranch\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RefKind::Tag).unwrap(),
+            "\"Tag\""
+        );
+    }
+
+    #[test]
+    fn test_commit_info_with_refs_serialization() {
+        use chrono::TimeZone;
+
+        let commit_with_refs = CommitInfo {
+            sha: "abc123".to_string(),
+            message: "Test commit".to_string(),
+            author: "Test Author".to_string(),
+            timestamp: Utc.with_ymd_and_hms(2025, 1, 15, 10, 30, 0).unwrap(),
+            remotes: None,
+            refs: vec![
+                RefDecoration {
+                    name: "main".to_string(),
+                    kind: RefKind::LocalBranch,
+                    is_head: true,
+                },
+                RefDecoration {
+                    name: "origin/main".to_string(),
+                    kind: RefKind::RemoteBranch,
+                    is_head: false,
+                },
+            ],
+        };
+
+        let json = serde_json::to_string(&commit_with_refs).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert!(parsed["refs"].is_array());
+        let refs = parsed["refs"].as_array().unwrap();
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0]["name"], "main");
+        assert_eq!(refs[1]["name"], "origin/main");
+
+        // Test with empty refs (should be omitted)
+        let commit_no_refs = CommitInfo {
+            sha: "def456".to_string(),
+            message: "Another commit".to_string(),
+            author: "Test Author".to_string(),
+            timestamp: Utc.with_ymd_and_hms(2025, 1, 14, 9, 0, 0).unwrap(),
+            remotes: None,
+            refs: vec![],
+        };
+
+        let json = serde_json::to_string(&commit_no_refs).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // refs field should be absent when empty
+        assert!(parsed.get("refs").is_none());
+    }
+
+    #[test]
+    fn test_commit_has_refs_populated() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+
+        // Create initial commit
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = {
+            let mut index = repo.index().unwrap();
+            let file_path = dir.path().join("test.txt");
+            std::fs::write(&file_path, "content").unwrap();
+            index.add_path(Path::new("test.txt")).unwrap();
+            index.write().unwrap();
+            index.write_tree().unwrap()
+        };
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+            .unwrap();
+
+        let result = detect_git(dir.path(), false, 10).unwrap();
+        assert!(result.is_some());
+
+        let info = result.unwrap();
+        assert!(!info.recent.is_empty());
+
+        // HEAD commit should have ref decorations
+        let head_commit = &info.recent[0];
+        assert!(!head_commit.refs.is_empty());
+
+        // Should have at least the local branch
+        let has_local_branch = head_commit
+            .refs
+            .iter()
+            .any(|r| r.kind == RefKind::LocalBranch);
+        assert!(has_local_branch, "HEAD commit should have a local branch ref");
+
+        // The HEAD branch should be marked
+        let has_head_marker = head_commit.refs.iter().any(|r| r.is_head);
+        assert!(has_head_marker, "Current branch should be marked as HEAD");
+    }
+
+    #[test]
+    fn test_refs_sorted_correctly() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+
+        // Create initial commit
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = {
+            let mut index = repo.index().unwrap();
+            let file_path = dir.path().join("test.txt");
+            std::fs::write(&file_path, "content").unwrap();
+            index.add_path(Path::new("test.txt")).unwrap();
+            index.write().unwrap();
+            index.write_tree().unwrap()
+        };
+        let tree = repo.find_tree(tree_id).unwrap();
+        let commit_id = repo
+            .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+            .unwrap();
+
+        // Create additional branches pointing to the same commit
+        let commit = repo.find_commit(commit_id).unwrap();
+        repo.branch("feature", &commit, false).unwrap();
+        repo.branch("develop", &commit, false).unwrap();
+
+        // Create a tag pointing to the same commit
+        repo.tag_lightweight("v1.0.0", commit.as_object(), false)
+            .unwrap();
+
+        let result = detect_git(dir.path(), false, 10).unwrap();
+        let info = result.unwrap();
+        let head_commit = &info.recent[0];
+
+        // Should have multiple refs
+        assert!(head_commit.refs.len() >= 3);
+
+        // HEAD branch should come first
+        assert!(head_commit.refs[0].is_head, "HEAD branch should be first");
+        assert_eq!(head_commit.refs[0].kind, RefKind::LocalBranch);
+
+        // Other local branches should come next, then tags
+        let first_tag_idx = head_commit.refs.iter().position(|r| r.kind == RefKind::Tag);
+        let last_local_idx = head_commit
+            .refs
+            .iter()
+            .rposition(|r| r.kind == RefKind::LocalBranch);
+
+        if let (Some(tag_idx), Some(local_idx)) = (first_tag_idx, last_local_idx) {
+            assert!(
+                local_idx < tag_idx,
+                "Local branches should come before tags"
+            );
+        }
     }
 }
