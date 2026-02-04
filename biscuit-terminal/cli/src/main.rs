@@ -12,20 +12,44 @@ use std::path::Path;
 use biscuit_terminal::{
     components::{
         mermaid::{MermaidRenderer, QuadrantTheme},
-        terminal_image::{parse_filepath_and_width, parse_width_spec, ImageWidth, TerminalImage},
+        terminal_image::{ImageWidth, TerminalImage, parse_filepath_and_width, parse_width_spec},
     },
     discovery::{
         clipboard,
-        detection::{multiplex_support, Connection, MultiplexSupport},
+        detection::{Connection, MultiplexSupport, multiplex_support},
         eval, fonts, mode_2027, osc_queries,
     },
     terminal::Terminal,
-    utils::escape_codes,
+    utils::{escape_codes, layout},
 };
-use clap::{CommandFactory, Parser, Subcommand};
-use clap_complete::engine::{ArgValueCompleter, PathCompleter};
+use clap::{Args as ClapArgs, CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
+use clap_complete::engine::{ArgValueCompleter, PathCompleter};
 use serde::Serialize;
+
+/// Shared layout arguments for image and diagram commands.
+#[derive(ClapArgs, Debug, Clone, Default)]
+struct LayoutArgs {
+    /// Left margin in characters
+    #[arg(long, visible_alias = "ml")]
+    margin_left: Option<u32>,
+
+    /// Right margin in characters
+    #[arg(long, visible_alias = "mr")]
+    margin_right: Option<u32>,
+
+    /// Top margin in blank lines
+    #[arg(long, visible_alias = "mt")]
+    margin_top: Option<u32>,
+
+    /// Bottom margin in blank lines
+    #[arg(long, visible_alias = "mb")]
+    margin_bottom: Option<u32>,
+
+    /// Alignment
+    #[arg(long, visible_alias = "align", value_enum)]
+    alignment: Option<layout::Alignment>,
+}
 
 /// Brief pause after image rendering.
 ///
@@ -140,6 +164,9 @@ enum Command {
         #[arg(long, short = 'w')]
         width: Option<String>,
 
+        #[command(flatten)]
+        layout: LayoutArgs,
+
         /// Output rendering metadata to stderr (filename, file size, render time)
         #[arg(long)]
         meta: bool,
@@ -201,6 +228,9 @@ enum Command {
         #[arg(long, short = 'w')]
         width: Option<String>,
 
+        #[command(flatten)]
+        layout: LayoutArgs,
+
         /// Render an example diagram and show the command used
         #[arg(long, short = 'e')]
         example: bool,
@@ -218,7 +248,9 @@ enum Command {
     ///
     /// Creates a Mermaid quadrantChart and renders it to the terminal.
     /// Data points are specified as "Label: [x, y]" where x and y are 0.0-1.0.
-    #[command(display_order = 3, after_long_help = "\
+    #[command(
+        display_order = 3,
+        after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
   Render an example quadrant chart:
     bt quadrant --example
@@ -268,7 +300,8 @@ enum Command {
 
   JSON output (for scripting):
     bt quadrant --json \"Item: [0.5, 0.5]\"
-")]
+"
+    )]
     Quadrant {
         /// X-axis label (e.g., \"Low --> High\")
         #[arg(long = "x-axis", short = 'x', allow_hyphen_values = true)]
@@ -283,11 +316,21 @@ enum Command {
         title: Option<String>,
 
         /// Top-left quadrant label (quadrant-1)
-        #[arg(long = "top-left", short = 'l', visible_alias = "tl", allow_hyphen_values = true)]
+        #[arg(
+            long = "top-left",
+            short = 'l',
+            visible_alias = "tl",
+            allow_hyphen_values = true
+        )]
         top_left: Option<String>,
 
         /// Top-right quadrant label (quadrant-2)
-        #[arg(long = "top-right", short = 'r', visible_alias = "tr", allow_hyphen_values = true)]
+        #[arg(
+            long = "top-right",
+            short = 'r',
+            visible_alias = "tr",
+            allow_hyphen_values = true
+        )]
         top_right: Option<String>,
 
         /// Bottom-left quadrant label (quadrant-3)
@@ -295,7 +338,11 @@ enum Command {
         bottom_left: Option<String>,
 
         /// Bottom-right quadrant label (quadrant-4)
-        #[arg(long = "bottom-right", visible_alias = "br", allow_hyphen_values = true)]
+        #[arg(
+            long = "bottom-right",
+            visible_alias = "br",
+            allow_hyphen_values = true
+        )]
         bottom_right: Option<String>,
 
         /// Use inverted colors with solid background
@@ -307,6 +354,9 @@ enum Command {
         /// Default is 50% of terminal width. Aspect ratio is always preserved.
         #[arg(long, short = 'w')]
         width: Option<String>,
+
+        #[command(flatten)]
+        layout: LayoutArgs,
 
         /// Default point radius (default: 5)
         ///
@@ -359,7 +409,10 @@ enum Command {
     ///
     /// Creates a Mermaid pie chart and renders it to the terminal.
     /// Data points are specified as "Label: value" pairs.
-    #[command(name = "pie-chart", display_order = 4, after_long_help = "\
+    #[command(
+        name = "pie-chart",
+        display_order = 4,
+        after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
   Render an example pie chart:
     bt pie-chart --example
@@ -405,7 +458,8 @@ enum Command {
     \"Label: value color: #rrggbb\" (explicit)
 
   Slices without colors use Mermaid's default palette.
-")]
+"
+    )]
     PieChart {
         /// Use inverted colors with solid background
         ///
@@ -424,6 +478,9 @@ enum Command {
         /// Default is 50% of terminal width. Aspect ratio is always preserved.
         #[arg(long, short = 'w')]
         width: Option<String>,
+
+        #[command(flatten)]
+        layout: LayoutArgs,
 
         /// Show data values on the pie slices
         #[arg(long)]
@@ -446,7 +503,10 @@ enum Command {
     ///
     /// Creates a Mermaid gitGraph and renders it to the terminal.
     /// Git commands include: commit, branch, checkout, merge, cherry-pick.
-    #[command(name = "git-graph", display_order = 5, after_long_help = "\
+    #[command(
+        name = "git-graph",
+        display_order = 5,
+        after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
   Render an example git graph:
     bt git-graph --example
@@ -483,7 +543,8 @@ enum Command {
   checkout <name>           Switch to a branch
   merge <name>              Merge a branch into current
   cherry-pick id: \"abc\"     Cherry-pick a commit
-")]
+"
+    )]
     GitGraph {
         /// Use inverted colors with solid background
         ///
@@ -503,6 +564,9 @@ enum Command {
         #[arg(long, short = 'w')]
         width: Option<String>,
 
+        #[command(flatten)]
+        layout: LayoutArgs,
+
         /// Render an example diagram and show the command used
         #[arg(long, short = 'e')]
         example: bool,
@@ -520,7 +584,10 @@ enum Command {
     ///
     /// Creates a Mermaid XY chart with bar series and renders it to the terminal.
     /// Data can be provided as JSON array, comma-separated, or space-separated values.
-    #[command(name = "bar-chart", display_order = 7, after_long_help = "\
+    #[command(
+        name = "bar-chart",
+        display_order = 7,
+        after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
   Render an example bar chart:
     bt bar-chart --example
@@ -559,7 +626,8 @@ enum Command {
   JSON:          \"[1, 8, 7, 5]\"
   Comma-sep:     \"1,8,7,5\"  or  \"1, 8, 7, 5\"
   Space-sep:     1 8 7 5
-")]
+"
+    )]
     BarChart {
         /// Chart title
         #[arg(long, short = 't')]
@@ -576,6 +644,9 @@ enum Command {
         /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
         #[arg(long, short = 'w')]
         width: Option<String>,
+
+        #[command(flatten)]
+        layout: LayoutArgs,
 
         /// Render bars horizontally instead of vertically
         #[arg(long)]
@@ -614,7 +685,10 @@ enum Command {
     ///
     /// Creates a Mermaid XY chart with line series and renders it to the terminal.
     /// Same input formats as bar-chart.
-    #[command(name = "line-chart", display_order = 8, after_long_help = "\
+    #[command(
+        name = "line-chart",
+        display_order = 8,
+        after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
   Render an example line chart:
     bt line-chart --example
@@ -641,7 +715,8 @@ enum Command {
   JSON:          \"[1, 8, 7, 5]\"
   Comma-sep:     \"1,8,7,5\"  or  \"1, 8, 7, 5\"
   Space-sep:     1 8 7 5
-")]
+"
+    )]
     LineChart {
         /// Chart title
         #[arg(long, short = 't')]
@@ -658,6 +733,9 @@ enum Command {
         /// Display width: percentage (e.g., "50%"), characters (e.g., "80ch" or "80"), or "fill"
         #[arg(long, short = 'w')]
         width: Option<String>,
+
+        #[command(flatten)]
+        layout: LayoutArgs,
 
         /// Render horizontally instead of vertically
         #[arg(long)]
@@ -696,7 +774,10 @@ enum Command {
     ///
     /// Creates a Mermaid timeline showing events over time periods.
     /// Events are specified as "YYYY: Event description" format.
-    #[command(name = "timeline", display_order = 9, after_long_help = "\
+    #[command(
+        name = "timeline",
+        display_order = 9,
+        after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
   Render an example timeline:
     bt timeline --example
@@ -720,7 +801,8 @@ enum Command {
 \x1b[1m\x1b[4mInput Format:\x1b[0m
   Each event: \"YYYY: Description\" where YYYY is a year or time period
   Sections group related events with --section \"Section Name\"
-")]
+"
+    )]
     Timeline {
         /// Timeline title
         #[arg(long, short = 't')]
@@ -729,6 +811,9 @@ enum Command {
         /// Display width: percentage (e.g., \"50%\"), characters (e.g., \"80ch\"), or \"fill\"
         #[arg(long, short = 'w')]
         width: Option<String>,
+
+        #[command(flatten)]
+        layout: LayoutArgs,
 
         /// Section name (can be used multiple times, applies to following events)
         #[arg(long, short = 's', action = clap::ArgAction::Append)]
@@ -755,7 +840,10 @@ enum Command {
     ///
     /// Creates a Mermaid state diagram showing states and transitions.
     /// Uses the same syntax as flowchart for defining states and transitions.
-    #[command(name = "state-diagram", display_order = 10, after_long_help = "\
+    #[command(
+        name = "state-diagram",
+        display_order = 10,
+        after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
   Render an example state diagram:
     bt state-diagram --example
@@ -779,7 +867,8 @@ enum Command {
   [*]           Start/end state
   State1 --> State2          Transition
   State1 --> State2: label   Labeled transition
-")]
+"
+    )]
     StateDiagram {
         /// Diagram title
         #[arg(long, short = 't')]
@@ -788,6 +877,9 @@ enum Command {
         /// Display width: percentage (e.g., \"50%\"), characters (e.g., \"80ch\"), or \"fill\"
         #[arg(long, short = 'w')]
         width: Option<String>,
+
+        #[command(flatten)]
+        layout: LayoutArgs,
 
         /// Use inverted colors with solid background
         #[arg(long)]
@@ -809,7 +901,10 @@ enum Command {
     /// Render an entity relationship diagram (ERD)
     ///
     /// Creates a Mermaid ERD showing entities and their relationships.
-    #[command(name = "erd", display_order = 11, after_long_help = "\
+    #[command(
+        name = "erd",
+        display_order = 11,
+        after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
   Render an example ERD:
     bt erd --example
@@ -835,7 +930,8 @@ enum Command {
   ||--o|   One to zero or one
 
   Entity1 <rel> Entity2 : label
-")]
+"
+    )]
     Erd {
         /// Diagram title
         #[arg(long, short = 't')]
@@ -844,6 +940,9 @@ enum Command {
         /// Display width: percentage (e.g., \"50%\"), characters (e.g., \"80ch\"), or \"fill\"
         #[arg(long, short = 'w')]
         width: Option<String>,
+
+        #[command(flatten)]
+        layout: LayoutArgs,
 
         /// Entity definition (can be used multiple times)
         #[arg(long, short = 'E', action = clap::ArgAction::Append)]
@@ -870,7 +969,9 @@ enum Command {
     ///
     /// Renders text with inline styling using atomic tokens ({{bold}}, {{red}})
     /// and block tags (<b>, <i>, <a href="...">).
-    #[command(display_order = 20, after_long_help = "\
+    #[command(
+        display_order = 20,
+        after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
   Atomic tokens:
     bt prose \"Hello {{bold}}world{{reset}}!\"
@@ -885,11 +986,11 @@ enum Command {
 
   With margins:
     bt prose --margin-left 4 \"Indented text\"
-    bt prose -l 4 -r 4 \"Indented with margins\"
+    bt prose --ml 4 --mr 4 \"Indented with margins\"
 
   With alignment:
     bt prose --alignment center \"Centered text\"
-    bt prose -a right \"Right-aligned text\"
+    bt prose --align right \"Right-aligned text\"
 
   Disable word wrapping:
     bt prose --no-wrap \"Long line that should not wrap\"
@@ -936,7 +1037,8 @@ enum Command {
       \x1b[1m<~>\x1b[2m...\x1b[22m</~>\x1b[0m \x1b[3mprovides strikethrough text\x1b[23m
       \x1b[1m<i>\x1b[2m...\x1b[22m</i>\x1b[0m \x1b[3mprovides italics text\x1b[23m
       \x1b[1m<b>\x1b[2m...\x1b[22m</b>\x1b[0m \x1b[3mprovides bold text\x1b[23m
-")]
+"
+    )]
     Prose {
         /// Content with {{tokens}} and <block>tags</block>
         #[arg(value_name = "CONTENT")]
@@ -946,24 +1048,17 @@ enum Command {
         #[arg(long)]
         no_wrap: bool,
 
-        /// Left margin in characters
-        #[arg(long, short = 'l')]
-        margin_left: Option<u32>,
-
-        /// Right margin in characters
-        #[arg(long, short = 'r')]
-        margin_right: Option<u32>,
-
-        /// Text alignment
-        #[arg(long, short = 'a', value_enum)]
-        alignment: Option<biscuit_terminal::utils::layout::Alignment>,
+        #[command(flatten)]
+        layout: LayoutArgs,
     },
 
     /// Render styled text in a block quote
     ///
     /// Wraps prose content in a block quote with a left border.
     /// Supports the same {{tokens}} and <block>tags</block> as the prose command.
-    #[command(display_order = 12, after_long_help = "\
+    #[command(
+        display_order = 12,
+        after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
   Simple quote:
     bt quote \"To be or not to be\"
@@ -978,8 +1073,9 @@ enum Command {
     bt quote \"First line\\nSecond line\\nThird line\"
 
   With attribution and styling:
-    bt quote -a \"Albert Einstein\" \"<i>Imagination is more important than knowledge.</i>\"
-")]
+    bt quote --attribution \"Albert Einstein\" \"<i>Imagination is more important than knowledge.</i>\"
+"
+    )]
     Quote {
         /// Content with {{tokens}} and <block>tags</block>
         #[arg(value_name = "CONTENT")]
@@ -989,24 +1085,17 @@ enum Command {
         #[arg(long)]
         attribution: Option<String>,
 
-        /// Left margin in characters
-        #[arg(long, short = 'l')]
-        margin_left: Option<u32>,
-
-        /// Right margin in characters
-        #[arg(long, short = 'r')]
-        margin_right: Option<u32>,
-
-        /// Text alignment
-        #[arg(long, short = 'a', value_enum)]
-        alignment: Option<biscuit_terminal::utils::layout::Alignment>,
+        #[command(flatten)]
+        layout: LayoutArgs,
     },
 
     /// Render a bulleted list with hanging indents
     ///
     /// Each argument becomes a list item. Supports the same {{tokens}} and
     /// <block>tags</block> as the prose command for styling individual items.
-    #[command(display_order = 13, after_long_help = "\
+    #[command(
+        display_order = 13,
+        after_long_help = "\
 \x1b[1m\x1b[4mExamples:\x1b[0m
   Simple list:
     bt list \"First item\" \"Second item\" \"Third item\"
@@ -1028,7 +1117,8 @@ enum Command {
 
   No hanging indent:
     bt list --no-hanging-indent \"Item without hanging indent on wrap\"
-")]
+"
+    )]
     List {
         /// List items with {{tokens}} and <block>tags</block>
         #[arg(value_name = "ITEMS", required = true)]
@@ -1042,17 +1132,8 @@ enum Command {
         #[arg(long)]
         no_hanging_indent: bool,
 
-        /// Left margin in characters
-        #[arg(long, short = 'l')]
-        margin_left: Option<u32>,
-
-        /// Right margin in characters
-        #[arg(long, short = 'r')]
-        margin_right: Option<u32>,
-
-        /// Text alignment
-        #[arg(long, short = 'a', value_enum)]
-        alignment: Option<biscuit_terminal::utils::layout::Alignment>,
+        #[command(flatten)]
+        layout: LayoutArgs,
     },
 }
 
@@ -1257,14 +1338,20 @@ fn main() -> color_eyre::Result<()> {
 
     // Handle subcommands
     match args.command {
-        Some(Command::Image { ref filepath, ref width, meta }) => {
-            return render_image(filepath, width.as_deref(), meta);
+        Some(Command::Image {
+            ref filepath,
+            ref width,
+            ref layout,
+            meta,
+        }) => {
+            return render_image(filepath, width.as_deref(), layout, meta);
         }
         Some(Command::Flowchart {
             vertical,
             inverse,
             ref title,
             ref width,
+            ref layout,
             example,
             meta,
             ref content,
@@ -1274,6 +1361,7 @@ fn main() -> color_eyre::Result<()> {
                 inverse,
                 title.as_deref(),
                 width.as_deref(),
+                layout,
                 example,
                 meta,
                 content,
@@ -1290,6 +1378,7 @@ fn main() -> color_eyre::Result<()> {
             ref bottom_right,
             inverse,
             ref width,
+            ref layout,
             point_radius,
             label_size,
             ref theme,
@@ -1311,6 +1400,7 @@ fn main() -> color_eyre::Result<()> {
                 bottom_right.as_deref(),
                 inverse,
                 width.as_deref(),
+                layout,
                 point_radius,
                 label_size,
                 *theme,
@@ -1328,6 +1418,7 @@ fn main() -> color_eyre::Result<()> {
             inverse,
             ref title,
             ref width,
+            ref layout,
             show_data,
             example,
             meta,
@@ -1337,6 +1428,7 @@ fn main() -> color_eyre::Result<()> {
                 inverse,
                 title.as_deref(),
                 width.as_deref(),
+                layout,
                 show_data,
                 example,
                 meta,
@@ -1348,6 +1440,7 @@ fn main() -> color_eyre::Result<()> {
             inverse,
             ref title,
             ref width,
+            ref layout,
             example,
             meta,
             ref commands,
@@ -1356,6 +1449,7 @@ fn main() -> color_eyre::Result<()> {
                 inverse,
                 title.as_deref(),
                 width.as_deref(),
+                layout,
                 example,
                 meta,
                 commands,
@@ -1367,6 +1461,7 @@ fn main() -> color_eyre::Result<()> {
             ref x_axis,
             ref y_axis,
             ref width,
+            ref layout,
             horizontal,
             show_data_label,
             aspect_ratio,
@@ -1382,11 +1477,12 @@ fn main() -> color_eyre::Result<()> {
                 x_axis.as_deref(),
                 y_axis.as_deref(),
                 width.as_deref(),
+                layout,
                 horizontal,
                 show_data_label,
                 aspect_ratio,
-                line,       // add_line for bar chart
-                false,      // add_bar is false since we're a bar chart
+                line,  // add_line for bar chart
+                false, // add_bar is false since we're a bar chart
                 inverse,
                 example,
                 meta,
@@ -1399,6 +1495,7 @@ fn main() -> color_eyre::Result<()> {
             ref x_axis,
             ref y_axis,
             ref width,
+            ref layout,
             horizontal,
             show_data_label,
             aspect_ratio,
@@ -1414,11 +1511,12 @@ fn main() -> color_eyre::Result<()> {
                 x_axis.as_deref(),
                 y_axis.as_deref(),
                 width.as_deref(),
+                layout,
                 horizontal,
                 show_data_label,
                 aspect_ratio,
-                false,      // add_line is false since we're a line chart
-                bar,        // add_bar for line chart
+                false, // add_line is false since we're a line chart
+                bar,   // add_bar for line chart
                 inverse,
                 example,
                 meta,
@@ -1429,6 +1527,7 @@ fn main() -> color_eyre::Result<()> {
         Some(Command::Timeline {
             ref title,
             ref width,
+            ref layout,
             ref section,
             inverse,
             example,
@@ -1438,6 +1537,7 @@ fn main() -> color_eyre::Result<()> {
             return render_timeline(
                 title.as_deref(),
                 width.as_deref(),
+                layout,
                 section,
                 inverse,
                 example,
@@ -1449,6 +1549,7 @@ fn main() -> color_eyre::Result<()> {
         Some(Command::StateDiagram {
             ref title,
             ref width,
+            ref layout,
             inverse,
             example,
             meta,
@@ -1457,6 +1558,7 @@ fn main() -> color_eyre::Result<()> {
             return render_state_diagram(
                 title.as_deref(),
                 width.as_deref(),
+                layout,
                 inverse,
                 example,
                 meta,
@@ -1467,6 +1569,7 @@ fn main() -> color_eyre::Result<()> {
         Some(Command::Erd {
             ref title,
             ref width,
+            ref layout,
             ref entity,
             inverse,
             example,
@@ -1476,6 +1579,7 @@ fn main() -> color_eyre::Result<()> {
             return render_erd(
                 title.as_deref(),
                 width.as_deref(),
+                layout,
                 entity,
                 inverse,
                 example,
@@ -1487,30 +1591,24 @@ fn main() -> color_eyre::Result<()> {
         Some(Command::Prose {
             ref content,
             no_wrap,
-            margin_left,
-            margin_right,
-            alignment,
+            ref layout,
         }) => {
-            return render_prose(content, no_wrap, margin_left, margin_right, alignment);
+            return render_prose(content, no_wrap, layout);
         }
         Some(Command::Quote {
             ref content,
             ref attribution,
-            margin_left,
-            margin_right,
-            alignment,
+            ref layout,
         }) => {
-            return render_quote(content, attribution.as_deref(), margin_left, margin_right, alignment);
+            return render_quote(content, attribution.as_deref(), layout);
         }
         Some(Command::List {
             ref items,
             ref bullet,
             no_hanging_indent,
-            margin_left,
-            margin_right,
-            alignment,
+            ref layout,
         }) => {
-            return render_list(items, bullet, no_hanging_indent, margin_left, margin_right, alignment);
+            return render_list(items, bullet, no_hanging_indent, layout);
         }
         None => {
             // Default behavior: content analysis or terminal metadata
@@ -1649,52 +1747,94 @@ fn image_completer() -> PathCompleter {
     })
 }
 
+/// Apply optional margin and alignment overrides to a `TerminalImage`.
+fn apply_image_layout(term_image: &mut TerminalImage, layout: &LayoutArgs) {
+    if let Some(ml) = layout.margin_left {
+        term_image.margin_left = ml;
+    }
+    if let Some(mr) = layout.margin_right {
+        term_image.margin_right = mr;
+    }
+    if let Some(align) = layout.alignment {
+        term_image.alignment = match align {
+            layout::Alignment::Left => std::fmt::Alignment::Left,
+            layout::Alignment::Center => std::fmt::Alignment::Center,
+            layout::Alignment::Right => std::fmt::Alignment::Right,
+        };
+    }
+}
+
+/// Emit blank lines for vertical margins around rendered content.
+fn emit_vertical_margins(
+    layout: &LayoutArgs,
+    f: impl FnOnce() -> color_eyre::Result<()>,
+) -> color_eyre::Result<()> {
+    for _ in 0..layout.margin_top.unwrap_or(0) {
+        println!();
+    }
+    f()?;
+    for _ in 0..layout.margin_bottom.unwrap_or(0) {
+        println!();
+    }
+    Ok(())
+}
+
 /// Render an image to the terminal.
 ///
 /// Supports width specification syntax: "file.jpg|50%" or "file.jpg|80"
 /// CLI `--width` flag takes precedence over inline spec.
-fn render_image(image_spec: &str, cli_width: Option<&str>, meta: bool) -> color_eyre::Result<()> {
+fn render_image(
+    image_spec: &str,
+    cli_width: Option<&str>,
+    layout: &LayoutArgs,
+    meta: bool,
+) -> color_eyre::Result<()> {
     use std::time::Instant;
 
     let start_time = Instant::now();
 
     // Parse the filepath and optional inline width
-    let (filepath, inline_width_spec) = parse_filepath_and_width(image_spec)
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+    let (filepath, inline_width_spec) =
+        parse_filepath_and_width(image_spec).map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
 
     // Resolve path relative to CWD
     let path = Path::new(&filepath);
 
     // Create the terminal image
-    let mut term_image = TerminalImage::new(path)
-        .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+    let mut term_image = TerminalImage::new(path).map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
 
     // CLI --width takes precedence over inline spec (e.g., "file.jpg|50%")
     let effective_width_spec = cli_width.or(inline_width_spec.as_deref());
     if let Some(ws) = effective_width_spec {
-        term_image.width = parse_width_spec(ws)
-            .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+        term_image.width = parse_width_spec(ws).map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
         term_image.width_raw = Some(format!("|{}", ws));
     }
+
+    // Apply margin and alignment overrides
+    apply_image_layout(&mut term_image, layout);
 
     // Get terminal capabilities
     let terminal = Terminal::new();
 
     // Render the image
-    let output = term_image.render_to_terminal(&terminal)
+    let output = term_image
+        .render_to_terminal(&terminal)
         .map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
 
-    // Output the result
+    // Output the result with vertical margins
+    for _ in 0..layout.margin_top.unwrap_or(0) {
+        println!();
+    }
     print!("{}", output);
+    for _ in 0..layout.margin_bottom.unwrap_or(0) {
+        println!();
+    }
 
     // Output metadata if requested
     if meta {
         let render_time_ms = start_time.elapsed().as_millis() as u64;
-        let absolute_path = std::fs::canonicalize(path)
-            .unwrap_or_else(|_| path.to_path_buf());
-        let file_size_bytes = std::fs::metadata(path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let absolute_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let file_size_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
         let render_meta = RenderMeta {
             filename: absolute_path.to_string_lossy().to_string(),
@@ -1732,6 +1872,7 @@ fn display_mermaid_diagram(
     instructions: &str,
     diagram_type: &str,
     width: Option<&str>,
+    layout: &LayoutArgs,
     meta: bool,
 ) -> color_eyre::Result<()> {
     use std::time::Instant;
@@ -1756,22 +1897,32 @@ fn display_mermaid_diagram(
 
     // Use TerminalImage to display
     let terminal = Terminal::new();
-    let term_image = TerminalImage::new(&png_path)
+    let mut term_image = TerminalImage::new(&png_path)
         .map_err(|e| color_eyre::eyre::eyre!("{}", e))?
         .with_width(image_width);
+
+    // Apply margin and alignment overrides
+    apply_image_layout(&mut term_image, layout);
+
+    // Top margin
+    for _ in 0..layout.margin_top.unwrap_or(0) {
+        println!();
+    }
 
     match term_image.render_to_terminal(&terminal) {
         Ok(output) => print!("{}", output),
         Err(e) => {
-            return Err(color_eyre::eyre::eyre!("Failed to display {}: {}", diagram_type, e));
+            return Err(color_eyre::eyre::eyre!(
+                "Failed to display {}: {}",
+                diagram_type,
+                e
+            ));
         }
     }
 
     // Output metadata if requested
     if meta {
-        let file_size_bytes = std::fs::metadata(&png_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size_bytes = std::fs::metadata(&png_path).map(|m| m.len()).unwrap_or(0);
 
         let render_meta = RenderMeta {
             filename: png_path.to_string_lossy().to_string(),
@@ -1781,6 +1932,11 @@ fn display_mermaid_diagram(
         };
 
         eprintln!("{}", serde_json::to_string(&render_meta)?);
+    }
+
+    // Bottom margin
+    for _ in 0..layout.margin_bottom.unwrap_or(0) {
+        println!();
     }
 
     // Let terminal settle after image rendering
@@ -1799,6 +1955,7 @@ fn render_flowchart(
     inverse: bool,
     title: Option<&str>,
     width: Option<&str>,
+    layout: &LayoutArgs,
     example: bool,
     meta: bool,
     content: &[String],
@@ -1856,7 +2013,7 @@ fn render_flowchart(
     };
 
     // Display the diagram
-    display_mermaid_diagram(&renderer, &instructions, "flowchart", width, meta)?;
+    display_mermaid_diagram(&renderer, &instructions, "flowchart", width, layout, meta)?;
 
     // Print command used if example mode
     if example {
@@ -1892,6 +2049,7 @@ fn render_quadrant(
     bottom_right: Option<&str>,
     inverse: bool,
     width: Option<&str>,
+    layout: &LayoutArgs,
     point_radius: Option<u32>,
     label_size: Option<u32>,
     theme: QuadrantTheme,
@@ -1910,16 +2068,17 @@ fn render_quadrant(
     let _ = std::io::stdout().flush();
 
     // Use example data if --example flag is set
-    let (title, x_axis, y_axis, points): (Option<&str>, Option<&str>, Option<&str>, Vec<String>) = if example {
-        (
-            Some("Campaign Analysis"),
-            Some("Low Reach --> High Reach"),
-            Some("Low Engagement --> High Engagement"),
-            QUADRANT_EXAMPLE.iter().map(|s| s.to_string()).collect(),
-        )
-    } else {
-        (title, x_axis, y_axis, points.to_vec())
-    };
+    let (title, x_axis, y_axis, points): (Option<&str>, Option<&str>, Option<&str>, Vec<String>) =
+        if example {
+            (
+                Some("Campaign Analysis"),
+                Some("Low Reach --> High Reach"),
+                Some("Low Engagement --> High Engagement"),
+                QUADRANT_EXAMPLE.iter().map(|s| s.to_string()).collect(),
+            )
+        } else {
+            (title, x_axis, y_axis, points.to_vec())
+        };
 
     // Build the quadrantChart body
     let mut body_lines = Vec::new();
@@ -1994,9 +2153,7 @@ fn render_quadrant(
         if let Some(r) = point_radius {
             cfg = cfg.with_point_radius(r);
         }
-        let effective_label_size = label_size.unwrap_or(
-            if points.len() <= 6 { 18 } else { 15 }
-        );
+        let effective_label_size = label_size.unwrap_or(if points.len() <= 6 { 18 } else { 15 });
         cfg = cfg.with_point_label_font_size(effective_label_size);
 
         // Apply theme preset (sets default quadrant colors based on terminal color mode)
@@ -2030,12 +2187,18 @@ fn render_quadrant(
             .with_config(config)
     } else {
         // Default: transparent background with theme matching terminal
-        MermaidRenderer::for_terminal(&instructions)
-            .with_config(config)
+        MermaidRenderer::for_terminal(&instructions).with_config(config)
     };
 
     // Display the diagram
-    display_mermaid_diagram(&renderer, &instructions, "quadrant chart", width, meta)?;
+    display_mermaid_diagram(
+        &renderer,
+        &instructions,
+        "quadrant chart",
+        width,
+        layout,
+        meta,
+    )?;
 
     // Print command used if example mode
     if example {
@@ -2073,7 +2236,9 @@ fn parse_pie_data(data: &[String]) -> Vec<PieEntry> {
             // Split by semicolon and process each part
             for part in item.split(';') {
                 let part = part.trim();
-                if !part.is_empty() && let Some(parsed) = parse_single_pie_entry(part) {
+                if !part.is_empty()
+                    && let Some(parsed) = parse_single_pie_entry(part)
+                {
                     result.push(parsed);
                 }
             }
@@ -2210,7 +2375,10 @@ fn build_pie_init_directive(entries: &[PieEntry]) -> Option<String> {
         .iter()
         .enumerate()
         .filter_map(|(i, entry)| {
-            entry.color.as_ref().map(|c| format!("'pie{}': '{}'", i + 1, c))
+            entry
+                .color
+                .as_ref()
+                .map(|c| format!("'pie{}': '{}'", i + 1, c))
         })
         .collect();
 
@@ -2226,7 +2394,8 @@ fn build_pie_init_directive(entries: &[PieEntry]) -> Option<String> {
 
 /// Example data for pie-chart --example
 const PIE_CHART_EXAMPLE: &[&str] = &["TypeScript: 45 #3178C6", "Rust: 35 #A72145", "Python: 20"];
-const PIE_CHART_EXAMPLE_CMD: &str = r#"bt pie-chart "TypeScript: 45 #3178C6" "Rust: 35 #A72145" "Python: 20""#;
+const PIE_CHART_EXAMPLE_CMD: &str =
+    r#"bt pie-chart "TypeScript: 45 #3178C6" "Rust: 35 #A72145" "Python: 20""#;
 
 /// Render a pie chart to the terminal.
 ///
@@ -2236,6 +2405,7 @@ fn render_pie_chart(
     inverse: bool,
     title: Option<&str>,
     width: Option<&str>,
+    layout: &LayoutArgs,
     show_data: bool,
     example: bool,
     meta: bool,
@@ -2268,7 +2438,9 @@ fn render_pie_chart(
 
     // Build the pie chart body
     let show_data_str = if show_data { " showData" } else { "" };
-    let title_line = title.map(|t| format!("    title {}", t)).unwrap_or_default();
+    let title_line = title
+        .map(|t| format!("    title {}", t))
+        .unwrap_or_default();
 
     let data_lines: String = parsed_entries
         .iter()
@@ -2286,7 +2458,10 @@ fn render_pie_chart(
     if title_line.is_empty() {
         instructions_parts.push(format!("pie{}\n{}", show_data_str, data_lines));
     } else {
-        instructions_parts.push(format!("pie{}\n{}\n{}", show_data_str, title_line, data_lines));
+        instructions_parts.push(format!(
+            "pie{}\n{}\n{}",
+            show_data_str, title_line, data_lines
+        ));
     }
 
     let instructions = instructions_parts.join("\n");
@@ -2317,7 +2492,7 @@ fn render_pie_chart(
     };
 
     // Display the diagram
-    display_mermaid_diagram(&renderer, &instructions, "pie chart", width, meta)?;
+    display_mermaid_diagram(&renderer, &instructions, "pie chart", width, layout, meta)?;
 
     // Print command used if example mode
     if example {
@@ -2350,6 +2525,7 @@ fn render_git_graph(
     inverse: bool,
     title: Option<&str>,
     width: Option<&str>,
+    layout: &LayoutArgs,
     example: bool,
     meta: bool,
     commands: &[String],
@@ -2405,7 +2581,7 @@ fn render_git_graph(
     };
 
     // Display the diagram
-    display_mermaid_diagram(&renderer, &instructions, "git-graph", width, meta)?;
+    display_mermaid_diagram(&renderer, &instructions, "git-graph", width, layout, meta)?;
 
     // Print command used if example mode
     if example {
@@ -2440,6 +2616,7 @@ fn render_xy_chart(
     x_axis: Option<&str>,
     y_axis: Option<&str>,
     width: Option<&str>,
+    layout: &LayoutArgs,
     horizontal: bool,
     show_data_label: bool,
     aspect_ratio: Option<f32>,
@@ -2530,10 +2707,16 @@ fn render_xy_chart(
     };
 
     // Build title line
-    let title_line = eff_title.map(|t| format!("    title \"{}\"", t)).unwrap_or_default();
+    let title_line = eff_title
+        .map(|t| format!("    title \"{}\"", t))
+        .unwrap_or_default();
 
     // Build data series
-    let data_str: String = values.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ");
+    let data_str: String = values
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
 
     let primary_series = match chart_type {
         XyChartType::Bar => format!("    bar [{}]", data_str),
@@ -2601,7 +2784,7 @@ fn render_xy_chart(
         XyChartType::Bar => "bar chart",
         XyChartType::Line => "line chart",
     };
-    display_mermaid_diagram(&renderer, &instructions, chart_name, width, meta)?;
+    display_mermaid_diagram(&renderer, &instructions, chart_name, width, layout, meta)?;
 
     // Print command used if example mode
     if example {
@@ -2642,18 +2825,19 @@ fn parse_xy_data(data: &[String]) -> color_eyre::Result<Vec<f64>> {
         // Try comma-separated
         if trimmed.contains(',') {
             for part in trimmed.split(',') {
-                let v: f64 = part.trim().parse().map_err(|_| {
-                    color_eyre::eyre::eyre!("Invalid number: '{}'", part.trim())
-                })?;
+                let v: f64 = part
+                    .trim()
+                    .parse()
+                    .map_err(|_| color_eyre::eyre::eyre!("Invalid number: '{}'", part.trim()))?;
                 values.push(v);
             }
             continue;
         }
 
         // Single value
-        let v: f64 = trimmed.parse().map_err(|_| {
-            color_eyre::eyre::eyre!("Invalid number: '{}'", trimmed)
-        })?;
+        let v: f64 = trimmed
+            .parse()
+            .map_err(|_| color_eyre::eyre::eyre!("Invalid number: '{}'", trimmed))?;
         values.push(v);
     }
 
@@ -2675,6 +2859,7 @@ const TIMELINE_EXAMPLE_CMD: &str = "bt timeline --title \"Social Media History\"
 fn render_timeline(
     title: Option<&str>,
     width: Option<&str>,
+    layout: &LayoutArgs,
     sections: &[String],
     inverse: bool,
     example: bool,
@@ -2767,7 +2952,7 @@ fn render_timeline(
     };
 
     // Display the diagram
-    display_mermaid_diagram(&renderer, &instructions, "timeline", width, meta)?;
+    display_mermaid_diagram(&renderer, &instructions, "timeline", width, layout, meta)?;
 
     if example {
         print_example_command(TIMELINE_EXAMPLE_CMD);
@@ -2791,6 +2976,7 @@ const STATE_DIAGRAM_EXAMPLE_CMD: &str = "bt state-diagram --title \"Process Stat
 fn render_state_diagram(
     title: Option<&str>,
     width: Option<&str>,
+    layout: &LayoutArgs,
     inverse: bool,
     example: bool,
     meta: bool,
@@ -2805,7 +2991,10 @@ fn render_state_diagram(
     // Use example data if --example flag is set
     let (transitions, eff_title): (Vec<String>, Option<&str>) = if example {
         (
-            STATE_DIAGRAM_EXAMPLE.iter().map(|s| s.to_string()).collect(),
+            STATE_DIAGRAM_EXAMPLE
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             Some("Process States"),
         )
     } else {
@@ -2854,7 +3043,14 @@ fn render_state_diagram(
     };
 
     // Display the diagram
-    display_mermaid_diagram(&renderer, &instructions, "state diagram", width, meta)?;
+    display_mermaid_diagram(
+        &renderer,
+        &instructions,
+        "state diagram",
+        width,
+        layout,
+        meta,
+    )?;
 
     if example {
         print_example_command(STATE_DIAGRAM_EXAMPLE_CMD);
@@ -2882,6 +3078,7 @@ const ERD_EXAMPLE_CMD: &str = "bt erd --title \"E-Commerce Schema\" \\\n  --enti
 fn render_erd(
     title: Option<&str>,
     width: Option<&str>,
+    layout: &LayoutArgs,
     entities: &[String],
     inverse: bool,
     example: bool,
@@ -2895,10 +3092,14 @@ fn render_erd(
     let _ = std::io::stdout().flush();
 
     // Use example data if --example flag is set
-    let (entities, relationships, eff_title): (Vec<String>, Vec<String>, Option<&str>) = if example {
+    let (entities, relationships, eff_title): (Vec<String>, Vec<String>, Option<&str>) = if example
+    {
         (
             ERD_EXAMPLE_ENTITIES.iter().map(|s| s.to_string()).collect(),
-            ERD_EXAMPLE_RELATIONSHIPS.iter().map(|s| s.to_string()).collect(),
+            ERD_EXAMPLE_RELATIONSHIPS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             Some("E-Commerce Schema"),
         )
     } else {
@@ -2957,7 +3158,7 @@ fn render_erd(
     };
 
     // Display the diagram
-    display_mermaid_diagram(&renderer, &instructions, "ERD", width, meta)?;
+    display_mermaid_diagram(&renderer, &instructions, "ERD", width, layout, meta)?;
 
     if example {
         print_example_command(ERD_EXAMPLE_CMD);
@@ -3387,13 +3588,7 @@ fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
 }
 
 /// Render prose content with styling tokens to the terminal.
-fn render_prose(
-    content: &[String],
-    no_wrap: bool,
-    margin_left: Option<u32>,
-    margin_right: Option<u32>,
-    alignment: Option<biscuit_terminal::utils::layout::Alignment>,
-) -> color_eyre::Result<()> {
+fn render_prose(content: &[String], no_wrap: bool, layout: &LayoutArgs) -> color_eyre::Result<()> {
     use biscuit_terminal::components::prose::Prose;
     use biscuit_terminal::components::renderable::Renderable;
     use biscuit_terminal::utils::layout::{Margin, WordWrap};
@@ -3424,15 +3619,15 @@ fn render_prose(
     }
 
     // Configure margins
-    if let Some(left) = margin_left {
+    if let Some(left) = layout.margin_left {
         prose = prose.with_left_margin(Margin::Chars(left));
     }
-    if let Some(right) = margin_right {
+    if let Some(right) = layout.margin_right {
         prose = prose.with_right_margin(Margin::Chars(right));
     }
 
     // Configure alignment
-    if let Some(align) = alignment {
+    if let Some(align) = layout.alignment {
         prose = prose.alignment(align);
     }
 
@@ -3440,18 +3635,17 @@ fn render_prose(
     let term = Terminal::new();
     let output = prose.fallback_render(&term);
 
-    println!("{}", output);
-
-    Ok(())
+    emit_vertical_margins(layout, || {
+        println!("{}", output);
+        Ok(())
+    })
 }
 
 /// Render prose content inside a block quote.
 fn render_quote(
     content: &[String],
     attribution: Option<&str>,
-    margin_left: Option<u32>,
-    margin_right: Option<u32>,
-    alignment: Option<biscuit_terminal::utils::layout::Alignment>,
+    layout: &LayoutArgs,
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::block_quote::BlockQuote;
     use biscuit_terminal::components::prose::Prose;
@@ -3478,21 +3672,18 @@ fn render_quote(
     let prose = Prose::new(&text);
 
     // Build the BlockQuote with the Prose content
-    let mut quote = BlockQuote::new(
-        RenderableContent::Component(Arc::new(prose)),
-        attribution,
-    );
+    let mut quote = BlockQuote::new(RenderableContent::Component(Arc::new(prose)), attribution);
 
     // Configure margins
-    if let Some(left) = margin_left {
+    if let Some(left) = layout.margin_left {
         quote = quote.left_margin(Margin::Chars(left));
     }
-    if let Some(right) = margin_right {
+    if let Some(right) = layout.margin_right {
         quote = quote.right_margin(Margin::Chars(right));
     }
 
     // Configure alignment
-    if let Some(align) = alignment {
+    if let Some(align) = layout.alignment {
         quote = quote.alignment(align);
     }
 
@@ -3500,9 +3691,10 @@ fn render_quote(
     let term = Terminal::new();
     let output = quote.fallback_render(&term);
 
-    println!("{}", output);
-
-    Ok(())
+    emit_vertical_margins(layout, || {
+        println!("{}", output);
+        Ok(())
+    })
 }
 
 /// Render a bulleted list with hanging indents.
@@ -3510,9 +3702,7 @@ fn render_list(
     items: &[String],
     bullet: &str,
     no_hanging_indent: bool,
-    margin_left: Option<u32>,
-    margin_right: Option<u32>,
-    alignment: Option<biscuit_terminal::utils::layout::Alignment>,
+    layout: &LayoutArgs,
 ) -> color_eyre::Result<()> {
     use biscuit_terminal::components::list::UnorderedList;
     use biscuit_terminal::components::prose::Prose;
@@ -3550,15 +3740,15 @@ fn render_list(
     }
 
     // Configure margins
-    if let Some(left) = margin_left {
+    if let Some(left) = layout.margin_left {
         list = list.left_margin(Margin::Chars(left));
     }
-    if let Some(right) = margin_right {
+    if let Some(right) = layout.margin_right {
         list = list.right_margin(Margin::Chars(right));
     }
 
     // Configure alignment
-    if let Some(align) = alignment {
+    if let Some(align) = layout.alignment {
         list = list.alignment(align);
     }
 
@@ -3566,7 +3756,8 @@ fn render_list(
     let term = Terminal::new();
     let output = list.fallback_render(&term);
 
-    println!("{}", output);
-
-    Ok(())
+    emit_vertical_margins(layout, || {
+        println!("{}", output);
+        Ok(())
+    })
 }
