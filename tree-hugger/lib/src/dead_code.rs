@@ -60,10 +60,7 @@ pub fn is_terminal_statement(node: Node, language: ProgrammingLanguage, source: 
         ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
             matches!(
                 kind,
-                "return_statement"
-                    | "throw_statement"
-                    | "break_statement"
-                    | "continue_statement"
+                "return_statement" | "throw_statement" | "break_statement" | "continue_statement"
             )
         }
         ProgrammingLanguage::Python => {
@@ -81,10 +78,7 @@ pub fn is_terminal_statement(node: Node, language: ProgrammingLanguage, source: 
         ProgrammingLanguage::Java | ProgrammingLanguage::CSharp => {
             matches!(
                 kind,
-                "return_statement"
-                    | "throw_statement"
-                    | "break_statement"
-                    | "continue_statement"
+                "return_statement" | "throw_statement" | "break_statement" | "continue_statement"
             )
         }
         ProgrammingLanguage::C | ProgrammingLanguage::Cpp => {
@@ -96,10 +90,7 @@ pub fn is_terminal_statement(node: Node, language: ProgrammingLanguage, source: 
         ProgrammingLanguage::Swift => {
             matches!(
                 kind,
-                "return_statement"
-                    | "throw_statement"
-                    | "break_statement"
-                    | "continue_statement"
+                "return_statement" | "throw_statement" | "break_statement" | "continue_statement"
             ) || is_swift_fatal_error(node, source)
         }
         ProgrammingLanguage::Scala => {
@@ -111,10 +102,7 @@ pub fn is_terminal_statement(node: Node, language: ProgrammingLanguage, source: 
         ProgrammingLanguage::Php => {
             matches!(
                 kind,
-                "return_statement"
-                    | "throw_expression"
-                    | "break_statement"
-                    | "continue_statement"
+                "return_statement" | "throw_expression" | "break_statement" | "continue_statement"
             ) || is_php_exit_call(node)
         }
         ProgrammingLanguage::Perl => {
@@ -304,11 +292,7 @@ pub fn find_dead_code_after<'tree>(
                 if found_statement {
                     // Skip comments, braces, and empty nodes
                     let kind = child.kind();
-                    if kind.contains("comment")
-                        || kind.is_empty()
-                        || kind == "{"
-                        || kind == "}"
-                    {
+                    if kind.contains("comment") || kind.is_empty() || kind == "{" || kind == "}" {
                         continue;
                     }
 

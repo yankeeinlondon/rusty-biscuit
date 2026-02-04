@@ -151,10 +151,18 @@ pub(crate) fn method_available(
         InstallationMethod::Yarn(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Yarn),
         InstallationMethod::Bun(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Bun),
         InstallationMethod::Cargo(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Cargo),
-        InstallationMethod::GoModules(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::GoModules),
-        InstallationMethod::Composer(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Composer),
-        InstallationMethod::SwiftPm(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::SwiftPm),
-        InstallationMethod::LuaRocks(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Luarocks),
+        InstallationMethod::GoModules(_) => {
+            lang_pkg_mgrs.is_installed(LanguagePackageManager::GoModules)
+        }
+        InstallationMethod::Composer(_) => {
+            lang_pkg_mgrs.is_installed(LanguagePackageManager::Composer)
+        }
+        InstallationMethod::SwiftPm(_) => {
+            lang_pkg_mgrs.is_installed(LanguagePackageManager::SwiftPm)
+        }
+        InstallationMethod::LuaRocks(_) => {
+            lang_pkg_mgrs.is_installed(LanguagePackageManager::Luarocks)
+        }
         InstallationMethod::VcPkg(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Vcpkg),
         InstallationMethod::Conan(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Conan),
         InstallationMethod::Nuget(_) => lang_pkg_mgrs.is_installed(LanguagePackageManager::Nuget),

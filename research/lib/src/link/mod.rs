@@ -171,9 +171,7 @@ pub async fn link(
 
     for topic in filtered_topics {
         let source_path = topic.location.join("skill");
-        let deep_dive_path = topic
-            .location
-            .join(format!("deep-dive/{}.md", topic.name));
+        let deep_dive_path = topic.location.join(format!("deep-dive/{}.md", topic.name));
 
         // Validate skill source (early filtering)
         let skill_source_valid = detection::validate_skill_source(&source_path);

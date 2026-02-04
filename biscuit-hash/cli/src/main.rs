@@ -138,7 +138,10 @@ fn get_content(cli: &Cli) -> Result<String, String> {
             if !io::stdin().is_terminal() {
                 read_from_stdin()
             } else {
-                Err("No content provided. Use positional argument, --file, or pipe to stdin.".into())
+                Err(
+                    "No content provided. Use positional argument, --file, or pipe to stdin."
+                        .into(),
+                )
             }
         }
     }

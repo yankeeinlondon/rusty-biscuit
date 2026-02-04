@@ -2,11 +2,11 @@
 
 use queue_lib::{HistoryStore, JsonFileStore, ScheduledTask, TaskStatus};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
-    Frame,
 };
 
 use super::color_context::ColorContext;
@@ -499,7 +499,11 @@ mod tests {
         let mut modal = HistoryModal::new();
 
         modal.update_layout(17);
-        assert_eq!(modal.layout, HistoryLayout::Compact, "17 rows should be compact");
+        assert_eq!(
+            modal.layout,
+            HistoryLayout::Compact,
+            "17 rows should be compact"
+        );
 
         modal.update_layout(18);
         assert_eq!(modal.layout, HistoryLayout::Full, "18 rows should be full");
@@ -509,7 +513,11 @@ mod tests {
     fn width_percent_is_reduced_to_avoid_help_bar() {
         use crate::tui::modal::Modal;
         let modal = HistoryModal::new();
-        assert_eq!(modal.width_percent(), 75, "Width should be 75% to avoid help bar interference");
+        assert_eq!(
+            modal.width_percent(),
+            75,
+            "Width should be 75% to avoid help bar interference"
+        );
     }
 
     #[test]

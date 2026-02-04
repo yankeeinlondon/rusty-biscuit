@@ -8,12 +8,12 @@ use crate::os::detect_os_type;
 use crate::programs::enums::{LanguagePackageManager, OsPackageManager};
 use crate::programs::find_program::find_programs_with_source_parallel;
 use crate::programs::installer::{
-    execute_install, execute_versioned_install, method_available, select_best_method,
-    InstallOptions,
+    InstallOptions, execute_install, execute_versioned_install, method_available,
+    select_best_method,
 };
 use crate::programs::schema::{ProgramEntry, ProgramError, ProgramMetadata};
 use crate::programs::types::{ExecutableSource, ProgramDetector};
-use crate::programs::{Program, PROGRAM_LOOKUP};
+use crate::programs::{PROGRAM_LOOKUP, Program};
 
 fn lang_pkg_mgr_details(
     pkg_mgr: LanguagePackageManager,

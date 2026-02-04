@@ -282,7 +282,7 @@ pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter, histo
 /// For subsection filters (--cpu, --gpu, --memory, --storage, --git, --repo, --language),
 /// the output is flattened to the top level without the parent container.
 fn apply_filter_to_json(result: &SniffResult, filter: OutputFilter) -> serde_json::Value {
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     match filter {
         OutputFilter::All => {

@@ -496,8 +496,12 @@ mod tests {
         // Add a task and try again
         use chrono::Utc;
         use queue_lib::{ExecutionTarget, ScheduledTask};
-        app.tasks
-            .push(ScheduledTask::new(1, "test".into(), Utc::now(), ExecutionTarget::default()));
+        app.tasks.push(ScheduledTask::new(
+            1,
+            "test".into(),
+            Utc::now(),
+            ExecutionTarget::default(),
+        ));
 
         input(&mut app, KeyCode::Char('e'));
         assert_eq!(app.mode, AppMode::InputModal);
@@ -578,7 +582,11 @@ mod tests {
 
     #[test]
     fn all_modes_escape_to_normal() {
-        for mode in [AppMode::EditMode, AppMode::RemoveMode, AppMode::HistoryModal] {
+        for mode in [
+            AppMode::EditMode,
+            AppMode::RemoveMode,
+            AppMode::HistoryModal,
+        ] {
             let mut app = App::new();
             app.mode = mode;
             input(&mut app, KeyCode::Esc);
@@ -652,13 +660,22 @@ mod tests {
         });
         app.mode = AppMode::HistoryModal;
 
-        assert_eq!(app.history_modal.as_ref().unwrap().list_state.selected(), Some(0));
+        assert_eq!(
+            app.history_modal.as_ref().unwrap().list_state.selected(),
+            Some(0)
+        );
 
         input(&mut app, KeyCode::Down);
-        assert_eq!(app.history_modal.as_ref().unwrap().list_state.selected(), Some(1));
+        assert_eq!(
+            app.history_modal.as_ref().unwrap().list_state.selected(),
+            Some(1)
+        );
 
         input(&mut app, KeyCode::Up);
-        assert_eq!(app.history_modal.as_ref().unwrap().list_state.selected(), Some(0));
+        assert_eq!(
+            app.history_modal.as_ref().unwrap().list_state.selected(),
+            Some(0)
+        );
     }
 
     #[test]

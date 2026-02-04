@@ -1,4 +1,4 @@
-use sniff_lib::{detect, detect_with_config, SniffConfig};
+use sniff_lib::{SniffConfig, detect, detect_with_config};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -289,7 +289,7 @@ fn test_detect_timezone_returns_valid_offset() {
 /// Tests that detect_os_type matches the current platform.
 #[test]
 fn test_detect_os_type_matches_platform() {
-    use sniff_lib::hardware::{detect_os_type, OsType};
+    use sniff_lib::hardware::{OsType, detect_os_type};
 
     let os_type = detect_os_type();
 
@@ -335,7 +335,7 @@ fn test_detect_os_type_matches_platform() {
 #[cfg(target_os = "macos")]
 #[test]
 fn test_macos_package_managers_finds_expected_managers() {
-    use sniff_lib::hardware::{detect_macos_package_managers, SystemPackageManager};
+    use sniff_lib::hardware::{SystemPackageManager, detect_macos_package_managers};
 
     let managers = detect_macos_package_managers();
 

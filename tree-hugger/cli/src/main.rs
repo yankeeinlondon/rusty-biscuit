@@ -1,5 +1,5 @@
-use std::io::IsTerminal;
 use std::collections::{BTreeMap, HashSet};
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
@@ -8,13 +8,13 @@ use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
 use owo_colors::{OwoColorize, Style};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
+use serde::{Deserialize, Serialize};
 use tree_hugger_lib::{
     Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary, FunctionSignature,
     ImportSymbol, LintDiagnostic, PackageSummary, ParameterInfo, ProgrammingLanguage,
     SourceContext, SymbolInfo, SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError,
     TypeMetadata, VariantInfo,
 };
-use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -295,9 +295,10 @@ fn find_repo_root(start: &Path) -> Option<PathBuf> {
 
 fn display_path(path: &Path, root: Option<&Path>) -> String {
     if let Some(root) = root
-        && let Ok(relative) = path.strip_prefix(root) {
-            return relative.display().to_string();
-        }
+        && let Ok(relative) = path.strip_prefix(root)
+    {
+        return relative.display().to_string();
+    }
     path.display().to_string()
 }
 
@@ -383,7 +384,11 @@ fn main() -> Result<(), TreeHuggerError> {
                 *instance_only,
             )?;
             if !class_summaries.is_empty() {
-                all_class_summaries.push((tree_file.file.clone(), tree_file.language, class_summaries));
+                all_class_summaries.push((
+                    tree_file.file.clone(),
+                    tree_file.language,
+                    class_summaries,
+                ));
             }
         }
 
@@ -400,7 +405,13 @@ fn main() -> Result<(), TreeHuggerError> {
             }
             OutputFormat::Pretty | OutputFormat::Plain => {
                 for (file, lang, summaries) in all_class_summaries {
-                    render_class_summaries(&file, lang, &summaries, &output_config, display_root.as_deref());
+                    render_class_summaries(
+                        &file,
+                        lang,
+                        &summaries,
+                        &output_config,
+                        display_root.as_deref(),
+                    );
                 }
             }
         }
@@ -435,7 +446,12 @@ fn main() -> Result<(), TreeHuggerError> {
         }
         OutputFormat::Pretty | OutputFormat::Plain => {
             for summary in summaries {
-                render_summary(&summary, &command_kind, &output_config, display_root.as_deref());
+                render_summary(
+                    &summary,
+                    &command_kind,
+                    &output_config,
+                    display_root.as_deref(),
+                );
             }
         }
     }
@@ -452,7 +468,12 @@ fn current_dir() -> Result<PathBuf, TreeHuggerError> {
 
 /// Prints shell completions to stdout.
 fn print_completions<G: Generator>(generator: G, cmd: &mut clap::Command) {
-    clap_complete::generate(generator, cmd, cmd.get_name().to_string(), &mut std::io::stdout());
+    clap_complete::generate(
+        generator,
+        cmd,
+        cmd.get_name().to_string(),
+        &mut std::io::stdout(),
+    );
 }
 
 fn collect_files(
@@ -624,7 +645,10 @@ fn render_symbols(symbols: &[SymbolInfo], config: &OutputConfig) {
     }
 
     for symbol in symbols {
-        let location = format!("[{}:{}]", symbol.range.start_line, symbol.range.start_column);
+        let location = format!(
+            "[{}:{}]",
+            symbol.range.start_line, symbol.range.start_column
+        );
         let location_display = if config.use_hyperlinks {
             hyperlink(&symbol.file, symbol.range.start_line, &location)
         } else {
@@ -786,11 +810,7 @@ fn format_return_type(return_type: &Option<String>, language: ProgrammingLanguag
 ///
 /// For structs: `name { field1: T1, field2: T2 }`
 /// For enums: `name { Variant1, Variant2(T), Variant3 { f: T } }`
-fn format_type_signature(
-    name: &str,
-    meta: &TypeMetadata,
-    language: ProgrammingLanguage,
-) -> String {
+fn format_type_signature(name: &str, meta: &TypeMetadata, language: ProgrammingLanguage) -> String {
     let mut result = name.to_string();
 
     // Add generic type parameters if present
@@ -1093,9 +1113,10 @@ fn dedupe_import_group<'a>(imports: &'a [&'a ImportSymbol]) -> Vec<&'a ImportSym
     let mut alias_originals = HashSet::new();
     for import in imports {
         if import.alias.is_some()
-            && let Some(original) = import.original_name.as_deref() {
-                alias_originals.insert((import.source.as_deref(), original));
-            }
+            && let Some(original) = import.original_name.as_deref()
+        {
+            alias_originals.insert((import.source.as_deref(), original));
+        }
     }
 
     let mut result = Vec::new();
@@ -1215,17 +1236,24 @@ fn format_python_import_group(imports: &[&ImportSymbol]) -> String {
         let source = *sources.iter().next().unwrap();
         let is_import_stmt = imports.iter().all(|import| {
             import.source.as_deref() == Some(source)
-                && (import.name == source
-                    || import.original_name.as_deref() == Some(source))
+                && (import.name == source || import.original_name.as_deref() == Some(source))
         });
-        let spec_list = imports.iter().map(|import| specs(import)).collect::<Vec<_>>().join(", ");
+        let spec_list = imports
+            .iter()
+            .map(|import| specs(import))
+            .collect::<Vec<_>>()
+            .join(", ");
         if is_import_stmt {
             format!("import {}", spec_list)
         } else {
             format!("from {} import {}", source, spec_list)
         }
     } else {
-        let spec_list = imports.iter().map(|import| specs(import)).collect::<Vec<_>>().join(", ");
+        let spec_list = imports
+            .iter()
+            .map(|import| specs(import))
+            .collect::<Vec<_>>()
+            .join(", ");
         format!("import {}", spec_list)
     }
 }
@@ -1306,13 +1334,7 @@ fn format_java_import_group(imports: &[&ImportSymbol]) -> String {
 fn format_csharp_import_group(imports: &[&ImportSymbol]) -> String {
     let specs = imports
         .iter()
-        .map(|import| {
-            import
-                .source
-                .as_deref()
-                .unwrap_or(&import.name)
-                .to_string()
-        })
+        .map(|import| import.source.as_deref().unwrap_or(&import.name).to_string())
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -1360,13 +1382,7 @@ fn format_scala_import_group(imports: &[&ImportSymbol]) -> String {
 fn format_swift_import_group(imports: &[&ImportSymbol]) -> String {
     let specs = imports
         .iter()
-        .map(|import| {
-            import
-                .source
-                .as_deref()
-                .unwrap_or(&import.name)
-                .to_string()
-        })
+        .map(|import| import.source.as_deref().unwrap_or(&import.name).to_string())
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -1424,9 +1440,7 @@ fn extract_class_summaries(
         // Get methods that belong to this class (between this class and the next)
         let class_methods: Vec<&SymbolInfo> = methods
             .iter()
-            .filter(|m| {
-                m.range.start_line > class_start && m.range.start_line < class_end
-            })
+            .filter(|m| m.range.start_line > class_start && m.range.start_line < class_end)
             .copied()
             .collect();
 
@@ -1500,11 +1514,7 @@ fn render_class_summaries(
     };
 
     if config.use_colors {
-        println!(
-            "{} ({})",
-            header.bold(),
-            language.to_string().dimmed()
-        );
+        println!("{} ({})", header.bold(), language.to_string().dimmed());
     } else {
         println!("{} ({})", header, language);
     }
@@ -1517,7 +1527,11 @@ fn render_class_summaries(
 }
 
 /// Renders a single class summary.
-fn render_class_summary(summary: &ClassSummary, language: ProgrammingLanguage, config: &OutputConfig) {
+fn render_class_summary(
+    summary: &ClassSummary,
+    language: ProgrammingLanguage,
+    config: &OutputConfig,
+) {
     let class = &summary.class;
     let location = format!("[{}:{}]", class.range.start_line, class.range.start_column);
     let location_display = if config.use_hyperlinks {
@@ -1539,12 +1553,24 @@ fn render_class_summary(summary: &ClassSummary, language: ProgrammingLanguage, c
 
     // Render static methods
     if !summary.static_methods.is_empty() {
-        render_member_section("Static Methods", &summary.static_methods, language, config, true);
+        render_member_section(
+            "Static Methods",
+            &summary.static_methods,
+            language,
+            config,
+            true,
+        );
     }
 
     // Render instance methods
     if !summary.instance_methods.is_empty() {
-        render_member_section("Instance Methods", &summary.instance_methods, language, config, true);
+        render_member_section(
+            "Instance Methods",
+            &summary.instance_methods,
+            language,
+            config,
+            true,
+        );
     }
 
     // Render static fields
@@ -1554,7 +1580,12 @@ fn render_class_summary(summary: &ClassSummary, language: ProgrammingLanguage, c
 
     // Render instance fields
     if !summary.instance_fields.is_empty() {
-        render_field_section("Instance Fields", &summary.instance_fields, language, config);
+        render_field_section(
+            "Instance Fields",
+            &summary.instance_fields,
+            language,
+            config,
+        );
     }
 }
 
@@ -1573,7 +1604,10 @@ fn render_member_section(
     }
 
     for method in methods {
-        let location = format!("[{}:{}]", method.range.start_line, method.range.start_column);
+        let location = format!(
+            "[{}:{}]",
+            method.range.start_line, method.range.start_column
+        );
         let location_display = if config.use_hyperlinks {
             hyperlink(&method.file, method.range.start_line, &location)
         } else {

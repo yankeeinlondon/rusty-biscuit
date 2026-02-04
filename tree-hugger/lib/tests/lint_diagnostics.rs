@@ -583,10 +583,9 @@ impl Foo {
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
 
-    let self_diagnostic = diagnostics.iter().find(|d| {
-        d.rule.as_deref() == Some("undefined-module")
-            && d.message.contains("'self'")
-    });
+    let self_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-module") && d.message.contains("'self'"));
     assert!(
         self_diagnostic.is_none(),
         "self.method() should NOT report undefined-module"
@@ -611,10 +610,9 @@ impl Foo {
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
 
-    let self_diagnostic = diagnostics.iter().find(|d| {
-        d.rule.as_deref() == Some("undefined-module")
-            && d.message.contains("'Self'")
-    });
+    let self_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-module") && d.message.contains("'Self'"));
     assert!(
         self_diagnostic.is_none(),
         "Self::new() should NOT report undefined-module"
@@ -641,10 +639,9 @@ fn test_undefined_module_super_not_reported() {
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
 
-    let super_diagnostic = diagnostics.iter().find(|d| {
-        d.rule.as_deref() == Some("undefined-module")
-            && d.message.contains("'super'")
-    });
+    let super_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-module") && d.message.contains("'super'"));
     assert!(
         super_diagnostic.is_none(),
         "super::something should NOT report undefined-module"
@@ -666,10 +663,9 @@ fn test_undefined_module_single_letter_not_reported() {
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
 
-    let single_letter_diagnostic = diagnostics.iter().find(|d| {
-        d.rule.as_deref() == Some("undefined-module")
-            && d.message.contains("'T'")
-    });
+    let single_letter_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-module") && d.message.contains("'T'"));
     assert!(
         single_letter_diagnostic.is_none(),
         "Single-letter qualifiers like T should NOT report undefined-module"
@@ -694,10 +690,9 @@ fn test_undefined_module_javascript_this_not_reported() {
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
 
-    let this_diagnostic = diagnostics.iter().find(|d| {
-        d.rule.as_deref() == Some("undefined-module")
-            && d.message.contains("'this'")
-    });
+    let this_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-module") && d.message.contains("'this'"));
     assert!(
         this_diagnostic.is_none(),
         "this.method() should NOT report undefined-module"
@@ -721,10 +716,9 @@ fn main() {
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
 
-    let io_diagnostic = diagnostics.iter().find(|d| {
-        d.rule.as_deref() == Some("undefined-module")
-            && d.message.contains("'io'")
-    });
+    let io_diagnostic = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-module") && d.message.contains("'io'"));
     assert!(
         io_diagnostic.is_none(),
         "Imported modules like 'io' should NOT report undefined-module"
@@ -754,10 +748,7 @@ fn test_dead_code_after_rust_panic_macro() {
     let dead_code = diagnostics
         .iter()
         .find(|d| d.rule.as_deref() == Some("dead-code"));
-    assert!(
-        dead_code.is_some(),
-        "Expected dead-code after panic! macro"
-    );
+    assert!(dead_code.is_some(), "Expected dead-code after panic! macro");
 }
 
 #[test]
@@ -804,10 +795,7 @@ fn test_dead_code_after_rust_todo_macro() {
     let dead_code = diagnostics
         .iter()
         .find(|d| d.rule.as_deref() == Some("dead-code"));
-    assert!(
-        dead_code.is_some(),
-        "Expected dead-code after todo! macro"
-    );
+    assert!(dead_code.is_some(), "Expected dead-code after todo! macro");
 }
 
 #[test]
@@ -1268,7 +1256,10 @@ fn test_syntax_diagnostic_has_context() {
 
     // At least one diagnostic should have context
     let has_context = diagnostics.iter().any(|d| d.context.is_some());
-    assert!(has_context, "At least one syntax diagnostic should have context");
+    assert!(
+        has_context,
+        "At least one syntax diagnostic should have context"
+    );
 }
 
 #[test]
@@ -1330,12 +1321,18 @@ fn test_syntax_diagnostics_fast_path_valid_file() {
 fn test_syntax_diagnostics_fast_path_many_languages() {
     let valid_files = vec![
         ("valid.js", r#"function hello() { return 1; }"#),
-        ("valid.py", r#"def hello():
+        (
+            "valid.py",
+            r#"def hello():
     return 1
-"#),
-        ("valid.go", r#"package main
+"#,
+        ),
+        (
+            "valid.go",
+            r#"package main
 func hello() int { return 1 }
-"#),
+"#,
+        ),
     ];
 
     let dir = TempDir::new().unwrap();
@@ -1375,9 +1372,9 @@ fn test_swift_function_parameter_not_undefined() {
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
 
-    let undefined_name = diagnostics.iter().find(|d| {
-        d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'name'")
-    });
+    let undefined_name = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'name'"));
     assert!(
         undefined_name.is_none(),
         "Swift function parameter 'name' should NOT be flagged as undefined"
@@ -1400,9 +1397,9 @@ fn test_swift_protocol_parameter_not_undefined() {
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
 
-    let undefined_name = diagnostics.iter().find(|d| {
-        d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'name'")
-    });
+    let undefined_name = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'name'"));
     assert!(
         undefined_name.is_none(),
         "Swift protocol method parameter 'name' should NOT be flagged as undefined"
@@ -1460,9 +1457,9 @@ fn test_swift_property_not_undefined() {
     let tree_file = TreeFile::new(&path).unwrap();
     let diagnostics = tree_file.lint_diagnostics();
 
-    let undefined_prefix = diagnostics.iter().find(|d| {
-        d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'prefix'")
-    });
+    let undefined_prefix = diagnostics
+        .iter()
+        .find(|d| d.rule.as_deref() == Some("undefined-symbol") && d.message.contains("'prefix'"));
     assert!(
         undefined_prefix.is_none(),
         "Swift class property 'prefix' should NOT be flagged as undefined"

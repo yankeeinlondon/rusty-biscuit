@@ -4,13 +4,13 @@ use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::CompleteEnv;
 use sniff_lib::programs::InstalledHeadlessAudio;
 
-use playa::{all_players, AudioFileFormat, AudioPlayer, Codec, Playa, SoundEffect, PLAYER_LOOKUP};
+use playa::{AudioFileFormat, AudioPlayer, Codec, PLAYER_LOOKUP, Playa, SoundEffect, all_players};
 
-#[cfg(feature = "audio-ducking")]
-use playa::ducking::{backend_name, create_backend, DuckConfig};
-use darkmatter_lib::markdown::output::terminal::{for_terminal, TerminalOptions};
 use darkmatter_lib::markdown::Markdown;
+use darkmatter_lib::markdown::output::terminal::{TerminalOptions, for_terminal};
 use darkmatter_lib::testing::strip_ansi_codes;
+#[cfg(feature = "audio-ducking")]
+use playa::ducking::{DuckConfig, backend_name, create_backend};
 
 const MISSING_FG: &str = "\x1b[38;2;140;140;140m";
 const ITALIC: &str = "\x1b[3m";
@@ -275,7 +275,9 @@ async fn play_file(path: &PathBuf, opts: &PlaybackOptions) {
 #[cfg(feature = "audio-ducking")]
 async fn play_effect(name: &str, opts: &PlaybackOptions) {
     let Some(effect) = SoundEffect::from_name(name) else {
-        eprintln!("Unknown sound effect: {name}. Use `playa list-effects` to see available effects.");
+        eprintln!(
+            "Unknown sound effect: {name}. Use `playa list-effects` to see available effects."
+        );
         std::process::exit(2);
     };
 
@@ -317,7 +319,9 @@ fn play_file_sync(path: &PathBuf, opts: &PlaybackOptions) {
 #[cfg(not(feature = "audio-ducking"))]
 fn play_effect_sync(name: &str, opts: &PlaybackOptions) {
     let Some(effect) = SoundEffect::from_name(name) else {
-        eprintln!("Unknown sound effect: {name}. Use `playa list-effects` to see available effects.");
+        eprintln!(
+            "Unknown sound effect: {name}. Use `playa list-effects` to see available effects."
+        );
         std::process::exit(2);
     };
 
@@ -358,7 +362,10 @@ async fn print_duck_info() {
     println!("Audio Ducking Backend Info");
     println!("==========================");
     println!("Selected backend: {}", name);
-    println!("Available: {}", if backend.is_available() { "yes" } else { "no" });
+    println!(
+        "Available: {}",
+        if backend.is_available() { "yes" } else { "no" }
+    );
     println!();
 
     match name {
@@ -431,7 +438,9 @@ async fn print_duck_info() {
                     } else {
                         println!("Applications that would be ducked ({}):", snap.len());
                         for entry in &snap.entries {
-                            if let playa::ducking::SessionId::PulseSinkInput { index, name } = &entry.id {
+                            if let playa::ducking::SessionId::PulseSinkInput { index, name } =
+                                &entry.id
+                            {
                                 let vol = entry.channels.first().copied().unwrap_or(0.0) * 100.0;
                                 println!("  [{}] {} - {:.0}%", index, name, vol);
                             }

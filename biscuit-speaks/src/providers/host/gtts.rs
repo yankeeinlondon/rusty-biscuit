@@ -13,9 +13,9 @@ use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
 #[cfg(feature = "playa")]
 use crate::types::AudioFormat;
+use crate::types::{Gender, Language, SpeakResult, TtsConfig, Voice, VoiceQuality};
 #[cfg(feature = "playa")]
 use crate::types::{HostTtsProvider, TtsProvider};
-use crate::types::{Gender, Language, SpeakResult, TtsConfig, Voice, VoiceQuality};
 
 /// gTTS (Google Text-to-Speech) provider.
 ///
@@ -93,7 +93,7 @@ impl GttsProvider {
         // We don't want to add reqwest as a dependency just for this check,
         // so we do a simple DNS lookup + TCP connect
         use tokio::net::TcpStream;
-        use tokio::time::{timeout, Duration};
+        use tokio::time::{Duration, timeout};
 
         // Try to connect to Google's servers with a short timeout
         let connect_future = TcpStream::connect("translate.google.com:443");
@@ -202,7 +202,10 @@ impl GttsProvider {
             let stderr = String::from_utf8_lossy(&output.stderr);
 
             // Check for connectivity-related errors
-            if stderr.contains("Connection") || stderr.contains("Network") || stderr.contains("Timeout") {
+            if stderr.contains("Connection")
+                || stderr.contains("Network")
+                || stderr.contains("Timeout")
+            {
                 self.connectivity_ok.store(false, Ordering::Relaxed);
             }
 
@@ -317,13 +320,12 @@ impl TtsExecutor for GttsProvider {
 
         // Return the result with cache metadata
         #[cfg(feature = "playa")]
-        Ok(SpeakResult::new(
-            TtsProvider::Host(HostTtsProvider::Gtts),
-            voice,
+        Ok(
+            SpeakResult::new(TtsProvider::Host(HostTtsProvider::Gtts), voice)
+                .with_audio_file(audio_path)
+                .with_codec("mp3")
+                .with_cache_hit(cache_hit),
         )
-        .with_audio_file(audio_path)
-        .with_codec("mp3")
-        .with_cache_hit(cache_hit))
     }
 }
 
@@ -351,10 +353,7 @@ impl TtsVoiceInventory for GttsProvider {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let voices: Vec<Voice> = stdout
-            .lines()
-            .filter_map(Self::parse_voice_line)
-            .collect();
+        let voices: Vec<Voice> = stdout.lines().filter_map(Self::parse_voice_line).collect();
 
         debug!(
             provider = Self::PROVIDER_NAME,
@@ -496,11 +495,7 @@ mod tests {
 
     #[test]
     fn test_parse_voice_line_all_gender_any() {
-        let lines = [
-            " de: German",
-            " es: Spanish",
-            " fr: French",
-        ];
+        let lines = [" de: German", " es: Spanish", " fr: French"];
 
         for line in lines {
             let voice = GttsProvider::parse_voice_line(line).unwrap();
@@ -623,7 +618,11 @@ mod tests {
 
         // Should parse all lines
         assert!(!voices.is_empty());
-        assert!(voices.len() >= 70, "Expected at least 70 voices, got {}", voices.len());
+        assert!(
+            voices.len() >= 70,
+            "Expected at least 70 voices, got {}",
+            voices.len()
+        );
     }
 
     #[test]
@@ -698,7 +697,9 @@ mod tests {
 
         // Should have an English voice
         assert!(
-            voices.iter().any(|v| v.languages.contains(&Language::English)),
+            voices
+                .iter()
+                .any(|v| v.languages.contains(&Language::English)),
             "Expected at least one English voice"
         );
 

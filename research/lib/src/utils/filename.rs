@@ -233,8 +233,8 @@ const CORE_DOCUMENTS: &[&str] = &[
     "integration_partners",
     "use_cases",
     "changelog",
-    "deep_dive",   // legacy
-    "deep-dive",   // new directory name
+    "deep_dive", // legacy
+    "deep-dive", // new directory name
     "brief",
 ];
 

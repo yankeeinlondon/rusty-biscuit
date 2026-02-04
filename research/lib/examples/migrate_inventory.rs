@@ -23,11 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Print summary
     for name in inventory.topic_names() {
         if let Some(topic) = inventory.get(name) {
-            println!(
-                "  - {} ({} documents)",
-                name,
-                topic.documents().len()
-            );
+            println!("  - {} ({} documents)", name, topic.documents().len());
         }
     }
 

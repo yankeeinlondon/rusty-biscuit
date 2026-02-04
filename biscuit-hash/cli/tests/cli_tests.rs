@@ -264,7 +264,9 @@ mod help_and_version {
             .arg("--help")
             .assert()
             .success()
-            .stdout(predicate::str::contains("Hash content using various algorithms"));
+            .stdout(predicate::str::contains(
+                "Hash content using various algorithms",
+            ));
     }
 
     #[test]

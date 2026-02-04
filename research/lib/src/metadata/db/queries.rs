@@ -4,8 +4,8 @@
 //! (CTEs) to efficiently load topic trees from the database.
 
 use super::{
-    rows::{DocumentRow, LibraryDetailsRow, SoftwareDetailsRow, TopicRow},
     DbError, DbPool, DbResult,
+    rows::{DocumentRow, LibraryDetailsRow, SoftwareDetailsRow, TopicRow},
 };
 use crate::metadata::{Document, KindCategory, Topic};
 
@@ -53,25 +53,23 @@ pub async fn get_all_descendant_names(pool: &DbPool, parent_name: &str) -> DbRes
 
 /// Get direct children topic names for a given parent topic.
 pub async fn get_child_topic_names(pool: &DbPool, parent_name: &str) -> DbResult<Vec<String>> {
-    let rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT name FROM topics WHERE parent_topic_name = ?1 ORDER BY name",
-    )
-    .bind(parent_name)
-    .fetch_all(pool)
-    .await
-    .map_err(DbError::QueryFailed)?;
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT name FROM topics WHERE parent_topic_name = ?1 ORDER BY name")
+            .bind(parent_name)
+            .fetch_all(pool)
+            .await
+            .map_err(DbError::QueryFailed)?;
 
     Ok(rows.into_iter().map(|(name,)| name).collect())
 }
 
 /// Get root topics (topics with no parent).
 pub async fn get_root_topic_names(pool: &DbPool) -> DbResult<Vec<String>> {
-    let rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT name FROM topics WHERE parent_topic_name IS NULL ORDER BY name",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(DbError::QueryFailed)?;
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT name FROM topics WHERE parent_topic_name IS NULL ORDER BY name")
+            .fetch_all(pool)
+            .await
+            .map_err(DbError::QueryFailed)?;
 
     Ok(rows.into_iter().map(|(name,)| name).collect())
 }
@@ -90,7 +88,10 @@ pub async fn fetch_topic_row(pool: &DbPool, name: &str) -> DbResult<Option<Topic
 }
 
 /// Fetch library details for a topic.
-pub async fn fetch_library_details(pool: &DbPool, topic_name: &str) -> DbResult<Option<LibraryDetailsRow>> {
+pub async fn fetch_library_details(
+    pool: &DbPool,
+    topic_name: &str,
+) -> DbResult<Option<LibraryDetailsRow>> {
     let row: Option<LibraryDetailsRow> = sqlx::query_as(
         "SELECT topic_name, package_manager, package_name, features, language, url, repo, docs, licenses FROM library_details WHERE topic_name = ?1",
     )
@@ -103,7 +104,10 @@ pub async fn fetch_library_details(pool: &DbPool, topic_name: &str) -> DbResult<
 }
 
 /// Fetch software details for a topic.
-pub async fn fetch_software_details(pool: &DbPool, topic_name: &str) -> DbResult<Option<SoftwareDetailsRow>> {
+pub async fn fetch_software_details(
+    pool: &DbPool,
+    topic_name: &str,
+) -> DbResult<Option<SoftwareDetailsRow>> {
     let row: Option<SoftwareDetailsRow> = sqlx::query_as(
         "SELECT topic_name, name, company FROM software_details WHERE topic_name = ?1",
     )
@@ -142,21 +146,21 @@ pub async fn fetch_topic_with_children(pool: &DbPool, name: &str) -> DbResult<Op
     // Determine the kind based on discriminator and fetch details
     let kind = match topic_row.kind.as_str() {
         "Library" => {
-            let details = fetch_library_details(pool, name)
-                .await?
-                .ok_or_else(|| DbError::InvalidEnumValue {
+            let details = fetch_library_details(pool, name).await?.ok_or_else(|| {
+                DbError::InvalidEnumValue {
                     type_name: "LibraryDetails".to_string(),
                     value: format!("Missing library_details for topic {name}"),
-                })?;
+                }
+            })?;
             KindCategory::Library(details.into_library()?)
         }
         "Software" => {
-            let details = fetch_software_details(pool, name)
-                .await?
-                .ok_or_else(|| DbError::InvalidEnumValue {
+            let details = fetch_software_details(pool, name).await?.ok_or_else(|| {
+                DbError::InvalidEnumValue {
                     type_name: "SoftwareDetails".to_string(),
                     value: format!("Missing software_details for topic {name}"),
-                })?;
+                }
+            })?;
             KindCategory::Software(details.into_software())
         }
         "Person" => KindCategory::Person,
@@ -166,7 +170,7 @@ pub async fn fetch_topic_with_children(pool: &DbPool, name: &str) -> DbResult<Op
             return Err(DbError::InvalidEnumValue {
                 type_name: "KindCategory".to_string(),
                 value: other.to_string(),
-            })
+            });
         }
     };
 
@@ -189,9 +193,7 @@ pub async fn fetch_topic_with_children(pool: &DbPool, name: &str) -> DbResult<Op
     }
 
     // Convert row to Topic
-    topic_row
-        .into_topic(kind, documents, children)
-        .map(Some)
+    topic_row.into_topic(kind, documents, children).map(Some)
 }
 
 /// Fetch all root topics with their children.
@@ -374,17 +376,28 @@ mod tests {
         insert_test_topic(&pool, "child2", Some("parent"), "Person").await;
         insert_test_topic(&pool, "grandchild", Some("child1"), "Person").await;
 
-        let topic = fetch_topic_with_children(&pool, "parent").await.unwrap().unwrap();
+        let topic = fetch_topic_with_children(&pool, "parent")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(topic.name(), "parent");
         assert_eq!(topic.children().len(), 2);
 
         // Find child1 and check its grandchild
-        let child1 = topic.children().iter().find(|c| c.name() == "child1").unwrap();
+        let child1 = topic
+            .children()
+            .iter()
+            .find(|c| c.name() == "child1")
+            .unwrap();
         assert_eq!(child1.children().len(), 1);
         assert_eq!(child1.children()[0].name(), "grandchild");
 
         // child2 has no children
-        let child2 = topic.children().iter().find(|c| c.name() == "child2").unwrap();
+        let child2 = topic
+            .children()
+            .iter()
+            .find(|c| c.name() == "child2")
+            .unwrap();
         assert!(child2.children().is_empty());
     }
 
@@ -392,7 +405,9 @@ mod tests {
     async fn test_fetch_topic_not_found() {
         let pool = setup_test_db().await;
 
-        let topic = fetch_topic_with_children(&pool, "nonexistent").await.unwrap();
+        let topic = fetch_topic_with_children(&pool, "nonexistent")
+            .await
+            .unwrap();
         assert!(topic.is_none());
     }
 }

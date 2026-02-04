@@ -22,19 +22,19 @@
 use std::path::PathBuf;
 
 use schematic_schema::elevenlabs::{
-    CreateSpeechBody, CreateSpeechRequest, CreateSoundEffectBody, CreateSoundEffectRequest,
+    CreateSoundEffectBody, CreateSoundEffectRequest, CreateSpeechBody, CreateSpeechRequest,
     ElevenLabs, ListVoicesResponse, ModelInfo, VoiceResponseModel, VoiceSettings,
 };
 use schematic_schema::shared::reqwest;
 
-use crate::audio_cache::{write_atomic, CacheKey};
+use crate::audio_cache::{CacheKey, write_atomic};
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
 #[cfg(feature = "playa")]
 use crate::types::AudioFormat;
 #[cfg(feature = "playa")]
 use crate::types::{CloudTtsProvider, TtsProvider};
-use crate::types::{Gender, Language, SpeedLevel, SpeakResult, TtsConfig, Voice, VoiceQuality};
+use crate::types::{Gender, Language, SpeakResult, SpeedLevel, TtsConfig, Voice, VoiceQuality};
 
 /// Default ElevenLabs voice ID (Rachel - a versatile female voice).
 const DEFAULT_VOICE_ID: &str = "21m00Tcm4TlvDq8ikWAM";
@@ -267,8 +267,7 @@ impl ElevenLabsProvider {
     /// Returns `true` if either `ELEVENLABS_API_KEY` or `ELEVEN_LABS_API_KEY`
     /// is set in the environment.
     pub fn has_api_key() -> bool {
-        std::env::var("ELEVEN_LABS_API_KEY").is_ok()
-            || std::env::var("ELEVENLABS_API_KEY").is_ok()
+        std::env::var("ELEVEN_LABS_API_KEY").is_ok() || std::env::var("ELEVENLABS_API_KEY").is_ok()
     }
 
     /// Generate audio to the cache path, returning the path and whether it was a cache hit.
@@ -327,14 +326,14 @@ impl ElevenLabsProvider {
         let request = CreateSpeechRequest::new(voice_id.to_string(), body);
 
         // Make the API request
-        let audio_bytes = self
-            .client
-            .create_speech(request)
-            .await
-            .map_err(|e| TtsError::HttpError {
-                provider: "elevenlabs".into(),
-                message: e.to_string(),
-            })?;
+        let audio_bytes =
+            self.client
+                .create_speech(request)
+                .await
+                .map_err(|e| TtsError::HttpError {
+                    provider: "elevenlabs".into(),
+                    message: e.to_string(),
+                })?;
 
         // Write to cache atomically
         write_atomic(&cache_path, &audio_bytes).map_err(|e| TtsError::TempFileError {
@@ -424,7 +423,11 @@ impl ElevenLabsProvider {
     /// let audio = provider.generate_audio("Hello", &TtsConfig::default()).await?;
     /// // audio is Vec<u8> containing MP3 data
     /// ```
-    pub async fn generate_audio(&self, text: &str, config: &TtsConfig) -> Result<Vec<u8>, TtsError> {
+    pub async fn generate_audio(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<Vec<u8>, TtsError> {
         let voice_id = self.resolve_voice_id(config).await?;
 
         // Use requested model from config, or fall back to default
@@ -459,14 +462,14 @@ impl ElevenLabsProvider {
         );
 
         // Use the generated client to make the request
-        let audio_bytes = self
-            .client
-            .create_speech(request)
-            .await
-            .map_err(|e| TtsError::HttpError {
-                provider: "elevenlabs".into(),
-                message: e.to_string(),
-            })?;
+        let audio_bytes =
+            self.client
+                .create_speech(request)
+                .await
+                .map_err(|e| TtsError::HttpError {
+                    provider: "elevenlabs".into(),
+                    message: e.to_string(),
+                })?;
 
         tracing::debug!(
             audio_size = audio_bytes.len(),
@@ -519,11 +522,10 @@ impl ElevenLabsProvider {
         let mut page_num = 0;
         while has_more {
             page_num += 1;
-            let mut url =
-                reqwest::Url::parse(&base_url).map_err(|e| TtsError::HttpError {
-                    provider: "elevenlabs".into(),
-                    message: format!("Invalid URL: {}", e),
-                })?;
+            let mut url = reqwest::Url::parse(&base_url).map_err(|e| TtsError::HttpError {
+                provider: "elevenlabs".into(),
+                message: format!("Invalid URL: {}", e),
+            })?;
 
             // Add pagination parameters
             url.query_pairs_mut().append_pair("page_size", "100");
@@ -796,12 +798,13 @@ impl TtsExecutor for ElevenLabsProvider {
 
 impl TtsVoiceInventory for ElevenLabsProvider {
     async fn list_voices(&self) -> Result<Vec<Voice>, TtsError> {
-        let response = self.list_voices_raw().await.map_err(|e| {
-            TtsError::VoiceEnumerationFailed {
-                provider: "elevenlabs".into(),
-                message: e.to_string(),
-            }
-        })?;
+        let response =
+            self.list_voices_raw()
+                .await
+                .map_err(|e| TtsError::VoiceEnumerationFailed {
+                    provider: "elevenlabs".into(),
+                    message: e.to_string(),
+                })?;
 
         Ok(response
             .voices
@@ -1072,7 +1075,11 @@ mod tests {
 
         assert_eq!(voice.languages.len(), 2);
         assert!(voice.languages.contains(&Language::English));
-        assert!(voice.languages.contains(&Language::Custom("fr".to_string())));
+        assert!(
+            voice
+                .languages
+                .contains(&Language::Custom("fr".to_string()))
+        );
     }
 
     #[test]
@@ -1160,7 +1167,10 @@ mod tests {
             .list_voices_raw()
             .await
             .expect("Should list voices");
-        assert!(!response.voices.is_empty(), "Should have at least one voice");
+        assert!(
+            !response.voices.is_empty(),
+            "Should have at least one voice"
+        );
     }
 
     #[tokio::test]
@@ -1219,7 +1229,10 @@ mod tests {
 
         match serde_json::from_str::<ListVoicesResponse>(&text) {
             Ok(resp) => {
-                println!("\n=== SUCCESS! Deserialized {} voices ===", resp.voices.len());
+                println!(
+                    "\n=== SUCCESS! Deserialized {} voices ===",
+                    resp.voices.len()
+                );
                 for v in resp.voices.iter() {
                     println!("\nVoice: {} ({:?})", v.name, v.category);
                     if let Some(langs) = &v.verified_languages {
@@ -1249,7 +1262,11 @@ mod tests {
                     println!("\nContext (lines {}-{}):", start + 1, end);
                     for (i, line) in lines[start..end].iter().enumerate() {
                         let actual_line = start + i + 1;
-                        let marker = if actual_line == line_num { ">>>" } else { "   " };
+                        let marker = if actual_line == line_num {
+                            ">>>"
+                        } else {
+                            "   "
+                        };
                         println!(
                             "{} {}: {}",
                             marker,

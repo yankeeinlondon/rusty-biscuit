@@ -169,10 +169,7 @@ fn convert_kind(v1: &ResearchMetadata, topic_name: &str) -> KindCategory {
         ResearchKind::Library => {
             // Extract library details if available
             if let Some(lib_details) = v1.library_details() {
-                let pm_str = lib_details
-                    .package_manager
-                    .as_deref()
-                    .unwrap_or("unknown");
+                let pm_str = lib_details.package_manager.as_deref().unwrap_or("unknown");
                 let package_manager = parse_package_manager(pm_str);
                 let language = lib_details.language.clone().unwrap_or_default();
                 let url = lib_details.url.clone().unwrap_or_default();
@@ -424,7 +421,11 @@ fn scan_documents(topic_dir: &Path) -> Result<Vec<Document>> {
 fn infer_content_type_from_filename(stem: &str) -> ContentType {
     match stem.to_lowercase().as_str() {
         // Kind-derived documents (generated based on topic kind)
-        "overview" | "similar_libraries" | "integration_partners" | "use_cases" | "changelog"
+        "overview"
+        | "similar_libraries"
+        | "integration_partners"
+        | "use_cases"
+        | "changelog"
         | "brief" => ContentType::KindDerived,
 
         // Question files are prompt-generated
@@ -441,9 +442,10 @@ fn get_file_timestamps(metadata: &fs::Metadata) -> (DateTime<Utc>, DateTime<Utc>
         .modified()
         .ok()
         .and_then(|t| {
-            t.duration_since(std::time::UNIX_EPOCH)
-                .ok()
-                .map(|d| Utc.timestamp_opt(d.as_secs() as i64, d.subsec_nanos()).single())
+            t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| {
+                Utc.timestamp_opt(d.as_secs() as i64, d.subsec_nanos())
+                    .single()
+            })
         })
         .flatten()
         .unwrap_or_else(Utc::now);
@@ -452,9 +454,10 @@ fn get_file_timestamps(metadata: &fs::Metadata) -> (DateTime<Utc>, DateTime<Utc>
         .created()
         .ok()
         .and_then(|t| {
-            t.duration_since(std::time::UNIX_EPOCH)
-                .ok()
-                .map(|d| Utc.timestamp_opt(d.as_secs() as i64, d.subsec_nanos()).single())
+            t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| {
+                Utc.timestamp_opt(d.as_secs() as i64, d.subsec_nanos())
+                    .single()
+            })
         })
         .flatten()
         .unwrap_or(modified);
@@ -465,8 +468,8 @@ fn get_file_timestamps(metadata: &fs::Metadata) -> (DateTime<Utc>, DateTime<Utc>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metadata::types::LibraryDetails;
     use crate::ResearchKind;
+    use crate::metadata::types::LibraryDetails;
     use std::collections::HashMap;
     use tempfile::TempDir;
 

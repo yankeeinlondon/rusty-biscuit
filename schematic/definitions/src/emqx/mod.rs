@@ -586,7 +586,8 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             id: "DeleteBan".to_string(),
             method: RestMethod::Delete,
             path: "/banned/{ban_type}/{who}".to_string(),
-            description: "Remove a ban by type (clientid, username, peerhost) and value".to_string(),
+            description: "Remove a ban by type (clientid, username, peerhost) and value"
+                .to_string(),
             request: None,
             response: ApiResponse::Empty,
             headers: vec![],
@@ -728,7 +729,11 @@ mod tests {
     #[test]
     fn list_clients_endpoint() {
         let api = define_emqx_basic_api();
-        let endpoint = api.endpoints.iter().find(|e| e.id == "ListClients").unwrap();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "ListClients")
+            .unwrap();
 
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/clients");
@@ -788,7 +793,11 @@ mod tests {
     #[test]
     fn publish_bulk_endpoint() {
         let api = define_emqx_basic_api();
-        let endpoint = api.endpoints.iter().find(|e| e.id == "PublishBulk").unwrap();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "PublishBulk")
+            .unwrap();
 
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/publish/bulk");
@@ -900,7 +909,11 @@ mod tests {
     #[test]
     fn list_metrics_endpoint() {
         let api = define_emqx_basic_api();
-        let endpoint = api.endpoints.iter().find(|e| e.id == "ListMetrics").unwrap();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "ListMetrics")
+            .unwrap();
 
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/metrics");
@@ -927,7 +940,11 @@ mod tests {
     #[test]
     fn list_retained_endpoint() {
         let api = define_emqx_basic_api();
-        let endpoint = api.endpoints.iter().find(|e| e.id == "ListRetained").unwrap();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "ListRetained")
+            .unwrap();
 
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/retainer/messages");
@@ -997,7 +1014,11 @@ mod tests {
         // Check that all basic endpoints exist in bearer (excluding auth-specific ones)
         for basic_endpoint in &basic.endpoints {
             let found = bearer.endpoints.iter().any(|e| e.id == basic_endpoint.id);
-            assert!(found, "Endpoint {} missing in bearer API", basic_endpoint.id);
+            assert!(
+                found,
+                "Endpoint {} missing in bearer API",
+                basic_endpoint.id
+            );
         }
     }
 

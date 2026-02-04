@@ -13,9 +13,9 @@ use tracing::{debug, trace};
 use crate::audio_cache::CacheKey;
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
+use crate::types::{Gender, Language, SpeakResult, SpeedLevel, TtsConfig, Voice, VoiceQuality};
 #[cfg(feature = "playa")]
 use crate::types::{HostTtsProvider, TtsProvider};
-use crate::types::{Gender, Language, SpeakResult, SpeedLevel, TtsConfig, Voice, VoiceQuality};
 
 /// Echogarden TTS engine identifier.
 ///
@@ -148,8 +148,9 @@ impl EchogardenProvider {
         let filtered_by_lang: Vec<&Voice> = candidates
             .iter()
             .filter(|v| {
-                v.languages.iter().any(|lang| {
-                    match (lang, target_language) {
+                v.languages
+                    .iter()
+                    .any(|lang| match (lang, target_language) {
                         (Language::English, Language::English) => true,
                         (Language::Custom(a), Language::Custom(b)) => {
                             let a_lower = a.to_lowercase();
@@ -162,8 +163,7 @@ impl EchogardenProvider {
                         | (Language::Custom(c), Language::English) => {
                             c.to_lowercase().starts_with("en")
                         }
-                    }
-                })
+                    })
             })
             .copied()
             .collect();
@@ -210,11 +210,7 @@ impl EchogardenProvider {
         speed: SpeedLevel,
     ) -> Result<(PathBuf, bool), TtsError> {
         // Build voice_id for cache key
-        let voice_id = format!(
-            "{}:{}",
-            self.engine.as_str(),
-            voice.unwrap_or("default")
-        );
+        let voice_id = format!("{}:{}", self.engine.as_str(), voice.unwrap_or("default"));
 
         // Create cache key - speed IS included (echogarden bakes speed via --speed flag)
         let mut cache_key = CacheKey::new("echogarden", &voice_id, text, "wav");
@@ -321,7 +317,8 @@ impl TtsExecutor for EchogardenProvider {
         // Play the audio file
         #[cfg(feature = "playa")]
         {
-            crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config).await
+            crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config)
+                .await
         }
         #[cfg(not(feature = "playa"))]
         {
@@ -355,7 +352,12 @@ impl TtsExecutor for EchogardenProvider {
             let engine_prefix = format!("{}:", self.engine.as_str());
             let engine_voices: Vec<&Voice> = voices
                 .iter()
-                .filter(|v| v.identifier.as_ref().map(|i| i.starts_with(&engine_prefix)).unwrap_or(false))
+                .filter(|v| {
+                    v.identifier
+                        .as_ref()
+                        .map(|i| i.starts_with(&engine_prefix))
+                        .unwrap_or(false)
+                })
                 .collect();
 
             // Select best voice based on constraints (gender, language, quality)
@@ -375,7 +377,8 @@ impl TtsExecutor for EchogardenProvider {
 
         // Play the audio file (requires playa feature)
         #[cfg(feature = "playa")]
-        crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config).await?;
+        crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config)
+            .await?;
 
         #[cfg(not(feature = "playa"))]
         {
@@ -406,13 +409,12 @@ impl TtsExecutor for EchogardenProvider {
                     .with_identifier(format!("{}:{}", self.engine.as_str(), voice_name))
             };
 
-            Ok(SpeakResult::new(
-                TtsProvider::Host(HostTtsProvider::EchoGarden),
-                voice,
+            Ok(
+                SpeakResult::new(TtsProvider::Host(HostTtsProvider::EchoGarden), voice)
+                    .with_audio_file(audio_path)
+                    .with_codec("wav")
+                    .with_cache_hit(cache_hit),
             )
-            .with_audio_file(audio_path)
-            .with_codec("wav")
-            .with_cache_hit(cache_hit))
         }
     }
 }
@@ -464,7 +466,11 @@ async fn list_voices_for_engine(engine: EchogardenEngine) -> Result<Vec<Voice>, 
         .await
         .map_err(|e| TtsError::VoiceEnumerationFailed {
             provider: format!("echogarden/{}", engine.as_str()),
-            message: format!("Failed to run 'echogarden list-voices {}': {}", engine.as_str(), e),
+            message: format!(
+                "Failed to run 'echogarden list-voices {}': {}",
+                engine.as_str(),
+                e
+            ),
         })?;
 
     if !output.status.success() {
@@ -693,7 +699,10 @@ fn parse_languages(langs_str: &str) -> Vec<Language> {
                 if !languages.contains(&Language::English) {
                     languages.push(Language::English);
                 }
-            } else if !languages.iter().any(|l| matches!(l, Language::Custom(c) if c == code)) {
+            } else if !languages
+                .iter()
+                .any(|l| matches!(l, Language::Custom(c) if c == code))
+            {
                 languages.push(Language::Custom(code.to_string()));
             }
         }
@@ -843,8 +852,8 @@ Gender: female
 
     #[test]
     fn test_parse_kokoro_voices() {
-        let voices = parse_echogarden_voices(ECHOGARDEN_KOKORO_SAMPLE, EchogardenEngine::Kokoro)
-            .unwrap();
+        let voices =
+            parse_echogarden_voices(ECHOGARDEN_KOKORO_SAMPLE, EchogardenEngine::Kokoro).unwrap();
 
         assert_eq!(voices.len(), 4);
 
@@ -872,9 +881,7 @@ Gender: female
             .unwrap();
         assert_eq!(kareem.gender, Gender::Male);
         assert_eq!(kareem.quality, VoiceQuality::Good);
-        assert!(kareem
-            .languages
-            .contains(&Language::Custom("ar-JO".into())));
+        assert!(kareem.languages.contains(&Language::Custom("ar-JO".into())));
         assert_eq!(kareem.identifier, Some("vits:ar_JO-kareem-low".into()));
 
         let thorsten = voices
@@ -882,9 +889,11 @@ Gender: female
             .find(|v| v.name == "de_DE-thorsten-medium")
             .unwrap();
         assert_eq!(thorsten.gender, Gender::Male);
-        assert!(thorsten
-            .languages
-            .contains(&Language::Custom("de-DE".into())));
+        assert!(
+            thorsten
+                .languages
+                .contains(&Language::Custom("de-DE".into()))
+        );
     }
 
     #[test]
@@ -1003,22 +1012,13 @@ Gender: female
 
     #[test]
     fn test_vits_quality_tier_to_voice_quality() {
-        assert_eq!(
-            VitsQualityTier::High.to_voice_quality(),
-            VoiceQuality::Good
-        );
+        assert_eq!(VitsQualityTier::High.to_voice_quality(), VoiceQuality::Good);
         assert_eq!(
             VitsQualityTier::Medium.to_voice_quality(),
             VoiceQuality::Moderate
         );
-        assert_eq!(
-            VitsQualityTier::Low.to_voice_quality(),
-            VoiceQuality::Low
-        );
-        assert_eq!(
-            VitsQualityTier::XLow.to_voice_quality(),
-            VoiceQuality::Low
-        );
+        assert_eq!(VitsQualityTier::Low.to_voice_quality(), VoiceQuality::Low);
+        assert_eq!(VitsQualityTier::XLow.to_voice_quality(), VoiceQuality::Low);
     }
 
     #[test]
@@ -1203,10 +1203,7 @@ Gender: female
         // Verify voice properties
         for voice in &voices {
             assert!(!voice.name.is_empty(), "Voice name should not be empty");
-            assert!(
-                voice.identifier.is_some(),
-                "Voice should have identifier"
-            );
+            assert!(voice.identifier.is_some(), "Voice should have identifier");
             assert!(
                 !voice.languages.is_empty(),
                 "Voice should have at least one language"
@@ -1250,7 +1247,9 @@ Gender: female
         }
 
         let config = TtsConfig::new().with_voice("Heart");
-        let result = provider.speak("Testing with the Heart voice.", &config).await;
+        let result = provider
+            .speak("Testing with the Heart voice.", &config)
+            .await;
         assert!(result.is_ok());
     }
 

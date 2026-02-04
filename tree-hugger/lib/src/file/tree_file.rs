@@ -243,59 +243,64 @@ impl TreeFile {
                 // Check for scoped_identifier (module::symbol)
                 if parent.kind() == "scoped_identifier"
                     && let Some(path_node) = parent.child_by_field_name("path")
-                        && path_node.id() != node.id() {
-                            let qualifier = path_node
-                                .utf8_text(self.source.as_bytes())
-                                .ok()
-                                .map(String::from);
-                            return (true, qualifier);
-                        }
+                    && path_node.id() != node.id()
+                {
+                    let qualifier = path_node
+                        .utf8_text(self.source.as_bytes())
+                        .ok()
+                        .map(String::from);
+                    return (true, qualifier);
+                }
                 // Check for field_expression (object.field)
                 if parent.kind() == "field_expression"
                     && let Some(value_node) = parent.child_by_field_name("value")
-                        && value_node.id() != node.id() {
-                            let qualifier = value_node
-                                .utf8_text(self.source.as_bytes())
-                                .ok()
-                                .map(String::from);
-                            return (true, qualifier);
-                        }
+                    && value_node.id() != node.id()
+                {
+                    let qualifier = value_node
+                        .utf8_text(self.source.as_bytes())
+                        .ok()
+                        .map(String::from);
+                    return (true, qualifier);
+                }
             }
             ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
                 // Check for member_expression (object.property)
                 if parent.kind() == "member_expression"
                     && let Some(object_node) = parent.child_by_field_name("object")
-                        && object_node.id() != node.id() {
-                            let qualifier = object_node
-                                .utf8_text(self.source.as_bytes())
-                                .ok()
-                                .map(String::from);
-                            return (true, qualifier);
-                        }
+                    && object_node.id() != node.id()
+                {
+                    let qualifier = object_node
+                        .utf8_text(self.source.as_bytes())
+                        .ok()
+                        .map(String::from);
+                    return (true, qualifier);
+                }
             }
             ProgrammingLanguage::Python => {
                 // Check for attribute (object.attr)
                 if parent.kind() == "attribute"
                     && let Some(object_node) = parent.child_by_field_name("object")
-                        && object_node.id() != node.id() {
-                            let qualifier = object_node
-                                .utf8_text(self.source.as_bytes())
-                                .ok()
-                                .map(String::from);
-                            return (true, qualifier);
-                        }
+                    && object_node.id() != node.id()
+                {
+                    let qualifier = object_node
+                        .utf8_text(self.source.as_bytes())
+                        .ok()
+                        .map(String::from);
+                    return (true, qualifier);
+                }
             }
             ProgrammingLanguage::Go => {
                 // Check for selector_expression (package.Symbol)
                 if parent.kind() == "selector_expression"
                     && let Some(operand_node) = parent.child_by_field_name("operand")
-                        && operand_node.id() != node.id() {
-                            let qualifier = operand_node
-                                .utf8_text(self.source.as_bytes())
-                                .ok()
-                                .map(String::from);
-                            return (true, qualifier);
-                        }
+                    && operand_node.id() != node.id()
+                {
+                    let qualifier = operand_node
+                        .utf8_text(self.source.as_bytes())
+                        .ok()
+                        .map(String::from);
+                    return (true, qualifier);
+                }
             }
             _ => {
                 // Generic check for field access patterns
@@ -335,12 +340,13 @@ impl TreeFile {
                 // has a real alias (not blank identifier "_"), skip the path capture
                 if node.kind() == "interpreted_string_literal"
                     && let Some(import_spec) = find_ancestor_by_kind(node, "import_spec")
-                        && let Some(name_node) = import_spec.child_by_field_name("name") {
-                            // Only skip if the alias is a real package_identifier, not blank "_"
-                            if name_node.kind() == "package_identifier" {
-                                return true; // Skip path when there's a real alias
-                            }
-                        }
+                    && let Some(name_node) = import_spec.child_by_field_name("name")
+                {
+                    // Only skip if the alias is a real package_identifier, not blank "_"
+                    if name_node.kind() == "package_identifier" {
+                        return true; // Skip path when there's a real alias
+                    }
+                }
                 false
             }
             ProgrammingLanguage::Java => {
@@ -377,9 +383,10 @@ impl TreeFile {
                     // Find the direct qualified_name child
                     for child in using_decl.children(&mut using_decl.walk()) {
                         if child.kind() == "qualified_name"
-                            && let Some(name_node) = child.child_by_field_name("name") {
-                                return name_node.id() != node.id();
-                            }
+                            && let Some(name_node) = child.child_by_field_name("name")
+                        {
+                            return name_node.id() != node.id();
+                        }
                     }
                 }
                 false
@@ -414,7 +421,11 @@ impl TreeFile {
     }
 
     /// Returns the range of the full import statement for grouping.
-    fn import_statement_range(&self, node: Node, language: ProgrammingLanguage) -> Option<CodeRange> {
+    fn import_statement_range(
+        &self,
+        node: Node,
+        language: ProgrammingLanguage,
+    ) -> Option<CodeRange> {
         let statement = match language {
             ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
                 find_ancestor_by_kind(node, "import_statement")
@@ -463,22 +474,23 @@ impl TreeFile {
             if p.kind() == "import_specifier" {
                 // import { original as alias } from "module"
                 if let Some(name_node) = p.child_by_field_name("name")
-                    && let Some(alias_node) = p.child_by_field_name("alias") {
-                        let orig = name_node
-                            .utf8_text(self.source.as_bytes())
-                            .unwrap_or_default()
-                            .to_string();
-                        let al = alias_node
-                            .utf8_text(self.source.as_bytes())
-                            .unwrap_or_default()
-                            .to_string();
+                    && let Some(alias_node) = p.child_by_field_name("alias")
+                {
+                    let orig = name_node
+                        .utf8_text(self.source.as_bytes())
+                        .unwrap_or_default()
+                        .to_string();
+                    let al = alias_node
+                        .utf8_text(self.source.as_bytes())
+                        .unwrap_or_default()
+                        .to_string();
 
-                        // The captured node is the alias (what's defined locally)
-                        if name == al {
-                            original_name = Some(orig);
-                            alias = Some(al);
-                        }
+                    // The captured node is the alias (what's defined locally)
+                    if name == al {
+                        original_name = Some(orig);
+                        alias = Some(al);
                     }
+                }
             } else if p.kind() == "namespace_import" {
                 // import * as ns from "module"
                 alias = Some(name.to_string());
@@ -507,49 +519,52 @@ impl TreeFile {
         // Check for aliased import (aliased_import) - do this first to get the correct module name
         let parent = node.parent();
         if let Some(p) = parent
-            && p.kind() == "aliased_import" {
-                // This handles both:
-                // - `import X as Y` (name field is module, alias field is local name)
-                // - `from M import X as Y` (name field is original symbol, alias field is local name)
-                if let Some(name_node) = p.child_by_field_name("name") {
-                    let orig = name_node
+            && p.kind() == "aliased_import"
+        {
+            // This handles both:
+            // - `import X as Y` (name field is module, alias field is local name)
+            // - `from M import X as Y` (name field is original symbol, alias field is local name)
+            if let Some(name_node) = p.child_by_field_name("name") {
+                let orig = name_node
+                    .utf8_text(self.source.as_bytes())
+                    .unwrap_or_default();
+                if let Some(alias_node) = p.child_by_field_name("alias") {
+                    let al = alias_node
                         .utf8_text(self.source.as_bytes())
                         .unwrap_or_default();
-                    if let Some(alias_node) = p.child_by_field_name("alias") {
-                        let al = alias_node
-                            .utf8_text(self.source.as_bytes())
-                            .unwrap_or_default();
-                        if name == al {
-                            original_name = Some(extract_dotted_name(orig));
-                            alias = Some(al.to_string());
+                    if name == al {
+                        original_name = Some(extract_dotted_name(orig));
+                        alias = Some(al.to_string());
 
-                            // For `import X as Y`, the source is X (the module name)
-                            if let Some(stmt) = &import_stmt
-                                && stmt.kind() == "import_statement" {
-                                    source = Some(orig.to_string());
-                                }
+                        // For `import X as Y`, the source is X (the module name)
+                        if let Some(stmt) = &import_stmt
+                            && stmt.kind() == "import_statement"
+                        {
+                            source = Some(orig.to_string());
                         }
                     }
                 }
             }
+        }
 
         // Set source if not already set by aliased import handling
         if source.is_none()
-            && let Some(stmt) = import_stmt {
-                if stmt.kind() == "import_from_statement" {
-                    // from X import Y - extract X as the source
-                    if let Some(module_node) = stmt.child_by_field_name("module_name") {
-                        source = module_node
-                            .utf8_text(self.source.as_bytes())
-                            .ok()
-                            .map(|s| s.to_string());
-                    }
-                } else {
-                    // import X - the module is the source
-                    // For `import os`, the source is "os" (same as name)
-                    source = Some(name.to_string());
+            && let Some(stmt) = import_stmt
+        {
+            if stmt.kind() == "import_from_statement" {
+                // from X import Y - extract X as the source
+                if let Some(module_node) = stmt.child_by_field_name("module_name") {
+                    source = module_node
+                        .utf8_text(self.source.as_bytes())
+                        .ok()
+                        .map(|s| s.to_string());
                 }
+            } else {
+                // import X - the module is the source
+                // For `import os`, the source is "os" (same as name)
+                source = Some(name.to_string());
             }
+        }
 
         (source, original_name, alias)
     }
@@ -577,17 +592,18 @@ impl TreeFile {
         // Check for use_as_clause (use foo as bar)
         let parent = node.parent();
         if let Some(p) = parent
-            && p.kind() == "use_as_clause" {
-                // The captured node is the alias
-                if let Some(path_node) = p.child_by_field_name("path") {
-                    let orig = path_node
-                        .utf8_text(self.source.as_bytes())
-                        .unwrap_or_default()
-                        .to_string();
-                    original_name = Some(orig);
-                    alias = Some(name.to_string());
-                }
+            && p.kind() == "use_as_clause"
+        {
+            // The captured node is the alias
+            if let Some(path_node) = p.child_by_field_name("path") {
+                let orig = path_node
+                    .utf8_text(self.source.as_bytes())
+                    .unwrap_or_default()
+                    .to_string();
+                original_name = Some(orig);
+                alias = Some(name.to_string());
             }
+        }
 
         (source, original_name, alias)
     }
@@ -655,7 +671,10 @@ impl TreeFile {
 
     /// Extracts import metadata for Java.
     /// Handles: `import com.example.Foo`, `import static java.lang.Math.PI`, `import java.io.*`.
-    fn extract_java_import_metadata(&self, node: Node) -> (Option<String>, Option<String>, Option<String>) {
+    fn extract_java_import_metadata(
+        &self,
+        node: Node,
+    ) -> (Option<String>, Option<String>, Option<String>) {
         let mut source = None;
         let mut original_name = None;
         let mut alias = None;
@@ -671,16 +690,18 @@ impl TreeFile {
             // Get the full import path from scoped_identifier
             for child in decl.children(&mut decl.walk()) {
                 if child.kind() == "scoped_identifier" {
-                    let full_path = child
-                        .utf8_text(self.source.as_bytes())
-                        .unwrap_or_default();
+                    let full_path = child.utf8_text(self.source.as_bytes()).unwrap_or_default();
 
                     if is_wildcard {
                         // For wildcard imports like `import java.io.*`
                         // The source is the entire path, and the import represents "*"
                         source = Some(full_path.to_string());
                         original_name = Some("*".to_string());
-                        alias = Some(node.utf8_text(self.source.as_bytes()).unwrap_or_default().to_string());
+                        alias = Some(
+                            node.utf8_text(self.source.as_bytes())
+                                .unwrap_or_default()
+                                .to_string(),
+                        );
                     } else {
                         // Extract package path (everything before the last dot)
                         // For `java.util.List`, source is `java.util`
@@ -700,7 +721,10 @@ impl TreeFile {
 
     /// Extracts import metadata for C#.
     /// Handles: `using System.IO`.
-    fn extract_csharp_import_metadata(&self, node: Node) -> (Option<String>, Option<String>, Option<String>) {
+    fn extract_csharp_import_metadata(
+        &self,
+        node: Node,
+    ) -> (Option<String>, Option<String>, Option<String>) {
         let mut source = None;
 
         // Find using_directive ancestor
@@ -723,7 +747,10 @@ impl TreeFile {
 
     /// Extracts import metadata for PHP.
     /// Handles: `use App\Models\User`, `use App\Models\User as UserModel`.
-    fn extract_php_import_metadata(&self, node: Node) -> (Option<String>, Option<String>, Option<String>) {
+    fn extract_php_import_metadata(
+        &self,
+        node: Node,
+    ) -> (Option<String>, Option<String>, Option<String>) {
         let mut source = None;
         let mut alias = None;
         let mut original_name = None;
@@ -773,9 +800,7 @@ impl TreeFile {
         let import_decl = find_ancestor_by_kind(node, "import_declaration");
         if let Some(decl) = import_decl {
             // Extract the full import path
-            let import_text = decl
-                .utf8_text(self.source.as_bytes())
-                .unwrap_or_default();
+            let import_text = decl.utf8_text(self.source.as_bytes()).unwrap_or_default();
             // Parse out the package path (skip "import " prefix)
             if import_text.contains('.') && import_text.len() > 7 {
                 source = Some(import_text[7..].trim().to_string());
@@ -786,21 +811,25 @@ impl TreeFile {
         let parent = node.parent();
         if let Some(p) = parent
             && p.kind() == "renamed_identifier"
-                && let Some(name_node) = p.child(0) {
-                    let orig = name_node
-                        .utf8_text(self.source.as_bytes())
-                        .unwrap_or_default()
-                        .to_string();
-                    original_name = Some(orig);
-                    alias = Some(name.to_string());
-                }
+            && let Some(name_node) = p.child(0)
+        {
+            let orig = name_node
+                .utf8_text(self.source.as_bytes())
+                .unwrap_or_default()
+                .to_string();
+            original_name = Some(orig);
+            alias = Some(name.to_string());
+        }
 
         (source, original_name, alias)
     }
 
     /// Extracts import metadata for Swift.
     /// Handles: `import Foundation`, `import UIKit`.
-    fn extract_swift_import_metadata(&self, node: Node) -> (Option<String>, Option<String>, Option<String>) {
+    fn extract_swift_import_metadata(
+        &self,
+        node: Node,
+    ) -> (Option<String>, Option<String>, Option<String>) {
         let mut source = None;
 
         // Find import_declaration ancestor
@@ -894,8 +923,7 @@ impl TreeFile {
         diagnostics.extend(self.run_semantic_diagnostics());
 
         // Parse ignore directives using tree-sitter (avoids false positives from strings)
-        let ignores =
-            IgnoreDirectives::parse_with_tree(&self.source, &self.tree, self.language);
+        let ignores = IgnoreDirectives::parse_with_tree(&self.source, &self.tree, self.language);
         if ignores.has_directives() {
             diagnostics.retain(|d| !ignores.should_ignore(d.range.start_line, d.rule.as_deref()));
         }
@@ -1278,10 +1306,7 @@ impl TreeFile {
             let context = self.build_source_context_from_range(&reference.range);
 
             diagnostics.push(LintDiagnostic {
-                message: format!(
-                    "Reference to undefined module or namespace '{}'",
-                    qualifier
-                ),
+                message: format!("Reference to undefined module or namespace '{}'", qualifier),
                 range: reference.range.clone(),
                 severity: severity_for_rule("undefined-module"),
                 rule: Some("undefined-module".to_string()),
@@ -1311,10 +1336,7 @@ impl TreeFile {
 
         // Calculate underline length (handle multi-line by capping to end of first line)
         let underline_length = if range.start_line == range.end_line {
-            range
-                .end_column
-                .saturating_sub(range.start_column)
-                .max(1)
+            range.end_column.saturating_sub(range.start_column).max(1)
         } else {
             // Multi-line: underline to end of first line
             line_text.len().saturating_sub(underline_column).max(1)
@@ -1659,7 +1681,8 @@ fn extract_parameters(
     // may be either function_definition or function_declarator:
     // - If function_definition: look in function_declarator child
     // - If function_declarator: look directly for parameter_list
-    let params_node = if language == ProgrammingLanguage::Go && node.kind() == "method_declaration" {
+    let params_node = if language == ProgrammingLanguage::Go && node.kind() == "method_declaration"
+    {
         find_nth_child_by_kind(node, params_node_kind, 1) // 0-indexed, so 1 = second
     } else if matches!(language, ProgrammingLanguage::C | ProgrammingLanguage::Cpp) {
         // C/C++: Context may be function_declarator or function_definition
@@ -1872,8 +1895,7 @@ fn find_go_type_node(node: Node<'_>) -> Option<Node<'_>> {
 
 fn extract_js_parameter(node: Node<'_>, kind: &str, source: &str) -> Option<ParameterInfo> {
     // Check if this is a rest/variadic parameter
-    let is_rest = kind == "rest_pattern"
-        || find_child_by_kind(node, "rest_pattern").is_some();
+    let is_rest = kind == "rest_pattern" || find_child_by_kind(node, "rest_pattern").is_some();
 
     let name = if kind == "rest_pattern" {
         find_child_by_kind(node, "identifier")
@@ -2162,9 +2184,10 @@ fn extract_java_csharp_is_static(node: Node<'_>, source: &str) -> bool {
         let mut cursor = modifiers.walk();
         for child in modifiers.children(&mut cursor) {
             if let Ok(text) = child.utf8_text(source.as_bytes())
-                && text == "static" {
-                    return true;
-                }
+                && text == "static"
+            {
+                return true;
+            }
         }
     }
 
@@ -2173,9 +2196,10 @@ fn extract_java_csharp_is_static(node: Node<'_>, source: &str) -> bool {
     for child in node.children(&mut cursor) {
         if child.kind() == "modifier"
             && let Ok(text) = child.utf8_text(source.as_bytes())
-                && text == "static" {
-                    return true;
-                }
+            && text == "static"
+        {
+            return true;
+        }
     }
 
     false
@@ -2201,16 +2225,18 @@ fn extract_php_is_static(node: Node<'_>) -> bool {
 fn extract_python_is_static(node: Node<'_>, source: &str) -> bool {
     // Look at the decorated_definition parent if exists
     if let Some(parent) = node.parent()
-        && parent.kind() == "decorated_definition" {
-            let mut cursor = parent.walk();
-            for child in parent.children(&mut cursor) {
-                if child.kind() == "decorator"
-                    && let Ok(text) = child.utf8_text(source.as_bytes())
-                        && (text.contains("staticmethod") || text.contains("classmethod")) {
-                            return true;
-                        }
+        && parent.kind() == "decorated_definition"
+    {
+        let mut cursor = parent.walk();
+        for child in parent.children(&mut cursor) {
+            if child.kind() == "decorator"
+                && let Ok(text) = child.utf8_text(source.as_bytes())
+                && (text.contains("staticmethod") || text.contains("classmethod"))
+            {
+                return true;
             }
         }
+    }
     false
 }
 
@@ -2222,9 +2248,10 @@ fn extract_swift_is_static(node: Node<'_>, source: &str) -> bool {
             let mut mod_cursor = child.walk();
             for modifier in child.children(&mut mod_cursor) {
                 if let Ok(text) = modifier.utf8_text(source.as_bytes())
-                    && (text == "static" || text == "class") {
-                        return true;
-                    }
+                    && (text == "static" || text == "class")
+                {
+                    return true;
+                }
             }
         }
     }
@@ -2253,9 +2280,10 @@ fn extract_cpp_is_static(node: Node<'_>, source: &str) -> bool {
     for child in node.children(&mut cursor) {
         if child.kind() == "storage_class_specifier"
             && let Ok(text) = child.utf8_text(source.as_bytes())
-                && text == "static" {
-                    return true;
-                }
+            && text == "static"
+        {
+            return true;
+        }
     }
     false
 }
@@ -2279,10 +2307,11 @@ fn extract_rust_is_static(node: Node<'_>, source: &str) -> bool {
             // Check for `self` in the first parameter
             if child.kind() == "parameter"
                 && let Some(pattern) = find_child_by_kind(child, "identifier")
-                    && let Ok(text) = pattern.utf8_text(source.as_bytes())
-                        && text == "self" {
-                            return false;
-                        }
+                && let Ok(text) = pattern.utf8_text(source.as_bytes())
+                && text == "self"
+            {
+                return false;
+            }
         }
         // Has parameters but no self -> associated function
         return true;
@@ -2352,7 +2381,10 @@ fn extract_rust_return_type(node: Node<'_>, source: &str) -> Option<String> {
                     | "dynamic_type"
                     | "abstract_type"
             ) {
-                return child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+                return child
+                    .utf8_text(source.as_bytes())
+                    .ok()
+                    .map(|s| s.to_string());
             }
         }
     }
@@ -2390,7 +2422,10 @@ fn extract_python_return_type(node: Node<'_>, source: &str) -> Option<String> {
             }
             // The type node contains the actual return type
             if kind == "type" {
-                return child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+                return child
+                    .utf8_text(source.as_bytes())
+                    .ok()
+                    .map(|s| s.to_string());
             }
         }
     }
@@ -2466,7 +2501,10 @@ fn extract_typescript_return_type(node: Node<'_>, source: &str) -> Option<String
             let mut ta_cursor = child.walk();
             for ta_child in child.children(&mut ta_cursor) {
                 if ta_child.kind() != ":" {
-                    return ta_child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+                    return ta_child
+                        .utf8_text(source.as_bytes())
+                        .ok()
+                        .map(|s| s.to_string());
                 }
             }
         }
@@ -2498,7 +2536,10 @@ fn extract_typescript_return_type(node: Node<'_>, source: &str) -> Option<String
 /// ```
 fn extract_php_parameter(node: Node<'_>, source: &str) -> Option<ParameterInfo> {
     let kind = node.kind();
-    if kind != "simple_parameter" && kind != "property_promotion_parameter" && kind != "variadic_parameter" {
+    if kind != "simple_parameter"
+        && kind != "property_promotion_parameter"
+        && kind != "variadic_parameter"
+    {
         return None;
     }
 
@@ -2576,7 +2617,10 @@ fn extract_php_return_type(node: Node<'_>, source: &str) -> Option<String> {
                     | "union_type"
                     | "intersection_type"
             ) {
-                return child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+                return child
+                    .utf8_text(source.as_bytes())
+                    .ok()
+                    .map(|s| s.to_string());
             }
         }
     }
@@ -2663,7 +2707,10 @@ fn extract_java_return_type(node: Node<'_>, source: &str) -> Option<String> {
                 | "array_type"
                 | "scoped_type_identifier"
         ) {
-            return child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+            return child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.to_string());
         }
     }
 
@@ -2721,20 +2768,25 @@ fn find_c_param_name(node: Node<'_>, source: &str) -> Option<String> {
         let kind = child.kind();
 
         if kind == "identifier" {
-            return child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+            return child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.to_string());
         }
 
         // Handle pointer declarator: *name
         if kind == "pointer_declarator"
-            && let Some(id) = find_child_by_kind(child, "identifier") {
-                return id.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
-            }
+            && let Some(id) = find_child_by_kind(child, "identifier")
+        {
+            return id.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+        }
 
         // Handle reference declarator: &name
         if kind == "reference_declarator"
-            && let Some(id) = find_child_by_kind(child, "identifier") {
-                return id.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
-            }
+            && let Some(id) = find_child_by_kind(child, "identifier")
+        {
+            return id.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+        }
     }
 
     None
@@ -2781,7 +2833,10 @@ fn extract_c_return_type(node: Node<'_>, source: &str) -> Option<String> {
                 | "qualified_identifier"
                 | "template_type"
         ) {
-            return child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+            return child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.to_string());
         }
     }
 
@@ -2864,13 +2919,12 @@ fn extract_csharp_return_type(node: Node<'_>, source: &str) -> Option<String> {
         // These are valid return type node kinds in C#
         if matches!(
             kind,
-            "predefined_type"
-                | "generic_name"
-                | "array_type"
-                | "nullable_type"
-                | "qualified_name"
+            "predefined_type" | "generic_name" | "array_type" | "nullable_type" | "qualified_name"
         ) {
-            return child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+            return child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.to_string());
         }
 
         // Handle identifier as type (e.g., custom class names)
@@ -2911,9 +2965,10 @@ fn extract_swift_parameters(node: Node<'_>, source: &str) -> Vec<ParameterInfo> 
 
     for child in node.children(&mut cursor) {
         if child.kind() == "parameter"
-            && let Some(param) = extract_swift_single_parameter(child, source) {
-                parameters.push(param);
-            }
+            && let Some(param) = extract_swift_single_parameter(child, source)
+        {
+            parameters.push(param);
+        }
     }
 
     parameters
@@ -3014,7 +3069,10 @@ fn extract_swift_return_type(node: Node<'_>, source: &str) -> Option<String> {
                     | "function_type"
                     | "metatype"
             ) {
-                return child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+                return child
+                    .utf8_text(source.as_bytes())
+                    .ok()
+                    .map(|s| s.to_string());
             }
         }
     }
@@ -3070,7 +3128,10 @@ fn extract_scala_return_type(node: Node<'_>, source: &str) -> Option<String> {
                     | "function_type"
                     | "compound_type"
             ) {
-                return child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+                return child
+                    .utf8_text(source.as_bytes())
+                    .ok()
+                    .map(|s| s.to_string());
             }
         }
     }
@@ -3107,7 +3168,8 @@ fn extract_scala_parameter(node: Node<'_>, source: &str) -> Option<ParameterInfo
     // Check for variadic (*) - Scala uses `name: Type*` for varargs
     let is_variadic = {
         let mut cursor = node.walk();
-        node.children(&mut cursor).any(|c| c.kind() == "repeated_parameter_type")
+        node.children(&mut cursor)
+            .any(|c| c.kind() == "repeated_parameter_type")
     };
 
     // Find default value
@@ -3154,7 +3216,10 @@ fn find_default_value_after_equals(node: Node<'_>, source: &str) -> Option<Strin
         }
 
         if found_equals {
-            return child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string());
+            return child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.to_string());
         }
     }
 
@@ -3367,7 +3432,8 @@ fn extract_dotted_name(name: &str) -> String {
 /// Finds the first child node with the given kind.
 fn find_child_by_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
     let mut cursor = node.walk();
-    node.children(&mut cursor).find(|child| child.kind() == kind)
+    node.children(&mut cursor)
+        .find(|child| child.kind() == kind)
 }
 
 /// Finds the nth child node with the given kind (0-indexed).
@@ -3437,7 +3503,9 @@ fn extract_type_metadata(
 
     match language {
         ProgrammingLanguage::Rust => extract_rust_type_metadata(node, node_kind, source),
-        ProgrammingLanguage::TypeScript => extract_typescript_type_metadata(node, node_kind, source),
+        ProgrammingLanguage::TypeScript => {
+            extract_typescript_type_metadata(node, node_kind, source)
+        }
         ProgrammingLanguage::Go => extract_go_type_metadata(node, node_kind, source),
         ProgrammingLanguage::Python => extract_python_type_metadata(node, node_kind, source),
         ProgrammingLanguage::Java => extract_java_type_metadata(node, node_kind, source),
@@ -3452,7 +3520,11 @@ fn extract_type_metadata(
 }
 
 /// Extracts type metadata from Rust struct_item or enum_item nodes.
-fn extract_rust_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+fn extract_rust_type_metadata(
+    node: Node<'_>,
+    node_kind: &str,
+    source: &str,
+) -> Option<TypeMetadata> {
     let mut metadata = TypeMetadata::new();
 
     // Extract generic type parameters
@@ -3469,7 +3541,8 @@ fn extract_rust_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> 
             // Check for field_declaration_list (normal struct) or ordered_field_declaration_list (tuple struct)
             if let Some(field_list) = find_child_by_kind(node, "field_declaration_list") {
                 metadata.fields = extract_rust_struct_fields(field_list, source);
-            } else if let Some(tuple_fields) = find_child_by_kind(node, "ordered_field_declaration_list")
+            } else if let Some(tuple_fields) =
+                find_child_by_kind(node, "ordered_field_declaration_list")
             {
                 // Tuple struct: struct Point(i32, i32)
                 metadata.fields = extract_rust_tuple_struct_fields(tuple_fields, source);
@@ -3510,23 +3583,27 @@ fn extract_rust_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
                         params.push(text.to_string());
                     }
                 } else if let Some(ident) = find_child_by_kind(child, "type_identifier")
-                    && let Ok(text) = ident.utf8_text(source.as_bytes()) {
-                        params.push(text.to_string());
-                    }
+                    && let Ok(text) = ident.utf8_text(source.as_bytes())
+                {
+                    params.push(text.to_string());
+                }
             }
             "lifetime_parameter" => {
-                if let Some(lifetime) = child.child_by_field_name("lifetime")
+                if let Some(lifetime) = child
+                    .child_by_field_name("lifetime")
                     .or_else(|| find_child_by_kind(child, "lifetime"))
-                    && let Ok(text) = lifetime.utf8_text(source.as_bytes()) {
-                        params.push(text.to_string());
-                    }
+                    && let Ok(text) = lifetime.utf8_text(source.as_bytes())
+                {
+                    params.push(text.to_string());
+                }
             }
             "constrained_type_parameter" | "optional_type_parameter" => {
                 // Get the type identifier from the constrained parameter
                 if let Some(ident) = find_child_by_kind(child, "type_identifier")
-                    && let Ok(text) = ident.utf8_text(source.as_bytes()) {
-                        params.push(text.to_string());
-                    }
+                    && let Ok(text) = ident.utf8_text(source.as_bytes())
+                {
+                    params.push(text.to_string());
+                }
             }
             _ => {}
         }
@@ -3638,7 +3715,8 @@ fn extract_rust_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> 
             variant.doc_comment = doc_comment;
 
             // Check for tuple variant: Variant(Type1, Type2)
-            if let Some(tuple_fields) = find_child_by_kind(child, "ordered_field_declaration_list") {
+            if let Some(tuple_fields) = find_child_by_kind(child, "ordered_field_declaration_list")
+            {
                 variant.tuple_fields = extract_rust_variant_tuple_fields(tuple_fields, source);
             }
 
@@ -3661,9 +3739,10 @@ fn extract_rust_variant_tuple_fields(node: Node<'_>, source: &str) -> Vec<String
 
     for child in node.children(&mut cursor) {
         if RUST_TYPE_KINDS.contains(&child.kind())
-            && let Ok(text) = child.utf8_text(source.as_bytes()) {
-                fields.push(text.to_string());
-            }
+            && let Ok(text) = child.utf8_text(source.as_bytes())
+        {
+            fields.push(text.to_string());
+        }
     }
 
     fields
@@ -3724,9 +3803,10 @@ fn extract_typescript_type_parameters(node: Node<'_>, source: &str) -> Vec<Strin
     for child in node.children(&mut cursor) {
         if child.kind() == "type_parameter"
             && let Some(name) = find_child_by_kind(child, "type_identifier")
-                && let Ok(text) = name.utf8_text(source.as_bytes()) {
-                    params.push(text.to_string());
-                }
+            && let Ok(text) = name.utf8_text(source.as_bytes())
+        {
+            params.push(text.to_string());
+        }
     }
 
     params
@@ -3819,7 +3899,10 @@ fn extract_typescript_enum_variants(node: Node<'_>, source: &str) -> Vec<Variant
                 .and_then(|n| n.utf8_text(source.as_bytes()).ok())
                 .map(|s| s.to_string())
         } else {
-            child.utf8_text(source.as_bytes()).ok().map(|s| s.to_string())
+            child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.to_string())
         };
 
         if let Some(name) = name {
@@ -3852,9 +3935,10 @@ fn extract_go_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Op
 
     // Check for struct type
     if let Some(struct_type) = find_child_by_kind(type_spec, "struct_type")
-        && let Some(field_list) = find_child_by_kind(struct_type, "field_declaration_list") {
-            metadata.fields = extract_go_struct_fields(field_list, source);
-        }
+        && let Some(field_list) = find_child_by_kind(struct_type, "field_declaration_list")
+    {
+        metadata.fields = extract_go_struct_fields(field_list, source);
+    }
 
     // Check for interface type
     if let Some(interface_type) = find_child_by_kind(type_spec, "interface_type") {
@@ -3879,9 +3963,10 @@ fn extract_go_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
             let mut inner_cursor = child.walk();
             for inner in child.children(&mut inner_cursor) {
                 if inner.kind() == "identifier"
-                    && let Ok(text) = inner.utf8_text(source.as_bytes()) {
-                        params.push(text.to_string());
-                    }
+                    && let Ok(text) = inner.utf8_text(source.as_bytes())
+                {
+                    params.push(text.to_string());
+                }
             }
         }
     }
@@ -3907,15 +3992,16 @@ fn extract_go_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
         let mut inner_cursor = child.walk();
         for inner in child.children(&mut inner_cursor) {
             if inner.kind() == "field_identifier"
-                && let Ok(name) = inner.utf8_text(source.as_bytes()) {
-                    fields.push(FieldInfo {
-                        name: name.to_string(),
-                        type_annotation: type_annotation.clone(),
-                        doc_comment: None,
-                        visibility: None,
-                        is_static: false,
-                    });
-                }
+                && let Ok(name) = inner.utf8_text(source.as_bytes())
+            {
+                fields.push(FieldInfo {
+                    name: name.to_string(),
+                    type_annotation: type_annotation.clone(),
+                    doc_comment: None,
+                    visibility: None,
+                    is_static: false,
+                });
+            }
         }
     }
 
@@ -4044,7 +4130,11 @@ fn extract_python_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
 // ============================================================================
 
 /// Extracts type metadata from Java class, enum, record, or interface declarations.
-fn extract_java_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+fn extract_java_type_metadata(
+    node: Node<'_>,
+    node_kind: &str,
+    source: &str,
+) -> Option<TypeMetadata> {
     let mut metadata = TypeMetadata::new();
 
     // Extract generic type parameters
@@ -4092,9 +4182,10 @@ fn extract_java_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
     for child in node.children(&mut cursor) {
         if child.kind() == "type_parameter"
             && let Some(ident) = find_child_by_kind(child, "type_identifier")
-                && let Ok(text) = ident.utf8_text(source.as_bytes()) {
-                    params.push(text.to_string());
-                }
+            && let Ok(text) = ident.utf8_text(source.as_bytes())
+        {
+            params.push(text.to_string());
+        }
     }
 
     params
@@ -4124,15 +4215,16 @@ fn extract_java_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
         for inner in child.children(&mut inner_cursor) {
             if inner.kind() == "variable_declarator"
                 && let Some(name_node) = find_child_by_kind(inner, "identifier")
-                    && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
-                        fields.push(FieldInfo {
-                            name: name.to_string(),
-                            type_annotation: type_annotation.clone(),
-                            doc_comment: None,
-                            visibility,
-                            is_static,
-                        });
-                    }
+                && let Ok(name) = name_node.utf8_text(source.as_bytes())
+            {
+                fields.push(FieldInfo {
+                    name: name.to_string(),
+                    type_annotation: type_annotation.clone(),
+                    doc_comment: None,
+                    visibility,
+                    is_static,
+                });
+            }
         }
     }
 
@@ -4169,9 +4261,10 @@ fn extract_java_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> 
         }
 
         if let Some(name_node) = find_child_by_kind(child, "identifier")
-            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
-                variants.push(VariantInfo::unit(name));
-            }
+            && let Ok(name) = name_node.utf8_text(source.as_bytes())
+        {
+            variants.push(VariantInfo::unit(name));
+        }
     }
 
     variants
@@ -4192,15 +4285,16 @@ fn extract_java_record_components(node: Node<'_>, source: &str) -> Vec<FieldInfo
             .map(|s| s.to_string());
 
         if let Some(name_node) = find_child_by_kind(child, "identifier")
-            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
-                fields.push(FieldInfo {
-                    name: name.to_string(),
-                    type_annotation,
-                    doc_comment: None,
-                    visibility: Some(Visibility::Public), // Record components are implicitly public
-                    is_static: false,
-                });
-            }
+            && let Ok(name) = name_node.utf8_text(source.as_bytes())
+        {
+            fields.push(FieldInfo {
+                name: name.to_string(),
+                type_annotation,
+                doc_comment: None,
+                visibility: Some(Visibility::Public), // Record components are implicitly public
+                is_static: false,
+            });
+        }
     }
 
     fields
@@ -4217,21 +4311,22 @@ fn extract_java_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo
         }
 
         if let Some(name_node) = find_child_by_kind(child, "identifier")
-            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
-                // Get the full method signature as the "type"
-                let type_annotation = child
-                    .utf8_text(source.as_bytes())
-                    .ok()
-                    .map(|s| s.trim().to_string());
+            && let Ok(name) = name_node.utf8_text(source.as_bytes())
+        {
+            // Get the full method signature as the "type"
+            let type_annotation = child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.trim().to_string());
 
-                fields.push(FieldInfo {
-                    name: name.to_string(),
-                    type_annotation,
-                    doc_comment: None,
-                    visibility: Some(Visibility::Public), // Interface members are implicitly public
-                    is_static: false,
-                });
-            }
+            fields.push(FieldInfo {
+                name: name.to_string(),
+                type_annotation,
+                doc_comment: None,
+                visibility: Some(Visibility::Public), // Interface members are implicitly public
+                is_static: false,
+            });
+        }
     }
 
     fields
@@ -4259,9 +4354,10 @@ fn extract_c_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Opt
         "type_definition" => {
             // For typedef struct { ... } Name; we look for struct_specifier inside
             if let Some(struct_spec) = find_child_by_kind(node, "struct_specifier")
-                && let Some(field_list) = find_child_by_kind(struct_spec, "field_declaration_list") {
-                    metadata.fields = extract_c_struct_fields(field_list, source);
-                }
+                && let Some(field_list) = find_child_by_kind(struct_spec, "field_declaration_list")
+            {
+                metadata.fields = extract_c_struct_fields(field_list, source);
+            }
         }
         _ => {}
     }
@@ -4292,15 +4388,16 @@ fn extract_c_struct_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
         let mut inner_cursor = child.walk();
         for inner in child.children(&mut inner_cursor) {
             if inner.kind() == "field_identifier"
-                && let Ok(name) = inner.utf8_text(source.as_bytes()) {
-                    fields.push(FieldInfo {
-                        name: name.to_string(),
-                        type_annotation: type_annotation.clone(),
-                        doc_comment: None,
-                        visibility: None, // C doesn't have visibility modifiers
-                        is_static: false,
-                    });
-                }
+                && let Ok(name) = inner.utf8_text(source.as_bytes())
+            {
+                fields.push(FieldInfo {
+                    name: name.to_string(),
+                    type_annotation: type_annotation.clone(),
+                    doc_comment: None,
+                    visibility: None, // C doesn't have visibility modifiers
+                    is_static: false,
+                });
+            }
         }
     }
 
@@ -4338,9 +4435,10 @@ fn extract_c_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
         }
 
         if let Some(name_node) = find_child_by_kind(child, "identifier")
-            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
-                variants.push(VariantInfo::unit(name));
-            }
+            && let Ok(name) = name_node.utf8_text(source.as_bytes())
+        {
+            variants.push(VariantInfo::unit(name));
+        }
     }
 
     variants
@@ -4351,7 +4449,11 @@ fn extract_c_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
 // ============================================================================
 
 /// Extracts type metadata from C++ class, struct, or enum declarations.
-fn extract_cpp_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+fn extract_cpp_type_metadata(
+    node: Node<'_>,
+    node_kind: &str,
+    source: &str,
+) -> Option<TypeMetadata> {
     let mut metadata = TypeMetadata::new();
 
     match node_kind {
@@ -4418,15 +4520,16 @@ fn extract_cpp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
         let mut inner_cursor = child.walk();
         for inner in child.children(&mut inner_cursor) {
             if inner.kind() == "field_identifier"
-                && let Ok(name) = inner.utf8_text(source.as_bytes()) {
-                    fields.push(FieldInfo {
-                        name: name.to_string(),
-                        type_annotation: type_annotation.clone(),
-                        doc_comment: None,
-                        visibility: current_visibility,
-                        is_static,
-                    });
-                }
+                && let Ok(name) = inner.utf8_text(source.as_bytes())
+            {
+                fields.push(FieldInfo {
+                    name: name.to_string(),
+                    type_annotation: type_annotation.clone(),
+                    doc_comment: None,
+                    visibility: current_visibility,
+                    is_static,
+                });
+            }
         }
     }
 
@@ -4490,9 +4593,10 @@ fn extract_csharp_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
     for child in node.children(&mut cursor) {
         if child.kind() == "type_parameter"
             && let Some(ident) = find_child_by_kind(child, "identifier")
-                && let Ok(text) = ident.utf8_text(source.as_bytes()) {
-                    params.push(text.to_string());
-                }
+            && let Ok(text) = ident.utf8_text(source.as_bytes())
+        {
+            params.push(text.to_string());
+        }
     }
 
     params
@@ -4524,15 +4628,16 @@ fn extract_csharp_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
             for inner in var_decl.children(&mut inner_cursor) {
                 if inner.kind() == "variable_declarator"
                     && let Some(ident) = find_child_by_kind(inner, "identifier")
-                        && let Ok(name) = ident.utf8_text(source.as_bytes()) {
-                            fields.push(FieldInfo {
-                                name: name.to_string(),
-                                type_annotation: type_annotation.clone(),
-                                doc_comment: None,
-                                visibility,
-                                is_static,
-                            });
-                        }
+                    && let Ok(name) = ident.utf8_text(source.as_bytes())
+                {
+                    fields.push(FieldInfo {
+                        name: name.to_string(),
+                        type_annotation: type_annotation.clone(),
+                        doc_comment: None,
+                        visibility,
+                        is_static,
+                    });
+                }
             }
         }
     }
@@ -4569,9 +4674,10 @@ fn extract_csharp_enum_variants(node: Node<'_>, source: &str) -> Vec<VariantInfo
         }
 
         if let Some(name_node) = find_child_by_kind(child, "identifier")
-            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
-                variants.push(VariantInfo::unit(name));
-            }
+            && let Ok(name) = name_node.utf8_text(source.as_bytes())
+        {
+            variants.push(VariantInfo::unit(name));
+        }
     }
 
     variants
@@ -4588,21 +4694,22 @@ fn extract_csharp_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldIn
         }
 
         if let Some(name_node) = find_child_by_kind(child, "identifier")
-            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
-                // Get the full method signature as the "type"
-                let type_annotation = child
-                    .utf8_text(source.as_bytes())
-                    .ok()
-                    .map(|s| s.trim().to_string());
+            && let Ok(name) = name_node.utf8_text(source.as_bytes())
+        {
+            // Get the full method signature as the "type"
+            let type_annotation = child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.trim().to_string());
 
-                fields.push(FieldInfo {
-                    name: name.to_string(),
-                    type_annotation,
-                    doc_comment: None,
-                    visibility: Some(Visibility::Public), // Interface members are implicitly public
-                    is_static: false,
-                });
-            }
+            fields.push(FieldInfo {
+                name: name.to_string(),
+                type_annotation,
+                doc_comment: None,
+                visibility: Some(Visibility::Public), // Interface members are implicitly public
+                is_static: false,
+            });
+        }
     }
 
     fields
@@ -4623,15 +4730,16 @@ fn extract_csharp_record_parameters(node: Node<'_>, source: &str) -> Vec<FieldIn
             .map(|s| s.to_string());
 
         if let Some(name_node) = find_child_by_kind(child, "identifier")
-            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
-                fields.push(FieldInfo {
-                    name: name.to_string(),
-                    type_annotation,
-                    doc_comment: None,
-                    visibility: Some(Visibility::Public), // Record parameters are implicitly public
-                    is_static: false,
-                });
-            }
+            && let Ok(name) = name_node.utf8_text(source.as_bytes())
+        {
+            fields.push(FieldInfo {
+                name: name.to_string(),
+                type_annotation,
+                doc_comment: None,
+                visibility: Some(Visibility::Public), // Record parameters are implicitly public
+                is_static: false,
+            });
+        }
     }
 
     fields
@@ -4642,7 +4750,11 @@ fn extract_csharp_record_parameters(node: Node<'_>, source: &str) -> Vec<FieldIn
 // ============================================================================
 
 /// Extracts type metadata from Swift class, struct, enum, or protocol declarations.
-fn extract_swift_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+fn extract_swift_type_metadata(
+    node: Node<'_>,
+    node_kind: &str,
+    source: &str,
+) -> Option<TypeMetadata> {
     let mut metadata = TypeMetadata::new();
 
     // Extract generic type parameters
@@ -4691,9 +4803,10 @@ fn extract_swift_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
     for child in node.children(&mut cursor) {
         if child.kind() == "type_parameter"
             && let Some(ident) = find_child_by_kind(child, "type_identifier")
-                && let Ok(text) = ident.utf8_text(source.as_bytes()) {
-                    params.push(text.to_string());
-                }
+            && let Ok(text) = ident.utf8_text(source.as_bytes())
+        {
+            params.push(text.to_string());
+        }
     }
 
     params
@@ -4712,25 +4825,26 @@ fn extract_swift_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
         // Get pattern (contains the name)
         if let Some(pattern) = find_child_by_kind(child, "pattern")
             && let Some(ident) = find_child_by_kind(pattern, "simple_identifier")
-                && let Ok(name) = ident.utf8_text(source.as_bytes()) {
-                    // Get type annotation
-                    let type_annotation = find_child_by_kind(child, "type_annotation")
-                        .and_then(|ta| ta.child(1)) // Skip colon
-                        .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-                        .map(|s| s.to_string());
+            && let Ok(name) = ident.utf8_text(source.as_bytes())
+        {
+            // Get type annotation
+            let type_annotation = find_child_by_kind(child, "type_annotation")
+                .and_then(|ta| ta.child(1)) // Skip colon
+                .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                .map(|s| s.to_string());
 
-                    // Extract visibility and static modifier
-                    let visibility = extract_swift_visibility(child, source);
-                    let is_static = extract_swift_is_static(child, source);
+            // Extract visibility and static modifier
+            let visibility = extract_swift_visibility(child, source);
+            let is_static = extract_swift_is_static(child, source);
 
-                    fields.push(FieldInfo {
-                        name: name.to_string(),
-                        type_annotation,
-                        doc_comment: None,
-                        visibility,
-                        is_static,
-                    });
-                }
+            fields.push(FieldInfo {
+                name: name.to_string(),
+                type_annotation,
+                doc_comment: None,
+                visibility,
+                is_static,
+            });
+        }
     }
 
     fields
@@ -4746,17 +4860,19 @@ fn extract_swift_enum_cases(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
         let kind = child.kind();
         if kind == "enum_entry" || kind == "enum_case_pattern" {
             if let Some(ident) = find_child_by_kind(child, "simple_identifier")
-                && let Ok(name) = ident.utf8_text(source.as_bytes()) {
-                    variants.push(VariantInfo::unit(name));
-                }
+                && let Ok(name) = ident.utf8_text(source.as_bytes())
+            {
+                variants.push(VariantInfo::unit(name));
+            }
         } else if kind == "switch_entry" {
             // Swift switch/case patterns
             let mut inner_cursor = child.walk();
             for inner in child.children(&mut inner_cursor) {
                 if inner.kind() == "simple_identifier"
-                    && let Ok(name) = inner.utf8_text(source.as_bytes()) {
-                        variants.push(VariantInfo::unit(name));
-                    }
+                    && let Ok(name) = inner.utf8_text(source.as_bytes())
+                {
+                    variants.push(VariantInfo::unit(name));
+                }
             }
         }
     }
@@ -4775,21 +4891,22 @@ fn extract_swift_protocol_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo
         }
 
         if let Some(ident) = find_child_by_kind(child, "simple_identifier")
-            && let Ok(name) = ident.utf8_text(source.as_bytes()) {
-                // Get the full method signature
-                let type_annotation = child
-                    .utf8_text(source.as_bytes())
-                    .ok()
-                    .map(|s| s.trim().to_string());
+            && let Ok(name) = ident.utf8_text(source.as_bytes())
+        {
+            // Get the full method signature
+            let type_annotation = child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.trim().to_string());
 
-                fields.push(FieldInfo {
-                    name: name.to_string(),
-                    type_annotation,
-                    doc_comment: None,
-                    visibility: None, // Protocol methods don't have visibility
-                    is_static: false,
-                });
-            }
+            fields.push(FieldInfo {
+                name: name.to_string(),
+                type_annotation,
+                doc_comment: None,
+                visibility: None, // Protocol methods don't have visibility
+                is_static: false,
+            });
+        }
     }
 
     fields
@@ -4800,7 +4917,11 @@ fn extract_swift_protocol_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo
 // ============================================================================
 
 /// Extracts type metadata from Scala class, trait, object, or enum definitions.
-fn extract_scala_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+fn extract_scala_type_metadata(
+    node: Node<'_>,
+    node_kind: &str,
+    source: &str,
+) -> Option<TypeMetadata> {
     let mut metadata = TypeMetadata::new();
 
     // Extract generic type parameters
@@ -4850,9 +4971,10 @@ fn extract_scala_type_parameters(node: Node<'_>, source: &str) -> Vec<String> {
     for child in node.children(&mut cursor) {
         // Look for identifiers inside type parameters
         if child.kind() == "identifier"
-            && let Ok(text) = child.utf8_text(source.as_bytes()) {
-                params.push(text.to_string());
-            }
+            && let Ok(text) = child.utf8_text(source.as_bytes())
+        {
+            params.push(text.to_string());
+        }
     }
 
     params
@@ -4869,22 +4991,23 @@ fn extract_scala_class_parameters(node: Node<'_>, source: &str) -> Vec<FieldInfo
         }
 
         if let Some(ident) = find_child_by_kind(child, "identifier")
-            && let Ok(name) = ident.utf8_text(source.as_bytes()) {
-                // Get type annotation (after colon)
-                let type_annotation = find_child_by_kind(child, "type_identifier")
-                    .or_else(|| find_child_by_kind(child, "generic_type"))
-                    .or_else(|| find_child_by_kind(child, "compound_type"))
-                    .and_then(|n| n.utf8_text(source.as_bytes()).ok())
-                    .map(|s| s.to_string());
+            && let Ok(name) = ident.utf8_text(source.as_bytes())
+        {
+            // Get type annotation (after colon)
+            let type_annotation = find_child_by_kind(child, "type_identifier")
+                .or_else(|| find_child_by_kind(child, "generic_type"))
+                .or_else(|| find_child_by_kind(child, "compound_type"))
+                .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                .map(|s| s.to_string());
 
-                fields.push(FieldInfo {
-                    name: name.to_string(),
-                    type_annotation,
-                    doc_comment: None,
-                    visibility: None, // Scala class parameters don't have explicit visibility
-                    is_static: false,
-                });
-            }
+            fields.push(FieldInfo {
+                name: name.to_string(),
+                type_annotation,
+                doc_comment: None,
+                visibility: None, // Scala class parameters don't have explicit visibility
+                is_static: false,
+            });
+        }
     }
 
     fields
@@ -4902,21 +5025,22 @@ fn extract_scala_trait_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
         }
 
         if let Some(ident) = find_child_by_kind(child, "identifier")
-            && let Ok(name) = ident.utf8_text(source.as_bytes()) {
-                // Get the full method signature
-                let type_annotation = child
-                    .utf8_text(source.as_bytes())
-                    .ok()
-                    .map(|s| s.trim().to_string());
+            && let Ok(name) = ident.utf8_text(source.as_bytes())
+        {
+            // Get the full method signature
+            let type_annotation = child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.trim().to_string());
 
-                fields.push(FieldInfo {
-                    name: name.to_string(),
-                    type_annotation,
-                    doc_comment: None,
-                    visibility: None, // Scala trait methods don't have explicit visibility
-                    is_static: false,
-                });
-            }
+            fields.push(FieldInfo {
+                name: name.to_string(),
+                type_annotation,
+                doc_comment: None,
+                visibility: None, // Scala trait methods don't have explicit visibility
+                is_static: false,
+            });
+        }
     }
 
     fields
@@ -4936,20 +5060,21 @@ fn extract_scala_object_members(node: Node<'_>, source: &str) -> Vec<FieldInfo> 
         // For function definitions
         if kind == "function_definition"
             && let Some(ident) = find_child_by_kind(child, "identifier")
-                && let Ok(name) = ident.utf8_text(source.as_bytes()) {
-                    let type_annotation = child
-                        .utf8_text(source.as_bytes())
-                        .ok()
-                        .map(|s| s.trim().to_string());
+            && let Ok(name) = ident.utf8_text(source.as_bytes())
+        {
+            let type_annotation = child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.trim().to_string());
 
-                    fields.push(FieldInfo {
-                        name: name.to_string(),
-                        type_annotation,
-                        doc_comment: None,
-                        visibility: None,
-                        is_static: true, // Object members are effectively static
-                    });
-                }
+            fields.push(FieldInfo {
+                name: name.to_string(),
+                type_annotation,
+                doc_comment: None,
+                visibility: None,
+                is_static: true, // Object members are effectively static
+            });
+        }
     }
 
     fields
@@ -4967,17 +5092,19 @@ fn extract_scala_enum_cases(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
 
         if child.kind() == "simple_enum_case" {
             if let Some(ident) = find_child_by_kind(child, "identifier")
-                && let Ok(name) = ident.utf8_text(source.as_bytes()) {
-                    variants.push(VariantInfo::unit(name));
-                }
+                && let Ok(name) = ident.utf8_text(source.as_bytes())
+            {
+                variants.push(VariantInfo::unit(name));
+            }
         } else {
             // enum_case_definitions can contain multiple cases
             let mut inner_cursor = child.walk();
             for inner in child.children(&mut inner_cursor) {
                 if inner.kind() == "identifier"
-                    && let Ok(name) = inner.utf8_text(source.as_bytes()) {
-                        variants.push(VariantInfo::unit(name));
-                    }
+                    && let Ok(name) = inner.utf8_text(source.as_bytes())
+                {
+                    variants.push(VariantInfo::unit(name));
+                }
             }
         }
     }
@@ -4990,7 +5117,11 @@ fn extract_scala_enum_cases(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
 // ============================================================================
 
 /// Extracts type metadata from PHP class, interface, trait, or enum declarations.
-fn extract_php_type_metadata(node: Node<'_>, node_kind: &str, source: &str) -> Option<TypeMetadata> {
+fn extract_php_type_metadata(
+    node: Node<'_>,
+    node_kind: &str,
+    source: &str,
+) -> Option<TypeMetadata> {
     let mut metadata = TypeMetadata::new();
 
     match node_kind {
@@ -5050,16 +5181,17 @@ fn extract_php_class_fields(node: Node<'_>, source: &str) -> Vec<FieldInfo> {
         for inner in child.children(&mut inner_cursor) {
             if inner.kind() == "property_element"
                 && let Some(var_name) = find_child_by_kind(inner, "variable_name")
-                    && let Some(name_node) = find_child_by_kind(var_name, "name")
-                        && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
-                            fields.push(FieldInfo {
-                                name: name.to_string(),
-                                type_annotation: type_annotation.clone(),
-                                doc_comment: None,
-                                visibility,
-                                is_static,
-                            });
-                        }
+                && let Some(name_node) = find_child_by_kind(var_name, "name")
+                && let Ok(name) = name_node.utf8_text(source.as_bytes())
+            {
+                fields.push(FieldInfo {
+                    name: name.to_string(),
+                    type_annotation: type_annotation.clone(),
+                    doc_comment: None,
+                    visibility,
+                    is_static,
+                });
+            }
         }
     }
 
@@ -5077,21 +5209,22 @@ fn extract_php_interface_methods(node: Node<'_>, source: &str) -> Vec<FieldInfo>
         }
 
         if let Some(name_node) = find_child_by_kind(child, "name")
-            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
-                // Get the full method signature
-                let type_annotation = child
-                    .utf8_text(source.as_bytes())
-                    .ok()
-                    .map(|s| s.trim().to_string());
+            && let Ok(name) = name_node.utf8_text(source.as_bytes())
+        {
+            // Get the full method signature
+            let type_annotation = child
+                .utf8_text(source.as_bytes())
+                .ok()
+                .map(|s| s.trim().to_string());
 
-                fields.push(FieldInfo {
-                    name: name.to_string(),
-                    type_annotation,
-                    doc_comment: None,
-                    visibility: Some(Visibility::Public), // Interface methods are implicitly public
-                    is_static: false,
-                });
-            }
+            fields.push(FieldInfo {
+                name: name.to_string(),
+                type_annotation,
+                doc_comment: None,
+                visibility: Some(Visibility::Public), // Interface methods are implicitly public
+                is_static: false,
+            });
+        }
     }
 
     fields
@@ -5108,9 +5241,10 @@ fn extract_php_enum_cases(node: Node<'_>, source: &str) -> Vec<VariantInfo> {
         }
 
         if let Some(name_node) = find_child_by_kind(child, "name")
-            && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
-                variants.push(VariantInfo::unit(name));
-            }
+            && let Ok(name) = name_node.utf8_text(source.as_bytes())
+        {
+            variants.push(VariantInfo::unit(name));
+        }
     }
 
     variants

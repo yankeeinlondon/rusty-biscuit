@@ -26,8 +26,7 @@ mod brave_search;
 mod screen_scrape;
 
 pub use brave_search::{
-    BravePlan, BraveSearchConfig, BraveSearchError, BraveSearchTool, SearchArgs,
-    SearchResultOutput,
+    BravePlan, BraveSearchConfig, BraveSearchError, BraveSearchTool, SearchArgs, SearchResultOutput,
 };
 pub use screen_scrape::{
     LinkInfo, OutputFormat, ProxyMode, ScrapeAction, ScrapeArgs, ScrapeError, ScrapeMetadata,

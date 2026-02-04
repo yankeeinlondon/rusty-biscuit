@@ -11,9 +11,9 @@ use tracing::debug;
 use crate::audio_cache::CacheKey;
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
+use crate::types::{Gender, Language, SpeakResult, TtsConfig, Voice, VoiceQuality};
 #[cfg(feature = "playa")]
 use crate::types::{HostTtsProvider, TtsProvider};
-use crate::types::{Gender, Language, SpeakResult, TtsConfig, Voice, VoiceQuality};
 
 /// Kokoro TTS provider.
 ///
@@ -104,8 +104,9 @@ impl KokoroTtsProvider {
         let filtered_by_lang: Vec<&Voice> = candidates
             .iter()
             .filter(|v| {
-                v.languages.iter().any(|lang| {
-                    match (lang, target_language) {
+                v.languages
+                    .iter()
+                    .any(|lang| match (lang, target_language) {
                         (Language::English, Language::English) => true,
                         (Language::Custom(a), Language::Custom(b)) => {
                             let a_lower = a.to_lowercase();
@@ -118,8 +119,7 @@ impl KokoroTtsProvider {
                         | (Language::Custom(c), Language::English) => {
                             c.to_lowercase().starts_with("en")
                         }
-                    }
-                })
+                    })
             })
             .copied()
             .collect();
@@ -273,10 +273,13 @@ impl KokoroTtsProvider {
             "Running kokoro-tts"
         );
 
-        let output = cmd.output().await.map_err(|e| TtsError::ProcessSpawnFailed {
-            provider: Self::PROVIDER_NAME.into(),
-            source: e,
-        })?;
+        let output = cmd
+            .output()
+            .await
+            .map_err(|e| TtsError::ProcessSpawnFailed {
+                provider: Self::PROVIDER_NAME.into(),
+                source: e,
+            })?;
 
         if !output.status.success() {
             // kokoro-tts writes errors to stdout, not stderr
@@ -305,7 +308,8 @@ impl TtsExecutor for KokoroTtsProvider {
         // Play the audio file
         #[cfg(feature = "playa")]
         {
-            crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config).await
+            crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config)
+                .await
         }
         #[cfg(not(feature = "playa"))]
         {
@@ -353,7 +357,8 @@ impl TtsExecutor for KokoroTtsProvider {
 
         // Play the audio file (requires playa feature)
         #[cfg(feature = "playa")]
-        crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config).await?;
+        crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config)
+            .await?;
 
         #[cfg(not(feature = "playa"))]
         {
@@ -370,13 +375,12 @@ impl TtsExecutor for KokoroTtsProvider {
                 .with_quality(VoiceQuality::Excellent)
                 .with_language(language);
 
-            Ok(SpeakResult::new(
-                TtsProvider::Host(HostTtsProvider::KokoroTts),
-                voice,
+            Ok(
+                SpeakResult::new(TtsProvider::Host(HostTtsProvider::KokoroTts), voice)
+                    .with_audio_file(audio_path)
+                    .with_codec("wav")
+                    .with_cache_hit(cache_hit),
             )
-            .with_audio_file(audio_path)
-            .with_codec("wav")
-            .with_cache_hit(cache_hit))
         }
     }
 }
@@ -527,8 +531,7 @@ mod tests {
 
     #[test]
     fn test_kokoro_provider_with_paths() {
-        let provider =
-            KokoroTtsProvider::with_paths("/path/to/model.onnx", "/path/to/voices.bin");
+        let provider = KokoroTtsProvider::with_paths("/path/to/model.onnx", "/path/to/voices.bin");
         assert_eq!(provider.model_path, Some("/path/to/model.onnx".into()));
         assert_eq!(provider.voices_path, Some("/path/to/voices.bin".into()));
     }
@@ -735,20 +738,17 @@ mod tests {
     #[test]
     fn test_get_kokoro_voices_american_english_female_count() {
         let voices = get_kokoro_voices();
-        let af_count = voices
-            .iter()
-            .filter(|v| v.name.starts_with("af_"))
-            .count();
-        assert_eq!(af_count, 11, "Should have 11 American English female voices");
+        let af_count = voices.iter().filter(|v| v.name.starts_with("af_")).count();
+        assert_eq!(
+            af_count, 11,
+            "Should have 11 American English female voices"
+        );
     }
 
     #[test]
     fn test_get_kokoro_voices_american_english_male_count() {
         let voices = get_kokoro_voices();
-        let am_count = voices
-            .iter()
-            .filter(|v| v.name.starts_with("am_"))
-            .count();
+        let am_count = voices.iter().filter(|v| v.name.starts_with("am_")).count();
         assert_eq!(am_count, 9, "Should have 9 American English male voices");
     }
 
@@ -886,14 +886,15 @@ mod tests {
         }
 
         let config = TtsConfig::default();
-        let result = provider
-            .speak("Hello from Kokoro TTS test.", &config)
-            .await;
+        let result = provider.speak("Hello from Kokoro TTS test.", &config).await;
 
         // This may fail if model files aren't present
         match result {
             Ok(()) => println!("Speech generated successfully"),
-            Err(e) => eprintln!("Speech generation failed (model files may be missing): {}", e),
+            Err(e) => eprintln!(
+                "Speech generation failed (model files may be missing): {}",
+                e
+            ),
         }
     }
 
@@ -924,7 +925,10 @@ mod tests {
         // Should fail with a meaningful error message
         match result {
             Ok(()) => panic!("Expected failure when model files are missing"),
-            Err(TtsError::ProcessFailed { provider: _, stderr }) => {
+            Err(TtsError::ProcessFailed {
+                provider: _,
+                stderr,
+            }) => {
                 // The error message should not be empty
                 assert!(!stderr.is_empty(), "Error message should not be empty");
                 // Should contain helpful information about missing models

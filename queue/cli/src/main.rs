@@ -6,16 +6,11 @@ use chrono::{Duration as ChronoDuration, Local, NaiveTime, TimeZone, Utc};
 use clap::Parser;
 use crossterm::terminal;
 use queue_lib::{
-    parse_at_time,
-    parse_delay,
-    ExecutionTarget,
-    JsonFileStore,
-    ScheduledTask,
-    TerminalDetector,
+    ExecutionTarget, JsonFileStore, ScheduledTask, TerminalDetector, parse_at_time, parse_delay,
 };
 use thiserror::Error;
 
-use crate::tui::{run_app, App};
+use crate::tui::{App, run_app};
 
 /// Queue commands for later execution with an interactive TUI.
 ///
@@ -356,8 +351,7 @@ mod tests {
 
     #[test]
     fn clap_accepts_tui_pane_with_other_args() {
-        let result =
-            Cli::try_parse_from(["queue", "--tui-pane", "--at", "7:00am", "echo hello"]);
+        let result = Cli::try_parse_from(["queue", "--tui-pane", "--at", "7:00am", "echo hello"]);
         assert!(result.is_ok());
         let cli = result.unwrap();
         assert!(cli.tui_pane);
@@ -419,14 +413,8 @@ mod tests {
     fn tui_pane_flag_preserves_all_arguments() {
         // Regression test: When spawning TUI in split pane, all user arguments
         // should be passed through to the child process
-        let cli = Cli::try_parse_from([
-            "queue",
-            "--debug",
-            "--at",
-            "14:30",
-            "echo 'test command'",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["queue", "--debug", "--at", "14:30", "echo 'test command'"])
+            .unwrap();
 
         assert!(cli.debug);
         assert!(cli.at.is_some());

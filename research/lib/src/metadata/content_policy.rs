@@ -1,22 +1,21 @@
 use serde::{Deserialize, Serialize};
 use sniff_lib::package::LanguagePackageManager;
 
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryVariant {
     package_manager: LanguagePackageManager,
     package_name: String,
     version: String,
 }
 
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoftwareVariant {
     name: String,
     url: String,
-    version: String
+    version: String,
 }
 
-
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ContentExpiry {
     /// expires after set number of days
     Days(u32),
@@ -36,11 +35,9 @@ pub enum ContentExpiry {
     MajorLibraryUpdate(LibraryVariant),
     MinorLibraryUpdate(LibraryVariant),
 
-    ModelArchived
+    ModelArchived,
 }
 
 /// A `ContentPolicy` is nothing more than
-#[derive(Debug,Clone,Serialize,Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentPolicy(Vec<ContentExpiry>);
-
-

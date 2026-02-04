@@ -305,7 +305,8 @@ SHELL COMPLETIONS:
                                     .unwrap_or(&file_path)
                                     .to_string_lossy();
                                 if relative.starts_with(current_str.as_ref()) {
-                                    candidates.push(CompletionCandidate::new(relative.into_owned()));
+                                    candidates
+                                        .push(CompletionCandidate::new(relative.into_owned()));
                                 }
                             }
                         }

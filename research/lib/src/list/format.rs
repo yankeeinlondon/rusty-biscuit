@@ -9,8 +9,8 @@
 //! - **BOLD**: All files present
 
 use crate::list::types::{ResearchOutput, TopicInfo};
-use owo_colors::OwoColorize;
 use darkmatter_lib::render::Link;
+use owo_colors::OwoColorize;
 use std::sync::OnceLock;
 
 /// Formats a list of topics as pretty-printed JSON.

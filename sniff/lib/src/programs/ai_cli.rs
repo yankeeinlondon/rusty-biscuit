@@ -8,13 +8,13 @@ use crate::os::detect_os_type;
 use crate::programs::enums::AiCli;
 use crate::programs::find_program::find_programs_with_source_parallel;
 use crate::programs::installer::{
-    execute_install, execute_versioned_install, method_available, select_best_method,
-    InstallOptions,
+    InstallOptions, execute_install, execute_versioned_install, method_available,
+    select_best_method,
 };
 use crate::programs::schema::{ProgramEntry, ProgramError, ProgramMetadata};
 use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{
-    InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
+    InstalledLanguagePackageManagers, InstalledOsPackageManagers, PROGRAM_LOOKUP, Program,
 };
 
 fn ai_cli_details(client: AiCli) -> Option<&'static crate::programs::ProgramDetails> {
@@ -48,7 +48,9 @@ pub struct InstalledAiClients {
 impl InstalledAiClients {
     /// Detect which AI CLI tools are installed on the system.
     pub fn new() -> Self {
-        let programs = ["claude", "opencode", "roo", "gemini", "aider", "codex", "goose"];
+        let programs = [
+            "claude", "opencode", "roo", "gemini", "aider", "codex", "goose",
+        ];
 
         let results = find_programs_with_source_parallel(&programs);
 
@@ -330,12 +332,11 @@ impl ProgramDetector for InstalledAiClients {
     }
 
     fn install(&self, program: Self::Program) -> Result<(), SniffInstallationError> {
-        let details = ai_cli_details(program).ok_or_else(|| {
-            SniffInstallationError::NotInstallableOnOs {
+        let details =
+            ai_cli_details(program).ok_or_else(|| SniffInstallationError::NotInstallableOnOs {
                 pkg: program.display_name().to_string(),
                 os: "unknown".to_string(),
-            }
-        })?;
+            })?;
 
         let os_type = detect_os_type();
         if !details.os_availability.contains(&os_type) {
@@ -362,12 +363,11 @@ impl ProgramDetector for InstalledAiClients {
         program: Self::Program,
         version: &str,
     ) -> Result<(), SniffInstallationError> {
-        let details = ai_cli_details(program).ok_or_else(|| {
-            SniffInstallationError::NotInstallableOnOs {
+        let details =
+            ai_cli_details(program).ok_or_else(|| SniffInstallationError::NotInstallableOnOs {
                 pkg: program.display_name().to_string(),
                 os: "unknown".to_string(),
-            }
-        })?;
+            })?;
 
         let os_type = detect_os_type();
         if !details.os_availability.contains(&os_type) {

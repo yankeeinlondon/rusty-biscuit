@@ -896,21 +896,17 @@ static WINDOWS_TERMINAL_INSTALL: &[InstallationMethod] = &[
 ];
 
 // AI CLI Tools
-static CLAUDE_INSTALL: &[InstallationMethod] = &[
-    InstallationMethod::Npm("@anthropic-ai/claude-code"),
-];
+static CLAUDE_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Npm("@anthropic-ai/claude-code")];
 
-static OPENCODE_INSTALL: &[InstallationMethod] = &[
-    InstallationMethod::GoModules("github.com/opencode-ai/opencode@latest"),
-];
+static OPENCODE_INSTALL: &[InstallationMethod] = &[InstallationMethod::GoModules(
+    "github.com/opencode-ai/opencode@latest",
+)];
 
-static ROO_INSTALL: &[InstallationMethod] = &[
-    InstallationMethod::Npm("@anthropic-ai/claude-code"),
-];
+static ROO_INSTALL: &[InstallationMethod] = &[InstallationMethod::Npm("@anthropic-ai/claude-code")];
 
-static GEMINI_CLI_INSTALL: &[InstallationMethod] = &[
-    InstallationMethod::Npm("@anthropic-ai/claude-code"),
-];
+static GEMINI_CLI_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Npm("@anthropic-ai/claude-code")];
 
 static AIDER_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Pip("aider-chat"),
@@ -918,9 +914,7 @@ static AIDER_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Brew("aider"),
 ];
 
-static CODEX_INSTALL: &[InstallationMethod] = &[
-    InstallationMethod::Npm("@openai/codex"),
-];
+static CODEX_INSTALL: &[InstallationMethod] = &[InstallationMethod::Npm("@openai/codex")];
 
 static GOOSE_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Brew("goose"),

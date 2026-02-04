@@ -15,8 +15,7 @@ use thiserror::Error;
 use crate::primitives::runnable::{AgentDelegation, Runnable};
 use crate::primitives::state::{PipelineState, StateKey, StepError};
 
-const DEFAULT_STATE_INSTRUCTIONS: &str =
-    "Use the provided state JSON and schema. Return the final output as JSON matching the output schema. Output JSON only.";
+const DEFAULT_STATE_INSTRUCTIONS: &str = "Use the provided state JSON and schema. Return the final output as JSON matching the output schema. Output JSON only.";
 const DEFAULT_FINALIZATION_JSON: &str =
     "Return the final output as JSON matching the output schema. Output JSON only.";
 const DEFAULT_FINALIZATION_TEXT: &str = "Return the final output as plain text.";

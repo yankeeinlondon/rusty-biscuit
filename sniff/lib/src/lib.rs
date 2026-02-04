@@ -201,7 +201,11 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
         let base = config
             .base_dir
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        Some(filesystem::detect_filesystem(&base, config.deep, config.commit_count)?)
+        Some(filesystem::detect_filesystem(
+            &base,
+            config.deep,
+            config.commit_count,
+        )?)
     };
 
     Ok(SniffResult {

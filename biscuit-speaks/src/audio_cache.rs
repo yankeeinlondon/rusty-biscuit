@@ -301,12 +301,13 @@ mod tests {
         let key = CacheKey::new("elevenlabs", "voice-id", "Hello", "mp3");
         let path = key.cache_path();
 
-        assert!(path
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .ends_with(".mp3"));
+        assert!(
+            path.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .ends_with(".mp3")
+        );
     }
 
     #[test]

@@ -90,11 +90,11 @@ impl ColorContext {
     pub fn status_symbol(&self, status: &TaskStatus) -> &'static str {
         if self.color_enabled {
             match status {
-                TaskStatus::Completed => "\u{2713}",   // ✓
-                TaskStatus::Cancelled => "\u{00d7}",   // ×
+                TaskStatus::Completed => "\u{2713}",     // ✓
+                TaskStatus::Cancelled => "\u{00d7}",     // ×
                 TaskStatus::Failed { .. } => "\u{2717}", // ✗
-                TaskStatus::Running => "\u{25b6}",     // ▶
-                TaskStatus::Pending => "\u{25cb}",     // ○
+                TaskStatus::Running => "\u{25b6}",       // ▶
+                TaskStatus::Pending => "\u{25cb}",       // ○
             }
         } else {
             match status {

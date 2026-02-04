@@ -43,8 +43,8 @@ use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use tokio::process::Command;
-use tokio::sync::{mpsc, RwLock};
-use tokio::time::{sleep_until, Instant};
+use tokio::sync::{RwLock, mpsc};
+use tokio::time::{Instant, sleep_until};
 
 use crate::{ExecutionTarget, ScheduledTask, TaskStatus, TerminalDetector, TerminalKind};
 
@@ -222,7 +222,9 @@ impl TaskExecutor {
 
         // Execute based on target
         let result = match task.target {
-            ExecutionTarget::NewPane => Self::execute_in_pane(&task.command, pane_id.as_deref()).await,
+            ExecutionTarget::NewPane => {
+                Self::execute_in_pane(&task.command, pane_id.as_deref()).await
+            }
             ExecutionTarget::NewWindow => Self::execute_in_window(&task.command).await,
             ExecutionTarget::Background => Self::execute_background(&task.command).await,
         };
@@ -233,7 +235,12 @@ impl TaskExecutor {
             Err(e) => TaskStatus::Failed { error: e },
         };
 
-        let _ = tx.send(TaskEvent::StatusChanged { id: task.id, status }).await;
+        let _ = tx
+            .send(TaskEvent::StatusChanged {
+                id: task.id,
+                status,
+            })
+            .await;
 
         if let Ok(mut handles) = task_handles.lock() {
             handles.remove(&task.id);
@@ -396,7 +403,8 @@ impl TaskExecutor {
             }
             TerminalKind::Xfce4Terminal => {
                 // Xfce4 terminal takes the full command, so we need to wrap it ourselves
-                let xfce_command = format!("/bin/sh -c '{}'", wrapped_command.replace('\'', "'\\''"));
+                let xfce_command =
+                    format!("/bin/sh -c '{}'", wrapped_command.replace('\'', "'\\''"));
                 Command::new("xfce4-terminal")
                     .args(["-e", &xfce_command])
                     .stdin(Stdio::null())
@@ -631,8 +639,14 @@ mod tests {
 
         match (event, cloned) {
             (
-                TaskEvent::StatusChanged { id: id1, status: status1 },
-                TaskEvent::StatusChanged { id: id2, status: status2 },
+                TaskEvent::StatusChanged {
+                    id: id1,
+                    status: status1,
+                },
+                TaskEvent::StatusChanged {
+                    id: id2,
+                    status: status2,
+                },
             ) => {
                 assert_eq!(id1, id2);
                 assert_eq!(status1, status2);
@@ -666,7 +680,9 @@ mod tests {
         let executor = TaskExecutor::new(tx);
 
         // Set a mock task pane ID
-        executor.set_task_pane_id(Some("task-pane-123".to_string())).await;
+        executor
+            .set_task_pane_id(Some("task-pane-123".to_string()))
+            .await;
 
         // Verify via try_read (not awaiting, just checking it was set)
         let pane_id = executor.task_pane_id.read().await;
@@ -705,7 +721,9 @@ mod tests {
         let executor = TaskExecutor::new(tx);
 
         // Set and then clear
-        executor.set_task_pane_id(Some("pane-to-clear".to_string())).await;
+        executor
+            .set_task_pane_id(Some("pane-to-clear".to_string()))
+            .await;
         executor.set_task_pane_id(None).await;
 
         let pane_id = executor.task_pane_id.read().await;
@@ -720,7 +738,9 @@ mod tests {
         let executor = TaskExecutor::new(tx);
 
         // Set the task pane ID
-        executor.set_task_pane_id(Some("shared-pane".to_string())).await;
+        executor
+            .set_task_pane_id(Some("shared-pane".to_string()))
+            .await;
 
         // Schedule two background tasks (won't actually use pane ID but tests the sharing)
         let task1 = ScheduledTask::new(
@@ -745,11 +765,14 @@ mod tests {
         let start = std::time::Instant::now();
 
         while completed_count < 2 && start.elapsed() < timeout {
-            if let Ok(Some(event)) = tokio::time::timeout(
-                std::time::Duration::from_millis(100),
-                rx.recv(),
-            ).await {
-                if let TaskEvent::StatusChanged { status: TaskStatus::Completed, .. } = event {
+            if let Ok(Some(event)) =
+                tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await
+            {
+                if let TaskEvent::StatusChanged {
+                    status: TaskStatus::Completed,
+                    ..
+                } = event
+                {
                     completed_count += 1;
                 }
             }
@@ -781,10 +804,16 @@ mod tests {
         let wrapped = TaskExecutor::wrap_command_for_interactive_shell(command);
 
         // Should contain the original command
-        assert!(wrapped.contains("echo hello"), "wrapped command should contain original: {wrapped}");
+        assert!(
+            wrapped.contains("echo hello"),
+            "wrapped command should contain original: {wrapped}"
+        );
 
         // Should contain exec and shell
-        assert!(wrapped.contains("; exec"), "wrapped command should contain '; exec': {wrapped}");
+        assert!(
+            wrapped.contains("; exec"),
+            "wrapped command should contain '; exec': {wrapped}"
+        );
     }
 
     #[test]

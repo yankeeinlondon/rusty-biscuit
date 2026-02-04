@@ -149,9 +149,8 @@ pub trait TtsVoiceInventory: Send + Sync {
     /// ## Errors
     ///
     /// Returns `TtsError::VoiceEnumerationFailed` if voice listing fails.
-    fn list_voices(
-        &self,
-    ) -> impl std::future::Future<Output = Result<Vec<Voice>, TtsError>> + Send;
+    fn list_voices(&self)
+    -> impl std::future::Future<Output = Result<Vec<Voice>, TtsError>> + Send;
 }
 
 // ============================================================================

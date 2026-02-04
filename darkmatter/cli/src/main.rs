@@ -276,26 +276,14 @@ fn print_completions(shell: clap_complete::Shell) {
     use clap_complete::Shell;
 
     let (setup_cmd, config_file) = match shell {
-        Shell::Bash => (
-            r#"source <(COMPLETE=bash md)"#,
-            "~/.bashrc",
-        ),
-        Shell::Zsh => (
-            r#"source <(COMPLETE=zsh md)"#,
-            "~/.zshrc",
-        ),
-        Shell::Fish => (
-            r#"COMPLETE=fish md | source"#,
-            "~/.config/fish/config.fish",
-        ),
+        Shell::Bash => (r#"source <(COMPLETE=bash md)"#, "~/.bashrc"),
+        Shell::Zsh => (r#"source <(COMPLETE=zsh md)"#, "~/.zshrc"),
+        Shell::Fish => (r#"COMPLETE=fish md | source"#, "~/.config/fish/config.fish"),
         Shell::PowerShell => (
             r#"$env:COMPLETE = "powershell"; md | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE"#,
             "$PROFILE",
         ),
-        Shell::Elvish => (
-            r#"eval (E:COMPLETE=elvish md | slurp)"#,
-            "~/.elvish/rc.elv",
-        ),
+        Shell::Elvish => (r#"eval (E:COMPLETE=elvish md | slurp)"#, "~/.elvish/rc.elv"),
         _ => {
             eprintln!("Shell {:?} is not supported for dynamic completions", shell);
             return;
@@ -478,7 +466,9 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
     // Print classification header
     let (classification_symbol, classification_name) = match delta.classification {
         darkmatter_lib::markdown::DocumentChange::NoChange => ("✓", "No changes"),
-        darkmatter_lib::markdown::DocumentChange::WhitespaceOnly => ("~", "Whitespace changes only"),
+        darkmatter_lib::markdown::DocumentChange::WhitespaceOnly => {
+            ("~", "Whitespace changes only")
+        }
         darkmatter_lib::markdown::DocumentChange::FrontmatterOnly => ("◈", "Frontmatter only"),
         darkmatter_lib::markdown::DocumentChange::FrontmatterAndWhitespace => {
             ("◈", "Frontmatter and whitespace")
@@ -586,12 +576,22 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
     let content_changes: Vec<_> = delta
         .modified
         .iter()
-        .filter(|c| !matches!(c.action, darkmatter_lib::markdown::ChangeAction::WhitespaceOnly))
+        .filter(|c| {
+            !matches!(
+                c.action,
+                darkmatter_lib::markdown::ChangeAction::WhitespaceOnly
+            )
+        })
         .collect();
     let whitespace_changes: Vec<_> = delta
         .modified
         .iter()
-        .filter(|c| matches!(c.action, darkmatter_lib::markdown::ChangeAction::WhitespaceOnly))
+        .filter(|c| {
+            matches!(
+                c.action,
+                darkmatter_lib::markdown::ChangeAction::WhitespaceOnly
+            )
+        })
         .collect();
 
     // Print content modifications (the important ones)

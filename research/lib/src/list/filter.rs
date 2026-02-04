@@ -294,9 +294,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(filtered.len(), 4); // All except baz-software
-        assert!(filtered
-            .iter()
-            .all(|t| t.topic_type == "library" || t.topic_type == "framework"));
+        assert!(
+            filtered
+                .iter()
+                .all(|t| t.topic_type == "library" || t.topic_type == "framework")
+        );
     }
 
     #[test]

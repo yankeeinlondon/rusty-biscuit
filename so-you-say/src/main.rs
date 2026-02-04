@@ -2,18 +2,19 @@ use std::fmt;
 use std::io::{self, Read};
 
 use biscuit_speaks::{
-    bust_host_capability_cache, get_available_providers, parse_provider_name,
-    populate_cache_for_all_providers, read_from_cache, speak, speak_with_result, CloudTtsProvider,
-    EchogardenProvider, ESpeakProvider, ElevenLabsProvider, Gender, GttsProvider, HostTtsProvider,
-    KokoroTtsProvider, Language, SayProvider, SapiProvider, SpeakResult, SpeedLevel, TtsConfig,
-    TtsError, TtsFailoverStrategy, TtsProvider, TtsVoiceInventory, Voice, VoiceQuality, VolumeLevel,
+    CloudTtsProvider, ESpeakProvider, EchogardenProvider, ElevenLabsProvider, Gender, GttsProvider,
+    HostTtsProvider, KokoroTtsProvider, Language, SapiProvider, SayProvider, SpeakResult,
+    SpeedLevel, TtsConfig, TtsError, TtsFailoverStrategy, TtsProvider, TtsVoiceInventory, Voice,
+    VoiceQuality, VolumeLevel, bust_host_capability_cache, get_available_providers,
+    parse_provider_name, populate_cache_for_all_providers, read_from_cache, speak,
+    speak_with_result,
 };
 use clap::{CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
+use darkmatter_lib::markdown::Markdown;
+use darkmatter_lib::markdown::output::terminal::{TerminalOptions, for_terminal};
 use inquire::Select;
 use owo_colors::OwoColorize;
-use darkmatter_lib::markdown::output::terminal::{TerminalOptions, for_terminal};
-use darkmatter_lib::markdown::Markdown;
 
 /// Gender preference for voice selection
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -202,18 +203,10 @@ fn print_speak_result(result: &SpeakResult, volume: VolumeLevel, speed: SpeedLev
         "Provider".dimmed(),
         provider_display_name(&result.provider)
     );
-    println!(
-        "  {}: {}",
-        "Voice".dimmed(),
-        result.voice.name
-    );
+    println!("  {}: {}", "Voice".dimmed(), result.voice.name);
     // Show Voice ID if available (useful for ElevenLabs)
     if let Some(ref id) = result.voice.identifier {
-        println!(
-            "  {}: {}",
-            "Voice ID".dimmed(),
-            id
-        );
+        println!("  {}: {}", "Voice ID".dimmed(), id);
     }
     println!(
         "  {}: {}",
@@ -225,39 +218,19 @@ fn print_speak_result(result: &SpeakResult, volume: VolumeLevel, speed: SpeedLev
         "Quality".dimmed(),
         voice_quality_label(result.voice.quality)
     );
-    println!(
-        "  {}: {}",
-        "Volume".dimmed(),
-        volume_label(volume)
-    );
-    println!(
-        "  {}: {}",
-        "Speed".dimmed(),
-        speed_label(speed)
-    );
+    println!("  {}: {}", "Volume".dimmed(), volume_label(volume));
+    println!("  {}: {}", "Speed".dimmed(), speed_label(speed));
     // Show Model Used if available (useful for ElevenLabs)
     if let Some(ref model) = result.model_used {
-        println!(
-            "  {}: {}",
-            "Model".dimmed(),
-            model
-        );
+        println!("  {}: {}", "Model".dimmed(), model);
     }
     // Show Audio File path if available
     if let Some(ref path) = result.audio_file_path {
-        println!(
-            "  {}: {}",
-            "Audio File".dimmed(),
-            path.display()
-        );
+        println!("  {}: {}", "Audio File".dimmed(), path.display());
     }
     // Show Audio Codec if available
     if let Some(ref codec) = result.audio_codec {
-        println!(
-            "  {}: {}",
-            "Codec".dimmed(),
-            codec
-        );
+        println!("  {}: {}", "Codec".dimmed(), codec);
     }
     // Show Cache status
     println!(
@@ -512,7 +485,9 @@ fn extract_display_name(name: &str) -> String {
         // Check if it looks like a locale (e.g., de_DE, en_US, ar_JO)
         if potential_locale.len() >= 2
             && potential_locale.contains('_')
-            && potential_locale.chars().all(|c| c.is_ascii_alphabetic() || c == '_')
+            && potential_locale
+                .chars()
+                .all(|c| c.is_ascii_alphabetic() || c == '_')
         {
             // Extract the name part after the locale
             let name_part = &name_without_vits_quality[dash_pos + 1..];
@@ -566,7 +541,10 @@ fn title_case(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
         None => String::new(),
-        Some(first) => first.to_uppercase().chain(chars.map(|c| c.to_ascii_lowercase())).collect(),
+        Some(first) => first
+            .to_uppercase()
+            .chain(chars.map(|c| c.to_ascii_lowercase()))
+            .collect(),
     }
 }
 
@@ -766,10 +744,7 @@ fn print_voices(provider: TtsProvider, voices: &[Voice], lang_filter: Option<&st
                 lang
             );
         } else {
-            println!(
-                "No voices found for {}.",
-                provider_display_name(&provider)
-            );
+            println!("No voices found for {}.", provider_display_name(&provider));
         }
         return;
     }
@@ -955,14 +930,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let engine_name = get_engine_voice_name(&voice);
                                 let model = voice.recommended_model().map(|s| s.to_string());
                                 if std::env::var("DEBUG").is_ok() {
-                                    eprintln!("[DEBUG] Resolved '{}' -> identifier={:?}, engine_name='{}', model={:?}",
-                                        voice_name, voice.identifier, engine_name, model);
+                                    eprintln!(
+                                        "[DEBUG] Resolved '{}' -> identifier={:?}, engine_name='{}', model={:?}",
+                                        voice_name, voice.identifier, engine_name, model
+                                    );
                                 }
                                 (engine_name, model)
                             }
                             VoiceResolution::NotFound => {
-                                eprintln!("Error: Voice '{}' not found for {}", voice_name, provider_display_name(&prov));
-                                eprintln!("Use --list-voices --provider {} to see available voices", cli.provider.as_ref().unwrap());
+                                eprintln!(
+                                    "Error: Voice '{}' not found for {}",
+                                    voice_name,
+                                    provider_display_name(&prov)
+                                );
+                                eprintln!(
+                                    "Use --list-voices --provider {} to see available voices",
+                                    cli.provider.as_ref().unwrap()
+                                );
                                 std::process::exit(1);
                             }
                             VoiceResolution::Ambiguous(matches) => {
@@ -971,7 +955,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     let lang = voice_language_label(&v.languages);
                                     eprintln!("  - {} ({})", extract_display_name(&v.name), lang);
                                 }
-                                eprintln!("Use --lang to disambiguate (e.g., --lang {} --voice {})",
+                                eprintln!(
+                                    "Use --lang to disambiguate (e.g., --lang {} --voice {})",
                                     voice_language_label(&matches[0].languages),
                                     voice_name
                                 );
@@ -1248,9 +1233,7 @@ mod tests {
 
     #[test]
     fn test_resolve_voice_name_not_found() {
-        let voices = vec![
-            Voice::new("Heart").with_language(Language::English),
-        ];
+        let voices = vec![Voice::new("Heart").with_language(Language::English)];
 
         match resolve_voice_name(&voices, "NonExistent", None) {
             VoiceResolution::NotFound => {}
@@ -1285,14 +1268,22 @@ mod tests {
         // With language filter, should resolve to one
         match resolve_voice_name(&voices, "Alex", Some("es")) {
             VoiceResolution::Found(v) => {
-                assert!(v.languages.iter().any(|l| matches!(l, Language::Custom(c) if c == "es-ES")));
+                assert!(
+                    v.languages
+                        .iter()
+                        .any(|l| matches!(l, Language::Custom(c) if c == "es-ES"))
+                );
             }
             _ => panic!("Expected Found with language filter"),
         }
 
         match resolve_voice_name(&voices, "Alex", Some("pt")) {
             VoiceResolution::Found(v) => {
-                assert!(v.languages.iter().any(|l| matches!(l, Language::Custom(c) if c == "pt-BR")));
+                assert!(
+                    v.languages
+                        .iter()
+                        .any(|l| matches!(l, Language::Custom(c) if c == "pt-BR"))
+                );
             }
             _ => panic!("Expected Found with language filter"),
         }
@@ -1377,8 +1368,7 @@ mod tests {
 
     #[test]
     fn test_voice_matches_language_english_exact() {
-        let voice = Voice::new("English")
-            .with_language(Language::English);
+        let voice = Voice::new("English").with_language(Language::English);
 
         assert!(voice_matches_language(&voice, "en"));
         assert!(voice_matches_language(&voice, "EN")); // case insensitive
@@ -1387,8 +1377,7 @@ mod tests {
     #[test]
     fn test_voice_matches_language_english_variant_filter() {
         // A voice with Language::English should match "en-us" filter
-        let voice = Voice::new("English")
-            .with_language(Language::English);
+        let voice = Voice::new("English").with_language(Language::English);
 
         assert!(voice_matches_language(&voice, "en-us"));
         assert!(voice_matches_language(&voice, "en-gb"));
@@ -1396,8 +1385,7 @@ mod tests {
 
     #[test]
     fn test_voice_matches_language_custom_exact() {
-        let voice = Voice::new("French")
-            .with_language(Language::Custom("fr".into()));
+        let voice = Voice::new("French").with_language(Language::Custom("fr".into()));
 
         assert!(voice_matches_language(&voice, "fr"));
         assert!(voice_matches_language(&voice, "FR")); // case insensitive
@@ -1406,16 +1394,14 @@ mod tests {
     #[test]
     fn test_voice_matches_language_custom_prefix() {
         // "fr-CA" voice should match "fr" filter
-        let voice = Voice::new("French (Canada)")
-            .with_language(Language::Custom("fr-CA".into()));
+        let voice = Voice::new("French (Canada)").with_language(Language::Custom("fr-CA".into()));
 
         assert!(voice_matches_language(&voice, "fr"));
     }
 
     #[test]
     fn test_voice_matches_language_no_match() {
-        let voice = Voice::new("German")
-            .with_language(Language::Custom("de".into()));
+        let voice = Voice::new("German").with_language(Language::Custom("de".into()));
 
         assert!(!voice_matches_language(&voice, "fr"));
         assert!(!voice_matches_language(&voice, "en"));
@@ -1483,7 +1469,10 @@ mod tests {
         // Voices with language/region suffixes should have just the name
         assert_eq!(extract_display_name("Eddy (English (UK))"), "Eddy");
         assert_eq!(extract_display_name("Eddy (English (US))"), "Eddy");
-        assert_eq!(extract_display_name("Eddy (Chinese (China mainland))"), "Eddy");
+        assert_eq!(
+            extract_display_name("Eddy (Chinese (China mainland))"),
+            "Eddy"
+        );
         assert_eq!(extract_display_name("Eddy (French (Canada))"), "Eddy");
         assert_eq!(extract_display_name("Eddy (German (Germany))"), "Eddy");
     }
@@ -1497,7 +1486,10 @@ mod tests {
 
     #[test]
     fn test_strip_parenthetical_suffix_nested() {
-        assert_eq!(strip_parenthetical_suffix("Eddy (Chinese (China mainland))"), "Eddy");
+        assert_eq!(
+            strip_parenthetical_suffix("Eddy (Chinese (China mainland))"),
+            "Eddy"
+        );
         assert_eq!(strip_parenthetical_suffix("Eddy (English (UK))"), "Eddy");
     }
 
@@ -1521,12 +1513,18 @@ mod tests {
     #[test]
     fn test_extract_quality_tier_premium() {
         assert_eq!(extract_quality_tier("Ava (Premium)"), QualityTier::Premium);
-        assert_eq!(extract_quality_tier("Samantha (Premium)"), QualityTier::Premium);
+        assert_eq!(
+            extract_quality_tier("Samantha (Premium)"),
+            QualityTier::Premium
+        );
     }
 
     #[test]
     fn test_extract_quality_tier_enhanced() {
-        assert_eq!(extract_quality_tier("Ava (Enhanced)"), QualityTier::Enhanced);
+        assert_eq!(
+            extract_quality_tier("Ava (Enhanced)"),
+            QualityTier::Enhanced
+        );
     }
 
     #[test]

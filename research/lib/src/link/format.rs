@@ -111,11 +111,7 @@ fn format_skill_link(link: &SkillLink) -> String {
 }
 
 /// Format skill actions for all three services (Claude Code, OpenCode, and Roo Code).
-fn format_skill_actions(
-    claude: &SkillAction,
-    opencode: &SkillAction,
-    roo: &SkillAction,
-) -> String {
+fn format_skill_actions(claude: &SkillAction, opencode: &SkillAction, roo: &SkillAction) -> String {
     // All three same state shortcuts
     match (claude, opencode, roo) {
         // All created successfully

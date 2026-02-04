@@ -147,7 +147,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Verify counts
     let db_count = db.count().await?;
     if db_count != topic_count {
-        eprintln!("Warning: Topic count mismatch! JSON: {}, DB: {}", topic_count, db_count);
+        eprintln!(
+            "Warning: Topic count mismatch! JSON: {}, DB: {}",
+            topic_count, db_count
+        );
     } else {
         println!("  Verified: {} topics in database", db_count);
     }
@@ -182,7 +185,10 @@ fn count_all_children(topic: &Topic) -> usize {
 }
 
 /// Verify migration by comparing JSON and DB counts.
-async fn verify_migration(json_path: &Path, db_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+async fn verify_migration(
+    json_path: &Path,
+    db_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Verification ===");
 
     // Load JSON
@@ -232,7 +238,10 @@ async fn verify_migration(json_path: &Path, db_path: &Path) -> Result<(), Box<dy
 }
 
 /// Export database back to JSON for rollback.
-async fn export_db_to_json(db_path: &Path, export_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+async fn export_db_to_json(
+    db_path: &Path,
+    export_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Export to JSON ===");
 
     if !db_path.exists() {

@@ -92,9 +92,8 @@ impl ResearchInventory {
     /// Returns `$RESEARCH_DIR/.research/research-inventory.json` if `RESEARCH_DIR`
     /// is set, otherwise `$HOME/.research/research-inventory.json`.
     pub fn default_path() -> Result<PathBuf> {
-        let base = std::env::var("RESEARCH_DIR").unwrap_or_else(|_| {
-            std::env::var("HOME").unwrap_or_else(|_| String::new())
-        });
+        let base = std::env::var("RESEARCH_DIR")
+            .unwrap_or_else(|_| std::env::var("HOME").unwrap_or_else(|_| String::new()));
 
         if base.is_empty() {
             return Err(InventoryError::NoResearchDir);
@@ -350,7 +349,11 @@ mod tests {
     #[test]
     fn test_atomic_write_creates_parent_dirs() {
         let temp = TempDir::new().unwrap();
-        let path = temp.path().join("nested").join("dir").join("inventory.json");
+        let path = temp
+            .path()
+            .join("nested")
+            .join("dir")
+            .join("inventory.json");
 
         let inventory = ResearchInventory::new();
         inventory.save_to(&path).unwrap();

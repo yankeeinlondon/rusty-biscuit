@@ -39,9 +39,9 @@ pub mod cache;
 pub mod detection;
 pub mod errors;
 pub mod gender_inference;
-pub mod playback;
 #[cfg(feature = "playa")]
 mod playa_bridge;
+pub mod playback;
 pub mod providers;
 pub mod speak;
 pub mod traits;
@@ -53,19 +53,19 @@ pub use cache::{
     read_from_cache, update_provider_in_cache,
 };
 pub use detection::{get_available_providers, get_providers_for_strategy, parse_provider_name};
-pub use gender_inference::infer_gender;
 pub use errors::{AllProvidersFailed, TtsError};
+pub use gender_inference::infer_gender;
 pub use providers::cloud::ElevenLabsProvider;
 pub use providers::host::{
-    EchogardenEngine, EchogardenProvider, ESpeakProvider, GttsProvider, KokoroTtsProvider,
+    ESpeakProvider, EchogardenEngine, EchogardenProvider, GttsProvider, KokoroTtsProvider,
     SapiProvider, SayProvider,
 };
-pub use speak::{speak, speak_when_able, speak_with_result, Speak};
+pub use speak::{Speak, speak, speak_when_able, speak_with_result};
 pub use traits::{TtsExecutor, TtsVoiceInventory};
 pub use types::{
-    AudioFormat, CloudTtsProvider, Gender, HostTtsCapabilities, HostTtsCapability,
-    HostTtsProvider, Language, SpeakResult, SpeedLevel, TtsConfig, TtsFailoverStrategy,
-    TtsProvider, Voice, VoiceQuality, VolumeLevel,
+    AudioFormat, CloudTtsProvider, Gender, HostTtsCapabilities, HostTtsCapability, HostTtsProvider,
+    Language, SpeakResult, SpeedLevel, TtsConfig, TtsFailoverStrategy, TtsProvider, Voice,
+    VoiceQuality, VolumeLevel,
 };
 
 // Playa-based playback functions (feature-gated)

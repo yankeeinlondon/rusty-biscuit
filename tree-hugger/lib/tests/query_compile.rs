@@ -9,15 +9,18 @@ fn test_query_compiles(language: ProgrammingLanguage, query_text: &str) {
 
     match &result {
         Ok(query) => {
-            println!("{}: {} patterns, captures: {:?}",
+            println!(
+                "{}: {} patterns, captures: {:?}",
                 language,
                 query.pattern_count(),
                 query.capture_names()
             );
         }
         Err(e) => {
-            panic!("{} lint query failed to compile: {:?}\n\nQuery:\n{}",
-                language, e, query_text);
+            panic!(
+                "{} lint query failed to compile: {:?}\n\nQuery:\n{}",
+                language, e, query_text
+            );
         }
     }
 
@@ -28,7 +31,7 @@ fn test_query_compiles(language: ProgrammingLanguage, query_text: &str) {
 fn test_rust_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Rust,
-        include_str!("../queries/rust/lint.scm")
+        include_str!("../queries/rust/lint.scm"),
     );
 }
 
@@ -36,7 +39,7 @@ fn test_rust_lint_query_compiles() {
 fn test_javascript_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::JavaScript,
-        include_str!("../queries/javascript/lint.scm")
+        include_str!("../queries/javascript/lint.scm"),
     );
 }
 
@@ -44,7 +47,7 @@ fn test_javascript_lint_query_compiles() {
 fn test_typescript_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::TypeScript,
-        include_str!("../queries/typescript/lint.scm")
+        include_str!("../queries/typescript/lint.scm"),
     );
 }
 
@@ -52,7 +55,7 @@ fn test_typescript_lint_query_compiles() {
 fn test_go_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Go,
-        include_str!("../queries/go/lint.scm")
+        include_str!("../queries/go/lint.scm"),
     );
 }
 
@@ -60,7 +63,7 @@ fn test_go_lint_query_compiles() {
 fn test_python_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Python,
-        include_str!("../queries/python/lint.scm")
+        include_str!("../queries/python/lint.scm"),
     );
 }
 
@@ -68,7 +71,7 @@ fn test_python_lint_query_compiles() {
 fn test_java_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Java,
-        include_str!("../queries/java/lint.scm")
+        include_str!("../queries/java/lint.scm"),
     );
 }
 
@@ -76,7 +79,7 @@ fn test_java_lint_query_compiles() {
 fn test_php_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Php,
-        include_str!("../queries/php/lint.scm")
+        include_str!("../queries/php/lint.scm"),
     );
 }
 
@@ -84,7 +87,7 @@ fn test_php_lint_query_compiles() {
 fn test_perl_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Perl,
-        include_str!("../queries/perl/lint.scm")
+        include_str!("../queries/perl/lint.scm"),
     );
 }
 
@@ -92,7 +95,7 @@ fn test_perl_lint_query_compiles() {
 fn test_bash_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Bash,
-        include_str!("../queries/bash/lint.scm")
+        include_str!("../queries/bash/lint.scm"),
     );
 }
 
@@ -100,7 +103,7 @@ fn test_bash_lint_query_compiles() {
 fn test_zsh_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Zsh,
-        include_str!("../queries/zsh/lint.scm")
+        include_str!("../queries/zsh/lint.scm"),
     );
 }
 
@@ -108,7 +111,7 @@ fn test_zsh_lint_query_compiles() {
 fn test_c_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::C,
-        include_str!("../queries/c/lint.scm")
+        include_str!("../queries/c/lint.scm"),
     );
 }
 
@@ -116,7 +119,7 @@ fn test_c_lint_query_compiles() {
 fn test_cpp_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Cpp,
-        include_str!("../queries/cpp/lint.scm")
+        include_str!("../queries/cpp/lint.scm"),
     );
 }
 
@@ -124,7 +127,7 @@ fn test_cpp_lint_query_compiles() {
 fn test_csharp_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::CSharp,
-        include_str!("../queries/c_sharp/lint.scm")
+        include_str!("../queries/c_sharp/lint.scm"),
     );
 }
 
@@ -132,7 +135,7 @@ fn test_csharp_lint_query_compiles() {
 fn test_swift_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Swift,
-        include_str!("../queries/swift/lint.scm")
+        include_str!("../queries/swift/lint.scm"),
     );
 }
 
@@ -140,7 +143,7 @@ fn test_swift_lint_query_compiles() {
 fn test_scala_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Scala,
-        include_str!("../queries/scala/lint.scm")
+        include_str!("../queries/scala/lint.scm"),
     );
 }
 
@@ -148,7 +151,7 @@ fn test_scala_lint_query_compiles() {
 fn test_lua_lint_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Lua,
-        include_str!("../queries/lua/lint.scm")
+        include_str!("../queries/lua/lint.scm"),
     );
 }
 
@@ -160,7 +163,7 @@ fn test_lua_lint_query_compiles() {
 fn test_rust_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Rust,
-        include_str!("../queries/rust/comments.scm")
+        include_str!("../queries/rust/comments.scm"),
     );
 }
 
@@ -168,7 +171,7 @@ fn test_rust_comments_query_compiles() {
 fn test_javascript_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::JavaScript,
-        include_str!("../queries/javascript/comments.scm")
+        include_str!("../queries/javascript/comments.scm"),
     );
 }
 
@@ -176,7 +179,7 @@ fn test_javascript_comments_query_compiles() {
 fn test_typescript_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::TypeScript,
-        include_str!("../queries/typescript/comments.scm")
+        include_str!("../queries/typescript/comments.scm"),
     );
 }
 
@@ -184,7 +187,7 @@ fn test_typescript_comments_query_compiles() {
 fn test_go_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Go,
-        include_str!("../queries/go/comments.scm")
+        include_str!("../queries/go/comments.scm"),
     );
 }
 
@@ -192,7 +195,7 @@ fn test_go_comments_query_compiles() {
 fn test_python_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Python,
-        include_str!("../queries/python/comments.scm")
+        include_str!("../queries/python/comments.scm"),
     );
 }
 
@@ -200,7 +203,7 @@ fn test_python_comments_query_compiles() {
 fn test_java_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Java,
-        include_str!("../queries/java/comments.scm")
+        include_str!("../queries/java/comments.scm"),
     );
 }
 
@@ -208,7 +211,7 @@ fn test_java_comments_query_compiles() {
 fn test_php_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Php,
-        include_str!("../queries/php/comments.scm")
+        include_str!("../queries/php/comments.scm"),
     );
 }
 
@@ -216,7 +219,7 @@ fn test_php_comments_query_compiles() {
 fn test_perl_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Perl,
-        include_str!("../queries/perl/comments.scm")
+        include_str!("../queries/perl/comments.scm"),
     );
 }
 
@@ -224,7 +227,7 @@ fn test_perl_comments_query_compiles() {
 fn test_bash_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Bash,
-        include_str!("../queries/bash/comments.scm")
+        include_str!("../queries/bash/comments.scm"),
     );
 }
 
@@ -232,7 +235,7 @@ fn test_bash_comments_query_compiles() {
 fn test_zsh_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Zsh,
-        include_str!("../queries/zsh/comments.scm")
+        include_str!("../queries/zsh/comments.scm"),
     );
 }
 
@@ -240,7 +243,7 @@ fn test_zsh_comments_query_compiles() {
 fn test_c_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::C,
-        include_str!("../queries/c/comments.scm")
+        include_str!("../queries/c/comments.scm"),
     );
 }
 
@@ -248,7 +251,7 @@ fn test_c_comments_query_compiles() {
 fn test_cpp_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Cpp,
-        include_str!("../queries/cpp/comments.scm")
+        include_str!("../queries/cpp/comments.scm"),
     );
 }
 
@@ -256,7 +259,7 @@ fn test_cpp_comments_query_compiles() {
 fn test_csharp_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::CSharp,
-        include_str!("../queries/c_sharp/comments.scm")
+        include_str!("../queries/c_sharp/comments.scm"),
     );
 }
 
@@ -264,7 +267,7 @@ fn test_csharp_comments_query_compiles() {
 fn test_swift_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Swift,
-        include_str!("../queries/swift/comments.scm")
+        include_str!("../queries/swift/comments.scm"),
     );
 }
 
@@ -272,7 +275,7 @@ fn test_swift_comments_query_compiles() {
 fn test_scala_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Scala,
-        include_str!("../queries/scala/comments.scm")
+        include_str!("../queries/scala/comments.scm"),
     );
 }
 
@@ -280,6 +283,6 @@ fn test_scala_comments_query_compiles() {
 fn test_lua_comments_query_compiles() {
     test_query_compiles(
         ProgrammingLanguage::Lua,
-        include_str!("../queries/lua/comments.scm")
+        include_str!("../queries/lua/comments.scm"),
     );
 }

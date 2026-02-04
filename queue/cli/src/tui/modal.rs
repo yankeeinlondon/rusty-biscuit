@@ -7,15 +7,15 @@
 //! 3. Render modal border and content
 
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
-    Frame,
 };
 
-use super::color_context::ColorContext;
 use super::PANEL_BG;
+use super::color_context::ColorContext;
 
 /// Trait for modal dialogs.
 ///
@@ -301,7 +301,10 @@ mod tests {
         // 60% of 50 = 30, which is larger than min 18
         let rect = centered_rect_with_min(60, 60, 0, 18, large_pane);
 
-        assert_eq!(rect.height, 30, "Should use percentage when larger than min");
+        assert_eq!(
+            rect.height, 30,
+            "Should use percentage when larger than min"
+        );
         assert_eq!(rect.y, 10, "Should be centered: (50 - 30) / 2 = 10");
     }
 

@@ -31,8 +31,8 @@ mod rows;
 
 use std::path::Path;
 
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use thiserror::Error;
 
 pub use inventory::ResearchInventoryDb;
@@ -199,7 +199,11 @@ mod tests {
     #[tokio::test]
     async fn test_init_memory_pool() {
         let pool = init_memory_pool().await;
-        assert!(pool.is_ok(), "Failed to create in-memory pool: {:?}", pool.err());
+        assert!(
+            pool.is_ok(),
+            "Failed to create in-memory pool: {:?}",
+            pool.err()
+        );
     }
 
     #[tokio::test]
@@ -224,10 +228,22 @@ mod tests {
 
         let table_names: Vec<&str> = tables.iter().map(|t| t.0.as_str()).collect();
         assert!(table_names.contains(&"topics"), "topics table not found");
-        assert!(table_names.contains(&"documents"), "documents table not found");
-        assert!(table_names.contains(&"library_details"), "library_details table not found");
-        assert!(table_names.contains(&"software_details"), "software_details table not found");
-        assert!(table_names.contains(&"schema_meta"), "schema_meta table not found");
+        assert!(
+            table_names.contains(&"documents"),
+            "documents table not found"
+        );
+        assert!(
+            table_names.contains(&"library_details"),
+            "library_details table not found"
+        );
+        assert!(
+            table_names.contains(&"software_details"),
+            "software_details table not found"
+        );
+        assert!(
+            table_names.contains(&"schema_meta"),
+            "schema_meta table not found"
+        );
     }
 
     #[tokio::test]
@@ -235,12 +251,11 @@ mod tests {
         let pool = init_memory_pool().await.expect("Failed to create pool");
         run_migrations(&pool).await.expect("Migrations failed");
 
-        let (version,): (String,) = sqlx::query_as(
-            "SELECT value FROM schema_meta WHERE key = 'schema_version'"
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("Failed to query schema version");
+        let (version,): (String,) =
+            sqlx::query_as("SELECT value FROM schema_meta WHERE key = 'schema_version'")
+                .fetch_one(&pool)
+                .await
+                .expect("Failed to query schema version");
 
         assert_eq!(version, "2");
     }

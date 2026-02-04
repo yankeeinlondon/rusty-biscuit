@@ -144,9 +144,13 @@ pub fn parse_provider_name(name: &str) -> Option<TtsProvider> {
         "festival" => Some(TtsProvider::Host(HostTtsProvider::Festival)),
         "gtts" | "gtts-cli" | "google" => Some(TtsProvider::Host(HostTtsProvider::Gtts)),
         "sapi" | "windows" => Some(TtsProvider::Host(HostTtsProvider::Sapi)),
-        "kokoro" | "kokoro-tts" | "kokorotts" => Some(TtsProvider::Host(HostTtsProvider::KokoroTts)),
+        "kokoro" | "kokoro-tts" | "kokorotts" => {
+            Some(TtsProvider::Host(HostTtsProvider::KokoroTts))
+        }
         "pico" | "pico2wave" => Some(TtsProvider::Host(HostTtsProvider::Pico2Wave)),
-        "spd" | "spd-say" | "spdsay" | "speechd" => Some(TtsProvider::Host(HostTtsProvider::SpdSay)),
+        "spd" | "spd-say" | "spdsay" | "speechd" => {
+            Some(TtsProvider::Host(HostTtsProvider::SpdSay))
+        }
 
         // Cloud providers
         "elevenlabs" | "eleven" | "11labs" => {

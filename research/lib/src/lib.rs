@@ -31,8 +31,6 @@ use rig::completion::{AssistantContent, CompletionModel, Message, Prompt, Prompt
 use rig::message::{ToolResultContent, UserContent};
 use rig::providers::{gemini, openai};
 use serde::{Deserialize, Serialize};
-use unchained_ai::rigging::providers::client_adaptors::zai;
-use unchained_ai::rigging::tools::{BravePlan, BraveSearchTool, ScreenScrapeTool};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -41,6 +39,8 @@ use std::time::Instant;
 use thiserror::Error;
 use tokio::fs;
 use tracing::{Span, debug, info, info_span, instrument, warn};
+use unchained_ai::rigging::providers::client_adaptors::zai;
+use unchained_ai::rigging::tools::{BravePlan, BraveSearchTool, ScreenScrapeTool};
 
 use crate::validation::{parse_and_validate_frontmatter, repair_skill_frontmatter};
 

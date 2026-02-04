@@ -143,17 +143,32 @@ fn test_json_flag_at_end() {
 fn test_language_flag_ordering() {
     // Regression test: --language flag should work in any position
     hug_cmd()
-        .args(["--language", "rust", "symbols", "tree-hugger/cli/src/main.rs"])
+        .args([
+            "--language",
+            "rust",
+            "symbols",
+            "tree-hugger/cli/src/main.rs",
+        ])
         .assert()
         .success();
 
     hug_cmd()
-        .args(["symbols", "--language", "rust", "tree-hugger/cli/src/main.rs"])
+        .args([
+            "symbols",
+            "--language",
+            "rust",
+            "tree-hugger/cli/src/main.rs",
+        ])
         .assert()
         .success();
 
     hug_cmd()
-        .args(["symbols", "tree-hugger/cli/src/main.rs", "--language", "rust"])
+        .args([
+            "symbols",
+            "tree-hugger/cli/src/main.rs",
+            "--language",
+            "rust",
+        ])
         .assert()
         .success();
 }
@@ -260,7 +275,11 @@ fn test_plain_flag_exists_in_help() {
 fn test_plain_flag_suppresses_ansi() {
     // Test that --plain output contains no ANSI escape codes
     let output = hug_cmd()
-        .args(["symbols", "tree-hugger/lib/tests/fixtures/sample.rs", "--plain"])
+        .args([
+            "symbols",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--plain",
+        ])
         .assert()
         .success()
         .get_output()
@@ -280,7 +299,11 @@ fn test_plain_flag_suppresses_ansi() {
 fn test_json_output_has_no_escape_codes() {
     // Test that --json output contains no ANSI escape codes
     let output = hug_cmd()
-        .args(["symbols", "tree-hugger/lib/tests/fixtures/sample.rs", "--json"])
+        .args([
+            "symbols",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--json",
+        ])
         .assert()
         .success()
         .get_output()
@@ -300,7 +323,11 @@ fn test_json_output_has_no_escape_codes() {
 fn test_json_contains_doc_comment() {
     // Test that JSON output includes doc_comment field for documented symbols
     hug_cmd()
-        .args(["functions", "tree-hugger/lib/tests/fixtures/sample.rs", "--json"])
+        .args([
+            "functions",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--json",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"doc_comment\""))
@@ -311,7 +338,11 @@ fn test_json_contains_doc_comment() {
 fn test_json_contains_signature() {
     // Test that JSON output includes signature field for functions
     hug_cmd()
-        .args(["functions", "tree-hugger/lib/tests/fixtures/sample.rs", "--json"])
+        .args([
+            "functions",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--json",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"signature\""))
@@ -322,7 +353,11 @@ fn test_json_contains_signature() {
 fn test_json_signature_has_parameter_names() {
     // Test that function signatures include parameter names
     hug_cmd()
-        .args(["functions", "tree-hugger/lib/tests/fixtures/sample.rs", "--json"])
+        .args([
+            "functions",
+            "tree-hugger/lib/tests/fixtures/sample.rs",
+            "--json",
+        ])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"name\": \"name\""));

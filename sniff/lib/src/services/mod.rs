@@ -28,9 +28,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
-    env,
-    fmt,
-    fs,
+    env, fmt, fs,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -170,7 +168,9 @@ pub fn detect_init_with_evidence(os: HostOs) -> DetectInitResult {
         HostOs::Linux => detect_init_linux_with_evidence(),
         HostOs::Macos => {
             let mut ev = InitEvidence::new();
-            ev.note("On macOS host systems, PID 1 is launchd (init system is not typically variable).");
+            ev.note(
+                "On macOS host systems, PID 1 is launchd (init system is not typically variable).",
+            );
             DetectInitResult {
                 init: InitSystem::Launchd,
                 evidence: ev,
@@ -545,7 +545,13 @@ fn list_launchd_services() -> Vec<Service> {
 /// Parses output from `systemctl list-units --type=service --all --no-pager --plain`
 fn list_systemd_services() -> Vec<Service> {
     let output = match Command::new("systemctl")
-        .args(["list-units", "--type=service", "--all", "--no-pager", "--plain"])
+        .args([
+            "list-units",
+            "--type=service",
+            "--all",
+            "--no-pager",
+            "--plain",
+        ])
         .output()
     {
         Ok(o) if o.status.success() => o,
@@ -592,7 +598,11 @@ fn list_systemd_services() -> Vec<Service> {
 /// Get the main PID of a systemd service.
 fn get_systemd_service_pid(service_name: &str) -> Option<u32> {
     let output = Command::new("systemctl")
-        .args(["show", &format!("{}.service", service_name), "--property=MainPID"])
+        .args([
+            "show",
+            &format!("{}.service", service_name),
+            "--property=MainPID",
+        ])
         .output()
         .ok()?;
 
@@ -701,12 +711,11 @@ fn check_runit_service_status(service_name: &str) -> (bool, Option<u32>) {
 
     let pid = if running {
         // Extract PID from "(pid 1234)"
-        stdout
-            .find("(pid ")
-            .and_then(|start| {
-                let rest = &stdout[start + 5..];
-                rest.find(')').and_then(|end| rest[..end].parse::<u32>().ok())
-            })
+        stdout.find("(pid ").and_then(|start| {
+            let rest = &stdout[start + 5..];
+            rest.find(')')
+                .and_then(|end| rest[..end].parse::<u32>().ok())
+        })
     } else {
         None
     };
@@ -910,7 +919,10 @@ mod tests {
         // On macOS, we should get some services from launchctl
         let services = list_launchd_services();
         // launchctl list should return at least some system services
-        assert!(!services.is_empty(), "launchctl list should return services on macOS");
+        assert!(
+            !services.is_empty(),
+            "launchctl list should return services on macOS"
+        );
 
         // Verify structure of returned services
         for service in &services {
@@ -954,9 +966,15 @@ mod tests {
 
     #[test]
     fn test_path_ends_with_component() {
-        assert!(path_ends_with_component(Path::new("/usr/bin/systemd"), "systemd"));
+        assert!(path_ends_with_component(
+            Path::new("/usr/bin/systemd"),
+            "systemd"
+        ));
         assert!(path_ends_with_component(Path::new("systemd"), "systemd"));
-        assert!(!path_ends_with_component(Path::new("/usr/bin/systemd"), "init"));
+        assert!(!path_ends_with_component(
+            Path::new("/usr/bin/systemd"),
+            "init"
+        ));
         assert!(!path_ends_with_component(Path::new(""), "systemd"));
     }
 

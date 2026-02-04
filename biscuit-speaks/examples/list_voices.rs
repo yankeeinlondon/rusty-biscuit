@@ -11,8 +11,8 @@
 //! ```
 
 use biscuit_speaks::{
-    bust_host_capability_cache, populate_cache_for_all_providers, read_from_cache,
-    HostTtsCapability, TtsProvider,
+    HostTtsCapability, TtsProvider, bust_host_capability_cache, populate_cache_for_all_providers,
+    read_from_cache,
 };
 
 /// Display voices grouped by provider.
@@ -36,11 +36,7 @@ fn display_voices(capabilities: &[HostTtsCapability]) {
             _ => "Unknown".to_string(),
         };
 
-        println!(
-            "## {} ({} voices)",
-            provider_name,
-            cap.voices.len()
-        );
+        println!("## {} ({} voices)", provider_name, cap.voices.len());
 
         if cap.voices.is_empty() {
             println!("   (no voices available)");

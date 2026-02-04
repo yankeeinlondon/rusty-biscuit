@@ -1,5 +1,5 @@
-use unchained_ai::rigging::providers::models::build::enum_name::enum_variant_name_from_wire_id;
 use std::collections::HashSet;
+use unchained_ai::rigging::providers::models::build::enum_name::enum_variant_name_from_wire_id;
 
 use std::borrow::Cow;
 

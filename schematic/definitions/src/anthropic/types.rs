@@ -1049,7 +1049,8 @@ mod tests {
         let json = serde_json::to_string(&simple).unwrap();
         assert!(json.contains("You are a helpful assistant."));
 
-        let cached = SystemPrompt::cached("You are a helpful assistant.", CacheControl::ephemeral());
+        let cached =
+            SystemPrompt::cached("You are a helpful assistant.", CacheControl::ephemeral());
         let json = serde_json::to_string(&cached).unwrap();
         assert!(json.contains("cache_control"));
     }

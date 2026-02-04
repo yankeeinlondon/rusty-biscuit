@@ -2,8 +2,8 @@
 //!
 //! These tests verify end-to-end CLI behavior using assert_cmd.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 fn queue_cmd() -> Command {
@@ -16,7 +16,9 @@ fn cli_shows_help() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Queue commands for later execution"))
+        .stdout(predicate::str::contains(
+            "Queue commands for later execution",
+        ))
         .stdout(predicate::str::contains("--at"))
         .stdout(predicate::str::contains("--in"))
         .stdout(predicate::str::contains("--debug"));

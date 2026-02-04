@@ -70,7 +70,11 @@ pub fn print_services_text(info: &ServicesInfo, verbose: u8, state_filter: Servi
         };
 
         for service in filtered.iter().take(show_count) {
-            let status = if service.running { "running" } else { "stopped" };
+            let status = if service.running {
+                "running"
+            } else {
+                "stopped"
+            };
             let pid_str = service
                 .pid
                 .map(|p| format!(" (PID {})", p))

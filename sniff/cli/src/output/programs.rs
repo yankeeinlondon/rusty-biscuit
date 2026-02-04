@@ -1,7 +1,7 @@
 //! Programs section output formatting (markdown and JSON).
 
-use darkmatter_lib::markdown::output::terminal::{for_terminal, TerminalOptions};
 use darkmatter_lib::markdown::Markdown;
+use darkmatter_lib::markdown::output::terminal::{TerminalOptions, for_terminal};
 use darkmatter_lib::render::link::Link;
 use sniff_lib::programs::ProgramsInfo;
 
@@ -31,7 +31,10 @@ fn name_link(name: &str, website: &str) -> String {
     Link::new(display, website).to_markdown()
 }
 
-fn collect_program_entries(programs: &ProgramsInfo, filter: OutputFilter) -> Vec<ProgramTableEntry> {
+fn collect_program_entries(
+    programs: &ProgramsInfo,
+    filter: OutputFilter,
+) -> Vec<ProgramTableEntry> {
     use sniff_lib::programs::ProgramMetadata;
     use strum::IntoEnumIterator;
 
@@ -263,7 +266,11 @@ pub fn print_programs_markdown(programs: &ProgramsInfo, verbose: u8, filter: Out
     lines.push(format!("| {} |", headers.join(" | ")));
     lines.push(format!(
         "| {} |",
-        headers.iter().map(|_| "---").collect::<Vec<_>>().join(" | ")
+        headers
+            .iter()
+            .map(|_| "---")
+            .collect::<Vec<_>>()
+            .join(" | ")
     ));
 
     for entry in entries {
@@ -281,9 +288,7 @@ pub fn print_programs_markdown(programs: &ProgramsInfo, verbose: u8, filter: Out
             cells.push(escape_markdown_cell(entry.path.as_deref().unwrap_or("")));
         }
         if verbose > 1 {
-            cells.push(escape_markdown_cell(
-                entry.version.as_deref().unwrap_or(""),
-            ));
+            cells.push(escape_markdown_cell(entry.version.as_deref().unwrap_or("")));
         }
 
         cells.push(escape_markdown_cell(&entry.description));

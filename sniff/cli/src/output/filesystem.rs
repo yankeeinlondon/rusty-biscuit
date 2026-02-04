@@ -193,7 +193,7 @@ pub fn print_git_section(git: &sniff_lib::filesystem::git::GitInfo, history_coun
                 .unwrap_or_default();
             format!(
                 "[<b>{}</b>] <b><yellow>{}</yellow></b>{} <i>at</i> <blue><b>{}</b></blue> {}<blue>{}</blue>{}: <dim>{}</dim>",
-                sha,  op, scope_part, time_str, date_prefix, date_str, refs_part, cc.description
+                sha, op, scope_part, time_str, date_prefix, date_str, refs_part, cc.description
             )
         } else {
             // Non-conventional commit
@@ -205,7 +205,7 @@ pub fn print_git_section(git: &sniff_lib::filesystem::git::GitInfo, history_coun
             };
             format!(
                 "[<b>{}</b>] <dim>{}</dim> {}<blue><b>{}</b></blue>{}",
-                sha,truncated, date_prefix, date_str,  refs_part,
+                sha, truncated, date_prefix, date_str, refs_part,
             )
         };
         status_items.push(commit_line);
@@ -304,19 +304,23 @@ pub fn print_git_section(git: &sniff_lib::filesystem::git::GitInfo, history_coun
                     .unwrap_or_default();
 
                 // Parse owner/repo from URL and build display string with link
-                let repo_link = remote.url.as_ref().map(|url| {
-                    let (owner_repo, browse_url) = parse_git_url(url, &remote.provider);
-                    let provider_name = format_provider(&remote.provider);
-                    if let Some(ref repo_path) = owner_repo {
-                        let link_url = browse_url.unwrap_or_else(|| url.clone());
-                        format!(
-                            " - <a href=\"{}\"><blue>{}</blue></a> <i>on</i> {}",
-                            link_url, repo_path, provider_name
-                        )
-                    } else {
-                        format!(" <i>on</i> {}", provider_name)
-                    }
-                }).unwrap_or_default();
+                let repo_link = remote
+                    .url
+                    .as_ref()
+                    .map(|url| {
+                        let (owner_repo, browse_url) = parse_git_url(url, &remote.provider);
+                        let provider_name = format_provider(&remote.provider);
+                        if let Some(ref repo_path) = owner_repo {
+                            let link_url = browse_url.unwrap_or_else(|| url.clone());
+                            format!(
+                                " - <a href=\"{}\"><blue>{}</blue></a> <i>on</i> {}",
+                                link_url, repo_path, provider_name
+                            )
+                        } else {
+                            format!(" <i>on</i> {}", provider_name)
+                        }
+                    })
+                    .unwrap_or_default();
 
                 let line = if tracking_part.is_empty() {
                     format!("<b>{}</b>{}", remote.name, repo_link)
@@ -552,10 +556,7 @@ pub fn print_filesystem_section(
         // Show HEAD commit (first recent commit)
         if let Some(commit) = git.recent.first() {
             println!("  HEAD: {} ({})", &commit.sha[..8], commit.author);
-            println!(
-                "  Message: {}",
-                commit.message.lines().next().unwrap_or("")
-            );
+            println!("  Message: {}", commit.message.lines().next().unwrap_or(""));
             // Show which remotes have this commit (deep mode)
             if let Some(ref remotes) = commit.remotes {
                 println!("    Synced to: {}", remotes.join(", "));

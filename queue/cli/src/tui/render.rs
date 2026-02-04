@@ -5,17 +5,17 @@
 use chrono::Utc;
 use queue_lib::{ExecutionTarget, ScheduledTask, TaskStatus};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
-    Frame,
 };
 
+use super::PANEL_BG;
 use super::app::{App, AppMode};
 use super::color_context::ColorContext;
-use super::modal::{render_modal, ConfirmQuitDialog};
-use super::PANEL_BG;
+use super::modal::{ConfirmQuitDialog, render_modal};
 
 /// Renders the entire application UI.
 ///
@@ -255,10 +255,10 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
 /// Returns the appropriate style for a task based on its status.
 fn task_style(task: &ScheduledTask) -> Style {
     match task.status {
-        TaskStatus::Completed => Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
-        TaskStatus::Cancelled => Style::default()
+        TaskStatus::Completed => Style::default()
             .fg(Color::Gray)
-            .add_modifier(Modifier::DIM),
+            .add_modifier(Modifier::ITALIC),
+        TaskStatus::Cancelled => Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
         TaskStatus::Running => Style::default()
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD),
@@ -352,7 +352,12 @@ mod tests {
     use chrono::{Duration, Utc};
 
     fn make_pending_task(scheduled_at: chrono::DateTime<Utc>) -> ScheduledTask {
-        ScheduledTask::new(1, "test".to_string(), scheduled_at, ExecutionTarget::default())
+        ScheduledTask::new(
+            1,
+            "test".to_string(),
+            scheduled_at,
+            ExecutionTarget::default(),
+        )
     }
 
     #[test]
@@ -403,7 +408,11 @@ mod tests {
         task.mark_completed();
         let result = format_schedule(&task);
         // Should be HH:MM format (e.g., "14:30")
-        assert!(result.contains(":"), "Expected HH:MM format, got: {}", result);
+        assert!(
+            result.contains(":"),
+            "Expected HH:MM format, got: {}",
+            result
+        );
         assert!(!result.starts_with("in "));
         assert_ne!(result, "past");
         assert_ne!(result, "now");
@@ -415,7 +424,11 @@ mod tests {
         let mut task = make_pending_task(Utc::now() - Duration::minutes(5));
         task.mark_running();
         let result = format_schedule(&task);
-        assert!(result.contains(":"), "Expected HH:MM format, got: {}", result);
+        assert!(
+            result.contains(":"),
+            "Expected HH:MM format, got: {}",
+            result
+        );
     }
 
     // =========================================================================
@@ -429,7 +442,12 @@ mod tests {
         scheduled_at: chrono::DateTime<Utc>,
         schedule_kind: Option<queue_lib::ScheduleKind>,
     ) -> ScheduledTask {
-        let mut task = ScheduledTask::new(1, "test".to_string(), scheduled_at, ExecutionTarget::default());
+        let mut task = ScheduledTask::new(
+            1,
+            "test".to_string(),
+            scheduled_at,
+            ExecutionTarget::default(),
+        );
         task.schedule_kind = schedule_kind;
         task
     }
@@ -446,8 +464,16 @@ mod tests {
         let result = format_schedule(&task);
 
         // Should show time format like "14:30", not "in 2h 0m"
-        assert!(result.contains(":"), "AtTime schedule should show clock time, got: {}", result);
-        assert!(!result.starts_with("in "), "AtTime schedule should not show countdown, got: {}", result);
+        assert!(
+            result.contains(":"),
+            "AtTime schedule should show clock time, got: {}",
+            result
+        );
+        assert!(
+            !result.starts_with("in "),
+            "AtTime schedule should not show countdown, got: {}",
+            result
+        );
     }
 
     #[test]
@@ -462,8 +488,16 @@ mod tests {
         let result = format_schedule(&task);
 
         // Should show countdown "in 30s" for precision in the final minute
-        assert!(result.starts_with("in "), "AtTime schedule should show countdown when close, got: {}", result);
-        assert!(result.ends_with("s"), "Should show seconds when < 1 minute, got: {}", result);
+        assert!(
+            result.starts_with("in "),
+            "AtTime schedule should show countdown when close, got: {}",
+            result
+        );
+        assert!(
+            result.ends_with("s"),
+            "Should show seconds when < 1 minute, got: {}",
+            result
+        );
     }
 
     #[test]
@@ -478,27 +512,35 @@ mod tests {
         let result = format_schedule(&task);
 
         // Should show countdown "in 2h 0m"
-        assert!(result.starts_with("in "), "AfterDelay schedule should show countdown, got: {}", result);
+        assert!(
+            result.starts_with("in "),
+            "AfterDelay schedule should show countdown, got: {}",
+            result
+        );
     }
 
     #[test]
     fn format_schedule_legacy_task_shows_countdown() {
         // Legacy tasks (schedule_kind = None) should show countdown for backwards compatibility
-        let task = make_task_with_schedule_kind(
-            Utc::now() + Duration::hours(2),
-            None,
-        );
+        let task = make_task_with_schedule_kind(Utc::now() + Duration::hours(2), None);
         let result = format_schedule(&task);
 
         // Should show countdown "in 2h 0m" (legacy behavior)
-        assert!(result.starts_with("in "), "Legacy task should show countdown, got: {}", result);
+        assert!(
+            result.starts_with("in "),
+            "Legacy task should show countdown, got: {}",
+            result
+        );
     }
 
     #[test]
     fn format_target_full_values() {
         assert_eq!(format_target(&ExecutionTarget::NewPane, false), "new pane");
         assert_eq!(format_target(&ExecutionTarget::NewWindow, false), "window");
-        assert_eq!(format_target(&ExecutionTarget::Background, false), "background");
+        assert_eq!(
+            format_target(&ExecutionTarget::Background, false),
+            "background"
+        );
     }
 
     #[test]
@@ -564,7 +606,9 @@ mod tests {
         let style = task_style(&task);
         assert_eq!(
             style,
-            Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC)
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::ITALIC)
         );
     }
 
@@ -599,8 +643,8 @@ mod tests {
 
     #[test]
     fn render_produces_output_with_empty_task_list() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -623,8 +667,8 @@ mod tests {
 
     #[test]
     fn render_shows_tasks_in_table() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -650,8 +694,8 @@ mod tests {
 
     #[test]
     fn render_shows_footer_shortcuts() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -671,8 +715,8 @@ mod tests {
 
     #[test]
     fn render_shows_confirm_quit_modal() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -739,8 +783,8 @@ mod tests {
 
     #[test]
     fn render_shows_empty_state_when_no_tasks() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -766,8 +810,8 @@ mod tests {
 
     #[test]
     fn render_shows_short_empty_state_in_narrow_terminal() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(39, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -797,8 +841,8 @@ mod tests {
 
     #[test]
     fn render_shows_all_columns_at_80_width() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -817,14 +861,20 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
         // At 80 width, should show full "background" and "Status" column
-        assert!(content.contains("Status"), "Should show Status column header");
-        assert!(content.contains("background"), "Should show full target text");
+        assert!(
+            content.contains("Status"),
+            "Should show Status column header"
+        );
+        assert!(
+            content.contains("background"),
+            "Should show full target text"
+        );
     }
 
     #[test]
     fn render_abbreviates_target_at_70_width() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(70, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -843,8 +893,14 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
         // At 70 width, should show abbreviated "bg" and still have "Status" column
-        assert!(content.contains("Status"), "Should still show Status column");
-        assert!(content.contains("bg"), "Should show abbreviated target 'bg'");
+        assert!(
+            content.contains("Status"),
+            "Should still show Status column"
+        );
+        assert!(
+            content.contains("bg"),
+            "Should show abbreviated target 'bg'"
+        );
         assert!(
             !content.contains("background"),
             "Should NOT show full 'background' at 70 width"
@@ -853,8 +909,8 @@ mod tests {
 
     #[test]
     fn render_hides_status_at_50_width() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(50, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -948,8 +1004,8 @@ mod tests {
 
     #[test]
     fn footer_shows_full_shortcuts_at_80_width() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -981,8 +1037,8 @@ mod tests {
 
     #[test]
     fn footer_shows_abbreviated_shortcuts_at_70_width() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(70, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1020,8 +1076,8 @@ mod tests {
 
     #[test]
     fn footer_shows_minimal_shortcuts_at_50_width() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(50, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1063,8 +1119,8 @@ mod tests {
 
     #[test]
     fn render_handles_very_narrow_terminal() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         // 20x10 is extremely narrow - should not panic
         let backend = TestBackend::new(20, 10);
@@ -1091,8 +1147,8 @@ mod tests {
 
     #[test]
     fn render_handles_very_wide_terminal() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         // 200x50 is very wide - should not panic
         let backend = TestBackend::new(200, 50);
@@ -1119,14 +1175,20 @@ mod tests {
         let buffer = terminal.backend().buffer();
         let content: String = buffer.content.iter().map(|c| c.symbol()).collect();
         // At very wide terminal, should show all columns with full text
-        assert!(content.contains("Status"), "Should show Status column at wide width");
-        assert!(content.contains("background"), "Should show full target text at wide width");
+        assert!(
+            content.contains("Status"),
+            "Should show Status column at wide width"
+        );
+        assert!(
+            content.contains("background"),
+            "Should show full target text at wide width"
+        );
     }
 
     #[test]
     fn render_handles_minimal_terminal_1x1() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         // Absolute minimum - 1x1 should not panic
         let backend = TestBackend::new(1, 1);
@@ -1140,8 +1202,8 @@ mod tests {
 
     #[test]
     fn render_handles_very_short_terminal() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         // 80 cols but only 5 rows - tests vertical constraints
         let backend = TestBackend::new(80, 5);

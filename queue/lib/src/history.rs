@@ -148,7 +148,11 @@ impl JsonFileStore {
         }
 
         let mut deduped: Vec<ScheduledTask> = latest.into_values().collect();
-        deduped.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+        deduped.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
         deduped
     }
 }
@@ -186,10 +190,7 @@ impl HistoryStore for JsonFileStore {
     fn update(&self, task: &ScheduledTask) -> Result<(), HistoryError> {
         self.ensure_file_exists()?;
 
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&self.path)?;
+        let mut file = OpenOptions::new().read(true).write(true).open(&self.path)?;
 
         file.lock_exclusive().map_err(|_| HistoryError::Lock)?;
 
@@ -390,12 +391,8 @@ mod tests {
 
         // Simulate sequential access patterns
         for i in 1..=5 {
-            let task = ScheduledTask::new(
-                i,
-                format!("task {i}"),
-                Utc::now(),
-                ExecutionTarget::NewPane,
-            );
+            let task =
+                ScheduledTask::new(i, format!("task {i}"), Utc::now(), ExecutionTarget::NewPane);
             store.save(&task).unwrap();
         }
 

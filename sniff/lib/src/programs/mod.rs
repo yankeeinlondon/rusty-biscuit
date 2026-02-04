@@ -121,10 +121,10 @@ pub use find_program::{
 };
 pub use headless_audio::InstalledHeadlessAudio;
 pub use installer::{
-    execute_install, execute_versioned_install, get_install_command,
-    get_versioned_install_command, InstallOptions, InstallResult,
+    InstallOptions, InstallResult, execute_install, execute_versioned_install, get_install_command,
+    get_versioned_install_command,
 };
-pub use inventory::{Program, PROGRAM_LOOKUP};
+pub use inventory::{PROGRAM_LOOKUP, Program};
 pub use macos_bundle::{find_macos_app_bundle, get_app_bundle_name};
 pub use pkg_mngrs::{InstalledLanguagePackageManagers, InstalledOsPackageManagers};
 pub use schema::{ProgramError, ProgramInfo, ProgramMetadata, VersionFlag, VersionParseStrategy};

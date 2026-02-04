@@ -205,10 +205,7 @@ fn find_executable_in_bundle(
 /// Returns a list of executable name candidates to try.
 #[cfg(target_os = "macos")]
 fn get_executable_candidates(app_name: &str, binary_name: &str) -> Vec<String> {
-    let mut candidates = vec![
-        binary_name.to_string(),
-        app_name.to_string(),
-    ];
+    let mut candidates = vec![binary_name.to_string(), app_name.to_string()];
 
     // Add lowercase variants
     let binary_lower = binary_name.to_lowercase();
@@ -331,7 +328,10 @@ mod tests {
     fn test_find_macos_app_bundle_whitespace_only() {
         // Whitespace-only string should return None
         let result = find_macos_app_bundle("   ");
-        assert!(result.is_none(), "Whitespace-only string should return None");
+        assert!(
+            result.is_none(),
+            "Whitespace-only string should return None"
+        );
     }
 
     #[test]
@@ -602,9 +602,23 @@ mod tests {
         fn test_find_macos_app_bundle_all_known_apps_return_none() {
             // All known app mappings should still return None on non-macOS
             let known_apps = [
-                "code", "cursor", "zed", "wezterm", "alacritty", "kitty",
-                "iterm2", "ghostty", "warp", "warp-terminal", "brave", "chrome",
-                "firefox", "vlc", "spotify", "slack", "discord",
+                "code",
+                "cursor",
+                "zed",
+                "wezterm",
+                "alacritty",
+                "kitty",
+                "iterm2",
+                "ghostty",
+                "warp",
+                "warp-terminal",
+                "brave",
+                "chrome",
+                "firefox",
+                "vlc",
+                "spotify",
+                "slack",
+                "discord",
             ];
             for app in known_apps {
                 assert!(

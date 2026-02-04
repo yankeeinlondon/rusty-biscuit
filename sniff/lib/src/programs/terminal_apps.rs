@@ -8,13 +8,13 @@ use crate::os::detect_os_type;
 use crate::programs::enums::TerminalApp;
 use crate::programs::find_program::find_programs_with_source_parallel;
 use crate::programs::installer::{
-    execute_install, execute_versioned_install, method_available, select_best_method,
-    InstallOptions,
+    InstallOptions, execute_install, execute_versioned_install, method_available,
+    select_best_method,
 };
 use crate::programs::schema::{ProgramEntry, ProgramError, ProgramMetadata};
 use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{
-    InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
+    InstalledLanguagePackageManagers, InstalledOsPackageManagers, PROGRAM_LOOKUP, Program,
 };
 
 fn terminal_app_details(app: TerminalApp) -> Option<&'static crate::programs::ProgramDetails> {
@@ -586,8 +586,7 @@ mod tests {
                 let (path, source) = result.unwrap();
                 assert!(!path.as_os_str().is_empty(), "Path should not be empty");
                 assert!(
-                    source == ExecutableSource::Path
-                        || source == ExecutableSource::MacOsAppBundle,
+                    source == ExecutableSource::Path || source == ExecutableSource::MacOsAppBundle,
                     "Source should be valid"
                 );
             }

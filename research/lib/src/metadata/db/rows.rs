@@ -17,7 +17,9 @@ use sniff_lib::package::LanguagePackageManager;
 use unchained_ai::models::model_capability::ModelCapability;
 
 use super::{DbError, DbResult, i64_to_u64, u64_to_i64};
-use crate::metadata::{ContentType, Document, Flow, KindCategory, Library, License, Software, Topic};
+use crate::metadata::{
+    ContentType, Document, Flow, KindCategory, Library, License, Software, Topic,
+};
 
 // ============================================================================
 // Enum TEXT conversions
@@ -302,12 +304,7 @@ impl LibraryDetailsRow {
             .map(|f| serde_json::from_str(f))
             .transpose()?;
 
-        let mut lib = Library::new(
-            package_manager,
-            self.package_name,
-            self.language,
-            self.url,
-        );
+        let mut lib = Library::new(package_manager, self.package_name, self.language, self.url);
 
         if let Some(features) = features {
             lib.set_features(features);
@@ -400,15 +397,15 @@ pub fn topic_to_library_row(topic: &Topic) -> Option<DbResult<LibraryDetailsRow>
         KindCategory::Library(lib) => {
             let licenses_result = licenses_to_json(&[]); // TODO: Need getter for licenses
 
-        Some(licenses_result.map(|licenses| LibraryDetailsRow {
+            Some(licenses_result.map(|licenses| LibraryDetailsRow {
                 topic_name: topic.name().to_string(),
                 package_manager: package_manager_to_text(lib.package_manager()),
                 package_name: lib.package_name().to_string(),
                 features: None, // TODO: Need getter for features on Library
                 language: lib.language().to_string(),
                 url: lib.url().to_string(),
-                repo: None,  // TODO: Need getter
-                docs: None,  // TODO: Need getter
+                repo: None, // TODO: Need getter
+                docs: None, // TODO: Need getter
                 licenses,
             }))
         }
@@ -434,12 +431,12 @@ pub fn document_to_row(doc: &Document, topic_name: &str) -> DocumentRow {
         topic_name: topic_name.to_string(),
         filename: doc.filename().to_string(),
         content_type: content_type_to_text(doc.content_type()).to_string(),
-        prompt: None, // TODO: Need getter for prompt
-        flow: None,   // TODO: Need getter for flow
-        created: Utc::now().to_rfc3339(), // TODO: Need getter for created
+        prompt: None,                          // TODO: Need getter for prompt
+        flow: None,                            // TODO: Need getter for flow
+        created: Utc::now().to_rfc3339(),      // TODO: Need getter for created
         last_updated: Utc::now().to_rfc3339(), // TODO: Need getter for last_updated
-        model: None,  // TODO: Need getter
-        model_capability: None, // TODO: Need getter
+        model: None,                           // TODO: Need getter
+        model_capability: None,                // TODO: Need getter
         content_hash: u64_to_i64(doc.content_hash()),
         interpolated_hash: 0, // TODO: Need getter
     }
@@ -452,9 +449,18 @@ mod tests {
     #[test]
     fn test_kind_category_discriminator_roundtrip() {
         // Simple variants
-        assert_eq!(discriminator_to_kind_category("Person").unwrap(), KindCategory::Person);
-        assert_eq!(discriminator_to_kind_category("SolutionArea").unwrap(), KindCategory::SolutionArea);
-        assert_eq!(discriminator_to_kind_category("ProgrammingLanguage").unwrap(), KindCategory::ProgrammingLanguage);
+        assert_eq!(
+            discriminator_to_kind_category("Person").unwrap(),
+            KindCategory::Person
+        );
+        assert_eq!(
+            discriminator_to_kind_category("SolutionArea").unwrap(),
+            KindCategory::SolutionArea
+        );
+        assert_eq!(
+            discriminator_to_kind_category("ProgrammingLanguage").unwrap(),
+            KindCategory::ProgrammingLanguage
+        );
 
         // Library/Software should error (need data)
         assert!(discriminator_to_kind_category("Library").is_err());
@@ -515,14 +521,21 @@ mod tests {
             // Compare discriminants since Other contains data
             match (&license, &parsed) {
                 (License::Other(a), License::Other(b)) => assert_eq!(a, b),
-                _ => assert_eq!(std::mem::discriminant(&license), std::mem::discriminant(&parsed)),
+                _ => assert_eq!(
+                    std::mem::discriminant(&license),
+                    std::mem::discriminant(&parsed)
+                ),
             }
         }
     }
 
     #[test]
     fn test_licenses_json_roundtrip() {
-        let licenses = vec![License::Mit, License::Apache2_0, License::Other("Custom".to_string())];
+        let licenses = vec![
+            License::Mit,
+            License::Apache2_0,
+            License::Other("Custom".to_string()),
+        ];
         let json = licenses_to_json(&licenses).unwrap();
         let parsed = json_to_licenses(&json).unwrap();
         assert_eq!(licenses.len(), parsed.len());

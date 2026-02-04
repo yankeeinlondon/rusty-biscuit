@@ -6,7 +6,7 @@ use crate::detection::get_providers_for_strategy;
 use crate::errors::{AllProvidersFailed, TtsError};
 use crate::providers::cloud::ElevenLabsProvider;
 use crate::providers::host::{
-    EchogardenProvider, ESpeakProvider, GttsProvider, KokoroTtsProvider, SapiProvider, SayProvider,
+    ESpeakProvider, EchogardenProvider, GttsProvider, KokoroTtsProvider, SapiProvider, SayProvider,
 };
 use crate::traits::TtsExecutor;
 use crate::types::{
@@ -184,7 +184,8 @@ impl Speak {
         if let Some(audio) = &self.audio {
             #[cfg(feature = "playa")]
             {
-                return crate::playback::play_audio_bytes(audio, self.audio_format, &self.config).await;
+                return crate::playback::play_audio_bytes(audio, self.audio_format, &self.config)
+                    .await;
             }
             #[cfg(not(feature = "playa"))]
             {
@@ -265,7 +266,10 @@ impl Speak {
     }
 
     /// Execute TTS with failover, returning metadata about the voice used.
-    async fn execute_with_failover_result(&self, providers: &[TtsProvider]) -> Result<SpeakResult, TtsError> {
+    async fn execute_with_failover_result(
+        &self,
+        providers: &[TtsProvider],
+    ) -> Result<SpeakResult, TtsError> {
         let mut errors: Vec<(TtsProvider, TtsError)> = Vec::new();
 
         for provider in providers {
@@ -296,7 +300,10 @@ impl Speak {
     }
 
     /// Execute TTS with a specific provider, returning metadata.
-    async fn execute_provider_with_result(&self, provider: TtsProvider) -> Result<SpeakResult, TtsError> {
+    async fn execute_provider_with_result(
+        &self,
+        provider: TtsProvider,
+    ) -> Result<SpeakResult, TtsError> {
         match provider {
             TtsProvider::Host(host) => self.execute_host_provider_with_result(host).await,
             TtsProvider::Cloud(cloud) => self.execute_cloud_provider_with_result(cloud).await,
@@ -349,7 +356,10 @@ impl Speak {
     }
 
     /// Execute TTS with a cloud provider, returning metadata.
-    async fn execute_cloud_provider_with_result(&self, provider: CloudTtsProvider) -> Result<SpeakResult, TtsError> {
+    async fn execute_cloud_provider_with_result(
+        &self,
+        provider: CloudTtsProvider,
+    ) -> Result<SpeakResult, TtsError> {
         match provider {
             CloudTtsProvider::ElevenLabs => {
                 let executor = ElevenLabsProvider::new()?;
@@ -359,7 +369,10 @@ impl Speak {
     }
 
     /// Execute TTS with a host provider, returning metadata.
-    async fn execute_host_provider_with_result(&self, provider: HostTtsProvider) -> Result<SpeakResult, TtsError> {
+    async fn execute_host_provider_with_result(
+        &self,
+        provider: HostTtsProvider,
+    ) -> Result<SpeakResult, TtsError> {
         match provider {
             HostTtsProvider::Say => {
                 let executor = SayProvider;
@@ -423,7 +436,10 @@ pub async fn speak(text: &str, config: &TtsConfig) -> Result<(), TtsError> {
 /// println!("Voice: {}", result.voice.name);
 /// ```
 pub async fn speak_with_result(text: &str, config: &TtsConfig) -> Result<SpeakResult, TtsError> {
-    Speak::new(text).with_config(config.clone()).play_with_result().await
+    Speak::new(text)
+        .with_config(config.clone())
+        .play_with_result()
+        .await
 }
 
 /// Fire-and-forget TTS that ignores errors.
@@ -513,12 +529,12 @@ mod tests {
         //
         // The following providers MUST have match arms in execute_host_provider:
         let implemented_providers = [
-            HostTtsProvider::Say,       // macOS
-            HostTtsProvider::ESpeak,    // Cross-platform
+            HostTtsProvider::Say,        // macOS
+            HostTtsProvider::ESpeak,     // Cross-platform
             HostTtsProvider::EchoGarden, // Cross-platform
-            HostTtsProvider::Gtts,      // Cross-platform (Python)
-            HostTtsProvider::KokoroTts, // Cross-platform (Rust)
-            HostTtsProvider::Sapi,      // Windows
+            HostTtsProvider::Gtts,       // Cross-platform (Python)
+            HostTtsProvider::KokoroTts,  // Cross-platform (Rust)
+            HostTtsProvider::Sapi,       // Windows
         ];
 
         // Verify at compile time these variants exist in the enum

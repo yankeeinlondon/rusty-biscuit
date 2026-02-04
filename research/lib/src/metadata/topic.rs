@@ -3,8 +3,8 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sniff_lib::package::LanguagePackageManager;
-use unchained_ai::models::model_capability::ModelCapability;
 use thiserror::Error;
+use unchained_ai::models::model_capability::ModelCapability;
 
 /// The type/provenance of a research document.
 ///
@@ -59,9 +59,8 @@ pub enum License {
     Mpl2_0,
     AGpl,
     Apache2_0,
-    Other(String)
+    Other(String),
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Library {
@@ -158,7 +157,10 @@ pub struct Software {
 impl Software {
     /// Create a new Software instance.
     pub fn new(name: String) -> Self {
-        Self { name, company: None }
+        Self {
+            name,
+            company: None,
+        }
     }
 
     /// Create a new Software instance with company.
@@ -354,7 +356,6 @@ pub struct Topic {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<Topic>,
 }
-
 
 impl Topic {
     /// Create a new topic with the given name and kind.

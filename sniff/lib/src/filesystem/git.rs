@@ -623,16 +623,13 @@ fn collect_ref_decorations(repo: &Repository) -> HashMap<git2::Oid, Vec<RefDecor
     let mut decorations: HashMap<git2::Oid, Vec<RefDecoration>> = HashMap::new();
 
     // Get current HEAD target to mark the active branch
-    let head_target = repo
-        .head()
-        .ok()
-        .and_then(|h| {
-            if h.is_branch() {
-                h.shorthand().map(String::from)
-            } else {
-                None
-            }
-        });
+    let head_target = repo.head().ok().and_then(|h| {
+        if h.is_branch() {
+            h.shorthand().map(String::from)
+        } else {
+            None
+        }
+    });
 
     // Iterate all references
     let Ok(refs) = repo.references() else {
@@ -1023,7 +1020,10 @@ fn get_local_branches(repo: &Repository) -> Vec<String> {
 }
 
 /// Gets tracking status (ahead/behind) for each remote.
-fn get_tracking_status(repo: &Repository, current_branch: Option<&str>) -> Vec<RemoteTrackingStatus> {
+fn get_tracking_status(
+    repo: &Repository,
+    current_branch: Option<&str>,
+) -> Vec<RemoteTrackingStatus> {
     let mut tracking = Vec::new();
 
     let Some(branch_name) = current_branch else {
@@ -2537,10 +2537,7 @@ mod tests {
             serde_json::to_string(&RefKind::RemoteBranch).unwrap(),
             "\"RemoteBranch\""
         );
-        assert_eq!(
-            serde_json::to_string(&RefKind::Tag).unwrap(),
-            "\"Tag\""
-        );
+        assert_eq!(serde_json::to_string(&RefKind::Tag).unwrap(), "\"Tag\"");
     }
 
     #[test]
@@ -2627,7 +2624,10 @@ mod tests {
             .refs
             .iter()
             .any(|r| r.kind == RefKind::LocalBranch);
-        assert!(has_local_branch, "HEAD commit should have a local branch ref");
+        assert!(
+            has_local_branch,
+            "HEAD commit should have a local branch ref"
+        );
 
         // The HEAD branch should be marked
         let has_head_marker = head_commit.refs.iter().any(|r| r.is_head);

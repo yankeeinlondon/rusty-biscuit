@@ -8,13 +8,13 @@ use crate::os::detect_os_type;
 use crate::programs::enums::Utility;
 use crate::programs::find_program::find_programs_with_source_parallel;
 use crate::programs::installer::{
-    execute_install, execute_versioned_install, method_available, select_best_method,
-    InstallOptions,
+    InstallOptions, execute_install, execute_versioned_install, method_available,
+    select_best_method,
 };
 use crate::programs::schema::{ProgramEntry, ProgramError, ProgramMetadata};
 use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{
-    InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
+    InstalledLanguagePackageManagers, InstalledOsPackageManagers, PROGRAM_LOOKUP, Program,
 };
 
 fn utility_details(utility: Utility) -> Option<&'static crate::programs::ProgramDetails> {

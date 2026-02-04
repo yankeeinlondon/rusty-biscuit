@@ -143,9 +143,11 @@ mod tests {
     #[test]
     fn test_error_display_no_image_support() {
         let error = MermaidRenderError::NoImageSupport;
-        assert!(error
-            .to_string()
-            .contains("does not support image rendering"));
+        assert!(
+            error
+                .to_string()
+                .contains("does not support image rendering")
+        );
     }
 
     #[test]

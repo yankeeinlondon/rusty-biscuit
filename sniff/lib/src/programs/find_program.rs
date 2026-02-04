@@ -68,7 +68,9 @@ use super::types::ExecutableSource;
 ///     println!("Found at: {}", path.display());
 /// }
 /// ```
-pub fn find_program_with_source<P: AsRef<OsStr>>(program: P) -> Option<(PathBuf, ExecutableSource)> {
+pub fn find_program_with_source<P: AsRef<OsStr>>(
+    program: P,
+) -> Option<(PathBuf, ExecutableSource)> {
     let program_str = program.as_ref().to_string_lossy();
 
     // Priority 1: Check PATH first
@@ -281,7 +283,12 @@ mod tests {
             assert!(result.is_some(), "{} should be found", prog);
             let (path, source) = result.as_ref().unwrap();
             assert!(path.exists(), "Path for {} should exist", prog);
-            assert_eq!(*source, ExecutableSource::Path, "{} should be via PATH", prog);
+            assert_eq!(
+                *source,
+                ExecutableSource::Path,
+                "{} should be via PATH",
+                prog
+            );
         }
     }
 
@@ -322,7 +329,10 @@ mod tests {
         let programs = &["ls", ""];
         let results = find_programs_parallel(programs);
         assert_eq!(results.len(), 2);
-        assert!(results.get("").unwrap().is_none(), "Empty string should not find anything");
+        assert!(
+            results.get("").unwrap().is_none(),
+            "Empty string should not find anything"
+        );
     }
 
     #[test]
@@ -374,7 +384,8 @@ mod tests {
             if let Some((_, source)) = results.get("wezterm").unwrap() {
                 // Either PATH or MacOsAppBundle is valid depending on installation
                 assert!(
-                    *source == ExecutableSource::Path || *source == ExecutableSource::MacOsAppBundle,
+                    *source == ExecutableSource::Path
+                        || *source == ExecutableSource::MacOsAppBundle,
                     "wezterm should be found via PATH or app bundle"
                 );
             }

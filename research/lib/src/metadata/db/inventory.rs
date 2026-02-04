@@ -30,14 +30,13 @@ use std::path::Path;
 use crate::metadata::{Document, KindCategory, Topic};
 
 use super::{
-    queries::{
-        count_topics, fetch_topic_with_children, get_all_topic_names, topic_exists,
-    },
+    DbError, DbPool, DbResult, init_memory_pool, init_pool,
+    queries::{count_topics, fetch_topic_with_children, get_all_topic_names, topic_exists},
     rows::{
-        content_type_to_text, kind_category_to_discriminator,
-        licenses_to_json, package_manager_to_text,
+        content_type_to_text, kind_category_to_discriminator, licenses_to_json,
+        package_manager_to_text,
     },
-    init_memory_pool, init_pool, run_migrations, u64_to_i64, DbError, DbPool, DbResult,
+    run_migrations, u64_to_i64,
 };
 
 /// SQLite-backed research inventory.
@@ -142,7 +141,8 @@ impl ResearchInventoryDb {
         let mut tx = self.pool.begin().await.map_err(DbError::QueryFailed)?;
 
         // Insert the topic
-        self.insert_topic_with_tx(&mut tx, topic, parent_name).await?;
+        self.insert_topic_with_tx(&mut tx, topic, parent_name)
+            .await?;
 
         // Commit
         tx.commit().await.map_err(DbError::QueryFailed)?;
@@ -219,7 +219,9 @@ impl ResearchInventoryDb {
                 .map_err(DbError::QueryFailed)?;
             }
             // Person, SolutionArea, ProgrammingLanguage have no detail tables
-            KindCategory::Person | KindCategory::SolutionArea | KindCategory::ProgrammingLanguage => {}
+            KindCategory::Person
+            | KindCategory::SolutionArea
+            | KindCategory::ProgrammingLanguage => {}
         }
 
         // Insert documents
@@ -278,13 +280,12 @@ impl ResearchInventoryDb {
         let mut tx = self.pool.begin().await.map_err(DbError::QueryFailed)?;
 
         // Get the parent name before deleting
-        let parent_name: Option<(Option<String>,)> = sqlx::query_as(
-            "SELECT parent_topic_name FROM topics WHERE name = ?1",
-        )
-        .bind(topic.name())
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(DbError::QueryFailed)?;
+        let parent_name: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT parent_topic_name FROM topics WHERE name = ?1")
+                .bind(topic.name())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(DbError::QueryFailed)?;
 
         let parent = parent_name.and_then(|(p,)| p);
 
@@ -296,7 +297,8 @@ impl ResearchInventoryDb {
             .map_err(DbError::QueryFailed)?;
 
         // Insert updated topic
-        self.insert_topic_with_tx(&mut tx, topic, parent.as_deref()).await?;
+        self.insert_topic_with_tx(&mut tx, topic, parent.as_deref())
+            .await?;
 
         tx.commit().await.map_err(DbError::QueryFailed)?;
         Ok(())
@@ -326,7 +328,7 @@ impl ResearchInventoryDb {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metadata::{Software, KindCategory};
+    use crate::metadata::{KindCategory, Software};
 
     fn create_test_topic(name: &str) -> Topic {
         Topic::new(
@@ -443,7 +445,10 @@ mod tests {
         db.insert(&topic, None).await.unwrap();
 
         let retrieved = db.get("rust").await.unwrap().unwrap();
-        assert!(matches!(retrieved.kind(), KindCategory::ProgrammingLanguage));
+        assert!(matches!(
+            retrieved.kind(),
+            KindCategory::ProgrammingLanguage
+        ));
     }
 
     #[tokio::test]
@@ -473,10 +478,7 @@ mod tests {
         for i in 0..10 {
             let db_clone = Arc::clone(&db);
             let handle = tokio::spawn(async move {
-                let topic = Topic::new(
-                    format!("concurrent-topic-{}", i),
-                    KindCategory::Person,
-                );
+                let topic = Topic::new(format!("concurrent-topic-{}", i), KindCategory::Person);
                 db_clone.insert(&topic, None).await
             });
             handles.push(handle);
@@ -493,14 +495,18 @@ mod tests {
         // Verify we can retrieve each topic
         for i in 0..10 {
             let name = format!("concurrent-topic-{}", i);
-            assert!(db.contains(&name).await.unwrap(), "Topic {} not found", name);
+            assert!(
+                db.contains(&name).await.unwrap(),
+                "Topic {} not found",
+                name
+            );
         }
     }
 
     #[tokio::test]
     async fn test_all_kind_variants_roundtrip() {
-        use sniff_lib::package::LanguagePackageManager;
         use crate::metadata::Library;
+        use sniff_lib::package::LanguagePackageManager;
 
         let db = ResearchInventoryDb::in_memory().await.unwrap();
 
@@ -541,10 +547,16 @@ mod tests {
         assert!(matches!(person_retrieved.kind(), KindCategory::Person));
 
         let solution_retrieved = db.get("solution-topic").await.unwrap().unwrap();
-        assert!(matches!(solution_retrieved.kind(), KindCategory::SolutionArea));
+        assert!(matches!(
+            solution_retrieved.kind(),
+            KindCategory::SolutionArea
+        ));
 
         let lang_retrieved = db.get("lang-topic").await.unwrap().unwrap();
-        assert!(matches!(lang_retrieved.kind(), KindCategory::ProgrammingLanguage));
+        assert!(matches!(
+            lang_retrieved.kind(),
+            KindCategory::ProgrammingLanguage
+        ));
     }
 
     #[tokio::test]

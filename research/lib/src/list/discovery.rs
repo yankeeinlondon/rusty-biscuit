@@ -5,8 +5,8 @@
 //! for completeness.
 
 use super::types::{ResearchOutput, TopicInfo};
-use crate::metadata::inventory::ResearchInventory;
 use crate::metadata::KindCategory;
+use crate::metadata::inventory::ResearchInventory;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -226,7 +226,10 @@ fn analyze_topic(
             topic.topic_type = metadata.kind.unwrap_or_else(|| "library".to_string());
             topic.description = metadata.brief;
         } else {
-            debug!("No inventory entry or legacy metadata for topic '{}'.", name);
+            debug!(
+                "No inventory entry or legacy metadata for topic '{}'.",
+                name
+            );
         }
     }
 

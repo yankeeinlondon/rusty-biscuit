@@ -298,10 +298,13 @@ impl TerminalDetector {
         }
 
         // Get the current pane ID - this will become the task execution pane
-        let current_pane_id = Self::get_wezterm_pane_id()
-            .ok_or_else(|| "WEZTERM_PANE not set".to_string())?;
+        let current_pane_id =
+            Self::get_wezterm_pane_id().ok_or_else(|| "WEZTERM_PANE not set".to_string())?;
 
-        let tui_rows = match env::var("LINES").ok().and_then(|value| value.parse::<u16>().ok()) {
+        let tui_rows = match env::var("LINES")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+        {
             Some(rows) => {
                 let percent_rows = rows.saturating_mul(20) / 100;
                 let desired = percent_rows.max(12);
@@ -527,13 +530,17 @@ mod tests {
 
     #[test]
     fn test_gnome_terminal_detection_via_screen() {
-        with_env("GNOME_TERMINAL_SCREEN", "/org/gnome/Terminal/screen/0", || {
-            assert!(TerminalDetector::is_gnome_terminal());
-            let caps = TerminalDetector::detect();
-            assert_eq!(caps.kind, TerminalKind::GnomeTerminal);
-            assert!(!caps.supports_panes);
-            assert!(caps.supports_new_window);
-        });
+        with_env(
+            "GNOME_TERMINAL_SCREEN",
+            "/org/gnome/Terminal/screen/0",
+            || {
+                assert!(TerminalDetector::is_gnome_terminal());
+                let caps = TerminalDetector::detect();
+                assert_eq!(caps.kind, TerminalKind::GnomeTerminal);
+                assert!(!caps.supports_panes);
+                assert!(caps.supports_new_window);
+            },
+        );
     }
 
     #[test]
@@ -780,10 +787,7 @@ mod tests {
         // This ensures the UI can correctly default to NewPane target
         with_env("WEZTERM_PANE", "123", || {
             let caps = TerminalDetector::detect();
-            assert!(
-                caps.supports_panes,
-                "Wezterm should support panes"
-            );
+            assert!(caps.supports_panes, "Wezterm should support panes");
             assert!(
                 caps.supports_new_window,
                 "Wezterm should support new windows"

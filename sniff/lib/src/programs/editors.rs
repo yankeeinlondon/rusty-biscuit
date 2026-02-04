@@ -8,13 +8,13 @@ use crate::os::detect_os_type;
 use crate::programs::enums::Editor;
 use crate::programs::find_program::find_programs_with_source_parallel;
 use crate::programs::installer::{
-    execute_install, execute_versioned_install, method_available, select_best_method,
-    InstallOptions,
+    InstallOptions, execute_install, execute_versioned_install, method_available,
+    select_best_method,
 };
 use crate::programs::schema::{ProgramEntry, ProgramError, ProgramMetadata};
 use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{
-    InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
+    InstalledLanguagePackageManagers, InstalledOsPackageManagers, PROGRAM_LOOKUP, Program,
 };
 
 fn editor_details(editor: Editor) -> Option<&'static crate::programs::ProgramDetails> {
@@ -701,8 +701,7 @@ mod tests {
                 assert!(!path.as_os_str().is_empty(), "Path should not be empty");
                 // Source should be either Path or MacOsAppBundle
                 assert!(
-                    source == ExecutableSource::Path
-                        || source == ExecutableSource::MacOsAppBundle,
+                    source == ExecutableSource::Path || source == ExecutableSource::MacOsAppBundle,
                     "Source should be valid"
                 );
             }

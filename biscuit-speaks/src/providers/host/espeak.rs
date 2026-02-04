@@ -9,7 +9,10 @@ use tokio::io::AsyncWriteExt;
 
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{Gender, HostTtsProvider, Language, SpeedLevel, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
+use crate::types::{
+    Gender, HostTtsProvider, Language, SpeakResult, SpeedLevel, TtsConfig, TtsProvider, Voice,
+    VoiceQuality,
+};
 
 /// Default speaking rate for eSpeak in words per minute.
 const DEFAULT_RATE_WPM: f32 = 175.0;
@@ -134,12 +137,9 @@ impl TtsExecutor for ESpeakProvider {
         })?;
 
         // Write text to stdin
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| TtsError::StdinPipeError {
-                provider: self.binary.clone(),
-            })?;
+        let mut stdin = child.stdin.take().ok_or_else(|| TtsError::StdinPipeError {
+            provider: self.binary.clone(),
+        })?;
 
         stdin
             .write_all(text.as_bytes())
@@ -152,7 +152,10 @@ impl TtsExecutor for ESpeakProvider {
         drop(stdin);
 
         // Wait for completion
-        let output = child.wait_with_output().await.map_err(|e| TtsError::IoError { source: e })?;
+        let output = child
+            .wait_with_output()
+            .await
+            .map_err(|e| TtsError::IoError { source: e })?;
 
         if output.status.success() {
             Ok(())
@@ -490,7 +493,11 @@ Pty Language Age/Gender VoiceName File Other Languages
 
         // Should have parsed all voice lines (not the header)
         assert!(!voices.is_empty());
-        assert!(voices.len() >= 25, "Expected at least 25 voices, got {}", voices.len());
+        assert!(
+            voices.len() >= 25,
+            "Expected at least 25 voices, got {}",
+            voices.len()
+        );
     }
 
     #[test]
@@ -577,7 +584,10 @@ Pty Language Age/Gender VoiceName File Other Languages
         let voices = parse_espeak_voices(ESPEAK_NG_VOICES_SAMPLE, "espeak-ng").unwrap();
 
         // Chinese_(Mandarin) should be parsed correctly (eSpeak uses underscores)
-        let mandarin = voices.iter().find(|v| v.name == "Chinese_(Mandarin)").unwrap();
+        let mandarin = voices
+            .iter()
+            .find(|v| v.name == "Chinese_(Mandarin)")
+            .unwrap();
         assert_eq!(mandarin.gender, Gender::Male);
         assert_eq!(mandarin.languages, vec![Language::Custom("cmn".into())]);
     }
@@ -624,7 +634,10 @@ Pty Language Age/Gender VoiceName File Other Languages
         assert_eq!(parse_language_code("de"), Language::Custom("de".into()));
         assert_eq!(parse_language_code("fr"), Language::Custom("fr".into()));
         assert_eq!(parse_language_code("cmn"), Language::Custom("cmn".into()));
-        assert_eq!(parse_language_code("zh-yue"), Language::Custom("zh-yue".into()));
+        assert_eq!(
+            parse_language_code("zh-yue"),
+            Language::Custom("zh-yue".into())
+        );
     }
 
     // ========================================================================
@@ -765,13 +778,18 @@ Pty Language Age/Gender VoiceName File Other
 
         // Should have an English voice
         assert!(
-            voices.iter().any(|v| v.languages.contains(&Language::English)),
+            voices
+                .iter()
+                .any(|v| v.languages.contains(&Language::English)),
             "Expected at least one English voice"
         );
 
         println!("Found {} voices", voices.len());
         for voice in voices.iter().take(10) {
-            println!("  - {} ({:?}): {:?}", voice.name, voice.gender, voice.languages);
+            println!(
+                "  - {} ({:?}): {:?}",
+                voice.name, voice.gender, voice.languages
+            );
         }
     }
 }

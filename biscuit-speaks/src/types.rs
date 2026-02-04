@@ -41,7 +41,6 @@ impl VolumeLevel {
     }
 }
 
-
 // ============================================================================
 // Speed Level
 // ============================================================================
@@ -74,7 +73,6 @@ impl SpeedLevel {
         }
     }
 }
-
 
 /// The quality of a specific voice (on a specific provider).
 ///
@@ -246,7 +244,6 @@ impl Voice {
     }
 }
 
-
 /// Capability information for a specific TTS provider on the host system.
 ///
 /// `HostTtsCapability` tracks both the currently installed/available voices
@@ -364,7 +361,6 @@ impl HostTtsCapabilities {
         self.providers.iter().find(|p| &p.provider == provider)
     }
 }
-
 
 // ============================================================================
 // Language
@@ -1085,7 +1081,10 @@ mod tests {
 
     #[test]
     fn test_voice_quality_serialization() {
-        assert_eq!(serde_json::to_string(&VoiceQuality::Low).unwrap(), "\"low\"");
+        assert_eq!(
+            serde_json::to_string(&VoiceQuality::Low).unwrap(),
+            "\"low\""
+        );
         assert_eq!(
             serde_json::to_string(&VoiceQuality::Excellent).unwrap(),
             "\"excellent\""
@@ -1103,7 +1102,10 @@ mod tests {
     #[test]
     fn test_gender_serialization() {
         assert_eq!(serde_json::to_string(&Gender::Male).unwrap(), "\"male\"");
-        assert_eq!(serde_json::to_string(&Gender::Female).unwrap(), "\"female\"");
+        assert_eq!(
+            serde_json::to_string(&Gender::Female).unwrap(),
+            "\"female\""
+        );
         assert_eq!(serde_json::to_string(&Gender::Any).unwrap(), "\"any\"");
     }
 
@@ -1256,15 +1258,18 @@ mod tests {
 
     #[test]
     fn test_host_tts_capabilities_get_provider() {
-        let caps = HostTtsCapabilities::new()
-            .with_provider(HostTtsCapability::new(TtsProvider::Host(HostTtsProvider::Say)));
+        let caps = HostTtsCapabilities::new().with_provider(HostTtsCapability::new(
+            TtsProvider::Host(HostTtsProvider::Say),
+        ));
 
-        assert!(caps
-            .get_provider(&TtsProvider::Host(HostTtsProvider::Say))
-            .is_some());
-        assert!(caps
-            .get_provider(&TtsProvider::Host(HostTtsProvider::ESpeak))
-            .is_none());
+        assert!(
+            caps.get_provider(&TtsProvider::Host(HostTtsProvider::Say))
+                .is_some()
+        );
+        assert!(
+            caps.get_provider(&TtsProvider::Host(HostTtsProvider::ESpeak))
+                .is_none()
+        );
     }
 
     #[test]

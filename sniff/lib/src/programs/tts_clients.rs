@@ -8,13 +8,13 @@ use crate::os::detect_os_type;
 use crate::programs::enums::TtsClient;
 use crate::programs::find_program::find_programs_with_source_parallel;
 use crate::programs::installer::{
-    execute_install, execute_versioned_install, method_available, select_best_method,
-    InstallOptions,
+    InstallOptions, execute_install, execute_versioned_install, method_available,
+    select_best_method,
 };
 use crate::programs::schema::{ProgramEntry, ProgramError, ProgramMetadata};
 use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{
-    InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
+    InstalledLanguagePackageManagers, InstalledOsPackageManagers, PROGRAM_LOOKUP, Program,
 };
 
 fn tts_client_details(client: TtsClient) -> Option<&'static crate::programs::ProgramDetails> {
@@ -600,10 +600,19 @@ mod tests {
     #[test]
     fn test_kokoro_tts_binary_name_uses_hyphen() {
         let mut clients = InstalledTtsClients::default();
-        assert!(!clients.is_installed(TtsClient::KokoroTts), "Default should be false");
+        assert!(
+            !clients.is_installed(TtsClient::KokoroTts),
+            "Default should be false"
+        );
 
         // Manually set to simulate detection
-        clients.kokoro_tts = Some((PathBuf::from("/usr/local/bin/kokoro-tts"), ExecutableSource::Path));
-        assert!(clients.is_installed(TtsClient::KokoroTts), "Should be settable to true");
+        clients.kokoro_tts = Some((
+            PathBuf::from("/usr/local/bin/kokoro-tts"),
+            ExecutableSource::Path,
+        ));
+        assert!(
+            clients.is_installed(TtsClient::KokoroTts),
+            "Should be settable to true"
+        );
     }
 }

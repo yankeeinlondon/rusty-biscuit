@@ -344,15 +344,7 @@ fn test_cli_help_shows_voice_option() {
 #[test]
 fn test_cli_provider_option() {
     let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "so-you-say",
-            "--",
-            "--provider",
-            "say",
-            "test",
-        ])
+        .args(["run", "-p", "so-you-say", "--", "--provider", "say", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -425,15 +417,7 @@ fn test_cli_soft_flag() {
 #[test]
 fn test_cli_loud_and_soft_conflict() {
     let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "so-you-say",
-            "--",
-            "--loud",
-            "--soft",
-            "test",
-        ])
+        .args(["run", "-p", "so-you-say", "--", "--loud", "--soft", "test"])
         .output()
         .expect("Failed to execute");
 
@@ -490,15 +474,7 @@ fn test_cli_slow_flag() {
 #[test]
 fn test_cli_fast_and_slow_conflict() {
     let output = Command::new("cargo")
-        .args([
-            "run",
-            "-p",
-            "so-you-say",
-            "--",
-            "--fast",
-            "--slow",
-            "test",
-        ])
+        .args(["run", "-p", "so-you-say", "--", "--fast", "--slow", "test"])
         .output()
         .expect("Failed to execute");
 

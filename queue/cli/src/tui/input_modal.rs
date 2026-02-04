@@ -1,12 +1,12 @@
 //! Input modal for creating and editing scheduled tasks.
 
-use queue_lib::{parse_at_time, parse_delay, ExecutionTarget, ScheduledTask, TerminalCapabilities};
+use queue_lib::{ExecutionTarget, ScheduledTask, TerminalCapabilities, parse_at_time, parse_delay};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 use super::color_context::ColorContext;
@@ -613,13 +613,7 @@ fn render_text_field_with_placeholder(
     }
 }
 
-fn render_selector_field(
-    frame: &mut Frame,
-    area: Rect,
-    label: &str,
-    value: &str,
-    is_active: bool,
-) {
+fn render_selector_field(frame: &mut Frame, area: Rect, label: &str, value: &str, is_active: bool) {
     let style = if is_active {
         Style::default().fg(Color::Yellow)
     } else {
@@ -1055,7 +1049,10 @@ mod tests {
         // Very narrow terminal (15 - 13 label = ~2 content width)
         // "echo test" (9 chars) / 2 = 4.5 rows, rounded up = 5, capped to 4
         let rows = modal.calculate_command_rows(15);
-        assert_eq!(rows, 4, "Narrow terminal should expand rows to fit content (capped at max)");
+        assert_eq!(
+            rows, 4,
+            "Narrow terminal should expand rows to fit content (capped at max)"
+        );
     }
 
     #[test]
@@ -1092,7 +1089,8 @@ mod tests {
         let expected_value = expected_local_time.format("%H:%M").to_string();
 
         assert_eq!(
-            modal.schedule_value, expected_value,
+            modal.schedule_value,
+            expected_value,
             "Edit modal should display local time, not UTC. \
              Task UTC: {}, Expected local: {}, Got: {}",
             task.scheduled_at.format("%H:%M"),
@@ -1130,8 +1128,8 @@ mod tests {
 
     #[test]
     fn render_text_field_does_not_include_pipe() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1180,9 +1178,9 @@ mod tests {
 
     #[test]
     fn cursor_positioned_at_correct_offset() {
+        use ratatui::Terminal;
         use ratatui::backend::TestBackend;
         use ratatui::prelude::Position;
-        use ratatui::Terminal;
 
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1195,7 +1193,7 @@ mod tests {
                     area,
                     "Command",
                     "hello",
-                    true, // active
+                    true,    // active
                     Some(3), // cursor at position 3 (after "hel")
                 );
             })
@@ -1214,9 +1212,9 @@ mod tests {
 
     #[test]
     fn cursor_at_end_of_value() {
+        use ratatui::Terminal;
         use ratatui::backend::TestBackend;
         use ratatui::prelude::Position;
-        use ratatui::Terminal;
 
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1225,11 +1223,7 @@ mod tests {
             .draw(|frame| {
                 let area = Rect::new(0, 0, 40, 3);
                 render_text_field(
-                    frame,
-                    area,
-                    "Label",
-                    "test",
-                    true,
+                    frame, area, "Label", "test", true,
                     None, // cursor_pos None means end of value
                 );
             })
@@ -1247,8 +1241,8 @@ mod tests {
 
     #[test]
     fn cursor_not_moved_when_field_inactive() {
-        use ratatui::backend::{Backend, TestBackend};
         use ratatui::Terminal;
+        use ratatui::backend::{Backend, TestBackend};
 
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1280,8 +1274,8 @@ mod tests {
 
     #[test]
     fn placeholder_shown_when_empty_and_inactive() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1318,8 +1312,8 @@ mod tests {
 
     #[test]
     fn placeholder_hidden_when_active_and_empty() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
 
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1355,9 +1349,9 @@ mod tests {
 
     #[test]
     fn compact_multiline_cursor_on_first_line() {
+        use ratatui::Terminal;
         use ratatui::backend::TestBackend;
         use ratatui::prelude::Position;
-        use ratatui::Terminal;
 
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -1389,9 +1383,9 @@ mod tests {
 
     #[test]
     fn compact_multiline_cursor_on_wrapped_line() {
+        use ratatui::Terminal;
         use ratatui::backend::TestBackend;
         use ratatui::prelude::Position;
-        use ratatui::Terminal;
 
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();

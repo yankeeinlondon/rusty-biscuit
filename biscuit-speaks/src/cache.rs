@@ -245,7 +245,7 @@ use sniff_lib::programs::InstalledTtsClients;
 
 use crate::providers::cloud::ElevenLabsProvider;
 use crate::providers::host::{
-    EchogardenProvider, ESpeakProvider, GttsProvider, KokoroTtsProvider, SayProvider,
+    ESpeakProvider, EchogardenProvider, GttsProvider, KokoroTtsProvider, SayProvider,
 };
 
 #[cfg(target_os = "windows")]
@@ -597,7 +597,9 @@ mod tests {
         let provider = TtsProvider::Host(HostTtsProvider::Say);
 
         // Simulate the update logic
-        capabilities.providers.retain(|cap| cap.provider != provider);
+        capabilities
+            .providers
+            .retain(|cap| cap.provider != provider);
 
         let new_capability = HostTtsCapability::new(provider).with_voice(Voice::new("NewVoice"));
         capabilities.providers.push(new_capability);
@@ -628,19 +630,25 @@ mod tests {
         let provider = TtsProvider::Host(HostTtsProvider::Piper);
 
         // Simulate the update logic - retain removes nothing (provider not present)
-        capabilities.providers.retain(|cap| cap.provider != provider);
+        capabilities
+            .providers
+            .retain(|cap| cap.provider != provider);
 
         let new_capability = HostTtsCapability::new(provider).with_voice(Voice::new("PiperVoice"));
         capabilities.providers.push(new_capability);
 
         // Verify: Both providers present
         assert_eq!(capabilities.providers.len(), 2);
-        assert!(capabilities
-            .get_provider(&TtsProvider::Host(HostTtsProvider::Say))
-            .is_some());
-        assert!(capabilities
-            .get_provider(&TtsProvider::Host(HostTtsProvider::Piper))
-            .is_some());
+        assert!(
+            capabilities
+                .get_provider(&TtsProvider::Host(HostTtsProvider::Say))
+                .is_some()
+        );
+        assert!(
+            capabilities
+                .get_provider(&TtsProvider::Host(HostTtsProvider::Piper))
+                .is_some()
+        );
     }
 
     // ========================================================================
@@ -807,7 +815,10 @@ mod tests {
 
     #[test]
     fn test_schema_version_constant() {
-        assert_eq!(CACHE_SCHEMA_VERSION, 1, "Initial schema version should be 1");
+        assert_eq!(
+            CACHE_SCHEMA_VERSION, 1,
+            "Initial schema version should be 1"
+        );
     }
 
     #[test]

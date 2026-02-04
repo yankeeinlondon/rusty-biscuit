@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use tree_sitter::{Query, QueryCursor, StreamingIterator, Tree};
 
-use crate::queries::{query_for, QueryKind};
+use crate::queries::{QueryKind, query_for};
 use crate::shared::ProgrammingLanguage;
 
 /// Directive prefix for line-level ignores.
@@ -462,7 +462,8 @@ fn main() {
 }
 "#;
         let tree = parse_rust(source);
-        let directives = IgnoreDirectives::parse_with_tree(source, &tree, ProgrammingLanguage::Rust);
+        let directives =
+            IgnoreDirectives::parse_with_tree(source, &tree, ProgrammingLanguage::Rust);
         assert!(directives.should_ignore(4, Some("unwrap-call")));
         assert!(!directives.should_ignore(2, Some("unwrap-call")));
     }
@@ -477,7 +478,8 @@ fn main() {
 }
 "#;
         let tree = parse_rust(source);
-        let directives = IgnoreDirectives::parse_with_tree(source, &tree, ProgrammingLanguage::Rust);
+        let directives =
+            IgnoreDirectives::parse_with_tree(source, &tree, ProgrammingLanguage::Rust);
         assert!(directives.should_ignore(4, Some("unwrap-call")));
         assert!(directives.should_ignore(5, Some("unwrap-call")));
         assert!(!directives.should_ignore(4, Some("expect-call")));
@@ -492,7 +494,8 @@ fn main() {
 }
 "#;
         let tree = parse_rust(source);
-        let directives = IgnoreDirectives::parse_with_tree(source, &tree, ProgrammingLanguage::Rust);
+        let directives =
+            IgnoreDirectives::parse_with_tree(source, &tree, ProgrammingLanguage::Rust);
         assert!(directives.should_ignore(4, Some("unwrap-call")));
     }
 
@@ -506,7 +509,8 @@ fn main() {
 }
 "#;
         let tree = parse_rust(source);
-        let directives = IgnoreDirectives::parse_with_tree(source, &tree, ProgrammingLanguage::Rust);
+        let directives =
+            IgnoreDirectives::parse_with_tree(source, &tree, ProgrammingLanguage::Rust);
         // Line 4 should NOT be ignored because the directive is inside a string
         assert!(!directives.should_ignore(4, Some("unwrap-call")));
         assert!(!directives.has_directives());
@@ -552,7 +556,8 @@ fn main() {
 }
 "#;
         let tree = parse_rust(source);
-        let directives = IgnoreDirectives::parse_with_tree(source, &tree, ProgrammingLanguage::Rust);
+        let directives =
+            IgnoreDirectives::parse_with_tree(source, &tree, ProgrammingLanguage::Rust);
         // The block comment ends on line 5, so it affects line 6
         assert!(directives.should_ignore(6, Some("unwrap-call")));
     }
@@ -603,19 +608,49 @@ def main():
     #[test]
     fn extract_comment_content_handles_various_styles() {
         // Line comments
-        assert_eq!(extract_comment_content("// tree-hugger-ignore"), "tree-hugger-ignore");
-        assert_eq!(extract_comment_content("# tree-hugger-ignore"), "tree-hugger-ignore");
-        assert_eq!(extract_comment_content("-- tree-hugger-ignore"), "tree-hugger-ignore");
-        assert_eq!(extract_comment_content("; tree-hugger-ignore"), "tree-hugger-ignore");
+        assert_eq!(
+            extract_comment_content("// tree-hugger-ignore"),
+            "tree-hugger-ignore"
+        );
+        assert_eq!(
+            extract_comment_content("# tree-hugger-ignore"),
+            "tree-hugger-ignore"
+        );
+        assert_eq!(
+            extract_comment_content("-- tree-hugger-ignore"),
+            "tree-hugger-ignore"
+        );
+        assert_eq!(
+            extract_comment_content("; tree-hugger-ignore"),
+            "tree-hugger-ignore"
+        );
 
         // Block comments
-        assert_eq!(extract_comment_content("/* tree-hugger-ignore */"), "tree-hugger-ignore");
-        assert_eq!(extract_comment_content("(* tree-hugger-ignore *)"), "tree-hugger-ignore");
-        assert_eq!(extract_comment_content("--[[ tree-hugger-ignore ]]"), "tree-hugger-ignore");
+        assert_eq!(
+            extract_comment_content("/* tree-hugger-ignore */"),
+            "tree-hugger-ignore"
+        );
+        assert_eq!(
+            extract_comment_content("(* tree-hugger-ignore *)"),
+            "tree-hugger-ignore"
+        );
+        assert_eq!(
+            extract_comment_content("--[[ tree-hugger-ignore ]]"),
+            "tree-hugger-ignore"
+        );
 
         // Doc comments
-        assert_eq!(extract_comment_content("/// tree-hugger-ignore"), "tree-hugger-ignore");
-        assert_eq!(extract_comment_content("//! tree-hugger-ignore"), "tree-hugger-ignore");
-        assert_eq!(extract_comment_content("/** tree-hugger-ignore */"), "tree-hugger-ignore");
+        assert_eq!(
+            extract_comment_content("/// tree-hugger-ignore"),
+            "tree-hugger-ignore"
+        );
+        assert_eq!(
+            extract_comment_content("//! tree-hugger-ignore"),
+            "tree-hugger-ignore"
+        );
+        assert_eq!(
+            extract_comment_content("/** tree-hugger-ignore */"),
+            "tree-hugger-ignore"
+        );
     }
 }

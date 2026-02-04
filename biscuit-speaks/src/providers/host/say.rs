@@ -10,7 +10,10 @@ use tracing::{debug, trace};
 use crate::errors::TtsError;
 use crate::gender_inference::infer_gender;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{Gender, HostTtsProvider, Language, SpeedLevel, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
+use crate::types::{
+    Gender, HostTtsProvider, Language, SpeakResult, SpeedLevel, TtsConfig, TtsProvider, Voice,
+    VoiceQuality,
+};
 
 /// Default speaking rate for macOS `say` command in words per minute.
 const DEFAULT_RATE_WPM: f32 = 175.0;
@@ -259,12 +262,9 @@ impl TtsExecutor for SayProvider {
         })?;
 
         // Write text to stdin
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| TtsError::StdinPipeError {
-                provider: Self::PROVIDER_NAME.into(),
-            })?;
+        let mut stdin = child.stdin.take().ok_or_else(|| TtsError::StdinPipeError {
+            provider: Self::PROVIDER_NAME.into(),
+        })?;
 
         stdin
             .write_all(text.as_bytes())
@@ -384,10 +384,7 @@ impl TtsVoiceInventory for SayProvider {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let voices: Vec<Voice> = stdout
-            .lines()
-            .filter_map(Self::parse_voice_line)
-            .collect();
+        let voices: Vec<Voice> = stdout.lines().filter_map(Self::parse_voice_line).collect();
 
         debug!(
             provider = Self::PROVIDER_NAME,

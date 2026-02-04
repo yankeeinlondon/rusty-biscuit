@@ -156,10 +156,7 @@ mod tests {
     fn api_has_version_header() {
         let api = define_anthropic_api();
 
-        let version_header = api
-            .headers
-            .iter()
-            .find(|(k, _)| k == "anthropic-version");
+        let version_header = api.headers.iter().find(|(k, _)| k == "anthropic-version");
         assert!(version_header.is_some());
         assert_eq!(version_header.unwrap().1, "2023-06-01");
     }
@@ -202,11 +199,7 @@ mod tests {
     #[test]
     fn list_models_endpoint() {
         let api = define_anthropic_api();
-        let endpoint = api
-            .endpoints
-            .iter()
-            .find(|e| e.id == "ListModels")
-            .unwrap();
+        let endpoint = api.endpoints.iter().find(|e| e.id == "ListModels").unwrap();
 
         assert_eq!(endpoint.method, RestMethod::Get);
         assert_eq!(endpoint.path, "/models");

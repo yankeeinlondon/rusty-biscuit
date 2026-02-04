@@ -4,7 +4,7 @@
 //! including discovery, filtering, and formatting.
 
 use research_lib::list::{
-    apply_filters, discover_topics, format_json, format_terminal, ResearchOutput,
+    ResearchOutput, apply_filters, discover_topics, format_json, format_terminal,
 };
 use std::path::PathBuf;
 
@@ -73,9 +73,11 @@ fn test_incomplete_topic_has_critical_issues() {
         3,
         "Should be missing all 3 outputs"
     );
-    assert!(incomplete
-        .missing_output
-        .contains(&ResearchOutput::DeepDive));
+    assert!(
+        incomplete
+            .missing_output
+            .contains(&ResearchOutput::DeepDive)
+    );
     assert!(incomplete.missing_output.contains(&ResearchOutput::Brief));
     assert!(incomplete.missing_output.contains(&ResearchOutput::Skill));
 

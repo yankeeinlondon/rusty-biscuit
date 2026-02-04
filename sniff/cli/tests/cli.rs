@@ -105,7 +105,9 @@ fn test_dynamic_completions_fish() {
         .env("COMPLETE", "fish")
         .assert()
         .success()
-        .stdout(predicate::str::contains("complete --keep-order --exclusive --command sniff"));
+        .stdout(predicate::str::contains(
+            "complete --keep-order --exclusive --command sniff",
+        ));
 }
 
 #[test]
@@ -477,7 +479,10 @@ fn test_gpu_subcommand_json_output() {
     let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
 
     // Top level should be an array (GPU list)
-    assert!(json.is_array(), "GPU output should be an array at top level");
+    assert!(
+        json.is_array(),
+        "GPU output should be an array at top level"
+    );
 }
 
 #[test]
@@ -621,10 +626,7 @@ fn test_git_subcommand_json_output() {
 
 #[test]
 fn test_repo_subcommand_text_output() {
-    cargo_bin_cmd!("sniff")
-        .arg("repo")
-        .assert()
-        .success();
+    cargo_bin_cmd!("sniff").arg("repo").assert().success();
 }
 
 #[test]
@@ -653,10 +655,7 @@ fn test_repo_subcommand_json_output() {
 
 #[test]
 fn test_language_subcommand_text_output() {
-    cargo_bin_cmd!("sniff")
-        .arg("language")
-        .assert()
-        .success();
+    cargo_bin_cmd!("sniff").arg("language").assert().success();
 }
 
 #[test]
@@ -996,8 +995,5 @@ fn test_invalid_subcommand_fails() {
 #[test]
 fn test_old_flag_syntax_fails() {
     // Old --hardware flag should not work (not a valid subcommand or flag)
-    cargo_bin_cmd!("sniff")
-        .arg("--hardware")
-        .assert()
-        .failure();
+    cargo_bin_cmd!("sniff").arg("--hardware").assert().failure();
 }

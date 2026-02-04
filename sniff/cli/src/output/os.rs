@@ -7,10 +7,7 @@ use super::format_uptime;
 
 pub fn print_os_section(os: &sniff_lib::OsInfo, verbose: u8) {
     let title = Prose::new("<b><u>Operating System:</u></b>").render(None);
-    println!(
-        "\n{}\n",
-        title
-    );
+    println!("\n{}\n", title);
     // Prefer long_version if available, otherwise fall back to name + version
     if let Some(ref long_ver) = os.long_version {
         println!("Name: {}", long_ver);

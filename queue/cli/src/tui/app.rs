@@ -1,12 +1,7 @@
 //! Application state for the TUI.
 
 use queue_lib::{
-    HistoryStore,
-    JsonFileStore,
-    ScheduledTask,
-    TaskEvent,
-    TaskExecutor,
-    TerminalCapabilities,
+    HistoryStore, JsonFileStore, ScheduledTask, TaskEvent, TaskExecutor, TerminalCapabilities,
     TerminalDetector,
 };
 use ratatui::widgets::TableState;
@@ -107,7 +102,12 @@ impl App {
     /// Adds a history store for persisting tasks.
     pub fn with_history_store(mut self, store: JsonFileStore) -> Self {
         let next_task_id = match store.load_all() {
-            Ok(tasks) => tasks.iter().map(|task| task.id).max().unwrap_or(0).saturating_add(1),
+            Ok(tasks) => tasks
+                .iter()
+                .map(|task| task.id)
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1),
             Err(err) => {
                 tracing::warn!(error = %err, "Failed to load history for task IDs");
                 self.next_task_id
@@ -127,7 +127,13 @@ impl App {
         }
         self.save_history(&task);
         self.tasks.push(task);
-        if let Some(next_id) = self.tasks.iter().map(|t| t.id).max().and_then(|id| id.checked_add(1)) {
+        if let Some(next_id) = self
+            .tasks
+            .iter()
+            .map(|t| t.id)
+            .max()
+            .and_then(|id| id.checked_add(1))
+        {
             self.next_task_id = self.next_task_id.max(next_id);
         }
     }
@@ -148,22 +154,19 @@ impl App {
         target: queue_lib::ExecutionTarget,
         schedule_kind: queue_lib::ScheduleKind,
     ) -> bool {
-        let (updated_task, should_reschedule) = if let Some(task) =
-            self.tasks.iter_mut().find(|t| t.id == task_id)
-        {
-            let was_pending = task.is_pending();
-            task.command = command;
-            task.scheduled_at = scheduled_at;
-            task.target = target;
-            task.schedule_kind = Some(schedule_kind);
-            (task.clone(), was_pending)
-        } else {
-            return false;
-        };
+        let (updated_task, should_reschedule) =
+            if let Some(task) = self.tasks.iter_mut().find(|t| t.id == task_id) {
+                let was_pending = task.is_pending();
+                task.command = command;
+                task.scheduled_at = scheduled_at;
+                task.target = target;
+                task.schedule_kind = Some(schedule_kind);
+                (task.clone(), was_pending)
+            } else {
+                return false;
+            };
 
-        if should_reschedule
-            && let Some(ref executor) = self.executor
-        {
+        if should_reschedule && let Some(ref executor) = self.executor {
             let _ = executor.cancel_task(task_id);
             executor.schedule(updated_task.clone());
         }
@@ -226,8 +229,7 @@ impl App {
     pub fn handle_task_event(&mut self, event: TaskEvent) {
         match event {
             TaskEvent::StatusChanged { id, status } => {
-                let updated_task = if let Some(task) = self.tasks.iter_mut().find(|t| t.id == id)
-                {
+                let updated_task = if let Some(task) = self.tasks.iter_mut().find(|t| t.id == id) {
                     task.status = status;
                     Some(task.clone())
                 } else {

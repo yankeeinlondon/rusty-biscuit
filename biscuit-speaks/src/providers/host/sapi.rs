@@ -5,7 +5,9 @@
 
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
-use crate::types::{Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality};
+use crate::types::{
+    Gender, HostTtsProvider, Language, SpeakResult, TtsConfig, TtsProvider, Voice, VoiceQuality,
+};
 
 /// Windows SAPI provider using PowerShell commands.
 ///

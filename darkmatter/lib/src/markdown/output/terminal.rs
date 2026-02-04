@@ -36,6 +36,10 @@ use crate::markdown::{
     inline::{InlineEvent, InlineTag, MarkProcessor},
 };
 use crate::render::link::Link;
+use biscuit_terminal::components::image_options::TerminalImageOptions;
+use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage, parse_width_spec};
+use biscuit_terminal::discovery::detection::ImageSupport;
+use biscuit_terminal::terminal::Terminal;
 use comfy_table::{Attribute, Cell, CellAlignment, ContentArrangement, Table, presets};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::path::{Path, PathBuf};
@@ -44,10 +48,6 @@ use syntect::highlighting::{Color, Style};
 use syntect::parsing::{Scope, SyntaxReference};
 use terminal_size::{Width, terminal_size};
 use unicode_width::UnicodeWidthStr;
-use biscuit_terminal::components::image_options::TerminalImageOptions;
-use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage, parse_width_spec};
-use biscuit_terminal::discovery::detection::ImageSupport;
-use biscuit_terminal::terminal::Terminal;
 
 /// Parse image alt text to extract optional width specification.
 ///
@@ -400,7 +400,12 @@ impl ImageRenderer {
         image.path = %image_path,
         image.graphics_supported = %self.graphics_supported()
     ))]
-    pub fn render_image(&self, image_path: &str, alt_text: &str, width: Option<ImageWidth>) -> String {
+    pub fn render_image(
+        &self,
+        image_path: &str,
+        alt_text: &str,
+        width: Option<ImageWidth>,
+    ) -> String {
         // Reject remote URLs (biscuit-terminal also checks, but we fail early)
         if image_path.starts_with("http://") || image_path.starts_with("https://") {
             tracing::debug!("Remote URLs not supported");
@@ -1251,7 +1256,8 @@ pub fn write_terminal<W: std::io::Write>(
                         // Clear the wrapper by creating a new one (preserving max_width)
                         wrapper = LineWrapper::new(terminal_width as usize);
                         // render_image returns empty string on success, fallback text on failure
-                        let result = renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
+                        let result =
+                            renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
                         if !result.is_empty() {
                             // viuer failed, print fallback text
                             write!(writer, "{}", result).ok();
@@ -1259,9 +1265,11 @@ pub fn write_terminal<W: std::io::Write>(
                         writer.flush().ok();
                         just_rendered_image = true;
                     } else {
-                        wrapper.push_with_newlines(
-                            &renderer.render_image(&current_image_path, &parsed_alt, parsed_width),
-                        );
+                        wrapper.push_with_newlines(&renderer.render_image(
+                            &current_image_path,
+                            &parsed_alt,
+                            parsed_width,
+                        ));
                         just_rendered_image = true;
                     }
                 } else {
@@ -1512,8 +1520,7 @@ fn calculate_min_column_width(rows: &[Vec<String>], col_index: usize) -> usize {
 fn strip_control_sequences(input: &str) -> String {
     let without_ansi = crate::testing::strip_ansi_codes(input);
     let without_links = strip_osc8_sequences(&without_ansi);
-    let without_link_markers =
-        without_links.replace([LINK_MARKER_START, LINK_MARKER_END], "");
+    let without_link_markers = without_links.replace([LINK_MARKER_START, LINK_MARKER_END], "");
     let without_code_start = without_link_markers.replace(CODE_MARKER_START, "");
     without_code_start.replace(CODE_MARKER_END, "")
 }
@@ -1688,7 +1695,13 @@ fn replace_osc8_with_markers(content: &str, links: &mut Vec<String>) -> String {
             return output;
         };
         let display = &after_url[..end_pos];
-        let osc8 = format!("{}{}\x07{}{}", osc8_start, &after_start[..bel_pos], display, osc8_end);
+        let osc8 = format!(
+            "{}{}\x07{}{}",
+            osc8_start,
+            &after_start[..bel_pos],
+            display,
+            osc8_end
+        );
         links.push(osc8);
         output.push(LINK_MARKER_START);
         output.push_str(display);
@@ -6465,10 +6478,7 @@ fn bar() {}
 
         // The language label "sh" should NOT be on the same line as "text."
         let text_line = lines.iter().find(|l| l.contains("text."));
-        assert!(
-            text_line.is_some(),
-            "Should have a line containing 'text.'"
-        );
+        assert!(text_line.is_some(), "Should have a line containing 'text.'");
         assert!(
             !text_line.unwrap().contains(" sh "),
             "Language label 'sh' should not be on same line as prose text. Found: {:?}",

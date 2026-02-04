@@ -2021,7 +2021,10 @@ mod tests {
         // Verify second voice (cloned with fine_tuning)
         let cloned = &response.voices[1];
         assert_eq!(cloned.category, Some(VoiceCategory::Cloned));
-        let ft = cloned.fine_tuning.as_ref().expect("fine_tuning should exist");
+        let ft = cloned
+            .fine_tuning
+            .as_ref()
+            .expect("fine_tuning should exist");
         let state_map = ft.state.as_ref().expect("state should exist");
         assert_eq!(
             state_map.get("eleven_turbo_v2"),
