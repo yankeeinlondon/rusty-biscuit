@@ -561,10 +561,7 @@ fn test_flowchart_example_flag() {
 #[test]
 fn test_example_flag_does_not_require_data() {
     // Without --example, data is required
-    cargo_bin_cmd!("bt")
-        .arg("pie-chart")
-        .assert()
-        .failure();
+    cargo_bin_cmd!("bt").arg("pie-chart").assert().failure();
 
     // With --example, data is not required
     cargo_bin_cmd!("bt")

@@ -67,12 +67,12 @@ impl Section {
 
         // Apply heading style based on level
         let (prefix, style_open, style_close) = match self.level {
-            HeadingLevel::h1 => ("# ", "\x1b[1m", "\x1b[22m"),     // Bold
-            HeadingLevel::h2 => ("## ", "\x1b[1m", "\x1b[22m"),    // Bold
-            HeadingLevel::h3 => ("### ", "\x1b[1m", "\x1b[22m"),   // Bold
-            HeadingLevel::h4 => ("#### ", "\x1b[3m", "\x1b[23m"),  // Italic
+            HeadingLevel::h1 => ("# ", "\x1b[1m", "\x1b[22m"), // Bold
+            HeadingLevel::h2 => ("## ", "\x1b[1m", "\x1b[22m"), // Bold
+            HeadingLevel::h3 => ("### ", "\x1b[1m", "\x1b[22m"), // Bold
+            HeadingLevel::h4 => ("#### ", "\x1b[3m", "\x1b[23m"), // Italic
             HeadingLevel::h5 => ("##### ", "\x1b[3m", "\x1b[23m"), // Italic
-            HeadingLevel::h6 => ("###### ", "", ""),              // Plain
+            HeadingLevel::h6 => ("###### ", "", ""),           // Plain
         };
 
         // Render the heading

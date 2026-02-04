@@ -251,9 +251,7 @@ impl Layout {
             Margin::None => 0,
             Margin::Chars(chars) => *chars,
             Margin::Percent(pct) => ((terminal_width as f32) * pct / 100.0).round() as u32,
-            Margin::Offset(base, chars) => {
-                Self::resolve_margin(base, terminal_width) + chars
-            }
+            Margin::Offset(base, chars) => Self::resolve_margin(base, terminal_width) + chars,
         }
     }
 

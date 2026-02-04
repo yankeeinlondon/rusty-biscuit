@@ -1,10 +1,6 @@
 use unicode_width::UnicodeWidthChar;
 
-use crate::{
-    terminal::Terminal,
-    utils::layout::WordWrap,
-    utils::word_wrap::truncate,
-};
+use crate::{terminal::Terminal, utils::layout::WordWrap, utils::word_wrap::truncate};
 
 /// Splits the string content passed in into a vector of string based
 /// on any explicit new lines found in the content.
@@ -346,8 +342,8 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                     WordWrap::WrapProse(_, hanging_indent)
                     | WordWrap::BespokeProse(_, _, hanging_indent) => {
                         let indent = hanging_indent.unwrap_or(0) as usize;
-                        let is_continuation = !wrapped.is_empty()
-                            || visible_width(&remaining) != original_width;
+                        let is_continuation =
+                            !wrapped.is_empty() || visible_width(&remaining) != original_width;
                         if is_continuation && indent > 0 {
                             format!("{}{}", " ".repeat(indent), remaining)
                         } else {
@@ -378,8 +374,8 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                 WordWrap::WrapProse(offset, hanging_indent) => {
                     let search_offset = offset.unwrap_or(8);
                     let indent = hanging_indent.unwrap_or(0) as usize;
-                    let is_continuation = !wrapped.is_empty()
-                        || visible_width(&remaining) != original_width;
+                    let is_continuation =
+                        !wrapped.is_empty() || visible_width(&remaining) != original_width;
                     let effective_width = if is_continuation && indent > 0 {
                         width.saturating_sub(indent as u32)
                     } else {
@@ -438,17 +434,20 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
                 WordWrap::BespokeProse(offset, break_chars, hanging_indent) => {
                     let search_offset = offset.unwrap_or(8);
                     let indent = hanging_indent.unwrap_or(0) as usize;
-                    let is_continuation = !wrapped.is_empty()
-                        || visible_width(&remaining) != original_width;
+                    let is_continuation =
+                        !wrapped.is_empty() || visible_width(&remaining) != original_width;
                     let effective_width = if is_continuation && indent > 0 {
                         width.saturating_sub(indent as u32)
                     } else {
                         width
                     };
 
-                    if let Some((break_idx, break_len, is_whitespace)) =
-                        find_bespoke_break_position(&remaining, effective_width, search_offset, break_chars)
-                    {
+                    if let Some((break_idx, break_len, is_whitespace)) = find_bespoke_break_position(
+                        &remaining,
+                        effective_width,
+                        search_offset,
+                        break_chars,
+                    ) {
                         let split_at = if is_whitespace {
                             break_idx
                         } else {

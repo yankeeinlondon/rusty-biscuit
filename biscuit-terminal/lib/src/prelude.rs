@@ -1,5 +1,6 @@
 pub use crate::components::block_quote::BlockQuote;
 pub use crate::components::prose::Prose;
+pub use crate::components::renderable::{Renderable, RenderableContent};
 pub use crate::components::terminal_image::TerminalImage;
 pub use crate::components::text_block::TextBlock;
 pub use crate::components::todo::Todo;

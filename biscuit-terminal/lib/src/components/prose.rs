@@ -4,8 +4,8 @@ use std::process::Command;
 use crate::{
     components::renderable::Renderable,
     terminal::Terminal,
-    utils::color::{Tailwind, WebColor, WEB_COLOR_LOOKUP},
-    utils::layout::{Layout, Margin, WordWrap}
+    utils::color::{Tailwind, WEB_COLOR_LOOKUP, WebColor},
+    utils::layout::{Layout, Margin, WordWrap},
 };
 
 /// Prose content allows plain text to be passed in and that content will be parsed
@@ -162,7 +162,8 @@ impl Prose {
                                 inner_content.push(c);
                                 // Check for nested opening tags
                                 if inner_content.ends_with(&format!("<{}>", tag_name))
-                                    || inner_content.ends_with(&format!("<{} ", tag_name)) {
+                                    || inner_content.ends_with(&format!("<{} ", tag_name))
+                                {
                                     depth += 1;
                                 }
                                 // Check for closing tag
@@ -170,7 +171,8 @@ impl Prose {
                                     depth -= 1;
                                     if depth == 0 {
                                         // Remove the closing tag from content
-                                        inner_content.truncate(inner_content.len() - closing_tag.len());
+                                        inner_content
+                                            .truncate(inner_content.len() - closing_tag.len());
                                     }
                                 }
                             } else {
@@ -409,7 +411,8 @@ fn block_tag_to_escape(
 
         // OSC8 hyperlinks
         "a" => {
-            let href = attrs.iter()
+            let href = attrs
+                .iter()
                 .find(|(k, _)| k == "href")
                 .map(|(_, v)| v.as_str())
                 .unwrap_or("");
@@ -433,7 +436,8 @@ fn block_tag_to_escape(
         // RGB colors
         "rgb" => {
             // Parse RGB from tag name like "rgb 125,67,45"
-            let rgb_str = attrs.iter()
+            let rgb_str = attrs
+                .iter()
                 .find(|(k, _)| k.is_empty())
                 .map(|(_, v)| v.as_str())
                 .unwrap_or("");
@@ -1219,14 +1223,20 @@ mod tests {
     fn test_nested_block_tags() {
         let prose = Prose::new("<b><i>bold italic</i></b>");
         let result = prose.render(None);
-        assert_eq!(result, "\x1b[1m\x1b[3mbold italic\x1b[23m\x1b[0m\x1b[22m\x1b[0m");
+        assert_eq!(
+            result,
+            "\x1b[1m\x1b[3mbold italic\x1b[23m\x1b[0m\x1b[22m\x1b[0m"
+        );
     }
 
     #[test]
     fn test_osc8_link() {
         let prose = Prose::new("<a href=\"https://example.com\">link</a>");
         let result = prose.render(None);
-        assert_eq!(result, "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\x1b[0m");
+        assert_eq!(
+            result,
+            "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\\x1b[0m"
+        );
     }
 
     #[test]
@@ -1312,7 +1322,10 @@ mod tests {
     fn test_resolve_href_urls_unchanged() {
         assert_eq!(resolve_href("https://example.com"), "https://example.com");
         assert_eq!(resolve_href("http://example.com"), "http://example.com");
-        assert_eq!(resolve_href("mailto:test@example.com"), "mailto:test@example.com");
+        assert_eq!(
+            resolve_href("mailto:test@example.com"),
+            "mailto:test@example.com"
+        );
         assert_eq!(resolve_href("file:///path/to/file"), "file:///path/to/file");
     }
 

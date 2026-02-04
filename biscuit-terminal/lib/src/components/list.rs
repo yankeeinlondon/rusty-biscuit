@@ -4,7 +4,6 @@ use crate::{
     utils::layout::Layout,
 };
 
-
 /// An **OrderedList** contains a list of renderable items
 /// which will be rendered into an **ordered** list.
 #[derive(Debug)]
@@ -17,9 +16,9 @@ pub struct OrderedList {
 impl Default for OrderedList {
     fn default() -> Self {
         OrderedList {
-          items: vec![],
-          layout: Layout::default(),
-          indent_children: 4,
+            items: vec![],
+            layout: Layout::default(),
+            indent_children: 4,
         }
     }
 }
@@ -181,7 +180,7 @@ impl<T: Into<String>> From<Vec<T>> for UnorderedList {
                 .into_iter()
                 .map(|f| RenderableContent::String(f.into()))
                 .collect(),
-           ..UnorderedList::default()
+            ..UnorderedList::default()
         }
     }
 }
@@ -320,8 +319,8 @@ impl Renderable for UnorderedList {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_ordered_list_simple() {
@@ -373,10 +372,7 @@ mod tests {
         let result = list.render(Some(80));
         // "First" gets prefix "1. First"
         // The nested OrderedList is block-level, so it gets indented (4 spaces)
-        assert_eq!(
-            result,
-            "1. First\n    1. Nested A\n    2. Nested B"
-        );
+        assert_eq!(result, "1. First\n    1. Nested A\n    2. Nested B");
     }
 
     #[test]
@@ -384,13 +380,9 @@ mod tests {
         // Inner-most list
         let inner = OrderedList::new(vec!["Deep"]);
         // Middle list containing the inner
-        let middle = OrderedList::from(vec![
-            RenderableContent::Component(Arc::new(inner)),
-        ]);
+        let middle = OrderedList::from(vec![RenderableContent::Component(Arc::new(inner))]);
         // Outer list containing middle
-        let outer = OrderedList::from(vec![
-            RenderableContent::Component(Arc::new(middle)),
-        ]);
+        let outer = OrderedList::from(vec![RenderableContent::Component(Arc::new(middle))]);
 
         let result = outer.render(Some(80));
         // outer indents middle by 4, middle indents inner by 4 = 8 total
@@ -405,7 +397,7 @@ mod tests {
         let prose = Prose::new("Inline text");
         let items = vec![
             RenderableContent::String("Plain string".to_string()),
-            RenderableContent::Component(Arc::new(prose)),    // inline (is_block_level = false)
+            RenderableContent::Component(Arc::new(prose)), // inline (is_block_level = false)
             RenderableContent::Component(Arc::new(inner_list)), // block-level
         ];
         let list = OrderedList::from(items);
@@ -432,10 +424,7 @@ mod tests {
 
         // "Top" gets bullet "• Top"
         // The nested UnorderedList is block-level, indented by bullet width (2 for "• ")
-        assert_eq!(
-            result,
-            "• Top\n  • Sub A\n  • Sub B"
-        );
+        assert_eq!(result, "• Top\n  • Sub A\n  • Sub B");
     }
 
     #[test]
@@ -447,10 +436,7 @@ mod tests {
         ];
         let list = OrderedList::from(items);
         let result = list.render(Some(80));
-        assert_eq!(
-            result,
-            "1. Fruits:\n    • Apple\n    • Banana"
-        );
+        assert_eq!(result, "1. Fruits:\n    • Apple\n    • Banana");
     }
 
     #[test]
@@ -471,9 +457,7 @@ mod tests {
     #[test]
     fn test_no_output_exceeds_term_width() {
         let inner = OrderedList::new(vec!["Short"]);
-        let items = vec![
-            RenderableContent::Component(Arc::new(inner)),
-        ];
+        let items = vec![RenderableContent::Component(Arc::new(inner))];
         let list = OrderedList::from(items);
         let width = 40u32;
         let result = list.render(Some(width));
@@ -483,7 +467,9 @@ mod tests {
             assert!(
                 visible <= width,
                 "Line exceeds term_width {}: \"{}\" (visible width: {})",
-                width, line, visible
+                width,
+                line,
+                visible
             );
         }
     }

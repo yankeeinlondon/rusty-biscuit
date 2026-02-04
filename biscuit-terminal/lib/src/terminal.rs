@@ -61,7 +61,7 @@ fn new_terminal() -> Terminal {
 ///     println!("Config file: {:?}", config);
 /// }
 /// ```
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Terminal {
     /// The app/vendor of the terminal
     pub app: TerminalApp,

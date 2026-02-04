@@ -2,7 +2,7 @@ use std::{borrow::Cow, collections::HashMap, sync::LazyLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{utils::layout::RenderableWrapper, terminal::Terminal};
+use crate::{terminal::Terminal, utils::layout::RenderableWrapper};
 use thiserror::Error;
 
 /// A single byte value (0-255) representing one RGB color channel.
@@ -1584,12 +1584,12 @@ impl Color {
         match self {
             Color::BasicColor(c) => Some(basic_color_to_rgb(*c)),
             Color::Rgb(rgb) => Some((rgb.red(), rgb.green(), rgb.blue())),
-            Color::Web(web) => {
-                WEB_COLOR_LOOKUP.get(web).map(|rgb| (rgb.red(), rgb.green(), rgb.blue()))
-            }
-            Color::Tailwind(tw) => {
-                tw.to_hdr_color().map(|hdr| (hdr.red(), hdr.green(), hdr.blue()))
-            }
+            Color::Web(web) => WEB_COLOR_LOOKUP
+                .get(web)
+                .map(|rgb| (rgb.red(), rgb.green(), rgb.blue())),
+            Color::Tailwind(tw) => tw
+                .to_hdr_color()
+                .map(|hdr| (hdr.red(), hdr.green(), hdr.blue())),
             Color::DefaultForeground | Color::DefaultBackground | Color::Reset => None,
         }
     }

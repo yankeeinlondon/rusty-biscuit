@@ -3,8 +3,6 @@ use crate::utils::{
     layout::WordWrap,
 };
 
-
-
 /// The **word_wrap** function follows the following logic:
 ///
 /// 1. Split content into a vector of string so that we can work with
@@ -47,5 +45,3 @@ pub fn truncate<T: Into<String>>(content: T, truncate_indicator: &String, width:
     let (head, _) = split_at_visible_width(&content, target_width);
     format!("{}{}", head, truncate_indicator)
 }
-
-

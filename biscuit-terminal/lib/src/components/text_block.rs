@@ -4,10 +4,9 @@ use crate::{
     utils::{
         color::Color,
         layout::Layout,
-        styling::{FontWeight, Style, Stylist, UnderliningRequest}
-    }
+        styling::{FontWeight, Style, Stylist, UnderliningRequest},
+    },
 };
-
 
 /// Provides uniform styling support to a block of text
 #[derive(Debug)]
@@ -100,12 +99,8 @@ impl TextBlock {
 
         content = self.font_weight.term_wrap(content, term);
 
-
-
-
         content
     }
-
 }
 
 impl Renderable for TextBlock {

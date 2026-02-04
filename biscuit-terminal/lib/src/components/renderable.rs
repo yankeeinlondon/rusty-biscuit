@@ -123,7 +123,6 @@ pub trait Renderable: std::fmt::Debug {
     }
 }
 
-
 #[derive(Debug)]
 pub enum RenderableContent {
     String(String),

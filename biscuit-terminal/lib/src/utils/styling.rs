@@ -86,7 +86,7 @@ pub fn curly_underline<T: Into<String>>(content: T, terminal: Option<&Terminal>)
     let content = content.into();
     let term: Terminal = match terminal {
         Some(terminal) => Terminal::from(terminal),
-        _ => Terminal::new_tty()
+        _ => Terminal::new_tty(),
     };
     if !term.is_tty {
         return content;
@@ -124,7 +124,7 @@ pub enum UnderliningRequest {
     Double(Option<Color>),
     Dotted(Option<Color>),
     Curly(Option<Color>),
-    Dashed(Option<Color>)
+    Dashed(Option<Color>),
 }
 
 const UNDERLINE: &'static str = "4";
@@ -155,7 +155,7 @@ const NOT_INVERSE: &'static str = "27";
 ///
 /// **Note:** this _does not_ include boldfacing or dimming text
 /// as this is covered with the `FontWeight` struct.
-#[derive(Debug, Clone,  PartialEq, Eq, Serialize, Deserialize, Hash )]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum Style {
     /// italicize text
     Italic,
@@ -258,35 +258,27 @@ impl Stylist for Style {
                 match self {
                     &Style::Underline(_) => match term.underline_support.straight {
                         true => self.wrap(content),
-                        false => content.into()
-                    }
-                    &Style::CurlyUnderline(_) => {
-                        match term.underline_support.curly {
-                            true => self.wrap(content),
-                            false => content.into()
-                        }
+                        false => content.into(),
                     },
-                    &Style::DoubleUnderline(_) => {
-                        match term.underline_support.double {
-                            true => self.wrap(content),
-                            false => content.into()
-                        }
+                    &Style::CurlyUnderline(_) => match term.underline_support.curly {
+                        true => self.wrap(content),
+                        false => content.into(),
                     },
-                    &Style::DashedUnderline(_) => {
-                        match term.underline_support.dashed {
-                            true => self.wrap(content),
-                            false => content.into()
-                        }
+                    &Style::DoubleUnderline(_) => match term.underline_support.double {
+                        true => self.wrap(content),
+                        false => content.into(),
                     },
-                    &Style::DottedUnderline(_) => {
-                        match term.underline_support.dotted {
-                            true => self.wrap(content),
-                            false => content.into()
-                        }
+                    &Style::DashedUnderline(_) => match term.underline_support.dashed {
+                        true => self.wrap(content),
+                        false => content.into(),
+                    },
+                    &Style::DottedUnderline(_) => match term.underline_support.dotted {
+                        true => self.wrap(content),
+                        false => content.into(),
                     },
                     &Style::Italic => match term.supports_italic {
                         true => self.wrap(content),
-                        false => content.into()
+                        false => content.into(),
                     },
                     // These styles are widely supported - apply when is_tty
                     &Style::Blink => self.wrap(content),
@@ -297,7 +289,7 @@ impl Stylist for Style {
                     &Style::Dim => self.wrap(content),
                     &Style::NormalWeight => self.wrap(content),
                 }
-            },
+            }
             false => content.into(),
         }
     }
@@ -311,7 +303,7 @@ const NORMAL: &'static str = "\x1b[22m";
 ///
 /// This allows for defining a desired _font weight_ for a renderable component prior
 /// to rendering.
-#[derive(Debug,PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum FontWeight {
     Normal,
     Bold,

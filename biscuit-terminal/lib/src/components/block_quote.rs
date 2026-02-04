@@ -1,9 +1,15 @@
 use std::sync::Arc;
 
 use crate::{
-    components::{prose::Prose, renderable::{Renderable, RenderableContent}},
+    components::{
+        prose::Prose,
+        renderable::{Renderable, RenderableContent},
+    },
     terminal::Terminal,
-    utils::{color::{Color, Tailwind}, layout::Layout},
+    utils::{
+        color::{Color, Tailwind},
+        layout::Layout,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -54,13 +60,19 @@ impl From<&str> for BlockQuote {
 
 impl From<Prose> for BlockQuote {
     fn from(value: Prose) -> Self {
-        BlockQuote::new(RenderableContent::Component(Arc::new(value)), None::<String>)
+        BlockQuote::new(
+            RenderableContent::Component(Arc::new(value)),
+            None::<String>,
+        )
     }
 }
 
 impl From<&Prose> for BlockQuote {
     fn from(value: &Prose) -> Self {
-        BlockQuote::new(RenderableContent::Component(Arc::new((*value).clone())), None::<String>)
+        BlockQuote::new(
+            RenderableContent::Component(Arc::new((*value).clone())),
+            None::<String>,
+        )
     }
 }
 
@@ -108,9 +120,7 @@ impl BlockQuote {
 
         let content: String = match &self.content {
             RenderableContent::String(s) => s.clone(),
-            RenderableContent::Component(component) => {
-                component.fallback_render(term)
-            }
+            RenderableContent::Component(component) => component.fallback_render(term),
         };
         let mut result = String::new();
 
@@ -272,8 +282,8 @@ mod tests {
 
     #[test]
     fn test_with_text_color() {
-        let quote = BlockQuote::from("Colored text")
-            .with_text_color(Color::Tailwind(Tailwind::Blue500));
+        let quote =
+            BlockQuote::from("Colored text").with_text_color(Color::Tailwind(Tailwind::Blue500));
         assert!(quote.text_color.is_some());
     }
 
@@ -508,10 +518,7 @@ mod tests {
     #[test]
     fn test_attribution_only() {
         // Attribution with empty-ish content
-        let quote = BlockQuote::new(
-            RenderableContent::from("Quote"),
-            Some("Author"),
-        );
+        let quote = BlockQuote::new(RenderableContent::from("Quote"), Some("Author"));
         let result = quote.render(None);
         assert!(result.contains("│ Quote"));
         assert!(result.contains("│ — Author"));

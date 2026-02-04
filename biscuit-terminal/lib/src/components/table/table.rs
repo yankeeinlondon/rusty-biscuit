@@ -291,9 +291,14 @@ impl Table {
         let mut result = String::new();
         let widths = self.calculate_column_widths();
 
-        // Render title if present
         if let Some(ref title) = self.title {
             result.push_str(title);
+            result.push('\n');
+        }
+
+        if !widths.is_empty() {
+            let top_border = build_border(&widths, '┌', '┬', '┐');
+            result.push_str(&top_border);
             result.push('\n');
         }
 
@@ -312,14 +317,7 @@ impl Table {
             result.push('\n');
 
             // Render separator
-            let mut separator = String::from("├─");
-            for (i, width) in widths.iter().enumerate() {
-                separator.push_str(&"─".repeat(*width));
-                if i < widths.len() - 1 {
-                    separator.push_str("─┼─");
-                }
-            }
-            separator.push_str("─┤");
+            let separator = build_border(&widths, '├', '┼', '┤');
             result.push_str(&separator);
             result.push('\n');
         }
@@ -342,6 +340,12 @@ impl Table {
             }
             row_str.push_str(" │");
             result.push_str(&row_str);
+            result.push('\n');
+        }
+
+        if !widths.is_empty() {
+            let bottom_border = build_border(&widths, '└', '┴', '┘');
+            result.push_str(&bottom_border);
             result.push('\n');
         }
 
@@ -378,6 +382,26 @@ impl Renderable for Table {
     fn is_block_level(&self) -> bool {
         true
     }
+}
+
+fn build_border(widths: &[usize], left: char, junction: char, right: char) -> String {
+    if widths.is_empty() {
+        return String::new();
+    }
+
+    let mut border = String::from(left);
+    border.push('─');
+    for (i, width) in widths.iter().enumerate() {
+        border.push_str(&"─".repeat(*width));
+        if i < widths.len() - 1 {
+            border.push('─');
+            border.push(junction);
+            border.push('─');
+        }
+    }
+    border.push('─');
+    border.push(right);
+    border
 }
 
 #[cfg(test)]
@@ -594,12 +618,12 @@ mod tests {
 
         let result = table.render_content(None);
         let lines: Vec<&str> = result.lines().collect();
-        // Header, separator, row1, row2
-        assert_eq!(lines.len(), 4);
+        // Top border, header, separator, row1, row2, bottom border
+        assert_eq!(lines.len(), 6);
         // All content lines should have the same visible width
-        let header_width = visible_width(lines[0]);
-        let row1_width = visible_width(lines[2]);
-        let row2_width = visible_width(lines[3]);
+        let header_width = visible_width(lines[1]);
+        let row1_width = visible_width(lines[3]);
+        let row2_width = visible_width(lines[4]);
         assert_eq!(header_width, row1_width);
         assert_eq!(header_width, row2_width);
     }
@@ -616,10 +640,10 @@ mod tests {
 
         let result = table.render_content(None);
         let lines: Vec<&str> = result.lines().collect();
-        assert_eq!(lines.len(), 4);
-        let header_width = visible_width(lines[0]);
-        let row1_width = visible_width(lines[2]);
-        let row2_width = visible_width(lines[3]);
+        assert_eq!(lines.len(), 6);
+        let header_width = visible_width(lines[1]);
+        let row1_width = visible_width(lines[3]);
+        let row2_width = visible_width(lines[4]);
         assert_eq!(header_width, row1_width);
         assert_eq!(header_width, row2_width);
     }
@@ -635,9 +659,9 @@ mod tests {
 
         let result = table.render_content(None);
         let lines: Vec<&str> = result.lines().collect();
-        let header_width = visible_width(lines[0]);
-        let row1_width = visible_width(lines[2]);
-        let row2_width = visible_width(lines[3]);
+        let header_width = visible_width(lines[1]);
+        let row1_width = visible_width(lines[3]);
+        let row2_width = visible_width(lines[4]);
         assert_eq!(header_width, row1_width);
         assert_eq!(header_width, row2_width);
     }
@@ -665,7 +689,7 @@ mod tests {
         let result = table.render_content(None);
         let lines: Vec<&str> = result.lines().collect();
         // First data row: "$9.99" should be right-padded to match "$1,234.56"
-        let data_line_1 = lines[2];
+        let data_line_1 = lines[3];
         // The shorter value should have leading spaces (right-aligned)
         assert!(data_line_1.contains("    $9.99"));
     }

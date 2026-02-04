@@ -1,20 +1,19 @@
 use crate::components::{
-    list::{OrderedList, UnorderedList}, prose::Prose, renderable::RenderableContent
+    list::{OrderedList, UnorderedList},
+    prose::Prose,
+    renderable::RenderableContent,
 };
-
-
-
 
 /// The **Compose** struct allows you to _compose_
 /// 1 or more _renderable_ components together.
 pub struct Compose {
-    parts: Vec<RenderableContent>
+    parts: Vec<RenderableContent>,
 }
 
 impl From<String> for Compose {
     fn from(value: String) -> Self {
         Compose {
-            parts: vec![RenderableContent::String(value)]
+            parts: vec![RenderableContent::String(value)],
         }
     }
 }
@@ -22,27 +21,23 @@ impl From<String> for Compose {
 impl From<&str> for Compose {
     fn from(value: &str) -> Self {
         Compose {
-            parts: vec![RenderableContent::String(value.into())]
+            parts: vec![RenderableContent::String(value.into())],
         }
     }
 }
 
 impl From<RenderableContent> for Compose {
     fn from(value: RenderableContent) -> Self {
-        Compose {
-            parts: vec![value]
-        }
+        Compose { parts: vec![value] }
     }
 }
 
-
 impl Compose {
-
     /// Adds a block of _prose_ which is text that is allowed
     /// to embed styling tokens in it that can be rendered lazily
     /// when we're ready to send to the terminal.
     pub fn add_prose(&mut self, content: Prose) -> &Self {
-        self.parts.push(RenderableContent::from(content) );
+        self.parts.push(RenderableContent::from(content));
 
         self
     }
@@ -69,5 +64,4 @@ impl Compose {
 
         self
     }
-
 }

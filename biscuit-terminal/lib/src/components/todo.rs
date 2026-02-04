@@ -36,7 +36,7 @@ pub static FB_CHECKBOX_CANCELLED: LazyLock<String> =
 pub static FB_CHECKBOX_BLOCKED: LazyLock<String> =
     LazyLock::new(|| format!("[{}]", BasicColor::BrightRed.fg("⏺")));
 
-#[derive(Debug, Clone,  PartialEq, Eq, Serialize, Deserialize, Hash )]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum TodoState {
     Open,
     InProgress,
@@ -45,7 +45,7 @@ pub enum TodoState {
     Blocked,
 }
 
-#[derive(Debug, Clone,  PartialEq, Eq, Serialize, Deserialize, Hash )]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct TodoStateRep {
     pub nerd: &'static str,
     pub fallback: &'static str,
@@ -125,7 +125,6 @@ impl std::hash::Hash for Todo {
         self.last_updated.hash(state);
     }
 }
-
 
 impl Default for Todo {
     fn default() -> Self {
