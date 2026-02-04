@@ -41,7 +41,7 @@ fn local_symbols(&self) -> Result<Vec<SymbolInfo>, TreeHuggerError>
 // All identifier references in the file
 fn referenced_symbols(&self) -> Result<Vec<ReferencedSymbol>, TreeHuggerError>
 
-// Imports that are also exported
+// Re-exported imports
 fn reexported_symbols(&self) -> Result<Vec<ImportSymbol>, TreeHuggerError>
 ```
 
@@ -57,8 +57,8 @@ fn syntax_diagnostics(&self) -> Vec<SyntaxDiagnostic>
 // Unified diagnostic format (lint + syntax)
 fn diagnostics(&self) -> Vec<Diagnostic>
 
-// Unreachable code after terminal statements
-fn dead_code(&self) -> Vec<DeadCodeDiagnostic>
+// Unreachable code blocks after terminal statements
+fn dead_code(&self) -> Vec<CodeBlock>
 ```
 
 ### TreePackage
@@ -74,11 +74,11 @@ let package = TreePackage::new(".")?;
 // Create with config
 let config = TreePackageConfig {
     language: Some(ProgrammingLanguage::Rust),
-    ignore_patterns: vec!["**/target/**".to_string()],
+    ignores: vec!["**/target/**".to_string()],
 };
 let package = TreePackage::with_config(".", config)?;
 
-// Get module names (Rust only)
+// Get module names (Rust only, requires &mut self)
 let modules = package.modules();
 ```
 
@@ -166,6 +166,7 @@ pub struct TypeMetadata {
 pub struct FieldInfo {
     pub name: String,
     pub type_annotation: Option<String>,
+    pub doc_comment: Option<String>,
     pub visibility: Option<Visibility>,
     pub is_static: bool,
 }
@@ -174,6 +175,7 @@ pub struct VariantInfo {
     pub name: String,
     pub tuple_fields: Vec<String>,        // Variant(T1, T2)
     pub struct_fields: Vec<FieldInfo>,    // Variant { field: T }
+    pub doc_comment: Option<String>,
 }
 ```
 
@@ -184,11 +186,11 @@ pub struct ImportSymbol {
     pub name: String,                      // Imported name (or alias)
     pub original_name: Option<String>,     // Original name if aliased
     pub alias: Option<String>,             // Alias if renamed
-    pub source: Option<String>,            // Module/package source
     pub range: CodeRange,                  // Symbol location
-    pub statement_range: Option<CodeRange>, // Full statement range
+    pub statement_range: Option<CodeRange>, // Full statement range (serde skipped)
     pub language: ProgrammingLanguage,
     pub file: PathBuf,
+    pub source: Option<String>,            // Module/package source
 }
 ```
 
@@ -198,6 +200,8 @@ pub struct ImportSymbol {
 pub struct ReferencedSymbol {
     pub name: String,
     pub range: CodeRange,
+    pub language: ProgrammingLanguage,
+    pub file: PathBuf,
     pub is_qualified: bool,      // e.g., foo.bar, Foo::bar
     pub qualifier: Option<String>, // The qualifier (foo, Foo)
 }
@@ -209,10 +213,10 @@ pub struct ReferencedSymbol {
 
 ```rust
 pub struct LintDiagnostic {
-    pub rule: String,            // e.g., "unwrap-call", "dbg-macro"
     pub message: String,
-    pub severity: DiagnosticSeverity,
     pub range: CodeRange,
+    pub severity: DiagnosticSeverity,
+    pub rule: Option<String>,    // e.g., "unwrap-call", "dbg-macro"
     pub context: Option<SourceContext>,
 }
 ```
@@ -223,6 +227,7 @@ pub struct LintDiagnostic {
 pub struct SyntaxDiagnostic {
     pub message: String,
     pub range: CodeRange,
+    pub severity: DiagnosticSeverity,
     pub context: Option<SourceContext>,
 }
 ```
@@ -271,10 +276,10 @@ is_builtin(ProgrammingLanguage::JavaScript, "Array") // true
 use tree_hugger_lib::{is_terminal_statement, find_dead_code_after};
 
 // Check if a statement is terminal (never returns)
-is_terminal_statement(node, source, ProgrammingLanguage::Rust)
+is_terminal_statement(node, ProgrammingLanguage::Rust, source)
 
-// Find dead code after terminal statements
-find_dead_code_after(tree, source, ProgrammingLanguage::Rust)
+// Find dead code sibling nodes after a terminal statement
+find_dead_code_after(terminal_node, ProgrammingLanguage::Rust)
 ```
 
 ### Ignore Directives
@@ -282,12 +287,16 @@ find_dead_code_after(tree, source, ProgrammingLanguage::Rust)
 ```rust
 use tree_hugger_lib::IgnoreDirectives;
 
-// Parse ignore directives from source
+// Tree-sitter-based parsing (preferred)
+let directives = IgnoreDirectives::parse_with_tree(&source, &tree, language);
+
+// Line-based fallback parsing
 let directives = IgnoreDirectives::parse(&source);
 
-// Check if a rule is ignored at a line
-directives.is_ignored("unwrap-call", 42)  // line-level
-directives.is_file_ignored("unused-import")  // file-level
+// Check if a diagnostic should be suppressed
+directives.should_ignore(42, Some("unwrap-call"))  // specific rule at line 42
+directives.should_ignore(42, None)                  // any rule at line 42
+directives.has_directives()                         // true if any directives found
 ```
 
 Comment formats supported:
@@ -301,11 +310,11 @@ Comment formats supported:
 ```rust
 pub enum TreeHuggerError {
     Io { path: PathBuf, source: std::io::Error },
-    UnsupportedLanguage { extension: String },
-    ParseFailed { path: PathBuf, reason: String },
+    UnsupportedLanguage { path: PathBuf },
+    ParseFailed { path: PathBuf },
     MissingQuery { language: ProgrammingLanguage, kind: QueryKind },
-    MissingVendorQuery { language: ProgrammingLanguage },
-    QueryError { message: String },
+    MissingVendorQuery { name: String },
+    QueryError { language: ProgrammingLanguage, kind: QueryKind, source: tree_sitter::QueryError },
     QueryCachePoisoned,
     GitRootNotFound { path: PathBuf },
     NoSourceFiles { path: PathBuf },

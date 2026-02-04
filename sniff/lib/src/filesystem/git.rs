@@ -272,6 +272,12 @@ impl HostingProvider {
 pub struct GitInfo {
     /// Absolute path to the repository root.
     pub repo_root: PathBuf,
+    /// Organization or owner name from the preferred remote (e.g., "rust-lang").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub org: Option<String>,
+    /// Repository name from the preferred remote (e.g., "cargo").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
     /// Current branch name (None for detached HEAD).
     pub current_branch: Option<String>,
     /// All local branch names.
@@ -542,6 +548,71 @@ pub struct UntrackedFile {
     pub absolute_filepath: PathBuf,
 }
 
+/// Extracts the organization (owner) and repository name from a remote URL.
+///
+/// Supports both SSH (`git@github.com:owner/repo.git`) and HTTPS
+/// (`https://github.com/owner/repo.git`) URL formats. Strips `.git` suffix
+/// and splits the path into owner and repo components.
+///
+/// Returns `(None, None)` if the URL cannot be parsed.
+fn parse_org_repo(url: &str) -> (Option<String>, Option<String>) {
+    let path = if url.contains('@') && url.contains(':') {
+        // SSH: git@github.com:owner/repo.git
+        url.split(':').last().map(|s| s.trim_end_matches(".git").to_string())
+    } else if url.contains("://") {
+        // HTTPS: https://github.com/owner/repo.git
+        let parts: Vec<_> = url.split('/').skip(3).collect();
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join("/").trim_end_matches(".git").to_string())
+        }
+    } else {
+        None
+    };
+
+    match path {
+        Some(p) => {
+            let segments: Vec<&str> = p.splitn(2, '/').collect();
+            match segments.as_slice() {
+                [org, repo] if !org.is_empty() && !repo.is_empty() => {
+                    (Some(org.to_string()), Some(repo.to_string()))
+                }
+                _ => (None, None),
+            }
+        }
+        None => (None, None),
+    }
+}
+
+/// Selects the preferred remote from a list of remotes.
+///
+/// Preference order:
+/// 1. `origin` (always preferred)
+/// 2. First alphabetically, excluding `upstream`
+/// 3. `upstream` as last resort (only if it's the sole remote)
+fn preferred_remote(remotes: &[RemoteInfo]) -> Option<&RemoteInfo> {
+    if remotes.is_empty() {
+        return None;
+    }
+
+    // Prefer "origin"
+    if let Some(origin) = remotes.iter().find(|r| r.name == "origin") {
+        return Some(origin);
+    }
+
+    // First non-upstream remote alphabetically
+    let mut candidates: Vec<_> = remotes.iter().filter(|r| r.name != "upstream").collect();
+    candidates.sort_by(|a, b| a.name.cmp(&b.name));
+
+    if let Some(first) = candidates.first() {
+        return Some(first);
+    }
+
+    // Fall back to upstream if it's the only remote
+    remotes.first()
+}
+
 /// Detects Git repository information for a given path.
 ///
 /// Searches upward from the given path to find a Git repository.
@@ -599,8 +670,15 @@ pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option
     let branches = get_local_branches(&repo);
     let tracking = get_tracking_status(&repo, current_branch.as_deref());
 
+    let (org, repo) = preferred_remote(&remotes)
+        .and_then(|r| r.url.as_deref())
+        .map(parse_org_repo)
+        .unwrap_or((None, None));
+
     Ok(Some(GitInfo {
         repo_root,
+        org,
+        repo,
         current_branch,
         branches,
         in_worktree,
@@ -2569,5 +2647,98 @@ mod tests {
         if let (Some(tag_idx), Some(local_idx)) = (first_tag_idx, last_local_idx) {
             assert!(local_idx < tag_idx, "Local branches should come before tags");
         }
+    }
+
+    // ============================================================================
+    // parse_org_repo tests
+    // ============================================================================
+
+    #[test]
+    fn test_parse_org_repo_ssh() {
+        let (org, repo) = parse_org_repo("git@github.com:rust-lang/cargo.git");
+        assert_eq!(org.as_deref(), Some("rust-lang"));
+        assert_eq!(repo.as_deref(), Some("cargo"));
+    }
+
+    #[test]
+    fn test_parse_org_repo_https() {
+        let (org, repo) = parse_org_repo("https://github.com/rust-lang/cargo.git");
+        assert_eq!(org.as_deref(), Some("rust-lang"));
+        assert_eq!(repo.as_deref(), Some("cargo"));
+    }
+
+    #[test]
+    fn test_parse_org_repo_https_no_git_suffix() {
+        let (org, repo) = parse_org_repo("https://gitlab.com/acme/project");
+        assert_eq!(org.as_deref(), Some("acme"));
+        assert_eq!(repo.as_deref(), Some("project"));
+    }
+
+    #[test]
+    fn test_parse_org_repo_ssh_no_git_suffix() {
+        let (org, repo) = parse_org_repo("git@bitbucket.org:team/repo");
+        assert_eq!(org.as_deref(), Some("team"));
+        assert_eq!(repo.as_deref(), Some("repo"));
+    }
+
+    #[test]
+    fn test_parse_org_repo_invalid_url() {
+        let (org, repo) = parse_org_repo("not-a-url");
+        assert_eq!(org, None);
+        assert_eq!(repo, None);
+    }
+
+    #[test]
+    fn test_parse_org_repo_no_repo_part() {
+        let (org, repo) = parse_org_repo("https://github.com/owner-only");
+        assert_eq!(org, None);
+        assert_eq!(repo, None);
+    }
+
+    // ============================================================================
+    // preferred_remote tests
+    // ============================================================================
+
+    fn make_remote(name: &str) -> RemoteInfo {
+        RemoteInfo {
+            name: name.to_string(),
+            url: Some(format!("https://github.com/{name}/repo.git")),
+            provider: HostingProvider::GitHub,
+            branches: None,
+        }
+    }
+
+    #[test]
+    fn test_preferred_remote_origin_preferred() {
+        let remotes = vec![make_remote("upstream"), make_remote("origin"), make_remote("fork")];
+        let preferred = preferred_remote(&remotes).unwrap();
+        assert_eq!(preferred.name, "origin");
+    }
+
+    #[test]
+    fn test_preferred_remote_first_alpha_excluding_upstream() {
+        let remotes = vec![make_remote("upstream"), make_remote("fork"), make_remote("backup")];
+        let preferred = preferred_remote(&remotes).unwrap();
+        assert_eq!(preferred.name, "backup");
+    }
+
+    #[test]
+    fn test_preferred_remote_upstream_only() {
+        let remotes = vec![make_remote("upstream")];
+        let preferred = preferred_remote(&remotes).unwrap();
+        assert_eq!(preferred.name, "upstream");
+    }
+
+    #[test]
+    fn test_preferred_remote_empty() {
+        let remotes: Vec<RemoteInfo> = vec![];
+        assert!(preferred_remote(&remotes).is_none());
+    }
+
+    #[test]
+    fn test_preferred_remote_single_non_origin() {
+        let remotes = vec![make_remote("my-fork")];
+        let preferred = preferred_remote(&remotes).unwrap();
+        assert_eq!(preferred.name, "my-fork");
     }
 }

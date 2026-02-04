@@ -209,6 +209,7 @@ This repository has local Claude Code skills in `.claude/skills/`:
 - `rig` - LLM agent framework
 - `syntect` - Syntax highlighting
 - `thiserror` - Error derive macros
+- `unchained-ai` - LLM pipeline primitives, provider registry, model catalogs, and rig-core integration
 
 **Prefer using these local skills** as they contain project-specific research and are optimized for this codebase.
 
@@ -228,6 +229,7 @@ When working in this repository, you **must** follow these workflows:
    - Working in `so-you-say/`? Use the `so-you-say` skill
    - Working in `playa/`? Use the `playa` skill
    - Working in `sniff/`? Use the `sniff` skill
+   - Working in `unchained-ai/`? Use the `unchained-ai` skill
 
 3. **Dependency Management**: Before introducing new dependencies:
    - Check `docs/dependencies.md` first (primary source)

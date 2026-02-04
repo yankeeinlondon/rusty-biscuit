@@ -240,12 +240,17 @@ A pragmatic test loop:
 
 **USE THE "claude" SKILL to do this task.**
 
-- Review the @biscuit-terminal/README.md @biscuit-terminal/cli/README.md @biscuit-terminal/lib/README.md @biscuit-terminal/lib/src/components/table/README.md for documentation context on the biscuit-terminal package
+- Review the @unchained-ai/README.md @unchained-ai/cli/README.md @unchained-ai/lib/README.md @unchained-ai/gen/README.md for documentation context on the unchained-ai package
 - then review the source code in each sub-package under schematic and update the documents where there has been any drift in the documentation.
 - Review the monorepo's @CLAUDE.md and see if there is anything which should be updated here
-- Now create (or update if it already exists) a Claude Code skill for "biscuit-terminal" locally in @.claude/skills .
+- Now create (or update if it already exists) a Claude Code skill for "unchained-ai" locally in @.claude/skills .
 
 **IMPORTANT:** Remember that skills must have a `SKILL.md` file but that file should exhibit clear signs of being as short as possible by using using the best practice of progressive disclosure.
 
 - If you only have ONE file in a skill you have almost certainly NOT done this correctly!
 - If the SKILL.md is more than 500 lines then you almost certainly have NOT done this correctly!
+
+## Best Practices
+
+- when you are updating any source code you should considered how this might impact the relevant README.md's in the package and update them accordingly
+- you should always use the `rust` and `rig` skills

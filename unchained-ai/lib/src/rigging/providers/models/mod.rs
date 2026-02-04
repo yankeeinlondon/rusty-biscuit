@@ -1,3 +1,11 @@
+use std::fmt;
+use std::str::FromStr;
+
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use super::Provider;
+
 use crate::models::model_metadata::{Modality, ModelMetadata};
 use crate::rigging::providers::models::{
     anthropic::ProviderModelAnthropic, deepseek::ProviderModelDeepseek,
@@ -52,7 +60,170 @@ pub enum ProviderModel {
     ZenMux(ProviderModelZenMux),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ProviderModelParseError {
+    InvalidFormat { input: String },
+    UnknownProvider { provider: String, input: String },
+    UnknownModel { provider: Provider, model: String },
+}
+
+impl fmt::Display for ProviderModelParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidFormat { input } => write!(
+                f,
+                "Invalid model string format: '{}' (expected 'provider/model-id')",
+                input
+            ),
+            Self::UnknownProvider { provider, input } => {
+                write!(
+                    f,
+                    "Unknown provider '{}' in model string '{}'",
+                    provider, input
+                )
+            }
+            Self::UnknownModel { provider, model } => {
+                write!(f, "Unknown model '{}' for provider {:?}", model, provider)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ProviderModelParseError {}
+
 impl ProviderModel {
+    fn provider(&self) -> Provider {
+        match self {
+            Self::Anthropic(_) => Provider::Anthropic,
+            Self::Deepseek(_) => Provider::Deepseek,
+            Self::Gemini(_) => Provider::Gemini,
+            Self::Groq(_) => Provider::Groq,
+            Self::Mistral(_) => Provider::Mistral,
+            Self::MoonshotAi(_) => Provider::MoonshotAi,
+            Self::OpenAi(_) => Provider::OpenAi,
+            Self::OpenRouter(_) => Provider::OpenRouter,
+            Self::Xai(_) => Provider::Xai,
+            Self::Zai(_) => Provider::Zai,
+            Self::ZenMux(_) => Provider::ZenMux,
+        }
+    }
+
+    pub(crate) fn wire_id(&self) -> String {
+        format!("{}/{}", provider_slug(self.provider()), self.model_id())
+    }
+
+    pub(crate) fn parse_wire_id(input: &str) -> Result<Self, ProviderModelParseError> {
+        let trimmed = input.trim();
+        let (provider_raw, model_id) =
+            trimmed
+                .split_once('/')
+                .ok_or_else(|| ProviderModelParseError::InvalidFormat {
+                    input: trimmed.to_string(),
+                })?;
+
+        let provider_key = normalize_provider_key(provider_raw);
+        let provider = match provider_key.as_str() {
+            "anthropic" => Provider::Anthropic,
+            "deepseek" => Provider::Deepseek,
+            "gemini" => Provider::Gemini,
+            "groq" => Provider::Groq,
+            "mistral" => Provider::Mistral,
+            "moonshotai" | "moonshot" => Provider::MoonshotAi,
+            "openai" => Provider::OpenAi,
+            "openrouter" => Provider::OpenRouter,
+            "xai" => Provider::Xai,
+            "zai" => Provider::Zai,
+            "zenmux" => Provider::ZenMux,
+            _ => {
+                return Err(ProviderModelParseError::UnknownProvider {
+                    provider: provider_raw.trim().to_string(),
+                    input: trimmed.to_string(),
+                })
+            }
+        };
+
+        let model_id = model_id.trim();
+        if model_id.is_empty() {
+            return Err(ProviderModelParseError::InvalidFormat {
+                input: trimmed.to_string(),
+            });
+        }
+
+        let parsed = match provider {
+            Provider::Anthropic => ProviderModelAnthropic::from_str(model_id)
+                .map(Self::Anthropic)
+                .map_err(|_| ProviderModelParseError::UnknownModel {
+                    provider,
+                    model: model_id.to_string(),
+                }),
+            Provider::Deepseek => ProviderModelDeepseek::from_str(model_id)
+                .map(Self::Deepseek)
+                .map_err(|_| ProviderModelParseError::UnknownModel {
+                    provider,
+                    model: model_id.to_string(),
+                }),
+            Provider::Gemini => ProviderModelGemini::from_str(model_id)
+                .map(Self::Gemini)
+                .map_err(|_| ProviderModelParseError::UnknownModel {
+                    provider,
+                    model: model_id.to_string(),
+                }),
+            Provider::Groq => ProviderModelGroq::from_str(model_id)
+                .map(Self::Groq)
+                .map_err(|_| ProviderModelParseError::UnknownModel {
+                    provider,
+                    model: model_id.to_string(),
+                }),
+            Provider::Mistral => ProviderModelMistral::from_str(model_id)
+                .map(Self::Mistral)
+                .map_err(|_| ProviderModelParseError::UnknownModel {
+                    provider,
+                    model: model_id.to_string(),
+                }),
+            Provider::MoonshotAi => ProviderModelMoonshotAi::from_str(model_id)
+                .map(Self::MoonshotAi)
+                .map_err(|_| ProviderModelParseError::UnknownModel {
+                    provider,
+                    model: model_id.to_string(),
+                }),
+            Provider::OpenAi => ProviderModelOpenAi::from_str(model_id)
+                .map(Self::OpenAi)
+                .map_err(|_| ProviderModelParseError::UnknownModel {
+                    provider,
+                    model: model_id.to_string(),
+                }),
+            Provider::OpenRouter => ProviderModelOpenRouter::from_str(model_id)
+                .map(Self::OpenRouter)
+                .map_err(|_| ProviderModelParseError::UnknownModel {
+                    provider,
+                    model: model_id.to_string(),
+                }),
+            Provider::Xai => ProviderModelXai::from_str(model_id)
+                .map(Self::Xai)
+                .map_err(|_| ProviderModelParseError::UnknownModel {
+                    provider,
+                    model: model_id.to_string(),
+                }),
+            Provider::Zai => ProviderModelZai::from_str(model_id)
+                .map(Self::Zai)
+                .map_err(|_| ProviderModelParseError::UnknownModel {
+                    provider,
+                    model: model_id.to_string(),
+                }),
+            Provider::ZenMux => ProviderModelZenMux::from_str(model_id)
+                .map(Self::ZenMux)
+                .map_err(|_| ProviderModelParseError::UnknownModel {
+                    provider,
+                    model: model_id.to_string(),
+                }),
+            _ => Err(ProviderModelParseError::UnknownProvider {
+                provider: provider_raw.trim().to_string(),
+                input: trimmed.to_string(),
+            }),
+        };
+
+        parsed
+    }
     /// Returns the canonical wire-format model ID.
     ///
     /// Delegates to the underlying provider-specific enum's `model_id()` method.
@@ -142,6 +313,51 @@ impl ProviderModel {
         self.metadata()
             .map(|m| m.has_capability(capability))
             .unwrap_or(false)
+    }
+}
+
+fn normalize_provider_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+fn provider_slug(provider: Provider) -> &'static str {
+    match provider {
+        Provider::Anthropic => "anthropic",
+        Provider::Deepseek => "deepseek",
+        Provider::Gemini => "gemini",
+        Provider::Groq => "groq",
+        Provider::Mistral => "mistral",
+        Provider::MoonshotAi => "moonshotai",
+        Provider::OpenAi => "openai",
+        Provider::OpenRouter => "openrouter",
+        Provider::Xai => "xai",
+        Provider::Zai => "zai",
+        Provider::ZenMux => "zenmux",
+        Provider::HuggingFace | Provider::Ollama => "unsupported",
+    }
+}
+
+impl Serialize for ProviderModel {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let wire_id = self.wire_id();
+        serializer.serialize_str(&wire_id)
+    }
+}
+
+impl<'de> Deserialize<'de> for ProviderModel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let input = String::deserialize(deserializer)?;
+        Self::parse_wire_id(&input).map_err(SerdeError::custom)
     }
 }
 

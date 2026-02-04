@@ -17,7 +17,7 @@ use std::fmt::Alignment;
 use std::io::Cursor;
 use std::path::Path;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use image::{DynamicImage, ImageFormat, ImageReader};
 
 use crate::{components::renderable::Renderable, terminal::Terminal, utils::layout::Layout};
@@ -110,12 +110,12 @@ pub struct TerminalImage {
     /// Horizontal alignment of the image.
     pub alignment: Alignment,
 
-    /// Left margin in characters.
+    /// Left margin in characters (legacy; prefer layout margins).
     pub margin_left: u32,
-    /// Right margin in characters.
+    /// Right margin in characters (legacy; prefer layout margins).
     pub margin_right: u32,
 
-    /// Layout configuration for the Renderable trait.
+    /// Layout configuration for the Renderable trait (authoritative margins/width).
     layout: Layout,
 }
 
@@ -138,18 +138,20 @@ impl Default for TerminalImage {
 impl Renderable for TerminalImage {
     /// Fallback render using terminal capabilities.
     ///
-    /// Note: Use the instance method `render_to_terminal()` instead
-    /// for full protocol-aware rendering.
-    fn fallback_render(&self, _term: &Terminal) -> String {
-        "[Image: use render_to_terminal() for actual rendering]".to_string()
+    /// Attempts inline rendering; if unsupported, returns an empty string (no alt text).
+    fn fallback_render(&self, term: &Terminal) -> String {
+        match self.render_to_terminal(term) {
+            Ok(text) => text,
+            Err(_) => String::new(),
+        }
     }
 
     /// Optimistic render assuming Kitty protocol support.
     ///
-    /// Note: Use the instance method `render_to_terminal()` instead
-    /// for full protocol-aware rendering.
+    /// Returns an empty string; use `fallback_render` for real rendering.
     fn render(&self, _term_width: Option<u32>) -> String {
-        "[Image: use render_to_terminal() for actual rendering]".to_string()
+        let _ = _term_width;
+        String::new()
     }
 
     fn layout(&self) -> &Layout {
@@ -305,14 +307,14 @@ impl TerminalImage {
     ) -> Result<String, TerminalImageError> {
         use crate::discovery::detection::ImageSupport;
 
-        // When terminal supports images, use viuer for proper aspect ratio preservation
-        if !matches!(term.image_support, ImageSupport::None) {
+        if term.is_tty && !matches!(term.image_support, ImageSupport::None) {
             // viuer prints directly, so we render and return empty string
             self.render_via_viuer(term)?;
             return Ok(String::new());
         }
 
-        Ok(self.generate_alt_text())
+        // Unsupported terminal: no alt-text fallback
+        Ok(String::new())
     }
 
     /// Render the image using viuer with the instance's width setting.
@@ -320,9 +322,12 @@ impl TerminalImage {
     /// This is a convenience method that creates options from the instance's
     /// width field and renders using viuer.
     fn render_via_viuer(&self, term: &crate::terminal::Terminal) -> Result<(), TerminalImageError> {
-        let term_width = term.width();
-        let term_width = if term_width == 0 { 80 } else { term_width };
-        let available_width = term_width.saturating_sub(self.margin_left + self.margin_right);
+        let term_width = term.width().max(1);
+        let resolved_left = Layout::resolve_margin(&self.layout.left_margin, term_width)
+            .saturating_add(self.margin_left);
+        let resolved_right = Layout::resolve_margin(&self.layout.right_margin, term_width)
+            .saturating_add(self.margin_right);
+        let available_width = term_width.saturating_sub(resolved_left + resolved_right);
 
         // Convert ImageWidth to viuer's cell-based width
         let width_cells = match &self.width {
@@ -335,9 +340,9 @@ impl TerminalImage {
         let image_cells = width_cells.unwrap_or(available_width);
         let slack = available_width.saturating_sub(image_cells);
         let x_offset = match self.alignment {
-            Alignment::Left => self.margin_left,
-            Alignment::Center => self.margin_left + slack / 2,
-            Alignment::Right => self.margin_left + slack,
+            Alignment::Left => resolved_left,
+            Alignment::Center => resolved_left + slack / 2,
+            Alignment::Right => resolved_left + slack,
         };
 
         let config = viuer::Config {
@@ -436,9 +441,12 @@ impl TerminalImage {
 
     /// Build a viuer Config from the image's own width and alignment settings.
     fn build_viuer_config(&self, term: &crate::terminal::Terminal) -> viuer::Config {
-        let term_width = term.width();
-        let term_width = if term_width == 0 { 80 } else { term_width };
-        let available_width = term_width.saturating_sub(self.margin_left + self.margin_right);
+        let term_width = term.width().max(1);
+        let resolved_left = Layout::resolve_margin(&self.layout.left_margin, term_width)
+            .saturating_add(self.margin_left);
+        let resolved_right = Layout::resolve_margin(&self.layout.right_margin, term_width)
+            .saturating_add(self.margin_right);
+        let available_width = term_width.saturating_sub(resolved_left + resolved_right);
 
         // Convert ImageWidth to viuer's cell-based width
         // Use self.width (per-image, set via with_width()) over options.width (global default)
@@ -452,9 +460,9 @@ impl TerminalImage {
         let image_cells = width_cells.unwrap_or(available_width);
         let slack = available_width.saturating_sub(image_cells);
         let x_offset = match self.alignment {
-            Alignment::Left => self.margin_left,
-            Alignment::Center => self.margin_left + slack / 2,
-            Alignment::Right => self.margin_left + slack,
+            Alignment::Left => resolved_left,
+            Alignment::Center => resolved_left + slack / 2,
+            Alignment::Right => resolved_left + slack,
         };
 
         viuer::Config {
@@ -1300,7 +1308,7 @@ mod tests {
         assert!(result.contains("f=100")); // PNG format
         assert!(result.contains("a=T")); // Transmit and display
         assert!(result.contains("t=d")); // Direct transmission
-        // Should end with string terminator
+                                         // Should end with string terminator
         assert!(result.ends_with("\x1b\\"));
     }
 

@@ -27,6 +27,7 @@ Symbol analysis rules computed at runtime:
 | Rule | Severity | Description |
 |------|----------|-------------|
 | `undefined-symbol` | Error | Reference to undefined symbol |
+| `undefined-module` | Warning | Reference to undefined module or namespace |
 | `unused-symbol` | Warning | Symbol defined but never used |
 | `unused-import` | Warning | Imported symbol never referenced |
 | `dead-code` | Warning | Code after unconditional return/throw/panic |
@@ -131,11 +132,16 @@ The `IgnoreDirectives` parser:
 ```rust
 use tree_hugger_lib::IgnoreDirectives;
 
+// Tree-sitter-based parsing (preferred, avoids false positives in strings)
+let directives = IgnoreDirectives::parse_with_tree(&source, &tree, language);
+
+// Line-based fallback parsing
 let directives = IgnoreDirectives::parse(&source);
 
-// Check if ignored
-directives.is_ignored("unwrap-call", 42)  // Line 42
-directives.is_file_ignored("unused-import")
+// Check if a diagnostic should be suppressed
+directives.should_ignore(42, Some("unwrap-call"))  // specific rule at line 42
+directives.should_ignore(42, None)                  // any rule at line 42
+directives.has_directives()                         // true if any directives found
 ```
 
 ## Dead Code Detection
@@ -146,7 +152,7 @@ Tree Hugger detects unreachable code after terminal statements.
 
 | Language | Terminal Statements |
 |----------|---------------------|
-| **Rust** | `panic!()`, `unreachable!()`, `todo!()`, `unimplemented!()`, `process::exit()` |
+| **Rust** | `panic!()`, `unreachable!()`, `todo!()`, `unimplemented!()`, `process::exit()`, `process::abort()` |
 | **Go** | `panic()`, `os.Exit()` |
 | **C/C++** | `exit()`, `abort()`, `_exit()`, `_Exit()`, `quick_exit()` |
 | **Swift** | `fatalError()`, `preconditionFailure()`, `assertionFailure()` |
@@ -171,11 +177,11 @@ fn example() {
 ```rust
 use tree_hugger_lib::{is_terminal_statement, find_dead_code_after};
 
-// Check single statement
-let is_terminal = is_terminal_statement(node, source, language);
+// Check if a node is a terminal statement
+let is_terminal = is_terminal_statement(node, language, source);
 
-// Find all dead code regions
-let dead_regions = find_dead_code_after(tree, source, language);
+// Find dead code sibling nodes after a terminal statement
+let dead_nodes = find_dead_code_after(terminal_node, language);
 ```
 
 ## Builtin Symbol Detection
@@ -238,26 +244,16 @@ CLI output with context:
    ) @diagnostic.todo-macro
    ```
 
-2. **Add severity mapping** (optional, defaults to Warning):
+2. **Add severity mapping** (optional, defaults to Info):
    ```rust
-   // In queries/mod.rs
-   fn default_severity(rule: &str) -> DiagnosticSeverity {
-       match rule {
-           "todo-macro" => DiagnosticSeverity::Info,
-           // ...
-       }
-   }
+   // In queries/mod.rs — severity_for_rule()
+   "todo-macro" => DiagnosticSeverity::Info,
    ```
 
 3. **Add message formatting** (optional):
    ```rust
-   // In queries/mod.rs
-   fn rule_message(rule: &str) -> &'static str {
-       match rule {
-           "todo-macro" => "Unfinished `todo!()` macro",
-           // ...
-       }
-   }
+   // In queries/mod.rs — format_rule_message()
+   "todo-macro" => "Unfinished `todo!()` macro".to_string(),
    ```
 
 4. **Test the rule**:
@@ -266,6 +262,6 @@ CLI output with context:
    fn detects_todo_macro() {
        let file = TreeFile::new(fixture_path("lint_samples.rs"))?;
        let diagnostics = file.lint_diagnostics();
-       assert!(diagnostics.iter().any(|d| d.rule == "todo-macro"));
+       assert!(diagnostics.iter().any(|d| d.rule.as_deref() == Some("todo-macro")));
    }
    ```

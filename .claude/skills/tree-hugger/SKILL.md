@@ -30,6 +30,7 @@ Rust, TypeScript, JavaScript, Go, Python, Java, C#, C, C++, Swift, Scala, PHP, P
 | `exports` | List exported symbols |
 | `classes` | List classes with static/instance member partitioning |
 | `lint` | Run lint and syntax diagnostics |
+| `completions` | Generate shell completions (Bash, Zsh, Fish, PowerShell) |
 
 ### Library API (`TreeFile`)
 
@@ -42,7 +43,7 @@ file.local_symbols()?;      // Local definitions
 file.referenced_symbols()?; // Identifier usages
 file.lint_diagnostics();    // Pattern lint rules
 file.syntax_diagnostics();  // Parse errors
-file.dead_code();           // Unreachable code
+file.dead_code();           // Unreachable code blocks
 ```
 
 ### SymbolKind Enum
@@ -55,7 +56,7 @@ Function, Method, Type, Class, Interface, Enum, Trait, Module, Namespace, Variab
 - **Custom queries**: `lint.scm`, `references.scm`, `comments.scm` per language
 - **Capture naming**: `@local.definition.<kind>` for symbols, `@diagnostic.<rule-id>` for lint
 - **Query caching**: Global `OnceLock<QueryCache>` for thread-safe caching
-- **Builtin database**: Per-language builtin lists to avoid false positive undefined-symbol errors
+- **Builtin database**: Per-language builtin lists to avoid false positive undefined-symbol/undefined-module errors
 
 ## Detailed Documentation
 

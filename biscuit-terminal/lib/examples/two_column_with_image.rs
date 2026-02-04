@@ -4,37 +4,33 @@
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::terminal_image::TerminalImage;
 use biscuit_terminal::components::two_column::TwoColumn;
 use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::layout::WordWrap;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Detect terminal capabilities (image support, width, etc.).
     let term = Terminal::new();
 
-    // Local image (no remote URLs) with an alt text fallback. Path is anchored to
-    // the crate manifest directory so it works regardless of the current working
-    // directory (e.g., when run from workspace root or target/).
+    // Show where the image would be; keep it text-only so TwoColumn renders cleanly
+    // in all terminals. The path is relative to the workspace root.
     let image_path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/biscuit-terminal.png");
-    let image_spec = format!("{}|45%", image_path.display());
-    let image = TerminalImage::from_spec(&image_spec)?.with_alt_text("biscuit-terminal logo");
-
-    // TwoColumn renders text content. TerminalImage performs side-effect rendering for
-    // inline images, so for the column content we use the alt text. If your terminal
-    // supports Kitty/iTerm2 images, you can render inline before/after this layout via
-    // `image.render_with_viuer(&term)`.
-    let left_column = Prose::new(image.generate_alt_text());
+    let left_column = Prose::new(format!(
+        "🖼️  biscuit-terminal.png\n({})",
+        image_path.display()
+    ));
 
     // Right-hand column with a short description.
     let description = Prose::new(concat!(
         "{{bold}}biscuit-terminal{{reset}}\n\n",
         "Terminal-aware rendering with capability detection, inline images, \n",
         "Mermaid diagrams, and graceful fallbacks when features are missing."
-    ));
+    ))
+    .with_word_wrap(WordWrap::WrapProse(None, None));
 
     // Compose the two columns and render for the detected terminal width.
-    let two_col = TwoColumn::new(left_column, description).with_left_percent(0.45);
+    let two_col = TwoColumn::new(left_column, description).with_left_percent(0.35);
     let output = two_col.fallback_render(&term);
 
     println!("{}", output);

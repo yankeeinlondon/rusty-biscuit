@@ -182,7 +182,7 @@ lint *args="":
 commit:
     @echo "Committing staged changes in the Rusty Biscuit monorepo to git"
     @echo ""
-    @opencode run commit "-f" --model "opencode/gpt-5.2"
+    @opencode run commit "-f" --model "openai/gpt-5.2"
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
@@ -284,7 +284,7 @@ skill-biscuit-terminal:
 
 # Update docs and then update the skill for the tree-huger package
 skill-tree-hugger:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}tree-hugger{{RESET}} Package"
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}tree-hugger{{RESET}} package"
     @echo "-------------------------------------------------------------------------------"
     @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-tree-hugger.md)"\'
     @echo ""
@@ -297,7 +297,7 @@ skill-tree-hugger:
 
 # Update docs and then update the skill for the Research package
 skill-research:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}research{{RESET}} Package"
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}research{{RESET}} package"
     @echo "-------------------------------------------------------------------------------"
     @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-research.md)"\'
     @echo ""
@@ -309,7 +309,7 @@ skill-research:
 
 # Update docs and then update the skill for the so-you-say package
 skill-so-you-say:
-    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}so-you-say{{RESET}} Package"
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}so-you-say{{RESET}} package"
     @echo "-------------------------------------------------------------------------------"
     @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-so-you-say.md)"\'
     @echo ""
@@ -317,4 +317,16 @@ skill-so-you-say:
     @echo ""
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "The so-you-say package has synced it's documents for drift and updated the skill tree."; \
+    fi
+
+# Update docs and then update the skill for the unchained-ai package
+skill-unchained-ai:
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}unchained-ai{{RESET}} package"
+    @echo "-------------------------------------------------------------------------------"
+    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-unchained-ai.md)"\'
+    @echo ""
+    @echo "The {{BOLD}}unchained-ai{{RESET}} skill has been rebuilt"
+    @echo ""
+    @if command -v unchained-ai >/dev/null 2>&1; then \
+        unchained-ai "The unchained-ai package has synced it's documents for drift and updated the skill tree."; \
     fi

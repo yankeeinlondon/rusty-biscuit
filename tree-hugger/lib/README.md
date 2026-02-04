@@ -82,7 +82,7 @@ pub enum SymbolKind {
 Symbols include rich metadata when available:
 
 ```rust
-pub struct Symbol {
+pub struct SymbolInfo {
     pub name: String,
     pub kind: SymbolKind,
     pub range: CodeRange,
@@ -102,6 +102,8 @@ For functions and methods:
 pub struct FunctionSignature {
     pub parameters: Vec<ParameterInfo>,
     pub return_type: Option<String>,
+    pub visibility: Option<Visibility>,
+    pub is_static: bool,
 }
 ```
 
@@ -112,7 +114,7 @@ For type definitions:
 ```rust
 pub struct TypeMetadata {
     pub fields: Vec<FieldInfo>,           // Struct fields
-    pub variants: Vec<EnumVariantInfo>,   // Enum variants
+    pub variants: Vec<VariantInfo>,       // Enum variants
     pub type_parameters: Vec<String>,     // Generic parameters
 }
 ```
@@ -186,6 +188,7 @@ These rules analyze symbol definitions, imports, and references:
 | Rule | Severity | Description |
 |------|----------|-------------|
 | `undefined-symbol` | Error | Reference to a symbol not defined, imported, or builtin |
+| `undefined-module` | Warning | Reference to undefined module or namespace |
 | `unused-symbol` | Warning | Symbol defined but never referenced or exported |
 | `unused-import` | Warning | Imported symbol never used in the file |
 | `dead-code` | Warning | Code after unconditional return/throw/panic |
@@ -256,10 +259,10 @@ Control flow analysis detects unreachable code after terminal statements:
 use tree_hugger_lib::{is_terminal_statement, find_dead_code_after, ProgrammingLanguage};
 
 // Detects terminal statements per language
-// Rust: panic!, unreachable!, todo!, process::exit()
+// Rust: panic!, unreachable!, todo!, unimplemented!, process::exit(), process::abort()
 // Go: panic(), os.Exit()
 // C/C++: exit(), abort(), _exit(), _Exit(), quick_exit()
-// Swift: fatalError(), preconditionFailure()
+// Swift: fatalError(), preconditionFailure(), assertionFailure()
 // Perl: die, exit
 // Lua: error(), os.exit()
 ```
