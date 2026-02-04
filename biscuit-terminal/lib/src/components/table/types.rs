@@ -1,46 +1,78 @@
+use crate::utils::layout::Alignment;
+
+/// The data type of a table column, which drives default alignment
+/// and formatting behavior.
+#[derive(Debug, Clone, PartialEq)]
 pub enum ColumnType {
+    /// Free-form text. Default alignment: Left.
     String,
+    /// Signed integer with thousands separators. Default alignment: Right.
     Integer,
+    /// Floating-point number with two decimal places. Default alignment: Right.
     Float,
-    Currency(CurrencyOptions),
-    Metric(MetricOptions),
-    OptString,
-    OptInteger,
-    OptFloat,
-
-    Unknown
+    /// Currency value with symbol prefix. Default alignment: Right.
+    Currency(Currency),
 }
 
-pub enum ColumnAggregate {
-    None,
-    Sum,
-    Avg,
-    Median,
-    Min,
-    Max,
-    Range,
+impl ColumnType {
+    /// Returns the default alignment for this column type.
+    pub fn default_alignment(&self) -> Alignment {
+        match self {
+            ColumnType::String => Alignment::Left,
+            _ => Alignment::Right,
+        }
+    }
 }
 
-
-pub struct TableCell {
-
+impl Default for ColumnType {
+    fn default() -> Self {
+        ColumnType::String
+    }
 }
 
-pub struct TableRow {
-  title: Option<String>,
+/// Currency with a display symbol.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Currency {
+    USD,
+    GBP,
+    EUR,
 }
 
-/// A **TableColumn** is used to define:
-///
-/// - the columns **title** (optionally)
-/// - the _data type_ we expect to be in the column
-/// - the _alignment_ for this column
-///
-pub struct TableColumn {
-    title: Option<String>,
-    kind: ColumnType,
-    aggregate: ColumnAggregate,
-    alignment: ColumnAlignment,
-
+impl Currency {
+    /// Returns the currency symbol.
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            Currency::USD => "$",
+            Currency::GBP => "\u{00a3}",
+            Currency::EUR => "\u{20ac}",
+        }
+    }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn column_type_default_alignment() {
+        assert_eq!(ColumnType::String.default_alignment(), Alignment::Left);
+        assert_eq!(ColumnType::Integer.default_alignment(), Alignment::Right);
+        assert_eq!(ColumnType::Float.default_alignment(), Alignment::Right);
+        assert_eq!(
+            ColumnType::Currency(Currency::USD).default_alignment(),
+            Alignment::Right
+        );
+    }
+
+    #[test]
+    fn column_type_default_is_string() {
+        assert_eq!(ColumnType::default(), ColumnType::String);
+    }
+
+    #[test]
+    fn currency_symbols() {
+        assert_eq!(Currency::USD.symbol(), "$");
+        assert_eq!(Currency::GBP.symbol(), "\u{00a3}");
+        assert_eq!(Currency::EUR.symbol(), "\u{20ac}");
+    }
+}
