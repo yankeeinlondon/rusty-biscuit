@@ -9,13 +9,14 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
 - **Frontmatter support**: YAML parsing with typed access and merge strategies
 - **Mermaid diagrams**: Render to terminal images or HTML with theme support
 - **Document comparison**: Structural diff with change classification
+- **Visual diff utilities**: Reusable string/file diff rendering (no Markdown dependency)
 - **Table of Contents**: Hierarchical extraction with content hashing
 - **Heading normalization**: Fix hierarchy violations, relevel documents
 - **Image rendering**: Inline images via biscuit-terminal (Kitty/iTerm2 protocols)
 
 ## Architecture
 
-Darkmatter focuses on **markdown parsing and transformation**. Terminal-specific capabilities are delegated to `biscuit-terminal`:
+Darkmatter focuses on **markdown parsing and transformation**. Visual diff rendering is exposed as a standalone module (`diff::visual`) for reuse outside Markdown. Terminal-specific capabilities are delegated to `biscuit-terminal`:
 
 | Responsibility | Package |
 |----------------|---------|
@@ -43,6 +44,7 @@ write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 | Module | Description |
 |--------|-------------|
 | `markdown` | Core `Markdown` type with frontmatter, rendering, and manipulation |
+| `diff` | Visual diff utilities for strings and files |
 | `mermaid` | Mermaid diagram theming (terminal rendering via biscuit-terminal) |
 | `render` | Hyperlink rendering utilities |
 | `terminal` | ANSI code generation and color depth constants |
@@ -161,6 +163,20 @@ if !delta.is_unchanged() {
 }
 ```
 
+### Visual Diff (Strings or Files)
+
+Darkmatter uses this visual diff renderer in the Markdown CLI for frontmatter and body comparisons, but the module itself is Markdown-agnostic and works directly with any strings or files.
+
+```rust
+use darkmatter_lib::diff::visual::{render_visual_diff_str, VisualDiffOptions};
+
+let original = "Hello\nWorld";
+let updated = "Hello\nUniverse";
+
+let output = render_visual_diff_str(original, updated, &VisualDiffOptions::default());
+println!("{}", output);
+```
+
 ### Heading Normalization
 
 ```rust
@@ -232,6 +248,8 @@ use biscuit_terminal::terminal::Terminal;
 
 let mode = Terminal::color_mode();  // Light, Dark, or Unknown
 ```
+
+Terminal metadata also includes repository context. In monorepos, `package_root` reports the package containing the current working directory (or the repo root when run at the root).
 
 ## Terminal Options
 

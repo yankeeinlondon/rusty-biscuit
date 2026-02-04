@@ -1,0 +1,9 @@
+pub mod about;
+pub mod completions;
+pub mod dry_run;
+pub mod handle;
+pub mod init;
+pub mod link;
+pub mod status;
+pub mod sync;
+pub mod uninstall;

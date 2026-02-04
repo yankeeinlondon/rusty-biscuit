@@ -1,0 +1,26 @@
+[package]
+name = "claudine-cli"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+
+[[bin]]
+name = "claudine"
+path = "src/main.rs"
+
+[dependencies]
+claudine-lib = { path = "../lib" }
+clap = { version = "4.5", features = ["derive", "unstable-ext"] }
+clap_complete = "4.5"
+tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+inquire = "0.9"
+darkmatter-lib = { path = "../../darkmatter/lib" }
+color-eyre = "0.6"
+serde_json = "1.0"
+dirs = "6"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"

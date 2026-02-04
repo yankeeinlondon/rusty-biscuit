@@ -717,7 +717,7 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
         writeln!(handle).ok();
 
         // Visual diff output
-        use darkmatter_lib::markdown::delta::visual::{VisualDiffOptions, render_visual_diff};
+        use darkmatter_lib::diff::visual::{VisualDiffInput, VisualDiffOptions, render_visual_diff};
 
         let options = VisualDiffOptions::default();
 
@@ -732,7 +732,16 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
                 writeln!(
                     handle,
                     "{}",
-                    render_visual_diff(&fm_orig, &fm_upd, "original", "updated", &options)
+                    render_visual_diff(
+                        VisualDiffInput {
+                            original: &fm_orig,
+                            updated: &fm_upd,
+                            label_original: "original",
+                            label_updated: "updated",
+                        },
+                        &options,
+                    )
+                    .rendered
                 )
                 .ok();
             }
@@ -750,12 +759,15 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
                 handle,
                 "{}",
                 render_visual_diff(
-                    original.content(),
-                    updated.content(),
-                    "original",
-                    "updated",
-                    &options
+                    VisualDiffInput {
+                        original: original.content(),
+                        updated: updated.content(),
+                        label_original: "original",
+                        label_updated: "updated",
+                    },
+                    &options,
                 )
+                .rendered
             )
             .ok();
         }

@@ -1,0 +1,40 @@
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if command -v md &> /dev/null; then
+        md just.md
+    fi
+
+    echo
+    echo "Claudine (library & CLI)"
+    echo "========================"
+    echo ""
+    just --list | grep -v 'default'
+    echo
+
+# Build the library and CLI
+build *args="":
+    cargo build -p claudine-lib -p claudine-cli {{args}}
+
+# Test both library and CLI
+test:
+    cargo test -p claudine-lib -p claudine-cli
+
+# Lint both the library and CLI
+lint:
+    cargo clippy -p claudine-lib -p claudine-cli
+
+# Lint (and fix) both the library and CLI
+lint-fix *args="":
+    cargo clippy --fix -p claudine-lib -p claudine-cli {{args}}
+
+# Install the Claudine CLI
+install:
+    cargo install --path ./cli
+
+# Validate the source code without doing a full build
+check:
+    cargo check -p claudine-lib -p claudine-cli

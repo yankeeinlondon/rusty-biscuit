@@ -1157,6 +1157,17 @@ struct TerminalMetadata {
     /// Whether running in a CI environment
     is_ci: bool,
 
+    /// Whether the current directory is inside a git repository
+    in_repo: bool,
+    /// Whether the current repository is a monorepo
+    in_monorepo: bool,
+    /// Root path of the git repository (if detected)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repo_root: Option<String>,
+    /// Root path of the package containing the current working directory (monorepos only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    package_root: Option<String>,
+
     /// Font name (if detectable)
     #[serde(skip_serializing_if = "Option::is_none")]
     font: Option<String>,
@@ -3286,6 +3297,10 @@ fn collect_metadata() -> TerminalMetadata {
         height: terminal.height(),
         is_tty: terminal.is_tty,
         is_ci: terminal.is_ci,
+        in_repo: terminal.in_repo,
+        in_monorepo: terminal.in_monorepo,
+        repo_root: terminal.repo_root.as_ref().map(|p| p.display().to_string()),
+        package_root: terminal.package_root.clone(),
         color_depth: format!("{:?}", terminal.color_depth),
         color_mode: format!("{:?}", Terminal::color_mode()),
         bg_color,
@@ -3441,6 +3456,30 @@ fn print_pretty(metadata: &TerminalMetadata, verbose: bool) {
             "no".to_string()
         }
     );
+
+    println!("\n{}{}Repository{}", bold, blue, reset);
+    println!(
+        "  In Repo:    {}",
+        if metadata.in_repo {
+            format!("{}yes{}", green, reset)
+        } else {
+            "no".to_string()
+        }
+    );
+    println!(
+        "  Monorepo:   {}",
+        if metadata.in_monorepo {
+            format!("{}yes{}", green, reset)
+        } else {
+            "no".to_string()
+        }
+    );
+    if let Some(repo_root) = &metadata.repo_root {
+        println!("  Root:       {}", repo_root);
+    }
+    if let Some(package_root) = &metadata.package_root {
+        println!("  Package:    {}", package_root);
+    }
 
     // Font section (always displayed)
     println!("\n{}{}Fonts{}", bold, blue, reset);

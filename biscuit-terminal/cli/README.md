@@ -45,6 +45,7 @@ bt -v           # Verbose output
 
 Output includes:
 - **Basic Info**: App, OS, distro, dimensions, TTY status, CI detection
+- **Repository**: In-repo, monorepo, repo root path
 - **Fonts**: Name, size, Nerd Font status, ligature support
 - **Colors**: Depth, mode (light/dark), background/foreground/cursor RGB
 - **Features**: Italics, images, OSC8 links, OSC10/11/12 queries, OSC52 clipboard, Mode 2027

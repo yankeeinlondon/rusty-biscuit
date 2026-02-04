@@ -1,0 +1,58 @@
+[package]
+name = "claudine-lib"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+
+[lib]
+name = "claudine_lib"
+
+[dependencies]
+# Internal
+sniff-lib = { path = "../../sniff/lib" }
+biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash"] }
+playa = { path = "../../playa/lib", features = ["sound-effects", "async"] }
+biscuit-speaks = { path = "../../biscuit-speaks", features = ["playa"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "2.0"
+
+# Async runtime
+tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
+
+# Regex for matcher engine
+regex = "1.11"
+
+# Home directory
+dirs = "6"
+
+# URL validation
+url = { version = "2.5", features = ["serde"] }
+
+# HTTP client for log server
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# TOML editing (preserves formatting)
+toml_edit = "0.22"
+
+# Structured logging
+tracing = "0.1"
+
+# File locking
+fs2 = "0.4"
+
+# Directory traversal
+walkdir = "2.5"
+
+[dev-dependencies]
+tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
+tempfile = "3"
+serde_json = "1.0"

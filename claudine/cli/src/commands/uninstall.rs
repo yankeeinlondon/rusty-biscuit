@@ -1,0 +1,53 @@
+use clap::Args;
+use color_eyre::eyre::Result;
+
+use claudine_lib::config::detect_agents;
+
+/// Arguments for the uninstall subcommand.
+#[derive(Args)]
+pub struct UninstallArgs {
+    /// Keep config files, only remove hook registrations.
+    #[arg(long)]
+    pub keep_config: bool,
+}
+
+/// Remove Claudine hooks from all agents.
+pub fn run(args: UninstallArgs) -> Result<()> {
+    let agents = detect_agents();
+
+    println!("Removing Claudine hooks...");
+
+    for (provider, configurator) in &agents {
+        match configurator.deregister(None) {
+            Ok(()) => {
+                println!("  {provider}: hooks removed");
+            }
+            Err(e) => {
+                eprintln!("  {provider}: error - {e}");
+            }
+        }
+    }
+
+    if !args.keep_config {
+        // Remove config files
+        if let Some(home) = dirs::home_dir() {
+            let hooker_path = home.join(".hooker");
+            if hooker_path.exists() {
+                std::fs::remove_file(&hooker_path)?;
+                println!("  Removed {}", hooker_path.display());
+            }
+            let hook_config_path = home.join(".hook-config");
+            if hook_config_path.exists() {
+                std::fs::remove_file(&hook_config_path)?;
+                println!("  Removed {}", hook_config_path.display());
+            }
+        }
+    }
+
+    println!();
+    println!("Claudine has been uninstalled.");
+    if args.keep_config {
+        println!("Config files preserved. Run `claudine init` to re-register.");
+    }
+    Ok(())
+}

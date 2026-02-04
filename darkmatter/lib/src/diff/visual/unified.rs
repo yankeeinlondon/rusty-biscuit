@@ -11,9 +11,9 @@
 //! with continuation lines showing empty line numbers and maintaining
 //! the appropriate styling.
 
-use super::VisualDiffOptions;
 use super::diff::{DiffLine, InlineSpan};
-use textwrap::{Options as WrapOptions, wrap};
+use super::VisualDiffOptions;
+use textwrap::{wrap, Options as WrapOptions};
 use unicode_width::UnicodeWidthStr;
 
 // ANSI escape codes

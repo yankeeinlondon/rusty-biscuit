@@ -1,0 +1,315 @@
+use std::fs;
+use std::path::{Component, Path, PathBuf};
+
+use crate::error::{ClaudineError, Result};
+
+use super::paths::LinkScope;
+
+/// Result of a single symlink creation attempt.
+#[derive(Debug)]
+pub enum LinkResult {
+    /// Symlink was created successfully.
+    Linked {
+        /// Absolute path to the source skill directory.
+        source: PathBuf,
+        /// Absolute path to the created symlink.
+        dest: PathBuf,
+        /// The value of the symlink (absolute or relative path).
+        link_target: PathBuf,
+    },
+    /// Symlink already exists pointing to the correct target.
+    AlreadyLinked,
+    /// Linking was skipped for the stated reason.
+    Skipped {
+        /// Why the link was skipped.
+        reason: String,
+    },
+}
+
+/// Create a symlink from source skill dir into dest_dir.
+///
+/// User scope creates absolute symlinks. Repo scope creates relative symlinks.
+/// Never overwrites real (non-symlink) directories.
+///
+/// ## Errors
+///
+/// Returns an error if:
+/// - The source has no file name component
+/// - The parent directory cannot be created
+/// - The symlink cannot be created
+pub fn create_skill_link(
+    source: &Path,
+    dest_dir: &Path,
+    scope: LinkScope,
+) -> Result<LinkResult> {
+    let skill_name = source
+        .file_name()
+        .ok_or_else(|| ClaudineError::LinkingError(format!(
+            "source path has no file name: {}",
+            source.display()
+        )))?;
+
+    let dest = dest_dir.join(skill_name);
+
+    // Safety: never overwrite existing non-symlink directories
+    if dest.exists() && !dest.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+        return Ok(LinkResult::Skipped {
+            reason: format!("real directory already exists at {}", dest.display()),
+        });
+    }
+
+    // If a symlink already exists, check if it points to our source
+    if dest.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+        let existing_target = fs::read_link(&dest)?;
+        let expected = match scope {
+            LinkScope::User => source.to_path_buf(),
+            LinkScope::Repo => {
+                let parent = dest.parent().ok_or_else(|| {
+                    ClaudineError::LinkingError("dest has no parent".to_string())
+                })?;
+                relative_path(parent, source)
+            }
+        };
+
+        if existing_target == expected {
+            return Ok(LinkResult::AlreadyLinked);
+        }
+
+        return Ok(LinkResult::Skipped {
+            reason: format!(
+                "symlink exists but points to {} (expected {})",
+                existing_target.display(),
+                expected.display()
+            ),
+        });
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    // Compute link target
+    let link_target = match scope {
+        LinkScope::User => source.to_path_buf(),
+        LinkScope::Repo => {
+            let parent = dest.parent().ok_or_else(|| {
+                ClaudineError::LinkingError("dest has no parent".to_string())
+            })?;
+            relative_path(parent, source)
+        }
+    };
+
+    // Create the symlink
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&link_target, &dest)?;
+
+    #[cfg(not(unix))]
+    return Err(ClaudineError::LinkingError(
+        "symlink creation is only supported on Unix".to_string(),
+    ));
+
+    Ok(LinkResult::Linked {
+        source: source.to_path_buf(),
+        dest,
+        link_target,
+    })
+}
+
+/// Compute the relative path from `from_dir` to `target`.
+///
+/// Both paths must be absolute. The result is suitable for
+/// use as a symlink target when created inside `from_dir`.
+///
+/// ## Examples
+///
+/// ```ignore
+/// let from = Path::new("/repo/.roo/skills");
+/// let target = Path::new("/repo/.claude/skills/my-skill");
+/// assert_eq!(
+///     relative_path(from, target),
+///     PathBuf::from("../../.claude/skills/my-skill")
+/// );
+/// ```
+pub fn relative_path(from_dir: &Path, target: &Path) -> PathBuf {
+    let from_components: Vec<Component<'_>> = from_dir.components().collect();
+    let target_components: Vec<Component<'_>> = target.components().collect();
+
+    // Find common prefix length
+    let common_len = from_components
+        .iter()
+        .zip(target_components.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    // "../" for each remaining component in from_dir
+    let ups = from_components.len() - common_len;
+    let mut result = PathBuf::new();
+    for _ in 0..ups {
+        result.push("..");
+    }
+
+    // Append remaining components from target
+    for component in &target_components[common_len..] {
+        result.push(component);
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn relative_path_computes_correct_result() {
+        let from = Path::new("/repo/.roo/skills");
+        let target = Path::new("/repo/.claude/skills/my-skill");
+        let result = relative_path(from, target);
+        assert_eq!(result, PathBuf::from("../../.claude/skills/my-skill"));
+    }
+
+    #[test]
+    fn relative_path_sibling_directories() {
+        let from = Path::new("/home/user/.roo/skills");
+        let target = Path::new("/home/user/.claude/skills/clap");
+        let result = relative_path(from, target);
+        assert_eq!(result, PathBuf::from("../../.claude/skills/clap"));
+    }
+
+    #[test]
+    fn relative_path_same_parent() {
+        let from = Path::new("/a/b");
+        let target = Path::new("/a/c");
+        let result = relative_path(from, target);
+        assert_eq!(result, PathBuf::from("../c"));
+    }
+
+    #[test]
+    fn relative_path_deeply_nested() {
+        let from = Path::new("/repo/sub/.opencode/skills");
+        let target = Path::new("/repo/sub/.claude/skills/deep-skill");
+        let result = relative_path(from, target);
+        assert_eq!(result, PathBuf::from("../../.claude/skills/deep-skill"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn user_scope_creates_absolute_symlink() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("source/my-skill");
+        let dest_dir = tmp.path().join("dest");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "# Skill").unwrap();
+        fs::create_dir_all(&dest_dir).unwrap();
+
+        let result = create_skill_link(&source, &dest_dir, LinkScope::User).unwrap();
+
+        match result {
+            LinkResult::Linked {
+                source: src,
+                dest,
+                link_target,
+            } => {
+                assert_eq!(src, source);
+                assert!(dest.ends_with("my-skill"));
+                // User scope: link target should be absolute
+                assert!(link_target.is_absolute());
+                // Verify the symlink was actually created
+                assert!(dest.symlink_metadata().unwrap().file_type().is_symlink());
+            }
+            other => panic!("expected Linked, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repo_scope_creates_relative_symlink() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("repo/.claude/skills/my-skill");
+        let dest_dir = tmp.path().join("repo/.roo/skills");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "# Skill").unwrap();
+        fs::create_dir_all(&dest_dir).unwrap();
+
+        let result = create_skill_link(&source, &dest_dir, LinkScope::Repo).unwrap();
+
+        match result {
+            LinkResult::Linked { link_target, .. } => {
+                // Repo scope: link target should be relative
+                assert!(link_target.is_relative());
+                assert_eq!(
+                    link_target,
+                    PathBuf::from("../../.claude/skills/my-skill")
+                );
+            }
+            other => panic!("expected Linked, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn never_overwrites_real_directory() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("source/my-skill");
+        let dest_dir = tmp.path().join("dest");
+        let existing = dest_dir.join("my-skill");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "# Source").unwrap();
+        fs::create_dir_all(&existing).unwrap();
+        fs::write(existing.join("SKILL.md"), "# Existing").unwrap();
+
+        let result = create_skill_link(&source, &dest_dir, LinkScope::User).unwrap();
+
+        match result {
+            LinkResult::Skipped { reason } => {
+                assert!(reason.contains("real directory already exists"));
+            }
+            other => panic!("expected Skipped, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn returns_already_linked_for_existing_correct_symlink() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("source/my-skill");
+        let dest_dir = tmp.path().join("dest");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("SKILL.md"), "# Skill").unwrap();
+        fs::create_dir_all(&dest_dir).unwrap();
+
+        // Create the symlink first
+        std::os::unix::fs::symlink(&source, dest_dir.join("my-skill")).unwrap();
+
+        let result = create_skill_link(&source, &dest_dir, LinkScope::User).unwrap();
+
+        assert!(matches!(result, LinkResult::AlreadyLinked));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skips_symlink_pointing_elsewhere() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("source/my-skill");
+        let other = tmp.path().join("other/my-skill");
+        let dest_dir = tmp.path().join("dest");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        fs::create_dir_all(&dest_dir).unwrap();
+
+        // Create a symlink pointing to 'other' instead of 'source'
+        std::os::unix::fs::symlink(&other, dest_dir.join("my-skill")).unwrap();
+
+        let result = create_skill_link(&source, &dest_dir, LinkScope::User).unwrap();
+
+        match result {
+            LinkResult::Skipped { reason } => {
+                assert!(reason.contains("symlink exists but points to"));
+            }
+            other => panic!("expected Skipped, got {other:?}"),
+        }
+    }
+}

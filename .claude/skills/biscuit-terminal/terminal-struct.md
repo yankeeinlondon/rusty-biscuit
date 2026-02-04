@@ -29,6 +29,9 @@ pub struct Terminal {
     pub is_tty: bool,               // stdout connected to TTY
     pub is_ci: bool,                // CI environment detected
     pub remote: Connection,         // Local, SshClient, MoshClient
+    pub in_repo: bool,              // current directory is in a git repo
+    pub in_monorepo: bool,          // repo is a monorepo
+    pub repo_root: Option<PathBuf>, // repo root path (if detected)
 
     // Feature support
     pub supports_italic: bool,

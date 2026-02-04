@@ -108,7 +108,9 @@ impl TwoColumn {
             }
             RenderableContent::Component(component) => {
                 let rendered = if let Some(t) = term {
-                    component.fallback_render(t)
+                    let mut column_term = Terminal::from(t);
+                    column_term.fixed_width = Some(width);
+                    component.fallback_render(&column_term)
                 } else {
                     component.render(Some(width))
                 };

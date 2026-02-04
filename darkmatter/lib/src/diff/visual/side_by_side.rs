@@ -9,9 +9,9 @@
 //! with continuation lines showing empty line numbers and maintaining
 //! the appropriate background color.
 
-use super::VisualDiffOptions;
 use super::diff::{DiffLine, InlineSpan};
-use textwrap::{Options as WrapOptions, wrap};
+use super::VisualDiffOptions;
+use textwrap::{wrap, Options as WrapOptions};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 // ANSI escape codes

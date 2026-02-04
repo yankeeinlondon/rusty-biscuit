@@ -32,6 +32,7 @@ This derives `clap::ValueEnum` on supported enums, enabling:
 - **Image Rendering**: Inline images via Kitty/iTerm2 protocols with security guards
 - **Mermaid Diagrams**: Render diagrams to terminal using mmdc CLI with viuer
 - **OS Detection**: Identify operating system and Linux distribution
+- **Repo Detection**: Detect git repo root and monorepo status
 - **Font Detection**: Extract font name and size from terminal config files
 - **Color Support**: Query color depth, mode (light/dark), and background color
 - **Escape Code Analysis**: Calculate visual line widths, detect escape codes
