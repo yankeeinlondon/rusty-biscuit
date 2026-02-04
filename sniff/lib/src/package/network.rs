@@ -652,9 +652,7 @@ mod tests {
     #[tokio::test]
     async fn test_cargo_network_nonexistent_package() {
         let cargo = CargoNetwork::new();
-        let result = cargo
-            .find_package("this-crate-definitely-does-not-exist-xyz123")
-            .await;
+        let result = cargo.find_package("this-crate-definitely-does-not-exist-xyz123").await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
@@ -684,9 +682,7 @@ mod tests {
     #[tokio::test]
     async fn test_npm_network_nonexistent_package() {
         let npm = NpmNetwork::new();
-        let result = npm
-            .find_package("this-package-definitely-does-not-exist-xyz123")
-            .await;
+        let result = npm.find_package("this-package-definitely-does-not-exist-xyz123").await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
@@ -914,10 +910,7 @@ mod wiremock_tests {
         let info = result.unwrap().expect("should have package info");
         assert_eq!(info.name, "lodash");
         assert_eq!(info.version, "4.17.21");
-        assert_eq!(
-            info.description,
-            Some("Lodash modular utilities".to_string())
-        );
+        assert_eq!(info.description, Some("Lodash modular utilities".to_string()));
     }
 
     #[tokio::test]

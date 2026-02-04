@@ -201,11 +201,7 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
         let base = config
             .base_dir
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        Some(filesystem::detect_filesystem(
-            &base,
-            config.deep,
-            config.commit_count,
-        )?)
+        Some(filesystem::detect_filesystem(&base, config.deep, config.commit_count)?)
     };
 
     Ok(SniffResult {
@@ -249,10 +245,8 @@ mod tests {
 
     #[test]
     fn test_config_builder_pattern() {
-        let config = SniffConfig::new()
-            .base_dir(PathBuf::from("."))
-            .include_cpu_usage(true)
-            .skip_network();
+        let config =
+            SniffConfig::new().base_dir(PathBuf::from(".")).include_cpu_usage(true).skip_network();
 
         assert!(config.base_dir.is_some());
         assert!(config.include_cpu_usage);
@@ -289,28 +283,15 @@ mod tests {
         let config = SniffConfig::new().skip_os().skip_hardware().skip_network();
         let result = detect_with_config(config).unwrap();
         assert!(result.os.is_none(), "OS should be None when skipped");
-        assert!(
-            result.hardware.is_none(),
-            "Hardware should be None when skipped"
-        );
-        assert!(
-            result.network.is_none(),
-            "Network should be None when skipped"
-        );
-        assert!(
-            result.filesystem.is_some(),
-            "Filesystem should be Some when not skipped"
-        );
+        assert!(result.hardware.is_none(), "Hardware should be None when skipped");
+        assert!(result.network.is_none(), "Network should be None when skipped");
+        assert!(result.filesystem.is_some(), "Filesystem should be Some when not skipped");
     }
 
     // Regression test: Multiple skip flags including OS
     #[test]
     fn test_multiple_skip_flags_including_os() {
-        let config = SniffConfig::new()
-            .skip_os()
-            .skip_hardware()
-            .skip_network()
-            .skip_filesystem();
+        let config = SniffConfig::new().skip_os().skip_hardware().skip_network().skip_filesystem();
         let result = detect_with_config(config).unwrap();
         assert!(result.os.is_none());
         assert!(result.hardware.is_none());

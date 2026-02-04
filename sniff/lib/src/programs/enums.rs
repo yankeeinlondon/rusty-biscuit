@@ -61,12 +61,7 @@ pub enum Editor {
 /// Metadata lookup table for editors.
 static EDITOR_INFO: &[ProgramInfo] = &[
     ProgramInfo::standard("vi", "Vi", "The classic vi editor", "https://www.vim.org/"),
-    ProgramInfo::standard(
-        "vim",
-        "Vim",
-        "Vi IMproved text editor",
-        "https://www.vim.org/",
-    ),
+    ProgramInfo::standard("vim", "Vim", "Vi IMproved text editor", "https://www.vim.org/"),
     ProgramInfo::standard(
         "nvim",
         "Neovim",
@@ -283,12 +278,7 @@ static UTILITY_INFO: &[ProgramInfo] = &[
         "A modern replacement for ls (deprecated)",
         "https://the.exa.website/",
     ),
-    ProgramInfo::standard(
-        "eza",
-        "eza",
-        "A modern replacement for ls",
-        "https://eza.rocks/",
-    ),
+    ProgramInfo::standard("eza", "eza", "A modern replacement for ls", "https://eza.rocks/"),
     ProgramInfo::standard(
         "rg",
         "ripgrep",
@@ -373,18 +363,8 @@ static UTILITY_INFO: &[ProgramInfo] = &[
         "Simple terminal UI for git commands",
         "https://github.com/jesseduffield/lazygit",
     ),
-    ProgramInfo::standard(
-        "gh",
-        "GitHub CLI",
-        "GitHub's official CLI",
-        "https://cli.github.com/",
-    ),
-    ProgramInfo::standard(
-        "htop",
-        "htop",
-        "Interactive process viewer",
-        "https://htop.dev/",
-    ),
+    ProgramInfo::standard("gh", "GitHub CLI", "GitHub's official CLI", "https://cli.github.com/"),
+    ProgramInfo::standard("htop", "htop", "Interactive process viewer", "https://htop.dev/"),
     ProgramInfo::standard(
         "btop",
         "btop",
@@ -397,18 +377,8 @@ static UTILITY_INFO: &[ProgramInfo] = &[
         "Terminal multiplexer",
         "https://github.com/tmux/tmux/wiki",
     ),
-    ProgramInfo::standard(
-        "zellij",
-        "Zellij",
-        "Modern terminal multiplexer",
-        "https://zellij.dev/",
-    ),
-    ProgramInfo::standard(
-        "http",
-        "HTTPie",
-        "User-friendly HTTP client",
-        "https://httpie.io/",
-    ),
+    ProgramInfo::standard("zellij", "Zellij", "Modern terminal multiplexer", "https://zellij.dev/"),
+    ProgramInfo::standard("http", "HTTPie", "User-friendly HTTP client", "https://httpie.io/"),
     ProgramInfo::standard(
         "curlie",
         "curlie",
@@ -439,12 +409,7 @@ static UTILITY_INFO: &[ProgramInfo] = &[
         "Friendly and fast HTTP client",
         "https://github.com/ducaale/xh",
     ),
-    ProgramInfo::standard(
-        "curl",
-        "curl",
-        "Transfer data with URLs",
-        "https://curl.se/",
-    ),
+    ProgramInfo::standard("curl", "curl", "Transfer data with URLs", "https://curl.se/"),
     ProgramInfo::standard(
         "wget",
         "wget",
@@ -509,12 +474,7 @@ pub enum LanguagePackageManager {
 
 /// Metadata lookup table for language package managers.
 static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
-    ProgramInfo::standard(
-        "npm",
-        "npm",
-        "Node.js package manager",
-        "https://www.npmjs.com/",
-    ),
+    ProgramInfo::standard("npm", "npm", "Node.js package manager", "https://www.npmjs.com/"),
     ProgramInfo::standard(
         "pnpm",
         "pnpm",
@@ -577,42 +537,17 @@ static LANG_PKG_MGR_INFO: &[ProgramInfo] = &[
         "Decentralized C/C++ package manager",
         "https://conan.io/",
     ),
-    ProgramInfo::standard(
-        "nuget",
-        "NuGet",
-        ".NET package manager",
-        "https://www.nuget.org/",
-    ),
-    ProgramInfo::standard(
-        "mix",
-        "Hex",
-        "Package manager for BEAM ecosystem",
-        "https://hex.pm/",
-    ),
-    ProgramInfo::standard(
-        "pip",
-        "pip",
-        "Python package installer",
-        "https://pip.pypa.io/",
-    ),
-    ProgramInfo::standard(
-        "uv",
-        "uv",
-        "Fast Python package manager",
-        "https://astral.sh/uv",
-    ),
+    ProgramInfo::standard("nuget", "NuGet", ".NET package manager", "https://www.nuget.org/"),
+    ProgramInfo::standard("mix", "Hex", "Package manager for BEAM ecosystem", "https://hex.pm/"),
+    ProgramInfo::standard("pip", "pip", "Python package installer", "https://pip.pypa.io/"),
+    ProgramInfo::standard("uv", "uv", "Fast Python package manager", "https://astral.sh/uv"),
     ProgramInfo::standard(
         "poetry",
         "Poetry",
         "Python dependency manager with lockfiles",
         "https://python-poetry.org/",
     ),
-    ProgramInfo::standard(
-        "cpan",
-        "CPAN",
-        "Perl module archive",
-        "https://www.cpan.org/",
-    ),
+    ProgramInfo::standard("cpan", "CPAN", "Perl module archive", "https://www.cpan.org/"),
     ProgramInfo::standard(
         "cpanm",
         "cpanminus",
@@ -708,12 +643,7 @@ static OS_PKG_MGR_INFO: &[ProgramInfo] = &[
         "Windows community package manager",
         "https://chocolatey.org/",
     ),
-    ProgramInfo::standard(
-        "scoop",
-        "Scoop",
-        "Windows command-line installer",
-        "https://scoop.sh/",
-    ),
+    ProgramInfo::standard("scoop", "Scoop", "Windows command-line installer", "https://scoop.sh/"),
     ProgramInfo::standard("nix", "Nix", "Nix package manager", "https://nixos.org/"),
 ];
 
@@ -963,12 +893,7 @@ static TERMINAL_APP_INFO: &[ProgramInfo] = &[
         "Hardware-accelerated GPU terminal emulator",
         "https://github.com/raphamorim/rio",
     ),
-    ProgramInfo::standard(
-        "tabby",
-        "Tabby",
-        "Terminal for a more modern age",
-        "https://tabby.sh/",
-    ),
+    ProgramInfo::standard("tabby", "Tabby", "Terminal for a more modern age", "https://tabby.sh/"),
     ProgramInfo::standard(
         "foot",
         "foot",

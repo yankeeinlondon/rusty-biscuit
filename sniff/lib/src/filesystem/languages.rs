@@ -119,25 +119,17 @@ pub fn detect_languages(root: &Path) -> Result<LanguageBreakdown> {
         total_files += 1;
         if let Ok(Some(detection)) = hyperpolyglot::detect(entry.path()) {
             // Store path relative to the scanned root
-            let relative_path = entry
-                .path()
-                .strip_prefix(root)
-                .unwrap_or(entry.path())
-                .to_path_buf();
-            language_files
-                .entry(detection.language().to_string())
-                .or_default()
-                .push(relative_path);
+            let relative_path =
+                entry.path().strip_prefix(root).unwrap_or(entry.path()).to_path_buf();
+            language_files.entry(detection.language().to_string()).or_default().push(relative_path);
         }
     }
 
     let languages = calculate_stats(&language_files, total_files);
 
     // Primary language must be a programming language, not markup/config
-    let primary = languages
-        .iter()
-        .find(|s| is_programming_language(&s.language))
-        .map(|s| s.language.clone());
+    let primary =
+        languages.iter().find(|s| is_programming_language(&s.language)).map(|s| s.language.clone());
 
     Ok(LanguageBreakdown {
         languages,
@@ -261,15 +253,11 @@ mod tests {
         let mut language_files = HashMap::new();
         language_files.insert(
             "Rust".to_string(),
-            (0..7)
-                .map(|i| PathBuf::from(format!("file{}.rs", i)))
-                .collect(),
+            (0..7).map(|i| PathBuf::from(format!("file{}.rs", i))).collect(),
         );
         language_files.insert(
             "JavaScript".to_string(),
-            (0..3)
-                .map(|i| PathBuf::from(format!("file{}.js", i)))
-                .collect(),
+            (0..3).map(|i| PathBuf::from(format!("file{}.js", i))).collect(),
         );
 
         let stats = calculate_stats(&language_files, 10);
@@ -327,11 +315,7 @@ mod tests {
 
         // Create a directory that should be ignored
         fs::create_dir(dir.path().join("generated")).unwrap();
-        fs::write(
-            dir.path().join("generated/output.rs"),
-            "// This should be ignored",
-        )
-        .unwrap();
+        fs::write(dir.path().join("generated/output.rs"), "// This should be ignored").unwrap();
 
         // Create a file that should be counted
         fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();

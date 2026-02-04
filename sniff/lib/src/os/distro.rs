@@ -175,31 +175,19 @@ pub fn infer_linux_family(distro_id: &str) -> LinuxFamily {
     ];
 
     // Check each family
-    if DEBIAN_DISTROS
-        .iter()
-        .any(|d| id == *d || id.starts_with(&format!("{d}-")))
-    {
+    if DEBIAN_DISTROS.iter().any(|d| id == *d || id.starts_with(&format!("{d}-"))) {
         return LinuxFamily::Debian;
     }
 
-    if REDHAT_DISTROS
-        .iter()
-        .any(|d| id == *d || id.starts_with(&format!("{d}-")))
-    {
+    if REDHAT_DISTROS.iter().any(|d| id == *d || id.starts_with(&format!("{d}-"))) {
         return LinuxFamily::RedHat;
     }
 
-    if ARCH_DISTROS
-        .iter()
-        .any(|d| id == *d || id.starts_with(&format!("{d}-")))
-    {
+    if ARCH_DISTROS.iter().any(|d| id == *d || id.starts_with(&format!("{d}-"))) {
         return LinuxFamily::Arch;
     }
 
-    if SUSE_DISTROS
-        .iter()
-        .any(|d| id == *d || id.starts_with(&format!("{d}-")))
-    {
+    if SUSE_DISTROS.iter().any(|d| id == *d || id.starts_with(&format!("{d}-"))) {
         return LinuxFamily::SUSE;
     }
 
@@ -438,19 +426,12 @@ pub fn parse_system_release_content(content: &str) -> Option<LinuxDistro> {
     let name = line.to_string();
 
     // Extract ID from the first word (lowercase)
-    let id = line
-        .split_whitespace()
-        .next()
-        .map(|s| s.to_lowercase())
-        .unwrap_or_default();
+    let id = line.split_whitespace().next().map(|s| s.to_lowercase()).unwrap_or_default();
 
     // Try to extract version (number after "release")
     let version = line.to_lowercase().find("release").and_then(|pos| {
         let after_release = &line[pos + "release".len()..];
-        after_release
-            .split_whitespace()
-            .next()
-            .map(|v| v.to_string())
+        after_release.split_whitespace().next().map(|v| v.to_string())
     });
 
     // Try to extract codename (text in parentheses)

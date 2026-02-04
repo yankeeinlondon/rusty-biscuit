@@ -205,7 +205,10 @@ fn find_executable_in_bundle(
 /// Returns a list of executable name candidates to try.
 #[cfg(target_os = "macos")]
 fn get_executable_candidates(app_name: &str, binary_name: &str) -> Vec<String> {
-    let mut candidates = vec![binary_name.to_string(), app_name.to_string()];
+    let mut candidates = vec![
+        binary_name.to_string(),
+        app_name.to_string(),
+    ];
 
     // Add lowercase variants
     let binary_lower = binary_name.to_lowercase();
@@ -244,9 +247,7 @@ fn is_executable(path: &Path) -> bool {
         return false;
     }
 
-    path.metadata()
-        .map(|m| m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
+    path.metadata().map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false)
 }
 
 /// Capitalizes the first letter of a string.
@@ -328,10 +329,7 @@ mod tests {
     fn test_find_macos_app_bundle_whitespace_only() {
         // Whitespace-only string should return None
         let result = find_macos_app_bundle("   ");
-        assert!(
-            result.is_none(),
-            "Whitespace-only string should return None"
-        );
+        assert!(result.is_none(), "Whitespace-only string should return None");
     }
 
     #[test]

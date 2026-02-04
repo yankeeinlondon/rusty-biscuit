@@ -203,9 +203,7 @@ fn detect_init_linux_with_evidence() -> DetectInitResult {
         ev.hint("Failed to read /proc/1/comm".to_string());
     }
 
-    let exe = fs::read_link("/proc/1/exe")
-        .ok()
-        .and_then(|p| canonicalish(p).ok());
+    let exe = fs::read_link("/proc/1/exe").ok().and_then(|p| canonicalish(p).ok());
 
     if let Some(ref p) = exe {
         ev.pid1_exe = Some(p.clone());
@@ -247,7 +245,10 @@ fn detect_init_linux_with_evidence() -> DetectInitResult {
     };
 
     if let Some(init) = classified {
-        return DetectInitResult { init, evidence: ev };
+        return DetectInitResult {
+            init,
+            evidence: ev,
+        };
     }
 
     // --- 2) Runtime hints (weaker signals) ---
@@ -356,10 +357,7 @@ impl ServiceManager {
     ///
     /// This is a convenience wrapper around `services_detailed()`.
     pub fn services(&self, state: ServiceState) -> Vec<String> {
-        self.services_detailed(state)
-            .into_iter()
-            .map(|s| s.name)
-            .collect()
+        self.services_detailed(state).into_iter().map(|s| s.name).collect()
     }
 
     /// Get detailed service information filtered by state.
@@ -380,10 +378,7 @@ impl ServiceManager {
             _ => Vec::new(),
         };
 
-        all_services
-            .into_iter()
-            .filter(|s| state.matches(Some(s.running)))
-            .collect()
+        all_services.into_iter().filter(|s| state.matches(Some(s.running))).collect()
     }
 }
 
@@ -450,10 +445,7 @@ fn canonicalish(p: PathBuf) -> std::io::Result<PathBuf> {
 }
 
 fn path_ends_with_component(path: &Path, component: &str) -> bool {
-    path.file_name()
-        .and_then(|n| n.to_str())
-        .map(|n| n == component)
-        .unwrap_or(false)
+    path.file_name().and_then(|n| n.to_str()).map(|n| n == component).unwrap_or(false)
 }
 
 /// Cross-platform `command -v` style check.
@@ -660,9 +652,8 @@ fn list_openrc_services() -> Vec<Service> {
 ///
 /// Scans the service directory (default `/var/service/` or `$SVDIR`).
 fn list_runit_services() -> Vec<Service> {
-    let sv_dir = env::var("SVDIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/var/service"));
+    let sv_dir =
+        env::var("SVDIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/var/service"));
 
     let entries = match fs::read_dir(&sv_dir) {
         Ok(e) => e,
@@ -698,7 +689,13 @@ fn list_runit_services() -> Vec<Service> {
 
 /// Check runit service status using `sv status`.
 fn check_runit_service_status(service_name: &str) -> (bool, Option<u32>) {
-    let output = match Command::new("sv").args(["status", service_name]).output() {
+    let output = match Command::new("sv")
+        .args([
+            "status",
+            service_name,
+        ])
+        .output()
+    {
         Ok(o) => o,
         Err(_) => return (false, None),
     };
@@ -713,8 +710,7 @@ fn check_runit_service_status(service_name: &str) -> (bool, Option<u32>) {
         // Extract PID from "(pid 1234)"
         stdout.find("(pid ").and_then(|start| {
             let rest = &stdout[start + 5..];
-            rest.find(')')
-                .and_then(|end| rest[..end].parse::<u32>().ok())
+            rest.find(')').and_then(|end| rest[..end].parse::<u32>().ok())
         })
     } else {
         None
@@ -751,10 +747,7 @@ mod tests {
         assert_eq!(InitSystem::S6.to_string(), "s6");
         assert_eq!(InitSystem::Dinit.to_string(), "dinit");
         assert_eq!(InitSystem::BusyboxInit.to_string(), "busybox-init");
-        assert_eq!(
-            InitSystem::ContainerMinimalInit.to_string(),
-            "container-minimal-init"
-        );
+        assert_eq!(InitSystem::ContainerMinimalInit.to_string(), "container-minimal-init");
         assert_eq!(InitSystem::OpenRc.to_string(), "openrc");
         assert_eq!(InitSystem::Upstart.to_string(), "upstart");
         assert_eq!(InitSystem::Unknown.to_string(), "unknown");
@@ -919,10 +912,7 @@ mod tests {
         // On macOS, we should get some services from launchctl
         let services = list_launchd_services();
         // launchctl list should return at least some system services
-        assert!(
-            !services.is_empty(),
-            "launchctl list should return services on macOS"
-        );
+        assert!(!services.is_empty(), "launchctl list should return services on macOS");
 
         // Verify structure of returned services
         for service in &services {
@@ -966,15 +956,9 @@ mod tests {
 
     #[test]
     fn test_path_ends_with_component() {
-        assert!(path_ends_with_component(
-            Path::new("/usr/bin/systemd"),
-            "systemd"
-        ));
+        assert!(path_ends_with_component(Path::new("/usr/bin/systemd"), "systemd"));
         assert!(path_ends_with_component(Path::new("systemd"), "systemd"));
-        assert!(!path_ends_with_component(
-            Path::new("/usr/bin/systemd"),
-            "init"
-        ));
+        assert!(!path_ends_with_component(Path::new("/usr/bin/systemd"), "init"));
         assert!(!path_ends_with_component(Path::new(""), "systemd"));
     }
 

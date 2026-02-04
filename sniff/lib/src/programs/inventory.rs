@@ -557,9 +557,11 @@ static IPERF3_INSTALL: &[InstallationMethod] = &[
 ];
 
 // Package Managers
-static BREW_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(
-    "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
-)];
+static BREW_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::RemoteBash(
+        "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
+    ),
+];
 
 static CARGO_INSTALL: &[InstallationMethod] =
     &[InstallationMethod::RemoteBash("https://sh.rustup.rs")];
@@ -899,9 +901,8 @@ static WINDOWS_TERMINAL_INSTALL: &[InstallationMethod] = &[
 static CLAUDE_INSTALL: &[InstallationMethod] =
     &[InstallationMethod::Npm("@anthropic-ai/claude-code")];
 
-static OPENCODE_INSTALL: &[InstallationMethod] = &[InstallationMethod::GoModules(
-    "github.com/opencode-ai/opencode@latest",
-)];
+static OPENCODE_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::GoModules("github.com/opencode-ai/opencode@latest")];
 
 static ROO_INSTALL: &[InstallationMethod] = &[InstallationMethod::Npm("@anthropic-ai/claude-code")];
 
@@ -925,8 +926,15 @@ static GOOSE_INSTALL: &[InstallationMethod] = &[
 // OS Availability arrays
 // ============================================================================
 
-static ALL_OS: &[OsType] = &[OsType::MacOS, OsType::Linux, OsType::Windows];
-static UNIX_ONLY: &[OsType] = &[OsType::MacOS, OsType::Linux];
+static ALL_OS: &[OsType] = &[
+    OsType::MacOS,
+    OsType::Linux,
+    OsType::Windows,
+];
+static UNIX_ONLY: &[OsType] = &[
+    OsType::MacOS,
+    OsType::Linux,
+];
 static MACOS_ONLY: &[OsType] = &[OsType::MacOS];
 static LINUX_ONLY: &[OsType] = &[OsType::Linux];
 static WINDOWS_ONLY: &[OsType] = &[OsType::Windows];
@@ -2604,23 +2612,16 @@ mod tests {
 
     #[test]
     fn test_program_lookup_vim_has_details() {
-        let details = PROGRAM_LOOKUP
-            .get(&Program::Vim)
-            .expect("Vim should be in lookup");
+        let details = PROGRAM_LOOKUP.get(&Program::Vim).expect("Vim should be in lookup");
         assert_eq!(details.name, "Vim");
         assert!(!details.installation_methods.is_empty());
     }
 
     #[test]
     fn test_program_lookup_ripgrep_has_cargo() {
-        let details = PROGRAM_LOOKUP
-            .get(&Program::Ripgrep)
-            .expect("Ripgrep should be in lookup");
+        let details = PROGRAM_LOOKUP.get(&Program::Ripgrep).expect("Ripgrep should be in lookup");
         assert!(
-            details
-                .installation_methods
-                .iter()
-                .any(|m| matches!(m, InstallationMethod::Cargo(_))),
+            details.installation_methods.iter().any(|m| matches!(m, InstallationMethod::Cargo(_))),
             "Ripgrep should have Cargo installation method"
         );
     }
@@ -2636,21 +2637,9 @@ mod tests {
     fn test_all_programs_in_lookup_have_valid_details() {
         for (program, details) in PROGRAM_LOOKUP.iter() {
             assert!(!details.name.is_empty(), "{:?} has empty name", program);
-            assert!(
-                !details.description.is_empty(),
-                "{:?} has empty description",
-                program
-            );
-            assert!(
-                !details.website.is_empty(),
-                "{:?} has empty website",
-                program
-            );
-            assert!(
-                !details.os_availability.is_empty(),
-                "{:?} has no OS availability",
-                program
-            );
+            assert!(!details.description.is_empty(), "{:?} has empty description", program);
+            assert!(!details.website.is_empty(), "{:?} has empty website", program);
+            assert!(!details.os_availability.is_empty(), "{:?} has no OS availability", program);
         }
     }
 

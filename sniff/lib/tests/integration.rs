@@ -49,11 +49,7 @@ fn test_detect_completes_in_reasonable_time() {
     let _ = detect();
     let elapsed = start.elapsed();
     // Allow slack for CI environments and package manager detection (PATH scanning)
-    assert!(
-        elapsed.as_millis() < 15000,
-        "Detection took too long: {:?}",
-        elapsed
-    );
+    assert!(elapsed.as_millis() < 15000, "Detection took too long: {:?}", elapsed);
 }
 
 #[test]
@@ -68,10 +64,7 @@ fn test_serialization_roundtrip() {
 
 #[test]
 fn test_skip_all_returns_minimal_result() {
-    let config = SniffConfig::new()
-        .skip_hardware()
-        .skip_network()
-        .skip_filesystem();
+    let config = SniffConfig::new().skip_hardware().skip_network().skip_filesystem();
     let result = detect_with_config(config).unwrap();
     assert!(result.hardware.is_none());
     assert!(result.network.is_none());
@@ -98,10 +91,7 @@ fn test_detect_pnpm_workspace() {
     assert!(fs.repo.is_some());
     let repo = fs.repo.unwrap();
     assert!(repo.is_monorepo);
-    assert_eq!(
-        repo.monorepo_tool,
-        Some(sniff_lib::filesystem::MonorepoTool::PnpmWorkspaces)
-    );
+    assert_eq!(repo.monorepo_tool, Some(sniff_lib::filesystem::MonorepoTool::PnpmWorkspaces));
 }
 
 // === Regression tests for JSON serialization of partial results ===
@@ -113,14 +103,8 @@ fn test_skip_hardware_json_omits_hardware_key() {
     let config = SniffConfig::new().skip_hardware();
     let result = detect_with_config(config).unwrap();
     let json = serde_json::to_string(&result).unwrap();
-    assert!(
-        !json.contains("\"hardware\""),
-        "JSON should not contain hardware key when skipped"
-    );
-    assert!(
-        json.contains("\"network\""),
-        "JSON should contain network key"
-    );
+    assert!(!json.contains("\"hardware\""), "JSON should not contain hardware key when skipped");
+    assert!(json.contains("\"network\""), "JSON should contain network key");
 }
 
 #[test]
@@ -129,14 +113,8 @@ fn test_skip_network_json_omits_network_key() {
     let config = SniffConfig::new().skip_network();
     let result = detect_with_config(config).unwrap();
     let json = serde_json::to_string(&result).unwrap();
-    assert!(
-        !json.contains("\"network\""),
-        "JSON should not contain network key when skipped"
-    );
-    assert!(
-        json.contains("\"hardware\""),
-        "JSON should contain hardware key"
-    );
+    assert!(!json.contains("\"network\""), "JSON should not contain network key when skipped");
+    assert!(json.contains("\"hardware\""), "JSON should contain hardware key");
 }
 
 #[test]
@@ -149,10 +127,7 @@ fn test_skip_filesystem_json_omits_filesystem_key() {
         !json.contains("\"filesystem\""),
         "JSON should not contain filesystem key when skipped"
     );
-    assert!(
-        json.contains("\"hardware\""),
-        "JSON should contain hardware key"
-    );
+    assert!(json.contains("\"hardware\""), "JSON should contain hardware key");
 }
 
 #[test]
@@ -161,22 +136,10 @@ fn test_hardware_only_json_contains_only_hardware() {
     let config = SniffConfig::new().skip_network().skip_filesystem();
     let result = detect_with_config(config).unwrap();
     let json = serde_json::to_string(&result).unwrap();
-    assert!(
-        json.contains("\"hardware\""),
-        "JSON should contain hardware key"
-    );
-    assert!(
-        !json.contains("\"network\""),
-        "JSON should not contain network key"
-    );
-    assert!(
-        !json.contains("\"filesystem\""),
-        "JSON should not contain filesystem key"
-    );
-    assert!(
-        !json.contains("\"interfaces\""),
-        "JSON should not contain interfaces (from network)"
-    );
+    assert!(json.contains("\"hardware\""), "JSON should contain hardware key");
+    assert!(!json.contains("\"network\""), "JSON should not contain network key");
+    assert!(!json.contains("\"filesystem\""), "JSON should not contain filesystem key");
+    assert!(!json.contains("\"interfaces\""), "JSON should not contain interfaces (from network)");
 }
 
 #[test]
@@ -186,14 +149,8 @@ fn test_partial_result_deserialization_roundtrip() {
     let result = detect_with_config(config).unwrap();
     let json = serde_json::to_string(&result).unwrap();
     let parsed: sniff_lib::SniffResult = serde_json::from_str(&json).unwrap();
-    assert!(
-        parsed.hardware.is_none(),
-        "Deserialized hardware should be None"
-    );
-    assert!(
-        parsed.network.is_some(),
-        "Deserialized network should be Some"
-    );
+    assert!(parsed.hardware.is_none(), "Deserialized hardware should be None");
+    assert!(parsed.network.is_some(), "Deserialized network should be Some");
 }
 
 // ============================================================================
@@ -259,26 +216,14 @@ fn test_detect_timezone_returns_valid_offset() {
     let time_info = detect_timezone();
 
     // UTC offset should be within valid bounds (-12h to +14h in seconds)
-    assert!(
-        time_info.utc_offset_seconds >= -12 * 3600,
-        "UTC offset should be >= -12 hours"
-    );
-    assert!(
-        time_info.utc_offset_seconds <= 14 * 3600,
-        "UTC offset should be <= +14 hours"
-    );
+    assert!(time_info.utc_offset_seconds >= -12 * 3600, "UTC offset should be >= -12 hours");
+    assert!(time_info.utc_offset_seconds <= 14 * 3600, "UTC offset should be <= +14 hours");
 
     // Timezone abbreviation should be present on all platforms
-    assert!(
-        time_info.timezone_abbr.is_some(),
-        "Timezone abbreviation should be detected"
-    );
+    assert!(time_info.timezone_abbr.is_some(), "Timezone abbreviation should be detected");
 
     // Monotonic clock should always be available on modern systems
-    assert!(
-        time_info.monotonic_available,
-        "Monotonic clock should be available"
-    );
+    assert!(time_info.monotonic_available, "Monotonic clock should be available");
 
     // TimeInfo should serialize/deserialize correctly
     let json = serde_json::to_string(&time_info).expect("TimeInfo should serialize");
@@ -295,32 +240,16 @@ fn test_detect_os_type_matches_platform() {
 
     // Verify the detected type matches the compilation target
     #[cfg(target_os = "macos")]
-    assert_eq!(
-        os_type,
-        OsType::MacOS,
-        "Should detect macOS on macOS platform"
-    );
+    assert_eq!(os_type, OsType::MacOS, "Should detect macOS on macOS platform");
 
     #[cfg(target_os = "linux")]
-    assert_eq!(
-        os_type,
-        OsType::Linux,
-        "Should detect Linux on Linux platform"
-    );
+    assert_eq!(os_type, OsType::Linux, "Should detect Linux on Linux platform");
 
     #[cfg(target_os = "windows")]
-    assert_eq!(
-        os_type,
-        OsType::Windows,
-        "Should detect Windows on Windows platform"
-    );
+    assert_eq!(os_type, OsType::Windows, "Should detect Windows on Windows platform");
 
     #[cfg(target_os = "freebsd")]
-    assert_eq!(
-        os_type,
-        OsType::FreeBSD,
-        "Should detect FreeBSD on FreeBSD platform"
-    );
+    assert_eq!(os_type, OsType::FreeBSD, "Should detect FreeBSD on FreeBSD platform");
 
     // On any platform, the type should have a valid Display implementation
     let display = os_type.to_string();
@@ -340,30 +269,20 @@ fn test_macos_package_managers_finds_expected_managers() {
     let managers = detect_macos_package_managers();
 
     // softwareupdate is always present on macOS as a system utility
-    let has_softwareupdate = managers
-        .managers
-        .iter()
-        .any(|m| m.manager == SystemPackageManager::Softwareupdate);
-    assert!(
-        has_softwareupdate,
-        "macOS should always have softwareupdate available"
-    );
+    let has_softwareupdate =
+        managers.managers.iter().any(|m| m.manager == SystemPackageManager::Softwareupdate);
+    assert!(has_softwareupdate, "macOS should always have softwareupdate available");
 
     // A primary should always be selected on macOS
-    assert!(
-        managers.primary.is_some(),
-        "macOS should have a primary package manager"
-    );
+    assert!(managers.primary.is_some(), "macOS should have a primary package manager");
 
     // If homebrew is installed, it should be detected
     let homebrew_apple_silicon = std::path::Path::new("/opt/homebrew/bin/brew").exists();
     let homebrew_intel = std::path::Path::new("/usr/local/bin/brew").exists();
 
     if homebrew_apple_silicon || homebrew_intel {
-        let has_homebrew = managers
-            .managers
-            .iter()
-            .any(|m| m.manager == SystemPackageManager::Homebrew);
+        let has_homebrew =
+            managers.managers.iter().any(|m| m.manager == SystemPackageManager::Homebrew);
         assert!(has_homebrew, "Homebrew should be detected when installed");
         assert_eq!(
             managers.primary,
@@ -387,18 +306,11 @@ fn test_linux_package_managers_finds_at_least_one() {
     // This may fail in extremely minimal containers, which is acceptable
     if !managers.managers.is_empty() {
         // If managers are found, primary should be set
-        assert!(
-            managers.primary.is_some(),
-            "Should have primary if managers are found"
-        );
+        assert!(managers.primary.is_some(), "Should have primary if managers are found");
 
         // Each detected manager should have a valid path
         for m in &managers.managers {
-            assert!(
-                !m.path.is_empty(),
-                "Detected manager {} should have a path",
-                m.manager
-            );
+            assert!(!m.path.is_empty(), "Detected manager {} should have a path", m.manager);
         }
     }
 }
@@ -432,10 +344,7 @@ fn test_os_includes_locale() {
     let result = detect().unwrap();
     let os = result.os.expect("os should be present");
 
-    assert!(
-        os.locale.is_some(),
-        "Locale info should be included in OS detection"
-    );
+    assert!(os.locale.is_some(), "Locale info should be included in OS detection");
 }
 
 /// Tests that the OS info from detect() includes time info.
@@ -444,10 +353,7 @@ fn test_os_includes_time_info() {
     let result = detect().unwrap();
     let os = result.os.expect("os should be present");
 
-    assert!(
-        os.time.is_some(),
-        "Time info should be included in OS detection"
-    );
+    assert!(os.time.is_some(), "Time info should be included in OS detection");
 
     let time = os.time.as_ref().unwrap();
     // Verify basic time info fields
@@ -474,25 +380,11 @@ fn test_network_has_ip_addresses_field() {
         let v6_count = network.ip_addresses.v6.len();
 
         // If interfaces have addresses, they should be aggregated
-        let expected_v4: usize = network
-            .interfaces
-            .iter()
-            .map(|i| i.ipv4_addresses.len())
-            .sum();
-        let expected_v6: usize = network
-            .interfaces
-            .iter()
-            .map(|i| i.ipv6_addresses.len())
-            .sum();
+        let expected_v4: usize = network.interfaces.iter().map(|i| i.ipv4_addresses.len()).sum();
+        let expected_v6: usize = network.interfaces.iter().map(|i| i.ipv6_addresses.len()).sum();
 
-        assert_eq!(
-            v4_count, expected_v4,
-            "ip_addresses.v4 count should match interface IPv4 sum"
-        );
-        assert_eq!(
-            v6_count, expected_v6,
-            "ip_addresses.v6 count should match interface IPv6 sum"
-        );
+        assert_eq!(v4_count, expected_v4, "ip_addresses.v4 count should match interface IPv4 sum");
+        assert_eq!(v6_count, expected_v6, "ip_addresses.v6 count should match interface IPv6 sum");
     }
 }
 
@@ -510,32 +402,20 @@ fn test_network_ip_addresses_json_structure() {
 
         if let Some(network) = value.get("network") {
             let ip_addresses = network.get("ip_addresses");
-            assert!(
-                ip_addresses.is_some(),
-                "network should have ip_addresses field"
-            );
+            assert!(ip_addresses.is_some(), "network should have ip_addresses field");
 
             let ip_addr = ip_addresses.unwrap();
             assert!(ip_addr.get("v4").is_some(), "ip_addresses should have v4");
             assert!(ip_addr.get("v6").is_some(), "ip_addresses should have v6");
 
             // v4 and v6 should be arrays
-            assert!(
-                ip_addr.get("v4").unwrap().is_array(),
-                "ip_addresses.v4 should be an array"
-            );
-            assert!(
-                ip_addr.get("v6").unwrap().is_array(),
-                "ip_addresses.v6 should be an array"
-            );
+            assert!(ip_addr.get("v4").unwrap().is_array(), "ip_addresses.v4 should be an array");
+            assert!(ip_addr.get("v6").unwrap().is_array(), "ip_addresses.v6 should be an array");
 
             // Each address entry should have address and interface fields
             if let Some(v4_arr) = ip_addr.get("v4").and_then(|v| v.as_array()) {
                 for addr in v4_arr {
-                    assert!(
-                        addr.get("address").is_some(),
-                        "IPv4 entry should have address field"
-                    );
+                    assert!(addr.get("address").is_some(), "IPv4 entry should have address field");
                     assert!(
                         addr.get("interface").is_some(),
                         "IPv4 entry should have interface field"
@@ -545,10 +425,7 @@ fn test_network_ip_addresses_json_structure() {
 
             if let Some(v6_arr) = ip_addr.get("v6").and_then(|v| v.as_array()) {
                 for addr in v6_arr {
-                    assert!(
-                        addr.get("address").is_some(),
-                        "IPv6 entry should have address field"
-                    );
+                    assert!(addr.get("address").is_some(), "IPv6 entry should have address field");
                     assert!(
                         addr.get("interface").is_some(),
                         "IPv6 entry should have interface field"
@@ -581,36 +458,16 @@ fn test_network_ip_addresses_roundtrip() {
         );
 
         // Contents should match
-        for (orig, parsed) in orig_net
-            .ip_addresses
-            .v4
-            .iter()
-            .zip(parsed_net.ip_addresses.v4.iter())
+        for (orig, parsed) in orig_net.ip_addresses.v4.iter().zip(parsed_net.ip_addresses.v4.iter())
         {
-            assert_eq!(
-                orig.address, parsed.address,
-                "IPv4 address should survive roundtrip"
-            );
-            assert_eq!(
-                orig.interface, parsed.interface,
-                "IPv4 interface should survive roundtrip"
-            );
+            assert_eq!(orig.address, parsed.address, "IPv4 address should survive roundtrip");
+            assert_eq!(orig.interface, parsed.interface, "IPv4 interface should survive roundtrip");
         }
 
-        for (orig, parsed) in orig_net
-            .ip_addresses
-            .v6
-            .iter()
-            .zip(parsed_net.ip_addresses.v6.iter())
+        for (orig, parsed) in orig_net.ip_addresses.v6.iter().zip(parsed_net.ip_addresses.v6.iter())
         {
-            assert_eq!(
-                orig.address, parsed.address,
-                "IPv6 address should survive roundtrip"
-            );
-            assert_eq!(
-                orig.interface, parsed.interface,
-                "IPv6 interface should survive roundtrip"
-            );
+            assert_eq!(orig.address, parsed.address, "IPv6 address should survive roundtrip");
+            assert_eq!(orig.interface, parsed.interface, "IPv6 interface should survive roundtrip");
         }
     }
 }

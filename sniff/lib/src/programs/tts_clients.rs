@@ -111,7 +111,10 @@ impl InstalledTtsClients {
             },
             gtts_cli: get("gtts-cli"),
             coqui_tts: get("tts"),
-            sherpa_onnx: get_any(&["sherpa-onnx-offline-tts", "sherpa-onnx-tts"]),
+            sherpa_onnx: get_any(&[
+                "sherpa-onnx-offline-tts",
+                "sherpa-onnx-tts",
+            ]),
             kokoro_tts: get("kokoro-tts"),
             pico2wave: get("pico2wave"),
         }
@@ -275,9 +278,7 @@ impl InstalledTtsClients {
     /// Returns a list of all installed TTS clients.
     pub fn installed(&self) -> Vec<TtsClient> {
         use strum::IntoEnumIterator;
-        TtsClient::iter()
-            .filter(|c| self.is_installed(*c))
-            .collect()
+        TtsClient::iter().filter(|c| self.is_installed(*c)).collect()
     }
 
     /// Mark a client as installed (for testing purposes).
@@ -600,19 +601,11 @@ mod tests {
     #[test]
     fn test_kokoro_tts_binary_name_uses_hyphen() {
         let mut clients = InstalledTtsClients::default();
-        assert!(
-            !clients.is_installed(TtsClient::KokoroTts),
-            "Default should be false"
-        );
+        assert!(!clients.is_installed(TtsClient::KokoroTts), "Default should be false");
 
         // Manually set to simulate detection
-        clients.kokoro_tts = Some((
-            PathBuf::from("/usr/local/bin/kokoro-tts"),
-            ExecutableSource::Path,
-        ));
-        assert!(
-            clients.is_installed(TtsClient::KokoroTts),
-            "Should be settable to true"
-        );
+        clients.kokoro_tts =
+            Some((PathBuf::from("/usr/local/bin/kokoro-tts"), ExecutableSource::Path));
+        assert!(clients.is_installed(TtsClient::KokoroTts), "Should be settable to true");
     }
 }

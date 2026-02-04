@@ -97,17 +97,26 @@ impl InstalledHeadlessAudio {
         Self {
             mpv: get("mpv"),
             ffplay: get("ffplay"),
-            vlc: get_any(&["vlc", "cvlc"]),
+            vlc: get_any(&[
+                "vlc", "cvlc",
+            ]),
             mplayer: get("mplayer"),
-            gstreamer_gst_play: get_any(&["gst-play-1.0", "gst-play"]),
-            sox: get_any(&["play", "sox"]),
+            gstreamer_gst_play: get_any(&[
+                "gst-play-1.0",
+                "gst-play",
+            ]),
+            sox: get_any(&[
+                "play", "sox",
+            ]),
             mpg123: get("mpg123"),
             ogg123: get("ogg123"),
             alsa_aplay: get("aplay"),
             macos_afplay: get("afplay"),
             pulseaudio_paplay: get("paplay"),
             pulseaudio_pacat: get("pacat"),
-            pipewire: get_any(&["pw-cat", "pw-play"]),
+            pipewire: get_any(&[
+                "pw-cat", "pw-play",
+            ]),
         }
     }
 
@@ -187,9 +196,7 @@ impl InstalledHeadlessAudio {
     /// Returns a list of all installed headless audio players.
     pub fn installed(&self) -> Vec<HeadlessAudio> {
         use strum::IntoEnumIterator;
-        HeadlessAudio::iter()
-            .filter(|p| self.is_installed(*p))
-            .collect()
+        HeadlessAudio::iter().filter(|p| self.is_installed(*p)).collect()
     }
 }
 

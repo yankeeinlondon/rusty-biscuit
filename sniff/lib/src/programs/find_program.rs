@@ -111,10 +111,7 @@ pub fn find_program_with_source<P: AsRef<OsStr>>(
 pub fn find_programs_with_source_parallel(
     programs: &[&str],
 ) -> HashMap<String, Option<(PathBuf, ExecutableSource)>> {
-    programs
-        .par_iter()
-        .map(|&prog| (prog.to_string(), find_program_with_source(prog)))
-        .collect()
+    programs.par_iter().map(|&prog| (prog.to_string(), find_program_with_source(prog))).collect()
 }
 
 #[cfg(test)]
@@ -161,9 +158,17 @@ mod tests {
     #[test]
     fn test_find_programs_parallel() {
         #[cfg(unix)]
-        let programs = &["ls", "cat", "__nonexistent__"];
+        let programs = &[
+            "ls",
+            "cat",
+            "__nonexistent__",
+        ];
         #[cfg(windows)]
-        let programs = &["cmd", "dir", "__nonexistent__"];
+        let programs = &[
+            "cmd",
+            "dir",
+            "__nonexistent__",
+        ];
 
         let results = find_programs_parallel(programs);
 
@@ -214,11 +219,7 @@ mod tests {
         let result = find_program_with_source(program);
         assert!(result.is_some());
         let (_, source) = result.unwrap();
-        assert_eq!(
-            source,
-            ExecutableSource::Path,
-            "PATH should take priority over app bundles"
-        );
+        assert_eq!(source, ExecutableSource::Path, "PATH should take priority over app bundles");
     }
 
     // macOS-specific tests for app bundle discovery
@@ -271,9 +272,13 @@ mod tests {
     #[test]
     fn test_find_programs_with_source_parallel_basic() {
         #[cfg(unix)]
-        let programs = &["ls", "cat"];
+        let programs = &[
+            "ls", "cat",
+        ];
         #[cfg(windows)]
-        let programs = &["cmd", "dir"];
+        let programs = &[
+            "cmd", "dir",
+        ];
 
         let results = find_programs_with_source_parallel(programs);
 
@@ -283,29 +288,27 @@ mod tests {
             assert!(result.is_some(), "{} should be found", prog);
             let (path, source) = result.as_ref().unwrap();
             assert!(path.exists(), "Path for {} should exist", prog);
-            assert_eq!(
-                *source,
-                ExecutableSource::Path,
-                "{} should be via PATH",
-                prog
-            );
+            assert_eq!(*source, ExecutableSource::Path, "{} should be via PATH", prog);
         }
     }
 
     #[test]
     fn test_find_programs_with_source_parallel_mixed() {
         #[cfg(unix)]
-        let programs = &["ls", "__nonexistent_xyz__"];
+        let programs = &[
+            "ls",
+            "__nonexistent_xyz__",
+        ];
         #[cfg(windows)]
-        let programs = &["cmd", "__nonexistent_xyz__"];
+        let programs = &[
+            "cmd",
+            "__nonexistent_xyz__",
+        ];
 
         let results = find_programs_with_source_parallel(programs);
 
         assert_eq!(results.len(), 2);
-        assert!(
-            results.get(programs[0]).unwrap().is_some(),
-            "System command should be found"
-        );
+        assert!(results.get(programs[0]).unwrap().is_some(), "System command should be found");
         assert!(
             results.get("__nonexistent_xyz__").unwrap().is_none(),
             "Nonexistent should not be found"
@@ -326,13 +329,12 @@ mod tests {
 
     #[test]
     fn test_find_programs_parallel_with_empty_string() {
-        let programs = &["ls", ""];
+        let programs = &[
+            "ls", "",
+        ];
         let results = find_programs_parallel(programs);
         assert_eq!(results.len(), 2);
-        assert!(
-            results.get("").unwrap().is_none(),
-            "Empty string should not find anything"
-        );
+        assert!(results.get("").unwrap().is_none(), "Empty string should not find anything");
     }
 
     #[test]
@@ -370,7 +372,9 @@ mod tests {
         fn test_find_programs_with_source_parallel_includes_bundles() {
             // This test verifies that parallel lookup can find both PATH and bundle programs
             // We use "ls" (should be PATH) and check if wezterm exists (might be bundle)
-            let programs = &["ls", "wezterm"];
+            let programs = &[
+                "ls", "wezterm",
+            ];
 
             let results = find_programs_with_source_parallel(programs);
 

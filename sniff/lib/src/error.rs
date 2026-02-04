@@ -36,7 +36,10 @@ pub enum SniffError {
 #[derive(Debug, thiserror::Error)]
 pub enum SniffInstallationError {
     #[error("Error installing {pkg} on host using the install command: {cmd}")]
-    InstallationError { pkg: String, cmd: String },
+    InstallationError {
+        pkg: String,
+        cmd: String,
+    },
 
     #[error("The package manager {manager} failed to install {pkg}: {msg}")]
     PackageManagerFailed {
@@ -46,12 +49,18 @@ pub enum SniffInstallationError {
     },
 
     #[error("The package {pkg} is not installable on {os}!")]
-    NotInstallableOnOs { pkg: String, os: String },
+    NotInstallableOnOs {
+        pkg: String,
+        os: String,
+    },
 
     #[error(
         "The package {pkg} requires a package manager ({manager}) which is NOT installed on this computer!"
     )]
-    MissingPackageManager { pkg: String, manager: String },
+    MissingPackageManager {
+        pkg: String,
+        manager: String,
+    },
 }
 
 /// Convenience Result type for Sniff operations.

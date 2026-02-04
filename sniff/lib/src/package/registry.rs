@@ -49,10 +49,7 @@ static PACKAGE_MANAGER_REGISTRY: LazyLock<HashMap<PackageManager, RegistryEntry>
         let mut map = HashMap::new();
 
         // OS Package Managers
-        map.insert(
-            PackageManager::Os(OsPackageManager::Apt),
-            RegistryEntry::new(AptStub),
-        );
+        map.insert(PackageManager::Os(OsPackageManager::Apt), RegistryEntry::new(AptStub));
         map.insert(
             PackageManager::Os(OsPackageManager::Homebrew),
             RegistryEntry::new(HomebrewStub),
@@ -122,9 +119,7 @@ static PACKAGE_MANAGER_REGISTRY: LazyLock<HashMap<PackageManager, RegistryEntry>
 /// - `None` if no implementation is registered for this package manager
 #[must_use]
 pub fn get_package_manager(manager: &PackageManager) -> Option<&'static dyn PackageManagerShape> {
-    PACKAGE_MANAGER_REGISTRY
-        .get(manager)
-        .map(|entry| entry.inner.as_ref())
+    PACKAGE_MANAGER_REGISTRY.get(manager).map(|entry| entry.inner.as_ref())
 }
 
 /// Checks if a package manager has a registered implementation.

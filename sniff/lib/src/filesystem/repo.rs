@@ -220,11 +220,7 @@ fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
 /// Parses Cargo.toml dependencies into DependencyEntry structs.
 fn parse_cargo_dependencies(
     toml_path: &Path,
-) -> Option<(
-    Vec<DependencyEntry>,
-    Vec<DependencyEntry>,
-    Vec<DependencyEntry>,
-)> {
+) -> Option<(Vec<DependencyEntry>, Vec<DependencyEntry>, Vec<DependencyEntry>)> {
     let content = std::fs::read_to_string(toml_path).ok()?;
     let parsed: toml::Value = toml::from_str(&content).ok()?;
 
@@ -250,18 +246,13 @@ fn parse_cargo_dep_section(
             let (version_req, features, optional) = match value {
                 toml::Value::String(v) => (v.clone(), Vec::new(), false),
                 toml::Value::Table(t) => {
-                    let version = t
-                        .get("version")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("*")
-                        .to_string();
+                    let version =
+                        t.get("version").and_then(|v| v.as_str()).unwrap_or("*").to_string();
                     let features = t
                         .get("features")
                         .and_then(|f| f.as_array())
                         .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_str().map(String::from))
-                                .collect()
+                            arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
                         })
                         .unwrap_or_default();
                     let optional = t.get("optional").and_then(|o| o.as_bool()).unwrap_or(false);
@@ -418,15 +409,9 @@ fn detect_lerna(root: &Path) -> Result<Option<RepoInfo>> {
 /// For example, `/repo/sniff/lib` becomes `sniff/lib` to avoid name collisions
 /// when multiple packages have the same directory name (like "lib" or "cli").
 fn make_namespaced_name(path: &Path, root: &Path) -> String {
-    path.strip_prefix(root)
-        .ok()
-        .and_then(|rel| rel.to_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            path.file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default()
-        })
+    path.strip_prefix(root).ok().and_then(|rel| rel.to_str()).map(|s| s.to_string()).unwrap_or_else(
+        || path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+    )
 }
 
 /// Detects programming languages in a package directory.
@@ -442,11 +427,8 @@ fn make_namespaced_name(path: &Path, root: &Path) -> String {
 fn detect_package_languages(path: &Path) -> (Option<String>, Vec<String>) {
     match detect_languages(path) {
         Ok(breakdown) => {
-            let languages: Vec<String> = breakdown
-                .languages
-                .iter()
-                .map(|s| s.language.clone())
-                .collect();
+            let languages: Vec<String> =
+                breakdown.languages.iter().map(|s| s.language.clone()).collect();
             (breakdown.primary, languages)
         }
         Err(_) => (None, Vec::new()),
@@ -609,7 +591,11 @@ fn create_package_location_with_deps(path: &Path, root: &Path) -> PackageLocatio
             } else {
                 Some(regular)
             };
-            let dev_deps = if dev.is_empty() { None } else { Some(dev) };
+            let dev_deps = if dev.is_empty() {
+                None
+            } else {
+                Some(dev)
+            };
             let opt_deps = if optional.is_empty() {
                 None
             } else {
@@ -653,11 +639,8 @@ mod tests {
     #[test]
     fn test_cargo_workspace_detected() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("Cargo.toml"),
-            "[workspace]\nmembers = [\"pkg1\", \"pkg2\"]\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[workspace]\nmembers = [\"pkg1\", \"pkg2\"]\n")
+            .unwrap();
         fs::create_dir(dir.path().join("pkg1")).unwrap();
         fs::create_dir(dir.path().join("pkg2")).unwrap();
 
@@ -672,11 +655,7 @@ mod tests {
     #[test]
     fn test_pnpm_workspace_detected() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("pnpm-workspace.yaml"),
-            "packages:\n  - 'packages/*'\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n").unwrap();
         fs::create_dir_all(dir.path().join("packages/app")).unwrap();
 
         let result = detect_repo(dir.path()).unwrap();
@@ -701,11 +680,8 @@ mod tests {
     #[test]
     fn test_cargo_workspace_with_glob() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("Cargo.toml"),
-            "[workspace]\nmembers = [\"packages/*\"]\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[workspace]\nmembers = [\"packages/*\"]\n")
+            .unwrap();
         fs::create_dir_all(dir.path().join("packages")).unwrap();
         fs::create_dir(dir.path().join("packages/foo")).unwrap();
         fs::create_dir(dir.path().join("packages/bar")).unwrap();
@@ -721,11 +697,7 @@ mod tests {
     #[test]
     fn test_npm_workspace_detected() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("package.json"),
-            r#"{"workspaces": ["packages/*"]}"#,
-        )
-        .unwrap();
+        fs::write(dir.path().join("package.json"), r#"{"workspaces": ["packages/*"]}"#).unwrap();
         fs::create_dir_all(dir.path().join("packages/app")).unwrap();
 
         let result = detect_repo(dir.path()).unwrap();
@@ -811,11 +783,7 @@ mod tests {
     #[test]
     fn test_detect_package_managers_pip_pyproject() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("pyproject.toml"),
-            "[project]\nname = \"test\"",
-        )
-        .unwrap();
+        fs::write(dir.path().join("pyproject.toml"), "[project]\nname = \"test\"").unwrap();
 
         let managers = detect_package_managers(dir.path());
         assert_eq!(managers, vec!["pip"]);
@@ -838,7 +806,12 @@ mod tests {
         fs::write(dir.path().join("package.json"), "{}").unwrap();
 
         let managers = detect_package_managers(dir.path());
-        assert_eq!(managers, vec!["cargo", "npm"]);
+        assert_eq!(
+            managers,
+            vec![
+                "cargo", "npm"
+            ]
+        );
     }
 
     #[test]
@@ -907,26 +880,15 @@ mod tests {
         assert_eq!(packages.len(), 2);
 
         // Find the rust package
-        let rust_package = packages
-            .iter()
-            .find(|p| p.name == "rust-pkg")
-            .expect("rust-pkg should be found");
+        let rust_package =
+            packages.iter().find(|p| p.name == "rust-pkg").expect("rust-pkg should be found");
         assert_eq!(rust_package.primary_language, Some("Rust".to_string()));
-        assert!(
-            rust_package
-                .detected_managers
-                .contains(&"cargo".to_string())
-        );
+        assert!(rust_package.detected_managers.contains(&"cargo".to_string()));
 
         // Find the node package
-        let node_package = packages
-            .iter()
-            .find(|p| p.name == "node-pkg")
-            .expect("node-pkg should be found");
-        assert_eq!(
-            node_package.primary_language,
-            Some("JavaScript".to_string())
-        );
+        let node_package =
+            packages.iter().find(|p| p.name == "node-pkg").expect("node-pkg should be found");
+        assert_eq!(node_package.primary_language, Some("JavaScript".to_string()));
         assert!(node_package.detected_managers.contains(&"npm".to_string()));
     }
 
@@ -950,11 +912,7 @@ mod tests {
     #[test]
     fn test_package_location_has_optional_dependency_fields() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("Cargo.toml"),
-            "[workspace]\nmembers = [\"pkg\"]\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[workspace]\nmembers = [\"pkg\"]\n").unwrap();
         fs::create_dir(dir.path().join("pkg")).unwrap();
 
         let result = detect_repo(dir.path()).unwrap();

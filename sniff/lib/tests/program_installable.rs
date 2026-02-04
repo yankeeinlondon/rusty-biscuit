@@ -15,9 +15,7 @@ fn test_installable_false_for_os_specific_programs() {
 
     #[cfg(target_os = "macos")]
     assert!(
-        !programs
-            .terminal_apps
-            .installable(TerminalApp::WindowsTerminal),
+        !programs.terminal_apps.installable(TerminalApp::WindowsTerminal),
         "Windows Terminal should not be installable on macOS"
     );
 

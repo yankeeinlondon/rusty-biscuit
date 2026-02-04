@@ -226,7 +226,11 @@ fn build_install_command(
 
     let cmd = match method {
         // OS Package Managers
-        InstallationMethod::Brew(pkg) => vec!["brew".into(), "install".into(), (*pkg).into()],
+        InstallationMethod::Brew(pkg) => vec![
+            "brew".into(),
+            "install".into(),
+            (*pkg).into(),
+        ],
         InstallationMethod::Apt(pkg) => {
             vec![
                 "sudo".into(),
@@ -272,34 +276,88 @@ fn build_install_command(
             ]
         }
         InstallationMethod::Chocolatey(pkg) => {
-            vec!["choco".into(), "install".into(), "-y".into(), (*pkg).into()]
+            vec![
+                "choco".into(),
+                "install".into(),
+                "-y".into(),
+                (*pkg).into(),
+            ]
         }
-        InstallationMethod::Scoop(pkg) => vec!["scoop".into(), "install".into(), (*pkg).into()],
-        InstallationMethod::Nix(pkg) => vec!["nix-env".into(), "-iA".into(), (*pkg).into()],
+        InstallationMethod::Scoop(pkg) => vec![
+            "scoop".into(),
+            "install".into(),
+            (*pkg).into(),
+        ],
+        InstallationMethod::Nix(pkg) => vec![
+            "nix-env".into(),
+            "-iA".into(),
+            (*pkg).into(),
+        ],
 
         // Language Package Managers
-        InstallationMethod::Cargo(pkg) => vec!["cargo".into(), "install".into(), (*pkg).into()],
+        InstallationMethod::Cargo(pkg) => vec![
+            "cargo".into(),
+            "install".into(),
+            (*pkg).into(),
+        ],
         InstallationMethod::Npm(pkg) => {
-            vec!["npm".into(), "install".into(), "-g".into(), (*pkg).into()]
+            vec![
+                "npm".into(),
+                "install".into(),
+                "-g".into(),
+                (*pkg).into(),
+            ]
         }
         InstallationMethod::Pnpm(pkg) => {
-            vec!["pnpm".into(), "add".into(), "-g".into(), (*pkg).into()]
+            vec![
+                "pnpm".into(),
+                "add".into(),
+                "-g".into(),
+                (*pkg).into(),
+            ]
         }
         InstallationMethod::Yarn(pkg) => {
-            vec!["yarn".into(), "global".into(), "add".into(), (*pkg).into()]
+            vec![
+                "yarn".into(),
+                "global".into(),
+                "add".into(),
+                (*pkg).into(),
+            ]
         }
         InstallationMethod::Bun(pkg) => {
-            vec!["bun".into(), "add".into(), "-g".into(), (*pkg).into()]
+            vec![
+                "bun".into(),
+                "add".into(),
+                "-g".into(),
+                (*pkg).into(),
+            ]
         }
-        InstallationMethod::Pip(pkg) => vec!["pip".into(), "install".into(), (*pkg).into()],
+        InstallationMethod::Pip(pkg) => vec![
+            "pip".into(),
+            "install".into(),
+            (*pkg).into(),
+        ],
         InstallationMethod::Uv(pkg) => {
-            vec!["uv".into(), "tool".into(), "install".into(), (*pkg).into()]
+            vec![
+                "uv".into(),
+                "tool".into(),
+                "install".into(),
+                (*pkg).into(),
+            ]
         }
         InstallationMethod::Poetry(pkg) => {
             // Poetry doesn't have global install; use pip instead
-            vec!["pip".into(), "install".into(), (*pkg).into()]
+            vec![
+                "pip".into(),
+                "install".into(),
+                (*pkg).into(),
+            ]
         }
-        InstallationMethod::GoModules(pkg) => vec!["go".into(), "install".into(), (*pkg).into()],
+        InstallationMethod::GoModules(pkg) => vec![
+            "go".into(),
+            "install".into(),
+            (*pkg).into(),
+        ],
         InstallationMethod::Composer(pkg) => {
             vec![
                 "composer".into(),
@@ -316,10 +374,22 @@ fn build_install_command(
             });
         }
         InstallationMethod::LuaRocks(pkg) => {
-            vec!["luarocks".into(), "install".into(), (*pkg).into()]
+            vec![
+                "luarocks".into(),
+                "install".into(),
+                (*pkg).into(),
+            ]
         }
-        InstallationMethod::VcPkg(pkg) => vec!["vcpkg".into(), "install".into(), (*pkg).into()],
-        InstallationMethod::Conan(pkg) => vec!["conan".into(), "install".into(), (*pkg).into()],
+        InstallationMethod::VcPkg(pkg) => vec![
+            "vcpkg".into(),
+            "install".into(),
+            (*pkg).into(),
+        ],
+        InstallationMethod::Conan(pkg) => vec![
+            "conan".into(),
+            "install".into(),
+            (*pkg).into(),
+        ],
         InstallationMethod::Nuget(pkg) => vec![
             "dotnet".into(),
             "tool".into(),
@@ -333,8 +403,14 @@ fn build_install_command(
             "hex".into(),
             (*pkg).into(),
         ],
-        InstallationMethod::Cpan(pkg) => vec!["cpan".into(), (*pkg).into()],
-        InstallationMethod::Cpanm(pkg) => vec!["cpanm".into(), (*pkg).into()],
+        InstallationMethod::Cpan(pkg) => vec![
+            "cpan".into(),
+            (*pkg).into(),
+        ],
+        InstallationMethod::Cpanm(pkg) => vec![
+            "cpanm".into(),
+            (*pkg).into(),
+        ],
 
         // Remote Bash - NOT SUPPORTED for security reasons
         InstallationMethod::RemoteBash(url) => {
@@ -448,7 +524,11 @@ fn build_versioned_install_command(
             } else {
                 format!("{}@{}", pkg.trim_end_matches("@latest"), version)
             };
-            vec!["go".into(), "install".into(), versioned]
+            vec![
+                "go".into(),
+                "install".into(),
+                versioned,
+            ]
         }
 
         // OS package managers that don't support versioned install well
@@ -460,10 +540,7 @@ fn build_versioned_install_command(
         | InstallationMethod::Winget(_) => {
             return Err(SniffInstallationError::InstallationError {
                 pkg: pkg.to_string(),
-                cmd: format!(
-                    "{} does not support versioned installation",
-                    method.manager_name()
-                ),
+                cmd: format!("{} does not support versioned installation", method.manager_name()),
             });
         }
 
@@ -480,10 +557,7 @@ fn build_versioned_install_command(
         | InstallationMethod::Cpanm(_) => {
             return Err(SniffInstallationError::InstallationError {
                 pkg: pkg.to_string(),
-                cmd: format!(
-                    "{} does not support versioned installation",
-                    method.manager_name()
-                ),
+                cmd: format!("{} does not support versioned installation", method.manager_name()),
             });
         }
 
@@ -665,21 +739,39 @@ mod tests {
     fn test_build_install_command_brew() {
         let method = InstallationMethod::Brew("ripgrep");
         let cmd = build_install_command(&method).unwrap();
-        assert_eq!(cmd, vec!["brew", "install", "ripgrep"]);
+        assert_eq!(
+            cmd,
+            vec![
+                "brew", "install", "ripgrep"
+            ]
+        );
     }
 
     #[test]
     fn test_build_install_command_cargo() {
         let method = InstallationMethod::Cargo("bat");
         let cmd = build_install_command(&method).unwrap();
-        assert_eq!(cmd, vec!["cargo", "install", "bat"]);
+        assert_eq!(
+            cmd,
+            vec![
+                "cargo", "install", "bat"
+            ]
+        );
     }
 
     #[test]
     fn test_build_install_command_npm() {
         let method = InstallationMethod::Npm("typescript");
         let cmd = build_install_command(&method).unwrap();
-        assert_eq!(cmd, vec!["npm", "install", "-g", "typescript"]);
+        assert_eq!(
+            cmd,
+            vec![
+                "npm",
+                "install",
+                "-g",
+                "typescript"
+            ]
+        );
     }
 
     #[test]
@@ -692,14 +784,31 @@ mod tests {
     fn test_build_versioned_install_command_cargo() {
         let method = InstallationMethod::Cargo("bat");
         let cmd = build_versioned_install_command(&method, "0.24.0").unwrap();
-        assert_eq!(cmd, vec!["cargo", "install", "bat", "--version", "0.24.0"]);
+        assert_eq!(
+            cmd,
+            vec![
+                "cargo",
+                "install",
+                "bat",
+                "--version",
+                "0.24.0"
+            ]
+        );
     }
 
     #[test]
     fn test_build_versioned_install_command_npm() {
         let method = InstallationMethod::Npm("typescript");
         let cmd = build_versioned_install_command(&method, "5.0.0").unwrap();
-        assert_eq!(cmd, vec!["npm", "install", "-g", "typescript@5.0.0"]);
+        assert_eq!(
+            cmd,
+            vec![
+                "npm",
+                "install",
+                "-g",
+                "typescript@5.0.0"
+            ]
+        );
     }
 
     #[test]
@@ -761,9 +870,7 @@ mod tests {
 
     #[test]
     fn test_select_best_method_returns_none_when_unavailable() {
-        let methods = [InstallationMethod::RemoteBash(
-            "https://example.com/install.sh",
-        )];
+        let methods = [InstallationMethod::RemoteBash("https://example.com/install.sh")];
         let os_pkg_mgrs = empty_os_pkg_mgrs();
         let lang_pkg_mgrs = empty_lang_pkg_mgrs();
         assert!(select_best_method(&methods, &os_pkg_mgrs, &lang_pkg_mgrs).is_none());

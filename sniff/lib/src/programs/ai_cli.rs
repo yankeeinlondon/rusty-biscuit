@@ -448,9 +448,8 @@ mod tests {
 
     #[test]
     fn test_installed_returns_marked_clients() {
-        let clients = InstalledAiClients::default()
-            .with_client(AiCli::Claude)
-            .with_client(AiCli::Aider);
+        let clients =
+            InstalledAiClients::default().with_client(AiCli::Claude).with_client(AiCli::Aider);
         let installed = clients.installed();
         assert_eq!(installed.len(), 2);
         assert!(installed.contains(&AiCli::Claude));

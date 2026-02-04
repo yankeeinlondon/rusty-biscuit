@@ -581,10 +581,8 @@ pub fn detect_git(path: &Path, deep: bool, commit_count: usize) -> Result<Option
         Err(_) => return Ok(None),
     };
 
-    let repo_root = repo
-        .workdir()
-        .ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?
-        .to_path_buf();
+    let repo_root =
+        repo.workdir().ok_or_else(|| SniffError::NotARepository(path.to_path_buf()))?.to_path_buf();
 
     let head = repo.head().ok();
     let current_branch = head.as_ref().and_then(|h| h.shorthand()).map(String::from);
@@ -870,9 +868,7 @@ fn get_upstream_commit(repo: &Repository) -> Option<String> {
     }
 
     let branch_name = head.shorthand()?;
-    let branch = repo
-        .find_branch(branch_name, git2::BranchType::Local)
-        .ok()?;
+    let branch = repo.find_branch(branch_name, git2::BranchType::Local).ok()?;
 
     // Get the upstream branch (this handles dynamic remote discovery)
     let upstream = branch.upstream().ok()?;
@@ -893,10 +889,8 @@ fn build_dirty_files(
 
     for filepath in paths {
         let diff = get_file_diff(repo, filepath)?;
-        let absolute_filepath = repo_root
-            .as_ref()
-            .map(|root| root.join(filepath))
-            .unwrap_or_else(|| filepath.clone());
+        let absolute_filepath =
+            repo_root.as_ref().map(|root| root.join(filepath)).unwrap_or_else(|| filepath.clone());
 
         dirty_files.push(DirtyFile {
             filepath: filepath.clone(),
@@ -1109,9 +1103,7 @@ fn get_remote_branches(repo: &Repository, remote_name: &str) -> Option<Vec<Strin
 
     // Connect to remote - use default callbacks (no auth)
     // This is a read-only operation (ls-remote)
-    remote
-        .connect_auth(git2::Direction::Fetch, None, None)
-        .ok()?;
+    remote.connect_auth(git2::Direction::Fetch, None, None).ok()?;
 
     // Get the list of remote refs
     let refs = remote.list().ok()?;
@@ -1121,8 +1113,7 @@ fn get_remote_branches(repo: &Repository, remote_name: &str) -> Option<Vec<Strin
         .filter_map(|head| {
             let name = head.name();
             // Filter to only branch refs (refs/heads/*)
-            name.strip_prefix("refs/heads/")
-                .map(|branch| branch.to_string())
+            name.strip_prefix("refs/heads/").map(|branch| branch.to_string())
         })
         .collect();
 
@@ -1193,9 +1184,7 @@ fn check_commit_on_remotes(repo: &Repository, commit_oid: git2::Oid) -> Option<V
                 for reference in refs.flatten() {
                     if let Ok(target) = reference.peel_to_commit() {
                         // Check if commit is reachable from this remote ref
-                        if repo
-                            .graph_descendant_of(target.id(), commit_oid)
-                            .unwrap_or(false)
+                        if repo.graph_descendant_of(target.id(), commit_oid).unwrap_or(false)
                             || target.id() == commit_oid
                         {
                             containing_remotes.push(remote_name.to_string());
@@ -1255,9 +1244,8 @@ fn get_worktrees(repo: &Repository) -> HashMap<String, WorktreeInfo> {
             .unwrap_or_default();
 
         // Check if worktree is dirty
-        let dirty = get_repo_status_with_changes(&worktree_repo)
-            .map(|(s, _)| s.is_dirty)
-            .unwrap_or(false);
+        let dirty =
+            get_repo_status_with_changes(&worktree_repo).map(|(s, _)| s.is_dirty).unwrap_or(false);
 
         worktrees.insert(
             branch.clone(),
@@ -1367,22 +1355,10 @@ mod tests {
 
     #[test]
     fn test_file_status_serialization() {
-        assert_eq!(
-            serde_json::to_string(&FileStatus::Staged).unwrap(),
-            "\"Staged\""
-        );
-        assert_eq!(
-            serde_json::to_string(&FileStatus::Modified).unwrap(),
-            "\"Modified\""
-        );
-        assert_eq!(
-            serde_json::to_string(&FileStatus::Both).unwrap(),
-            "\"Both\""
-        );
-        assert_eq!(
-            serde_json::to_string(&FileStatus::Untracked).unwrap(),
-            "\"Untracked\""
-        );
+        assert_eq!(serde_json::to_string(&FileStatus::Staged).unwrap(), "\"Staged\"");
+        assert_eq!(serde_json::to_string(&FileStatus::Modified).unwrap(), "\"Modified\"");
+        assert_eq!(serde_json::to_string(&FileStatus::Both).unwrap(), "\"Both\"");
+        assert_eq!(serde_json::to_string(&FileStatus::Untracked).unwrap(), "\"Untracked\"");
     }
 
     // ============================================================================
@@ -1408,18 +1384,14 @@ mod tests {
             index.write_tree().unwrap()
         };
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
 
         let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
 
         let info = result.unwrap();
         // Use canonicalize to handle /private/var vs /var on macOS
-        assert_eq!(
-            info.repo_root.canonicalize().unwrap(),
-            dir.path().canonicalize().unwrap()
-        );
+        assert_eq!(info.repo_root.canonicalize().unwrap(), dir.path().canonicalize().unwrap());
         assert!(info.current_branch.is_some());
         assert!(!info.recent.is_empty());
     }
@@ -1436,8 +1408,7 @@ mod tests {
             index.write_tree().unwrap()
         };
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
 
         let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
@@ -1515,10 +1486,7 @@ mod tests {
 
     #[test]
     fn test_hosting_provider_unknown() {
-        assert_eq!(
-            HostingProvider::from_url("unknown"),
-            HostingProvider::Unknown
-        );
+        assert_eq!(HostingProvider::from_url("unknown"), HostingProvider::Unknown);
     }
 
     #[test]
@@ -1569,8 +1537,7 @@ mod tests {
             index.write().unwrap();
             let tree_id = index.write_tree().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-                .unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
         }
 
         // Modify the file (unstaged change)
@@ -1604,8 +1571,7 @@ mod tests {
             index.write().unwrap();
             let tree_id = index.write_tree().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-                .unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
         }
 
         // Modify and stage the file
@@ -1638,8 +1604,7 @@ mod tests {
             let mut index = repo.index().unwrap();
             let tree_id = index.write_tree().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-                .unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
         }
 
         // Create and stage a new file
@@ -1678,8 +1643,7 @@ mod tests {
             index.write().unwrap();
             let tree_id = index.write_tree().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-                .unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
         }
 
         // Modify the nested file
@@ -1723,8 +1687,7 @@ mod tests {
             let mut index = repo.index().unwrap();
             let tree_id = index.write_tree().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-                .unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
         }
 
         // Create nested untracked file
@@ -1762,8 +1725,7 @@ mod tests {
             index.write().unwrap();
             let tree_id = index.write_tree().unwrap();
             let tree = repo.find_tree(tree_id).unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-                .unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
         }
 
         // Modify the file
@@ -1789,8 +1751,7 @@ mod tests {
             index.write_tree().unwrap()
         };
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
 
         let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
@@ -1812,12 +1773,10 @@ mod tests {
             index.write_tree().unwrap()
         };
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
 
         // Add a remote (even though it won't be reachable, we just need to test the struct)
-        repo.remote("origin", "https://github.com/example/repo.git")
-            .unwrap();
+        repo.remote("origin", "https://github.com/example/repo.git").unwrap();
 
         // Without deep mode, branches should be None
         let result = detect_git(dir.path(), false, 10).unwrap();
@@ -1841,8 +1800,7 @@ mod tests {
             index.write_tree().unwrap()
         };
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
 
         // Without deep mode, is_behind should be None
         let result = detect_git(dir.path(), false, 10).unwrap();
@@ -1864,8 +1822,7 @@ mod tests {
             index.write_tree().unwrap()
         };
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
 
         // Without deep mode, commit remotes should be None
         let result = detect_git(dir.path(), false, 10).unwrap();
@@ -1894,9 +1851,7 @@ mod tests {
                 // Create a file to make each commit have content
                 let file_path = dir.path().join(format!("file{}.txt", i));
                 std::fs::write(&file_path, format!("content {}", i)).unwrap();
-                index
-                    .add_path(Path::new(&format!("file{}.txt", i)))
-                    .unwrap();
+                index.add_path(Path::new(&format!("file{}.txt", i))).unwrap();
                 index.write().unwrap();
                 index.write_tree().unwrap()
             };
@@ -1905,18 +1860,10 @@ mod tests {
 
             let commit_id = if let Some(parent) = parent_commit {
                 let parent_commit_obj = repo.find_commit(parent).unwrap();
-                repo.commit(
-                    Some("HEAD"),
-                    &sig,
-                    &sig,
-                    &message,
-                    &tree,
-                    &[&parent_commit_obj],
-                )
-                .unwrap()
-            } else {
-                repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[])
+                repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[&parent_commit_obj])
                     .unwrap()
+            } else {
+                repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[]).unwrap()
             };
             parent_commit = Some(commit_id);
         }
@@ -1958,14 +1905,7 @@ mod tests {
         };
         let tree = repo.find_tree(tree_id).unwrap();
         let first_commit_id = repo
-            .commit(
-                Some("HEAD"),
-                &sig1,
-                &sig1,
-                "  First commit with whitespace  \n",
-                &tree,
-                &[],
-            )
+            .commit(Some("HEAD"), &sig1, &sig1, "  First commit with whitespace  \n", &tree, &[])
             .unwrap();
 
         // Create second commit with Bob
@@ -2048,9 +1988,8 @@ mod tests {
             index.write_tree().unwrap()
         };
         let tree = repo.find_tree(tree_id).unwrap();
-        let initial_commit_id = repo
-            .commit(Some("HEAD"), &sig, &sig, "Initial on main", &tree, &[])
-            .unwrap();
+        let initial_commit_id =
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial on main", &tree, &[]).unwrap();
 
         // Get the actual initial branch name (could be "master" or "main" depending on git config)
         let initial_branch_name = repo
@@ -2071,23 +2010,11 @@ mod tests {
         let tree = repo.find_tree(tree_id).unwrap();
         let initial_commit = repo.find_commit(initial_commit_id).unwrap();
         let second_main_id = repo
-            .commit(
-                Some("HEAD"),
-                &sig,
-                &sig,
-                "Second on main",
-                &tree,
-                &[&initial_commit],
-            )
+            .commit(Some("HEAD"), &sig, &sig, "Second on main", &tree, &[&initial_commit])
             .unwrap();
 
         // Create a branch from initial commit (not from HEAD)
-        repo.branch(
-            "feature",
-            &repo.find_commit(initial_commit_id).unwrap(),
-            false,
-        )
-        .unwrap();
+        repo.branch("feature", &repo.find_commit(initial_commit_id).unwrap(), false).unwrap();
 
         // Switch to feature branch and add a commit
         repo.set_head("refs/heads/feature").unwrap();
@@ -2102,14 +2029,7 @@ mod tests {
         let tree = repo.find_tree(tree_id).unwrap();
         let initial_commit = repo.find_commit(initial_commit_id).unwrap();
         let feature_commit_id = repo
-            .commit(
-                Some("HEAD"),
-                &sig,
-                &sig,
-                "Commit on feature",
-                &tree,
-                &[&initial_commit],
-            )
+            .commit(Some("HEAD"), &sig, &sig, "Commit on feature", &tree, &[&initial_commit])
             .unwrap();
 
         // Now detect from feature branch
@@ -2134,18 +2054,13 @@ mod tests {
 
         // Verify main branch still has its commits (switch back and check)
         // Use the actual initial branch name we captured earlier
-        repo.set_head(&format!("refs/heads/{}", initial_branch_name))
-            .unwrap();
+        repo.set_head(&format!("refs/heads/{}", initial_branch_name)).unwrap();
         // Also checkout to update the working directory
-        repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
-            .unwrap();
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force())).unwrap();
 
         let result_main = detect_git(dir.path(), false, 10).unwrap().unwrap();
-        let main_messages: Vec<&str> = result_main
-            .recent
-            .iter()
-            .map(|c| c.message.as_str())
-            .collect();
+        let main_messages: Vec<&str> =
+            result_main.recent.iter().map(|c| c.message.as_str()).collect();
         assert!(main_messages.contains(&"Second on main"));
         assert!(main_messages.contains(&"Initial on main"));
         assert!(!main_messages.contains(&"Commit on feature"));
@@ -2184,7 +2099,10 @@ mod tests {
             name: "origin".to_string(),
             url: Some("https://github.com/user/repo".to_string()),
             provider: HostingProvider::GitHub,
-            branches: Some(vec!["main".to_string(), "develop".to_string()]),
+            branches: Some(vec![
+                "main".to_string(),
+                "develop".to_string(),
+            ]),
         };
 
         let json_with = serde_json::to_string(&remote_with_branches).unwrap();
@@ -2223,7 +2141,10 @@ mod tests {
         assert_eq!(json, "false");
 
         // Behind should serialize as array
-        let behind = BehindStatus::Behind(vec!["origin".to_string(), "upstream".to_string()]);
+        let behind = BehindStatus::Behind(vec![
+            "origin".to_string(),
+            "upstream".to_string(),
+        ]);
         let json = serde_json::to_string(&behind).unwrap();
         assert_eq!(json, r#"["origin","upstream"]"#);
 
@@ -2243,7 +2164,10 @@ mod tests {
         let behind: BehindStatus = serde_json::from_str(r#"["origin","upstream"]"#).unwrap();
         assert_eq!(
             behind,
-            BehindStatus::Behind(vec!["origin".to_string(), "upstream".to_string()])
+            BehindStatus::Behind(vec![
+                "origin".to_string(),
+                "upstream".to_string()
+            ])
         );
 
         // empty array should deserialize to Behind with empty vec
@@ -2385,12 +2309,10 @@ mod tests {
             index.write_tree().unwrap()
         };
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
 
         // Add a remote
-        repo.remote("origin", "https://github.com/example/repo.git")
-            .unwrap();
+        repo.remote("origin", "https://github.com/example/repo.git").unwrap();
 
         // Call detect_git with deep=false
         let result = detect_git(dir.path(), false, 10).unwrap();
@@ -2403,25 +2325,16 @@ mod tests {
         // 1. RemoteInfo.branches should be None
         assert!(!info.remotes.is_empty());
         for remote in &info.remotes {
-            assert!(
-                remote.branches.is_none(),
-                "branches should be None when deep=false"
-            );
+            assert!(remote.branches.is_none(), "branches should be None when deep=false");
         }
 
         // 2. RepoStatus.is_behind should be None
-        assert!(
-            info.status.is_behind.is_none(),
-            "is_behind should be None when deep=false"
-        );
+        assert!(info.status.is_behind.is_none(), "is_behind should be None when deep=false");
 
         // 3. CommitInfo.remotes should be None for all commits
         assert!(!info.recent.is_empty());
         for commit in &info.recent {
-            assert!(
-                commit.remotes.is_none(),
-                "commit.remotes should be None when deep=false"
-            );
+            assert!(commit.remotes.is_none(), "commit.remotes should be None when deep=false");
         }
 
         // Verify basic fields are still populated correctly
@@ -2447,9 +2360,7 @@ mod tests {
                 let mut index = repo.index().unwrap();
                 let file_path = dir.path().join(format!("file{}.txt", i));
                 std::fs::write(&file_path, format!("content {}", i)).unwrap();
-                index
-                    .add_path(Path::new(&format!("file{}.txt", i)))
-                    .unwrap();
+                index.add_path(Path::new(&format!("file{}.txt", i))).unwrap();
                 index.write().unwrap();
                 index.write_tree().unwrap()
             };
@@ -2458,18 +2369,10 @@ mod tests {
 
             let commit_id = if let Some(parent) = parent_commit {
                 let parent_commit_obj = repo.find_commit(parent).unwrap();
-                repo.commit(
-                    Some("HEAD"),
-                    &sig,
-                    &sig,
-                    &message,
-                    &tree,
-                    &[&parent_commit_obj],
-                )
-                .unwrap()
-            } else {
-                repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[])
+                repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[&parent_commit_obj])
                     .unwrap()
+            } else {
+                repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[]).unwrap()
             };
             parent_commit = Some(commit_id);
         }
@@ -2529,14 +2432,8 @@ mod tests {
 
     #[test]
     fn test_ref_kind_variants() {
-        assert_eq!(
-            serde_json::to_string(&RefKind::LocalBranch).unwrap(),
-            "\"LocalBranch\""
-        );
-        assert_eq!(
-            serde_json::to_string(&RefKind::RemoteBranch).unwrap(),
-            "\"RemoteBranch\""
-        );
+        assert_eq!(serde_json::to_string(&RefKind::LocalBranch).unwrap(), "\"LocalBranch\"");
+        assert_eq!(serde_json::to_string(&RefKind::RemoteBranch).unwrap(), "\"RemoteBranch\"");
         assert_eq!(serde_json::to_string(&RefKind::Tag).unwrap(), "\"Tag\"");
     }
 
@@ -2606,8 +2503,7 @@ mod tests {
             index.write_tree().unwrap()
         };
         let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
 
         let result = detect_git(dir.path(), false, 10).unwrap();
         assert!(result.is_some());
@@ -2620,14 +2516,8 @@ mod tests {
         assert!(!head_commit.refs.is_empty());
 
         // Should have at least the local branch
-        let has_local_branch = head_commit
-            .refs
-            .iter()
-            .any(|r| r.kind == RefKind::LocalBranch);
-        assert!(
-            has_local_branch,
-            "HEAD commit should have a local branch ref"
-        );
+        let has_local_branch = head_commit.refs.iter().any(|r| r.kind == RefKind::LocalBranch);
+        assert!(has_local_branch, "HEAD commit should have a local branch ref");
 
         // The HEAD branch should be marked
         let has_head_marker = head_commit.refs.iter().any(|r| r.is_head);
@@ -2650,9 +2540,8 @@ mod tests {
             index.write_tree().unwrap()
         };
         let tree = repo.find_tree(tree_id).unwrap();
-        let commit_id = repo
-            .commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
-            .unwrap();
+        let commit_id =
+            repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[]).unwrap();
 
         // Create additional branches pointing to the same commit
         let commit = repo.find_commit(commit_id).unwrap();
@@ -2660,8 +2549,7 @@ mod tests {
         repo.branch("develop", &commit, false).unwrap();
 
         // Create a tag pointing to the same commit
-        repo.tag_lightweight("v1.0.0", commit.as_object(), false)
-            .unwrap();
+        repo.tag_lightweight("v1.0.0", commit.as_object(), false).unwrap();
 
         let result = detect_git(dir.path(), false, 10).unwrap();
         let info = result.unwrap();
@@ -2676,16 +2564,10 @@ mod tests {
 
         // Other local branches should come next, then tags
         let first_tag_idx = head_commit.refs.iter().position(|r| r.kind == RefKind::Tag);
-        let last_local_idx = head_commit
-            .refs
-            .iter()
-            .rposition(|r| r.kind == RefKind::LocalBranch);
+        let last_local_idx = head_commit.refs.iter().rposition(|r| r.kind == RefKind::LocalBranch);
 
         if let (Some(tag_idx), Some(local_idx)) = (first_tag_idx, last_local_idx) {
-            assert!(
-                local_idx < tag_idx,
-                "Local branches should come before tags"
-            );
+            assert!(local_idx < tag_idx, "Local branches should come before tags");
         }
     }
 }
