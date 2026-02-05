@@ -157,6 +157,9 @@ pub enum WordWrap {
     /// a new line is started but without any `-` or other markings to
     /// indicate a "continuation" and no attempt is made to break at a
     /// clean break character.
+    ///
+    /// This is also a hint to components like Table to try other columns
+    /// before those marked as NOT having word wrap.
     None,
 }
 

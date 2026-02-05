@@ -205,11 +205,9 @@ fn run_simple(
     }
 
     let term = Terminal::new();
-    let rendered = if term.is_tty {
-        table.render_with_cursor_alignment(100)
-    } else {
-        table.render(Some(100))
-    };
+    let table = table.prefer_cursor_alignment();
+
+    let rendered = table.fallback_render(&term);
     log::data(&format!("\n{}", rendered));
 
     // Show color legend if there are sync issues
@@ -263,7 +261,7 @@ fn run_verbose(
         columns.push(column);
     }
 
-    let mut table = Table::new().with_columns(columns);
+    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
     table.layout_mut().left_margin = Margin::Chars(1);
 
     for provider in ALL_PROVIDERS {
@@ -299,19 +297,15 @@ fn run_verbose(
     }
 
     let term = Terminal::new();
-    let rendered = if term.is_tty {
-        table.render_with_cursor_alignment(160)
-    } else {
-        table.render(Some(160))
-    };
+    let rendered = table.fallback_render(&term);
     log::data(&format!("\n{}", rendered));
 
     // Show legend
     log::data("");
     let legend = Prose::new(
-        "{{dim}}- Legend: {{reset}}⚠️{{dim}} = not supported, {{reset}}-{{dim}} = not configured, {{reset}}⓪{{dim}} = 0 actions, {{reset}}❶{{dim}} = 1 action, etc.{{reset}}",
-    );
-    log::data(&format!(" {}", legend.render(Some(160))));
+        "{{dim}}Legend: {{reset}}⚠️{{dim}} = not supported, {{reset}}-{{dim}} = not configured, {{reset}}⓪{{dim}} = 0 actions, {{reset}}❶{{dim}} = 1 action, etc.{{reset}}",
+    ).with_left_margin(Margin::Chars(8));
+    log::data(&format!(" {}\n", legend.fallback_render(&term)));
 
     // Show hints about available flags
     let hints = [
@@ -320,7 +314,7 @@ fn run_verbose(
         "{{dim}}- Use <blue><bold>--describe</bold></blue>{{dim}} to see event descriptions and schemas{{reset}}",
     ];
     for hint in hints {
-        log::data(&format!(" {}", Prose::new(hint).render(Some(160))));
+        log::data(&format!(" {}", Prose::new(hint).fallback_render(&term)));
     }
 
     Ok(())
@@ -348,7 +342,7 @@ fn run_support() -> Result<()> {
         columns.push(TableColumn::new(provider.to_string()));
     }
 
-    let mut table = Table::new().with_columns(columns);
+    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
     table.layout_mut().left_margin = Margin::Chars(1);
 
     // Add a row for each event
@@ -368,11 +362,7 @@ fn run_support() -> Result<()> {
     }
 
     let term = Terminal::new();
-    let rendered = if term.is_tty {
-        table.render_with_cursor_alignment(120)
-    } else {
-        table.render(Some(120))
-    };
+    let rendered = table.fallback_render(&term);
     log::data(&format!("\n{}", rendered));
 
     Ok(())
@@ -396,21 +386,13 @@ fn run_mapping() -> Result<()> {
     let term = Terminal::new();
 
     // Render first table (Claude, Codex, Gemini, Goose)
-    let table1 = build_mapping_table(&MAPPING_GROUP_1);
-    let rendered1 = if term.is_tty {
-        table1.render_with_cursor_alignment(100)
-    } else {
-        table1.render(Some(100))
-    };
+    let table1 = build_mapping_table(&MAPPING_GROUP_1).prefer_cursor_alignment();
+    let rendered1 = table1.fallback_render(&term);
     log::data(&format!("\n{}", rendered1));
 
     // Render second table (KimiCode, OpenCode, QwenCode)
-    let table2 = build_mapping_table(&MAPPING_GROUP_2);
-    let rendered2 = if term.is_tty {
-        table2.render_with_cursor_alignment(100)
-    } else {
-        table2.render(Some(100))
-    };
+    let table2 = build_mapping_table(&MAPPING_GROUP_2).prefer_cursor_alignment();
+    let rendered2 = table2.fallback_render(&term);
     log::data(&format!("\n{}", rendered2));
 
     // Show legend
@@ -462,7 +444,8 @@ fn run_describe() -> Result<()> {
         TableColumn::new("Description"),
     ];
 
-    let mut table = Table::new().with_columns(columns);
+    let term = Terminal::new();
+    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
     table.layout_mut().left_margin = Margin::Chars(1);
 
     // Add a row for each event
@@ -476,23 +459,18 @@ fn run_describe() -> Result<()> {
         table.add_row(row);
     }
 
-    let term = Terminal::new();
-    let rendered = if term.is_tty {
-        table.render_with_cursor_alignment(140)
-    } else {
-        table.render(Some(140))
-    };
+    let rendered = table.fallback_render(&term);
     log::data(&format!("\n{}", rendered));
 
     // Show legend
     log::data("");
     let legend =
         Prose::new("{{dim}}- Response Schema: fields available in the event payload{{reset}}");
-    log::data(&format!(" {}", legend.render(Some(140))));
+    log::data(&format!(" {}", legend.fallback_render(&term)));
     let legend2 = Prose::new(
         "{{dim}}- Return Schema: what hooks can return to influence agent behavior (blocking hooks only){{reset}}",
     );
-    log::data(&format!(" {}", legend2.render(Some(140))));
+    log::data(&format!(" {}", legend2.fallback_render(&term)));
 
     Ok(())
 }

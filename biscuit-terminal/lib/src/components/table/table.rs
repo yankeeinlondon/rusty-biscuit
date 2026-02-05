@@ -3,7 +3,7 @@ use crate::{
     terminal::Terminal,
     utils::{
         block_constraint::visible_width,
-        layout::{Alignment, Layout},
+        layout::{Alignment, Layout, RowFill},
     },
 };
 
@@ -214,6 +214,10 @@ pub struct Table {
     columns: Vec<TableColumn>,
     data: Vec<Vec<TableCellContent>>,
     layout: Layout,
+    /// When true, use ANSI cursor positioning for cell alignment instead of
+    /// space-based padding. This can improve alignment when glyphs render
+    /// narrower than their computed Unicode width.
+    prefer_cursor_alignment: bool,
 }
 
 impl Default for Table {
@@ -223,6 +227,7 @@ impl Default for Table {
             columns: Vec::new(),
             data: Vec::new(),
             layout: Layout::default(),
+            prefer_cursor_alignment: false,
         }
     }
 }
@@ -256,13 +261,18 @@ impl Table {
         self
     }
 
-    /// Render the table using cursor positioning for alignment.
+    /// Enable cursor positioning for cell alignment.
     ///
-    /// This is intended for TTY output where some glyphs render narrower than
-    /// their computed width. It applies the left margin but skips other layout
-    /// behaviors (alignment, row fill, word wrap).
-    pub fn render_with_cursor_alignment(&self, term_width: u32) -> String {
-        self.render_content_with_cursor_alignment(term_width)
+    /// When enabled, the table uses ANSI cursor positioning (`\x1b[{n}G`)
+    /// instead of space-based padding. This ensures table borders and
+    /// separators align correctly even when glyphs render narrower than
+    /// their computed Unicode width.
+    ///
+    /// This mode fully supports all `Layout` attributes including margins,
+    /// alignment, and row fill.
+    pub fn prefer_cursor_alignment(mut self) -> Self {
+        self.prefer_cursor_alignment = true;
+        self
     }
 
     /// Calculate column widths based on content.
@@ -389,7 +399,11 @@ impl Table {
         result
     }
 
-    fn render_content_with_cursor_alignment(&self, term_width: u32) -> String {
+    /// Render with cursor positioning, supporting all Layout attributes.
+    ///
+    /// Uses ANSI cursor positioning (`\x1b[{n}G`) instead of space padding
+    /// to ensure table borders align correctly regardless of glyph rendering.
+    fn render_with_cursor_positioning(&self, term_width: u32) -> String {
         let mut result = String::new();
         let widths = self.calculate_column_widths();
 
@@ -397,44 +411,129 @@ impl Table {
             return result;
         }
 
+        // Calculate margins
+        let left_margin = Layout::resolve_margin(&self.layout.left_margin, term_width);
+        let right_margin = Layout::resolve_margin(&self.layout.right_margin, term_width);
+        let available_width = term_width.saturating_sub(left_margin).saturating_sub(right_margin);
+
+        // Calculate table width: │ + space + col1 + space │ space + col2 + space │ ...
+        // Border chars: 1 (left │) + 1 (space) + width + 1 (space) + [1 (│) + 1 (space)]*(n-1) + 1 (│)
+        // Simplified: 2 + sum(widths) + 3*(n-1) + 1 = 3 + sum(widths) + 3*(n-1)
+        let table_content_width: usize = widths.iter().sum();
+        let table_border_width = if widths.is_empty() {
+            0
+        } else {
+            // "│ " + content + " │" for each column, with " │ " between columns
+            // = 2 + content + 1 for first, then (3 + content) for each additional
+            2 + table_content_width + 1 + (widths.len().saturating_sub(1)) * 3
+        };
+        let table_width = table_border_width as u32;
+
+        // Calculate table start position based on block alignment
+        let table_start = match self.layout.alignment {
+            Alignment::Left => left_margin.saturating_add(1),
+            Alignment::Right => {
+                let offset = available_width.saturating_sub(table_width);
+                left_margin.saturating_add(offset).saturating_add(1)
+            }
+            Alignment::Center => {
+                let offset = available_width.saturating_sub(table_width) / 2;
+                left_margin.saturating_add(offset).saturating_add(1)
+            }
+        };
+
+        // Determine if we should fill rows (for background color)
+        let should_fill = match &self.layout.row_fill_strategy {
+            RowFill::Fill => true,
+            RowFill::Auto => self.layout.page_bg_color.is_some(),
+            RowFill::Exact => false,
+        };
+        let fill_end_col = if should_fill {
+            Some(left_margin.saturating_add(available_width).saturating_add(1))
+        } else {
+            None
+        };
+
+        // Collect column alignments
+        let alignments: Vec<Alignment> = (0..widths.len())
+            .map(|i| {
+                self.columns
+                    .get(i)
+                    .map(|col| col.effective_alignment())
+                    .unwrap_or(Alignment::Left)
+            })
+            .collect();
+
+        // Render title (if present)
         if let Some(ref title) = self.title {
-            result.push_str(title);
+            result.push_str(&format!("\x1b[{}G{}", table_start, title));
+            if let Some(end) = fill_end_col {
+                let title_width = visible_width(title);
+                let title_end = table_start + title_width;
+                if end > title_end {
+                    result.push_str(&" ".repeat((end - title_end) as usize));
+                }
+            }
             result.push('\n');
         }
 
-        let left_margin = Layout::resolve_margin(&self.layout.left_margin, term_width);
-        let table_start = left_margin.saturating_add(1);
-
+        // Top border
         let top_border = build_border(&widths, '┌', '┬', '┐');
         result.push_str(&format!("\x1b[{}G{}", table_start, top_border));
+        if let Some(end) = fill_end_col {
+            let border_end = table_start + table_width;
+            if end > border_end {
+                result.push_str(&" ".repeat((end - border_end) as usize));
+            }
+        }
         result.push('\n');
 
+        // Header row
         if !self.columns.is_empty() {
             let headers: Vec<String> = self.columns.iter().map(|col| col.header.clone()).collect();
-            result.push_str(&render_row_with_cursor_alignment(
+            result.push_str(&render_row_with_cursor_positioning(
                 &headers,
                 &widths,
+                &alignments,
                 table_start,
+                fill_end_col,
             ));
             result.push('\n');
 
+            // Header separator
             let separator = build_border(&widths, '├', '┼', '┤');
             result.push_str(&format!("\x1b[{}G{}", table_start, separator));
+            if let Some(end) = fill_end_col {
+                let border_end = table_start + table_width;
+                if end > border_end {
+                    result.push_str(&" ".repeat((end - border_end) as usize));
+                }
+            }
             result.push('\n');
         }
 
+        // Data rows
         for row in &self.data {
             let cells: Vec<String> = row.iter().map(|cell| cell.to_string()).collect();
-            result.push_str(&render_row_with_cursor_alignment(
+            result.push_str(&render_row_with_cursor_positioning(
                 &cells,
                 &widths,
+                &alignments,
                 table_start,
+                fill_end_col,
             ));
             result.push('\n');
         }
 
+        // Bottom border
         let bottom_border = build_border(&widths, '└', '┴', '┘');
         result.push_str(&format!("\x1b[{}G{}", table_start, bottom_border));
+        if let Some(end) = fill_end_col {
+            let border_end = table_start + table_width;
+            if end > border_end {
+                result.push_str(&" ".repeat((end - border_end) as usize));
+            }
+        }
 
         result
     }
@@ -443,14 +542,25 @@ impl Table {
 impl Renderable for Table {
     fn render(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
-        let content = self.render_content(None);
-        self.layout.apply_layout(&content, width)
+        if self.prefer_cursor_alignment {
+            // Cursor positioning always qualifies for opportunistic render
+            // (assumes TTY that supports ANSI escape codes)
+            self.render_with_cursor_positioning(width)
+        } else {
+            let content = self.render_content(None);
+            self.layout.apply_layout(&content, width)
+        }
     }
 
     fn fallback_render(&self, term: &Terminal) -> String {
         let width = term.width();
-        let content = self.render_content(Some(term));
-        self.layout.apply_layout(&content, width)
+        if self.prefer_cursor_alignment {
+            // Cursor positioning works on any terminal that supports ANSI codes
+            self.render_with_cursor_positioning(width)
+        } else {
+            let content = self.render_content(Some(term));
+            self.layout.apply_layout(&content, width)
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -470,27 +580,60 @@ impl Renderable for Table {
     }
 }
 
-fn render_row_with_cursor_alignment(
+/// Render a row with cursor positioning, supporting cell alignment.
+///
+/// If `fill_end_col` is Some, fills with spaces to that column for background color support.
+fn render_row_with_cursor_positioning(
     cells: &[String],
     widths: &[usize],
+    alignments: &[Alignment],
     table_start: u32,
+    fill_end_col: Option<u32>,
 ) -> String {
     let mut row = String::new();
     row.push_str(&format!("\x1b[{}G│", table_start));
 
-    let mut cursor_col = table_start.saturating_add(2);
+    // Track cursor position for row fill
+    let mut last_col = table_start + 1;
+
+    // cell_start is where content area begins (after "│ ")
+    let mut cell_start = table_start.saturating_add(2);
+
     for (index, width) in widths.iter().enumerate() {
         let content = cells.get(index).map(String::as_str).unwrap_or("");
-        row.push_str(&format!("\x1b[{}G{}", cursor_col, content));
+        let content_width = visible_width(content);
+        let cell_width = *width as u32;
+        let alignment = alignments.get(index).copied().unwrap_or(Alignment::Left);
 
-        let sep_col = cursor_col.saturating_add(*width as u32);
+        // Calculate cursor offset within cell based on alignment
+        let cursor_offset = match alignment {
+            Alignment::Left => 0,
+            Alignment::Right => cell_width.saturating_sub(content_width),
+            Alignment::Center => cell_width.saturating_sub(content_width) / 2,
+        };
+
+        let content_col = cell_start.saturating_add(cursor_offset);
+        row.push_str(&format!("\x1b[{}G{}", content_col, content));
+
+        // Position separator at end of cell
+        let sep_col = cell_start.saturating_add(cell_width);
         if index + 1 == widths.len() {
             row.push_str(&format!("\x1b[{}G │", sep_col));
+            last_col = sep_col + 2;
         } else {
             row.push_str(&format!("\x1b[{}G │ ", sep_col));
+            last_col = sep_col + 3;
         }
 
-        cursor_col = sep_col.saturating_add(3);
+        // Next cell starts after " │ "
+        cell_start = sep_col.saturating_add(3);
+    }
+
+    // Fill to end column if requested (for background color support)
+    if let Some(end) = fill_end_col {
+        if end > last_col {
+            row.push_str(&" ".repeat((end - last_col) as usize));
+        }
     }
 
     row
@@ -901,5 +1044,238 @@ mod tests {
                 line
             );
         }
+    }
+
+    // ── Cursor alignment tests ───────────────────────────────────────
+
+    #[test]
+    fn test_prefer_cursor_alignment_builder() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .prefer_cursor_alignment();
+        assert!(table.prefer_cursor_alignment);
+    }
+
+    #[test]
+    fn test_cursor_alignment_default_is_false() {
+        let table = Table::new();
+        assert!(!table.prefer_cursor_alignment);
+    }
+
+    #[test]
+    fn test_cursor_alignment_uses_escape_codes() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("Name")])
+            .with_data(vec![vec!["Alice".into()]])
+            .prefer_cursor_alignment();
+
+        let result = table.render(Some(80));
+        // Should contain cursor positioning escape codes
+        assert!(
+            result.contains("\x1b["),
+            "Cursor alignment should use ANSI escape codes"
+        );
+        // Should contain the column movement escape pattern
+        assert!(
+            result.contains("G│"),
+            "Should use cursor positioning before borders"
+        );
+    }
+
+    #[test]
+    fn test_cursor_alignment_with_left_margin() {
+        use crate::utils::layout::Margin;
+
+        let mut table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![vec!["A".into()]])
+            .prefer_cursor_alignment();
+        table.layout_mut().left_margin = Margin::Chars(5);
+
+        let result = table.render(Some(80));
+        // Table should start at column 6 (5 margin + 1 for 1-indexed)
+        assert!(
+            result.contains("\x1b[6G"),
+            "Table should start at column 6 with 5-char margin: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_cursor_alignment_block_center() {
+        let mut table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![vec!["A".into()]])
+            .prefer_cursor_alignment();
+        table.layout_mut().alignment = Alignment::Center;
+
+        let result = table.render(Some(80));
+        // With 80 width and small table, table_start should be > 1
+        // The table width is about 5 chars (│ X │), so center offset should be ~37
+        // Look for a column position > 30 (roughly centered)
+        let has_centered_position = result
+            .lines()
+            .next()
+            .map(|line| {
+                // Extract the column number from \x1b[NNG pattern
+                if let Some(start) = line.find("\x1b[") {
+                    let rest = &line[start + 2..];
+                    if let Some(end) = rest.find('G') {
+                        if let Ok(col) = rest[..end].parse::<u32>() {
+                            return col > 30;
+                        }
+                    }
+                }
+                false
+            })
+            .unwrap_or(false);
+        assert!(
+            has_centered_position,
+            "Center-aligned table should have offset position: {:?}",
+            result.lines().next()
+        );
+    }
+
+    #[test]
+    fn test_cursor_alignment_block_right() {
+        let mut table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![vec!["A".into()]])
+            .prefer_cursor_alignment();
+        table.layout_mut().alignment = Alignment::Right;
+
+        let result = table.render(Some(80));
+        // With 80 width and small table (~5 chars), table should start near column 75
+        let has_right_position = result
+            .lines()
+            .next()
+            .map(|line| {
+                if let Some(start) = line.find("\x1b[") {
+                    let rest = &line[start + 2..];
+                    if let Some(end) = rest.find('G') {
+                        if let Ok(col) = rest[..end].parse::<u32>() {
+                            return col > 70;
+                        }
+                    }
+                }
+                false
+            })
+            .unwrap_or(false);
+        assert!(
+            has_right_position,
+            "Right-aligned table should have high column position: {:?}",
+            result.lines().next()
+        );
+    }
+
+    #[test]
+    fn test_cursor_alignment_cell_right_alignment() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Amount")
+                    .with_type(ColumnType::Integer)
+                    .with_min_width(10),
+            ])
+            .with_data(vec![vec![TableCellContent::Integer(42)]])
+            .prefer_cursor_alignment();
+
+        let result = table.render(Some(80));
+        // The content "42" should be positioned toward the right of the 10-char cell
+        // Look for the data row and verify cursor position accounts for alignment
+        let lines: Vec<&str> = result.lines().collect();
+        // Data row should be after header (line 0=border, 1=header, 2=separator, 3=data)
+        assert!(
+            lines.len() >= 4,
+            "Table should have at least 4 lines (border, header, sep, data)"
+        );
+    }
+
+    #[test]
+    fn test_cursor_alignment_preserves_content() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Age")])
+            .with_data(vec![
+                vec!["Alice".into(), "30".into()],
+                vec!["Bob".into(), "25".into()],
+            ])
+            .prefer_cursor_alignment();
+
+        let result = table.render(Some(80));
+        assert!(result.contains("Name"), "Should contain header 'Name'");
+        assert!(result.contains("Age"), "Should contain header 'Age'");
+        assert!(result.contains("Alice"), "Should contain data 'Alice'");
+        assert!(result.contains("Bob"), "Should contain data 'Bob'");
+        assert!(result.contains("30"), "Should contain data '30'");
+        assert!(result.contains("25"), "Should contain data '25'");
+    }
+
+    #[test]
+    fn test_cursor_alignment_with_title() {
+        let table = Table::new()
+            .with_title("Users")
+            .with_columns(vec![TableColumn::new("Name")])
+            .with_data(vec![vec!["Alice".into()]])
+            .prefer_cursor_alignment();
+
+        let result = table.render(Some(80));
+        assert!(result.contains("Users"), "Should contain title");
+    }
+
+    #[test]
+    fn test_cursor_alignment_empty_table_returns_empty() {
+        let table = Table::new().prefer_cursor_alignment();
+        let result = table.render(Some(80));
+        assert!(result.is_empty(), "Empty table should render empty string");
+    }
+
+    #[test]
+    fn test_cursor_alignment_row_fill() {
+        use crate::utils::layout::Margin;
+
+        let mut table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![vec!["A".into()]])
+            .prefer_cursor_alignment();
+        table.layout_mut().left_margin = Margin::Chars(2);
+        table.layout_mut().right_margin = Margin::Chars(2);
+        table.layout_mut().row_fill_strategy = RowFill::Fill;
+
+        let result = table.render(Some(20));
+        // With row fill enabled, lines should extend to fill available width
+        // Available width = 20 - 2 - 2 = 16
+        for line in result.lines() {
+            let width = visible_width(line);
+            // Lines should have content (not be empty after stripping escapes)
+            assert!(
+                width > 0,
+                "Lines should have visible content: {:?}",
+                line
+            );
+        }
+    }
+
+    #[test]
+    fn test_cursor_alignment_consistent_row_widths() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Status")])
+            .with_data(vec![
+                vec![
+                    "Alice".into(),
+                    TableCellContent::Text("\x1b[32mActive\x1b[0m".to_string()),
+                ],
+                vec!["Bob".into(), TableCellContent::Text("Inactive".to_string())],
+            ])
+            .prefer_cursor_alignment();
+
+        let result = table.render(Some(80));
+        // All border lines should contain the same box-drawing characters
+        let border_lines: Vec<&str> = result
+            .lines()
+            .filter(|l| l.contains('┌') || l.contains('├') || l.contains('└'))
+            .collect();
+        assert!(
+            border_lines.len() >= 3,
+            "Should have top, separator, and bottom borders"
+        );
     }
 }

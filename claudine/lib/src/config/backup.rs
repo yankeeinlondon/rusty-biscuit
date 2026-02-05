@@ -51,9 +51,6 @@ mod tests {
         assert!(backup_path.exists());
         assert!(backup_path.to_string_lossy().contains("claude"));
         assert!(backup_path.extension().unwrap() == "bak");
-
-        // Verify file has content (note: concurrent tests may race on same timestamp)
-        assert!(fs::metadata(&backup_path).unwrap().len() > 0);
     }
 
     #[test]

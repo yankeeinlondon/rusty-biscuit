@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::components::renderable::Renderable;
+use crate::discovery::detection::ColorDepth;
 use crate::terminal::Terminal;
 use crate::utils::styling::{FontWeight, Style, Stylist};
 use crate::utils::{
@@ -27,14 +28,24 @@ const NERD_CHECKBOX_CANCELLED: &'static str = "\u{f12ed}";
 
 /// fallback representation for an _open_ **TODO**
 pub static FB_CHECKBOX_OPEN: &str = "[ ]";
+/// In-progress fallback with color
 pub static FB_CHECKBOX_IN_PROGRESS: LazyLock<String> =
     LazyLock::new(|| format!("[{}]", BasicColor::Green.fg("⏺")));
+/// Completed fallback with color
 pub static FB_CHECKBOX_COMPLETED: LazyLock<String> =
     LazyLock::new(|| format!("[{}]", BasicColor::Green.fg("✔")));
+/// Cancelled fallback with color
 pub static FB_CHECKBOX_CANCELLED: LazyLock<String> =
     LazyLock::new(|| format!("[{}]", BasicColor::BrightRed.fg("-")));
+/// Blocked fallback with color
 pub static FB_CHECKBOX_BLOCKED: LazyLock<String> =
     LazyLock::new(|| format!("[{}]", BasicColor::BrightRed.fg("⏺")));
+
+/// No-color fallback representations for terminals without color support
+pub static FB_CHECKBOX_IN_PROGRESS_NOCOLOR: &str = "[>]";
+pub static FB_CHECKBOX_COMPLETED_NOCOLOR: &str = "[x]";
+pub static FB_CHECKBOX_CANCELLED_NOCOLOR: &str = "[-]";
+pub static FB_CHECKBOX_BLOCKED_NOCOLOR: &str = "[!]";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum TodoState {
@@ -164,28 +175,55 @@ impl Todo {
     /// Reports the Todo item to the terminal. Using a nerd font representation
     /// if the terminal has detected that the font is a nerd font. Otherwise it
     /// uses basic characters which should be in all font variants.
+    ///
+    /// When the terminal does not support colors (`ColorDepth::None`), plain
+    /// ASCII fallbacks are used without any ANSI escape codes.
     fn to_terminal(&self, term: &Terminal) -> String {
         let todo_icon = TODO_CHAR_LOOKUP
             .get(&self.state)
             .unwrap_or(&TODO_CHAR_LOOKUP[&TodoState::Open]);
 
+        // Check if terminal supports colors
+        let has_color = term.color_depth != ColorDepth::None;
+
+        // Get the appropriate fallback icon based on color support
+        let fallback_icon = if has_color {
+            todo_icon.fallback
+        } else {
+            match self.state {
+                TodoState::Open => FB_CHECKBOX_OPEN,
+                TodoState::InProgress => FB_CHECKBOX_IN_PROGRESS_NOCOLOR,
+                TodoState::Completed => FB_CHECKBOX_COMPLETED_NOCOLOR,
+                TodoState::Cancelled => FB_CHECKBOX_CANCELLED_NOCOLOR,
+                TodoState::Blocked => FB_CHECKBOX_BLOCKED_NOCOLOR,
+            }
+        };
+
         match self.state {
             TodoState::Cancelled => match term.is_nerd_font {
-                Some(true) => {
+                Some(true) if has_color => {
                     FontWeight::Dim.wrap(format!("{} {}", todo_icon.nerd, self.description))
                 }
-                _ => FontWeight::Dim.wrap(format!(
+                Some(true) => {
+                    // Nerd font but no color - just use the icon without dim styling
+                    format!("{} {}", todo_icon.nerd, self.description)
+                }
+                _ if has_color => FontWeight::Dim.wrap(format!(
                     "{} {}",
-                    todo_icon.fallback,
+                    fallback_icon,
                     Style::Strikethrough.term_wrap(&self.description, term)
                 )),
+                _ => {
+                    // No color - plain text with no styling
+                    format!("{} {}", fallback_icon, self.description)
+                }
             },
             _ => match term.is_nerd_font {
                 Some(true) => {
                     format!("{} {}", todo_icon.nerd, self.description)
                 }
                 _ => {
-                    format!("{} {}", todo_icon.fallback, self.description)
+                    format!("{} {}", fallback_icon, self.description)
                 }
             },
         }
@@ -216,5 +254,99 @@ impl Renderable for Todo {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Create a terminal with no color support for testing
+    fn no_color_terminal() -> Terminal {
+        let mut term = Terminal::builder()
+            .width(80)
+            .color_depth(ColorDepth::None)
+            .build();
+        // Ensure no nerd font support for consistent fallback output
+        term.is_nerd_font = Some(false);
+        term
+    }
+
+    /// Create a terminal with color support for testing
+    fn color_terminal() -> Terminal {
+        let mut term = Terminal::builder()
+            .width(80)
+            .color_depth(ColorDepth::TrueColor)
+            .build();
+        // Ensure no nerd font support for consistent fallback output
+        term.is_nerd_font = Some(false);
+        term
+    }
+
+    /// Helper to create Todo with a specific state
+    fn todo_with_state(desc: &str, state: TodoState) -> Todo {
+        Todo {
+            description: desc.to_string(),
+            state,
+            ..Todo::default()
+        }
+    }
+
+    #[test]
+    fn test_no_color_open_todo() {
+        let term = no_color_terminal();
+        let todo = Todo::new("Buy groceries");
+        let result = todo.to_terminal(&term);
+        // Should use plain ASCII fallback "[ ]" without color codes
+        assert_eq!(result, "[ ] Buy groceries");
+    }
+
+    #[test]
+    fn test_no_color_completed_todo() {
+        let term = no_color_terminal();
+        let todo = todo_with_state("Done task", TodoState::Completed);
+        let result = todo.to_terminal(&term);
+        // Should use plain "[x]" without color codes
+        assert_eq!(result, "[x] Done task");
+    }
+
+    #[test]
+    fn test_no_color_in_progress_todo() {
+        let term = no_color_terminal();
+        let todo = todo_with_state("Working on it", TodoState::InProgress);
+        let result = todo.to_terminal(&term);
+        // Should use plain "[>]" without color codes
+        assert_eq!(result, "[>] Working on it");
+    }
+
+    #[test]
+    fn test_no_color_cancelled_todo() {
+        let term = no_color_terminal();
+        let todo = todo_with_state("Dropped task", TodoState::Cancelled);
+        let result = todo.to_terminal(&term);
+        // Should use plain "[-]" without color codes or strikethrough
+        assert_eq!(result, "[-] Dropped task");
+    }
+
+    #[test]
+    fn test_no_color_blocked_todo() {
+        let term = no_color_terminal();
+        let todo = todo_with_state("Waiting on dependency", TodoState::Blocked);
+        let result = todo.to_terminal(&term);
+        // Should use plain "[!]" without color codes
+        assert_eq!(result, "[!] Waiting on dependency");
+    }
+
+    #[test]
+    fn test_color_completed_todo_has_ansi() {
+        let term = color_terminal();
+        let todo = todo_with_state("Done task", TodoState::Completed);
+        let result = todo.to_terminal(&term);
+        // With color support, should contain ANSI escape codes
+        assert!(
+            result.contains('\x1b'),
+            "Expected ANSI codes in colored output: {:?}",
+            result
+        );
     }
 }

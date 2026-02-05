@@ -111,16 +111,18 @@ impl BlockQuote {
     ///
     /// The border "│ " consumes 2 columns, so child content width
     /// is reduced accordingly.
-    fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
-        let default_term = Terminal::new_tty();
-        let term = term.unwrap_or(&default_term);
-
+    fn render_content(&self, _term: Option<&Terminal>, term_width: u32) -> String {
         // Border "│ " is 2 visible characters wide
-        let _child_width = term_width.saturating_sub(2);
+        let child_width = term_width.saturating_sub(2);
 
+        // Render child content with constrained width
         let content: String = match &self.content {
             RenderableContent::String(s) => s.clone(),
-            RenderableContent::Component(component) => component.fallback_render(term),
+            RenderableContent::Component(component) => {
+                // Use render() with the constrained child width so nested
+                // components respect the block quote's border
+                component.render(Some(child_width))
+            }
         };
         let mut result = String::new();
 

@@ -172,7 +172,76 @@ impl Renderable for TerminalImage {
     }
 }
 
+/// Resolved dimensions for image rendering.
+///
+/// This struct captures the calculated dimensions after applying margins,
+/// width specifications, and alignment.
+#[derive(Debug, Clone)]
+pub struct ResolvedDimensions {
+    /// Available width after margins are applied
+    pub available_width: u32,
+    /// The resolved image width in cells/characters
+    pub image_width: u32,
+    /// X offset for positioning (includes left margin and alignment)
+    pub x_offset: u32,
+    /// Left margin in characters
+    pub left_margin: u32,
+    /// Right margin in characters
+    pub right_margin: u32,
+}
+
 impl TerminalImage {
+    /// Resolve image dimensions based on terminal width, margins, and width specification.
+    ///
+    /// This helper centralizes the width/margin calculations that were previously
+    /// duplicated across multiple rendering methods.
+    ///
+    /// ## Arguments
+    ///
+    /// * `term_width` - Total terminal width in characters
+    ///
+    /// ## Returns
+    ///
+    /// `ResolvedDimensions` containing the calculated values for rendering.
+    pub fn resolve_dimensions(&self, term_width: u32) -> ResolvedDimensions {
+        let term_width = term_width.max(1);
+
+        // Resolve margins from layout and legacy margin fields
+        let resolved_left = Layout::resolve_margin(&self.layout.left_margin, term_width)
+            .saturating_add(self.margin_left);
+        let resolved_right = Layout::resolve_margin(&self.layout.right_margin, term_width)
+            .saturating_add(self.margin_right);
+
+        // Calculate available width after margins
+        let available_width = term_width
+            .saturating_sub(resolved_left + resolved_right)
+            .max(1);
+
+        // Calculate image width based on width specification
+        let image_width = match &self.width {
+            ImageWidth::Fill => available_width,
+            ImageWidth::Percent(pct) => ((available_width as f32) * pct).round() as u32,
+            ImageWidth::Characters(chars) => (*chars).min(available_width),
+        }
+        .clamp(1, available_width);
+
+        // Calculate x offset based on alignment
+        let slack = available_width.saturating_sub(image_width);
+        let x_offset = match self.alignment {
+            Alignment::Left => resolved_left,
+            Alignment::Center => resolved_left + slack / 2,
+            Alignment::Right => resolved_left + slack,
+        };
+
+        ResolvedDimensions {
+            available_width,
+            image_width,
+            x_offset,
+            left_margin: resolved_left,
+            right_margin: resolved_right,
+        }
+    }
+
     /// Create a new TerminalImage from a file path.
     ///
     /// ## Errors
@@ -337,21 +406,9 @@ impl TerminalImage {
             return Err(TerminalImageError::UnsupportedTerminal);
         }
 
-        let term_width = term.width().max(1);
-        let resolved_left = Layout::resolve_margin(&self.layout.left_margin, term_width)
-            .saturating_add(self.margin_left);
-        let resolved_right = Layout::resolve_margin(&self.layout.right_margin, term_width)
-            .saturating_add(self.margin_right);
-        let available_width = term_width
-            .saturating_sub(resolved_left + resolved_right)
-            .max(1);
-
-        let width_cells = match &self.width {
-            ImageWidth::Fill => available_width,
-            ImageWidth::Percent(pct) => ((available_width as f32) * pct).round() as u32,
-            ImageWidth::Characters(chars) => (*chars).min(available_width),
-        }
-        .clamp(1, available_width);
+        let dims = self.resolve_dimensions(term.width());
+        let width_cells = dims.image_width;
+        let x_offset = dims.x_offset;
 
         let img = self.load_image()?;
         let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
@@ -361,13 +418,6 @@ impl TerminalImage {
         let cell_aspect = cell_pixel_width as f32 / cell_pixel_height as f32;
         let height_cells =
             (((width_cells as f32) * image_aspect * cell_aspect).ceil() as u32).max(1);
-
-        let slack = available_width.saturating_sub(width_cells);
-        let x_offset = match self.alignment {
-            Alignment::Left => resolved_left,
-            Alignment::Center => resolved_left + slack / 2,
-            Alignment::Right => resolved_left + slack,
-        };
 
         let png_data = self.encode_as_png(&img)?;
         let image = match term.image_support {
@@ -404,33 +454,12 @@ impl TerminalImage {
     /// This is a convenience method that creates options from the instance's
     /// width field and renders using viuer.
     fn render_via_viuer(&self, term: &crate::terminal::Terminal) -> Result<(), TerminalImageError> {
-        let term_width = term.width().max(1);
-        let resolved_left = Layout::resolve_margin(&self.layout.left_margin, term_width)
-            .saturating_add(self.margin_left);
-        let resolved_right = Layout::resolve_margin(&self.layout.right_margin, term_width)
-            .saturating_add(self.margin_right);
-        let available_width = term_width.saturating_sub(resolved_left + resolved_right);
-
-        // Convert ImageWidth to viuer's cell-based width
-        let width_cells = match &self.width {
-            ImageWidth::Fill => Some(available_width),
-            ImageWidth::Percent(pct) => Some(((available_width as f32) * pct) as u32),
-            ImageWidth::Characters(chars) => Some((*chars).min(available_width)),
-        };
-
-        // Compute x offset based on alignment
-        let image_cells = width_cells.unwrap_or(available_width);
-        let slack = available_width.saturating_sub(image_cells);
-        let x_offset = match self.alignment {
-            Alignment::Left => resolved_left,
-            Alignment::Center => resolved_left + slack / 2,
-            Alignment::Right => resolved_left + slack,
-        };
+        let dims = self.resolve_dimensions(term.width());
 
         let config = viuer::Config {
-            width: width_cells,
+            width: Some(dims.image_width),
             height: None, // Let viuer compute height to preserve aspect ratio
-            x: x_offset as u16,
+            x: dims.x_offset as u16,
             y: 0,
             transparent: true,
             truecolor: true,
@@ -523,34 +552,12 @@ impl TerminalImage {
 
     /// Build a viuer Config from the image's own width and alignment settings.
     fn build_viuer_config(&self, term: &crate::terminal::Terminal) -> viuer::Config {
-        let term_width = term.width().max(1);
-        let resolved_left = Layout::resolve_margin(&self.layout.left_margin, term_width)
-            .saturating_add(self.margin_left);
-        let resolved_right = Layout::resolve_margin(&self.layout.right_margin, term_width)
-            .saturating_add(self.margin_right);
-        let available_width = term_width.saturating_sub(resolved_left + resolved_right);
-
-        // Convert ImageWidth to viuer's cell-based width
-        // Use self.width (per-image, set via with_width()) over options.width (global default)
-        let width_cells = match &self.width {
-            ImageWidth::Fill => Some(available_width),
-            ImageWidth::Percent(pct) => Some(((available_width as f32) * pct) as u32),
-            ImageWidth::Characters(chars) => Some((*chars).min(available_width)),
-        };
-
-        // Compute x offset based on alignment
-        let image_cells = width_cells.unwrap_or(available_width);
-        let slack = available_width.saturating_sub(image_cells);
-        let x_offset = match self.alignment {
-            Alignment::Left => resolved_left,
-            Alignment::Center => resolved_left + slack / 2,
-            Alignment::Right => resolved_left + slack,
-        };
+        let dims = self.resolve_dimensions(term.width());
 
         viuer::Config {
-            width: width_cells,
+            width: Some(dims.image_width),
             height: None, // Let viuer compute height to preserve aspect ratio
-            x: x_offset as u16,
+            x: dims.x_offset as u16,
             y: 0,
             transparent: true,
             truecolor: true,
@@ -646,16 +653,12 @@ impl TerminalImage {
     /// * `term_width` - Terminal width in characters (defaults to 80 if 0)
     pub fn render_as_kitty(&self, term_width: u32) -> Result<String, TerminalImageError> {
         let term_width = if term_width == 0 { 80 } else { term_width };
-        let available_width = term_width.saturating_sub(self.margin_left + self.margin_right);
+        let dims = self.resolve_dimensions(term_width);
 
         let img = self.load_image()?;
 
-        // Calculate target display size in character cells
-        let target_cells = match &self.width {
-            ImageWidth::Fill => available_width,
-            ImageWidth::Percent(pct) => ((available_width as f32) * pct) as u32,
-            ImageWidth::Characters(chars) => (*chars).min(available_width),
-        };
+        // Use resolved dimensions
+        let target_cells = dims.image_width;
 
         // Use measured cell size when available for correct aspect ratio calculation.
         let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
@@ -686,16 +689,12 @@ impl TerminalImage {
     /// * `term_width` - Terminal width in characters (defaults to 80 if 0)
     pub fn render_as_iterm2(&self, term_width: u32) -> Result<String, TerminalImageError> {
         let term_width = if term_width == 0 { 80 } else { term_width };
+        let dims = self.resolve_dimensions(term_width);
 
         let img = self.load_image()?;
 
-        // Calculate display width in characters
-        let available_width = term_width.saturating_sub(self.margin_left + self.margin_right);
-        let char_width = match &self.width {
-            ImageWidth::Fill => available_width,
-            ImageWidth::Percent(pct) => ((available_width as f32) * pct) as u32,
-            ImageWidth::Characters(chars) => (*chars).min(available_width),
-        };
+        // Use resolved dimensions
+        let char_width = dims.image_width;
 
         // Resize to preserve aspect ratio based on character width
         let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
@@ -1889,5 +1888,105 @@ mod tests {
 
         // x offset should match left margin
         assert_eq!(config.x, 10);
+    }
+
+    // resolve_dimensions tests
+    #[test]
+    fn test_resolve_dimensions_fill() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path)
+            .unwrap()
+            .with_width(ImageWidth::Fill);
+        let dims = img.resolve_dimensions(80);
+
+        assert_eq!(dims.available_width, 80);
+        assert_eq!(dims.image_width, 80);
+        assert_eq!(dims.x_offset, 0);
+    }
+
+    #[test]
+    fn test_resolve_dimensions_percent() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path)
+            .unwrap()
+            .with_width(ImageWidth::Percent(0.5));
+        let dims = img.resolve_dimensions(80);
+
+        assert_eq!(dims.available_width, 80);
+        assert_eq!(dims.image_width, 40);
+    }
+
+    #[test]
+    fn test_resolve_dimensions_with_margins() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+
+        let img = TerminalImage::new(&file_path)
+            .unwrap()
+            .with_margins(5, 5)
+            .with_width(ImageWidth::Fill);
+        let dims = img.resolve_dimensions(80);
+
+        assert_eq!(dims.left_margin, 5);
+        assert_eq!(dims.right_margin, 5);
+        assert_eq!(dims.available_width, 70); // 80 - 5 - 5
+        assert_eq!(dims.image_width, 70);
+        assert_eq!(dims.x_offset, 5);
+    }
+
+    #[test]
+    fn test_resolve_dimensions_center_alignment() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+
+        let mut img = TerminalImage::new(&file_path)
+            .unwrap()
+            .with_width(ImageWidth::Characters(40));
+        img.alignment = Alignment::Center;
+        let dims = img.resolve_dimensions(80);
+
+        assert_eq!(dims.image_width, 40);
+        // Centered: (80 - 40) / 2 = 20
+        assert_eq!(dims.x_offset, 20);
+    }
+
+    #[test]
+    fn test_resolve_dimensions_right_alignment() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+
+        let mut img = TerminalImage::new(&file_path)
+            .unwrap()
+            .with_width(ImageWidth::Characters(30));
+        img.alignment = Alignment::Right;
+        let dims = img.resolve_dimensions(80);
+
+        assert_eq!(dims.image_width, 30);
+        // Right-aligned: 80 - 30 = 50
+        assert_eq!(dims.x_offset, 50);
     }
 }
