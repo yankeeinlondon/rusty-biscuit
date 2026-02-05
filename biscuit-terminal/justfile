@@ -76,3 +76,15 @@ meta:
     @echo "Metadata from Biscuit Terminal CLI (latest debug build)"
     @echo ""
     @cargo run -p biscuit-terminal-cli
+
+# Example: show an example table with text, integer, and currency based columns
+example-table-showcase:
+    @cargo run -p biscuit-terminal --example table_showcase
+
+# Example: use the `TwoColum` struct with text on both sides
+example-two-column-text:
+    @cargo run -p biscuit-terminal --example two-column-prose
+
+# Example: use the `TwoColumn` struct with image in left column, text in right
+example-two-column-image:
+    @cargo run -p biscuit-terminal --example two_column_with_image

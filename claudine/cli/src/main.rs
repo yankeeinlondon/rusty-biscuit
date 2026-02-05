@@ -44,15 +44,9 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    // Initialize tracing based on verbosity
-    let filter = match cli.verbose {
-        0 => "warn",
-        1 => "info",
-        _ => "debug",
-    };
-    // Allow DEBUG env var override
+    // Initialize tracing (only DEBUG env var enables info/debug logs)
     let env_filter = tracing_subscriber::EnvFilter::try_from_env("DEBUG")
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(filter));
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
 
     tracing_subscriber::fmt()
         .with_env_filter(env_filter)

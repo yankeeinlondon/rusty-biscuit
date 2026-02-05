@@ -4,6 +4,7 @@ mod claude;
 mod codex;
 mod gemini;
 mod opencode;
+mod qwen;
 mod trait_def;
 
 pub use trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
@@ -28,6 +29,7 @@ use claude::ClaudeConfigurator;
 use codex::CodexConfigurator;
 use gemini::GeminiConfigurator;
 use opencode::OpenCodeConfigurator;
+use qwen::QwenConfigurator;
 
 /// Rich information about a detected agent.
 #[derive(Debug, Clone)]
@@ -93,6 +95,11 @@ pub fn discover_agents_full() -> Vec<AgentInfo> {
             home.join(".config").join("opencode").join("opencode.json"),
             AiCli::Opencode,
         ),
+        (
+            Provider::QwenCode,
+            home.join(".qwen").join("settings.json"),
+            AiCli::QwenCli,
+        ),
     ];
 
     providers
@@ -153,6 +160,11 @@ pub fn detect_agents() -> Vec<(Provider, Box<dyn AgentConfigurator>)> {
         agents.push((Provider::OpenCode, Box::new(OpenCodeConfigurator)));
     }
 
+    // Qwen Code: ~/.qwen/settings.json
+    if home.join(".qwen").join("settings.json").exists() {
+        agents.push((Provider::QwenCode, Box::new(QwenConfigurator)));
+    }
+
     agents
 }
 
@@ -168,9 +180,9 @@ mod tests {
     }
 
     #[test]
-    fn discover_agents_full_returns_all_six() {
+    fn discover_agents_full_returns_all_seven() {
         let agents = discover_agents_full();
-        assert_eq!(agents.len(), 6);
+        assert_eq!(agents.len(), 7);
 
         // Check all providers are present
         let providers: Vec<_> = agents.iter().map(|a| a.provider).collect();
@@ -180,12 +192,16 @@ mod tests {
         assert!(providers.contains(&Provider::Goose));
         assert!(providers.contains(&Provider::KimiCode));
         assert!(providers.contains(&Provider::OpenCode));
+        assert!(providers.contains(&Provider::QwenCode));
     }
 
     #[test]
     fn agent_info_display_names() {
         let agents = discover_agents_full();
-        let claude = agents.iter().find(|a| a.provider == Provider::Claude).unwrap();
+        let claude = agents
+            .iter()
+            .find(|a| a.provider == Provider::Claude)
+            .unwrap();
         assert_eq!(claude.display_name, "Claude Code");
         assert_eq!(claude.binary_name, "claude");
     }

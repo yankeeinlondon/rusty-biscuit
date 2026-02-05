@@ -17,6 +17,8 @@ pub enum Provider {
     KimiCode,
     /// OpenCode.
     OpenCode,
+    /// Qwen Code CLI (Alibaba).
+    QwenCode,
 }
 
 impl Provider {
@@ -32,6 +34,7 @@ impl Provider {
             Provider::Goose => "goose",
             Provider::KimiCode => "kimi_code",
             Provider::OpenCode => "open_code",
+            Provider::QwenCode => "qwen_code",
         }
     }
 
@@ -48,10 +51,15 @@ impl Provider {
     /// | Goose      | ✗      | N/A                                                     |
     /// | KimiCode   | ✗      | N/A                                                     |
     /// | OpenCode   | ✓      | `~/.config/opencode/skills/`, `.opencode/skills/`       |
+    /// | QwenCode   | ✓      | `~/.qwen/skills/`, `.qwen/skills/` (experimental)       |
     pub fn supports_skills(&self) -> bool {
         matches!(
             self,
-            Provider::Claude | Provider::Codex | Provider::Gemini | Provider::OpenCode
+            Provider::Claude
+                | Provider::Codex
+                | Provider::Gemini
+                | Provider::OpenCode
+                | Provider::QwenCode
         )
     }
 
@@ -62,8 +70,9 @@ impl Provider {
             Provider::Codex => "https://github.com/openai/codex",
             Provider::Gemini => "https://github.com/google-gemini/gemini-cli",
             Provider::Goose => "https://block.github.io/goose/",
-            Provider::KimiCode => "https://github.com/aspect-build/aspect-cli",
+            Provider::KimiCode => "https://moonshotai.github.io/kimi-cli/en/",
             Provider::OpenCode => "https://github.com/opencode-ai/opencode",
+            Provider::QwenCode => "https://qwenlm.github.io/qwen-code-docs/",
         }
     }
 
@@ -71,21 +80,225 @@ impl Provider {
     ///
     /// Events that are not supported cannot be registered with the provider's
     /// hook system and will be skipped during sync.
+    ///
+    /// ## Provider Event Sources
+    ///
+    /// - **Claude**: Native hooks system
+    /// - **Codex**: JSONL event stream (`codex exec --json`) + `notify` hook
+    /// - **Gemini**: Native hooks system
+    /// - **Goose**: No hook support yet
+    /// - **Kimi Code**: Wire mode JSON-RPC (`kimi --wire`) with blocking requests
+    /// - **OpenCode**: Native hooks system
     pub fn supports_event(&self, event: &super::AgenticEvent) -> bool {
         use super::AgenticEvent::*;
         match self {
             Provider::Claude => !matches!(event, BeforeModel | AfterModel | TurnError),
-            Provider::Codex => matches!(event, TurnComplete),
+            Provider::Codex => {
+                // JSONL stream: thread.started, turn.started/completed/failed,
+                // item events (agent_message, command_execution, file_change, mcp_tool_call)
+                // notify hook: agent-turn-complete
+                // Missing: permission requests, subagents, compaction, BeforeModel
+                !matches!(
+                    event,
+                    SessionEnd
+                        | PermissionRequest
+                        | SubagentStart
+                        | SubagentStop
+                        | BeforeModel
+                        | BeforeCompact
+                )
+            }
             Provider::Gemini => !matches!(
                 event,
                 ToolError | PermissionRequest | TurnError | SubagentStart | SubagentStop
             ),
-            Provider::Goose => false, // No hook support yet
-            Provider::KimiCode => false, // No hook support yet
+            Provider::Goose => {
+                // Stream-json events: message, notification, model_change, error, complete
+                // MCP notifications: subagent_tool_request, task_execution
+                // GOOSE_STATUS_HOOK: waiting/thinking status (fire-and-forget)
+                // Missing: session lifecycle, tool events, permission, BeforeModel, compaction
+                !matches!(
+                    event,
+                    SessionStart
+                        | SessionEnd
+                        | BeforePrompt
+                        | BeforeTool
+                        | AfterTool
+                        | ToolError
+                        | PermissionRequest
+                        | BeforeModel
+                        | BeforeCompact
+                )
+            }
+            Provider::KimiCode => {
+                // Wire mode events: TurnBegin/End, ToolCall/Result, StatusUpdate,
+                // ContentPart, SubagentEvent, CompactionBegin/End
+                // Blocking hooks: ApprovalRequest (permission), ToolCallRequest (tool exec)
+                // Missing: session lifecycle, BeforeModel
+                !matches!(event, SessionStart | SessionEnd | BeforeModel)
+            }
             Provider::OpenCode => {
-                !matches!(event, ToolError | SubagentStart | SubagentStop | AfterModel)
+                // Plugin hooks: tool.execute.before/after, permission.ask, chat.*, event
+                // Events: session.*, message.part.updated (streaming), permission.asked
+                // Missing: ToolError (no tool.execute.error hook), subagent interception
+                !matches!(event, ToolError | SubagentStart | SubagentStop)
+            }
+            Provider::QwenCode => {
+                // Stream-json events: system (session_start), assistant, result (success/error)
+                // SDK callback: canUseTool (permission gating, but not blocking)
+                // Missing: BeforeTool, AfterTool, ToolError, BeforePrompt, session lifecycle,
+                //          subagents, permission request (canUseTool is SDK-only), compaction
+                !matches!(
+                    event,
+                    SessionStart
+                        | SessionEnd
+                        | BeforePrompt
+                        | BeforeTool
+                        | AfterTool
+                        | ToolError
+                        | PermissionRequest
+                        | SubagentStart
+                        | SubagentStop
+                        | BeforeModel
+                        | BeforeCompact
+                )
             }
         }
+    }
+
+    /// Returns the native event name used by this provider for the given event.
+    ///
+    /// Returns `None` if the provider doesn't support the event.
+    /// Returns `Some("")` (empty string) if supported but no specific native name.
+    pub fn native_event_name(&self, event: &super::AgenticEvent) -> Option<&'static str> {
+        use super::AgenticEvent::*;
+
+        if !self.supports_event(event) {
+            return None;
+        }
+
+        Some(match self {
+            Provider::Claude => match event {
+                SessionStart => "PreToolUse",
+                SessionEnd => "",
+                BeforePrompt => "PreToolUse",
+                BeforeTool => "PreToolUse",
+                AfterTool => "PostToolUse",
+                ToolError => "PostToolUse",
+                PermissionRequest => "PreToolUse",
+                TurnComplete => "Stop",
+                TurnError => "",
+                SubagentStart => "PreToolUse",
+                SubagentStop => "PostToolUse",
+                BeforeModel => "",
+                AfterModel => "",
+                BeforeCompact => "",
+                Notification => "Notification",
+            },
+            Provider::Codex => match event {
+                SessionStart => "thread.started",
+                SessionEnd => "",
+                BeforePrompt => "turn.started",
+                BeforeTool => "item.started",
+                AfterTool => "item.completed",
+                ToolError => "error",
+                PermissionRequest => "",
+                TurnComplete => "turn.completed",
+                TurnError => "turn.failed",
+                SubagentStart => "",
+                SubagentStop => "",
+                BeforeModel => "",
+                AfterModel => "agent_message",
+                BeforeCompact => "",
+                Notification => "reasoning",
+            },
+            Provider::Gemini => match event {
+                SessionStart => "SessionStart",
+                SessionEnd => "SessionEnd",
+                BeforePrompt => "BeforeAgent",
+                BeforeTool => "BeforeTool",
+                AfterTool => "AfterTool",
+                ToolError => "",
+                PermissionRequest => "",
+                TurnComplete => "AfterAgent",
+                TurnError => "",
+                SubagentStart => "",
+                SubagentStop => "",
+                BeforeModel => "BeforeModel",
+                AfterModel => "AfterModel",
+                BeforeCompact => "PreCompress",
+                Notification => "Notification",
+            },
+            Provider::Goose => match event {
+                SessionStart => "",
+                SessionEnd => "",
+                BeforePrompt => "",
+                BeforeTool => "",
+                AfterTool => "",
+                ToolError => "",
+                PermissionRequest => "",
+                TurnComplete => "complete",
+                TurnError => "error",
+                SubagentStart => "subagent_tool_request",
+                SubagentStop => "tasks_complete",
+                BeforeModel => "",
+                AfterModel => "message",
+                BeforeCompact => "",
+                Notification => "notification",
+            },
+            Provider::KimiCode => match event {
+                SessionStart => "",
+                SessionEnd => "",
+                BeforePrompt => "TurnBegin",
+                BeforeTool => "ToolCall",
+                AfterTool => "ToolResult",
+                ToolError => "ToolResult",
+                PermissionRequest => "ApprovalRequest",
+                TurnComplete => "TurnEnd",
+                TurnError => "prompt.status",
+                SubagentStart => "SubagentEvent",
+                SubagentStop => "SubagentEvent",
+                BeforeModel => "",
+                AfterModel => "ContentPart",
+                BeforeCompact => "CompactionBegin",
+                Notification => "StatusUpdate",
+            },
+            Provider::OpenCode => match event {
+                SessionStart => "session.created",
+                SessionEnd => "session.deleted",
+                BeforePrompt => "chat.message",
+                BeforeTool => "tool.execute.before",
+                AfterTool => "tool.execute.after",
+                ToolError => "",
+                PermissionRequest => "permission.ask",
+                TurnComplete => "session.idle",
+                TurnError => "session.error",
+                SubagentStart => "",
+                SubagentStop => "",
+                BeforeModel => "chat.params",
+                AfterModel => "message.part.updated",
+                BeforeCompact => "session.compacting",
+                Notification => "event",
+            },
+            Provider::QwenCode => match event {
+                // Stream-json events (headless mode)
+                SessionStart => "",
+                SessionEnd => "",
+                BeforePrompt => "",
+                BeforeTool => "",
+                AfterTool => "",
+                ToolError => "",
+                PermissionRequest => "",
+                TurnComplete => "result",
+                TurnError => "result",
+                SubagentStart => "",
+                SubagentStop => "",
+                BeforeModel => "",
+                AfterModel => "assistant",
+                BeforeCompact => "",
+                Notification => "system",
+            },
+        })
     }
 }
 
@@ -98,6 +311,7 @@ impl fmt::Display for Provider {
             Provider::Goose => "Goose",
             Provider::KimiCode => "Kimi Code",
             Provider::OpenCode => "OpenCode",
+            Provider::QwenCode => "Qwen Code",
         };
         f.write_str(name)
     }
@@ -125,6 +339,7 @@ mod tests {
             (Provider::Goose, "goose"),
             (Provider::KimiCode, "kimi_code"),
             (Provider::OpenCode, "open_code"),
+            (Provider::QwenCode, "qwen_code"),
         ];
         for (variant, expected) in cases {
             let json = serde_json::to_value(&variant).unwrap();
@@ -140,6 +355,7 @@ mod tests {
         assert_eq!(Provider::Goose.to_string(), "Goose");
         assert_eq!(Provider::KimiCode.to_string(), "Kimi Code");
         assert_eq!(Provider::OpenCode.to_string(), "OpenCode");
+        assert_eq!(Provider::QwenCode.to_string(), "Qwen Code");
     }
 
     #[test]
@@ -157,6 +373,7 @@ mod tests {
         assert!(Provider::Codex.supports_skills());
         assert!(Provider::Gemini.supports_skills());
         assert!(Provider::OpenCode.supports_skills());
+        assert!(Provider::QwenCode.supports_skills()); // Experimental but supported
         // Providers without skill discovery
         assert!(!Provider::Goose.supports_skills());
         assert!(!Provider::KimiCode.supports_skills());
@@ -170,6 +387,7 @@ mod tests {
         assert_eq!(Provider::Goose.as_slug(), "goose");
         assert_eq!(Provider::KimiCode.as_slug(), "kimi_code");
         assert_eq!(Provider::OpenCode.as_slug(), "open_code");
+        assert_eq!(Provider::QwenCode.as_slug(), "qwen_code");
     }
 
     #[test]
@@ -182,9 +400,13 @@ mod tests {
             Provider::Goose,
             Provider::KimiCode,
             Provider::OpenCode,
+            Provider::QwenCode,
         ] {
             let url = provider.docs_url();
-            assert!(url.starts_with("https://"), "Provider {provider:?} URL should start with https://");
+            assert!(
+                url.starts_with("https://"),
+                "Provider {provider:?} URL should start with https://"
+            );
         }
     }
 
@@ -203,10 +425,22 @@ mod tests {
     #[test]
     fn supports_event_codex() {
         use crate::events::AgenticEvent::*;
-        // Codex only supports TurnComplete
+        // Codex supports most events via JSONL stream + notify hook
+        // Missing: SessionEnd, PermissionRequest, SubagentStart/Stop, BeforeModel, BeforeCompact
+        assert!(Provider::Codex.supports_event(&SessionStart));
         assert!(Provider::Codex.supports_event(&TurnComplete));
-        assert!(!Provider::Codex.supports_event(&SessionStart));
-        assert!(!Provider::Codex.supports_event(&BeforeTool));
+        assert!(Provider::Codex.supports_event(&TurnError));
+        assert!(Provider::Codex.supports_event(&BeforeTool));
+        assert!(Provider::Codex.supports_event(&AfterTool));
+        assert!(Provider::Codex.supports_event(&AfterModel));
+        assert!(Provider::Codex.supports_event(&Notification));
+        // Not supported
+        assert!(!Provider::Codex.supports_event(&SessionEnd));
+        assert!(!Provider::Codex.supports_event(&PermissionRequest));
+        assert!(!Provider::Codex.supports_event(&SubagentStart));
+        assert!(!Provider::Codex.supports_event(&SubagentStop));
+        assert!(!Provider::Codex.supports_event(&BeforeModel));
+        assert!(!Provider::Codex.supports_event(&BeforeCompact));
     }
 
     #[test]
@@ -221,12 +455,93 @@ mod tests {
     }
 
     #[test]
-    fn supports_event_goose_kimicode_no_hooks() {
+    fn supports_event_goose() {
         use crate::events::AgenticEvent::*;
-        // Goose and KimiCode have no hook support
+        // Goose supports events via stream-json output and MCP notifications
+        // Supported: TurnComplete, TurnError, AfterModel, Notification, SubagentStart/Stop
+        assert!(Provider::Goose.supports_event(&TurnComplete));
+        assert!(Provider::Goose.supports_event(&TurnError));
+        assert!(Provider::Goose.supports_event(&AfterModel));
+        assert!(Provider::Goose.supports_event(&Notification));
+        assert!(Provider::Goose.supports_event(&SubagentStart));
+        assert!(Provider::Goose.supports_event(&SubagentStop));
+        // Not supported: session lifecycle, tool events, permission, BeforeModel, compaction
         assert!(!Provider::Goose.supports_event(&SessionStart));
-        assert!(!Provider::Goose.supports_event(&TurnComplete));
+        assert!(!Provider::Goose.supports_event(&SessionEnd));
+        assert!(!Provider::Goose.supports_event(&BeforePrompt));
+        assert!(!Provider::Goose.supports_event(&BeforeTool));
+        assert!(!Provider::Goose.supports_event(&AfterTool));
+        assert!(!Provider::Goose.supports_event(&ToolError));
+        assert!(!Provider::Goose.supports_event(&PermissionRequest));
+        assert!(!Provider::Goose.supports_event(&BeforeModel));
+        assert!(!Provider::Goose.supports_event(&BeforeCompact));
+    }
+
+    #[test]
+    fn supports_event_kimicode() {
+        use crate::events::AgenticEvent::*;
+        // Kimi Code Wire mode supports most events via JSON-RPC
+        // Missing: SessionStart/End, BeforeModel
+        assert!(Provider::KimiCode.supports_event(&TurnComplete));
+        assert!(Provider::KimiCode.supports_event(&TurnError));
+        assert!(Provider::KimiCode.supports_event(&BeforePrompt));
+        assert!(Provider::KimiCode.supports_event(&BeforeTool));
+        assert!(Provider::KimiCode.supports_event(&AfterTool));
+        assert!(Provider::KimiCode.supports_event(&ToolError));
+        assert!(Provider::KimiCode.supports_event(&PermissionRequest));
+        assert!(Provider::KimiCode.supports_event(&SubagentStart));
+        assert!(Provider::KimiCode.supports_event(&SubagentStop));
+        assert!(Provider::KimiCode.supports_event(&AfterModel));
+        assert!(Provider::KimiCode.supports_event(&BeforeCompact));
+        // Not supported
         assert!(!Provider::KimiCode.supports_event(&SessionStart));
-        assert!(!Provider::KimiCode.supports_event(&TurnComplete));
+        assert!(!Provider::KimiCode.supports_event(&SessionEnd));
+        assert!(!Provider::KimiCode.supports_event(&BeforeModel));
+    }
+
+    #[test]
+    fn supports_event_opencode() {
+        use crate::events::AgenticEvent::*;
+        // OpenCode supports most events via plugin hooks and event system
+        // Missing: ToolError (no tool.execute.error hook), SubagentStart/Stop (not intercepted)
+        assert!(Provider::OpenCode.supports_event(&SessionStart));
+        assert!(Provider::OpenCode.supports_event(&SessionEnd));
+        assert!(Provider::OpenCode.supports_event(&BeforePrompt));
+        assert!(Provider::OpenCode.supports_event(&BeforeTool));
+        assert!(Provider::OpenCode.supports_event(&AfterTool));
+        assert!(Provider::OpenCode.supports_event(&PermissionRequest));
+        assert!(Provider::OpenCode.supports_event(&TurnComplete));
+        assert!(Provider::OpenCode.supports_event(&TurnError));
+        assert!(Provider::OpenCode.supports_event(&BeforeModel));
+        assert!(Provider::OpenCode.supports_event(&AfterModel));
+        assert!(Provider::OpenCode.supports_event(&BeforeCompact));
+        assert!(Provider::OpenCode.supports_event(&Notification));
+        // Not supported
+        assert!(!Provider::OpenCode.supports_event(&ToolError));
+        assert!(!Provider::OpenCode.supports_event(&SubagentStart));
+        assert!(!Provider::OpenCode.supports_event(&SubagentStop));
+    }
+
+    #[test]
+    fn supports_event_qwencode() {
+        use crate::events::AgenticEvent::*;
+        // Qwen Code has limited event support via stream-json output
+        // Supported: TurnComplete, TurnError, AfterModel, Notification
+        assert!(Provider::QwenCode.supports_event(&TurnComplete));
+        assert!(Provider::QwenCode.supports_event(&TurnError));
+        assert!(Provider::QwenCode.supports_event(&AfterModel));
+        assert!(Provider::QwenCode.supports_event(&Notification));
+        // Not supported: most events (no native hook system yet)
+        assert!(!Provider::QwenCode.supports_event(&SessionStart));
+        assert!(!Provider::QwenCode.supports_event(&SessionEnd));
+        assert!(!Provider::QwenCode.supports_event(&BeforePrompt));
+        assert!(!Provider::QwenCode.supports_event(&BeforeTool));
+        assert!(!Provider::QwenCode.supports_event(&AfterTool));
+        assert!(!Provider::QwenCode.supports_event(&ToolError));
+        assert!(!Provider::QwenCode.supports_event(&PermissionRequest));
+        assert!(!Provider::QwenCode.supports_event(&SubagentStart));
+        assert!(!Provider::QwenCode.supports_event(&SubagentStop));
+        assert!(!Provider::QwenCode.supports_event(&BeforeModel));
+        assert!(!Provider::QwenCode.supports_event(&BeforeCompact));
     }
 }

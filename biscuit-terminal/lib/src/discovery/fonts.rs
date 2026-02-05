@@ -587,6 +587,12 @@ pub fn window_size_pixels() -> Option<WindowSizePixels> {
         return None;
     }
 
+    // Skip terminal queries in CI environments (no real terminal available)
+    if crate::discovery::os_detection::is_ci() {
+        tracing::debug!("window_size_pixels(): skipping in CI environment");
+        return None;
+    }
+
     // Open /dev/tty for direct terminal access
     let mut tty = match std::fs::OpenOptions::new()
         .read(true)
@@ -634,13 +640,17 @@ pub fn window_size_pixels() -> Option<WindowSizePixels> {
     }
     let _ = tty.flush();
 
-    // Read response with timeout
+    // Read response with timeout and hard limits to prevent hangs
     let timeout = Duration::from_millis(100);
     let start = Instant::now();
     let mut buffer = Vec::with_capacity(32);
     let mut byte = [0u8; 1];
+    const MAX_BYTES: usize = 64;
+    const MAX_ITERATIONS: usize = 100;
+    let mut iterations = 0;
 
-    while start.elapsed() < timeout {
+    while start.elapsed() < timeout && buffer.len() < MAX_BYTES && iterations < MAX_ITERATIONS {
+        iterations += 1;
         match tty.read(&mut byte) {
             Ok(1) => {
                 buffer.push(byte[0]);

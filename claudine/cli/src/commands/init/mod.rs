@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use clap::Args;
 use color_eyre::eyre::Result;
 
-use claudine::config::{detect_agents, discover_agents_full, RegistrationResult, SkipReason};
+use claudine::config::{RegistrationResult, SkipReason, detect_agents, discover_agents_full};
 use claudine::events::{
     AgenticEvent, EventBinding, GlobalSettings, HookerConfig, Provider, ProviderConfig,
 };
@@ -185,6 +185,9 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
             Ok(RegistrationResult::Skipped(SkipReason::NotDetected)) => {
                 log::message(&format!("  {provider}: not detected"));
             }
+            Ok(RegistrationResult::Skipped(SkipReason::NoHookSupport)) => {
+                log::message(&format!("  {provider}: no native hook support yet"));
+            }
             Err(e) => {
                 log::error(&format!("  {provider}: {e}"));
             }
@@ -275,6 +278,9 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
             Ok(RegistrationResult::Skipped(SkipReason::NotDetected)) => {
                 log::message(&format!("  {provider}: not detected"));
             }
+            Ok(RegistrationResult::Skipped(SkipReason::NoHookSupport)) => {
+                log::message(&format!("  {provider}: no native hook support yet"));
+            }
             Err(e) => {
                 log::error(&format!("  {provider}: {e}"));
             }
@@ -298,9 +304,12 @@ fn default_config() -> HookerConfig {
         Provider::Gemini,
         Provider::OpenCode,
     ] {
-        providers.insert(provider, ProviderConfig {
-            events: default_events.clone(),
-        });
+        providers.insert(
+            provider,
+            ProviderConfig {
+                events: default_events.clone(),
+            },
+        );
     }
 
     HookerConfig {

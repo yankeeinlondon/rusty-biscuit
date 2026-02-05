@@ -29,8 +29,8 @@ pub trait ProviderAdapter {
 ///
 /// ## Panics
 ///
-/// Panics if called with `Provider::Goose` or `Provider::KimiCode` as these
-/// providers do not yet have adapter implementations.
+/// Panics if called with `Provider::Goose`, `Provider::KimiCode`, or
+/// `Provider::QwenCode` as these providers do not yet have adapter implementations.
 pub fn adapter_for(provider: Provider) -> Box<dyn ProviderAdapter> {
     match provider {
         Provider::Claude => Box::new(claude::ClaudeAdapter),
@@ -39,5 +39,6 @@ pub fn adapter_for(provider: Provider) -> Box<dyn ProviderAdapter> {
         Provider::Goose => unimplemented!("Goose adapter not yet implemented"),
         Provider::KimiCode => unimplemented!("Kimi Code adapter not yet implemented"),
         Provider::OpenCode => Box::new(opencode::OpenCodeAdapter),
+        Provider::QwenCode => unimplemented!("Qwen Code adapter not yet implemented"),
     }
 }

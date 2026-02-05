@@ -19,7 +19,8 @@ impl ColumnType {
     pub fn default_alignment(&self) -> Alignment {
         match self {
             ColumnType::String => Alignment::Left,
-            _ => Alignment::Right,
+            ColumnType::Integer => Alignment::Center,
+            ColumnType::Float | ColumnType::Currency(_) => Alignment::Right,
         }
     }
 }
@@ -56,7 +57,7 @@ mod tests {
     #[test]
     fn column_type_default_alignment() {
         assert_eq!(ColumnType::String.default_alignment(), Alignment::Left);
-        assert_eq!(ColumnType::Integer.default_alignment(), Alignment::Right);
+        assert_eq!(ColumnType::Integer.default_alignment(), Alignment::Center);
         assert_eq!(ColumnType::Float.default_alignment(), Alignment::Right);
         assert_eq!(
             ColumnType::Currency(Currency::USD).default_alignment(),

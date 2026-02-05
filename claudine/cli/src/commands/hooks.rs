@@ -7,26 +7,39 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::Margin;
-use claudine::config::{detect_agents, AgentConfigurator};
+use biscuit_terminal::utils::layout::{Alignment, Margin};
+use claudine::config::{AgentConfigurator, detect_agents};
 use claudine::dispatch::loader::load_config;
 use claudine::events::{AgenticEvent, HookerConfig, Provider};
-use sniff::programs::{enums::AiCli, InstalledAiClients};
+use sniff::programs::{InstalledAiClients, enums::AiCli};
 
 use crate::log;
 
 /// Arguments for the hooks command.
 #[derive(Args)]
-pub struct HooksArgs {}
+pub struct HooksArgs {
+    /// Show provider event support matrix (✅/❌)
+    #[arg(long)]
+    pub support: bool,
+
+    /// Show native event name mappings for each provider
+    #[arg(long)]
+    pub mapping: bool,
+
+    /// Show event descriptions and schemas
+    #[arg(long)]
+    pub describe: bool,
+}
 
 /// All supported providers in display order.
-const ALL_PROVIDERS: [Provider; 6] = [
+const ALL_PROVIDERS: [Provider; 7] = [
     Provider::Claude,
     Provider::Codex,
     Provider::Gemini,
     Provider::Goose,
     Provider::KimiCode,
     Provider::OpenCode,
+    Provider::QwenCode,
 ];
 
 /// Map a claudine `Provider` to the corresponding sniff `AiCli` variant.
@@ -38,6 +51,7 @@ fn provider_to_ai_cli(provider: Provider) -> AiCli {
         Provider::Goose => AiCli::Goose,
         Provider::KimiCode => AiCli::KimiCli,
         Provider::OpenCode => AiCli::Opencode,
+        Provider::QwenCode => AiCli::QwenCli,
     }
 }
 
@@ -99,7 +113,18 @@ fn action_count_indicator(count: usize) -> &'static str {
 }
 
 /// Show registered hooks for all providers.
-pub fn run(_args: HooksArgs, verbose: bool) -> Result<()> {
+pub fn run(args: HooksArgs, verbose: bool) -> Result<()> {
+    // Handle --support, --mapping, and --describe flags first
+    if args.support {
+        return run_support();
+    }
+    if args.mapping {
+        return run_mapping();
+    }
+    if args.describe {
+        return run_describe();
+    }
+
     let agents = detect_agents();
     let clients = InstalledAiClients::new();
 
@@ -191,17 +216,22 @@ fn run_simple(
     if has_sync_issues {
         log::data("");
         let legend = Prose::new(
-            "{{dim}}- Legend: {{red}}red{{reset}}{{dim}} = stale (remove with sync), {{yellow}}orange{{reset}}{{dim}} = missing (add with sync){{reset}}"
+            "{{dim}}- Legend: {{red}}red{{reset}}{{dim}} = stale (remove with sync), {{yellow}}orange{{reset}}{{dim}} = missing (add with sync){{reset}}",
         );
         log::data(&format!(" {}", legend.render(Some(100))));
     }
 
-    // Show hint about verbose mode
+    // Show hints about available flags
     log::data("");
-    let hint = Prose::new(
-        "{{dim}}- Use <blue><bold>-v</bold></blue>{{dim}} flag for detailed event matrix{{reset}}",
-    );
-    log::data(&format!(" {}", hint.render(Some(100))));
+    let hints = [
+        "{{dim}}- Use <blue><bold>-v</bold></blue>{{dim}} for detailed event matrix{{reset}}",
+        "{{dim}}- Use <blue><bold>--support</bold></blue>{{dim}} to see which events each provider supports{{reset}}",
+        "{{dim}}- Use <blue><bold>--mapping</bold></blue>{{dim}} to see native event name mappings{{reset}}",
+        "{{dim}}- Use <blue><bold>--describe</bold></blue>{{dim}} to see event descriptions and schemas{{reset}}",
+    ];
+    for hint in hints {
+        log::data(&format!(" {}", Prose::new(hint).render(Some(100))));
+    }
 
     Ok(())
 }
@@ -223,7 +253,14 @@ fn run_verbose(
 
     // Add a column for each event using abbreviations
     for event in AgenticEvent::ALL {
-        columns.push(TableColumn::new(event.abbrev()));
+        let mut column = TableColumn::new(event.abbrev());
+        if matches!(
+            event,
+            AgenticEvent::SubagentStart | AgenticEvent::SubagentStop
+        ) {
+            column = column.with_fixed_width(4);
+        }
+        columns.push(column);
     }
 
     let mut table = Table::new().with_columns(columns);
@@ -272,15 +309,19 @@ fn run_verbose(
     // Show legend
     log::data("");
     let legend = Prose::new(
-        "{{dim}}- Legend: {{reset}}⚠️{{dim}} = not supported, {{reset}}-{{dim}} = not configured, {{reset}}⓪{{dim}} = 0 actions, {{reset}}❶{{dim}} = 1 action, etc.{{reset}}"
+        "{{dim}}- Legend: {{reset}}⚠️{{dim}} = not supported, {{reset}}-{{dim}} = not configured, {{reset}}⓪{{dim}} = 0 actions, {{reset}}❶{{dim}} = 1 action, etc.{{reset}}",
     );
     log::data(&format!(" {}", legend.render(Some(160))));
 
-    // Show hint about provider-specific details
-    let hint = Prose::new(
-        "{{dim}}- Add a provider name for greater details on a given provider: <blue><bold>claudine</bold> hooks <italic>provider</italic></blue>"
-    );
-    log::data(&format!(" {}", hint.render(Some(160))));
+    // Show hints about available flags
+    let hints = [
+        "{{dim}}- Use <blue><bold>--support</bold></blue>{{dim}} to see which events each provider supports{{reset}}",
+        "{{dim}}- Use <blue><bold>--mapping</bold></blue>{{dim}} to see native event name mappings{{reset}}",
+        "{{dim}}- Use <blue><bold>--describe</bold></blue>{{dim}} to see event descriptions and schemas{{reset}}",
+    ];
+    for hint in hints {
+        log::data(&format!(" {}", Prose::new(hint).render(Some(160))));
+    }
 
     Ok(())
 }
@@ -294,4 +335,164 @@ fn find_configurator(
         .iter()
         .find(|(p, _)| *p == provider)
         .map(|(_, cfg)| cfg.as_ref())
+}
+
+const SUPPORTED: &str = "✅";
+const NOT_SUPPORTED: &str = "❌";
+
+/// Show provider event support matrix with ✅/❌ indicators.
+fn run_support() -> Result<()> {
+    // Build columns: Event name, then one per provider
+    let mut columns = vec![TableColumn::new("Event")];
+    for provider in ALL_PROVIDERS {
+        columns.push(TableColumn::new(provider.to_string()));
+    }
+
+    let mut table = Table::new().with_columns(columns);
+    table.layout_mut().left_margin = Margin::Chars(1);
+
+    // Add a row for each event
+    for event in AgenticEvent::ALL {
+        let mut row: Vec<TableCellContent> = vec![event.to_string().into()];
+
+        for provider in ALL_PROVIDERS {
+            let cell = if provider.supports_event(&event) {
+                SUPPORTED.into()
+            } else {
+                NOT_SUPPORTED.into()
+            };
+            row.push(cell);
+        }
+
+        table.add_row(row);
+    }
+
+    let term = Terminal::new();
+    let rendered = if term.is_tty {
+        table.render_with_cursor_alignment(120)
+    } else {
+        table.render(Some(120))
+    };
+    log::data(&format!("\n{}", rendered));
+
+    Ok(())
+}
+
+/// First group of providers for mapping table (to fit width constraints).
+const MAPPING_GROUP_1: [Provider; 4] = [
+    Provider::Claude,
+    Provider::Codex,
+    Provider::Gemini,
+    Provider::OpenCode,
+];
+
+/// Second group of providers for mapping table.
+const MAPPING_GROUP_2: [Provider; 3] = [Provider::Goose, Provider::KimiCode, Provider::QwenCode];
+
+/// Show native event name mappings for each provider.
+///
+/// Splits providers into two tables to fit width-constrained terminals.
+fn run_mapping() -> Result<()> {
+    let term = Terminal::new();
+
+    // Render first table (Claude, Codex, Gemini, Goose)
+    let table1 = build_mapping_table(&MAPPING_GROUP_1);
+    let rendered1 = if term.is_tty {
+        table1.render_with_cursor_alignment(100)
+    } else {
+        table1.render(Some(100))
+    };
+    log::data(&format!("\n{}", rendered1));
+
+    // Render second table (KimiCode, OpenCode, QwenCode)
+    let table2 = build_mapping_table(&MAPPING_GROUP_2);
+    let rendered2 = if term.is_tty {
+        table2.render_with_cursor_alignment(100)
+    } else {
+        table2.render(Some(100))
+    };
+    log::data(&format!("\n{}", rendered2));
+
+    // Show legend
+    log::data("");
+    let legend = Prose::new(
+        "{{dim}}- Legend: {{reset}}❌{{dim}} = not supported, {{reset}}(blank){{dim}} = supported but no specific native name{{reset}}",
+    );
+    log::data(&format!(" {}", legend.render(Some(100))));
+
+    Ok(())
+}
+
+/// Build a mapping table for a subset of providers.
+fn build_mapping_table(providers: &[Provider]) -> Table {
+    // Build columns: Event name (left-aligned), then one per provider (center-aligned)
+    let mut columns = vec![TableColumn::new("Event")];
+    for provider in providers {
+        columns.push(TableColumn::new(provider.to_string()).with_alignment(Alignment::Center));
+    }
+
+    let mut table = Table::new().with_columns(columns);
+    table.layout_mut().left_margin = Margin::Chars(1);
+
+    // Add a row for each event
+    for event in AgenticEvent::ALL {
+        let mut row: Vec<TableCellContent> = vec![event.to_string().into()];
+
+        for provider in providers {
+            let cell: TableCellContent = match provider.native_event_name(&event) {
+                None => NOT_SUPPORTED.into(), // Not supported
+                Some("") => "".into(),        // Supported but no specific name
+                Some(name) => name.into(),    // Native name
+            };
+            row.push(cell);
+        }
+
+        table.add_row(row);
+    }
+
+    table
+}
+
+/// Show event descriptions and schemas.
+fn run_describe() -> Result<()> {
+    let columns = vec![
+        TableColumn::new("Event"),
+        TableColumn::new("Response Schema"),
+        TableColumn::new("Return Schema"),
+        TableColumn::new("Description"),
+    ];
+
+    let mut table = Table::new().with_columns(columns);
+    table.layout_mut().left_margin = Margin::Chars(1);
+
+    // Add a row for each event
+    for event in AgenticEvent::ALL {
+        let row: Vec<TableCellContent> = vec![
+            event.to_string().into(),
+            event.response_schema().into(),
+            event.return_schema().into(),
+            event.description().into(),
+        ];
+        table.add_row(row);
+    }
+
+    let term = Terminal::new();
+    let rendered = if term.is_tty {
+        table.render_with_cursor_alignment(140)
+    } else {
+        table.render(Some(140))
+    };
+    log::data(&format!("\n{}", rendered));
+
+    // Show legend
+    log::data("");
+    let legend =
+        Prose::new("{{dim}}- Response Schema: fields available in the event payload{{reset}}");
+    log::data(&format!(" {}", legend.render(Some(140))));
+    let legend2 = Prose::new(
+        "{{dim}}- Return Schema: what hooks can return to influence agent behavior (blocking hooks only){{reset}}",
+    );
+    log::data(&format!(" {}", legend2.render(Some(140))));
+
+    Ok(())
 }

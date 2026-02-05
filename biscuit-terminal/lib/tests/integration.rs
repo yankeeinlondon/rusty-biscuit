@@ -112,7 +112,7 @@ fn test_image_support_with_reason_provides_details() {
     assert!(!result.reason.is_empty(), "Reason should not be empty");
 
     // Method should always be one of the expected values
-    let valid_methods = ["tty_check", "viuer", "env_heuristic"];
+    let valid_methods = ["tty_check", "viuer", "env_heuristic", "known_terminal"];
     assert!(
         valid_methods.contains(&result.method.as_str()),
         "Method '{}' should be one of {:?}",

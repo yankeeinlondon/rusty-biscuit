@@ -145,6 +145,8 @@ fn pad_cell(content: &str, width: usize, alignment: Alignment) -> String {
 pub struct TableColumn {
     /// Header text for the column
     pub header: String,
+    /// Fixed width for the column (overrides header/data widths when set)
+    pub fixed_width: Option<usize>,
     /// Minimum width for the column (optional)
     pub min_width: Option<usize>,
     /// Maximum width for the column (optional)
@@ -160,11 +162,18 @@ impl TableColumn {
     pub fn new<T: Into<String>>(header: T) -> Self {
         TableColumn {
             header: header.into(),
+            fixed_width: None,
             min_width: None,
             max_width: None,
             column_type: ColumnType::default(),
             alignment: None,
         }
+    }
+
+    /// Set a fixed width for the column.
+    pub fn with_fixed_width(mut self, width: usize) -> Self {
+        self.fixed_width = Some(width);
+        self
     }
 
     /// Set minimum width for the column.
@@ -264,9 +273,16 @@ impl Table {
             .max(self.data.iter().map(|row| row.len()).max().unwrap_or(0));
 
         let mut widths = vec![0; num_cols];
+        let mut fixed = vec![false; num_cols];
 
         // Consider header widths
         for (i, col) in self.columns.iter().enumerate() {
+            if let Some(fixed_width) = col.fixed_width {
+                widths[i] = fixed_width;
+                fixed[i] = true;
+                continue;
+            }
+
             widths[i] = visible_width(&col.header) as usize;
             if let Some(min) = col.min_width {
                 widths[i] = widths[i].max(min);
@@ -277,6 +293,9 @@ impl Table {
         for row in &self.data {
             for (i, cell) in row.iter().enumerate() {
                 if i < widths.len() {
+                    if fixed.get(i).copied().unwrap_or(false) {
+                        continue;
+                    }
                     let cell_width = visible_width(&cell.to_string()) as usize;
                     widths[i] = widths[i].max(cell_width);
                 }
@@ -285,6 +304,9 @@ impl Table {
 
         // Apply max width constraints
         for (i, col) in self.columns.iter().enumerate() {
+            if fixed.get(i).copied().unwrap_or(false) {
+                continue;
+            }
             if let Some(max) = col.max_width {
                 if i < widths.len() {
                     widths[i] = widths[i].min(max);
@@ -316,7 +338,8 @@ impl Table {
             let mut header_row = String::from("│ ");
             for (i, col) in self.columns.iter().enumerate() {
                 let width = widths.get(i).copied().unwrap_or(col.header.len());
-                header_row.push_str(&pad_cell(&col.header, width, Alignment::Left));
+                let alignment = col.effective_alignment();
+                header_row.push_str(&pad_cell(&col.header, width, alignment));
                 if i < self.columns.len() - 1 {
                     header_row.push_str(" │ ");
                 }
@@ -798,9 +821,48 @@ mod tests {
     }
 
     #[test]
-    fn test_default_integer_right_alignment() {
+    fn test_default_integer_center_alignment() {
         let col = TableColumn::new("Count").with_type(ColumnType::Integer);
-        assert_eq!(col.effective_alignment(), Alignment::Right);
+        assert_eq!(col.effective_alignment(), Alignment::Center);
+    }
+
+    #[test]
+    fn test_header_uses_column_alignment() {
+        // Headers should respect the column's effective alignment, not be hardcoded to Left
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("ID")
+                    .with_type(ColumnType::Integer)
+                    .with_min_width(8),
+            ])
+            .with_data(vec![vec![TableCellContent::Integer(42)]]);
+
+        let result = table.render_content(None);
+        let lines: Vec<&str> = result.lines().collect();
+        // Header line (index 1) should have centered "ID" (integer type defaults to center)
+        // "│    ID   │" - ID centered in 8-char width
+        let header_line = lines[1];
+        assert!(
+            header_line.contains("   ID   "),
+            "Header should be center-aligned: {:?}",
+            header_line
+        );
+    }
+
+    #[test]
+    fn test_fixed_width_overrides_content_width() {
+        // When fixed_width is larger than content, padding is applied
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X").with_fixed_width(10)])
+            .with_data(vec![vec!["A".into()]]);
+
+        let result = table.render_content(None);
+        let lines: Vec<&str> = result.lines().collect();
+        let header_width = visible_width(lines[1]);
+        let row_width = visible_width(lines[3]);
+        assert_eq!(header_width, row_width);
+        // Total width = "│ " (2) + fixed_width (10) + " │" (2) = 14
+        assert_eq!(header_width, 14);
     }
 
     // ── Regression: table without title should not emit a title line ──

@@ -131,7 +131,8 @@ fn escape_sequence_end(content: &str, start: usize) -> usize {
             }
             idx
         }
-        b'G' => {
+        // APC sequences (ESC _ ... ST) - used by Kitty graphics protocol
+        b'_' => {
             let mut idx = start + 2;
             while idx < bytes.len() {
                 if bytes[idx] == 0x1b && idx + 1 < bytes.len() && bytes[idx + 1] == b'\\' {

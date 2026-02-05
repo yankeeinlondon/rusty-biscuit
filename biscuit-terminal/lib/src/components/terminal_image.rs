@@ -17,7 +17,7 @@ use std::fmt::Alignment;
 use std::io::Cursor;
 use std::path::Path;
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use image::{DynamicImage, ImageFormat, ImageReader};
 
 use crate::discovery::detection::TerminalApp;
@@ -1030,6 +1030,7 @@ pub fn parse_filepath_and_width(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::io::Write;
 
     // Helper to create a minimal valid PNG using the image crate
@@ -1385,7 +1386,7 @@ mod tests {
         assert!(result.contains("f=100")); // PNG format
         assert!(result.contains("a=T")); // Transmit and display
         assert!(result.contains("t=d")); // Direct transmission
-                                         // Should end with string terminator
+        // Should end with string terminator
         assert!(result.ends_with("\x1b\\"));
     }
 
@@ -1470,7 +1471,10 @@ mod tests {
     }
 
     // Integration tests for render_as_* methods
+    // These tests query the terminal for cell size - must run serially to avoid /dev/tty conflicts
+
     #[test]
+    #[serial]
     fn test_render_as_kitty_produces_valid_output() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.png");
@@ -1492,6 +1496,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_render_as_iterm2_produces_valid_output() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.png");
@@ -1513,6 +1518,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_render_as_kitty_with_zero_term_width_uses_default() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.png");
@@ -1529,6 +1535,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_render_as_iterm2_with_zero_term_width_uses_default() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.png");

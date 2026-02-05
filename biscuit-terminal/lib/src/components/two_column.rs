@@ -132,7 +132,8 @@ impl TwoColumn {
         let mut left_width = match self.left_width {
             ColumnWidth::Fixed(chars) => chars,
             ColumnWidth::Percent(percent) => {
-                (available as f32 * percent.clamp(0.0, 1.0)).round() as u32
+                // Truncate rather than round for predictable integer division behavior
+                (available as f32 * percent.clamp(0.0, 1.0)) as u32
             }
         };
         left_width = left_width.clamp(1, available.saturating_sub(1).max(1));

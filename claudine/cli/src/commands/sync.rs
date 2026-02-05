@@ -1,7 +1,7 @@
 use clap::Args;
 use color_eyre::eyre::Result;
 
-use claudine::config::{detect_agents, RegistrationResult, SkipReason};
+use claudine::config::{RegistrationResult, SkipReason, detect_agents};
 use claudine::events::Provider;
 
 use crate::log;
@@ -28,11 +28,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
     };
 
     let agents = detect_agents();
-    let filter_provider = args
-        .provider
-        .as_deref()
-        .map(parse_provider)
-        .transpose()?;
+    let filter_provider = args.provider.as_deref().map(parse_provider).transpose()?;
 
     for (provider, configurator) in &agents {
         if let Some(ref filter) = filter_provider
@@ -86,6 +82,9 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                             }
                             SkipReason::NotDetected => {
                                 log::data(&format!("{provider}: not detected"));
+                            }
+                            SkipReason::NoHookSupport => {
+                                log::data(&format!("{provider}: no native hook support yet"));
                             }
                         },
                         Err(e) => {

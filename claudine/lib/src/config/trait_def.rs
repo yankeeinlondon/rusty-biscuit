@@ -27,6 +27,8 @@ pub enum SkipReason {
     },
     /// Already registered with same config.
     AlreadyRegistered,
+    /// Provider doesn't support native hooks yet.
+    NoHookSupport,
 }
 
 /// Trait for provider-specific hook configuration management.
@@ -35,7 +37,11 @@ pub trait AgentConfigurator {
     fn provider(&self) -> Provider;
 
     /// Register Claudine hooks with this provider's config.
-    fn register(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<RegistrationResult>;
+    fn register(
+        &self,
+        config: &HookerConfig,
+        config_dir: Option<&Path>,
+    ) -> Result<RegistrationResult>;
 
     /// Remove Claudine hooks from this provider's config.
     fn deregister(&self, config_dir: Option<&Path>) -> Result<()>;

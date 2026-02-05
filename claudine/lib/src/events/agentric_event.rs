@@ -83,6 +83,73 @@ impl AgenticEvent {
             AgenticEvent::Notification => "💬",
         }
     }
+
+    /// Returns a human-readable description of the event.
+    pub fn description(&self) -> &'static str {
+        match self {
+            AgenticEvent::SessionStart => "Agent session started, resumed, or cleared",
+            AgenticEvent::SessionEnd => "Agent session ended or terminated",
+            AgenticEvent::BeforePrompt => "User prompt submitted, before agent processes it",
+            AgenticEvent::BeforeTool => "Tool call created, before execution begins",
+            AgenticEvent::AfterTool => "Tool call completed successfully",
+            AgenticEvent::ToolError => "Tool call failed with an error",
+            AgenticEvent::PermissionRequest => "Agent is requesting user permission",
+            AgenticEvent::TurnComplete => "Agent turn (request/response cycle) completed",
+            AgenticEvent::TurnError => "Agent turn failed with an error",
+            AgenticEvent::SubagentStart => "Sub-agent spawned",
+            AgenticEvent::SubagentStop => "Sub-agent finished",
+            AgenticEvent::BeforeModel => "Before sending prompt to the model",
+            AgenticEvent::AfterModel => "After receiving response from the model",
+            AgenticEvent::BeforeCompact => "Before context compaction/summarization",
+            AgenticEvent::Notification => "Provider-specific notification or status update",
+        }
+    }
+
+    /// Returns the schema of data provided to hooks when this event fires.
+    ///
+    /// Describes what fields are available in the event payload.
+    pub fn response_schema(&self) -> &'static str {
+        match self {
+            AgenticEvent::SessionStart => "session_id, cwd",
+            AgenticEvent::SessionEnd => "session_id",
+            AgenticEvent::BeforePrompt => "prompt, session_id",
+            AgenticEvent::BeforeTool => "tool_name, tool_input",
+            AgenticEvent::AfterTool => "tool_name, tool_input, tool_response",
+            AgenticEvent::ToolError => "tool_name, tool_input, error",
+            AgenticEvent::PermissionRequest => "tool_name, tool_input",
+            AgenticEvent::TurnComplete => "session_id",
+            AgenticEvent::TurnError => "error, session_id",
+            AgenticEvent::SubagentStart => "agent_type, session_id",
+            AgenticEvent::SubagentStop => "agent_type, session_id",
+            AgenticEvent::BeforeModel => "prompt (varies by provider)",
+            AgenticEvent::AfterModel => "response (varies by provider)",
+            AgenticEvent::BeforeCompact => "session_id",
+            AgenticEvent::Notification => "notification_type, notification_message",
+        }
+    }
+
+    /// Returns what the hook can return to influence agent behavior.
+    ///
+    /// Most hooks are fire-and-forget; blocking hooks can modify flow.
+    pub fn return_schema(&self) -> &'static str {
+        match self {
+            AgenticEvent::SessionStart => "(none)",
+            AgenticEvent::SessionEnd => "(none)",
+            AgenticEvent::BeforePrompt => "modified prompt (blocking)",
+            AgenticEvent::BeforeTool => "allow/deny, modified input (blocking)",
+            AgenticEvent::AfterTool => "(none)",
+            AgenticEvent::ToolError => "(none)",
+            AgenticEvent::PermissionRequest => "allow/deny (blocking)",
+            AgenticEvent::TurnComplete => "(none)",
+            AgenticEvent::TurnError => "(none)",
+            AgenticEvent::SubagentStart => "(none)",
+            AgenticEvent::SubagentStop => "(none)",
+            AgenticEvent::BeforeModel => "modified prompt (blocking)",
+            AgenticEvent::AfterModel => "(none)",
+            AgenticEvent::BeforeCompact => "(none)",
+            AgenticEvent::Notification => "(none)",
+        }
+    }
 }
 
 impl fmt::Display for AgenticEvent {
