@@ -59,6 +59,29 @@ impl OrderedList {
         Self::from(items)
     }
 
+    /// Create an empty ordered list.
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Add an item that can be converted to RenderableContent.
+    ///
+    /// This is a convenience method for building lists incrementally.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::components::list::OrderedList;
+    /// use biscuit_terminal::components::prose::Prose;
+    ///
+    /// let mut list = OrderedList::empty();
+    /// list.add("First item").add("Second item");
+    /// ```
+    pub fn add<T: Into<RenderableContent>>(&mut self, item: T) -> &mut Self {
+        self.items.push(item.into());
+        self
+    }
+
     /// Set the indentation width for child block-level components.
     pub fn with_indent_children(mut self, indent: u32) -> Self {
         self.indent_children = indent;
@@ -211,6 +234,29 @@ impl UnorderedList {
     /// Create a new unordered list from items.
     pub fn new<T: Into<String>>(items: Vec<T>) -> Self {
         Self::from(items)
+    }
+
+    /// Create an empty unordered list.
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Add an item that can be converted to RenderableContent.
+    ///
+    /// This is a convenience method for building lists incrementally.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::components::list::UnorderedList;
+    /// use biscuit_terminal::components::prose::Prose;
+    ///
+    /// let mut list = UnorderedList::empty();
+    /// list.add("First item").add("Second item");
+    /// ```
+    pub fn add<T: Into<RenderableContent>>(&mut self, item: T) -> &mut Self {
+        self.items.push(item.into());
+        self
     }
 
     /// Set a custom bullet character.

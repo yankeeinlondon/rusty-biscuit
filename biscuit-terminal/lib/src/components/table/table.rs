@@ -821,9 +821,9 @@ mod tests {
     }
 
     #[test]
-    fn test_default_integer_center_alignment() {
+    fn test_default_integer_right_alignment() {
         let col = TableColumn::new("Count").with_type(ColumnType::Integer);
-        assert_eq!(col.effective_alignment(), Alignment::Center);
+        assert_eq!(col.effective_alignment(), Alignment::Right);
     }
 
     #[test]
@@ -839,12 +839,12 @@ mod tests {
 
         let result = table.render_content(None);
         let lines: Vec<&str> = result.lines().collect();
-        // Header line (index 1) should have centered "ID" (integer type defaults to center)
-        // "│    ID   │" - ID centered in 8-char width
+        // Header line (index 1) should have right-aligned "ID" (integer type defaults to right)
+        // "│      ID │" - ID right-aligned in 8-char width
         let header_line = lines[1];
         assert!(
-            header_line.contains("   ID   "),
-            "Header should be center-aligned: {:?}",
+            header_line.contains("      ID"),
+            "Header should be right-aligned: {:?}",
             header_line
         );
     }

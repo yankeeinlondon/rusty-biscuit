@@ -61,6 +61,26 @@ impl Section {
         self.content.push(RenderableContent::String(s.into()));
     }
 
+    /// Add any content that can be converted to RenderableContent.
+    ///
+    /// This is a convenience method that accepts strings, Prose, and other
+    /// renderable components without requiring manual wrapping.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::components::section::{Section, HeadingLevel};
+    /// use biscuit_terminal::components::prose::Prose;
+    ///
+    /// let mut section = Section::new(HeadingLevel::h2, "My Section");
+    /// section.push("Plain text");
+    /// section.push(Prose::new("{{bold}}Styled{{reset}} text"));
+    /// ```
+    pub fn push<T: Into<RenderableContent>>(&mut self, item: T) -> &mut Self {
+        self.content.push(item.into());
+        self
+    }
+
     /// Render the section with heading styling based on level.
     fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
         let mut result = String::new();

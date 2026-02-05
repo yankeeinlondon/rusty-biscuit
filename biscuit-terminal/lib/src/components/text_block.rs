@@ -48,47 +48,55 @@ impl TextBlock {
         }
     }
 
-    pub fn using_italics(&mut self) -> &Self {
+    /// Enable italics styling.
+    pub fn using_italics(&mut self) -> &mut Self {
         self.italic = true;
         self
     }
 
-    pub fn using_bold_text(&mut self) -> &Self {
+    /// Enable bold text styling.
+    pub fn using_bold_text(&mut self) -> &mut Self {
         self.font_weight = FontWeight::Bold;
         self
     }
 
-    pub fn use_strikethrough_on_content(&mut self) -> &Self {
+    /// Enable strikethrough styling.
+    pub fn use_strikethrough_on_content(&mut self) -> &mut Self {
         self.strikethrough = true;
         self
     }
 
-    pub fn using_dim_text(&mut self) -> &Self {
+    /// Enable dim text styling.
+    pub fn using_dim_text(&mut self) -> &mut Self {
         self.font_weight = FontWeight::Dim;
         self
     }
 
-    pub fn with_foreground_color(&mut self, color: Color) -> &Self {
+    /// Set the foreground (text) color.
+    pub fn with_foreground_color(&mut self, color: Color) -> &mut Self {
         self.fg_color = Some(color);
         self
     }
 
-    pub fn with_background_color(&mut self, color: Color) -> &Self {
+    /// Set the background color.
+    pub fn with_background_color(&mut self, color: Color) -> &mut Self {
         self.bg_color = Some(color);
         self
     }
 
-    pub fn make_content_blink(&mut self) -> &Self {
+    /// Enable blinking text.
+    pub fn make_content_blink(&mut self) -> &mut Self {
         self.blink = true;
         self
     }
 
-    pub fn with_underline(&mut self, under: UnderliningRequest) -> &Self {
+    /// Set the underline style.
+    pub fn with_underline(&mut self, under: UnderliningRequest) -> &mut Self {
         self.underline = under;
         self
     }
 
-    /// Renders to the terminal without
+    /// Renders to a string with terminal escape sequences applied.
     fn to_terminal(&self, term: &Terminal) -> String {
         let mut content = self.content.clone();
         let _underline = term.underline_support;
@@ -106,7 +114,7 @@ impl TextBlock {
 impl Renderable for TextBlock {
     fn render(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
-        let term = Terminal::new_tty();
+        let term = Terminal::new_optimistic(width);
         let content = self.to_terminal(&term);
         self.layout.apply_layout(&content, width)
     }

@@ -194,8 +194,8 @@ impl Todo {
 
 impl Renderable for Todo {
     fn render(&self, term_width: Option<u32>) -> String {
-        let term = Terminal::new();
-        let width = term_width.unwrap_or_else(|| term.width());
+        let width = term_width.unwrap_or(80);
+        let term = Terminal::new_optimistic(width);
         let content = self.to_terminal(&term);
         self.layout.apply_layout(&content, width)
     }

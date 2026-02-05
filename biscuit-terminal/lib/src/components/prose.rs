@@ -439,11 +439,13 @@ fn block_tag_to_escape(
 
         // RGB colors
         "rgb" => {
-            // Parse RGB from tag name like "rgb 125,67,45"
+            // Parse RGB from attrs like "rgb 125,67,45"
+            // The RGB value appears as an attr with the value in the key and empty value,
+            // e.g., attrs = [("125,67,45", "")]
             let rgb_str = attrs
                 .iter()
-                .find(|(k, _)| k.is_empty())
-                .map(|(_, v)| v.as_str())
+                .find(|(_, v)| v.is_empty())
+                .map(|(k, _)| k.as_str())
                 .unwrap_or("");
 
             if let Some((r, g, b)) = parse_rgb(rgb_str) {
@@ -1320,6 +1322,26 @@ mod tests {
         let prose = Prose::new("<unknown-tag>content</unknown-tag>");
         let result = prose.render(None);
         assert!(result.contains("<unknown-tag>content</unknown-tag>"));
+    }
+
+    #[test]
+    fn test_rgb_tag() {
+        // Test RGB color tag parsing
+        let prose = Prose::new("<rgb 255,0,0>red text</rgb>");
+        let result = prose.render(None);
+        assert!(
+            result.contains("\x1b[38;2;255;0;0m"),
+            "Expected RGB escape code, got: {:?}",
+            result
+        );
+        assert!(result.contains("red text"));
+        assert!(result.contains("\x1b[39m"));
+
+        // Test with different RGB values
+        let prose = Prose::new("<rgb 125,67,45>brown text</rgb>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[38;2;125;67;45m"));
+        assert!(result.contains("brown text"));
     }
 
     #[test]

@@ -149,10 +149,14 @@ impl Renderable for TerminalImage {
 
     /// Optimistic render assuming Kitty protocol support.
     ///
-    /// Returns an empty string; use `fallback_render` for real rendering.
-    fn render(&self, _term_width: Option<u32>) -> String {
-        let _ = _term_width;
-        String::new()
+    /// Returns Kitty escape sequences for the image. If rendering fails,
+    /// returns the alt text as a fallback.
+    fn render(&self, term_width: Option<u32>) -> String {
+        let width = term_width.unwrap_or(80);
+        match self.render_as_kitty(width) {
+            Ok(escape_seq) => escape_seq,
+            Err(_) => self.alt_text.clone().unwrap_or_default(),
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -300,8 +304,9 @@ impl TerminalImage {
     ///
     /// ## Returns
     ///
-    /// A string containing the appropriate escape sequences for the terminal,
-    /// or plain text fallback if images aren't supported.
+    /// An empty string. viuer prints directly to the terminal, so the return
+    /// value is not used for display. Returns `Ok("")` on success regardless
+    /// of terminal capabilities.
     ///
     /// ## Errors
     ///
@@ -742,8 +747,8 @@ impl TerminalImage {
     /// ## Arguments
     ///
     /// * `png_data` - PNG-encoded image bytes
-    /// * `width` - Display width in pixels
-    /// * `height` - Display height in pixels
+    /// * `width_cells` - Display width in terminal cells (columns)
+    /// * `height_cells` - Display height in terminal cells (rows)
     ///
     /// ## Escape Sequence Format
     ///

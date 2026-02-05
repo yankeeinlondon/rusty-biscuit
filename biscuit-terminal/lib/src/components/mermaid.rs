@@ -268,6 +268,13 @@ pub enum MermaidRenderError {
     /// Terminal does not support image rendering.
     #[error("Terminal does not support image rendering (use fallback_code_block instead)")]
     NoImageSupport,
+
+    /// Path contains invalid UTF-8 characters.
+    #[error("Invalid path encoding: {path}")]
+    InvalidPath {
+        /// The path that contained invalid UTF-8
+        path: String,
+    },
 }
 
 /// Checks if a command exists in the system PATH.
@@ -1024,8 +1031,18 @@ impl MermaidRenderer {
         };
 
         // Add common arguments
-        cmd.args(["-i", input_file.path().to_str().unwrap()])
-            .args(["-o", output_path.to_str().unwrap()])
+        let input_path_str = input_file.path().to_str().ok_or_else(|| {
+            MermaidRenderError::InvalidPath {
+                path: input_file.path().to_string_lossy().into_owned(),
+            }
+        })?;
+        let output_path_str = output_path.to_str().ok_or_else(|| {
+            MermaidRenderError::InvalidPath {
+                path: output_path.to_string_lossy().into_owned(),
+            }
+        })?;
+        cmd.args(["-i", input_path_str])
+            .args(["-o", output_path_str])
             .args(["--theme", self.theme.as_str()])
             .args(["--scale", &self.scale.to_string()]);
 
@@ -1036,7 +1053,12 @@ impl MermaidRenderer {
 
         // Add config file if we have one
         if let Some(ref cf) = config_file {
-            cmd.args(["--configFile", cf.path().to_str().unwrap()]);
+            let config_path_str = cf.path().to_str().ok_or_else(|| {
+                MermaidRenderError::InvalidPath {
+                    path: cf.path().to_string_lossy().into_owned(),
+                }
+            })?;
+            cmd.args(["--configFile", config_path_str]);
         }
 
         // Add icon packs
@@ -1143,8 +1165,18 @@ impl MermaidRenderer {
         };
 
         // Add common arguments
-        cmd.args(["-i", input_file.path().to_str().unwrap()])
-            .args(["-o", output_path.to_str().unwrap()])
+        let input_path_str = input_file.path().to_str().ok_or_else(|| {
+            MermaidRenderError::InvalidPath {
+                path: input_file.path().to_string_lossy().into_owned(),
+            }
+        })?;
+        let output_path_str = output_path.to_str().ok_or_else(|| {
+            MermaidRenderError::InvalidPath {
+                path: output_path.to_string_lossy().into_owned(),
+            }
+        })?;
+        cmd.args(["-i", input_path_str])
+            .args(["-o", output_path_str])
             .args(["--theme", self.theme.as_str()])
             .args(["--scale", &self.scale.to_string()]);
 
@@ -1155,7 +1187,12 @@ impl MermaidRenderer {
 
         // Add config file if we have one
         if let Some(ref cf) = config_file {
-            cmd.args(["--configFile", cf.path().to_str().unwrap()]);
+            let config_path_str = cf.path().to_str().ok_or_else(|| {
+                MermaidRenderError::InvalidPath {
+                    path: cf.path().to_string_lossy().into_owned(),
+                }
+            })?;
+            cmd.args(["--configFile", config_path_str]);
         }
 
         // Add icon packs

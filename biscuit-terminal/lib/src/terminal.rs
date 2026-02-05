@@ -235,6 +235,72 @@ impl Terminal {
         }
     }
 
+    /// Creates an optimistic Terminal with fixed width and full capabilities enabled.
+    ///
+    /// This constructor creates a Terminal that assumes all modern terminal
+    /// capabilities are available, without performing actual detection. This is
+    /// useful for:
+    ///
+    /// - `render()` methods that need a terminal for rendering calculations
+    /// - Testing with predictable terminal capabilities
+    /// - Generating output intended for modern terminals
+    ///
+    /// The returned Terminal has:
+    /// - Fixed width set to the provided value
+    /// - Kitty image support enabled
+    /// - TrueColor depth enabled
+    /// - Italics, underlines, and OSC8 links enabled
+    /// - TTY mode enabled
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::terminal::Terminal;
+    /// use biscuit_terminal::discovery::detection::{ImageSupport, ColorDepth};
+    ///
+    /// let term = Terminal::new_optimistic(80);
+    /// assert_eq!(term.width(), 80);
+    /// assert_eq!(term.image_support, ImageSupport::Kitty);
+    /// assert_eq!(term.color_depth, ColorDepth::TrueColor);
+    /// assert!(term.supports_italic);
+    /// assert!(term.osc_link_support);
+    /// ```
+    pub fn new_optimistic(width: u32) -> Terminal {
+        Terminal {
+            app: TerminalApp::Other("Optimistic".to_string()),
+            supports_italic: true,
+            image_support: ImageSupport::Kitty,
+            underline_support: UnderlineSupport {
+                straight: true,
+                double: true,
+                curly: true,
+                dotted: true,
+                dashed: true,
+                colored: true,
+            },
+            osc_link_support: true,
+            is_tty: true,
+            color_depth: ColorDepth::TrueColor,
+            os: OsType::Unknown,
+            distro: None,
+            config_file: None,
+            is_ci: false,
+            font: None,
+            font_size: None,
+            font_ligatures: None,
+            is_nerd_font: None,
+            in_repo: false,
+            in_monorepo: false,
+            repo_root: None,
+            package_root: None,
+            remote: Connection::Local,
+            char_encoding: CharEncoding::default(),
+            locale: TerminalLocale::default(),
+            fixed_width: Some(width),
+            fixed_height: None,
+        }
+    }
+
     /// Get the terminal width in columns.
     ///
     /// If a fixed width was set via the builder, returns that value.
@@ -663,6 +729,47 @@ mod tests {
 
         let result = compute_package_root(root, root, true, None);
         assert_eq!(result, Some(root.to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn test_terminal_new_optimistic_has_correct_width() {
+        let term = Terminal::new_optimistic(80);
+        assert_eq!(term.width(), 80);
+        assert_eq!(term.fixed_width, Some(80));
+
+        let term = Terminal::new_optimistic(120);
+        assert_eq!(term.width(), 120);
+    }
+
+    #[test]
+    fn test_terminal_new_optimistic_has_full_capabilities() {
+        let term = Terminal::new_optimistic(80);
+        assert_eq!(term.image_support, ImageSupport::Kitty);
+        assert_eq!(term.color_depth, ColorDepth::TrueColor);
+        // All underline styles enabled
+        assert!(term.underline_support.straight);
+        assert!(term.underline_support.double);
+        assert!(term.underline_support.curly);
+        assert!(term.underline_support.dotted);
+        assert!(term.underline_support.dashed);
+        assert!(term.underline_support.colored);
+        assert!(term.supports_italic);
+        assert!(term.osc_link_support);
+        assert!(term.is_tty);
+        assert!(!term.is_ci);
+    }
+
+    #[test]
+    fn test_terminal_new_optimistic_no_detection() {
+        // new_optimistic should NOT run detection (fast, predictable)
+        let term = Terminal::new_optimistic(80);
+        assert_eq!(term.os, OsType::Unknown);
+        assert!(term.distro.is_none());
+        assert!(term.config_file.is_none());
+        assert!(!term.in_repo);
+        assert!(!term.in_monorepo);
+        assert!(term.repo_root.is_none());
+        assert!(term.package_root.is_none());
     }
 
     #[test]
