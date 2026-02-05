@@ -1115,6 +1115,7 @@ pub enum AiCli {
     Codex,
     Goose,
     KimiCli,
+    QwenCli,
 }
 
 /// Metadata lookup table for AI CLI tools.
@@ -1166,6 +1167,12 @@ static AI_CLI_INFO: &[ProgramInfo] = &[
         "Kimi Code CLI",
         "AI agent that runs in the terminal",
         "https://moonshotai.github.io/kimi-cli/",
+    ),
+    ProgramInfo::standard(
+        "qwen",
+        "Qwen Code CLI",
+        "Qwen's AI coding agent",
+        "https://qwenlm.github.io/qwen-code-docs/",
     ),
 ];
 

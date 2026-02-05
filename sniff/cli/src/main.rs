@@ -64,6 +64,9 @@ pub enum Commands {
     /// Show only filesystem information (git, languages, monorepo)
     Filesystem,
 
+    /// Show a table of subsection topics for each top-level command
+    Topics,
+
     // === Hardware detail sections ===
     /// Show only CPU information
     Cpu,
@@ -174,6 +177,7 @@ impl Commands {
             Commands::Hardware => OutputFilter::Hardware,
             Commands::Network => OutputFilter::Network,
             Commands::Filesystem => OutputFilter::Filesystem,
+            Commands::Topics => OutputFilter::All,
 
             // Hardware detail sections
             Commands::Cpu => OutputFilter::Cpu,
@@ -276,6 +280,7 @@ Commands:
     sniff hardware    Show only hardware information
     sniff network     Show only network information
     sniff filesystem  Show only filesystem information
+    sniff topics      Show subsection topics as a table
 
   Hardware details:
     sniff cpu         Show only CPU information
@@ -358,6 +363,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Handle --completions first (prints setup instructions)
     if let Some(shell) = cli.completions {
         print_completions(shell);
+        return Ok(());
+    }
+
+    if matches!(cli.command, Some(Commands::Topics)) {
+        output::print_topics_table();
         return Ok(());
     }
 
@@ -675,6 +685,12 @@ mod tests {
         fn filesystem_subcommand_parses() {
             let cli = parse_args(&["filesystem"]).unwrap();
             assert!(matches!(cli.command, Some(Commands::Filesystem)));
+        }
+
+        #[test]
+        fn topics_subcommand_parses() {
+            let cli = parse_args(&["topics"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Topics)));
         }
 
         #[test]

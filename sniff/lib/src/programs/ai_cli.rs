@@ -27,6 +27,7 @@ fn ai_cli_details(client: AiCli) -> Option<&'static crate::programs::ProgramDeta
         AiCli::Codex => Program::Codex,
         AiCli::Goose => Program::Goose,
         AiCli::KimiCli => Program::KimiCli,
+        AiCli::QwenCli => Program::QwenCli,
     };
 
     PROGRAM_LOOKUP.get(&program)
@@ -45,6 +46,7 @@ pub struct InstalledAiClients {
     codex: Option<(PathBuf, ExecutableSource)>,
     goose: Option<(PathBuf, ExecutableSource)>,
     kimi_cli: Option<(PathBuf, ExecutableSource)>,
+    qwen_cli: Option<(PathBuf, ExecutableSource)>,
 }
 
 impl InstalledAiClients {
@@ -52,6 +54,7 @@ impl InstalledAiClients {
     pub fn new() -> Self {
         let programs = [
             "claude", "opencode", "roo", "gemini", "aider", "codex", "goose", "kimi", "kimi-cli",
+            "qwen",
         ];
 
         let results = find_programs_with_source_parallel(&programs);
@@ -70,6 +73,7 @@ impl InstalledAiClients {
             kimi_cli: get_first(&[
                 "kimi", "kimi-cli",
             ]),
+            qwen_cli: get("qwen"),
         }
     }
 
@@ -120,6 +124,11 @@ impl InstalledAiClients {
         self.kimi_cli.is_some()
     }
 
+    /// Returns true if Qwen Code CLI is installed.
+    pub fn qwen_cli(&self) -> bool {
+        self.qwen_cli.is_some()
+    }
+
     /// Returns the path to the specified AI CLI tool's binary if installed.
     pub fn path(&self, client: AiCli) -> Option<PathBuf> {
         self.path_with_source(client).map(|(p, _)| p)
@@ -136,6 +145,7 @@ impl InstalledAiClients {
             AiCli::Codex => self.codex.clone(),
             AiCli::Goose => self.goose.clone(),
             AiCli::KimiCli => self.kimi_cli.clone(),
+            AiCli::QwenCli => self.qwen_cli.clone(),
         }
     }
 
@@ -175,6 +185,7 @@ impl InstalledAiClients {
             AiCli::Codex => self.codex.is_some(),
             AiCli::Goose => self.goose.is_some(),
             AiCli::KimiCli => self.kimi_cli.is_some(),
+            AiCli::QwenCli => self.qwen_cli.is_some(),
         }
     }
 
@@ -198,6 +209,7 @@ impl InstalledAiClients {
             AiCli::Codex => "codex",
             AiCli::Goose => "goose",
             AiCli::KimiCli => "kimi",
+            AiCli::QwenCli => "qwen",
         };
         let fake_path = PathBuf::from(format!("/usr/bin/{}", cmd_name));
         let entry = Some((fake_path, ExecutableSource::Path));
@@ -210,6 +222,7 @@ impl InstalledAiClients {
             AiCli::Codex => self.codex = entry,
             AiCli::Goose => self.goose = entry,
             AiCli::KimiCli => self.kimi_cli = entry,
+            AiCli::QwenCli => self.qwen_cli = entry,
         }
         self
     }
@@ -230,7 +243,7 @@ impl Serialize for InstalledAiClients {
             }
         };
 
-        let mut state = serializer.serialize_struct("InstalledAiClients", 8)?;
+        let mut state = serializer.serialize_struct("InstalledAiClients", 9)?;
         for client in AiCli::iter() {
             let field_name = match client {
                 AiCli::Claude => "claude",
@@ -241,6 +254,7 @@ impl Serialize for InstalledAiClients {
                 AiCli::Codex => "codex",
                 AiCli::Goose => "goose",
                 AiCli::KimiCli => "kimi_cli",
+                AiCli::QwenCli => "qwen_cli",
             };
             state.serialize_field(field_name, &entry(client))?;
         }
@@ -271,6 +285,8 @@ impl<'de> Deserialize<'de> for InstalledAiClients {
             goose: bool,
             #[serde(default)]
             kimi_cli: bool,
+            #[serde(default)]
+            qwen_cli: bool,
         }
 
         let b = BoolAiClients::deserialize(deserializer)?;
@@ -292,6 +308,7 @@ impl<'de> Deserialize<'de> for InstalledAiClients {
             codex: to_opt(b.codex),
             goose: to_opt(b.goose),
             kimi_cli: to_opt(b.kimi_cli),
+            qwen_cli: to_opt(b.qwen_cli),
         })
     }
 }
@@ -486,6 +503,7 @@ mod tests {
         assert!(!clients.codex());
         assert!(!clients.goose());
         assert!(!clients.kimi_cli());
+        assert!(!clients.qwen_cli());
     }
 
     #[test]

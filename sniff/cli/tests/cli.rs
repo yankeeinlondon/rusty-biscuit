@@ -256,6 +256,17 @@ fn test_deep_flag_after_subcommand() {
         .stdout(predicate::str::contains("Status"));
 }
 
+#[test]
+fn test_topics_subcommand_output() {
+    cargo_bin_cmd!("sniff")
+        .arg("topics")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("hardware"))
+        .stdout(predicate::str::contains("filesystem"))
+        .stdout(predicate::str::contains("programs"));
+}
+
 // ============================================================================
 // Top-Level Section Subcommand Tests
 // os, hardware, network, filesystem

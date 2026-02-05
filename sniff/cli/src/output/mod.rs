@@ -10,6 +10,7 @@ mod network;
 mod os;
 mod programs;
 mod services;
+mod topics;
 
 use std::path::Path;
 
@@ -18,6 +19,7 @@ use sniff::SniffResult;
 pub use filesystem::print_git_section;
 pub use programs::{print_programs_json, print_programs_markdown};
 pub use services::{print_services_json, print_services_text};
+pub use topics::print_topics_table;
 
 // Re-export types needed by submodules
 pub(crate) use filesystem::{print_filesystem_section, print_language_section, print_repo_section};

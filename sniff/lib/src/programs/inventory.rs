@@ -166,6 +166,7 @@ pub enum Program {
     Codex,
     Goose,
     KimiCli,
+    QwenCli,
 }
 
 // ============================================================================
@@ -926,6 +927,11 @@ static GOOSE_INSTALL: &[InstallationMethod] = &[
 static KIMI_CLI_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Uv("kimi-cli"),
     InstallationMethod::RemoteBash("https://code.kimi.com/install.sh"),
+];
+
+static QWEN_CLI_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Npm("@qwen-code/qwen-code"),
+    InstallationMethod::Brew("qwen-code"),
 ];
 
 // ============================================================================
@@ -2510,7 +2516,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     // ========================================================================
-    // AI CLI Tools (8 entries)
+    // AI CLI Tools (9 entries)
     // ========================================================================
     lookup.insert(
         Program::Claude,
@@ -2605,6 +2611,18 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
             "https://moonshotai.github.io/kimi-cli/",
             Some("https://github.com/MoonshotAI/kimi-cli"),
             KIMI_CLI_INSTALL,
+        ),
+    );
+
+    lookup.insert(
+        Program::QwenCli,
+        ProgramDetails::full(
+            "Qwen Code CLI",
+            "Qwen's AI coding agent",
+            ALL_OS,
+            "https://qwenlm.github.io/qwen-code-docs/",
+            Some("https://github.com/QwenLM/qwen-code"),
+            QWEN_CLI_INSTALL,
         ),
     );
 
