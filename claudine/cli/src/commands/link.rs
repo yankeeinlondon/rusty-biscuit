@@ -3,6 +3,8 @@ use color_eyre::eyre::Result;
 
 use claudine_lib::linking::{self, LinkScope};
 
+use crate::log;
+
 /// Arguments for the link subcommand.
 #[derive(Args)]
 pub struct LinkArgs {
@@ -28,11 +30,11 @@ pub fn run(args: LinkArgs) -> Result<()> {
     let report = linking::link_skills(scope, filter, args.dry_run)?;
 
     if args.dry_run {
-        println!("Dry run \u{2014} no changes made:");
+        log::data("Dry run \u{2014} no changes made:");
     }
 
     // LinkReport implements Display via format_report()
-    println!("{report}");
+    log::data(&format!("{report}"));
 
     Ok(())
 }

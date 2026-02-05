@@ -8,13 +8,13 @@ use crate::os::detect_os_type;
 use crate::programs::enums::AiCli;
 use crate::programs::find_program::find_programs_with_source_parallel;
 use crate::programs::installer::{
-    InstallOptions, execute_install, execute_versioned_install, method_available,
-    select_best_method,
+    execute_install, execute_versioned_install, method_available, select_best_method,
+    InstallOptions,
 };
 use crate::programs::schema::{ProgramEntry, ProgramError, ProgramMetadata};
 use crate::programs::types::{ExecutableSource, ProgramDetector};
 use crate::programs::{
-    InstalledLanguagePackageManagers, InstalledOsPackageManagers, PROGRAM_LOOKUP, Program,
+    InstalledLanguagePackageManagers, InstalledOsPackageManagers, Program, PROGRAM_LOOKUP,
 };
 
 fn ai_cli_details(client: AiCli) -> Option<&'static crate::programs::ProgramDetails> {
@@ -26,6 +26,7 @@ fn ai_cli_details(client: AiCli) -> Option<&'static crate::programs::ProgramDeta
         AiCli::Aider => Program::Aider,
         AiCli::Codex => Program::Codex,
         AiCli::Goose => Program::Goose,
+        AiCli::KimiCli => Program::KimiCli,
     };
 
     PROGRAM_LOOKUP.get(&program)
@@ -43,18 +44,20 @@ pub struct InstalledAiClients {
     aider: Option<(PathBuf, ExecutableSource)>,
     codex: Option<(PathBuf, ExecutableSource)>,
     goose: Option<(PathBuf, ExecutableSource)>,
+    kimi_cli: Option<(PathBuf, ExecutableSource)>,
 }
 
 impl InstalledAiClients {
     /// Detect which AI CLI tools are installed on the system.
     pub fn new() -> Self {
         let programs = [
-            "claude", "opencode", "roo", "gemini", "aider", "codex", "goose",
+            "claude", "opencode", "roo", "gemini", "aider", "codex", "goose", "kimi", "kimi-cli",
         ];
 
         let results = find_programs_with_source_parallel(&programs);
 
         let get = |name: &str| results.get(name).and_then(|r| r.clone());
+        let get_first = |names: &[&str]| names.iter().find_map(|name| get(name));
 
         Self {
             claude: get("claude"),
@@ -64,6 +67,9 @@ impl InstalledAiClients {
             aider: get("aider"),
             codex: get("codex"),
             goose: get("goose"),
+            kimi_cli: get_first(&[
+                "kimi", "kimi-cli",
+            ]),
         }
     }
 
@@ -109,6 +115,11 @@ impl InstalledAiClients {
         self.goose.is_some()
     }
 
+    /// Returns true if Kimi Code CLI is installed.
+    pub fn kimi_cli(&self) -> bool {
+        self.kimi_cli.is_some()
+    }
+
     /// Returns the path to the specified AI CLI tool's binary if installed.
     pub fn path(&self, client: AiCli) -> Option<PathBuf> {
         self.path_with_source(client).map(|(p, _)| p)
@@ -124,6 +135,7 @@ impl InstalledAiClients {
             AiCli::Aider => self.aider.clone(),
             AiCli::Codex => self.codex.clone(),
             AiCli::Goose => self.goose.clone(),
+            AiCli::KimiCli => self.kimi_cli.clone(),
         }
     }
 
@@ -162,6 +174,7 @@ impl InstalledAiClients {
             AiCli::Aider => self.aider.is_some(),
             AiCli::Codex => self.codex.is_some(),
             AiCli::Goose => self.goose.is_some(),
+            AiCli::KimiCli => self.kimi_cli.is_some(),
         }
     }
 
@@ -184,6 +197,7 @@ impl InstalledAiClients {
             AiCli::Aider => "aider",
             AiCli::Codex => "codex",
             AiCli::Goose => "goose",
+            AiCli::KimiCli => "kimi",
         };
         let fake_path = PathBuf::from(format!("/usr/bin/{}", cmd_name));
         let entry = Some((fake_path, ExecutableSource::Path));
@@ -195,6 +209,7 @@ impl InstalledAiClients {
             AiCli::Aider => self.aider = entry,
             AiCli::Codex => self.codex = entry,
             AiCli::Goose => self.goose = entry,
+            AiCli::KimiCli => self.kimi_cli = entry,
         }
         self
     }
@@ -215,7 +230,7 @@ impl Serialize for InstalledAiClients {
             }
         };
 
-        let mut state = serializer.serialize_struct("InstalledAiClients", 7)?;
+        let mut state = serializer.serialize_struct("InstalledAiClients", 8)?;
         for client in AiCli::iter() {
             let field_name = match client {
                 AiCli::Claude => "claude",
@@ -225,6 +240,7 @@ impl Serialize for InstalledAiClients {
                 AiCli::Aider => "aider",
                 AiCli::Codex => "codex",
                 AiCli::Goose => "goose",
+                AiCli::KimiCli => "kimi_cli",
             };
             state.serialize_field(field_name, &entry(client))?;
         }
@@ -253,6 +269,8 @@ impl<'de> Deserialize<'de> for InstalledAiClients {
             codex: bool,
             #[serde(default)]
             goose: bool,
+            #[serde(default)]
+            kimi_cli: bool,
         }
 
         let b = BoolAiClients::deserialize(deserializer)?;
@@ -273,6 +291,7 @@ impl<'de> Deserialize<'de> for InstalledAiClients {
             aider: to_opt(b.aider),
             codex: to_opt(b.codex),
             goose: to_opt(b.goose),
+            kimi_cli: to_opt(b.kimi_cli),
         })
     }
 }
@@ -466,6 +485,7 @@ mod tests {
         assert!(!clients.aider());
         assert!(!clients.codex());
         assert!(!clients.goose());
+        assert!(!clients.kimi_cli());
     }
 
     #[test]

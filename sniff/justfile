@@ -1,10 +1,20 @@
+set dotenv-load
+set positional-arguments
+
 BOLD := '\033[1m'
 RESET := '\033[0m'
 
 default:
-    @echo "{{BOLD}}Sniff CLI and Library{{RESET}}"
-    @echo
-    @just --list | grep -v 'default'
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v md &> /dev/null; then
+        md just.md
+    else
+        @echo "{{BOLD}}Sniff CLI and Library{{RESET}}"
+        echo "=================================="
+    fi
+    echo
+    just --list | grep -v 'default'
 
 # build library and CLI
 build *args="":

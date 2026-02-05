@@ -2,6 +2,8 @@ use color_eyre::eyre::Result;
 use darkmatter_lib::markdown::Markdown;
 use darkmatter_lib::markdown::output::terminal::{TerminalOptions, for_terminal};
 
+use crate::log;
+
 const ABOUT_TEXT: &str = r#"# Claudine
 
 Cross-agent hook/event system for agentic CLIs.
@@ -44,10 +46,10 @@ pub fn run() -> Result<()> {
     let md: Markdown = ABOUT_TEXT.into();
     match for_terminal(&md, TerminalOptions::default()) {
         Ok(rendered) => {
-            print!("{rendered}");
+            log::output(&rendered);
         }
         Err(_) => {
-            print!("{ABOUT_TEXT}");
+            log::output(ABOUT_TEXT);
         }
     }
     Ok(())

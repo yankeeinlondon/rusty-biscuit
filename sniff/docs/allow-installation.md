@@ -9,7 +9,7 @@ This feature set provides:
 - **Type Safety**: All program detection structs now implement the `ProgramDetector` trait
 - **Rich Metadata**: `PROGRAM_LOOKUP` contains metadata for 126 programs across all categories
 - **Installation Support**: Safe installation via package managers with `installable()` checks
-- **Enhanced CLI Output**: `--json-format full` and `--markdown` program tables
+- **Enhanced CLI Output**: Rich JSON format and text tables for program detection
 
 ---
 
@@ -86,10 +86,10 @@ let cmd = get_versioned_install_command(&InstallationMethod::Cargo("bat"), "0.24
 
 ```bash
 # Backward-compatible simple format (default)
-sniff --programs --json
+sniff programs --json
 
 # Rich metadata format
-sniff --programs --json --json-format full
+sniff programs --json --json-format full
 ```
 
 **Rich JSON output includes:**
@@ -101,17 +101,17 @@ sniff --programs --json --json-format full
 - `description`: One-line description
 - `website`: Official URL
 
-**New `--markdown` flag:**
+**Text output (default):**
 
 ```bash
-# Render program detection as a markdown table
-sniff --programs --markdown
-sniff --programs --markdown -v
-sniff --programs --markdown -vv
+# Render program detection as a table in the terminal
+sniff programs
+sniff programs -v
+sniff programs -vv
 ```
 
-Markdown tables include Name, Installed, Description, Website columns and expand
-with Binary/Path and Version at higher verbosity levels.
+Tables include Name, Installed, Description, Website columns and expand with
+Binary/Path and Version at higher verbosity levels.
 
 ---
 

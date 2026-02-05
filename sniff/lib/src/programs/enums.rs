@@ -1114,6 +1114,7 @@ pub enum AiCli {
     Aider,
     Codex,
     Goose,
+    KimiCli,
 }
 
 /// Metadata lookup table for AI CLI tools.
@@ -1159,6 +1160,12 @@ static AI_CLI_INFO: &[ProgramInfo] = &[
         "Goose",
         "Block's AI developer agent",
         "https://github.com/block/goose",
+    ),
+    ProgramInfo::standard(
+        "kimi",
+        "Kimi Code CLI",
+        "AI agent that runs in the terminal",
+        "https://moonshotai.github.io/kimi-cli/",
     ),
 ];
 

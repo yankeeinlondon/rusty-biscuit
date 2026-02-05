@@ -98,13 +98,14 @@ sniff os-package-managers        # OS package managers (homebrew, apt, etc.)
 sniff tts-clients                # TTS clients (say, espeak, piper, etc.)
 sniff terminal-apps              # Terminal apps (alacritty, wezterm, etc.)
 sniff audio                      # Headless audio players (afplay, pacat, etc.)
+sniff agents                     # AI agent/CLI tools (claude, kimi, etc.)
 ```
 
-**Programs Output Formats:**
+**Programs Output:**
 
 ```bash
-# Markdown table output (default for programs)
-sniff programs --markdown
+# Text output (default)
+sniff programs
 # JSON output with simple format (backward compatible)
 sniff programs --json
 # JSON output with full metadata
@@ -258,7 +259,7 @@ Returns installed programs organized by category:
   "tts_clients": ["say"],
   "terminal_apps": ["wezterm", "alacritty"],
   "headless_audio": ["afplay"],
-  "ai_cli": ["claude", "aider"]
+  "ai_clients": ["claude", "aider"]
 }
 ```
 

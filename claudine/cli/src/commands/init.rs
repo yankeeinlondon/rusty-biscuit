@@ -7,6 +7,8 @@ use color_eyre::eyre::Result;
 use claudine_lib::config::{detect_agents, RegistrationResult, SkipReason};
 use claudine_lib::events::*;
 
+use crate::log;
+
 /// Arguments for the init wizard.
 #[derive(Args)]
 pub struct InitArgs {
@@ -26,13 +28,13 @@ pub async fn run(args: InitArgs) -> Result<()> {
 
     // Full interactive mode -- for now, delegate to quick defaults.
     // TODO: Phase 9 enhancement -- use inquire for interactive prompts
-    eprintln!("Interactive mode not yet implemented. Using --quick defaults.");
+    log::warn("Interactive mode not yet implemented. Using --quick defaults.");
     run_quick(args.repo).await
 }
 
 async fn run_quick(repo_scope: bool) -> Result<()> {
-    eprintln!("Claudine quick setup");
-    eprintln!();
+    log::message("Claudine quick setup");
+    log::message("");
 
     // Build default config
     let config = default_config();
@@ -50,36 +52,36 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
     // Write config file
     let json = serde_json::to_string_pretty(&config)?;
     std::fs::write(&config_path, &json)?;
-    eprintln!("  Wrote config to {}", config_path.display());
+    log::message(&format!("  Wrote config to {}", config_path.display()));
 
     // Detect and register with agents
     let agents = detect_agents();
-    eprintln!();
-    eprintln!("Registering with detected agents:");
+    log::message("");
+    log::message("Registering with detected agents:");
 
     for (provider, configurator) in &agents {
         match configurator.register(&config, None) {
             Ok(RegistrationResult::Registered { event_count }) => {
-                eprintln!("  {provider}: registered ({event_count} events)");
+                log::message(&format!("  {provider}: registered ({event_count} events)"));
             }
             Ok(RegistrationResult::Skipped(SkipReason::WrapperOnly { guidance })) => {
-                eprintln!("  {provider}: skipped (wrapper-only)");
-                eprintln!("    {guidance}");
+                log::message(&format!("  {provider}: skipped (wrapper-only)"));
+                log::message(&format!("    {guidance}"));
             }
             Ok(RegistrationResult::Skipped(SkipReason::AlreadyRegistered)) => {
-                eprintln!("  {provider}: already registered");
+                log::message(&format!("  {provider}: already registered"));
             }
             Ok(RegistrationResult::Skipped(SkipReason::NotDetected)) => {
-                eprintln!("  {provider}: not detected");
+                log::message(&format!("  {provider}: not detected"));
             }
             Err(e) => {
-                eprintln!("  {provider}: error - {e}");
+                log::error(&format!("  {provider}: {e}"));
             }
         }
     }
 
-    eprintln!();
-    eprintln!("Done! Run `claudine status` to verify.");
+    log::message("");
+    log::message("Done! Run `claudine status` to verify.");
     Ok(())
 }
 

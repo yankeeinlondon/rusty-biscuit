@@ -165,6 +165,7 @@ pub enum Program {
     Aider,
     Codex,
     Goose,
+    KimiCli,
 }
 
 // ============================================================================
@@ -920,6 +921,11 @@ static CODEX_INSTALL: &[InstallationMethod] = &[InstallationMethod::Npm("@openai
 static GOOSE_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Brew("goose"),
     InstallationMethod::Pip("goose-ai"),
+];
+
+static KIMI_CLI_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Uv("kimi-cli"),
+    InstallationMethod::RemoteBash("https://code.kimi.com/install.sh"),
 ];
 
 // ============================================================================
@@ -2504,7 +2510,7 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
     );
 
     // ========================================================================
-    // AI CLI Tools (7 entries)
+    // AI CLI Tools (8 entries)
     // ========================================================================
     lookup.insert(
         Program::Claude,
@@ -2587,6 +2593,18 @@ pub static PROGRAM_LOOKUP: LazyLock<HashMap<Program, ProgramDetails>> = LazyLock
             "https://github.com/block/goose",
             Some("https://github.com/block/goose"),
             GOOSE_INSTALL,
+        ),
+    );
+
+    lookup.insert(
+        Program::KimiCli,
+        ProgramDetails::full(
+            "Kimi Code CLI",
+            "AI agent that runs in the terminal",
+            ALL_OS,
+            "https://moonshotai.github.io/kimi-cli/",
+            Some("https://github.com/MoonshotAI/kimi-cli"),
+            KIMI_CLI_INSTALL,
         ),
     );
 

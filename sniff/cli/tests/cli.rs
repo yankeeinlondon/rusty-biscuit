@@ -29,10 +29,11 @@ fn test_help_mentions_subcommands() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("SUBCOMMANDS"))
+        .stdout(predicate::str::contains("Commands:"))
         .stdout(predicate::str::contains("sniff os"))
         .stdout(predicate::str::contains("sniff cpu"))
-        .stdout(predicate::str::contains("sniff hardware"));
+        .stdout(predicate::str::contains("sniff hardware"))
+        .stdout(predicate::str::contains("sniff agents"));
 }
 
 // ============================================================================
@@ -116,8 +117,19 @@ fn test_help_mentions_completions() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("--completions"))
-        .stdout(predicate::str::contains("SHELL COMPLETIONS"));
+        .stdout(predicate::str::contains("--completions").not())
+        .stdout(predicate::str::contains("Shell completions").not());
+}
+
+#[test]
+fn test_completions_help_flag_shows_setup() {
+    cargo_bin_cmd!("sniff")
+        .args(["--completions", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Shell completions"))
+        .stdout(predicate::str::contains("sniff --completions"))
+        .stdout(predicate::str::contains("COMPLETE=bash sniff"));
 }
 
 // ============================================================================
@@ -143,7 +155,7 @@ fn test_subcommand_outputs_text_by_default() {
         .arg("os")
         .assert()
         .success()
-        .stdout(predicate::str::contains("=== OS ==="));
+        .stdout(predicate::str::contains("Operating System"));
 }
 
 #[test]
@@ -255,7 +267,7 @@ fn test_os_subcommand_text_output() {
         .arg("os")
         .assert()
         .success()
-        .stdout(predicate::str::contains("=== OS ==="))
+        .stdout(predicate::str::contains("Operating System"))
         .stdout(predicate::str::contains("Name:"))
         .stdout(predicate::str::contains("Kernel:"));
 }
@@ -712,24 +724,6 @@ fn test_programs_subcommand_json_output() {
 }
 
 #[test]
-fn test_programs_subcommand_markdown_flag() {
-    cargo_bin_cmd!("sniff")
-        .args(["programs", "--markdown"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Name"))
-        .stdout(predicate::str::contains("Installed"));
-}
-
-#[test]
-fn test_programs_markdown_conflicts_with_json() {
-    cargo_bin_cmd!("sniff")
-        .args(["programs", "--markdown", "--json"])
-        .assert()
-        .failure();
-}
-
-#[test]
 fn test_editors_subcommand_text_output() {
     cargo_bin_cmd!("sniff")
         .arg("editors")
@@ -962,9 +956,9 @@ fn test_deep_and_verbose_combined() {
 // ============================================================================
 
 #[test]
-fn test_verbose_with_programs_markdown_adds_columns() {
+fn test_verbose_with_programs_adds_columns() {
     cargo_bin_cmd!("sniff")
-        .args(["programs", "--markdown", "-v"])
+        .args(["programs", "-v"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Binary"))

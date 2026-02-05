@@ -8,6 +8,8 @@ use claudine_lib::adapters;
 use claudine_lib::dispatch::template::interpolate;
 use claudine_lib::events::{EventAction, Provider, detect_environment};
 
+use crate::log;
+
 /// Arguments for the dry-run subcommand.
 #[derive(Args)]
 pub struct DryRunArgs {
@@ -30,53 +32,53 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
 
     match parsed {
         Some((event, meta)) => {
-            println!("Provider: {provider}");
-            println!("Event:    {event}");
+            log::data(&format!("Provider: {provider}"));
+            log::data(&format!("Event:    {event}"));
             if let Some(tool) = &meta.tool_name {
-                println!("Tool:     {tool}");
+                log::data(&format!("Tool:     {tool}"));
             }
             if let Some(sid) = &meta.session_id {
-                println!("Session:  {sid}");
+                log::data(&format!("Session:  {sid}"));
             }
-            println!();
+            log::data("");
 
             // Try to load config and show what would fire
             let config = claudine_lib::dispatch::loader::load_config(None, None);
             match config {
                 Ok(cfg) => {
                     if let Some(binding) = cfg.events.get(&event) {
-                        println!("Matching binding found:");
-                        println!("  Enabled: {}", binding.enabled);
-                        println!("  Actions: {}", binding.actions.len());
+                        log::data("Matching binding found:");
+                        log::data(&format!("  Enabled: {}", binding.enabled));
+                        log::data(&format!("  Actions: {}", binding.actions.len()));
                         for (i, action) in binding.actions.iter().enumerate() {
                             match action {
                                 EventAction::Speak { message } => {
                                     let resolved = interpolate(message, &meta);
-                                    println!("  [{i}] Speak: \"{resolved}\"");
+                                    log::data(&format!("  [{i}] Speak: \"{resolved}\""));
                                 }
                                 EventAction::Log { target } => {
-                                    println!("  [{i}] Log: {target:?}");
+                                    log::data(&format!("  [{i}] Log: {target:?}"));
                                 }
                                 EventAction::Report { handler } => {
-                                    println!("  [{i}] Report: {handler:?}");
+                                    log::data(&format!("  [{i}] Report: {handler:?}"));
                                 }
                                 EventAction::SoundEffect { name, .. } => {
-                                    println!("  [{i}] SoundEffect: {name}");
+                                    log::data(&format!("  [{i}] SoundEffect: {name}"));
                                 }
                             }
                         }
                     } else {
-                        println!("No binding found for event '{event}'");
+                        log::data(&format!("No binding found for event '{event}'"));
                     }
                 }
                 Err(e) => {
-                    println!("No config loaded: {e}");
-                    println!("(Create config with `claudine init`)");
+                    log::data(&format!("No config loaded: {e}"));
+                    log::data("(Create config with `claudine init`)");
                 }
             }
         }
         None => {
-            println!("Adapter returned None for this payload (unknown event).");
+            log::data("Adapter returned None for this payload (unknown event).");
         }
     }
 

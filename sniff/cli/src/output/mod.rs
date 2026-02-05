@@ -76,6 +76,8 @@ pub enum OutputFilter {
     TerminalApps,
     /// Show only headless audio players (programs subsection)
     HeadlessAudio,
+    /// Show only AI CLI tools (programs subsection)
+    AiClients,
     /// Show only system services (init system and service list)
     Services,
 }
@@ -267,6 +269,7 @@ pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter, histo
         | OutputFilter::TtsClients
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
+        | OutputFilter::AiClients
         | OutputFilter::Services => {
             // These are handled separately, should not reach here
             unreachable!("Programs and Services filters should be handled separately")
@@ -386,6 +389,7 @@ fn apply_filter_to_json(result: &SniffResult, filter: OutputFilter) -> serde_jso
         | OutputFilter::TtsClients
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
+        | OutputFilter::AiClients
         | OutputFilter::Services => {
             unreachable!("Programs and Services filters should be handled separately")
         }

@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::error::Result;
 
@@ -113,25 +113,12 @@ pub fn discover_commands(
     Ok(commands)
 }
 
-/// Parse YAML frontmatter from a SKILL.md file, returning the name field.
-pub fn parse_frontmatter_name(skill_md_path: &Path) -> Option<String> {
-    let content = fs::read_to_string(skill_md_path).ok()?;
-    let content = content.trim_start();
-    if !content.starts_with("---") {
-        return None;
-    }
-    let after_first = &content[3..];
-    let end_idx = after_first.find("---")?;
-    let yaml_str = &after_first[..end_idx];
-    let value: serde_yaml::Value = serde_yaml::from_str(yaml_str).ok()?;
-    value.get("name").and_then(|v| v.as_str()).map(|s| s.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::paths::ProviderPaths;
     use super::*;
     use std::fs;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn empty_paths() -> ProviderPaths {
@@ -222,26 +209,4 @@ mod tests {
         assert!(skills[0].is_symlink);
     }
 
-    #[test]
-    fn parse_frontmatter_extracts_name() {
-        let tmp = TempDir::new().unwrap();
-        let skill_md = tmp.path().join("SKILL.md");
-        fs::write(
-            &skill_md,
-            "---\nname: my-cool-skill\ndescription: Does stuff\n---\n\n# Content\n",
-        )
-        .unwrap();
-        assert_eq!(
-            parse_frontmatter_name(&skill_md),
-            Some("my-cool-skill".to_string())
-        );
-    }
-
-    #[test]
-    fn parse_frontmatter_returns_none_without_frontmatter() {
-        let tmp = TempDir::new().unwrap();
-        let skill_md = tmp.path().join("SKILL.md");
-        fs::write(&skill_md, "# Just a heading\nNo frontmatter here.").unwrap();
-        assert_eq!(parse_frontmatter_name(&skill_md), None);
-    }
 }

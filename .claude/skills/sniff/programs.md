@@ -54,7 +54,6 @@ sniff utilities            # Just utilities
 sniff tts-clients          # TTS programs
 sniff audio                # Audio players
 sniff programs --json      # JSON output
-sniff programs --markdown  # Markdown table output
 ```
 
 ## Parallel Detection

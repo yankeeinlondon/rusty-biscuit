@@ -1,7 +1,7 @@
 //! Programs section output formatting (markdown and JSON).
 
+use darkmatter_lib::markdown::output::terminal::{for_terminal, TerminalOptions};
 use darkmatter_lib::markdown::Markdown;
-use darkmatter_lib::markdown::output::terminal::{TerminalOptions, for_terminal};
 use darkmatter_lib::render::link::Link;
 use sniff_lib::programs::ProgramsInfo;
 
@@ -247,6 +247,36 @@ fn collect_program_entries(
         _ => {}
     }
 
+    match filter {
+        OutputFilter::Programs | OutputFilter::AiClients => {
+            for client in sniff_lib::programs::AiCli::iter() {
+                let installed = programs.ai_clients.is_installed(client);
+                let path = programs
+                    .ai_clients
+                    .path(client)
+                    .map(|p| p.display().to_string());
+                let version = if installed {
+                    programs.ai_clients.version(client).ok()
+                } else {
+                    None
+                };
+                entries.push(ProgramTableEntry {
+                    name: client.display_name().to_string(),
+                    binary_name: client.binary_name().to_string(),
+                    installed,
+                    path,
+                    version,
+                    description: client.description().to_string(),
+                    website: client.website().to_string(),
+                });
+            }
+            if filter == OutputFilter::AiClients {
+                return entries;
+            }
+        }
+        _ => {}
+    }
+
     entries
 }
 
@@ -341,6 +371,7 @@ pub fn print_programs_json(
             OutputFilter::TtsClients => serde_json::to_value(&programs.tts_clients)?,
             OutputFilter::TerminalApps => serde_json::to_value(&programs.terminal_apps)?,
             OutputFilter::HeadlessAudio => serde_json::to_value(&programs.headless_audio)?,
+            OutputFilter::AiClients => serde_json::to_value(&programs.ai_clients)?,
             _ => json!({}),
         };
         println!("{}", serde_json::to_string_pretty(&json_value)?);
@@ -566,6 +597,35 @@ pub fn print_programs_json(
                 ));
             }
             if filter == OutputFilter::HeadlessAudio {
+                println!("{}", serde_json::to_string_pretty(&entries)?);
+                return Ok(());
+            }
+        }
+        _ => {}
+    }
+
+    match filter {
+        OutputFilter::Programs | OutputFilter::AiClients => {
+            use strum::IntoEnumIterator;
+            for client in sniff_lib::programs::AiCli::iter() {
+                let installed = programs.ai_clients.is_installed(client);
+                let path = programs.ai_clients.path(client);
+                let version = if installed {
+                    programs.ai_clients.version(client).ok()
+                } else {
+                    None
+                };
+                entries.push(build_entry(
+                    client.display_name(),
+                    client.binary_name(),
+                    installed,
+                    path,
+                    version,
+                    client.description(),
+                    client.website(),
+                ));
+            }
+            if filter == OutputFilter::AiClients {
                 println!("{}", serde_json::to_string_pretty(&entries)?);
                 return Ok(());
             }

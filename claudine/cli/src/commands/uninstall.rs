@@ -3,6 +3,8 @@ use color_eyre::eyre::Result;
 
 use claudine_lib::config::detect_agents;
 
+use crate::log;
+
 /// Arguments for the uninstall subcommand.
 #[derive(Args)]
 pub struct UninstallArgs {
@@ -15,15 +17,15 @@ pub struct UninstallArgs {
 pub fn run(args: UninstallArgs) -> Result<()> {
     let agents = detect_agents();
 
-    println!("Removing Claudine hooks...");
+    log::message("Removing Claudine hooks...");
 
     for (provider, configurator) in &agents {
         match configurator.deregister(None) {
             Ok(()) => {
-                println!("  {provider}: hooks removed");
+                log::message(&format!("  {provider}: hooks removed"));
             }
             Err(e) => {
-                eprintln!("  {provider}: error - {e}");
+                log::error(&format!("  {provider}: {e}"));
             }
         }
     }
@@ -34,20 +36,20 @@ pub fn run(args: UninstallArgs) -> Result<()> {
             let hooker_path = home.join(".hooker");
             if hooker_path.exists() {
                 std::fs::remove_file(&hooker_path)?;
-                println!("  Removed {}", hooker_path.display());
+                log::message(&format!("  Removed {}", hooker_path.display()));
             }
             let hook_config_path = home.join(".hook-config");
             if hook_config_path.exists() {
                 std::fs::remove_file(&hook_config_path)?;
-                println!("  Removed {}", hook_config_path.display());
+                log::message(&format!("  Removed {}", hook_config_path.display()));
             }
         }
     }
 
-    println!();
-    println!("Claudine has been uninstalled.");
+    log::message("");
+    log::message("Claudine has been uninstalled.");
     if args.keep_config {
-        println!("Config files preserved. Run `claudine init` to re-register.");
+        log::message("Config files preserved. Run `claudine init` to re-register.");
     }
     Ok(())
 }

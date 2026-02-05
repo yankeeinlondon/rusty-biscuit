@@ -12,7 +12,13 @@ use output::OutputFilter;
 
 /// Detect system and repository information
 #[derive(Parser)]
-#[command(name = "sniff", version, about, after_help = AFTER_HELP)]
+#[command(
+    name = "sniff",
+    version,
+    about,
+    after_help = AFTER_HELP,
+    help_template = HELP_TEMPLATE
+)]
 struct Cli {
     /// Base directory for filesystem analysis
     #[arg(short, long, global = true)]
@@ -31,7 +37,7 @@ struct Cli {
     verbose: u8,
 
     /// Generate shell completions for the specified shell
-    #[arg(long, value_name = "SHELL", help_heading = "Shell Completions")]
+    #[arg(long, value_name = "SHELL", hide = true)]
     completions: Option<Shell>,
 
     /// Subcommand to filter output to a specific section
@@ -89,10 +95,6 @@ pub enum Commands {
     // === Programs sections ===
     /// Show all installed programs detection
     Programs {
-        /// Output as a markdown table
-        #[arg(long, conflicts_with = "json")]
-        markdown: bool,
-
         /// JSON output format: "simple" (default) or "full" (rich metadata)
         #[arg(long, value_name = "FORMAT")]
         json_format: Option<String>,
@@ -100,10 +102,6 @@ pub enum Commands {
 
     /// Show only installed editors
     Editors {
-        /// Output as a markdown table
-        #[arg(long, conflicts_with = "json")]
-        markdown: bool,
-
         /// JSON output format: "simple" (default) or "full" (rich metadata)
         #[arg(long, value_name = "FORMAT")]
         json_format: Option<String>,
@@ -111,10 +109,6 @@ pub enum Commands {
 
     /// Show only installed utilities
     Utilities {
-        /// Output as a markdown table
-        #[arg(long, conflicts_with = "json")]
-        markdown: bool,
-
         /// JSON output format: "simple" (default) or "full" (rich metadata)
         #[arg(long, value_name = "FORMAT")]
         json_format: Option<String>,
@@ -122,10 +116,6 @@ pub enum Commands {
 
     /// Show only language package managers
     LanguagePackageManagers {
-        /// Output as a markdown table
-        #[arg(long, conflicts_with = "json")]
-        markdown: bool,
-
         /// JSON output format: "simple" (default) or "full" (rich metadata)
         #[arg(long, value_name = "FORMAT")]
         json_format: Option<String>,
@@ -133,10 +123,6 @@ pub enum Commands {
 
     /// Show only OS package managers
     OsPackageManagers {
-        /// Output as a markdown table
-        #[arg(long, conflicts_with = "json")]
-        markdown: bool,
-
         /// JSON output format: "simple" (default) or "full" (rich metadata)
         #[arg(long, value_name = "FORMAT")]
         json_format: Option<String>,
@@ -144,10 +130,6 @@ pub enum Commands {
 
     /// Show only TTS clients
     TtsClients {
-        /// Output as a markdown table
-        #[arg(long, conflicts_with = "json")]
-        markdown: bool,
-
         /// JSON output format: "simple" (default) or "full" (rich metadata)
         #[arg(long, value_name = "FORMAT")]
         json_format: Option<String>,
@@ -155,10 +137,6 @@ pub enum Commands {
 
     /// Show only terminal apps
     TerminalApps {
-        /// Output as a markdown table
-        #[arg(long, conflicts_with = "json")]
-        markdown: bool,
-
         /// JSON output format: "simple" (default) or "full" (rich metadata)
         #[arg(long, value_name = "FORMAT")]
         json_format: Option<String>,
@@ -166,10 +144,13 @@ pub enum Commands {
 
     /// Show only headless audio players
     Audio {
-        /// Output as a markdown table
-        #[arg(long, conflicts_with = "json")]
-        markdown: bool,
+        /// JSON output format: "simple" (default) or "full" (rich metadata)
+        #[arg(long, value_name = "FORMAT")]
+        json_format: Option<String>,
+    },
 
+    /// Show only AI agent/CLI tools
+    Agents {
         /// JSON output format: "simple" (default) or "full" (rich metadata)
         #[arg(long, value_name = "FORMAT")]
         json_format: Option<String>,
@@ -214,6 +195,7 @@ impl Commands {
             Commands::TtsClients { .. } => OutputFilter::TtsClients,
             Commands::TerminalApps { .. } => OutputFilter::TerminalApps,
             Commands::Audio { .. } => OutputFilter::HeadlessAudio,
+            Commands::Agents { .. } => OutputFilter::AiClients,
 
             // Services section
             Commands::Services { .. } => OutputFilter::Services,
@@ -232,22 +214,8 @@ impl Commands {
                 | Commands::TtsClients { .. }
                 | Commands::TerminalApps { .. }
                 | Commands::Audio { .. }
+                | Commands::Agents { .. }
         )
-    }
-
-    /// Get markdown flag if this is a programs command.
-    pub fn markdown(&self) -> bool {
-        match self {
-            Commands::Programs { markdown, .. }
-            | Commands::Editors { markdown, .. }
-            | Commands::Utilities { markdown, .. }
-            | Commands::LanguagePackageManagers { markdown, .. }
-            | Commands::OsPackageManagers { markdown, .. }
-            | Commands::TtsClients { markdown, .. }
-            | Commands::TerminalApps { markdown, .. }
-            | Commands::Audio { markdown, .. } => *markdown,
-            _ => false,
-        }
     }
 
     /// Get json_format if this is a programs command.
@@ -260,7 +228,8 @@ impl Commands {
             | Commands::OsPackageManagers { json_format, .. }
             | Commands::TtsClients { json_format, .. }
             | Commands::TerminalApps { json_format, .. }
-            | Commands::Audio { json_format, .. } => json_format.as_deref(),
+            | Commands::Audio { json_format, .. }
+            | Commands::Agents { json_format, .. } => json_format.as_deref(),
             _ => None,
         }
     }
@@ -291,11 +260,17 @@ pub enum ServiceStateArg {
     Stopped,
 }
 
-const AFTER_HELP: &str = "\
-SUBCOMMANDS:
-  Use subcommands to filter output to specific sections. Without a subcommand,
-  all system data is output as JSON.
+const HELP_TEMPLATE: &str = "\
+{name} {version}
+{about}
 
+Usage: {usage}
+
+{options}
+{after-help}";
+
+const AFTER_HELP: &str = "\
+Commands:
   Top-level sections:
     sniff os          Show only OS information
     sniff hardware    Show only hardware information
@@ -313,32 +288,45 @@ SUBCOMMANDS:
     sniff repo        Show only repository/monorepo structure
     sniff language    Show only language detection results
 
-  Programs (with --markdown and --json-format options):
-    sniff programs    Show all installed programs
-    sniff editors     Show only installed editors
-    sniff utilities   Show only installed utilities
-    sniff audio       Show only headless audio players
-    ...and more (see sniff --help)
+  Programs:
+    sniff programs                   Show all installed programs
+    sniff editors                    Show only installed editors
+    sniff utilities                  Show only installed utilities
+    sniff language-package-managers  Show only language package managers
+    sniff os-package-managers        Show only OS package managers
+    sniff tts-clients                Show only TTS clients
+    sniff terminal-apps              Show only terminal apps
+    sniff audio                      Show only headless audio players
+    sniff agents                     Show only AI agent CLI tools
 
   Services:
     sniff services              Show running services (default)
     sniff services --state all  Show all services
 
-OUTPUT MODES:
+Output modes:
   - No subcommand: JSON output (all data)
   - With subcommand: Text output by default, use --json for JSON
 
-EXAMPLES:
-  sniff                    # Full system info as JSON
-  sniff cpu                # CPU info as text
-  sniff cpu --json         # CPU info as JSON
-  sniff --json cpu         # Same as above (flag position flexible)
-  sniff programs --markdown  # Programs as markdown table
+Examples:
+  sniff                      # Full system info as JSON
+  sniff cpu                  # CPU info as text
+  sniff cpu --json           # CPU info as JSON
+  sniff --json cpu           # Same as above (flag position flexible)
+  sniff programs             # Programs as text
+  sniff programs --json      # Programs as JSON
   sniff -b /path/to/repo filesystem  # Analyze specific directory
+";
 
-SHELL COMPLETIONS:
-  Enable tab completions with --completions <SHELL>
+const COMPLETIONS_HELP: &str = "\
+Shell completions
 
+Usage:
+  sniff --completions <SHELL>
+
+Available shells:
+  bash, elvish, fish, powershell, zsh
+
+Setup commands:
   Bash (add to ~/.bashrc):
     source <(COMPLETE=bash sniff)
 
@@ -353,14 +341,17 @@ SHELL COMPLETIONS:
 
   Elvish (add to ~/.elvish/rc.elv):
     eval (E:COMPLETE=elvish sniff | slurp)
-
-  Run 'sniff --completions <SHELL>' to see the setup command for your shell.
 ";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Handle dynamic shell completions (invoked by shell completion scripts)
     CompleteEnv::with_factory(Cli::command).complete();
+
+    if wants_completions_help() {
+        print_completions_help();
+        return Ok(());
+    }
 
     let cli = Cli::parse();
 
@@ -384,8 +375,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if cli.json {
                 let format = cmd.json_format().unwrap_or("simple");
                 output::print_programs_json(&programs, output_filter, format)?;
-            } else if cmd.markdown() {
-                output::print_programs_markdown(&programs, cli.verbose, output_filter);
             } else {
                 // Default: text output (using markdown renderer for now)
                 output::print_programs_markdown(&programs, cli.verbose, output_filter);
@@ -467,6 +456,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::TtsClients
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
+        | OutputFilter::AiClients
         | OutputFilter::Services => {
             unreachable!("Programs and Services mode should be handled before this point")
         }
@@ -515,6 +505,24 @@ fn print_completions(shell: Shell) {
 
     println!("# Add this line to {}:", config_file);
     println!("{}", setup_cmd);
+}
+
+fn wants_completions_help() -> bool {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    for (index, arg) in args.iter().enumerate() {
+        if arg == "--completions" {
+            if let Some(next) = args.get(index + 1) {
+                return next == "--help" || next == "-h";
+            }
+        }
+    }
+
+    false
+}
+
+fn print_completions_help() {
+    println!("{}", COMPLETIONS_HELP);
 }
 
 /// Enriches all dependencies in a SniffResult with latest versions from package registries.
@@ -772,7 +780,6 @@ mod tests {
         #[test]
         fn programs_maps_to_programs_filter() {
             let cmd = Commands::Programs {
-                markdown: false,
                 json_format: None,
             };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Programs);
@@ -781,7 +788,6 @@ mod tests {
         #[test]
         fn editors_maps_to_editors_filter() {
             let cmd = Commands::Editors {
-                markdown: false,
                 json_format: None,
             };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Editors);
@@ -790,7 +796,6 @@ mod tests {
         #[test]
         fn audio_maps_to_headless_audio_filter() {
             let cmd = Commands::Audio {
-                markdown: false,
                 json_format: None,
             };
             assert_eq!(cmd.to_output_filter(), OutputFilter::HeadlessAudio);
@@ -895,32 +900,12 @@ mod tests {
         use super::*;
 
         #[test]
-        fn programs_markdown_flag() {
-            let cli = parse_args(&["programs", "--markdown"]).unwrap();
-            if let Some(Commands::Programs { markdown, .. }) = cli.command {
-                assert!(markdown);
-            } else {
-                panic!("Expected Programs command");
-            }
-        }
-
-        #[test]
         fn programs_json_format_flag() {
             let cli = parse_args(&["programs", "--json-format", "full"]).unwrap();
             if let Some(Commands::Programs { json_format, .. }) = cli.command {
                 assert_eq!(json_format, Some("full".to_string()));
             } else {
                 panic!("Expected Programs command");
-            }
-        }
-
-        #[test]
-        fn editors_markdown_flag() {
-            let cli = parse_args(&["editors", "--markdown"]).unwrap();
-            if let Some(Commands::Editors { markdown, .. }) = cli.command {
-                assert!(markdown);
-            } else {
-                panic!("Expected Editors command");
             }
         }
     }
@@ -931,7 +916,6 @@ mod tests {
         #[test]
         fn programs_is_programs_mode() {
             let cmd = Commands::Programs {
-                markdown: false,
                 json_format: None,
             };
             assert!(cmd.is_programs_mode());
@@ -940,7 +924,6 @@ mod tests {
         #[test]
         fn editors_is_programs_mode() {
             let cmd = Commands::Editors {
-                markdown: false,
                 json_format: None,
             };
             assert!(cmd.is_programs_mode());
@@ -949,7 +932,6 @@ mod tests {
         #[test]
         fn audio_is_programs_mode() {
             let cmd = Commands::Audio {
-                markdown: false,
                 json_format: None,
             };
             assert!(cmd.is_programs_mode());

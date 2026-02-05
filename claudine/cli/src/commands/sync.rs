@@ -4,6 +4,8 @@ use color_eyre::eyre::Result;
 use claudine_lib::config::{detect_agents, RegistrationResult, SkipReason};
 use claudine_lib::events::Provider;
 
+use crate::log;
+
 /// Arguments for the sync subcommand.
 #[derive(Args)]
 pub struct SyncArgs {
@@ -37,28 +39,28 @@ pub async fn run(args: SyncArgs) -> Result<()> {
         if args.dry_run {
             let registered = configurator.is_registered(None).unwrap_or(false);
             if registered {
-                println!("{provider}: already registered (no changes)");
+                log::data(&format!("{provider}: already registered (no changes)"));
             } else {
-                println!("{provider}: would register");
+                log::data(&format!("{provider}: would register"));
             }
         } else {
             match configurator.register(&config, None) {
                 Ok(RegistrationResult::Registered { event_count }) => {
-                    println!("{provider}: synced ({event_count} events)");
+                    log::data(&format!("{provider}: synced ({event_count} events)"));
                 }
                 Ok(RegistrationResult::Skipped(reason)) => match reason {
                     SkipReason::AlreadyRegistered => {
-                        println!("{provider}: already up-to-date");
+                        log::data(&format!("{provider}: already up-to-date"));
                     }
                     SkipReason::WrapperOnly { guidance } => {
-                        println!("{provider}: wrapper-only - {guidance}");
+                        log::data(&format!("{provider}: wrapper-only - {guidance}"));
                     }
                     SkipReason::NotDetected => {
-                        println!("{provider}: not detected");
+                        log::data(&format!("{provider}: not detected"));
                     }
                 },
                 Err(e) => {
-                    eprintln!("{provider}: error - {e}");
+                    log::error(&format!("{provider}: {e}"));
                 }
             }
         }
