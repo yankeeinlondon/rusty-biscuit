@@ -41,6 +41,50 @@ pub enum AgenticEvent {
     Notification,
 }
 
+impl AgenticEvent {
+    /// Returns all event variants in display order.
+    pub const ALL: [AgenticEvent; 15] = [
+        AgenticEvent::SessionStart,
+        AgenticEvent::SessionEnd,
+        AgenticEvent::BeforePrompt,
+        AgenticEvent::BeforeTool,
+        AgenticEvent::AfterTool,
+        AgenticEvent::ToolError,
+        AgenticEvent::PermissionRequest,
+        AgenticEvent::TurnComplete,
+        AgenticEvent::TurnError,
+        AgenticEvent::SubagentStart,
+        AgenticEvent::SubagentStop,
+        AgenticEvent::BeforeModel,
+        AgenticEvent::AfterModel,
+        AgenticEvent::BeforeCompact,
+        AgenticEvent::Notification,
+    ];
+
+    /// Returns a short abbreviation suitable for table column headers.
+    ///
+    /// These are kept to 4-5 characters to conserve horizontal space.
+    pub fn abbrev(&self) -> &'static str {
+        match self {
+            AgenticEvent::SessionStart => "🎉",
+            AgenticEvent::SessionEnd => "🛑",
+            AgenticEvent::BeforePrompt => "🪄",
+            AgenticEvent::BeforeTool => "←🔧",
+            AgenticEvent::AfterTool => "🔧→",
+            AgenticEvent::ToolError => "⚒️",
+            AgenticEvent::PermissionRequest => "🪪",
+            AgenticEvent::TurnComplete => "⏎",
+            AgenticEvent::TurnError => "⧳",
+            AgenticEvent::SubagentStart => "🧑‍💼🎉",
+            AgenticEvent::SubagentStop => "🧑‍💼🛑",
+            AgenticEvent::BeforeModel => "←𝌭",
+            AgenticEvent::AfterModel => "𝌭→",
+            AgenticEvent::BeforeCompact => "🗜️",
+            AgenticEvent::Notification => "💬",
+        }
+    }
+}
+
 impl fmt::Display for AgenticEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = serde_json::to_value(self)
@@ -101,5 +145,43 @@ mod tests {
         let mut map = HashMap::new();
         map.insert(AgenticEvent::BeforeTool, "test");
         assert_eq!(map.get(&AgenticEvent::BeforeTool), Some(&"test"));
+    }
+
+    #[test]
+    fn all_contains_all_variants() {
+        // Verify ALL array has exactly 15 elements (all variants)
+        assert_eq!(AgenticEvent::ALL.len(), 15);
+
+        // Verify each variant is present
+        let all_set: std::collections::HashSet<_> = AgenticEvent::ALL.iter().collect();
+        assert!(all_set.contains(&AgenticEvent::SessionStart));
+        assert!(all_set.contains(&AgenticEvent::SessionEnd));
+        assert!(all_set.contains(&AgenticEvent::BeforePrompt));
+        assert!(all_set.contains(&AgenticEvent::BeforeTool));
+        assert!(all_set.contains(&AgenticEvent::AfterTool));
+        assert!(all_set.contains(&AgenticEvent::ToolError));
+        assert!(all_set.contains(&AgenticEvent::PermissionRequest));
+        assert!(all_set.contains(&AgenticEvent::TurnComplete));
+        assert!(all_set.contains(&AgenticEvent::TurnError));
+        assert!(all_set.contains(&AgenticEvent::SubagentStart));
+        assert!(all_set.contains(&AgenticEvent::SubagentStop));
+        assert!(all_set.contains(&AgenticEvent::BeforeModel));
+        assert!(all_set.contains(&AgenticEvent::AfterModel));
+        assert!(all_set.contains(&AgenticEvent::BeforeCompact));
+        assert!(all_set.contains(&AgenticEvent::Notification));
+    }
+
+    #[test]
+    fn abbrev_returns_short_strings() {
+        // All abbreviations should be 4-5 characters for table columns
+        for event in AgenticEvent::ALL {
+            let abbr = event.abbrev();
+            assert!(
+                abbr.len() >= 4 && abbr.len() <= 5,
+                "Event {:?} abbreviation '{}' should be 4-5 chars",
+                event,
+                abbr
+            );
+        }
     }
 }

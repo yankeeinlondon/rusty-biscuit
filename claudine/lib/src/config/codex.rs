@@ -8,10 +8,8 @@ use crate::events::{HookerConfig, Provider};
 
 use super::atomic::atomic_write;
 use super::backup::create_backup;
+use super::claudine_command;
 use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
-
-/// The notify value Claudine sets in Codex config.
-const CLAUDINE_NOTIFY: [&str; 2] = ["claudine", "handle"];
 
 pub(crate) struct CodexConfigurator;
 
@@ -59,10 +57,12 @@ impl AgentConfigurator for CodexConfigurator {
                 }
             });
 
+        let claudine_bin = claudine_command();
+
         if let Some(original_cmd) = existing_notify {
             // Need to create a wrapper script
             let wrapper_path = wrapper_script_path(config_dir);
-            create_wrapper_script(&wrapper_path, &original_cmd)?;
+            create_wrapper_script(&wrapper_path, &original_cmd, &claudine_bin)?;
 
             // Set notify to the wrapper
             let mut arr = toml_edit::Array::new();
@@ -71,9 +71,8 @@ impl AgentConfigurator for CodexConfigurator {
         } else {
             // No existing notify, set directly
             let mut arr = toml_edit::Array::new();
-            for part in &CLAUDINE_NOTIFY {
-                arr.push(*part);
-            }
+            arr.push(&claudine_bin);
+            arr.push("handle");
             doc["notify"] = toml_edit::value(arr);
         }
 
@@ -157,15 +156,18 @@ impl AgentConfigurator for CodexConfigurator {
 }
 
 /// Check if notify is set directly to claudine.
+///
+/// Matches both short form `["claudine", "handle"]` and full path
+/// `["/path/to/claudine", "handle"]`.
 fn is_claudine_notify(doc: &DocumentMut) -> bool {
     doc.get("notify")
         .and_then(|v| v.as_array())
         .is_some_and(|arr| {
-            let parts: Vec<&str> = arr
-                .iter()
-                .filter_map(|item| item.as_str())
-                .collect();
-            parts == CLAUDINE_NOTIFY
+            let parts: Vec<&str> = arr.iter().filter_map(|item| item.as_str()).collect();
+            // Check: first part ends with "claudine", second part is "handle"
+            parts.len() == 2
+                && (parts[0] == "claudine" || parts[0].ends_with("/claudine"))
+                && parts[1] == "handle"
         })
 }
 
@@ -190,13 +192,13 @@ fn is_claudine_wrapper(doc: &DocumentMut, config_dir: Option<&Path>) -> bool {
 }
 
 /// Generate the wrapper script that calls both the original and claudine.
-fn create_wrapper_script(path: &Path, original_command: &str) -> Result<()> {
+fn create_wrapper_script(path: &Path, original_command: &str, claudine_bin: &str) -> Result<()> {
     let script = format!(
         "#!/bin/bash\n\
          # Claudine wrapper for Codex notify\n\
          # Calls both original and claudine\n\
          {original_command} \"$@\"\n\
-         claudine handle turn_complete \"$@\"\n"
+         {claudine_bin} handle turn_complete \"$@\"\n"
     );
 
     if let Some(parent) = path.parent() {
@@ -215,15 +217,17 @@ fn create_wrapper_script(path: &Path, original_command: &str) -> Result<()> {
     Ok(())
 }
 
+/// Check if a line in a script is a claudine command.
+fn is_claudine_line(line: &str) -> bool {
+    line.contains("claudine handle") || line.contains("claudine ")
+}
+
 /// Extract the original command from a Claudine wrapper script.
 fn extract_original_from_wrapper(script: &str) -> Option<String> {
     for line in script.lines() {
         let trimmed = line.trim();
-        // Skip shebang, comments, empty lines, and the claudine line
-        if trimmed.is_empty()
-            || trimmed.starts_with('#')
-            || trimmed.starts_with("claudine ")
-        {
+        // Skip shebang, comments, empty lines, and claudine lines
+        if trimmed.is_empty() || trimmed.starts_with('#') || is_claudine_line(trimmed) {
             continue;
         }
         // First non-comment, non-claudine command is the original
@@ -260,7 +264,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::events::{AgenticEvent, EventBinding, GlobalSettings};
+    use crate::events::{AgenticEvent, EventBinding, GlobalSettings, ProviderConfig};
 
     use super::*;
 
@@ -272,13 +276,17 @@ mod tests {
                 enabled: true,
                 actions: vec![],
                 matcher: None,
-                overrides: HashMap::new(),
             },
+        );
+        let mut providers = HashMap::new();
+        providers.insert(
+            Provider::Codex,
+            ProviderConfig { events },
         );
         HookerConfig {
             version: "1.0".to_string(),
             settings: GlobalSettings::default(),
-            events,
+            providers,
         }
     }
 
@@ -390,7 +398,7 @@ mod tests {
     fn wrapper_script_is_valid_bash() {
         let tmp = TempDir::new().unwrap();
         let wrapper_path = tmp.path().join("wrapper.sh");
-        create_wrapper_script(&wrapper_path, "my-tool done").unwrap();
+        create_wrapper_script(&wrapper_path, "my-tool done", "claudine").unwrap();
 
         let script = fs::read_to_string(&wrapper_path).unwrap();
         assert!(script.starts_with("#!/bin/bash"));

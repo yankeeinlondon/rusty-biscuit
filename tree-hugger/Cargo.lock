@@ -658,23 +658,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tree-hugger-cli"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "clap",
- "clap_complete",
- "ignore",
- "owo-colors",
- "percent-encoding",
- "predicates",
- "serde",
- "serde_json",
- "tree-hugger-lib",
-]
-
-[[package]]
-name = "tree-hugger-lib"
+name = "tree-hugger"
 version = "0.1.0"
 dependencies = [
  "biscuit-hash",
@@ -699,6 +683,22 @@ dependencies = [
  "tree-sitter-swift",
  "tree-sitter-typescript",
  "tree-sitter-zsh",
+]
+
+[[package]]
+name = "tree-hugger-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "clap",
+ "clap_complete",
+ "ignore",
+ "owo-colors",
+ "percent-encoding",
+ "predicates",
+ "serde",
+ "serde_json",
+ "tree-hugger",
 ]
 
 [[package]]

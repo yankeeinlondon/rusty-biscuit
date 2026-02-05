@@ -14,15 +14,15 @@ use crate::events::{EnvironmentContext, Provider};
 /// Main dispatch entry point.
 ///
 /// Parses raw provider JSON, matches against config bindings,
-/// resolves actions (including provider overrides), and executes them.
+/// resolves actions, and executes them.
 ///
 /// ## Flow
 ///
 /// 1. Select adapter for provider
 /// 2. Parse raw JSON into normalized event + metadata
 /// 3. Load hooker config (user + repo, merged)
-/// 4. Look up event binding
-/// 5. Resolve actions (with provider overrides)
+/// 4. Look up event binding for this provider
+/// 5. Resolve actions
 /// 6. Check matcher against event metadata
 /// 7. Execute resolved actions
 ///
@@ -59,18 +59,17 @@ pub async fn dispatch(
         Err(e) => return Err(e),
     };
 
-    // 4. Look up the event binding
-    let binding = match config.events.get(&event) {
+    // 4. Look up the event binding for this provider
+    let binding = match config.get_binding(provider, &event) {
         Some(b) => b,
         None => {
-            debug!(%event, "No binding found for event, skipping");
+            debug!(%event, %provider, "No binding found for event/provider, skipping");
             return Ok(());
         }
     };
 
-    // 5. Resolve actions (check overrides)
-    let (enabled, actions, matcher_override) =
-        resolver::resolve_actions(binding, provider);
+    // 5. Resolve actions
+    let (enabled, actions, matcher_pattern) = resolver::resolve_actions(binding);
 
     if !enabled {
         debug!(%event, %provider, "Binding disabled, skipping");
@@ -82,9 +81,8 @@ pub async fn dispatch(
         return Ok(());
     }
 
-    // 6. Check matcher (use override matcher if present, otherwise binding matcher)
-    let effective_matcher = matcher_override.or(binding.matcher.as_deref());
-    if !matcher::matches_with_pattern(effective_matcher, &meta) {
+    // 6. Check matcher
+    if !matcher::matches_with_pattern(matcher_pattern, &meta) {
         debug!(%event, "Matcher did not match, skipping");
         return Ok(());
     }
@@ -135,63 +133,53 @@ mod tests {
     #[test]
     fn loader_with_explicit_path() {
         let tmp = tempfile::tempdir().unwrap();
+
+        let mut claude_config = ProviderConfig::default();
+        claude_config.events.insert(
+            AgenticEvent::SessionStart,
+            EventBinding {
+                enabled: true,
+                actions: vec![EventAction::Report { handler: None }],
+                matcher: None,
+            },
+        );
+
         let config = HookerConfig {
             version: "1.0".to_string(),
             settings: GlobalSettings::default(),
-            events: {
+            providers: {
                 let mut m = HashMap::new();
-                m.insert(
-                    AgenticEvent::SessionStart,
-                    EventBinding {
-                        enabled: true,
-                        actions: vec![EventAction::Report { handler: None }],
-                        matcher: None,
-                        overrides: HashMap::new(),
-                    },
-                );
+                m.insert(Provider::Claude, claude_config);
                 m
             },
         };
+
         let path = tmp.path().join(".hooker");
         std::fs::write(&path, serde_json::to_string(&config).unwrap()).unwrap();
 
         let loaded = loader::load_config(Some(&path), None).unwrap();
-        assert_eq!(loaded.events.len(), 1);
+        assert!(loaded.providers.contains_key(&Provider::Claude));
+        assert_eq!(loaded.providers[&Provider::Claude].events.len(), 1);
     }
 
     #[test]
-    fn resolver_integration() {
+    fn resolver_returns_actions() {
         let binding = EventBinding {
             enabled: true,
             actions: vec![EventAction::Speak {
-                message: "default".to_string(),
+                message: "hello".to_string(),
             }],
-            matcher: None,
-            overrides: {
-                let mut m = HashMap::new();
-                m.insert(
-                    Provider::Claude,
-                    ProviderOverride {
-                        enabled: true,
-                        actions: vec![EventAction::Speak {
-                            message: "claude override".to_string(),
-                        }],
-                        matcher: Some("Bash".to_string()),
-                    },
-                );
-                m
-            },
+            matcher: Some("Bash".to_string()),
         };
 
-        let (enabled, actions, matcher) =
-            resolver::resolve_actions(&binding, Provider::Claude);
+        let (enabled, actions, matcher) = resolver::resolve_actions(&binding);
         assert!(enabled);
         assert_eq!(actions.len(), 1);
         assert_eq!(matcher, Some("Bash"));
     }
 
     #[test]
-    fn matcher_with_override_pattern() {
+    fn matcher_with_pattern() {
         let meta = EventMeta {
             provider: Provider::Claude,
             event: AgenticEvent::BeforeTool,

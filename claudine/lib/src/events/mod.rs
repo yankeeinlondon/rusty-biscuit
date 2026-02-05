@@ -6,7 +6,7 @@ mod event_meta;
 mod provider;
 
 pub use agentric_event::AgenticEvent;
-pub use config::{EventBinding, GlobalSettings, HookerConfig, ProviderOverride, TtsSettings};
+pub use config::{EventBinding, GlobalSettings, HookerConfig, ProviderConfig, TtsSettings};
 pub use environment::{
     EnvironmentContext, GitContext, HardwareContext, OsContext, RepoContext, detect_environment,
 };

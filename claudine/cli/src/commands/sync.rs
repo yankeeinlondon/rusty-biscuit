@@ -20,7 +20,12 @@ pub struct SyncArgs {
 /// Re-sync hook registrations with detected agents.
 pub async fn run(args: SyncArgs) -> Result<()> {
     // Load current config from user/repo locations
-    let config = claudine::dispatch::loader::load_config(None, None)?;
+    // If config is missing, treat as "remove all hooks" operation
+    let config = match claudine::dispatch::loader::load_config(None, None) {
+        Ok(cfg) => Some(cfg),
+        Err(claudine::error::ClaudineError::ConfigNotFound(_)) => None,
+        Err(e) => return Err(e.into()),
+    };
 
     let agents = detect_agents();
     let filter_provider = args
@@ -36,31 +41,57 @@ pub async fn run(args: SyncArgs) -> Result<()> {
             continue;
         }
 
-        if args.dry_run {
-            let registered = configurator.is_registered(None).unwrap_or(false);
-            if registered {
-                log::data(&format!("{provider}: already registered (no changes)"));
-            } else {
-                log::data(&format!("{provider}: would register"));
-            }
-        } else {
-            match configurator.register(&config, None) {
-                Ok(RegistrationResult::Registered { event_count }) => {
-                    log::data(&format!("{provider}: synced ({event_count} events)"));
+        // When config is None, deregister (remove all claudine hooks)
+        // When config is Some, register/sync hooks
+        match &config {
+            None => {
+                // Config removed - deregister from all providers
+                if args.dry_run {
+                    let registered = configurator.is_registered(None).unwrap_or(false);
+                    if registered {
+                        log::data(&format!("{provider}: would deregister"));
+                    } else {
+                        log::data(&format!("{provider}: not registered (no changes)"));
+                    }
+                } else {
+                    match configurator.deregister(None) {
+                        Ok(()) => {
+                            log::data(&format!("{provider}: deregistered"));
+                        }
+                        Err(e) => {
+                            log::error(&format!("{provider}: {e}"));
+                        }
+                    }
                 }
-                Ok(RegistrationResult::Skipped(reason)) => match reason {
-                    SkipReason::AlreadyRegistered => {
-                        log::data(&format!("{provider}: already up-to-date"));
+            }
+            Some(cfg) => {
+                if args.dry_run {
+                    let registered = configurator.is_registered(None).unwrap_or(false);
+                    if registered {
+                        log::data(&format!("{provider}: already registered (no changes)"));
+                    } else {
+                        log::data(&format!("{provider}: would register"));
                     }
-                    SkipReason::WrapperOnly { guidance } => {
-                        log::data(&format!("{provider}: wrapper-only - {guidance}"));
+                } else {
+                    match configurator.register(cfg, None) {
+                        Ok(RegistrationResult::Registered { event_count }) => {
+                            log::data(&format!("{provider}: synced ({event_count} events)"));
+                        }
+                        Ok(RegistrationResult::Skipped(reason)) => match reason {
+                            SkipReason::AlreadyRegistered => {
+                                log::data(&format!("{provider}: already up-to-date"));
+                            }
+                            SkipReason::WrapperOnly { guidance } => {
+                                log::data(&format!("{provider}: wrapper-only - {guidance}"));
+                            }
+                            SkipReason::NotDetected => {
+                                log::data(&format!("{provider}: not detected"));
+                            }
+                        },
+                        Err(e) => {
+                            log::error(&format!("{provider}: {e}"));
+                        }
                     }
-                    SkipReason::NotDetected => {
-                        log::data(&format!("{provider}: not detected"));
-                    }
-                },
-                Err(e) => {
-                    log::error(&format!("{provider}: {e}"));
                 }
             }
         }

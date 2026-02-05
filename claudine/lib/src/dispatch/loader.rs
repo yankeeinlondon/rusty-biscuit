@@ -14,7 +14,7 @@ const REPO_CONFIG_NAME: &str = ".hooker";
 /// Load and merge Claudine configuration.
 ///
 /// Resolves `~/.hooker` or `~/.hook-config` (user) then merges with
-/// `.hooker` (repo). Repo-level event bindings replace user-level per-event.
+/// `.hooker` (repo). Repo-level provider/event bindings replace user-level.
 /// Settings merge field-by-field.
 ///
 /// ## Errors
@@ -116,14 +116,14 @@ fn load_repo_config(repo_root: Option<&Path>) -> Option<HookerConfig> {
     }
 }
 
-/// Merge two configs: repo events replace user events per-event,
+/// Merge two configs: repo provider configs replace user provider configs,
 /// settings merge field-by-field (repo overrides user).
 fn merge_configs(user: HookerConfig, repo: HookerConfig) -> HookerConfig {
-    let mut events = user.events;
+    let mut providers = user.providers;
 
-    // Repo events completely replace matching user events
-    for (event_key, repo_binding) in repo.events {
-        events.insert(event_key, repo_binding);
+    // Repo provider configs completely replace matching user provider configs
+    for (provider, repo_provider_config) in repo.providers {
+        providers.insert(provider, repo_provider_config);
     }
 
     // Settings: repo fields override user fields individually
@@ -138,7 +138,7 @@ fn merge_configs(user: HookerConfig, repo: HookerConfig) -> HookerConfig {
     HookerConfig {
         version: repo.version,
         settings,
-        events,
+        providers,
     }
 }
 
@@ -159,16 +159,17 @@ mod tests {
         HookerConfig {
             version: "1.0".to_string(),
             settings: GlobalSettings::default(),
-            events: HashMap::new(),
+            providers: HashMap::new(),
         }
     }
 
     fn speak_binding(msg: &str) -> EventBinding {
         EventBinding {
             enabled: true,
-            actions: vec![EventAction::Speak { message: msg.to_string() }],
+            actions: vec![EventAction::Speak {
+                message: msg.to_string(),
+            }],
             matcher: None,
-            overrides: HashMap::new(),
         }
     }
 
@@ -176,46 +177,107 @@ mod tests {
     fn load_config_from_explicit_user_path() {
         let tmp = tempfile::tempdir().unwrap();
         let mut config = empty_cfg();
-        config.events.insert(AgenticEvent::SessionStart, speak_binding("hello"));
+
+        let mut claude_config = ProviderConfig::default();
+        claude_config
+            .events
+            .insert(AgenticEvent::SessionStart, speak_binding("hello"));
+        config.providers.insert(Provider::Claude, claude_config);
+
         let path = write_cfg(tmp.path(), ".hooker", &config);
 
         let loaded = load_config(Some(&path), None).unwrap();
         assert_eq!(loaded.version, "1.0");
-        assert!(loaded.events.contains_key(&AgenticEvent::SessionStart));
+        assert!(loaded.providers.contains_key(&Provider::Claude));
+        assert!(loaded.providers[&Provider::Claude]
+            .events
+            .contains_key(&AgenticEvent::SessionStart));
     }
 
     #[test]
     fn missing_config_returns_config_not_found() {
         let tmp = tempfile::tempdir().unwrap();
         let result = load_config(Some(&tmp.path().join("nonexistent")), None);
-        assert!(matches!(result.unwrap_err(), ClaudineError::ConfigNotFound(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            ClaudineError::ConfigNotFound(_)
+        ));
     }
 
     #[test]
-    fn merge_repo_events_replace_user_events() {
+    fn merge_repo_providers_replace_user_providers() {
         let tmp = tempfile::tempdir().unwrap();
+
+        // User config: Claude has session_start and turn_complete
         let mut user_config = empty_cfg();
-        user_config.events.insert(AgenticEvent::SessionStart, speak_binding("user hello"));
-        user_config.events.insert(AgenticEvent::TurnComplete, speak_binding("user turn"));
+        let mut claude_user = ProviderConfig::default();
+        claude_user
+            .events
+            .insert(AgenticEvent::SessionStart, speak_binding("user session"));
+        claude_user
+            .events
+            .insert(AgenticEvent::TurnComplete, speak_binding("user turn"));
+        user_config.providers.insert(Provider::Claude, claude_user);
         let user_path = write_cfg(tmp.path(), "user-config", &user_config);
 
+        // Repo config: Claude only has session_start (replaces entirely)
         let repo_dir = tmp.path().join("repo");
         std::fs::create_dir_all(&repo_dir).unwrap();
         let mut repo_config = empty_cfg();
-        repo_config.events.insert(AgenticEvent::SessionStart, speak_binding("repo hello"));
+        let mut claude_repo = ProviderConfig::default();
+        claude_repo
+            .events
+            .insert(AgenticEvent::SessionStart, speak_binding("repo session"));
+        repo_config.providers.insert(Provider::Claude, claude_repo);
         write_cfg(&repo_dir, ".hooker", &repo_config);
 
         let loaded = load_config(Some(&user_path), Some(&repo_dir)).unwrap();
-        // session_start replaced by repo
-        match &loaded.events[&AgenticEvent::SessionStart].actions[0] {
-            EventAction::Speak { message } => assert_eq!(message, "repo hello"),
+
+        // Claude config from repo replaces user entirely
+        let claude = &loaded.providers[&Provider::Claude];
+        assert_eq!(claude.events.len(), 1); // Only session_start, no turn_complete
+        match &claude.events[&AgenticEvent::SessionStart].actions[0] {
+            EventAction::Speak { message } => assert_eq!(message, "repo session"),
             _ => panic!("Expected Speak"),
         }
-        // turn_complete preserved from user
-        match &loaded.events[&AgenticEvent::TurnComplete].actions[0] {
-            EventAction::Speak { message } => assert_eq!(message, "user turn"),
-            _ => panic!("Expected Speak"),
-        }
+    }
+
+    #[test]
+    fn merge_preserves_non_overlapping_providers() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // User config: Claude and Codex
+        let mut user_config = empty_cfg();
+        let mut claude_user = ProviderConfig::default();
+        claude_user
+            .events
+            .insert(AgenticEvent::SessionStart, speak_binding("claude hello"));
+        user_config.providers.insert(Provider::Claude, claude_user);
+
+        let mut codex_user = ProviderConfig::default();
+        codex_user
+            .events
+            .insert(AgenticEvent::TurnComplete, speak_binding("codex done"));
+        user_config.providers.insert(Provider::Codex, codex_user);
+        let user_path = write_cfg(tmp.path(), "user-config", &user_config);
+
+        // Repo config: Only Gemini
+        let repo_dir = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        let mut repo_config = empty_cfg();
+        let mut gemini_repo = ProviderConfig::default();
+        gemini_repo
+            .events
+            .insert(AgenticEvent::BeforeTool, speak_binding("gemini tool"));
+        repo_config.providers.insert(Provider::Gemini, gemini_repo);
+        write_cfg(&repo_dir, ".hooker", &repo_config);
+
+        let loaded = load_config(Some(&user_path), Some(&repo_dir)).unwrap();
+
+        // All three providers should be present
+        assert!(loaded.providers.contains_key(&Provider::Claude));
+        assert!(loaded.providers.contains_key(&Provider::Codex));
+        assert!(loaded.providers.contains_key(&Provider::Gemini));
     }
 
     #[test]
@@ -232,7 +294,7 @@ mod tests {
                     rate: None,
                 }),
             },
-            events: HashMap::new(),
+            providers: HashMap::new(),
         };
         let repo = HookerConfig {
             version: "1.0".to_string(),
@@ -244,10 +306,13 @@ mod tests {
                     rate: Some(1.5),
                 }),
             },
-            events: HashMap::new(),
+            providers: HashMap::new(),
         };
         let merged = merge_configs(user, repo);
-        assert!(matches!(&merged.settings.default_log_target, Some(LogTarget::LocalFile { .. })));
+        assert!(matches!(
+            &merged.settings.default_log_target,
+            Some(LogTarget::LocalFile { .. })
+        ));
         let tts = merged.settings.tts.unwrap();
         assert_eq!(tts.provider.as_deref(), Some("espeak"));
         assert_eq!(tts.rate, Some(1.5));
@@ -258,15 +323,24 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let repo_dir = tmp.path().join("repo");
         std::fs::create_dir_all(&repo_dir).unwrap();
+
         let mut config = empty_cfg();
-        config.events.insert(AgenticEvent::BeforeTool, EventBinding {
-            enabled: true,
-            actions: vec![],
-            matcher: Some("Bash".to_string()),
-            overrides: HashMap::new(),
-        });
+        let mut claude_config = ProviderConfig::default();
+        claude_config.events.insert(
+            AgenticEvent::BeforeTool,
+            EventBinding {
+                enabled: true,
+                actions: vec![],
+                matcher: Some("Bash".to_string()),
+            },
+        );
+        config.providers.insert(Provider::Claude, claude_config);
         write_cfg(&repo_dir, ".hooker", &config);
+
         let loaded = load_config(Some(&tmp.path().join("nope")), Some(&repo_dir)).unwrap();
-        assert!(loaded.events.contains_key(&AgenticEvent::BeforeTool));
+        assert!(loaded.providers.contains_key(&Provider::Claude));
+        assert!(loaded.providers[&Provider::Claude]
+            .events
+            .contains_key(&AgenticEvent::BeforeTool));
     }
 }

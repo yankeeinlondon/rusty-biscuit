@@ -20,6 +20,7 @@ use std::path::Path;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use image::{DynamicImage, ImageFormat, ImageReader};
 
+use crate::discovery::detection::TerminalApp;
 use crate::{components::renderable::Renderable, terminal::Terminal, utils::layout::Layout};
 
 /// Error types for terminal image operations.
@@ -365,7 +366,13 @@ impl TerminalImage {
 
         let png_data = self.encode_as_png(&img)?;
         let image = match term.image_support {
-            ImageSupport::Kitty => self.render_kitty_cells(&png_data, width_cells, height_cells),
+            ImageSupport::Kitty => {
+                if matches!(term.app, TerminalApp::Wezterm) {
+                    self.render_kitty_cells(&png_data, width_cells, height_cells)
+                } else {
+                    self.render_kitty_width_only(&png_data, width_cells)
+                }
+            }
             ImageSupport::ITerm => {
                 let filename = Path::new(&self.filename)
                     .file_name()
@@ -382,7 +389,7 @@ impl TerminalImage {
             String::new()
         };
 
-        let sequence = format!("\x1b[s{}{}\x1b[u", prefix, image);
+        let sequence = format!("{}{}", prefix, image);
 
         Ok((sequence, height_cells))
     }

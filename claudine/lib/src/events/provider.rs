@@ -54,6 +54,39 @@ impl Provider {
             Provider::Claude | Provider::Codex | Provider::Gemini | Provider::OpenCode
         )
     }
+
+    /// Returns the documentation URL for this provider.
+    pub fn docs_url(&self) -> &'static str {
+        match self {
+            Provider::Claude => "https://docs.anthropic.com/en/docs/claude-code",
+            Provider::Codex => "https://github.com/openai/codex",
+            Provider::Gemini => "https://github.com/google-gemini/gemini-cli",
+            Provider::Goose => "https://block.github.io/goose/",
+            Provider::KimiCode => "https://github.com/aspect-build/aspect-cli",
+            Provider::OpenCode => "https://github.com/opencode-ai/opencode",
+        }
+    }
+
+    /// Returns whether this provider supports the given event natively.
+    ///
+    /// Events that are not supported cannot be registered with the provider's
+    /// hook system and will be skipped during sync.
+    pub fn supports_event(&self, event: &super::AgenticEvent) -> bool {
+        use super::AgenticEvent::*;
+        match self {
+            Provider::Claude => !matches!(event, BeforeModel | AfterModel | TurnError),
+            Provider::Codex => matches!(event, TurnComplete),
+            Provider::Gemini => !matches!(
+                event,
+                ToolError | PermissionRequest | TurnError | SubagentStart | SubagentStop
+            ),
+            Provider::Goose => false, // No hook support yet
+            Provider::KimiCode => false, // No hook support yet
+            Provider::OpenCode => {
+                !matches!(event, ToolError | SubagentStart | SubagentStop | AfterModel)
+            }
+        }
+    }
 }
 
 impl fmt::Display for Provider {
@@ -137,5 +170,63 @@ mod tests {
         assert_eq!(Provider::Goose.as_slug(), "goose");
         assert_eq!(Provider::KimiCode.as_slug(), "kimi_code");
         assert_eq!(Provider::OpenCode.as_slug(), "open_code");
+    }
+
+    #[test]
+    fn docs_url_returns_valid_urls() {
+        // All providers should return HTTPS URLs
+        for provider in [
+            Provider::Claude,
+            Provider::Codex,
+            Provider::Gemini,
+            Provider::Goose,
+            Provider::KimiCode,
+            Provider::OpenCode,
+        ] {
+            let url = provider.docs_url();
+            assert!(url.starts_with("https://"), "Provider {provider:?} URL should start with https://");
+        }
+    }
+
+    #[test]
+    fn supports_event_claude() {
+        use crate::events::AgenticEvent::*;
+        // Claude supports most events except BeforeModel, AfterModel, TurnError
+        assert!(Provider::Claude.supports_event(&SessionStart));
+        assert!(Provider::Claude.supports_event(&TurnComplete));
+        assert!(Provider::Claude.supports_event(&ToolError));
+        assert!(!Provider::Claude.supports_event(&BeforeModel));
+        assert!(!Provider::Claude.supports_event(&AfterModel));
+        assert!(!Provider::Claude.supports_event(&TurnError));
+    }
+
+    #[test]
+    fn supports_event_codex() {
+        use crate::events::AgenticEvent::*;
+        // Codex only supports TurnComplete
+        assert!(Provider::Codex.supports_event(&TurnComplete));
+        assert!(!Provider::Codex.supports_event(&SessionStart));
+        assert!(!Provider::Codex.supports_event(&BeforeTool));
+    }
+
+    #[test]
+    fn supports_event_gemini() {
+        use crate::events::AgenticEvent::*;
+        // Gemini doesn't support ToolError, PermissionRequest, TurnError, SubagentStart, SubagentStop
+        assert!(Provider::Gemini.supports_event(&SessionStart));
+        assert!(Provider::Gemini.supports_event(&BeforeModel));
+        assert!(!Provider::Gemini.supports_event(&ToolError));
+        assert!(!Provider::Gemini.supports_event(&PermissionRequest));
+        assert!(!Provider::Gemini.supports_event(&SubagentStart));
+    }
+
+    #[test]
+    fn supports_event_goose_kimicode_no_hooks() {
+        use crate::events::AgenticEvent::*;
+        // Goose and KimiCode have no hook support
+        assert!(!Provider::Goose.supports_event(&SessionStart));
+        assert!(!Provider::Goose.supports_event(&TurnComplete));
+        assert!(!Provider::KimiCode.supports_event(&SessionStart));
+        assert!(!Provider::KimiCode.supports_event(&TurnComplete));
     }
 }

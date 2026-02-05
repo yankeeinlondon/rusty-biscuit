@@ -247,6 +247,15 @@ impl Table {
         self
     }
 
+    /// Render the table using cursor positioning for alignment.
+    ///
+    /// This is intended for TTY output where some glyphs render narrower than
+    /// their computed width. It applies the left margin but skips other layout
+    /// behaviors (alignment, row fill, word wrap).
+    pub fn render_with_cursor_alignment(&self, term_width: u32) -> String {
+        self.render_content_with_cursor_alignment(term_width)
+    }
+
     /// Calculate column widths based on content.
     fn calculate_column_widths(&self) -> Vec<usize> {
         let num_cols = self
@@ -356,6 +365,56 @@ impl Table {
 
         result
     }
+
+    fn render_content_with_cursor_alignment(&self, term_width: u32) -> String {
+        let mut result = String::new();
+        let widths = self.calculate_column_widths();
+
+        if widths.is_empty() {
+            return result;
+        }
+
+        if let Some(ref title) = self.title {
+            result.push_str(title);
+            result.push('\n');
+        }
+
+        let left_margin = Layout::resolve_margin(&self.layout.left_margin, term_width);
+        let table_start = left_margin.saturating_add(1);
+
+        let top_border = build_border(&widths, '┌', '┬', '┐');
+        result.push_str(&format!("\x1b[{}G{}", table_start, top_border));
+        result.push('\n');
+
+        if !self.columns.is_empty() {
+            let headers: Vec<String> = self.columns.iter().map(|col| col.header.clone()).collect();
+            result.push_str(&render_row_with_cursor_alignment(
+                &headers,
+                &widths,
+                table_start,
+            ));
+            result.push('\n');
+
+            let separator = build_border(&widths, '├', '┼', '┤');
+            result.push_str(&format!("\x1b[{}G{}", table_start, separator));
+            result.push('\n');
+        }
+
+        for row in &self.data {
+            let cells: Vec<String> = row.iter().map(|cell| cell.to_string()).collect();
+            result.push_str(&render_row_with_cursor_alignment(
+                &cells,
+                &widths,
+                table_start,
+            ));
+            result.push('\n');
+        }
+
+        let bottom_border = build_border(&widths, '└', '┴', '┘');
+        result.push_str(&format!("\x1b[{}G{}", table_start, bottom_border));
+
+        result
+    }
 }
 
 impl Renderable for Table {
@@ -386,6 +445,32 @@ impl Renderable for Table {
     fn is_block_level(&self) -> bool {
         true
     }
+}
+
+fn render_row_with_cursor_alignment(
+    cells: &[String],
+    widths: &[usize],
+    table_start: u32,
+) -> String {
+    let mut row = String::new();
+    row.push_str(&format!("\x1b[{}G│", table_start));
+
+    let mut cursor_col = table_start.saturating_add(2);
+    for (index, width) in widths.iter().enumerate() {
+        let content = cells.get(index).map(String::as_str).unwrap_or("");
+        row.push_str(&format!("\x1b[{}G{}", cursor_col, content));
+
+        let sep_col = cursor_col.saturating_add(*width as u32);
+        if index + 1 == widths.len() {
+            row.push_str(&format!("\x1b[{}G │", sep_col));
+        } else {
+            row.push_str(&format!("\x1b[{}G │ ", sep_col));
+        }
+
+        cursor_col = sep_col.saturating_add(3);
+    }
+
+    row
 }
 
 fn build_border(widths: &[usize], left: char, junction: char, right: char) -> String {

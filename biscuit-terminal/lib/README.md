@@ -94,7 +94,8 @@ fn main() {
 
 ### Kitty specifics
 
-- Sends cell-based sizing (`c=`/`r=`) rather than pixel sizing for consistent layout.
+- Default behavior uses `c=` (columns only) so Kitty preserves aspect ratio.
+- WezTerm is a special case: it uses `c=` + `r=` in inline layouts to avoid vertical stretch.
 - Advances the cursor below the image after rendering so prompts don’t overlap.
 
 ### iTerm2 specifics
@@ -102,6 +103,14 @@ fn main() {
 - Forces iTerm path when `TERM_PROGRAM=iTerm.app`, even if Kitty is advertised.
 - Uses `inline=1;preserveAspectRatio=1;width=<user spec>;size=auto`.
 - Appends a cursor advance based on measured cell height to avoid prompt collisions; avoids extra escape clutter that previously caused ENOENT errors in iTerm.
+
+### Inline layout notes (TwoColumn)
+
+`TwoColumn` can render `TerminalImage` inline next to text. Inline images are not normal text: they occupy rows without printable cells, so the layout uses an overlay strategy:
+
+- The image column is emitted as a single escape sequence, then the text column is drawn with a cursor offset.
+- Terminals disagree on cursor save/restore semantics. The layout applies terminal-specific cursor resets to keep the right column aligned to the top of the image.
+- Warp, WezTerm, Ghostty, Kitty, and iTerm2 are supported with tailored cursor moves; other terminals fall back to standard save/restore.
 
 ### Security Features
 
@@ -413,6 +422,9 @@ use biscuit_terminal::discovery::eval::{line_widths, has_escape_codes};
 
 // Calculate visual width (escape codes don't count)
 assert_eq!(line_widths("\x1b[31mred\x1b[0m"), vec![3]);
+
+// Kitty graphics protocol escape sequences are treated as zero-width
+assert_eq!(line_widths("\x1b_Gf=100,a=T,t=d,c=10,m=0;AAAA\x1b\\text"), vec![4]);
 
 // Detect escape codes
 assert!(has_escape_codes("\x1b[1mBold\x1b[0m"));

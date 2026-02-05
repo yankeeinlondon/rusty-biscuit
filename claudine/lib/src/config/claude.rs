@@ -8,10 +8,8 @@ use crate::events::{AgenticEvent, HookerConfig, Provider};
 
 use super::atomic::atomic_write;
 use super::backup::create_backup;
+use super::claudine_command;
 use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
-
-/// Command prefix used to identify Claudine-managed hooks.
-const CLAUDINE_PREFIX: &str = "claudine handle";
 
 pub(crate) struct ClaudeConfigurator;
 
@@ -46,22 +44,31 @@ impl AgentConfigurator for ClaudeConfigurator {
             .as_object_mut()
             .unwrap();
 
+        // Get events configured for this provider
+        let provider_config = match config.providers.get(&Provider::Claude) {
+            Some(pc) => pc,
+            None => return Ok(RegistrationResult::Registered { event_count: 0 }),
+        };
+
+        let claudine_bin = claudine_command();
         let mut event_count = 0;
-        for event in config.events.keys() {
-            let native_name = to_claude_native(event);
+        for event in provider_config.events.keys() {
+            // Skip events that Claude Code doesn't support
+            let Some(native_name) = to_claude_native(event) else {
+                continue;
+            };
+
             let snake = event.to_string();
             let hook_entry = json!([{
                 "hooks": [{
                     "type": "command",
-                    "command": format!("{CLAUDINE_PREFIX} {snake}"),
+                    "command": format!("{claudine_bin} handle {snake}"),
                     "timeout": 30
                 }]
             }]);
 
             // Merge with existing hooks for this event
-            let existing = hooks
-                .entry(&native_name)
-                .or_insert_with(|| json!([]));
+            let existing = hooks.entry(&native_name).or_insert_with(|| json!([]));
             if let Some(arr) = existing.as_array_mut() {
                 // Remove any existing Claudine entries first
                 arr.retain(|entry| !is_claudine_hook_group(entry));
@@ -159,25 +166,35 @@ impl AgentConfigurator for ClaudeConfigurator {
 }
 
 /// Map Claudine event names to Claude Code native hook names.
-fn to_claude_native(event: &AgenticEvent) -> String {
+///
+/// Returns `None` for events that Claude Code doesn't support natively.
+/// Unsupported events: BeforeModel, AfterModel, TurnError.
+fn to_claude_native(event: &AgenticEvent) -> Option<String> {
     match event {
-        AgenticEvent::BeforeTool => "PreToolUse".to_string(),
-        AgenticEvent::AfterTool => "PostToolUse".to_string(),
-        AgenticEvent::ToolError => "PostToolUseFailure".to_string(),
-        AgenticEvent::BeforePrompt => "UserPromptSubmit".to_string(),
-        AgenticEvent::TurnComplete => "Stop".to_string(),
-        AgenticEvent::BeforeCompact => "PreCompact".to_string(),
-        // Others use the variant name as-is
-        AgenticEvent::SessionStart => "SessionStart".to_string(),
-        AgenticEvent::SessionEnd => "SessionEnd".to_string(),
-        AgenticEvent::PermissionRequest => "PermissionRequest".to_string(),
-        AgenticEvent::SubagentStart => "SubagentStart".to_string(),
-        AgenticEvent::SubagentStop => "SubagentStop".to_string(),
-        AgenticEvent::Notification => "Notification".to_string(),
-        AgenticEvent::TurnError => "TurnError".to_string(),
-        AgenticEvent::BeforeModel => "BeforeModel".to_string(),
-        AgenticEvent::AfterModel => "AfterModel".to_string(),
+        AgenticEvent::BeforeTool => Some("PreToolUse".to_string()),
+        AgenticEvent::AfterTool => Some("PostToolUse".to_string()),
+        AgenticEvent::ToolError => Some("PostToolUseFailure".to_string()),
+        AgenticEvent::BeforePrompt => Some("UserPromptSubmit".to_string()),
+        AgenticEvent::TurnComplete => Some("Stop".to_string()),
+        AgenticEvent::BeforeCompact => Some("PreCompact".to_string()),
+        AgenticEvent::SessionStart => Some("SessionStart".to_string()),
+        AgenticEvent::SessionEnd => Some("SessionEnd".to_string()),
+        AgenticEvent::PermissionRequest => Some("PermissionRequest".to_string()),
+        AgenticEvent::SubagentStart => Some("SubagentStart".to_string()),
+        AgenticEvent::SubagentStop => Some("SubagentStop".to_string()),
+        AgenticEvent::Notification => Some("Notification".to_string()),
+        // Unsupported events - Claude Code doesn't have these hook types
+        AgenticEvent::BeforeModel | AgenticEvent::AfterModel | AgenticEvent::TurnError => None,
     }
+}
+
+/// Check if a command string is a Claudine-managed hook.
+///
+/// Matches both short form ("claudine handle ...") and full path
+/// ("/path/to/claudine handle ...").
+fn is_claudine_command(cmd: &str) -> bool {
+    // Check for "claudine handle" anywhere (covers full paths)
+    cmd.contains("claudine handle") || cmd.contains("claudine ")
 }
 
 /// Check if a hook group entry contains a Claudine-managed command.
@@ -189,14 +206,15 @@ fn is_claudine_hook_group(entry: &Value) -> bool {
             hooks.iter().any(|hook| {
                 hook.get("command")
                     .and_then(|c| c.as_str())
-                    .is_some_and(|cmd| {
-                        cmd.starts_with(CLAUDINE_PREFIX) || cmd.starts_with("claudine ")
-                    })
+                    .is_some_and(is_claudine_command)
             })
         })
 }
 
-/// Extract the event name from a Claudine hook entry (e.g., "claudine handle before_tool" -> "before_tool").
+/// Extract the event name from a Claudine hook entry.
+///
+/// Handles both short form ("claudine handle before_tool") and full path
+/// ("/path/to/claudine handle before_tool") -> "before_tool".
 fn extract_claudine_event(entry: &Value) -> Option<String> {
     entry
         .get("hooks")
@@ -206,18 +224,21 @@ fn extract_claudine_event(entry: &Value) -> Option<String> {
                 hook.get("command")
                     .and_then(|c| c.as_str())
                     .and_then(|cmd| {
-                        if cmd.starts_with(CLAUDINE_PREFIX) {
-                            // "claudine handle before_tool" -> "before_tool"
-                            cmd.strip_prefix(CLAUDINE_PREFIX)
-                                .map(|s| s.trim().to_string())
-                        } else if cmd.starts_with("claudine ") {
-                            // "claudine before_tool" -> "before_tool"
-                            cmd.strip_prefix("claudine ")
-                                .and_then(|s| s.split_whitespace().nth(1))
-                                .map(|s| s.to_string())
-                        } else {
-                            None
+                        // Find "claudine handle " and extract event after it
+                        if let Some(idx) = cmd.find("claudine handle ") {
+                            let after_handle = &cmd[idx + "claudine handle ".len()..];
+                            let event = after_handle.split_whitespace().next()?;
+                            return Some(event.to_string());
                         }
+                        // Fallback for old format "claudine <subcommand> <event>"
+                        if let Some(idx) = cmd.find("claudine ") {
+                            let after_claudine = &cmd[idx + "claudine ".len()..];
+                            // Skip subcommand, get event
+                            let mut parts = after_claudine.split_whitespace();
+                            parts.next(); // skip subcommand
+                            return parts.next().map(|s| s.to_string());
+                        }
+                        None
                     })
             })
         })
@@ -240,7 +261,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::events::{EventBinding, GlobalSettings};
+    use crate::events::{EventBinding, GlobalSettings, ProviderConfig};
 
     use super::*;
 
@@ -253,14 +274,18 @@ mod tests {
                     enabled: true,
                     actions: vec![],
                     matcher: None,
-                    overrides: HashMap::new(),
                 },
             );
         }
+        let mut providers = HashMap::new();
+        providers.insert(
+            Provider::Claude,
+            ProviderConfig { events: event_map },
+        );
         HookerConfig {
             version: "1.0".to_string(),
             settings: GlobalSettings::default(),
-            events: event_map,
+            providers,
         }
     }
 
@@ -289,10 +314,10 @@ mod tests {
         assert!(hooks.contains_key("PreToolUse"));
         assert!(hooks.contains_key("Stop"));
 
-        // Verify command content
+        // Verify command content (may be full path or just "claudine")
         let pre_tool = &hooks["PreToolUse"];
         let cmd = pre_tool[0]["hooks"][0]["command"].as_str().unwrap();
-        assert!(cmd.starts_with("claudine handle"));
+        assert!(cmd.contains("claudine") && cmd.contains("handle"));
         assert!(cmd.contains("before_tool"));
     }
 
@@ -426,21 +451,40 @@ mod tests {
 
     #[test]
     fn event_name_mapping() {
-        assert_eq!(to_claude_native(&AgenticEvent::BeforeTool), "PreToolUse");
-        assert_eq!(to_claude_native(&AgenticEvent::AfterTool), "PostToolUse");
+        assert_eq!(
+            to_claude_native(&AgenticEvent::BeforeTool),
+            Some("PreToolUse".to_string())
+        );
+        assert_eq!(
+            to_claude_native(&AgenticEvent::AfterTool),
+            Some("PostToolUse".to_string())
+        );
         assert_eq!(
             to_claude_native(&AgenticEvent::ToolError),
-            "PostToolUseFailure"
+            Some("PostToolUseFailure".to_string())
         );
         assert_eq!(
             to_claude_native(&AgenticEvent::BeforePrompt),
-            "UserPromptSubmit"
+            Some("UserPromptSubmit".to_string())
         );
-        assert_eq!(to_claude_native(&AgenticEvent::TurnComplete), "Stop");
-        assert_eq!(to_claude_native(&AgenticEvent::BeforeCompact), "PreCompact");
+        assert_eq!(
+            to_claude_native(&AgenticEvent::TurnComplete),
+            Some("Stop".to_string())
+        );
+        assert_eq!(
+            to_claude_native(&AgenticEvent::BeforeCompact),
+            Some("PreCompact".to_string())
+        );
         assert_eq!(
             to_claude_native(&AgenticEvent::SessionStart),
-            "SessionStart"
+            Some("SessionStart".to_string())
         );
+    }
+
+    #[test]
+    fn unsupported_events_return_none() {
+        assert_eq!(to_claude_native(&AgenticEvent::BeforeModel), None);
+        assert_eq!(to_claude_native(&AgenticEvent::AfterModel), None);
+        assert_eq!(to_claude_native(&AgenticEvent::TurnError), None);
     }
 }

@@ -10,7 +10,9 @@ use clap::Args;
 use color_eyre::eyre::Result;
 
 use claudine::config::{detect_agents, discover_agents_full, RegistrationResult, SkipReason};
-use claudine::events::{AgenticEvent, EventBinding, GlobalSettings, HookerConfig};
+use claudine::events::{
+    AgenticEvent, EventBinding, GlobalSettings, HookerConfig, Provider, ProviderConfig,
+};
 
 use crate::log;
 
@@ -98,7 +100,6 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
                     enabled: true,
                     actions,
                     matcher: None,
-                    overrides: HashMap::new(),
                 },
             );
         }
@@ -116,11 +117,21 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     log::message("-------------------------");
     let settings = prompts::prompt_global_settings()?;
 
-    // Build final config
+    // Build final config with per-provider configuration
+    let mut providers = HashMap::new();
+    for agent in &selected_agents {
+        providers.insert(
+            agent.provider,
+            ProviderConfig {
+                events: event_bindings.clone(),
+            },
+        );
+    }
+
     let config = HookerConfig {
         version: "1.0".to_string(),
         settings,
-        events: event_bindings,
+        providers,
     };
 
     // Phase 5: Write and Register
@@ -276,6 +287,30 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
 }
 
 fn default_config() -> HookerConfig {
+    // Create default event bindings
+    let default_events = create_default_events();
+
+    // Apply to all supported providers that have hook registration
+    let mut providers = HashMap::new();
+    for provider in [
+        Provider::Claude,
+        Provider::Codex,
+        Provider::Gemini,
+        Provider::OpenCode,
+    ] {
+        providers.insert(provider, ProviderConfig {
+            events: default_events.clone(),
+        });
+    }
+
+    HookerConfig {
+        version: "1.0".to_string(),
+        settings: GlobalSettings::default(),
+        providers,
+    }
+}
+
+fn create_default_events() -> HashMap<AgenticEvent, EventBinding> {
     use claudine::events::EventAction;
 
     let mut events = HashMap::new();
@@ -291,7 +326,6 @@ fn default_config() -> HookerConfig {
                 speed: 1.0,
             }],
             matcher: None,
-            overrides: HashMap::new(),
         },
     );
 
@@ -306,7 +340,6 @@ fn default_config() -> HookerConfig {
                 speed: 1.0,
             }],
             matcher: None,
-            overrides: HashMap::new(),
         },
     );
 
@@ -321,7 +354,6 @@ fn default_config() -> HookerConfig {
                 speed: 1.0,
             }],
             matcher: None,
-            overrides: HashMap::new(),
         },
     );
 
@@ -336,13 +368,8 @@ fn default_config() -> HookerConfig {
                 speed: 1.0,
             }],
             matcher: None,
-            overrides: HashMap::new(),
         },
     );
 
-    HookerConfig {
-        version: "1.0".to_string(),
-        settings: GlobalSettings::default(),
-        events,
-    }
+    events
 }

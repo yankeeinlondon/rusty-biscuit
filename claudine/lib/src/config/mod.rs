@@ -10,7 +10,17 @@ pub use trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
 
 use std::path::PathBuf;
 
-use sniff::programs::{AiCli, InstalledAiClients, ProgramMetadata};
+use sniff::programs::{AiCli, InstalledAiClients, ProgramMetadata, find_program::find_program};
+
+/// Resolve the full path to the claudine executable.
+///
+/// Returns the absolute path to `claudine` if found on PATH, otherwise
+/// falls back to just "claudine" (relying on PATH at runtime).
+pub(crate) fn claudine_command() -> String {
+    find_program("claudine")
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "claudine".to_string())
+}
 
 use crate::events::Provider;
 

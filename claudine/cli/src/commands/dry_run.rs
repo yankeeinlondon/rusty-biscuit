@@ -46,7 +46,7 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
             let config = claudine::dispatch::loader::load_config(None, None);
             match config {
                 Ok(cfg) => {
-                    if let Some(binding) = cfg.events.get(&event) {
+                    if let Some(binding) = cfg.get_binding(provider, &event) {
                         log::data("Matching binding found:");
                         log::data(&format!("  Enabled: {}", binding.enabled));
                         log::data(&format!("  Actions: {}", binding.actions.len()));
@@ -73,7 +73,7 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
                             }
                         }
                     } else {
-                        log::data(&format!("No binding found for event '{event}'"));
+                        log::data(&format!("No binding found for {provider}/{event}"));
                     }
                 }
                 Err(e) => {

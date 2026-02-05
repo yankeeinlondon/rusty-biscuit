@@ -1,3 +1,4 @@
+use crate::discovery::detection::TerminalApp;
 use crate::prelude::*;
 use crate::utils::block_constraint::{split_lines, visible_width, wrap_lines};
 
@@ -23,6 +24,38 @@ fn cursor_forward(chars: u32) -> String {
     } else {
         format!("\x1b[{}C", chars)
     }
+}
+
+fn cursor_save() -> &'static str {
+    "\x1b7\x1b[s"
+}
+
+fn cursor_restore() -> &'static str {
+    "\x1b[u\x1b8"
+}
+
+fn render_column_block(render: &RenderedColumn, offset: u32) -> String {
+    let mut output = String::new();
+
+    if render.uses_cursor_padding {
+        let line = render.lines.first().map(String::as_str).unwrap_or("");
+        output.push('\r');
+        output.push_str(&cursor_forward(offset));
+        output.push_str(line);
+        return output;
+    }
+
+    for (idx, line) in render.lines.iter().enumerate() {
+        if idx == 0 {
+            output.push('\r');
+        } else {
+            output.push_str("\r\n");
+        }
+        output.push_str(&cursor_forward(offset));
+        output.push_str(line);
+    }
+
+    output
 }
 
 /// Renders content into two columns side by side.
@@ -111,6 +144,9 @@ impl TwoColumn {
 
         let left_render = self.render_column(&self.left, left_width, term);
         let right_render = self.render_column(&self.right, right_width, term);
+        if left_render.uses_cursor_padding || right_render.uses_cursor_padding {
+            return self.render_overlay(&left_render, &right_render, left_width, right_width, term);
+        }
         let max_lines = left_render.lines.len().max(right_render.lines.len());
         let gutter_str = " ".repeat(self.gap as usize);
 
@@ -139,6 +175,86 @@ impl TwoColumn {
         }
 
         combined.join("\n")
+    }
+
+    fn render_overlay(
+        &self,
+        left_render: &RenderedColumn,
+        right_render: &RenderedColumn,
+        left_width: u32,
+        _right_width: u32,
+        term: Option<&Terminal>,
+    ) -> String {
+        if let Some(app) = term.map(|t| &t.app) {
+            if matches!(
+                app,
+                TerminalApp::Wezterm
+                    | TerminalApp::Ghostty
+                    | TerminalApp::ITerm2
+                    | TerminalApp::Kitty
+            ) {
+                let move_up_by = match app {
+                    TerminalApp::Wezterm | TerminalApp::Ghostty => {
+                        left_render.lines.len().saturating_sub(1) as u32
+                    }
+                    TerminalApp::ITerm2 | TerminalApp::Kitty => {
+                        left_render.lines.len().saturating_sub(1) as u32
+                    }
+                    _ => left_render.lines.len() as u32,
+                };
+                return self.render_overlay_with_cursor_reset(
+                    left_render,
+                    right_render,
+                    left_width,
+                    move_up_by,
+                );
+            }
+        }
+
+        let right_offset = left_width + self.gap;
+        let block_height = left_render.lines.len().max(right_render.lines.len());
+
+        let mut output = String::new();
+        output.push_str(cursor_save());
+        output.push_str(&render_column_block(left_render, 0));
+        output.push_str(cursor_restore());
+        output.push_str(cursor_save());
+        output.push_str(&render_column_block(right_render, right_offset));
+        output.push_str(cursor_restore());
+
+        if block_height > 0 {
+            output.push_str(&format!("\x1b[{}B\r", block_height));
+        }
+
+        output
+    }
+
+    fn render_overlay_with_cursor_reset(
+        &self,
+        left_render: &RenderedColumn,
+        right_render: &RenderedColumn,
+        left_width: u32,
+        move_up_by: u32,
+    ) -> String {
+        let right_offset = left_width + self.gap;
+        let left_height = left_render.lines.len().max(1) as u32;
+        let right_height = right_render.lines.len().max(1) as u32;
+        let block_height = left_height.max(right_height);
+
+        let mut output = String::new();
+        output.push_str(&render_column_block(left_render, 0));
+
+        if move_up_by > 0 {
+            output.push_str(&format!("\x1b[{}A", move_up_by));
+        }
+        output.push('\r');
+
+        output.push_str(&render_column_block(right_render, right_offset));
+
+        let move_down = block_height.saturating_sub(right_height) + 1;
+        output.push_str(&format!("\x1b[{}B\r", move_down));
+
+        output
     }
 
     fn render_stacked(&self, width: u32, term: Option<&Terminal>) -> String {
