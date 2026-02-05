@@ -121,6 +121,33 @@ impl AgentConfigurator for GeminiConfigurator {
 
         Ok(false)
     }
+
+    fn registered_events(&self, config_dir: Option<&Path>) -> Result<Vec<String>> {
+        let settings_path = config_path(config_dir);
+        if !settings_path.exists() {
+            return Ok(vec![]);
+        }
+
+        let content = fs::read_to_string(&settings_path)?;
+        let root: Value = serde_json::from_str(&content)?;
+
+        let mut events = Vec::new();
+        if let Some(hooks) = root.get("hooks").and_then(|h| h.as_object()) {
+            for (_, hook_list) in hooks {
+                if let Some(arr) = hook_list.as_array() {
+                    for entry in arr {
+                        if let Some(event_name) = extract_claudine_event(entry) {
+                            events.push(event_name);
+                        }
+                    }
+                }
+            }
+        }
+
+        events.sort();
+        events.dedup();
+        Ok(events)
+    }
 }
 
 /// Map Claudine event names to Gemini CLI native hook names.
@@ -150,6 +177,15 @@ fn is_claudine_hook(entry: &Value) -> bool {
         .get("name")
         .and_then(|n| n.as_str())
         .is_some_and(|name| name.starts_with(CLAUDINE_NAME_PREFIX))
+}
+
+/// Extract the event name from a Claudine hook (e.g., "claudine-before_tool" -> "before_tool").
+fn extract_claudine_event(entry: &Value) -> Option<String> {
+    entry
+        .get("name")
+        .and_then(|n| n.as_str())
+        .and_then(|name| name.strip_prefix(CLAUDINE_NAME_PREFIX))
+        .map(|s| s.to_string())
 }
 
 /// Resolve the settings.json path for Gemini.

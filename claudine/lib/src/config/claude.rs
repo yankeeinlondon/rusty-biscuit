@@ -129,6 +129,33 @@ impl AgentConfigurator for ClaudeConfigurator {
 
         Ok(false)
     }
+
+    fn registered_events(&self, config_dir: Option<&Path>) -> Result<Vec<String>> {
+        let settings_path = config_path(config_dir);
+        if !settings_path.exists() {
+            return Ok(vec![]);
+        }
+
+        let content = fs::read_to_string(&settings_path)?;
+        let root: Value = serde_json::from_str(&content)?;
+
+        let mut events = Vec::new();
+        if let Some(hooks) = root.get("hooks").and_then(|h| h.as_object()) {
+            for (_, hook_groups) in hooks {
+                if let Some(arr) = hook_groups.as_array() {
+                    for entry in arr {
+                        if let Some(event_name) = extract_claudine_event(entry) {
+                            events.push(event_name);
+                        }
+                    }
+                }
+            }
+        }
+
+        events.sort();
+        events.dedup();
+        Ok(events)
+    }
 }
 
 /// Map Claudine event names to Claude Code native hook names.
@@ -164,6 +191,33 @@ fn is_claudine_hook_group(entry: &Value) -> bool {
                     .and_then(|c| c.as_str())
                     .is_some_and(|cmd| {
                         cmd.starts_with(CLAUDINE_PREFIX) || cmd.starts_with("claudine ")
+                    })
+            })
+        })
+}
+
+/// Extract the event name from a Claudine hook entry (e.g., "claudine handle before_tool" -> "before_tool").
+fn extract_claudine_event(entry: &Value) -> Option<String> {
+    entry
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .and_then(|hooks| {
+            hooks.iter().find_map(|hook| {
+                hook.get("command")
+                    .and_then(|c| c.as_str())
+                    .and_then(|cmd| {
+                        if cmd.starts_with(CLAUDINE_PREFIX) {
+                            // "claudine handle before_tool" -> "before_tool"
+                            cmd.strip_prefix(CLAUDINE_PREFIX)
+                                .map(|s| s.trim().to_string())
+                        } else if cmd.starts_with("claudine ") {
+                            // "claudine before_tool" -> "before_tool"
+                            cmd.strip_prefix("claudine ")
+                                .and_then(|s| s.split_whitespace().nth(1))
+                                .map(|s| s.to_string())
+                        } else {
+                            None
+                        }
                     })
             })
         })

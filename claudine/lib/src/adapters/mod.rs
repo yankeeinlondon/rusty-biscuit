@@ -2,7 +2,6 @@ mod claude;
 mod codex;
 mod gemini;
 mod opencode;
-mod roo;
 
 use serde_json::Value;
 
@@ -27,12 +26,18 @@ pub trait ProviderAdapter {
 }
 
 /// Create the appropriate adapter for a given provider.
+///
+/// ## Panics
+///
+/// Panics if called with `Provider::Goose` or `Provider::KimiCode` as these
+/// providers do not yet have adapter implementations.
 pub fn adapter_for(provider: Provider) -> Box<dyn ProviderAdapter> {
     match provider {
         Provider::Claude => Box::new(claude::ClaudeAdapter),
         Provider::Codex => Box::new(codex::CodexAdapter),
         Provider::Gemini => Box::new(gemini::GeminiAdapter),
+        Provider::Goose => unimplemented!("Goose adapter not yet implemented"),
+        Provider::KimiCode => unimplemented!("Kimi Code adapter not yet implemented"),
         Provider::OpenCode => Box::new(opencode::OpenCodeAdapter),
-        Provider::RooCode => Box::new(roo::RooAdapter),
     }
 }

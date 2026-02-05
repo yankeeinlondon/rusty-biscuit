@@ -14,7 +14,6 @@ Cross-agent hook/event system for agentic CLIs.
 - **Codex CLI** (OpenAI) --- Notify-based hooks via config.toml
 - **Gemini CLI** (Google) --- Full hook support via settings.json
 - **OpenCode** --- Plugin + experimental hooks
-- **Roo Code** --- Wrapper-only (deferred)
 
 ## Event Types
 

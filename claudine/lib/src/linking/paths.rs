@@ -31,7 +31,6 @@ pub struct ProviderSkillPaths {
     pub gemini: ProviderPaths,
     pub codex: ProviderPaths,
     pub opencode: ProviderPaths,
-    pub roo: ProviderPaths,
 }
 
 impl ProviderSkillPaths {
@@ -71,13 +70,6 @@ impl ProviderSkillPaths {
                 repo_commands: Some(PathBuf::from(".opencode/commands")),
                 also_reads_from: vec![claude_user_skills, claude_repo_skills],
             },
-            roo: ProviderPaths {
-                user_skills: home.join(".roo/skills"),
-                repo_skills: PathBuf::from(".roo/skills"),
-                user_commands: Some(home.join(".roo/commands")),
-                repo_commands: Some(PathBuf::from(".roo/commands")),
-                also_reads_from: vec![],
-            },
         }
     }
 
@@ -88,7 +80,6 @@ impl ProviderSkillPaths {
             ("gemini", &self.gemini),
             ("codex", &self.codex),
             ("opencode", &self.opencode),
-            ("roo", &self.roo),
         ];
 
         providers
@@ -106,12 +97,11 @@ impl ProviderSkillPaths {
     /// Return provider names and their command paths for the given scope.
     ///
     /// Only returns providers that support Markdown commands
-    /// (Claude, Roo, OpenCode). Gemini (TOML) and Codex (none)
+    /// (Claude, OpenCode). Gemini (TOML) and Codex (none)
     /// are excluded.
     pub fn commands_for_scope(&self, scope: LinkScope) -> Vec<(&str, &PathBuf)> {
         let providers: Vec<(&str, &ProviderPaths)> = vec![
             ("claude", &self.claude),
-            ("roo", &self.roo),
             ("opencode", &self.opencode),
         ];
 
@@ -134,7 +124,6 @@ impl ProviderSkillPaths {
             "gemini" => &self.gemini.also_reads_from,
             "codex" => &self.codex.also_reads_from,
             "opencode" => &self.opencode.also_reads_from,
-            "roo" => &self.roo.also_reads_from,
             _ => &[],
         }
     }
@@ -160,21 +149,19 @@ mod tests {
             .opencode
             .user_skills
             .ends_with(".config/opencode/skills"));
-        assert!(paths.roo.user_skills.ends_with(".roo/skills"));
     }
 
     #[test]
     fn for_scope_returns_all_providers() {
         let paths = ProviderSkillPaths::new();
         let user_scope = paths.for_scope(LinkScope::User);
-        assert_eq!(user_scope.len(), 5);
+        assert_eq!(user_scope.len(), 4);
 
         let names: Vec<&str> = user_scope.iter().map(|(n, _)| *n).collect();
         assert!(names.contains(&"claude"));
         assert!(names.contains(&"gemini"));
         assert!(names.contains(&"codex"));
         assert!(names.contains(&"opencode"));
-        assert!(names.contains(&"roo"));
     }
 
     #[test]
@@ -183,7 +170,6 @@ mod tests {
         let cmds = paths.commands_for_scope(LinkScope::User);
         let names: Vec<&str> = cmds.iter().map(|(n, _)| *n).collect();
         assert!(names.contains(&"claude"));
-        assert!(names.contains(&"roo"));
         assert!(names.contains(&"opencode"));
         assert!(!names.contains(&"gemini"));
         assert!(!names.contains(&"codex"));

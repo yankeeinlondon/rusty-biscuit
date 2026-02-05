@@ -75,7 +75,6 @@ fn parse_provider(name: &str) -> color_eyre::eyre::Result<Provider> {
         "codex" => Ok(Provider::Codex),
         "gemini" => Ok(Provider::Gemini),
         "opencode" | "open_code" => Ok(Provider::OpenCode),
-        "roo" | "roo_code" | "roocode" => Ok(Provider::RooCode),
         other => color_eyre::eyre::bail!("Unknown provider: {other}"),
     }
 }

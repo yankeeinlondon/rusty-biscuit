@@ -33,7 +33,7 @@ pub(crate) enum Commands {
     /// Re-sync hook registrations with detected agents.
     Sync(commands::sync::SyncArgs),
     /// Show registration status for all detected agents.
-    Status,
+    Status(commands::status::StatusArgs),
     /// Remove Claudine hooks from all agents.
     Uninstall(commands::uninstall::UninstallArgs),
 }
@@ -67,7 +67,7 @@ async fn main() -> Result<()> {
         Some(Commands::Init(args)) => commands::init::run(args).await,
         Some(Commands::Link(args)) => commands::link::run(args),
         Some(Commands::Sync(args)) => commands::sync::run(args).await,
-        Some(Commands::Status) => commands::status::run(),
+        Some(Commands::Status(args)) => commands::status::run(args, cli.verbose > 0),
         Some(Commands::Uninstall(args)) => commands::uninstall::run(args),
         None => {
             // Default: read from stdin as handle command

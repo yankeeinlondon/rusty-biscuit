@@ -76,7 +76,6 @@ fn parse_provider(name: &str) -> Result<Provider> {
         "codex" => Ok(Provider::Codex),
         "gemini" => Ok(Provider::Gemini),
         "opencode" | "open_code" => Ok(Provider::OpenCode),
-        "roo" | "roo_code" | "roocode" => Ok(Provider::RooCode),
         other => bail!("Unknown provider: {other}"),
     }
 }

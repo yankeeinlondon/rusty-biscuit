@@ -138,7 +138,6 @@ mod tests {
             gemini: empty_paths(),
             codex: empty_paths(),
             opencode: empty_paths(),
-            roo: empty_paths(),
         }
     }
 

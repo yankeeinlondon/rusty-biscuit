@@ -42,4 +42,9 @@ pub trait AgentConfigurator {
 
     /// Check if Claudine hooks are already registered.
     fn is_registered(&self, config_dir: Option<&Path>) -> Result<bool>;
+
+    /// Return the list of Claudine-registered event names (snake_case).
+    ///
+    /// Returns an empty vector if no hooks are registered or the config doesn't exist.
+    fn registered_events(&self, config_dir: Option<&Path>) -> Result<Vec<String>>;
 }

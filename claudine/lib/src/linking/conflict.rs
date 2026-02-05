@@ -189,7 +189,7 @@ mod tests {
         }
     }
 
-    static ALL_PROVIDERS: &[&str] = &["claude", "gemini", "codex", "opencode", "roo"];
+    static ALL_PROVIDERS: &[&str] = &["claude", "gemini", "codex", "opencode"];
 
     fn no_reads() -> AlsoReadsFrom {
         AlsoReadsFrom::new()
@@ -209,7 +209,7 @@ mod tests {
             } => {
                 assert_eq!(source.name, "clap");
                 assert_eq!(source.provider, "claude");
-                assert_eq!(target_providers.len(), 4);
+                assert_eq!(target_providers.len(), 3);
             }
             other => panic!("expected LinkCandidate, got {other:?}"),
         }
@@ -219,7 +219,7 @@ mod tests {
     fn same_hash_is_in_sync() {
         let skills = vec![
             make_skill("tokio", "claude", 999, false),
-            make_skill("tokio", "roo", 999, false),
+            make_skill("tokio", "gemini", 999, false),
         ];
 
         let results = analyze_skills(skills, ALL_PROVIDERS, &no_reads());
@@ -238,7 +238,7 @@ mod tests {
     fn different_hash_is_conflict() {
         let skills = vec![
             make_skill("react", "claude", 111, false),
-            make_skill("react", "roo", 222, false),
+            make_skill("react", "gemini", 222, false),
         ];
 
         let results = analyze_skills(skills, ALL_PROVIDERS, &no_reads());
@@ -258,7 +258,7 @@ mod tests {
     fn symlinks_detected_as_already_linked() {
         let skills = vec![
             make_skill("serde", "claude", 500, false),
-            make_skill("serde", "roo", 500, true),
+            make_skill("serde", "gemini", 500, true),
         ];
 
         let results = analyze_skills(skills, ALL_PROVIDERS, &no_reads());
@@ -306,7 +306,6 @@ mod tests {
                 );
                 assert!(target_providers.contains(&"gemini".to_string()));
                 assert!(target_providers.contains(&"codex".to_string()));
-                assert!(target_providers.contains(&"roo".to_string()));
             }
             other => panic!("expected LinkCandidate, got {other:?}"),
         }
@@ -334,9 +333,9 @@ mod tests {
         let skills = vec![
             make_skill("alpha", "claude", 1, false),
             make_skill("beta", "claude", 2, false),
-            make_skill("beta", "roo", 2, false),
+            make_skill("beta", "gemini", 2, false),
             make_skill("gamma", "claude", 3, false),
-            make_skill("gamma", "roo", 4, false),
+            make_skill("gamma", "gemini", 4, false),
         ];
 
         let results = analyze_skills(skills, ALL_PROVIDERS, &no_reads());

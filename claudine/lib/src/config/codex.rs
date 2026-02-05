@@ -145,6 +145,15 @@ impl AgentConfigurator for CodexConfigurator {
 
         Ok(is_claudine_notify(&doc) || is_claudine_wrapper(&doc, config_dir))
     }
+
+    fn registered_events(&self, config_dir: Option<&Path>) -> Result<Vec<String>> {
+        // Codex only supports turn_complete (via notify)
+        if self.is_registered(config_dir)? {
+            Ok(vec!["turn_complete".to_string()])
+        } else {
+            Ok(vec![])
+        }
+    }
 }
 
 /// Check if notify is set directly to claudine.

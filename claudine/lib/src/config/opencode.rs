@@ -152,6 +152,22 @@ impl AgentConfigurator for OpenCodeConfigurator {
 
         Ok(has_plugin)
     }
+
+    fn registered_events(&self, config_dir: Option<&Path>) -> Result<Vec<String>> {
+        if !self.is_registered(config_dir)? {
+            return Ok(vec![]);
+        }
+
+        // Parse events from the bridge TypeScript file
+        let bridge_path = plugin_dir(config_dir).join("claudine-bridge.ts");
+        if !bridge_path.exists() {
+            return Ok(vec![]);
+        }
+
+        let source = fs::read_to_string(&bridge_path)?;
+        let events = extract_events_from_bridge(&source);
+        Ok(events)
+    }
 }
 
 /// Generate the bridge TypeScript source with event mappings.
@@ -213,6 +229,36 @@ fn plugin_dir(config_dir: Option<&Path>) -> PathBuf {
             home.join(".config").join("opencode").join("plugin")
         }
     }
+}
+
+/// Extract event names from bridge TypeScript source.
+///
+/// Parses lines like `"opencode_event": "claudine_event"` from the EVENT_MAP.
+fn extract_events_from_bridge(source: &str) -> Vec<String> {
+    let mut events = Vec::new();
+    // Look for lines like: "before_tool": "before_tool"
+    for line in source.lines() {
+        let trimmed = line.trim();
+        // Match pattern: "key": "value" (with or without trailing comma)
+        if trimmed.contains('"') {
+            if let Some(mid) = trimmed.find("\": \"") {
+                if let Some(end) = trimmed[mid + 4..].find('"') {
+                    let event_name = &trimmed[mid + 4..mid + 4 + end];
+                    // Only add if it looks like a valid snake_case event name
+                    if event_name
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c == '_')
+                        && !event_name.is_empty()
+                    {
+                        events.push(event_name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    events.sort();
+    events.dedup();
+    events
 }
 
 #[cfg(test)]

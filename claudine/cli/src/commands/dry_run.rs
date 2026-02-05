@@ -62,6 +62,11 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
                                 EventAction::Report { handler } => {
                                     log::data(&format!("  [{i}] Report: {handler:?}"));
                                 }
+                                EventAction::Run { command, args, blocking } => {
+                                    let args_str = args.as_ref().map(|a| a.join(" ")).unwrap_or_default();
+                                    let mode = if *blocking { "blocking" } else { "async" };
+                                    log::data(&format!("  [{i}] Run ({mode}): {command} {args_str}"));
+                                }
                                 EventAction::SoundEffect { name, .. } => {
                                     log::data(&format!("  [{i}] SoundEffect: {name}"));
                                 }
@@ -117,7 +122,6 @@ fn parse_provider(name: &str) -> Result<Provider> {
         "codex" => Ok(Provider::Codex),
         "gemini" => Ok(Provider::Gemini),
         "opencode" | "open_code" => Ok(Provider::OpenCode),
-        "roo" | "roo_code" | "roocode" => Ok(Provider::RooCode),
         other => bail!("Unknown provider: {other}"),
     }
 }

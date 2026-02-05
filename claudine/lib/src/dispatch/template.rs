@@ -55,7 +55,7 @@ pub fn interpolate(template: &str, meta: &EventMeta) -> String {
 fn resolve_placeholder<'a>(key: &str, meta: &'a EventMeta) -> Cow<'a, str> {
     match key {
         // Top-level fields
-        "provider" => Cow::Owned(meta.provider.to_string()),
+        "provider" => Cow::Borrowed(meta.provider.as_slug()),
         "event" => Cow::Owned(meta.event.to_string()),
         "timestamp" => Cow::Owned(meta.timestamp.to_rfc3339()),
         "session_id" => opt_to_cow(&meta.session_id),

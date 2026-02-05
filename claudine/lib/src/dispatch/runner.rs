@@ -26,6 +26,9 @@ pub async fn execute_actions(
             EventAction::Speak { message } => execute_speak(message, meta),
             EventAction::Log { target } => execute_log(target, meta, settings).await?,
             EventAction::Report { handler } => execute_report(handler.as_ref(), meta),
+            EventAction::Run { command, args, blocking } => {
+                execute_run(command, args.as_deref(), *blocking).await?;
+            }
             EventAction::SoundEffect { name, .. } => execute_sound_effect(name),
         }
     }
@@ -122,6 +125,51 @@ fn format_report(handler: &crate::events::ReportHandler, meta: &EventMeta) -> St
             meta.event, meta.provider, meta.tool_name.as_deref().unwrap_or("-")
         ),
     }
+}
+
+/// Run a command on the host system.
+///
+/// Validates the command exists on PATH via `sniff::programs::find_program`.
+/// Non-fatal: logs a warning and returns `Ok(())` if the command is not found.
+async fn execute_run(
+    command: &str,
+    args: Option<&[String]>,
+    blocking: bool,
+) -> Result<()> {
+    if sniff::programs::find_program(command).is_none() {
+        warn!(%command, "Run action skipped: command not found on PATH");
+        return Ok(());
+    }
+
+    let mut cmd = tokio::process::Command::new(command);
+    if let Some(args) = args {
+        cmd.args(args);
+    }
+
+    if blocking {
+        debug!(%command, "Running command (blocking)");
+        match cmd.output().await {
+            Ok(output) => {
+                if !output.status.success() {
+                    warn!(%command, status = %output.status, "Command exited with non-zero status");
+                }
+            }
+            Err(e) => warn!(%command, %e, "Command execution failed"),
+        }
+    } else {
+        debug!(%command, "Running command (fire-and-forget)");
+        tokio::spawn(async move {
+            match cmd.output().await {
+                Ok(output) if !output.status.success() => {
+                    warn!(status = %output.status, "Background command exited with non-zero status");
+                }
+                Err(e) => warn!(%e, "Background command execution failed"),
+                _ => {}
+            }
+        });
+    }
+
+    Ok(())
 }
 
 /// Play a sound effect via playa (fire-and-forget).
@@ -225,7 +273,20 @@ mod tests {
     fn report_text_format() {
         let h = ReportHandler { format: ReportFormat::Text, template: None, include_metadata: false };
         let out = format_report(&h, &meta());
-        assert!(out.contains("before_tool") && out.contains("claude") && out.contains("Bash"));
+        assert!(out.contains("before_tool") && out.contains("Claude") && out.contains("Bash"));
+    }
+
+    #[tokio::test]
+    async fn run_action_with_nonexistent_command() {
+        let actions = vec![EventAction::Run {
+            command: "this_command_surely_does_not_exist_12345".to_string(),
+            args: None,
+            blocking: false,
+        }];
+        // Should not panic — warns and returns Ok.
+        execute_actions(&actions, &meta(), &GlobalSettings::default())
+            .await
+            .unwrap();
     }
 
     #[test]

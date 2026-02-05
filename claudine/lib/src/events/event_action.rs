@@ -35,6 +35,23 @@ pub enum EventAction {
         handler: Option<ReportHandler>,
     },
 
+    /// Run a command on the host system.
+    ///
+    /// The command must exist on the system PATH. Arguments are optional.
+    /// By default, execution is fire-and-forget (non-blocking). Set
+    /// `blocking` to `true` to wait for the command to complete.
+    Run {
+        /// Command name or path to executable.
+        command: String,
+        /// Optional arguments to pass to the command.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        args: Option<Vec<String>>,
+        /// When true, wait for the command to complete before proceeding.
+        /// Defaults to false (fire-and-forget).
+        #[serde(default)]
+        blocking: bool,
+    },
+
     /// Play an embedded sound effect from the playa library.
     ///
     /// Uses playa's 53 built-in effects across 6 categories.
@@ -228,5 +245,52 @@ mod tests {
             let json = serde_json::to_value(&variant).unwrap();
             assert_eq!(json.as_str().unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn run_round_trip() {
+        let action = EventAction::Run {
+            command: "notify-send".to_string(),
+            args: Some(vec!["--urgency=low".to_string(), "done".to_string()]),
+            blocking: false,
+        };
+        let json = serde_json::to_value(&action).unwrap();
+        assert_eq!(json["type"], "run");
+        assert_eq!(json["command"], "notify-send");
+        assert_eq!(json["args"], serde_json::json!(["--urgency=low", "done"]));
+        let back: EventAction = serde_json::from_value(json).unwrap();
+        assert_eq!(back, action);
+    }
+
+    #[test]
+    fn run_deserializes_with_defaults() {
+        let json = serde_json::json!({
+            "type": "run",
+            "command": "echo"
+        });
+        let action: EventAction = serde_json::from_value(json).unwrap();
+        match action {
+            EventAction::Run { command, args, blocking } => {
+                assert_eq!(command, "echo");
+                assert!(args.is_none());
+                assert!(!blocking);
+            }
+            _ => panic!("Expected Run"),
+        }
+    }
+
+    #[test]
+    fn run_blocking_round_trip() {
+        let action = EventAction::Run {
+            command: "sync".to_string(),
+            args: None,
+            blocking: true,
+        };
+        let json = serde_json::to_value(&action).unwrap();
+        assert_eq!(json["type"], "run");
+        assert_eq!(json["blocking"], true);
+        assert!(json.get("args").is_none());
+        let back: EventAction = serde_json::from_value(json).unwrap();
+        assert_eq!(back, action);
     }
 }

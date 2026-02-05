@@ -160,7 +160,7 @@ mod tests {
                 name: "clap".to_string(),
                 source_provider: "claude".to_string(),
                 target_providers: vec![
-                    "roo".to_string(),
+                    "codex".to_string(),
                     "gemini".to_string(),
                 ],
             }],
@@ -171,7 +171,7 @@ mod tests {
         assert!(output.contains("\u{2713}"));
         assert!(output.contains("clap"));
         assert!(output.contains("claude"));
-        assert!(output.contains("roo, gemini"));
+        assert!(output.contains("codex, gemini"));
         assert!(output.contains("1 linked"));
     }
 
@@ -180,7 +180,7 @@ mod tests {
         let report = LinkReport {
             in_sync: vec![InSyncEntry {
                 name: "tokio".to_string(),
-                providers: vec!["claude".to_string(), "roo".to_string()],
+                providers: vec!["claude".to_string(), "gemini".to_string()],
             }],
             ..Default::default()
         };
@@ -199,7 +199,7 @@ mod tests {
                 name: "react".to_string(),
                 versions: vec![
                     ("claude".to_string(), PathBuf::from("/a"), 0x111),
-                    ("roo".to_string(), PathBuf::from("/b"), 0x222),
+                    ("gemini".to_string(), PathBuf::from("/b"), 0x222),
                 ],
             }],
             ..Default::default()
@@ -234,7 +234,7 @@ mod tests {
             linked: vec![LinkedEntry {
                 name: "test".to_string(),
                 source_provider: "claude".to_string(),
-                target_providers: vec!["roo".to_string()],
+                target_providers: vec!["gemini".to_string()],
             }],
             ..Default::default()
         };

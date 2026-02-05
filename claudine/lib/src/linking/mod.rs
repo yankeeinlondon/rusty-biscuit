@@ -171,7 +171,6 @@ fn resolve_provider_skill_dir(
         "gemini" => &paths.gemini,
         "codex" => &paths.codex,
         "opencode" => &paths.opencode,
-        "roo" => &paths.roo,
         _ => &paths.claude,
     };
     match scope {
@@ -188,7 +187,6 @@ fn resolve_provider_command_dir(
 ) -> Option<std::path::PathBuf> {
     let p = match provider {
         "claude" => &paths.claude,
-        "roo" => &paths.roo,
         "opencode" => &paths.opencode,
         _ => return None,
     };
@@ -234,13 +232,6 @@ mod tests {
                 repo_commands: Some(base.join("repo/.opencode/commands")),
                 also_reads_from: vec![base.join("claude/skills")],
             },
-            roo: ProviderPaths {
-                user_skills: base.join("roo/skills"),
-                repo_skills: base.join("repo/.roo/skills"),
-                user_commands: Some(base.join("roo/commands")),
-                repo_commands: Some(base.join("repo/.roo/commands")),
-                also_reads_from: vec![],
-            },
         }
     }
 
@@ -280,7 +271,7 @@ mod tests {
         let report = link_skills_inner(&paths, LinkScope::User, None, true).unwrap();
 
         assert!(!report.linked.is_empty());
-        assert!(!paths.roo.user_skills.join("dry-test").exists());
+        assert!(!paths.codex.user_skills.join("dry-test").exists());
         assert!(!paths.gemini.user_skills.join("dry-test").exists());
     }
 

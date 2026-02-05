@@ -10,7 +10,7 @@ use crate::events::Provider;
 ///
 /// Backups are stored at `~/.claudine/backups/<provider>/<timestamp>.bak`.
 pub fn create_backup(path: &Path, provider: Provider) -> Result<PathBuf> {
-    let backup_dir = backup_base_dir()?.join(provider.to_string());
+    let backup_dir = backup_base_dir()?.join(provider.as_slug());
     fs::create_dir_all(&backup_dir)?;
 
     let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
