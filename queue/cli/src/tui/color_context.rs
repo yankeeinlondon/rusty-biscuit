@@ -14,7 +14,7 @@
 //! - `NO_COLOR="0"`: color disabled (any non-empty value disables)
 //! - `NO_COLOR="yes"`: color disabled
 
-use queue_lib::TaskStatus;
+use queue::TaskStatus;
 use std::env;
 
 /// Context for color-aware rendering decisions.

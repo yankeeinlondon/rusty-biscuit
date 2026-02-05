@@ -28,7 +28,7 @@ build *args="":
     @echo "Build Research Modules (CLI, LIB)"
     @echo "---------------------------------"
     @echo ""
-    @cargo build -p research-cli -p research-lib {{args}}
+    @cargo build -p research-cli -p research {{args}}
 
 # run tests across research modules
 test *args="":
@@ -36,7 +36,7 @@ test *args="":
     @echo "Testing Research Modules"
     @echo "------------------------"
     @echo ""
-    @cargo test -p research-cli -p research-lib {{args}}
+    @cargo test -p research-cli -p research {{args}}
 
 # install the `research` binary into the executable path
 install:
@@ -53,5 +53,5 @@ lint:
     @echo "Linting research Packages"
     @echo "--------------------------"
     @echo ""
-    @cargo clippy -p research-lib -- -D warnings
+    @cargo clippy -p research -- -D warnings
     @cargo clippy -p research-cli -- -D warnings

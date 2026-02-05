@@ -14,7 +14,7 @@
 //! ## Examples
 //!
 //! ```no_run
-//! use sniff_lib::services::{ServiceManager, ServiceState};
+//! use sniff::services::{ServiceManager, ServiceState};
 //!
 //! let manager = ServiceManager::detect();
 //! println!("Init system: {}", manager.init_system);

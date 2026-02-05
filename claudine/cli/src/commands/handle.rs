@@ -5,7 +5,7 @@ use color_eyre::eyre::{Result, bail};
 use serde_json::Value;
 use tracing::debug;
 
-use claudine_lib::events::{Provider, detect_environment};
+use claudine::events::{Provider, detect_environment};
 
 /// Arguments for the handle subcommand.
 #[derive(Args)]
@@ -25,7 +25,7 @@ pub async fn run(args: HandleArgs) -> Result<()> {
     let env = detect_environment(&cwd);
 
     debug!(%provider, event = %args.event, "Handling event");
-    claudine_lib::dispatch::dispatch(&raw, provider, &env).await?;
+    claudine::dispatch::dispatch(&raw, provider, &env).await?;
     Ok(())
 }
 
@@ -36,7 +36,7 @@ pub async fn run_default() -> Result<()> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let env = detect_environment(&cwd);
 
-    claudine_lib::dispatch::dispatch(&raw, provider, &env).await?;
+    claudine::dispatch::dispatch(&raw, provider, &env).await?;
     Ok(())
 }
 

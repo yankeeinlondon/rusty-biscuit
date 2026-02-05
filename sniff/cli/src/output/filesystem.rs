@@ -5,7 +5,7 @@ use std::path::Path;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
-use sniff_lib::filesystem::git::{BehindStatus, ConventionalCommit, FileStatus, RefKind};
+use sniff::filesystem::git::{BehindStatus, ConventionalCommit, FileStatus, RefKind};
 
 use super::{format_number, relative_path};
 
@@ -56,7 +56,7 @@ fn format_commit_datetime(timestamp: &chrono::DateTime<chrono::Utc>) -> (String,
 /// - Cyan for local branches (HEAD indicator in bold)
 /// - Green for remote tracking branches
 /// - Yellow for tags
-fn format_ref_decorations(refs: &[sniff_lib::filesystem::git::RefDecoration]) -> String {
+fn format_ref_decorations(refs: &[sniff::filesystem::git::RefDecoration]) -> String {
     if refs.is_empty() {
         return String::new();
     }
@@ -87,8 +87,8 @@ fn format_ref_decorations(refs: &[sniff_lib::filesystem::git::RefDecoration]) ->
 }
 
 /// Format a hosting provider as a display string.
-fn format_provider(provider: &sniff_lib::filesystem::git::HostingProvider) -> &'static str {
-    use sniff_lib::filesystem::git::HostingProvider;
+fn format_provider(provider: &sniff::filesystem::git::HostingProvider) -> &'static str {
+    use sniff::filesystem::git::HostingProvider;
     match provider {
         HostingProvider::GitHub => "GitHub",
         HostingProvider::GitLab => "GitLab",
@@ -111,9 +111,9 @@ fn format_provider(provider: &sniff_lib::filesystem::git::HostingProvider) -> &'
 /// Returns (owner/repo, browsable_url) tuple.
 fn parse_git_url(
     url: &str,
-    provider: &sniff_lib::filesystem::git::HostingProvider,
+    provider: &sniff::filesystem::git::HostingProvider,
 ) -> (Option<String>, Option<String>) {
-    use sniff_lib::filesystem::git::HostingProvider;
+    use sniff::filesystem::git::HostingProvider;
 
     // Try to extract owner/repo from URL
     let owner_repo = if url.contains('@') && url.contains(':') {
@@ -170,7 +170,7 @@ fn split_path(path: &str) -> (String, String) {
 ///
 /// * `git` - Git repository information
 /// * `history_count` - Number of recent commits to display
-pub fn print_git_section(git: &sniff_lib::filesystem::git::GitInfo, history_count: usize) {
+pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: usize) {
     // === Status Section ===
     let status_title = Prose::new("<b><u>Status</u></b>");
     println!("\n{}\n", status_title.render(None));
@@ -397,7 +397,7 @@ pub fn print_git_section(git: &sniff_lib::filesystem::git::GitInfo, history_coun
 }
 
 pub fn print_repo_section(
-    repo: &sniff_lib::filesystem::repo::RepoInfo,
+    repo: &sniff::filesystem::repo::RepoInfo,
     verbose: u8,
     repo_root: Option<&Path>,
 ) {
@@ -438,7 +438,7 @@ pub fn print_repo_section(
 }
 
 pub fn print_language_section(
-    langs: &sniff_lib::filesystem::languages::LanguageBreakdown,
+    langs: &sniff::filesystem::languages::LanguageBreakdown,
     verbose: u8,
 ) {
     println!("=== Languages ===");
@@ -474,7 +474,7 @@ pub fn print_language_section(
 }
 
 pub fn print_filesystem_section(
-    fs: &sniff_lib::FilesystemInfo,
+    fs: &sniff::FilesystemInfo,
     verbose: u8,
     repo_root: Option<&Path>,
 ) {

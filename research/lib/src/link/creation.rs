@@ -39,11 +39,11 @@ pub enum CreationError {
 ///
 /// ```rust,no_run
 /// use std::path::Path;
-/// use research_lib::link::creation::validate_skill_directory;
+/// use research::link::creation::validate_skill_directory;
 ///
 /// let skill_dir = Path::new("/path/to/skill");
 /// validate_skill_directory(skill_dir)?;
-/// # Ok::<(), research_lib::link::creation::CreationError>(())
+/// # Ok::<(), research::link::creation::CreationError>(())
 /// ```
 #[instrument]
 pub fn validate_skill_directory(path: &Path) -> Result<(), CreationError> {
@@ -88,7 +88,7 @@ pub fn validate_skill_directory(path: &Path) -> Result<(), CreationError> {
 ///
 /// ```rust,no_run
 /// use std::path::Path;
-/// use research_lib::link::creation::ensure_parent_directory;
+/// use research::link::creation::ensure_parent_directory;
 ///
 /// let symlink_path = Path::new("/home/user/.claude/skills/clap");
 /// ensure_parent_directory(symlink_path)?;
@@ -138,12 +138,12 @@ pub fn ensure_parent_directory(path: &Path) -> Result<(), std::io::Error> {
 ///
 /// ```rust,no_run
 /// use std::path::Path;
-/// use research_lib::link::creation::create_skill_symlink;
+/// use research::link::creation::create_skill_symlink;
 ///
 /// let skill_dir = Path::new("/home/user/.research/library/clap/skill");
 /// let symlink_location = Path::new("/home/user/.claude/skills/clap");
 /// create_skill_symlink(skill_dir, symlink_location)?;
-/// # Ok::<(), research_lib::link::creation::CreationError>(())
+/// # Ok::<(), research::link::creation::CreationError>(())
 /// ```
 #[instrument]
 pub fn create_skill_symlink(
@@ -243,12 +243,12 @@ pub fn validate_deep_dive_file(path: &Path) -> Result<(), CreationError> {
 ///
 /// ```rust,no_run
 /// use std::path::Path;
-/// use research_lib::link::creation::create_deep_dive_symlink;
+/// use research::link::creation::create_deep_dive_symlink;
 ///
 /// let deep_dive = Path::new("/home/user/.research/library/clap/deep-dive/clap.md");
 /// let symlink_location = Path::new("/home/user/.claude/docs/clap.md");
 /// create_deep_dive_symlink(deep_dive, symlink_location)?;
-/// # Ok::<(), research_lib::link::creation::CreationError>(())
+/// # Ok::<(), research::link::creation::CreationError>(())
 /// ```
 #[instrument]
 pub fn create_deep_dive_symlink(

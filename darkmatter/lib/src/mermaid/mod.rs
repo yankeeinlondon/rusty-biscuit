@@ -32,7 +32,7 @@ use crate::markdown::highlighting::{ColorMode, ThemePair};
 /// ## Examples
 ///
 /// ```rust
-/// use darkmatter_lib::mermaid::Mermaid;
+/// use darkmatter::mermaid::Mermaid;
 ///
 /// // Create a diagram from a string
 /// let diagram = Mermaid::new("flowchart LR\n    A --> B");
@@ -62,7 +62,7 @@ impl Mermaid {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::mermaid::Mermaid;
+    /// use darkmatter::mermaid::Mermaid;
     ///
     /// let diagram = Mermaid::new("flowchart LR\n    A --> B");
     /// ```
@@ -87,7 +87,7 @@ impl Mermaid {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::mermaid::{Mermaid, DEFAULT_LIGHT_THEME, DEFAULT_DARK_THEME};
+    /// use darkmatter::mermaid::{Mermaid, DEFAULT_LIGHT_THEME, DEFAULT_DARK_THEME};
     ///
     /// let diagram = Mermaid::new("flowchart LR\n    A --> B")
     ///     .with_theme(DEFAULT_LIGHT_THEME.clone(), DEFAULT_DARK_THEME.clone());
@@ -102,7 +102,7 @@ impl Mermaid {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::mermaid::Mermaid;
+    /// use darkmatter::mermaid::Mermaid;
     ///
     /// let diagram = Mermaid::new("flowchart LR\n    A --> B")
     ///     .with_title("My Flowchart");
@@ -117,7 +117,7 @@ impl Mermaid {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::mermaid::Mermaid;
+    /// use darkmatter::mermaid::Mermaid;
     ///
     /// let diagram = Mermaid::new("flowchart LR\n    A --> B")
     ///     .with_footer("Generated 2026-01-03");
@@ -132,8 +132,8 @@ impl Mermaid {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::mermaid::Mermaid;
-    /// use darkmatter_lib::markdown::highlighting::ThemePair;
+    /// use darkmatter::mermaid::Mermaid;
+    /// use darkmatter::markdown::highlighting::ThemePair;
     ///
     /// let diagram = Mermaid::new("flowchart LR\n    A --> B")
     ///     .use_syntect_theme(ThemePair::Gruvbox);
@@ -152,7 +152,7 @@ impl Mermaid {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::mermaid::Mermaid;
+    /// use darkmatter::mermaid::Mermaid;
     ///
     /// let diagram = Mermaid::new("flowchart LR\n    A --> B");
     /// let hash = diagram.hash();
@@ -169,7 +169,7 @@ impl Mermaid {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::mermaid::Mermaid;
+    /// use darkmatter::mermaid::Mermaid;
     ///
     /// let diagram = Mermaid::new("flowchart LR\n    A --> B");
     /// assert_eq!(diagram.instructions(), "flowchart LR\n    A --> B");
@@ -186,8 +186,8 @@ impl Mermaid {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::mermaid::Mermaid;
-    /// use darkmatter_lib::markdown::highlighting::ColorMode;
+    /// use darkmatter::mermaid::Mermaid;
+    /// use darkmatter::markdown::highlighting::ColorMode;
     ///
     /// let diagram = Mermaid::new("flowchart LR\n    A --> B");
     /// let theme = diagram.theme(ColorMode::Light);
@@ -208,7 +208,7 @@ impl Mermaid {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::mermaid::Mermaid;
+    /// use darkmatter::mermaid::Mermaid;
     ///
     /// let diagram = Mermaid::new("flowchart LR\n    A --> B")
     ///     .with_title("My Flowchart");
@@ -223,7 +223,7 @@ impl Mermaid {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::mermaid::Mermaid;
+    /// use darkmatter::mermaid::Mermaid;
     ///
     /// let diagram = Mermaid::new("flowchart LR\n    A --> B")
     ///     .with_footer("Generated 2026-01-03");
@@ -241,7 +241,7 @@ impl Mermaid {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::mermaid::Mermaid;
+    /// use darkmatter::mermaid::Mermaid;
     ///
     /// // Explicit title
     /// let diagram = Mermaid::new("flowchart LR\n    A --> B")
@@ -275,7 +275,7 @@ impl Mermaid {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::mermaid::Mermaid;
+    /// use darkmatter::mermaid::Mermaid;
     ///
     /// let diagram = Mermaid::new("flowchart LR\n    A --> B")
     ///     .with_title("My Flowchart");
@@ -341,7 +341,7 @@ impl Mermaid {
     /// ## Examples
     ///
     /// ```rust,no_run
-    /// use darkmatter_lib::mermaid::Mermaid;
+    /// use darkmatter::mermaid::Mermaid;
     ///
     /// fn example() -> Result<(), Box<dyn std::error::Error>> {
     ///     let diagram = Mermaid::new("flowchart LR\n    A --> B");

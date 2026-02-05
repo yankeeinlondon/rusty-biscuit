@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 /// ## Examples
 ///
 /// ```rust
-/// use darkmatter_lib::testing::strip_ansi_codes;
+/// use darkmatter::testing::strip_ansi_codes;
 ///
 /// let colored = "\x1b[31mRed\x1b[0m \x1b[1mBold\x1b[0m";
 /// assert_eq!(strip_ansi_codes(colored), "Red Bold");
@@ -40,7 +40,7 @@ pub fn strip_ansi_codes(input: &str) -> String {
 /// ## Examples
 ///
 /// ```rust
-/// use darkmatter_lib::testing::TestTerminal;
+/// use darkmatter::testing::TestTerminal;
 ///
 /// let mut terminal = TestTerminal::new();
 /// terminal.run(|term| {
@@ -65,7 +65,7 @@ impl TestTerminal {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::testing::TestTerminal;
+    /// use darkmatter::testing::TestTerminal;
     ///
     /// let terminal = TestTerminal::new();
     /// ```
@@ -83,7 +83,7 @@ impl TestTerminal {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::testing::TestTerminal;
+    /// use darkmatter::testing::TestTerminal;
     ///
     /// let mut terminal = TestTerminal::new();
     /// terminal.run(|term| {
@@ -110,7 +110,7 @@ impl TestTerminal {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::testing::TestTerminal;
+    /// use darkmatter::testing::TestTerminal;
     ///
     /// let terminal = TestTerminal::new();
     /// terminal.run(|buf| {
@@ -137,7 +137,7 @@ impl TestTerminal {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::testing::TestTerminal;
+    /// use darkmatter::testing::TestTerminal;
     ///
     /// let terminal = TestTerminal::new();
     /// terminal.run(|buf| {
@@ -165,7 +165,7 @@ impl TestTerminal {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::testing::TestTerminal;
+    /// use darkmatter::testing::TestTerminal;
     ///
     /// let terminal = TestTerminal::new();
     /// terminal.run(|buf| {

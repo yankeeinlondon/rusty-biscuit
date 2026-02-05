@@ -1,6 +1,6 @@
 //! Input modal for creating and editing scheduled tasks.
 
-use queue_lib::{ExecutionTarget, ScheduledTask, TerminalCapabilities, parse_at_time, parse_delay};
+use queue::{ExecutionTarget, ScheduledTask, TerminalCapabilities, parse_at_time, parse_delay};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -838,7 +838,7 @@ fn render_compact_selector_field(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use queue_lib::TerminalKind;
+    use queue::TerminalKind;
 
     /// Creates capabilities for a terminal with pane support (like Wezterm).
     fn wezterm_caps() -> TerminalCapabilities {
@@ -1074,11 +1074,11 @@ mod tests {
         use chrono::Local;
 
         // Create a task with a specific UTC time
-        let task = queue_lib::ScheduledTask::new(
+        let task = queue::ScheduledTask::new(
             1,
             "echo hello".to_string(),
             chrono::Utc::now(),
-            queue_lib::ExecutionTarget::Background,
+            queue::ExecutionTarget::Background,
         );
 
         let modal = InputModal::for_edit(&task, wezterm_caps());
@@ -1103,18 +1103,18 @@ mod tests {
     fn for_edit_preserves_task_properties() {
         use chrono::Utc;
 
-        let task = queue_lib::ScheduledTask::new(
+        let task = queue::ScheduledTask::new(
             42,
             "cargo build --release".to_string(),
             Utc::now(),
-            queue_lib::ExecutionTarget::NewWindow,
+            queue::ExecutionTarget::NewWindow,
         );
 
         let modal = InputModal::for_edit(&task, wezterm_caps());
 
         assert_eq!(modal.command, "cargo build --release");
         assert_eq!(modal.cursor_pos, task.command.len());
-        assert_eq!(modal.target, queue_lib::ExecutionTarget::NewWindow);
+        assert_eq!(modal.target, queue::ExecutionTarget::NewWindow);
         assert_eq!(modal.editing_task_id, Some(42));
         assert_eq!(modal.schedule_type, ScheduleType::AtTime);
         assert_eq!(modal.active_field, InputField::Command);

@@ -185,7 +185,7 @@ fn handle_input_modal(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
                 let scheduled_at = match modal.schedule_type {
                     ScheduleType::AtTime => {
                         use chrono::{Local, TimeZone, Utc};
-                        let time = queue_lib::parse_at_time(&modal.schedule_value).unwrap();
+                        let time = queue::parse_at_time(&modal.schedule_value).unwrap();
                         // Combine with today's date, in local time, then convert to UTC
                         let today = Local::now().date_naive();
                         let local_dt = today.and_time(time);
@@ -200,14 +200,14 @@ fn handle_input_modal(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
                     }
                     ScheduleType::AfterDelay => {
                         use chrono::Utc;
-                        let delay = queue_lib::parse_delay(&modal.schedule_value).unwrap();
+                        let delay = queue::parse_delay(&modal.schedule_value).unwrap();
                         Utc::now() + delay
                     }
                 };
 
                 let schedule_kind = match modal.schedule_type {
-                    ScheduleType::AtTime => queue_lib::ScheduleKind::AtTime,
-                    ScheduleType::AfterDelay => queue_lib::ScheduleKind::AfterDelay,
+                    ScheduleType::AtTime => queue::ScheduleKind::AtTime,
+                    ScheduleType::AfterDelay => queue::ScheduleKind::AfterDelay,
                 };
 
                 Some((
@@ -226,7 +226,7 @@ fn handle_input_modal(app: &mut App, key: KeyCode, modifiers: KeyModifiers) {
                     app.update_task(task_id, command, scheduled_at, target, schedule_kind);
                 } else {
                     let id = app.alloc_task_id();
-                    let task = queue_lib::ScheduledTask::with_schedule_kind(
+                    let task = queue::ScheduledTask::with_schedule_kind(
                         id,
                         command,
                         scheduled_at,
@@ -371,7 +371,7 @@ fn handle_history_modal(app: &mut App, key: KeyCode) {
 mod tests {
     use super::*;
     use crate::tui::history_modal::HistoryLayout;
-    use queue_lib::{TerminalCapabilities, TerminalKind};
+    use queue::{TerminalCapabilities, TerminalKind};
 
     fn input(app: &mut App, key: KeyCode) {
         handle_input(app, key, KeyModifiers::NONE);
@@ -390,7 +390,7 @@ mod tests {
     fn normal_mode_q_triggers_confirm_quit() {
         let mut app = App::new();
         use chrono::Utc;
-        use queue_lib::{ExecutionTarget, ScheduledTask};
+        use queue::{ExecutionTarget, ScheduledTask};
         app.tasks.push(ScheduledTask::new(
             1,
             "a".into(),
@@ -455,7 +455,7 @@ mod tests {
         let mut app = App::new();
         // Add tasks so navigation has effect
         use chrono::Utc;
-        use queue_lib::{ExecutionTarget, ScheduledTask};
+        use queue::{ExecutionTarget, ScheduledTask};
 
         app.tasks = vec![
             ScheduledTask::new(1, "a".into(), Utc::now(), ExecutionTarget::default()),
@@ -495,7 +495,7 @@ mod tests {
 
         // Add a task and try again
         use chrono::Utc;
-        use queue_lib::{ExecutionTarget, ScheduledTask};
+        use queue::{ExecutionTarget, ScheduledTask};
         app.tasks.push(ScheduledTask::new(
             1,
             "test".into(),
@@ -626,7 +626,7 @@ mod tests {
     #[test]
     fn history_modal_navigation() {
         use chrono::Utc;
-        use queue_lib::{ExecutionTarget, ScheduledTask, TaskStatus};
+        use queue::{ExecutionTarget, ScheduledTask, TaskStatus};
         use ratatui::widgets::ListState;
 
         let mut app = App::new();
@@ -681,7 +681,7 @@ mod tests {
     #[test]
     fn history_modal_enter_opens_input_modal() {
         use chrono::Utc;
-        use queue_lib::{ExecutionTarget, ScheduledTask, TaskStatus};
+        use queue::{ExecutionTarget, ScheduledTask, TaskStatus};
         use ratatui::widgets::ListState;
 
         let mut app = App::new();
@@ -734,7 +734,7 @@ mod tests {
     #[test]
     fn normal_mode_x_cancels_pending_task() {
         use chrono::Utc;
-        use queue_lib::{ExecutionTarget, ScheduledTask};
+        use queue::{ExecutionTarget, ScheduledTask};
 
         let mut app = App::new();
         app.tasks = vec![
@@ -753,7 +753,7 @@ mod tests {
     #[test]
     fn normal_mode_x_does_not_cancel_running_task() {
         use chrono::Utc;
-        use queue_lib::{ExecutionTarget, ScheduledTask};
+        use queue::{ExecutionTarget, ScheduledTask};
 
         let mut app = App::new();
         let mut task = ScheduledTask::new(1, "a".into(), Utc::now(), ExecutionTarget::default());

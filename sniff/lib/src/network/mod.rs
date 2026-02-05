@@ -14,7 +14,7 @@ pub use interface::{InterfaceFlags, IpAddresses, Ipv4Address, Ipv6Address, Netwo
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::network::detect_network;
+/// use sniff::network::detect_network;
 ///
 /// let info = detect_network().unwrap();
 /// if !info.permission_denied {
@@ -66,7 +66,7 @@ pub struct NetworkInfo {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::network::detect_network;
+/// use sniff::network::detect_network;
 ///
 /// let info = detect_network().unwrap();
 /// if !info.permission_denied {
@@ -266,7 +266,7 @@ fn find_primary_interface(interfaces: &[NetworkInterface]) -> Option<String> {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::network::detect_network_filtered;
+/// use sniff::network::detect_network_filtered;
 ///
 /// let info = detect_network_filtered().unwrap();
 /// // All interfaces should be up and not loopback

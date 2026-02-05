@@ -7,9 +7,9 @@
 //! ## Examples
 //!
 //! ```
-//! use darkmatter_lib::markdown::Markdown;
-//! use darkmatter_lib::markdown::output::{HtmlOptions, as_html};
-//! use darkmatter_lib::markdown::highlighting::{ThemePair, ColorMode};
+//! use darkmatter::markdown::Markdown;
+//! use darkmatter::markdown::output::{HtmlOptions, as_html};
+//! use darkmatter::markdown::highlighting::{ThemePair, ColorMode};
 //!
 //! let content = "# Hello World\n\n\
 //!                ```rust\n\
@@ -41,8 +41,8 @@ use syntect::util::LinesWithEndings;
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::output::HtmlOptions;
-/// use darkmatter_lib::markdown::highlighting::{ThemePair, ColorMode};
+/// use darkmatter::markdown::output::HtmlOptions;
+/// use darkmatter::markdown::highlighting::{ThemePair, ColorMode};
 ///
 /// let mut options = HtmlOptions::default();
 /// options.code_theme = ThemePair::Github;
@@ -94,8 +94,8 @@ impl Default for HtmlOptions {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::Markdown;
-/// use darkmatter_lib::markdown::output::{HtmlOptions, as_html};
+/// use darkmatter::markdown::Markdown;
+/// use darkmatter::markdown::output::{HtmlOptions, as_html};
 ///
 /// let md: Markdown = "# Hello\n\nWorld".into();
 /// let html = as_html(&md, HtmlOptions::default()).unwrap();

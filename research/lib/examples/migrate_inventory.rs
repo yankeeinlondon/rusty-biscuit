@@ -1,6 +1,6 @@
 //! One-time migration script to populate research-inventory.json from existing topics.
 
-use research_lib::metadata::migration_v2::scan_and_build_inventory;
+use research::metadata::migration_v2::scan_and_build_inventory;
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

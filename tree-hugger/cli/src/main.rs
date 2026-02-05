@@ -9,7 +9,7 @@ use ignore::overrides::OverrideBuilder;
 use owo_colors::{OwoColorize, Style};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
-use tree_hugger_lib::{
+use tree_hugger::{
     Diagnostic, DiagnosticKind, DiagnosticSeverity, FieldInfo, FileSummary, FunctionSignature,
     ImportSymbol, LintDiagnostic, PackageSummary, ParameterInfo, ProgrammingLanguage,
     SourceContext, SymbolInfo, SymbolKind, SyntaxDiagnostic, TreeFile, TreeHuggerError,

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::hardware::SimdCapabilities;
+/// use sniff::hardware::SimdCapabilities;
 ///
 /// let caps = SimdCapabilities::detect();
 /// if caps.avx2 {
@@ -65,7 +65,7 @@ impl SimdCapabilities {
     /// ## Examples
     ///
     /// ```
-    /// use sniff_lib::hardware::SimdCapabilities;
+    /// use sniff::hardware::SimdCapabilities;
     ///
     /// let caps = SimdCapabilities::detect();
     /// println!("SSE2: {}, AVX: {}, AVX2: {}", caps.sse2, caps.avx, caps.avx2);
@@ -157,7 +157,7 @@ impl SimdCapabilities {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::hardware::detect_simd;
+/// use sniff::hardware::detect_simd;
 ///
 /// let caps = detect_simd();
 /// if caps.avx2 {

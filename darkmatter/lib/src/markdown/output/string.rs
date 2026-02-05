@@ -10,7 +10,7 @@ use crate::markdown::Markdown;
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::Markdown;
+/// use darkmatter::markdown::Markdown;
 /// use serde_json::json;
 ///
 /// let mut md = Markdown::new("# Hello".to_string());

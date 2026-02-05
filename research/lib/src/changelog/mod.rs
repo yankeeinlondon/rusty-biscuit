@@ -29,7 +29,7 @@
 //! ## Examples
 //!
 //! ```rust,no_run
-//! use research_lib::changelog::types::{VersionHistory, ConfidenceLevel};
+//! use research::changelog::types::{VersionHistory, ConfidenceLevel};
 //!
 //! let history = VersionHistory::default();
 //! assert_eq!(history.confidence, ConfidenceLevel::Low);

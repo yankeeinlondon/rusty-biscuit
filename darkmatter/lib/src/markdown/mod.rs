@@ -11,7 +11,7 @@
 //! ## Examples
 //!
 //! ```
-//! use darkmatter_lib::markdown::Markdown;
+//! use darkmatter::markdown::Markdown;
 //!
 //! let content = r#"---
 //! title: Hello World
@@ -82,7 +82,7 @@ impl Markdown {
     /// ## Examples
     ///
     /// ```no_run
-    /// # use darkmatter_lib::markdown::Markdown;
+    /// # use darkmatter::markdown::Markdown;
     /// # use url::Url;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let url = Url::parse("https://example.com/doc.md")?;
@@ -151,7 +151,7 @@ impl Markdown {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::Markdown;
+    /// use darkmatter::markdown::Markdown;
     ///
     /// let content = "# Header\nParagraph\n## Subheader";
     /// let mut md: Markdown = content.into();
@@ -171,7 +171,7 @@ impl Markdown {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::Markdown;
+    /// use darkmatter::markdown::Markdown;
     ///
     /// let mut md = Markdown::new("# Hello".to_string());
     /// md.fm_insert("title", "Test").unwrap();
@@ -202,7 +202,7 @@ impl Markdown {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::Markdown;
+    /// use darkmatter::markdown::Markdown;
     ///
     /// let md = Markdown::new("# Hello\n\nWorld".to_string());
     /// let ast = md.as_ast().unwrap();
@@ -223,8 +223,8 @@ impl Markdown {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::Markdown;
-    /// use darkmatter_lib::markdown::output::HtmlOptions;
+    /// use darkmatter::markdown::Markdown;
+    /// use darkmatter::markdown::output::HtmlOptions;
     ///
     /// let md = Markdown::new("# Hello\n\nWorld".to_string());
     /// let html = md.as_html(HtmlOptions::default()).unwrap();
@@ -249,7 +249,7 @@ impl Markdown {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::Markdown;
+    /// use darkmatter::markdown::Markdown;
     ///
     /// let content = "# Introduction\n\nWelcome.\n\n## Getting Started\n\nFirst steps.";
     /// let md: Markdown = content.into();
@@ -275,7 +275,7 @@ impl Markdown {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::Markdown;
+    /// use darkmatter::markdown::Markdown;
     ///
     /// let original: Markdown = "# Hello\n\nWorld".into();
     /// let updated: Markdown = "# Hello\n\nUniverse".into();
@@ -297,8 +297,8 @@ impl Markdown {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::Markdown;
-    /// use darkmatter_lib::markdown::HeadingLevel;
+    /// use darkmatter::markdown::Markdown;
+    /// use darkmatter::markdown::HeadingLevel;
     ///
     /// let doc: Markdown = "## Intro\n### Details\n## Conclusion".into();
     /// let validation = doc.validate_structure();
@@ -342,7 +342,7 @@ impl Markdown {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::{Markdown, HeadingLevel};
+    /// use darkmatter::markdown::{Markdown, HeadingLevel};
     ///
     /// // Promote an H3-rooted document to H1
     /// let doc: Markdown = "### Intro\n#### Details".into();
@@ -368,7 +368,7 @@ impl Markdown {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::{Markdown, HeadingLevel};
+    /// use darkmatter::markdown::{Markdown, HeadingLevel};
     ///
     /// let mut doc: Markdown = "### Intro\n#### Details".into();
     /// let report = doc.normalize_mut(Some(HeadingLevel::H1)).unwrap();
@@ -408,7 +408,7 @@ impl Markdown {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::{Markdown, HeadingLevel};
+    /// use darkmatter::markdown::{Markdown, HeadingLevel};
     ///
     /// // Demote an H1-rooted document to H2 (for embedding as a subsection)
     /// let doc: Markdown = "# Main\n## Sub\n### Detail".into();

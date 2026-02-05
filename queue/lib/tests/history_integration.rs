@@ -4,7 +4,7 @@
 //! across process restarts (simulated by creating new store instances).
 
 use chrono::Utc;
-use queue_lib::{ExecutionTarget, HistoryStore, JsonFileStore, ScheduledTask};
+use queue::{ExecutionTarget, HistoryStore, JsonFileStore, ScheduledTask};
 use tempfile::tempdir;
 
 #[test]

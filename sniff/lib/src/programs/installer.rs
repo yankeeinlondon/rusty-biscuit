@@ -15,8 +15,8 @@
 //! ## Examples
 //!
 //! ```ignore
-//! use sniff_lib::programs::installer::{InstallOptions, execute_install};
-//! use sniff_lib::programs::types::InstallationMethod;
+//! use sniff::programs::installer::{InstallOptions, execute_install};
+//! use sniff::programs::types::InstallationMethod;
 //!
 //! let method = InstallationMethod::Brew("ripgrep");
 //! let opts = InstallOptions::dry_run();

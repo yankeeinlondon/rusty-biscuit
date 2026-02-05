@@ -9,7 +9,7 @@
 //! - **BOLD**: All files present
 
 use crate::list::types::{ResearchOutput, TopicInfo};
-use darkmatter_lib::render::Link;
+use darkmatter::render::Link;
 use owo_colors::OwoColorize;
 use std::sync::OnceLock;
 
@@ -30,8 +30,8 @@ use std::sync::OnceLock;
 /// # Examples
 ///
 /// ```
-/// use research_lib::list::types::TopicInfo;
-/// use research_lib::list::format::format_json;
+/// use research::list::types::TopicInfo;
+/// use research::list::format::format_json;
 /// use std::path::PathBuf;
 ///
 /// let topics = vec![
@@ -75,7 +75,7 @@ pub fn format_json(topics: &[TopicInfo]) -> Result<String, serde_json::Error> {
 /// # Examples
 ///
 /// ```
-/// use research_lib::list::{TopicInfo, format_terminal};
+/// use research::list::{TopicInfo, format_terminal};
 /// use std::path::PathBuf;
 ///
 /// let topics = vec![

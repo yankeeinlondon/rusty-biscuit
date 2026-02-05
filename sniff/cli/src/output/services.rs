@@ -1,6 +1,6 @@
 //! Services section output formatting.
 
-use sniff_lib::services::{Service, ServiceState, ServicesInfo};
+use sniff::services::{Service, ServiceState, ServicesInfo};
 
 /// Print services information as text.
 pub fn print_services_text(info: &ServicesInfo, verbose: u8, state_filter: ServiceState) {

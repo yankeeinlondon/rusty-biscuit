@@ -25,7 +25,7 @@ use crate::{error::SniffInstallationError, os::OsType, programs::schema::Program
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::programs::ExecutableSource;
+/// use sniff::programs::ExecutableSource;
 ///
 /// let source = ExecutableSource::Path;
 /// assert!(!source.is_app_bundle());
@@ -48,7 +48,7 @@ impl ExecutableSource {
     /// ## Examples
     ///
     /// ```
-    /// use sniff_lib::programs::ExecutableSource;
+    /// use sniff::programs::ExecutableSource;
     ///
     /// assert!(!ExecutableSource::Path.is_app_bundle());
     /// assert!(ExecutableSource::MacOsAppBundle.is_app_bundle());
@@ -310,7 +310,7 @@ impl ProgramDetails {
 /// ## Examples
 ///
 /// ```ignore
-/// use sniff_lib::programs::{ProgramDetector, InstalledEditors, Editor};
+/// use sniff::programs::{ProgramDetector, InstalledEditors, Editor};
 ///
 /// let editors = InstalledEditors::new();
 /// if editors.is_installed(Editor::Vim) {
@@ -342,7 +342,7 @@ pub trait ProgramDetector {
     /// ## Examples
     ///
     /// ```ignore
-    /// use sniff_lib::programs::{ProgramDetector, InstalledEditors, Editor, ExecutableSource};
+    /// use sniff::programs::{ProgramDetector, InstalledEditors, Editor, ExecutableSource};
     ///
     /// let editors = InstalledEditors::new();
     /// if let Some((path, source)) = editors.path_with_source(Editor::Vscode) {

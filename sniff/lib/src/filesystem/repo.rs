@@ -134,7 +134,7 @@ pub struct PackageLocation {
 ///
 /// ```no_run
 /// use std::path::Path;
-/// use sniff_lib::filesystem::repo::detect_repo;
+/// use sniff::filesystem::repo::detect_repo;
 ///
 /// let root = Path::new("/path/to/project");
 /// if let Some(info) = detect_repo(root).unwrap() {

@@ -11,7 +11,7 @@
 //! ## Examples
 //!
 //! ```
-//! use sniff_lib::package::{OsPackageManager, LanguagePackageManager, PackageManager};
+//! use sniff::package::{OsPackageManager, LanguagePackageManager, PackageManager};
 //!
 //! let os_mgr = PackageManager::Os(OsPackageManager::Homebrew);
 //! let lang_mgr = PackageManager::Language(LanguagePackageManager::Cargo);

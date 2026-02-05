@@ -13,7 +13,7 @@ default:
 build *args="":
     @echo "Building ..."
     @echo
-    @cargo build -p queue-lib {{args}}
+    @cargo build -p queue {{args}}
     @cargo build -p queue-cli {{args}}
     @echo
 
@@ -21,7 +21,7 @@ build *args="":
 test *args="":
     @echo "Testing {{BOLD}}Library{{RESET}} code"
     @echo ""
-    @cargo test -p queue-lib {{args}}
+    @cargo test -p queue {{args}}
     @echo ""
     @echo "Testing {{BOLD}}CLI{{RESET}} code"
     @echo ""
@@ -29,7 +29,7 @@ test *args="":
 
 # lint with clippy
 lint *args="":
-    @cargo clippy -p queue-lib -p queue-cli {{args}}
+    @cargo clippy -p queue -p queue-cli {{args}}
 
 # install latest release version of CLI
 install *args="":
@@ -39,7 +39,7 @@ install *args="":
 docs:
     @echo "Building and then showing latest docs for the library code"
     @echo ""
-    @cargo doc -p queue-lib --open
+    @cargo doc -p queue --open
 
 # run the debug release of the Queue CLI
 cli *args="":

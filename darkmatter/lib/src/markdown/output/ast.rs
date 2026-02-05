@@ -21,7 +21,7 @@ use markdown::ParseOptions;
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::Markdown;
+/// use darkmatter::markdown::Markdown;
 ///
 /// let md = Markdown::new("# Hello\n\nWorld".to_string());
 /// let ast = md.as_ast().unwrap();

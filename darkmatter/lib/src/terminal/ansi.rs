@@ -7,7 +7,7 @@
 //! ## Examples
 //!
 //! ```
-//! use darkmatter_lib::terminal::ansi::AnsiBuilder;
+//! use darkmatter::terminal::ansi::AnsiBuilder;
 //! use syntect::highlighting::Color;
 //!
 //! // Simple foreground color

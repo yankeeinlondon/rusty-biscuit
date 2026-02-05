@@ -3,7 +3,7 @@
 //! This module implements the main window layout with a task table and status footer.
 
 use chrono::Utc;
-use queue_lib::{ExecutionTarget, ScheduledTask, TaskStatus};
+use queue::{ExecutionTarget, ScheduledTask, TaskStatus};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -276,7 +276,7 @@ fn task_style(task: &ScheduledTask) -> Style {
 ///
 /// For completed/running tasks, shows the absolute time when scheduled (HH:MM).
 fn format_schedule(task: &ScheduledTask) -> String {
-    use queue_lib::ScheduleKind;
+    use queue::ScheduleKind;
 
     let now = Utc::now();
     let duration = task.scheduled_at.signed_duration_since(now);
@@ -440,7 +440,7 @@ mod tests {
 
     fn make_task_with_schedule_kind(
         scheduled_at: chrono::DateTime<Utc>,
-        schedule_kind: Option<queue_lib::ScheduleKind>,
+        schedule_kind: Option<queue::ScheduleKind>,
     ) -> ScheduledTask {
         let mut task = ScheduledTask::new(
             1,
@@ -455,7 +455,7 @@ mod tests {
     #[test]
     fn format_schedule_at_time_shows_clock_time_when_far() {
         // Task scheduled "at time" should show the clock time when > 1 minute away
-        use queue_lib::ScheduleKind;
+        use queue::ScheduleKind;
 
         let task = make_task_with_schedule_kind(
             Utc::now() + Duration::hours(2),
@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn format_schedule_at_time_shows_countdown_when_close() {
         // Task scheduled "at time" should switch to countdown when < 1 minute away
-        use queue_lib::ScheduleKind;
+        use queue::ScheduleKind;
 
         let task = make_task_with_schedule_kind(
             Utc::now() + Duration::seconds(30),
@@ -503,7 +503,7 @@ mod tests {
     #[test]
     fn format_schedule_after_delay_always_shows_countdown() {
         // Task scheduled with delay should always show countdown
-        use queue_lib::ScheduleKind;
+        use queue::ScheduleKind;
 
         let task = make_task_with_schedule_kind(
             Utc::now() + Duration::hours(2),

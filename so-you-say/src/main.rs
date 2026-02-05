@@ -11,8 +11,8 @@ use biscuit_speaks::{
 };
 use clap::{CommandFactory, Parser, ValueEnum};
 use clap_complete::CompleteEnv;
-use darkmatter_lib::markdown::Markdown;
-use darkmatter_lib::markdown::output::terminal::{TerminalOptions, for_terminal};
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 use inquire::Select;
 use owo_colors::OwoColorize;
 

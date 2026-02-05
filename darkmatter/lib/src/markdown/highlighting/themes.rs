@@ -43,7 +43,7 @@ pub enum ColorMode {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::highlighting::{ThemePair, ColorMode};
+/// use darkmatter::markdown::highlighting::{ThemePair, ColorMode};
 ///
 /// let theme = ThemePair::Github;
 /// let desc = theme.description(ColorMode::Dark);
@@ -118,7 +118,7 @@ impl ThemePair {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::highlighting::ThemePair;
+    /// use darkmatter::markdown::highlighting::ThemePair;
     ///
     /// assert_eq!(ThemePair::from_str_or_default("github"), ThemePair::Github);
     /// assert_eq!(ThemePair::from_str_or_default("unknown"), ThemePair::OneHalf);
@@ -132,7 +132,7 @@ impl ThemePair {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::highlighting::ThemePair;
+    /// use darkmatter::markdown::highlighting::ThemePair;
     ///
     /// assert_eq!(ThemePair::Github.kebab_name(), "github");
     /// assert_eq!(ThemePair::OneHalf.kebab_name(), "one-half");
@@ -157,7 +157,7 @@ impl ThemePair {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::highlighting::{ThemePair, ColorMode};
+    /// use darkmatter::markdown::highlighting::{ThemePair, ColorMode};
     ///
     /// let desc = ThemePair::Github.description(ColorMode::Dark);
     /// assert_eq!(desc, "GitHub's dark mode theme with blue accents");
@@ -324,7 +324,7 @@ fn code_theme_lookup() -> &'static HashMap<ThemePair, ThemePair> {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::highlighting::{ThemePair, get_code_theme_for_prose};
+/// use darkmatter::markdown::highlighting::{ThemePair, get_code_theme_for_prose};
 ///
 /// assert_eq!(get_code_theme_for_prose(ThemePair::OneHalf), ThemePair::Monokai);
 /// assert_eq!(get_code_theme_for_prose(ThemePair::Base16Ocean), ThemePair::Github);
@@ -344,7 +344,7 @@ pub fn get_code_theme_for_prose(prose_theme: ThemePair) -> ThemePair {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::highlighting::detect_prose_theme;
+/// use darkmatter::markdown::highlighting::detect_prose_theme;
 /// // When THEME is not set, returns default
 /// let theme = detect_prose_theme();
 /// ```
@@ -371,7 +371,7 @@ pub fn detect_prose_theme() -> ThemePair {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::highlighting::{detect_code_theme, ThemePair};
+/// use darkmatter::markdown::highlighting::{detect_code_theme, ThemePair};
 /// // Derives code theme from prose theme
 /// let code_theme = detect_code_theme(ThemePair::OneHalf);
 /// ```
@@ -403,7 +403,7 @@ pub fn detect_code_theme(prose_theme: ThemePair) -> ThemePair {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::highlighting::detect_color_mode;
+/// use darkmatter::markdown::highlighting::detect_color_mode;
 /// let mode = detect_color_mode();
 /// ```
 pub fn detect_color_mode() -> ColorMode {

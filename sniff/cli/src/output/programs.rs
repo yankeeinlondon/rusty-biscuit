@@ -1,9 +1,9 @@
 //! Programs section output formatting (markdown and JSON).
 
-use darkmatter_lib::markdown::output::terminal::{for_terminal, TerminalOptions};
-use darkmatter_lib::markdown::Markdown;
-use darkmatter_lib::render::link::Link;
-use sniff_lib::programs::ProgramsInfo;
+use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
+use darkmatter::markdown::Markdown;
+use darkmatter::render::link::Link;
+use sniff::programs::{ExecutableSource, ProgramsInfo};
 
 use super::OutputFilter;
 
@@ -31,24 +31,28 @@ fn name_link(name: &str, website: &str) -> String {
     Link::new(display, website).to_markdown()
 }
 
+fn version_allowed(include_versions: bool, source: Option<ExecutableSource>) -> bool {
+    include_versions && matches!(source, Some(ExecutableSource::Path))
+}
+
 fn collect_program_entries(
     programs: &ProgramsInfo,
     filter: OutputFilter,
+    include_versions: bool,
 ) -> Vec<ProgramTableEntry> {
-    use sniff_lib::programs::ProgramMetadata;
+    use sniff::programs::ProgramMetadata;
     use strum::IntoEnumIterator;
 
     let mut entries = Vec::new();
 
     match filter {
         OutputFilter::Programs | OutputFilter::Editors => {
-            for editor in sniff_lib::programs::Editor::iter() {
-                let installed = programs.editors.is_installed(editor);
-                let path = programs
-                    .editors
-                    .path(editor)
-                    .map(|p| p.display().to_string());
-                let version = if installed {
+            for editor in sniff::programs::Editor::iter() {
+                let path_info = programs.editors.path_with_source(editor);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.display().to_string());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(include_versions, source) {
                     programs.editors.version(editor).ok()
                 } else {
                     None
@@ -72,13 +76,12 @@ fn collect_program_entries(
 
     match filter {
         OutputFilter::Programs | OutputFilter::Utilities => {
-            for util in sniff_lib::programs::Utility::iter() {
-                let installed = programs.utilities.is_installed(util);
-                let path = programs
-                    .utilities
-                    .path(util)
-                    .map(|p| p.display().to_string());
-                let version = if installed {
+            for util in sniff::programs::Utility::iter() {
+                let path_info = programs.utilities.path_with_source(util);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.display().to_string());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(include_versions, source) {
                     programs.utilities.version(util).ok()
                 } else {
                     None
@@ -102,13 +105,12 @@ fn collect_program_entries(
 
     match filter {
         OutputFilter::Programs | OutputFilter::LanguagePackageManagers => {
-            for pm in sniff_lib::programs::LanguagePackageManager::iter() {
-                let installed = programs.language_package_managers.is_installed(pm);
-                let path = programs
-                    .language_package_managers
-                    .path(pm)
-                    .map(|p| p.display().to_string());
-                let version = if installed {
+            for pm in sniff::programs::LanguagePackageManager::iter() {
+                let path_info = programs.language_package_managers.path_with_source(pm);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.display().to_string());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(include_versions, source) {
                     programs.language_package_managers.version(pm).ok()
                 } else {
                     None
@@ -132,13 +134,12 @@ fn collect_program_entries(
 
     match filter {
         OutputFilter::Programs | OutputFilter::OsPackageManagers => {
-            for pm in sniff_lib::programs::OsPackageManager::iter() {
-                let installed = programs.os_package_managers.is_installed(pm);
-                let path = programs
-                    .os_package_managers
-                    .path(pm)
-                    .map(|p| p.display().to_string());
-                let version = if installed {
+            for pm in sniff::programs::OsPackageManager::iter() {
+                let path_info = programs.os_package_managers.path_with_source(pm);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.display().to_string());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(include_versions, source) {
                     programs.os_package_managers.version(pm).ok()
                 } else {
                     None
@@ -162,13 +163,12 @@ fn collect_program_entries(
 
     match filter {
         OutputFilter::Programs | OutputFilter::TtsClients => {
-            for client in sniff_lib::programs::TtsClient::iter() {
-                let installed = programs.tts_clients.is_installed(client);
-                let path = programs
-                    .tts_clients
-                    .path(client)
-                    .map(|p| p.display().to_string());
-                let version = if installed {
+            for client in sniff::programs::TtsClient::iter() {
+                let path_info = programs.tts_clients.path_with_source(client);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.display().to_string());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(include_versions, source) {
                     programs.tts_clients.version(client).ok()
                 } else {
                     None
@@ -192,13 +192,12 @@ fn collect_program_entries(
 
     match filter {
         OutputFilter::Programs | OutputFilter::TerminalApps => {
-            for app in sniff_lib::programs::TerminalApp::iter() {
-                let installed = programs.terminal_apps.is_installed(app);
-                let path = programs
-                    .terminal_apps
-                    .path(app)
-                    .map(|p| p.display().to_string());
-                let version = if installed {
+            for app in sniff::programs::TerminalApp::iter() {
+                let path_info = programs.terminal_apps.path_with_source(app);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.display().to_string());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(include_versions, source) {
                     programs.terminal_apps.version(app).ok()
                 } else {
                     None
@@ -222,13 +221,12 @@ fn collect_program_entries(
 
     match filter {
         OutputFilter::Programs | OutputFilter::HeadlessAudio => {
-            for player in sniff_lib::programs::HeadlessAudio::iter() {
-                let installed = programs.headless_audio.is_installed(player);
-                let path = programs
-                    .headless_audio
-                    .path(player)
-                    .map(|p| p.display().to_string());
-                let version = if installed {
+            for player in sniff::programs::HeadlessAudio::iter() {
+                let path_info = programs.headless_audio.path_with_source(player);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.display().to_string());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(include_versions, source) {
                     programs.headless_audio.version(player).ok()
                 } else {
                     None
@@ -249,13 +247,12 @@ fn collect_program_entries(
 
     match filter {
         OutputFilter::Programs | OutputFilter::AiClients => {
-            for client in sniff_lib::programs::AiCli::iter() {
-                let installed = programs.ai_clients.is_installed(client);
-                let path = programs
-                    .ai_clients
-                    .path(client)
-                    .map(|p| p.display().to_string());
-                let version = if installed {
+            for client in sniff::programs::AiCli::iter() {
+                let path_info = programs.ai_clients.path_with_source(client);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.display().to_string());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(include_versions, source) {
                     programs.ai_clients.version(client).ok()
                 } else {
                     None
@@ -281,7 +278,8 @@ fn collect_program_entries(
 }
 
 pub fn print_programs_markdown(programs: &ProgramsInfo, verbose: u8, filter: OutputFilter) {
-    let entries = collect_program_entries(programs, filter);
+    let include_versions = verbose > 1;
+    let entries = collect_program_entries(programs, filter, include_versions);
     let mut headers = vec!["Name", "Installed", "Description"];
 
     if verbose > 0 {
@@ -356,7 +354,7 @@ pub fn print_programs_json(
     format: &str,
 ) -> serde_json::Result<()> {
     use serde_json::json;
-    use sniff_lib::programs::ProgramMetadata;
+    use sniff::programs::ProgramMetadata;
 
     // Simple format: backward-compatible serialization
     if format != "full" {
@@ -404,10 +402,12 @@ pub fn print_programs_json(
     match filter {
         OutputFilter::Programs | OutputFilter::Editors => {
             use strum::IntoEnumIterator;
-            for editor in sniff_lib::programs::Editor::iter() {
-                let installed = programs.editors.is_installed(editor);
-                let path = programs.editors.path(editor);
-                let version = if installed {
+            for editor in sniff::programs::Editor::iter() {
+                let path_info = programs.editors.path_with_source(editor);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.clone());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(true, source) {
                     programs.editors.version(editor).ok()
                 } else {
                     None
@@ -433,10 +433,12 @@ pub fn print_programs_json(
     match filter {
         OutputFilter::Programs | OutputFilter::Utilities => {
             use strum::IntoEnumIterator;
-            for util in sniff_lib::programs::Utility::iter() {
-                let installed = programs.utilities.is_installed(util);
-                let path = programs.utilities.path(util);
-                let version = if installed {
+            for util in sniff::programs::Utility::iter() {
+                let path_info = programs.utilities.path_with_source(util);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.clone());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(true, source) {
                     programs.utilities.version(util).ok()
                 } else {
                     None
@@ -462,10 +464,12 @@ pub fn print_programs_json(
     match filter {
         OutputFilter::Programs | OutputFilter::LanguagePackageManagers => {
             use strum::IntoEnumIterator;
-            for pm in sniff_lib::programs::LanguagePackageManager::iter() {
-                let installed = programs.language_package_managers.is_installed(pm);
-                let path = programs.language_package_managers.path(pm);
-                let version = if installed {
+            for pm in sniff::programs::LanguagePackageManager::iter() {
+                let path_info = programs.language_package_managers.path_with_source(pm);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.clone());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(true, source) {
                     programs.language_package_managers.version(pm).ok()
                 } else {
                     None
@@ -491,10 +495,12 @@ pub fn print_programs_json(
     match filter {
         OutputFilter::Programs | OutputFilter::OsPackageManagers => {
             use strum::IntoEnumIterator;
-            for pm in sniff_lib::programs::OsPackageManager::iter() {
-                let installed = programs.os_package_managers.is_installed(pm);
-                let path = programs.os_package_managers.path(pm);
-                let version = if installed {
+            for pm in sniff::programs::OsPackageManager::iter() {
+                let path_info = programs.os_package_managers.path_with_source(pm);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.clone());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(true, source) {
                     programs.os_package_managers.version(pm).ok()
                 } else {
                     None
@@ -520,10 +526,12 @@ pub fn print_programs_json(
     match filter {
         OutputFilter::Programs | OutputFilter::TtsClients => {
             use strum::IntoEnumIterator;
-            for client in sniff_lib::programs::TtsClient::iter() {
-                let installed = programs.tts_clients.is_installed(client);
-                let path = programs.tts_clients.path(client);
-                let version = if installed {
+            for client in sniff::programs::TtsClient::iter() {
+                let path_info = programs.tts_clients.path_with_source(client);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.clone());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(true, source) {
                     programs.tts_clients.version(client).ok()
                 } else {
                     None
@@ -549,10 +557,12 @@ pub fn print_programs_json(
     match filter {
         OutputFilter::Programs | OutputFilter::TerminalApps => {
             use strum::IntoEnumIterator;
-            for app in sniff_lib::programs::TerminalApp::iter() {
-                let installed = programs.terminal_apps.is_installed(app);
-                let path = programs.terminal_apps.path(app);
-                let version = if installed {
+            for app in sniff::programs::TerminalApp::iter() {
+                let path_info = programs.terminal_apps.path_with_source(app);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.clone());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(true, source) {
                     programs.terminal_apps.version(app).ok()
                 } else {
                     None
@@ -578,10 +588,12 @@ pub fn print_programs_json(
     match filter {
         OutputFilter::Programs | OutputFilter::HeadlessAudio => {
             use strum::IntoEnumIterator;
-            for player in sniff_lib::programs::HeadlessAudio::iter() {
-                let installed = programs.headless_audio.is_installed(player);
-                let path = programs.headless_audio.path(player);
-                let version = if installed {
+            for player in sniff::programs::HeadlessAudio::iter() {
+                let path_info = programs.headless_audio.path_with_source(player);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.clone());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(true, source) {
                     programs.headless_audio.version(player).ok()
                 } else {
                     None
@@ -607,10 +619,12 @@ pub fn print_programs_json(
     match filter {
         OutputFilter::Programs | OutputFilter::AiClients => {
             use strum::IntoEnumIterator;
-            for client in sniff_lib::programs::AiCli::iter() {
-                let installed = programs.ai_clients.is_installed(client);
-                let path = programs.ai_clients.path(client);
-                let version = if installed {
+            for client in sniff::programs::AiCli::iter() {
+                let path_info = programs.ai_clients.path_with_source(client);
+                let installed = path_info.is_some();
+                let path = path_info.as_ref().map(|(p, _)| p.clone());
+                let source = path_info.as_ref().map(|(_, source)| *source);
+                let version = if version_allowed(true, source) {
                     programs.ai_clients.version(client).ok()
                 } else {
                     None

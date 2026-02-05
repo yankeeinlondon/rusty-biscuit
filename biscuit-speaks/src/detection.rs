@@ -8,7 +8,7 @@
 
 use std::sync::OnceLock;
 
-use sniff_lib::programs::InstalledTtsClients;
+use sniff::programs::InstalledTtsClients;
 
 use crate::types::{CloudTtsProvider, HostTtsProvider, TtsFailoverStrategy, TtsProvider};
 
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_build_available_provider_stack_filters() {
-        use sniff_lib::programs::TtsClient;
+        use sniff::programs::TtsClient;
 
         // Create a mock installed clients with only Say available
         let installed = InstalledTtsClients::default().with_client(TtsClient::Say);

@@ -241,7 +241,7 @@ fn write_cache_atomically(
 // Cache Population Functions
 // ============================================================================
 
-use sniff_lib::programs::InstalledTtsClients;
+use sniff::programs::InstalledTtsClients;
 
 use crate::providers::cloud::ElevenLabsProvider;
 use crate::providers::host::{

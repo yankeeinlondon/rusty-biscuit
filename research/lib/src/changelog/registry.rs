@@ -7,7 +7,7 @@
 //! ## Examples
 //!
 //! ```rust,no_run
-//! use research_lib::changelog::registry::fetch_registry_versions;
+//! use research::changelog::registry::fetch_registry_versions;
 //! use reqwest::Client;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -50,7 +50,7 @@ use std::time::Duration;
 /// ## Examples
 ///
 /// ```rust,no_run
-/// # use research_lib::changelog::registry::fetch_registry_versions;
+/// # use research::changelog::registry::fetch_registry_versions;
 /// # use reqwest::Client;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = Client::new();
@@ -97,7 +97,7 @@ pub async fn fetch_registry_versions(
 /// ## Examples
 ///
 /// ```rust,no_run
-/// # use research_lib::changelog::registry::fetch_crates_io_versions;
+/// # use research::changelog::registry::fetch_crates_io_versions;
 /// # use reqwest::Client;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = Client::new();
@@ -175,7 +175,7 @@ pub async fn fetch_crates_io_versions(
 /// ## Examples
 ///
 /// ```rust,no_run
-/// # use research_lib::changelog::registry::fetch_npm_versions;
+/// # use research::changelog::registry::fetch_npm_versions;
 /// # use reqwest::Client;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = Client::new();
@@ -258,7 +258,7 @@ pub async fn fetch_npm_versions(
 /// ## Examples
 ///
 /// ```rust,no_run
-/// # use research_lib::changelog::registry::fetch_pypi_versions;
+/// # use research::changelog::registry::fetch_pypi_versions;
 /// # use reqwest::Client;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = Client::new();

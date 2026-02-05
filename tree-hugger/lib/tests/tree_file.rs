@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use tempfile::TempDir;
-use tree_hugger_lib::{ProgrammingLanguage, TreeFile, TreeHuggerError};
+use tree_hugger::{ProgrammingLanguage, TreeFile, TreeHuggerError};
 
 #[test]
 fn parses_all_fixtures() -> Result<(), TreeHuggerError> {
@@ -148,7 +148,7 @@ fn extracts_rust_function_return_type() -> Result<(), TreeHuggerError> {
 
     let greet = symbols
         .iter()
-        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "greet" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find greet function");
 
     // Check return type
@@ -179,7 +179,7 @@ fn extracts_rust_doc_comments() -> Result<(), TreeHuggerError> {
 
     let greet = symbols
         .iter()
-        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "greet" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find greet function");
 
     let doc = greet.doc_comment.as_ref().expect("should have doc comment");
@@ -199,7 +199,7 @@ fn extracts_typescript_function_signature() -> Result<(), TreeHuggerError> {
 
     let greet = symbols
         .iter()
-        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "greet" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find greet function");
 
     let sig = greet.signature.as_ref().expect("should have signature");
@@ -241,7 +241,7 @@ fn extracts_typescript_doc_comments_through_export() -> Result<(), TreeHuggerErr
 
     let greet = symbols
         .iter()
-        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "greet" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find greet function");
 
     let doc = greet
@@ -264,7 +264,7 @@ fn extracts_python_function_signature() -> Result<(), TreeHuggerError> {
 
     let greet = symbols
         .iter()
-        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "greet" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find greet function");
 
     let sig = greet.signature.as_ref().expect("should have signature");
@@ -312,7 +312,7 @@ fn extracts_go_function_signature() -> Result<(), TreeHuggerError> {
     // Check function return type
     let greet = symbols
         .iter()
-        .find(|s| s.name == "Greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "Greet" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find Greet function");
 
     let sig = greet.signature.as_ref().expect("should have signature");
@@ -325,7 +325,7 @@ fn extracts_go_function_signature() -> Result<(), TreeHuggerError> {
     // Check method parameters (should NOT include receiver)
     let method_greet = symbols
         .iter()
-        .find(|s| s.name == "Greet" && s.kind == tree_hugger_lib::SymbolKind::Method)
+        .find(|s| s.name == "Greet" && s.kind == tree_hugger::SymbolKind::Method)
         .expect("should find Greet method");
 
     let sig = method_greet
@@ -350,7 +350,7 @@ fn extracts_go_doc_comments() -> Result<(), TreeHuggerError> {
 
     let greet = symbols
         .iter()
-        .find(|s| s.name == "Greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "Greet" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find Greet function");
 
     let doc = greet.doc_comment.as_ref().expect("should have doc comment");
@@ -579,7 +579,7 @@ fn extracts_rust_struct_fields() -> Result<(), TreeHuggerError> {
 
     let greeter = symbols
         .iter()
-        .find(|s| s.name == "Greeter" && s.kind == tree_hugger_lib::SymbolKind::Type)
+        .find(|s| s.name == "Greeter" && s.kind == tree_hugger::SymbolKind::Type)
         .expect("should find Greeter struct");
 
     let meta = greeter
@@ -612,7 +612,7 @@ fn extracts_rust_enum_variants() -> Result<(), TreeHuggerError> {
     // Check simple enum (now correctly identified as Enum, not Type)
     let message = symbols
         .iter()
-        .find(|s| s.name == "Message" && s.kind == tree_hugger_lib::SymbolKind::Enum)
+        .find(|s| s.name == "Message" && s.kind == tree_hugger::SymbolKind::Enum)
         .expect("should find Message enum");
 
     let meta = message
@@ -659,7 +659,7 @@ fn extracts_rust_generic_type_parameters() -> Result<(), TreeHuggerError> {
 
     let container = symbols
         .iter()
-        .find(|s| s.name == "Container" && s.kind == tree_hugger_lib::SymbolKind::Type)
+        .find(|s| s.name == "Container" && s.kind == tree_hugger::SymbolKind::Type)
         .expect("should find Container struct");
 
     let meta = container
@@ -687,7 +687,7 @@ fn extracts_rust_tuple_struct_fields() -> Result<(), TreeHuggerError> {
 
     let point = symbols
         .iter()
-        .find(|s| s.name == "Point" && s.kind == tree_hugger_lib::SymbolKind::Type)
+        .find(|s| s.name == "Point" && s.kind == tree_hugger::SymbolKind::Type)
         .expect("should find Point tuple struct");
 
     let meta = point
@@ -730,7 +730,7 @@ fn distinguishes_rust_struct_from_enum() -> Result<(), TreeHuggerError> {
         .expect("should find Point");
     assert_eq!(
         point.kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "Point struct should be SymbolKind::Type"
     );
 
@@ -741,7 +741,7 @@ fn distinguishes_rust_struct_from_enum() -> Result<(), TreeHuggerError> {
         .expect("should find Container");
     assert_eq!(
         container.kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "Container struct should be SymbolKind::Type"
     );
 
@@ -752,7 +752,7 @@ fn distinguishes_rust_struct_from_enum() -> Result<(), TreeHuggerError> {
         .expect("should find Message");
     assert_eq!(
         message.kind,
-        tree_hugger_lib::SymbolKind::Enum,
+        tree_hugger::SymbolKind::Enum,
         "Message enum should be SymbolKind::Enum, not Type"
     );
 
@@ -763,7 +763,7 @@ fn distinguishes_rust_struct_from_enum() -> Result<(), TreeHuggerError> {
         .expect("should find Result");
     assert_eq!(
         result.kind,
-        tree_hugger_lib::SymbolKind::Enum,
+        tree_hugger::SymbolKind::Enum,
         "Result enum should be SymbolKind::Enum, not Type"
     );
 
@@ -810,7 +810,7 @@ fn distinguishes_typescript_interface_from_enum() -> Result<(), TreeHuggerError>
         .expect("should find GreetingService");
     assert_eq!(
         greeting_service.kind,
-        tree_hugger_lib::SymbolKind::Interface,
+        tree_hugger::SymbolKind::Interface,
         "GreetingService should be SymbolKind::Interface"
     );
 
@@ -821,7 +821,7 @@ fn distinguishes_typescript_interface_from_enum() -> Result<(), TreeHuggerError>
         .expect("should find GreetFn");
     assert_eq!(
         greet_fn.kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "GreetFn type alias should be SymbolKind::Type"
     );
 
@@ -832,7 +832,7 @@ fn distinguishes_typescript_interface_from_enum() -> Result<(), TreeHuggerError>
         .expect("should find Status");
     assert_eq!(
         status.kind,
-        tree_hugger_lib::SymbolKind::Enum,
+        tree_hugger::SymbolKind::Enum,
         "Status enum should be SymbolKind::Enum, not Type"
     );
 
@@ -853,7 +853,7 @@ fn distinguishes_java_types() -> Result<(), TreeHuggerError> {
     assert!(point.is_some(), "should find Point class");
     assert_eq!(
         point.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "Java class should be SymbolKind::Type"
     );
 
@@ -862,7 +862,7 @@ fn distinguishes_java_types() -> Result<(), TreeHuggerError> {
     assert!(status.is_some(), "should find Status enum");
     assert_eq!(
         status.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Enum,
+        tree_hugger::SymbolKind::Enum,
         "Java enum should be SymbolKind::Enum"
     );
 
@@ -871,7 +871,7 @@ fn distinguishes_java_types() -> Result<(), TreeHuggerError> {
     assert!(person.is_some(), "should find Person record");
     assert_eq!(
         person.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "Java record should be SymbolKind::Type"
     );
 
@@ -888,7 +888,7 @@ fn distinguishes_c_types() -> Result<(), TreeHuggerError> {
     assert!(point.is_some(), "should find Point struct");
     assert_eq!(
         point.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "C struct should be SymbolKind::Type"
     );
 
@@ -897,7 +897,7 @@ fn distinguishes_c_types() -> Result<(), TreeHuggerError> {
     assert!(status.is_some(), "should find Status enum");
     assert_eq!(
         status.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Enum,
+        tree_hugger::SymbolKind::Enum,
         "C enum should be SymbolKind::Enum"
     );
 
@@ -906,7 +906,7 @@ fn distinguishes_c_types() -> Result<(), TreeHuggerError> {
     assert!(alias.is_some(), "should find PointAlias typedef");
     assert_eq!(
         alias.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "C typedef should be SymbolKind::Type"
     );
 
@@ -923,7 +923,7 @@ fn distinguishes_cpp_types() -> Result<(), TreeHuggerError> {
     assert!(point.is_some(), "should find Point struct");
     assert_eq!(
         point.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "C++ struct should be SymbolKind::Type"
     );
 
@@ -932,7 +932,7 @@ fn distinguishes_cpp_types() -> Result<(), TreeHuggerError> {
     assert!(greeter.is_some(), "should find Greeter class");
     assert_eq!(
         greeter.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "C++ class should be SymbolKind::Type"
     );
 
@@ -941,7 +941,7 @@ fn distinguishes_cpp_types() -> Result<(), TreeHuggerError> {
     assert!(status.is_some(), "should find Status enum");
     assert_eq!(
         status.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Enum,
+        tree_hugger::SymbolKind::Enum,
         "C++ enum should be SymbolKind::Enum"
     );
 
@@ -950,7 +950,7 @@ fn distinguishes_cpp_types() -> Result<(), TreeHuggerError> {
     assert!(color.is_some(), "should find Color enum class");
     assert_eq!(
         color.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Enum,
+        tree_hugger::SymbolKind::Enum,
         "C++ enum class should be SymbolKind::Enum"
     );
 
@@ -967,7 +967,7 @@ fn distinguishes_csharp_types() -> Result<(), TreeHuggerError> {
     assert!(point.is_some(), "should find Point struct");
     assert_eq!(
         point.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "C# struct should be SymbolKind::Type"
     );
 
@@ -976,7 +976,7 @@ fn distinguishes_csharp_types() -> Result<(), TreeHuggerError> {
     assert!(greeter.is_some(), "should find Greeter class");
     assert_eq!(
         greeter.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Class,
+        tree_hugger::SymbolKind::Class,
         "C# class should be SymbolKind::Class"
     );
 
@@ -985,7 +985,7 @@ fn distinguishes_csharp_types() -> Result<(), TreeHuggerError> {
     assert!(service.is_some(), "should find IGreetingService interface");
     assert_eq!(
         service.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Interface,
+        tree_hugger::SymbolKind::Interface,
         "C# interface should be SymbolKind::Interface"
     );
 
@@ -994,7 +994,7 @@ fn distinguishes_csharp_types() -> Result<(), TreeHuggerError> {
     assert!(status.is_some(), "should find Status enum");
     assert_eq!(
         status.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Enum,
+        tree_hugger::SymbolKind::Enum,
         "C# enum should be SymbolKind::Enum"
     );
 
@@ -1003,7 +1003,7 @@ fn distinguishes_csharp_types() -> Result<(), TreeHuggerError> {
     assert!(person.is_some(), "should find Person record");
     assert_eq!(
         person.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "C# record should be SymbolKind::Type"
     );
 
@@ -1024,7 +1024,7 @@ fn distinguishes_swift_types() -> Result<(), TreeHuggerError> {
     assert!(point.is_some(), "should find Point struct");
     assert_eq!(
         point.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "Swift struct should be SymbolKind::Type"
     );
 
@@ -1033,7 +1033,7 @@ fn distinguishes_swift_types() -> Result<(), TreeHuggerError> {
     assert!(greeter.is_some(), "should find Greeter class");
     assert_eq!(
         greeter.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "Swift class should be SymbolKind::Type (grammar limitation)"
     );
 
@@ -1042,7 +1042,7 @@ fn distinguishes_swift_types() -> Result<(), TreeHuggerError> {
     assert!(status.is_some(), "should find Status enum");
     assert_eq!(
         status.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "Swift enum should be SymbolKind::Type (grammar limitation)"
     );
 
@@ -1051,7 +1051,7 @@ fn distinguishes_swift_types() -> Result<(), TreeHuggerError> {
     assert!(service.is_some(), "should find GreetingService protocol");
     assert_eq!(
         service.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Interface,
+        tree_hugger::SymbolKind::Interface,
         "Swift protocol should be SymbolKind::Interface"
     );
 
@@ -1068,7 +1068,7 @@ fn distinguishes_scala_types() -> Result<(), TreeHuggerError> {
     assert!(point.is_some(), "should find Point class");
     assert_eq!(
         point.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Class,
+        tree_hugger::SymbolKind::Class,
         "Scala class should be SymbolKind::Class"
     );
 
@@ -1077,7 +1077,7 @@ fn distinguishes_scala_types() -> Result<(), TreeHuggerError> {
     assert!(greeter.is_some(), "should find Greeter trait");
     assert_eq!(
         greeter.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Trait,
+        tree_hugger::SymbolKind::Trait,
         "Scala trait should be SymbolKind::Trait"
     );
 
@@ -1089,7 +1089,7 @@ fn distinguishes_scala_types() -> Result<(), TreeHuggerError> {
     );
     assert_eq!(
         default_greeter.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Module,
+        tree_hugger::SymbolKind::Module,
         "Scala object should be SymbolKind::Module"
     );
 
@@ -1098,7 +1098,7 @@ fn distinguishes_scala_types() -> Result<(), TreeHuggerError> {
     assert!(status.is_some(), "should find Status enum");
     assert_eq!(
         status.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Enum,
+        tree_hugger::SymbolKind::Enum,
         "Scala 3 enum should be SymbolKind::Enum"
     );
 
@@ -1115,7 +1115,7 @@ fn distinguishes_php_types() -> Result<(), TreeHuggerError> {
     assert!(greeter.is_some(), "should find Greeter class");
     assert_eq!(
         greeter.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Class,
+        tree_hugger::SymbolKind::Class,
         "PHP class should be SymbolKind::Class"
     );
 
@@ -1124,7 +1124,7 @@ fn distinguishes_php_types() -> Result<(), TreeHuggerError> {
     assert!(service.is_some(), "should find GreetingService interface");
     assert_eq!(
         service.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Interface,
+        tree_hugger::SymbolKind::Interface,
         "PHP interface should be SymbolKind::Interface"
     );
 
@@ -1133,7 +1133,7 @@ fn distinguishes_php_types() -> Result<(), TreeHuggerError> {
     assert!(greeting_trait.is_some(), "should find GreetingTrait trait");
     assert_eq!(
         greeting_trait.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Trait,
+        tree_hugger::SymbolKind::Trait,
         "PHP trait should be SymbolKind::Trait"
     );
 
@@ -1142,7 +1142,7 @@ fn distinguishes_php_types() -> Result<(), TreeHuggerError> {
     assert!(status.is_some(), "should find Status enum");
     assert_eq!(
         status.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Enum,
+        tree_hugger::SymbolKind::Enum,
         "PHP enum should be SymbolKind::Enum"
     );
 
@@ -1159,7 +1159,7 @@ fn distinguishes_go_types() -> Result<(), TreeHuggerError> {
     assert!(point.is_some(), "should find Point struct");
     assert_eq!(
         point.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "Go struct should be SymbolKind::Type"
     );
 
@@ -1169,7 +1169,7 @@ fn distinguishes_go_types() -> Result<(), TreeHuggerError> {
     assert!(service.is_some(), "should find GreetingService interface");
     assert_eq!(
         service.unwrap().kind,
-        tree_hugger_lib::SymbolKind::Type,
+        tree_hugger::SymbolKind::Type,
         "Go interface should be SymbolKind::Type (Go uses 'type' for all)"
     );
 
@@ -1262,7 +1262,7 @@ fn extracts_c_type_metadata() -> Result<(), TreeHuggerError> {
     // Struct should have fields
     let point = symbols
         .iter()
-        .find(|s| s.name == "Point" && s.kind == tree_hugger_lib::SymbolKind::Type)
+        .find(|s| s.name == "Point" && s.kind == tree_hugger::SymbolKind::Type)
         .expect("should find Point struct");
     let meta = point
         .type_metadata
@@ -1631,7 +1631,7 @@ fn extracts_php_function_signature() -> Result<(), TreeHuggerError> {
 
     let greet = symbols
         .iter()
-        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "greet" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find greet function");
 
     let sig = greet.signature.as_ref().expect("should have signature");
@@ -1669,7 +1669,7 @@ fn extracts_java_function_signature() -> Result<(), TreeHuggerError> {
 
     let greet = symbols
         .iter()
-        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Method)
+        .find(|s| s.name == "greet" && s.kind == tree_hugger::SymbolKind::Method)
         .expect("should find greet method");
 
     let sig = greet.signature.as_ref().expect("should have signature");
@@ -1699,7 +1699,7 @@ fn extracts_c_function_signature() -> Result<(), TreeHuggerError> {
 
     let add = symbols
         .iter()
-        .find(|s| s.name == "add" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "add" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find add function");
 
     let sig = add.signature.as_ref().expect("should have signature");
@@ -1729,7 +1729,7 @@ fn extracts_cpp_function_signature() -> Result<(), TreeHuggerError> {
 
     let add = symbols
         .iter()
-        .find(|s| s.name == "add" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "add" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find add function");
 
     let sig = add.signature.as_ref().expect("should have signature");
@@ -1755,7 +1755,7 @@ fn extracts_csharp_function_signature() -> Result<(), TreeHuggerError> {
 
     let greet = symbols
         .iter()
-        .find(|s| s.name == "Greet" && s.kind == tree_hugger_lib::SymbolKind::Method)
+        .find(|s| s.name == "Greet" && s.kind == tree_hugger::SymbolKind::Method)
         .expect("should find Greet method");
 
     let sig = greet.signature.as_ref().expect("should have signature");
@@ -1785,7 +1785,7 @@ fn extracts_swift_function_signature() -> Result<(), TreeHuggerError> {
 
     let greet = symbols
         .iter()
-        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "greet" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find greet function");
 
     let sig = greet.signature.as_ref().expect("should have signature");
@@ -1815,7 +1815,7 @@ fn extracts_scala_function_signature() -> Result<(), TreeHuggerError> {
 
     let greet = symbols
         .iter()
-        .find(|s| s.name == "greet" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "greet" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find greet function");
 
     let sig = greet.signature.as_ref().expect("should have signature");
@@ -1903,7 +1903,7 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
         .iter()
         .find(|s| {
             s.name == "greet"
-                && s.kind == tree_hugger_lib::SymbolKind::Function
+                && s.kind == tree_hugger::SymbolKind::Function
                 && s.range.start_line == 32
         })
         .expect("should find public greet method");
@@ -1914,7 +1914,7 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
         .expect("should have signature");
     assert_eq!(
         sig.visibility,
-        Some(tree_hugger_lib::Visibility::Public),
+        Some(tree_hugger::Visibility::Public),
         "TypeScript public method should have Public visibility"
     );
 
@@ -1930,7 +1930,7 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
         .expect("should have signature");
     assert_eq!(
         sig.visibility,
-        Some(tree_hugger_lib::Visibility::Protected),
+        Some(tree_hugger::Visibility::Protected),
         "TypeScript protected method should have Protected visibility"
     );
 
@@ -1946,7 +1946,7 @@ fn extracts_typescript_visibility_modifiers() -> Result<(), TreeHuggerError> {
         .expect("should have signature");
     assert_eq!(
         sig.visibility,
-        Some(tree_hugger_lib::Visibility::Private),
+        Some(tree_hugger::Visibility::Private),
         "TypeScript private method should have Private visibility"
     );
 
@@ -1964,7 +1964,7 @@ fn infers_csharp_interface_method_visibility() -> Result<(), TreeHuggerError> {
         .iter()
         .find(|s| {
             s.name == "Greet"
-                && s.kind == tree_hugger_lib::SymbolKind::Method
+                && s.kind == tree_hugger::SymbolKind::Method
                 && s.range.start_line == 19
         })
         .expect("should find Greet method in interface");
@@ -1975,7 +1975,7 @@ fn infers_csharp_interface_method_visibility() -> Result<(), TreeHuggerError> {
         .expect("interface method should have signature");
     assert_eq!(
         sig.visibility,
-        Some(tree_hugger_lib::Visibility::Public),
+        Some(tree_hugger::Visibility::Public),
         "C# interface method should have inferred Public visibility"
     );
 
@@ -1993,7 +1993,7 @@ fn infers_java_interface_method_visibility() -> Result<(), TreeHuggerError> {
         .iter()
         .find(|s| {
             s.name == "greet"
-                && s.kind == tree_hugger_lib::SymbolKind::Method
+                && s.kind == tree_hugger::SymbolKind::Method
                 && s.range.start_line == 18
         })
         .expect("should find greet method in interface");
@@ -2004,7 +2004,7 @@ fn infers_java_interface_method_visibility() -> Result<(), TreeHuggerError> {
         .expect("interface method should have signature");
     assert_eq!(
         sig.visibility,
-        Some(tree_hugger_lib::Visibility::Public),
+        Some(tree_hugger::Visibility::Public),
         "Java interface method should have inferred Public visibility"
     );
 
@@ -2026,7 +2026,7 @@ fn extracts_typescript_arrow_function_signatures() -> Result<(), TreeHuggerError
         .iter()
         .find(|s| {
             s.name == "greet"
-                && s.kind == tree_hugger_lib::SymbolKind::Function
+                && s.kind == tree_hugger::SymbolKind::Function
                 && s.range.start_line == 2
         })
         .expect("should find greet arrow function");
@@ -2058,7 +2058,7 @@ fn extracts_typescript_arrow_function_with_multiple_params() -> Result<(), TreeH
 
     let add = symbols
         .iter()
-        .find(|s| s.name == "add" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "add" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find add arrow function");
 
     let sig = add.signature.as_ref().expect("should have signature");
@@ -2079,7 +2079,7 @@ fn extracts_typescript_arrow_function_with_rest_params() -> Result<(), TreeHugge
 
     let sum = symbols
         .iter()
-        .find(|s| s.name == "sum" && s.kind == tree_hugger_lib::SymbolKind::Function)
+        .find(|s| s.name == "sum" && s.kind == tree_hugger::SymbolKind::Function)
         .expect("should find sum arrow function");
 
     let sig = sum.signature.as_ref().expect("should have signature");
@@ -2104,7 +2104,7 @@ fn extracts_javascript_arrow_function_signatures() -> Result<(), TreeHuggerError
         .iter()
         .find(|s| {
             s.name == "greet"
-                && s.kind == tree_hugger_lib::SymbolKind::Function
+                && s.kind == tree_hugger::SymbolKind::Function
                 && s.range.start_line == 2
         })
         .expect("should find greet arrow function");

@@ -9,7 +9,7 @@
 //! ## Examples
 //!
 //! ```
-//! use darkmatter_lib::markdown::Markdown;
+//! use darkmatter::markdown::Markdown;
 //!
 //! let content = r#"---
 //! title: Hello

@@ -84,7 +84,7 @@ impl ScheduledTask {
     /// ## Examples
     ///
     /// ```
-    /// use queue_lib::{ScheduledTask, ExecutionTarget};
+    /// use queue::{ScheduledTask, ExecutionTarget};
     /// use chrono::Utc;
     ///
     /// let task = ScheduledTask::new(
@@ -120,7 +120,7 @@ impl ScheduledTask {
     /// ## Examples
     ///
     /// ```
-    /// use queue_lib::{ScheduledTask, ExecutionTarget, ScheduleKind};
+    /// use queue::{ScheduledTask, ExecutionTarget, ScheduleKind};
     /// use chrono::Utc;
     ///
     /// // Task scheduled at a specific time - will show "07:00" in WHEN column

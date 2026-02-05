@@ -36,7 +36,7 @@ impl Frontmatter {
     /// ## Examples
     ///
     /// ```
-    /// # use darkmatter_lib::markdown::Frontmatter;
+    /// # use darkmatter::markdown::Frontmatter;
     /// # use serde_json::json;
     /// let mut fm = Frontmatter::new();
     /// fm.insert("title", json!("Hello"));
@@ -65,7 +65,7 @@ impl Frontmatter {
     /// ## Examples
     ///
     /// ```
-    /// # use darkmatter_lib::markdown::{Frontmatter, MergeStrategy};
+    /// # use darkmatter::markdown::{Frontmatter, MergeStrategy};
     /// # use serde_json::json;
     /// let mut fm = Frontmatter::new();
     /// fm.insert("title", json!("Original")).unwrap();
@@ -115,7 +115,7 @@ impl Frontmatter {
     /// ## Examples
     ///
     /// ```
-    /// # use darkmatter_lib::markdown::Frontmatter;
+    /// # use darkmatter::markdown::Frontmatter;
     /// # use serde_json::json;
     /// let mut fm = Frontmatter::new();
     /// fm.insert("title", json!("My Document")).unwrap();

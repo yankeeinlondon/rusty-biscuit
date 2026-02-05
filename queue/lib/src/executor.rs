@@ -9,7 +9,7 @@
 //! ## Examples
 //!
 //! ```no_run
-//! use queue_lib::{ExecutionTarget, ScheduledTask, TaskEvent, TaskExecutor};
+//! use queue::{ExecutionTarget, ScheduledTask, TaskEvent, TaskExecutor};
 //! use tokio::sync::mpsc;
 //! use chrono::Utc;
 //!
@@ -101,7 +101,7 @@ impl TaskExecutor {
     /// ## Examples
     ///
     /// ```
-    /// use queue_lib::TaskExecutor;
+    /// use queue::TaskExecutor;
     /// use tokio::sync::mpsc;
     ///
     /// let (tx, _rx) = mpsc::channel(100);
@@ -149,7 +149,7 @@ impl TaskExecutor {
     /// ## Examples
     ///
     /// ```no_run
-    /// use queue_lib::{ExecutionTarget, ScheduledTask, TaskExecutor};
+    /// use queue::{ExecutionTarget, ScheduledTask, TaskExecutor};
     /// use tokio::sync::mpsc;
     /// use chrono::{Duration, Utc};
     ///

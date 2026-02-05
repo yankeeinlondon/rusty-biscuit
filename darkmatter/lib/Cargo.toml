@@ -1,5 +1,5 @@
 [package]
-name = "darkmatter-lib"
+name = "darkmatter"
 description = "Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML output."
 version = "0.1.0"
 edition = "2024"
@@ -10,7 +10,7 @@ keywords = ["markdown", "terminal", "syntax-highlighting", "mermaid", "themes"]
 categories = ["text-processing", "visualization"]
 
 [lib]
-name = "darkmatter_lib"
+name = "darkmatter"
 path = "src/lib.rs"
 
 [dependencies]

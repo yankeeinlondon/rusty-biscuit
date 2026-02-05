@@ -53,7 +53,7 @@ pub trait HistoryStore {
 /// ## Examples
 ///
 /// ```no_run
-/// use queue_lib::{JsonFileStore, HistoryStore, ScheduledTask, ExecutionTarget};
+/// use queue::{JsonFileStore, HistoryStore, ScheduledTask, ExecutionTarget};
 /// use chrono::Utc;
 ///
 /// let store = JsonFileStore::new("/tmp/test-history.jsonl".into());

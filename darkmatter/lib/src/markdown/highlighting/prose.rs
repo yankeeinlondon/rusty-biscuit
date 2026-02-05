@@ -17,8 +17,8 @@ use syntect::parsing::Scope;
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::highlighting::{ThemePair, ColorMode};
-/// use darkmatter_lib::markdown::highlighting::prose::ProseHighlighter;
+/// use darkmatter::markdown::highlighting::{ThemePair, ColorMode};
+/// use darkmatter::markdown::highlighting::prose::ProseHighlighter;
 ///
 /// let theme = ThemePair::Github;
 /// let color_mode = ColorMode::Dark;
@@ -36,7 +36,7 @@ impl<'a> ProseHighlighter<'a> {
     /// ## Examples
     ///
     /// ```ignore
-    /// use darkmatter_lib::markdown::highlighting::prose::ProseHighlighter;
+    /// use darkmatter::markdown::highlighting::prose::ProseHighlighter;
     ///
     /// let highlighter = ProseHighlighter::new(&syntect_theme);
     /// ```

@@ -26,7 +26,7 @@ sfx-motion = []     # whooshes, air sounds (~5MB, 7 files)
 [dependencies]
 infer = "0.19"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
-sniff-lib = { path = "../../sniff/lib" }
+sniff = { path = "../../sniff/lib" }
 thiserror = "2.0"
 tokio = { version = "1", features = ["process", "io-util", "fs", "rt", "time", "sync"], optional = true }
 url = "2.5"

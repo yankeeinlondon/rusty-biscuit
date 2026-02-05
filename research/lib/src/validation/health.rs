@@ -213,7 +213,7 @@ const STANDARD_PROMPTS: &[(&str, &str)] = &[
 /// # Examples
 ///
 /// ```no_run
-/// use research_lib::validation::health::{research_health, ResearchType};
+/// use research::validation::health::{research_health, ResearchType};
 ///
 /// let health = research_health(ResearchType::Library, "pulldown-cmark")?;
 /// if health.ok {

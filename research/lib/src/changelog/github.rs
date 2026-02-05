@@ -42,7 +42,7 @@ struct GitHubError {
 /// ## Examples
 ///
 /// ```
-/// use research_lib::changelog::github::parse_github_url;
+/// use research::changelog::github::parse_github_url;
 ///
 /// let (owner, repo) = parse_github_url("https://github.com/rust-lang/rust").unwrap();
 /// assert_eq!(owner, "rust-lang");
@@ -122,7 +122,7 @@ pub fn parse_github_url(url: &str) -> Option<(String, String)> {
 ///
 /// ```rust,no_run
 /// use reqwest::Client;
-/// use research_lib::changelog::github::fetch_github_releases;
+/// use research::changelog::github::fetch_github_releases;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = Client::new();

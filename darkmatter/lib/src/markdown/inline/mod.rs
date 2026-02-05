@@ -20,7 +20,7 @@
 //!
 //! ```
 //! use pulldown_cmark::{Parser, Options};
-//! use darkmatter_lib::markdown::inline::{MarkProcessor, InlineEvent, InlineTag};
+//! use darkmatter::markdown::inline::{MarkProcessor, InlineEvent, InlineTag};
 //!
 //! let content = "This is ==highlighted== text.";
 //! let parser = Parser::new_ext(content, Options::ENABLE_STRIKETHROUGH);
@@ -77,7 +77,7 @@ use std::collections::VecDeque;
 ///
 /// ```
 /// use pulldown_cmark::Parser;
-/// use darkmatter_lib::markdown::inline::{MarkProcessor, InlineEvent, InlineTag};
+/// use darkmatter::markdown::inline::{MarkProcessor, InlineEvent, InlineTag};
 ///
 /// let parser = Parser::new("Hello ==world==!");
 /// let mut events = MarkProcessor::new(parser);
@@ -111,7 +111,7 @@ where
     ///
     /// ```
     /// use pulldown_cmark::Parser;
-    /// use darkmatter_lib::markdown::inline::MarkProcessor;
+    /// use darkmatter::markdown::inline::MarkProcessor;
     ///
     /// let parser = Parser::new("==highlighted==");
     /// let processor = MarkProcessor::new(parser);

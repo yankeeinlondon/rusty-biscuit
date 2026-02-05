@@ -119,11 +119,11 @@
 //!
 //! ## Library Usage
 //!
-//! The rendering functionality is provided by the [`darkmatter_lib`] crate.
-//! See [`darkmatter_lib::markdown`] for the core markdown processing API.
+//! The rendering functionality is provided by the [`darkmatter`] crate.
+//! See [`darkmatter::markdown`] for the core markdown processing API.
 //!
 //! ```rust,ignore
-//! use darkmatter_lib::markdown::{Markdown, TerminalOptions, write_terminal};
+//! use darkmatter::markdown::{Markdown, TerminalOptions, write_terminal};
 //!
 //! let md: Markdown = "# Hello\n\nWorld".into();
 //! let options = TerminalOptions::default();
@@ -139,7 +139,7 @@ mod cli {
     use clap::{ArgGroup, Parser};
     use clap_complete::Shell;
     use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
-    use darkmatter_lib::markdown::highlighting::ThemePair;
+    use darkmatter::markdown::highlighting::ThemePair;
     use std::path::{Path, PathBuf};
 
     /// Command-line interface for the darkmatter markdown renderer.
@@ -321,6 +321,6 @@ SHELL COMPLETIONS:
 }
 
 /// Parses a theme name string into ThemePair.
-fn parse_theme_name(s: &str) -> Result<darkmatter_lib::markdown::highlighting::ThemePair, String> {
-    darkmatter_lib::markdown::highlighting::ThemePair::try_from(s).map_err(|e| e.to_string())
+fn parse_theme_name(s: &str) -> Result<darkmatter::markdown::highlighting::ThemePair, String> {
+    darkmatter::markdown::highlighting::ThemePair::try_from(s).map_err(|e| e.to_string())
 }

@@ -12,20 +12,20 @@ default:
 # build library and CLI
 build *args="":
     @echo "Building ..."
-    @cargo build -p darkmatter-lib {{args}}
+    @cargo build -p darkmatter {{args}}
     @cargo build -p darkmatter-cli {{args}}
 
 # test library and CLI
 test *args="":
     @echo "Testing {{BOLD}}Library{{RESET}} code"
-    @cargo test -p darkmatter-lib {{args}}
+    @cargo test -p darkmatter {{args}}
     @echo ""
     @echo "Testing {{BOLD}}CLI{{RESET}} code"
     @cargo test -p darkmatter-cli {{args}}
 
 # lint with clippy
 lint *args="":
-    @cargo clippy -p darkmatter-lib -p darkmatter-cli {{args}}
+    @cargo clippy -p darkmatter -p darkmatter-cli {{args}}
 
 # install latest release version of CLI
 install *args="":
@@ -33,7 +33,7 @@ install *args="":
 
 # build and show the docs for the library code
 docs:
-    @cargo doc -p darkmatter-lib --open
+    @cargo doc -p darkmatter --open
 
 # run the debug release of the Darkmatter CLI
 cli *args="":

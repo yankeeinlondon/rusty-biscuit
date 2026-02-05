@@ -17,19 +17,19 @@ default:
 
 # Build the library and CLI
 build *args="":
-    cargo build -p claudine-lib -p claudine-cli {{args}}
+    cargo build -p claudine -p claudine-cli {{args}}
 
 # Test both library and CLI
 test:
-    cargo test -p claudine-lib -p claudine-cli
+    cargo test -p claudine -p claudine-cli
 
 # Lint both the library and CLI
 lint:
-    cargo clippy -p claudine-lib -p claudine-cli
+    cargo clippy -p claudine -p claudine-cli
 
 # Lint (and fix) both the library and CLI
 lint-fix *args="":
-    cargo clippy --fix -p claudine-lib -p claudine-cli {{args}}
+    cargo clippy --fix -p claudine -p claudine-cli {{args}}
 
 # Install the Claudine CLI
 install:
@@ -37,4 +37,4 @@ install:
 
 # Validate the source code without doing a full build
 check:
-    cargo check -p claudine-lib -p claudine-cli
+    cargo check -p claudine -p claudine-cli

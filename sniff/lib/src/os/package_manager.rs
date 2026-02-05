@@ -199,7 +199,7 @@ impl SystemPackageManager {
     /// ## Examples
     ///
     /// ```
-    /// use sniff_lib::os::SystemPackageManager;
+    /// use sniff::os::SystemPackageManager;
     ///
     /// assert_eq!(SystemPackageManager::Apt.executable_name(), "apt");
     /// assert_eq!(SystemPackageManager::Homebrew.executable_name(), "brew");
@@ -269,7 +269,7 @@ impl SystemPackageManager {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::os::PackageManagerCommands;
+/// use sniff::os::PackageManagerCommands;
 ///
 /// let apt_commands = PackageManagerCommands {
 ///     list: Some("apt list --installed".to_string()),
@@ -326,7 +326,7 @@ pub struct SystemPackageManagers {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::os::get_path_dirs;
+/// use sniff::os::get_path_dirs;
 ///
 /// let dirs = get_path_dirs();
 /// // dirs contains PathBuf entries for each valid directory in PATH
@@ -369,7 +369,7 @@ pub fn get_path_dirs() -> Vec<PathBuf> {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::os::{get_path_dirs, command_exists_in_path};
+/// use sniff::os::{get_path_dirs, command_exists_in_path};
 ///
 /// let path_dirs = get_path_dirs();
 /// if let Some(path) = command_exists_in_path("git", &path_dirs) {
@@ -454,7 +454,7 @@ fn command_exists_in_path_windows(cmd: &str, path_dirs: &[PathBuf]) -> Option<Pa
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::os::{get_commands_for_manager, SystemPackageManager};
+/// use sniff::os::{get_commands_for_manager, SystemPackageManager};
 ///
 /// let apt_cmds = get_commands_for_manager(SystemPackageManager::Apt);
 /// assert_eq!(apt_cmds.list, Some("apt list --installed".to_string()));
@@ -780,7 +780,7 @@ const AUR_HELPERS: &[SystemPackageManager] = &[
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::os::{detect_linux_package_managers, LinuxFamily};
+/// use sniff::os::{detect_linux_package_managers, LinuxFamily};
 ///
 /// // With family hint (recommended on Linux)
 /// let managers = detect_linux_package_managers(Some(LinuxFamily::Debian));
@@ -1003,7 +1003,7 @@ const SOFTWAREUPDATE_PATH: &str = "/usr/sbin/softwareupdate";
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::os::detect_macos_package_managers;
+/// use sniff::os::detect_macos_package_managers;
 ///
 /// let managers = detect_macos_package_managers();
 /// println!("Primary: {:?}", managers.primary);
@@ -1109,7 +1109,7 @@ pub fn detect_macos_package_managers() -> SystemPackageManagers {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::os::detect_windows_package_managers;
+/// use sniff::os::detect_windows_package_managers;
 ///
 /// let managers = detect_windows_package_managers();
 /// if let Some(primary) = managers.primary {
@@ -1242,10 +1242,10 @@ pub fn detect_windows_package_managers() -> SystemPackageManagers {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::os::{detect_bsd_package_managers, OsType};
+/// use sniff::os::{detect_bsd_package_managers, OsType};
 ///
 /// let managers = detect_bsd_package_managers(OsType::FreeBSD);
-/// assert_eq!(managers.primary, Some(sniff_lib::os::SystemPackageManager::Pkg));
+/// assert_eq!(managers.primary, Some(sniff::os::SystemPackageManager::Pkg));
 /// ```
 ///
 /// ## Arguments

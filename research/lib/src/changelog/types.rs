@@ -90,7 +90,7 @@ impl VersionInfo {
     /// ## Examples
     ///
     /// ```
-    /// use research_lib::changelog::types::{VersionInfo, VersionSignificance};
+    /// use research::changelog::types::{VersionInfo, VersionSignificance};
     ///
     /// let version = VersionInfo::new("1.0.0", VersionSignificance::Major);
     /// assert_eq!(version.version, "1.0.0");
@@ -253,7 +253,7 @@ pub enum ConfidenceLevel {
 /// ## Examples
 ///
 /// ```
-/// use research_lib::changelog::types::parse_flexible_date;
+/// use research::changelog::types::parse_flexible_date;
 ///
 /// let date1 = parse_flexible_date("2024-01-15").unwrap();
 /// let date2 = parse_flexible_date("2024-01-15T10:30:00Z").unwrap();

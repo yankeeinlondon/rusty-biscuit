@@ -91,7 +91,7 @@ pub struct GpuInfo {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::hardware::detect_gpus;
+/// use sniff::hardware::detect_gpus;
 ///
 /// let gpus = detect_gpus();
 /// for gpu in &gpus {

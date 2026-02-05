@@ -22,7 +22,7 @@ use crate::Result;
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::package::{PackageManager, OsPackageManager, LanguagePackageManager};
+/// use sniff::package::{PackageManager, OsPackageManager, LanguagePackageManager};
 ///
 /// let managers: Vec<PackageManager> = vec![
 ///     PackageManager::Os(OsPackageManager::Apt),
@@ -50,7 +50,7 @@ impl PackageManager {
     /// ## Examples
     ///
     /// ```
-    /// use sniff_lib::package::{PackageManager, OsPackageManager, LanguagePackageManager};
+    /// use sniff::package::{PackageManager, OsPackageManager, LanguagePackageManager};
     ///
     /// let apt = PackageManager::Os(OsPackageManager::Apt);
     /// assert_eq!(apt.executable_name(), "apt");
@@ -118,7 +118,7 @@ pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a
 /// ## Examples
 ///
 /// ```ignore
-/// use sniff_lib::package::{PackageManagerShape, PackageInfo};
+/// use sniff::package::{PackageManagerShape, PackageInfo};
 ///
 /// async fn check_package(mgr: &dyn PackageManagerShape, name: &str) {
 ///     if mgr.is_available() {

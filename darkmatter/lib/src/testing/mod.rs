@@ -11,7 +11,7 @@
 //! assertions when you don't care about colors/formatting:
 //!
 //! ```rust
-//! use darkmatter_lib::testing::strip_ansi_codes;
+//! use darkmatter::testing::strip_ansi_codes;
 //!
 //! let output = "\x1b[31mError:\x1b[0m Something went wrong";
 //! assert_eq!(strip_ansi_codes(output), "Error: Something went wrong");
@@ -22,7 +22,7 @@
 //! Use `TestTerminal` to verify specific ANSI codes are present:
 //!
 //! ```rust
-//! use darkmatter_lib::testing::TestTerminal;
+//! use darkmatter::testing::TestTerminal;
 //!
 //! let mut terminal = TestTerminal::new();
 //! terminal.run(|term| {

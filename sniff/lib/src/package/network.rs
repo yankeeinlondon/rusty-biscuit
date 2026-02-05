@@ -541,7 +541,7 @@ pub async fn enrich_dependency(mut entry: DependencyEntry) -> DependencyEntry {
 /// ## Examples
 ///
 /// ```ignore
-/// use sniff_lib::package::enrich_dependencies;
+/// use sniff::package::enrich_dependencies;
 ///
 /// let deps = vec![/* ... */];
 /// let enriched = enrich_dependencies(deps).await;

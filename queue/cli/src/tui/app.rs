@@ -1,6 +1,6 @@
 //! Application state for the TUI.
 
-use queue_lib::{
+use queue::{
     HistoryStore, JsonFileStore, ScheduledTask, TaskEvent, TaskExecutor, TerminalCapabilities,
     TerminalDetector,
 };
@@ -151,8 +151,8 @@ impl App {
         task_id: u64,
         command: String,
         scheduled_at: chrono::DateTime<chrono::Utc>,
-        target: queue_lib::ExecutionTarget,
-        schedule_kind: queue_lib::ScheduleKind,
+        target: queue::ExecutionTarget,
+        schedule_kind: queue::ScheduleKind,
     ) -> bool {
         let (updated_task, should_reschedule) =
             if let Some(task) = self.tasks.iter_mut().find(|t| t.id == task_id) {
@@ -264,7 +264,7 @@ impl App {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use queue_lib::{ExecutionTarget, TaskStatus};
+    use queue::{ExecutionTarget, TaskStatus};
 
     fn make_task(id: u64, command: &str) -> ScheduledTask {
         ScheduledTask::new(

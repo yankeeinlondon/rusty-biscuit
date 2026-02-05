@@ -2,7 +2,7 @@ use std::path::Path;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sniff_lib::package::LanguagePackageManager;
+use sniff::package::LanguagePackageManager;
 use thiserror::Error;
 use unchained_ai::models::model_capability::ModelCapability;
 

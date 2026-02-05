@@ -30,8 +30,8 @@ use owo_colors::OwoColorize;
 /// # Example
 ///
 /// ```rust
-/// use research_lib::link::{LinkResult, SkillLink, SkillAction};
-/// use research_lib::link::format::format_terminal;
+/// use research::link::{LinkResult, SkillLink, SkillAction};
+/// use research::link::format::format_terminal;
 ///
 /// let mut result = LinkResult::new();
 /// result.links.push(SkillLink::new(
@@ -262,8 +262,8 @@ fn format_action_status(action: &SkillAction, service: &str) -> String {
 /// # Example
 ///
 /// ```rust
-/// use research_lib::link::{LinkResult, SkillLink, SkillAction};
-/// use research_lib::link::format::format_json;
+/// use research::link::{LinkResult, SkillLink, SkillAction};
+/// use research::link::format::format_json;
 ///
 /// let mut result = LinkResult::new();
 /// result.links.push(SkillLink::new(

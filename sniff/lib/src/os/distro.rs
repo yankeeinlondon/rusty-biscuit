@@ -87,7 +87,7 @@ pub struct LinuxDistro {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::os::{infer_linux_family, LinuxFamily};
+/// use sniff::os::{infer_linux_family, LinuxFamily};
 ///
 /// assert_eq!(infer_linux_family("ubuntu"), LinuxFamily::Debian);
 /// assert_eq!(infer_linux_family("fedora"), LinuxFamily::RedHat);
@@ -212,7 +212,7 @@ pub fn infer_linux_family(distro_id: &str) -> LinuxFamily {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::os::detect_linux_distro;
+/// use sniff::os::detect_linux_distro;
 ///
 /// if let Some(distro) = detect_linux_distro() {
 ///     println!("Distribution: {} ({})", distro.name, distro.id);

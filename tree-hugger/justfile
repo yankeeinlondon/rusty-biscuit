@@ -10,7 +10,7 @@ default:
 build *args="":
     @echo "Building ..."
     @echo
-    @cargo build -p tree-hugger-lib -- {{args}}
+    @cargo build -p tree-hugger -- {{args}}
     @cargo build -p tree-hugger-cli -- {{args}}
     @echo
 
@@ -18,7 +18,7 @@ build *args="":
 test *args="":
     @echo "Testing {{BOLD}}Library{{RESET}} code"
     @echo ""
-    @cargo test -p tree-hugger-lib -- {{args}}
+    @cargo test -p tree-hugger -- {{args}}
     @echo ""
     @echo "Testing {{BOLD}}CLI{{RESET}} code"
     @echo ""
@@ -26,7 +26,7 @@ test *args="":
 
 # lint with clippy
 lint *args="":
-    @cargo clippy -p tree-hugger-lib -p tree-hugger-cli -- {{args}}
+    @cargo clippy -p tree-hugger -p tree-hugger-cli -- {{args}}
 
 # install latest release version of CLI
 install *args="":
@@ -36,13 +36,13 @@ install *args="":
 docs:
     @echo "Building and then showing latest docs for the library code"
     @echo ""
-    @cargo doc -p tree-hugger-lib --open
+    @cargo doc -p tree-hugger --open
 
 # build and show the docs for the tree-hugger CLI
 cli_docs:
     @echo "Building and then showing latest docs for the tree-hugger CLI"
     @echo ""
-    @cargo doc -p tree-hugger-lib --open
+    @cargo doc -p tree-hugger --open
 
 # run the latest debug build of the CLI
 hug *args="":

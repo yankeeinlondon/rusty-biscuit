@@ -7,7 +7,7 @@
 //! ## Examples
 //!
 //! ```rust
-//! use darkmatter_lib::diff::visual::{render_visual_diff_str, VisualDiffOptions};
+//! use darkmatter::diff::visual::{render_visual_diff_str, VisualDiffOptions};
 //!
 //! let original = "Hello\nWorld";
 //! let updated = "Hello\nUniverse";

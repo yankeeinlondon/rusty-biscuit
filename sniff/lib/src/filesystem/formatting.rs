@@ -7,7 +7,7 @@
 //! ## Examples
 //!
 //! ```no_run
-//! use sniff_lib::filesystem::formatting::detect_formatting;
+//! use sniff::filesystem::formatting::detect_formatting;
 //! use std::path::Path;
 //!
 //! let config = detect_formatting(Path::new(".")).unwrap();
@@ -103,7 +103,7 @@ pub struct EditorConfigSection {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::filesystem::formatting::detect_formatting;
+/// use sniff::filesystem::formatting::detect_formatting;
 /// use std::path::Path;
 ///
 /// let config = detect_formatting(Path::new("/path/to/project")).unwrap();

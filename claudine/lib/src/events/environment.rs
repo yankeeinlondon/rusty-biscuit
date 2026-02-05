@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Host and repository environment snapshot.
 ///
-/// Detected once at session start via `sniff_lib::detect_with_config`
+/// Detected once at session start via `sniff::detect_with_config`
 /// and cached for the session lifetime. Attached to every `EventMeta`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[derive(Default)]
@@ -169,8 +169,8 @@ pub struct RepoContext {
     pub packages: Vec<String>,
 }
 
-impl From<sniff_lib::SniffResult> for EnvironmentContext {
-    fn from(result: sniff_lib::SniffResult) -> Self {
+impl From<sniff::SniffResult> for EnvironmentContext {
+    fn from(result: sniff::SniffResult) -> Self {
         let os = if let Some(os_info) = result.os {
             let os_type = format!("{:?}", os_info.os_type).to_lowercase();
 
@@ -279,18 +279,18 @@ impl From<sniff_lib::SniffResult> for EnvironmentContext {
 
 /// Detect the environment context for the given working directory.
 ///
-/// Uses `sniff_lib` with a fast configuration (no network calls,
+/// Uses `sniff` with a fast configuration (no network calls,
 /// single commit, no deep inspection) to gather OS, hardware,
 /// git, and repository information.
 pub fn detect_environment(cwd: &Path) -> EnvironmentContext {
-    let config = sniff_lib::SniffConfig::new()
+    let config = sniff::SniffConfig::new()
         .base_dir(cwd.to_path_buf())
         .deep(false)
         .commit_count(1)
         .skip_network();
 
     let result =
-        sniff_lib::detect_with_config(config).unwrap_or(sniff_lib::SniffResult {
+        sniff::detect_with_config(config).unwrap_or(sniff::SniffResult {
             os: None,
             hardware: None,
             network: None,
@@ -377,7 +377,7 @@ mod tests {
 
     #[test]
     fn from_empty_sniff_result() {
-        let result = sniff_lib::SniffResult {
+        let result = sniff::SniffResult {
             os: None,
             hardware: None,
             network: None,

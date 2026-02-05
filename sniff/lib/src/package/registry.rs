@@ -6,7 +6,7 @@
 //! ## Examples
 //!
 //! ```
-//! use sniff_lib::package::{get_package_manager, LanguagePackageManager, PackageManagerShape};
+//! use sniff::package::{get_package_manager, LanguagePackageManager, PackageManagerShape};
 //!
 //! if let Some(npm) = get_package_manager(&LanguagePackageManager::Npm.into()) {
 //!     println!("npm available: {}", npm.is_available());
@@ -104,7 +104,7 @@ static PACKAGE_MANAGER_REGISTRY: LazyLock<HashMap<PackageManager, RegistryEntry>
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::package::{get_package_manager, LanguagePackageManager, PackageManager};
+/// use sniff::package::{get_package_manager, LanguagePackageManager, PackageManager};
 ///
 /// let npm_key = PackageManager::Language(LanguagePackageManager::Npm);
 /// if let Some(npm) = get_package_manager(&npm_key) {
@@ -127,7 +127,7 @@ pub fn get_package_manager(manager: &PackageManager) -> Option<&'static dyn Pack
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::package::{LanguagePackageManager, PackageManager};
+/// use sniff::package::{LanguagePackageManager, PackageManager};
 ///
 /// let cargo = PackageManager::Language(LanguagePackageManager::Cargo);
 /// // Cargo is registered
@@ -142,7 +142,7 @@ pub fn is_registered(manager: &PackageManager) -> bool {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::package::registered_managers;
+/// use sniff::package::registered_managers;
 ///
 /// for mgr in registered_managers() {
 ///     println!("Registered: {}", mgr);

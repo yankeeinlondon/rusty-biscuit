@@ -1,6 +1,6 @@
 //! Network section output formatting.
 
-pub fn print_network_section(network: &sniff_lib::NetworkInfo) {
+pub fn print_network_section(network: &sniff::NetworkInfo) {
     println!("=== Network ===");
     if network.permission_denied {
         println!("Permission denied - unable to enumerate interfaces");

@@ -35,7 +35,7 @@ lazy_static! {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::dsl::parse_code_info;
+/// use darkmatter::markdown::dsl::parse_code_info;
 ///
 /// // Language only
 /// let meta = parse_code_info("rust").unwrap();

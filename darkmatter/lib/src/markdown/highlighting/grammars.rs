@@ -24,7 +24,7 @@ lazy_static! {
 /// ## Examples
 ///
 /// ```
-/// # use darkmatter_lib::markdown::highlighting::CodeHighlighter;
+/// # use darkmatter::markdown::highlighting::CodeHighlighter;
 /// # let highlighter = CodeHighlighter::default();
 /// let syntax_set = highlighter.syntax_set();
 /// let rust_syntax = syntax_set.find_syntax_by_extension("rs");

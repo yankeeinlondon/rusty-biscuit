@@ -20,7 +20,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
-use research_lib::metadata::{ResearchInventory, ResearchInventoryDb, Topic};
+use research::metadata::{ResearchInventory, ResearchInventoryDb, Topic};
 
 #[derive(Parser, Debug)]
 #[command(name = "migrate_json_to_sqlite")]

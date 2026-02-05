@@ -19,7 +19,7 @@
 //! ## Examples
 //!
 //! ```no_run
-//! use research_lib::metadata::migration_v2::scan_and_build_inventory;
+//! use research::metadata::migration_v2::scan_and_build_inventory;
 //! use std::path::PathBuf;
 //!
 //! let research_dir = PathBuf::from("/home/user/.research");
@@ -35,7 +35,7 @@ use thiserror::Error;
 use xxhash_rust::xxh3::xxh3_64;
 
 use super::inventory::ResearchInventory;
-use sniff_lib::package::LanguagePackageManager;
+use sniff::package::LanguagePackageManager;
 
 use super::topic::{ContentType, Document, KindCategory, Library, Topic};
 use crate::ResearchMetadata;

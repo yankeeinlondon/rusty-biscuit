@@ -1,6 +1,6 @@
 //! Development binary for testing the research library
 
-use research_lib::research;
+use research::research;
 
 #[tokio::main]
 async fn main() {

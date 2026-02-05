@@ -142,7 +142,7 @@ const UNDERLYING_DOCS: &[&str] = &[
 ///
 /// ```no_run
 /// use std::path::PathBuf;
-/// use research_lib::list::discovery::discover_topics;
+/// use research::list::discovery::discover_topics;
 ///
 /// let topics = discover_topics(PathBuf::from("/home/user/.research/library")).unwrap();
 /// for topic in topics {

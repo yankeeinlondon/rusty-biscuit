@@ -92,7 +92,7 @@ fn is_programming_language(lang: &str) -> bool {
 ///
 /// ```no_run
 /// use std::path::Path;
-/// use sniff_lib::filesystem::detect_languages;
+/// use sniff::filesystem::detect_languages;
 ///
 /// let breakdown = detect_languages(Path::new(".")).unwrap();
 /// println!("Primary language: {:?}", breakdown.primary);

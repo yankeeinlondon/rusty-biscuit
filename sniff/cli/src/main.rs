@@ -1,10 +1,10 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
 use clap_complete::Shell;
-use sniff_lib::package::enrich_dependencies;
-use sniff_lib::programs::ProgramsInfo;
-use sniff_lib::services::{ServiceState, detect_services};
-use sniff_lib::{SniffConfig, SniffResult, detect_with_config};
+use sniff::package::enrich_dependencies;
+use sniff::programs::ProgramsInfo;
+use sniff::services::{ServiceState, detect_services};
+use sniff::{SniffConfig, SniffResult, detect_with_config};
 use std::path::PathBuf;
 
 mod output;

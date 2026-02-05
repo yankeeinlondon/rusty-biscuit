@@ -27,7 +27,7 @@ use crate::os::{command_exists_in_path, get_path_dirs};
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::package::PackageInfo;
+/// use sniff::package::PackageInfo;
 ///
 /// let info = PackageInfo {
 ///     name: "lodash".to_string(),

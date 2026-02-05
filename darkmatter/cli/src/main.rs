@@ -2,11 +2,11 @@ use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter_cli::Cli;
-use darkmatter_lib::markdown::highlighting::{
+use darkmatter::markdown::highlighting::{
     ColorMode, ThemePair, detect_code_theme, detect_color_mode, detect_prose_theme,
 };
-use darkmatter_lib::markdown::output::{HtmlOptions, MermaidMode, TerminalOptions, write_terminal};
-use darkmatter_lib::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
+use darkmatter::markdown::output::{HtmlOptions, MermaidMode, TerminalOptions, write_terminal};
+use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
@@ -29,11 +29,11 @@ fn init_tracing(verbose: u8) {
         Ok(filter) => filter,
         Err(_) => match verbose {
             // -v: Show INFO for progress and tool calls
-            1 => "info,md=info,darkmatter_lib=info".to_string(),
+            1 => "info,md=info,darkmatter=info".to_string(),
             // -vv: Show DEBUG for tool arguments and requests
-            2 => "info,md=debug,darkmatter_lib=debug".to_string(),
+            2 => "info,md=debug,darkmatter=debug".to_string(),
             // -vvv+: Show TRACE for detailed debugging
-            _ => "debug,md=trace,darkmatter_lib=trace".to_string(),
+            _ => "debug,md=trace,darkmatter=trace".to_string(),
         },
     };
 
@@ -465,19 +465,19 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
 
     // Print classification header
     let (classification_symbol, classification_name) = match delta.classification {
-        darkmatter_lib::markdown::DocumentChange::NoChange => ("✓", "No changes"),
-        darkmatter_lib::markdown::DocumentChange::WhitespaceOnly => {
+        darkmatter::markdown::DocumentChange::NoChange => ("✓", "No changes"),
+        darkmatter::markdown::DocumentChange::WhitespaceOnly => {
             ("~", "Whitespace changes only")
         }
-        darkmatter_lib::markdown::DocumentChange::FrontmatterOnly => ("◈", "Frontmatter only"),
-        darkmatter_lib::markdown::DocumentChange::FrontmatterAndWhitespace => {
+        darkmatter::markdown::DocumentChange::FrontmatterOnly => ("◈", "Frontmatter only"),
+        darkmatter::markdown::DocumentChange::FrontmatterAndWhitespace => {
             ("◈", "Frontmatter and whitespace")
         }
-        darkmatter_lib::markdown::DocumentChange::StructuralOnly => ("⊕", "Structural only"),
-        darkmatter_lib::markdown::DocumentChange::ContentMinor => ("△", "Minor changes"),
-        darkmatter_lib::markdown::DocumentChange::ContentModerate => ("◐", "Moderate changes"),
-        darkmatter_lib::markdown::DocumentChange::ContentMajor => ("◉", "Major changes"),
-        darkmatter_lib::markdown::DocumentChange::Rewritten => ("★", "Rewritten"),
+        darkmatter::markdown::DocumentChange::StructuralOnly => ("⊕", "Structural only"),
+        darkmatter::markdown::DocumentChange::ContentMinor => ("△", "Minor changes"),
+        darkmatter::markdown::DocumentChange::ContentModerate => ("◐", "Moderate changes"),
+        darkmatter::markdown::DocumentChange::ContentMajor => ("◉", "Major changes"),
+        darkmatter::markdown::DocumentChange::Rewritten => ("★", "Rewritten"),
     };
 
     writeln!(
@@ -498,9 +498,9 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
         } else {
             for change in &delta.frontmatter_changes {
                 let symbol = match change.action {
-                    darkmatter_lib::markdown::ChangeAction::PropertyAdded => "+",
-                    darkmatter_lib::markdown::ChangeAction::PropertyRemoved => "-",
-                    darkmatter_lib::markdown::ChangeAction::PropertyUpdated => "~",
+                    darkmatter::markdown::ChangeAction::PropertyAdded => "+",
+                    darkmatter::markdown::ChangeAction::PropertyRemoved => "-",
+                    darkmatter::markdown::ChangeAction::PropertyUpdated => "~",
                     _ => "?",
                 };
                 writeln!(
@@ -579,7 +579,7 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
         .filter(|c| {
             !matches!(
                 c.action,
-                darkmatter_lib::markdown::ChangeAction::WhitespaceOnly
+                darkmatter::markdown::ChangeAction::WhitespaceOnly
             )
         })
         .collect();
@@ -589,7 +589,7 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
         .filter(|c| {
             matches!(
                 c.action,
-                darkmatter_lib::markdown::ChangeAction::WhitespaceOnly
+                darkmatter::markdown::ChangeAction::WhitespaceOnly
             )
         })
         .collect();
@@ -717,7 +717,7 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
         writeln!(handle).ok();
 
         // Visual diff output
-        use darkmatter_lib::diff::visual::{VisualDiffInput, VisualDiffOptions, render_visual_diff};
+        use darkmatter::diff::visual::{VisualDiffInput, VisualDiffOptions, render_visual_diff};
 
         let options = VisualDiffOptions::default();
 

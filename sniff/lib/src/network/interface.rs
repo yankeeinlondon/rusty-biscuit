@@ -9,7 +9,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::network::NetworkInterface;
+/// use sniff::network::NetworkInterface;
 ///
 /// let iface = NetworkInterface::new("eth0".to_string());
 /// assert_eq!(iface.name, "eth0");
@@ -41,7 +41,7 @@ impl NetworkInterface {
     /// ## Examples
     ///
     /// ```
-    /// use sniff_lib::network::NetworkInterface;
+    /// use sniff::network::NetworkInterface;
     ///
     /// let iface = NetworkInterface::new("eth0".to_string());
     /// assert_eq!(iface.name, "eth0");
@@ -64,7 +64,7 @@ impl NetworkInterface {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::network::Ipv4Address;
+/// use sniff::network::Ipv4Address;
 ///
 /// let addr = Ipv4Address {
 ///     address: "192.168.1.100".to_string(),
@@ -89,7 +89,7 @@ pub struct Ipv4Address {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::network::Ipv6Address;
+/// use sniff::network::Ipv6Address;
 ///
 /// let addr = Ipv6Address {
 ///     address: "fe80::1".to_string(),
@@ -115,7 +115,7 @@ pub struct Ipv6Address {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::network::{IpAddresses, Ipv4Address, Ipv6Address};
+/// use sniff::network::{IpAddresses, Ipv4Address, Ipv6Address};
 ///
 /// let mut addrs = IpAddresses::default();
 /// addrs.v4.push(Ipv4Address {
@@ -145,7 +145,7 @@ pub struct IpAddresses {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::network::InterfaceFlags;
+/// use sniff::network::InterfaceFlags;
 ///
 /// let flags = InterfaceFlags {
 ///     is_up: true,

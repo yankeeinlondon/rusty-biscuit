@@ -3,8 +3,8 @@
 //! This test suite verifies end-to-end functionality of the migration system,
 //! including loading v0 files, creating backups, and auto-saving migrated data.
 
-use research_lib::metadata::{MetadataV0, migration};
-use research_lib::{ResearchKind, ResearchMetadata};
+use research::metadata::{MetadataV0, migration};
+use research::{ResearchKind, ResearchMetadata};
 use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::fs;

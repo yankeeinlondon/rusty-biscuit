@@ -20,7 +20,7 @@ default:
 build *args="":
     @echo "Building ..."
     @echo
-    @cargo build -p sniff-lib {{args}}
+    @cargo build -p sniff {{args}}
     @cargo build -p sniff-cli {{args}}
     @echo
 
@@ -28,7 +28,7 @@ build *args="":
 test *args="":
     @echo "Testing {{BOLD}}Library{{RESET}} code"
     @echo ""
-    @cargo test -p sniff-lib -- {{args}}
+    @cargo test -p sniff -- {{args}}
     @echo ""
     @echo "Testing {{BOLD}}CLI{{RESET}} code"
     @echo ""
@@ -36,11 +36,11 @@ test *args="":
 
 # lint with clippy
 lint *args="":
-    @cargo clippy -p sniff-lib -p sniff-cli -- {{args}}
+    @cargo clippy -p sniff -p sniff-cli -- {{args}}
 
 # install latest release version of CLI
 install *args="":
-    @cargo build --release -p sniff-lib
+    @cargo build --release -p sniff
     @cargo build --release -p sniff-cli
     @cargo install --path cli -- {{args}}
 
@@ -48,10 +48,10 @@ install *args="":
 docs:
     @echo "Building and then showing latest docs for the library code"
     @echo ""
-    @cargo doc -p sniff-lib --open
+    @cargo doc -p sniff --open
 
 # build and show the docs for the Sniff CLI
 cli_docs:
     @echo "Building and then showing latest docs for the Sniff CLI"
     @echo ""
-    @cargo doc -p sniff-lib --open
+    @cargo doc -p sniff --open

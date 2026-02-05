@@ -2,5 +2,5 @@
 //!
 //! Deprecated: use [`crate::diff::visual`] instead.
 
-#[deprecated(note = "moved to darkmatter_lib::diff::visual")]
+#[deprecated(note = "moved to darkmatter::diff::visual")]
 pub use crate::diff::visual::*;

@@ -8,10 +8,10 @@
 //! - Whitespace variation handling
 //! - Edge cases and error scenarios
 
-use research_lib::validation::frontmatter::{
+use research::validation::frontmatter::{
     FrontmatterError, SkillFrontmatter, parse_and_validate_frontmatter,
 };
-use research_lib::{LibraryInfo, ResearchMetadata};
+use research::{LibraryInfo, ResearchMetadata};
 
 /// Helper function to access the split_into_files function from lib.rs
 /// Since it's private, we'll test it through the public API or duplicate the logic here.
@@ -352,7 +352,7 @@ fn test_backward_compatibility_missing_schema_version() {
 #[test]
 fn test_v0_metadata_parsing() {
     // V0 metadata.json should be parseable by MetadataV0 struct
-    use research_lib::metadata::MetadataV0;
+    use research::metadata::MetadataV0;
 
     let v0_json = r#"{
         "schema_version": 0,

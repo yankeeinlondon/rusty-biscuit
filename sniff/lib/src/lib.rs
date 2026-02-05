@@ -17,7 +17,7 @@ pub use network::NetworkInfo;
 pub use programs::{ProgramMetadata, ProgramsInfo};
 
 // Re-export key OS types from the os module for convenience.
-// The canonical path is `sniff_lib::os::*`.
+// The canonical path is `sniff::os::*`.
 pub use os::OsInfo;
 
 /// Complete system detection result.
@@ -44,7 +44,7 @@ pub struct SniffResult {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::SniffConfig;
+/// use sniff::SniffConfig;
 /// use std::path::PathBuf;
 ///
 /// let config = SniffConfig::new()
@@ -149,7 +149,7 @@ impl SniffConfig {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::detect;
+/// use sniff::detect;
 ///
 /// let result = detect().unwrap();
 /// if let Some(os) = result.os {
@@ -165,7 +165,7 @@ pub fn detect() -> Result<SniffResult> {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::{detect_with_config, SniffConfig};
+/// use sniff::{detect_with_config, SniffConfig};
 /// use std::path::PathBuf;
 ///
 /// let config = SniffConfig::new()

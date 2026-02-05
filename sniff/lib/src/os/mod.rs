@@ -91,7 +91,7 @@ impl std::fmt::Display for OsType {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::os::detect_os_type;
+/// use sniff::os::detect_os_type;
 ///
 /// let os_type = detect_os_type();
 /// println!("Running on: {}", os_type);
@@ -161,7 +161,7 @@ pub struct OsInfo {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::os::detect_os;
+/// use sniff::os::detect_os;
 ///
 /// let os = detect_os().unwrap();
 /// println!("OS: {} {}", os.name, os.version);

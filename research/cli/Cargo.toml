@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5.53", features = ["derive"] }
-research-lib = { path = "../lib" }
+research = { path = "../lib" }
 biscuit-speaks = { path = "../../biscuit-speaks" }
 dirs = "5.0"
 dotenvy = "0.15.7"

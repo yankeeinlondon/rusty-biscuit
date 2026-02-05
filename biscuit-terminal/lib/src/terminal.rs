@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use sniff_lib::filesystem::git::detect_git;
-use sniff_lib::filesystem::repo::detect_repo;
-use sniff_lib::filesystem::repo::PackageLocation;
+use sniff::filesystem::git::detect_git;
+use sniff::filesystem::repo::detect_repo;
+use sniff::filesystem::repo::PackageLocation;
 
 use crate::discovery::config_paths::get_terminal_config_path;
 use crate::discovery::detection::{

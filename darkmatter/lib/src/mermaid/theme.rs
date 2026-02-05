@@ -33,7 +33,7 @@ pub enum MermaidThemeError {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::mermaid::MermaidTheme;
+/// use darkmatter::mermaid::MermaidTheme;
 /// use std::convert::TryFrom;
 ///
 /// let json = r##"{
@@ -386,8 +386,8 @@ lazy_static! {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::mermaid::mermaid_theme_for_syntect;
-/// use darkmatter_lib::markdown::highlighting::{ThemePair, ColorMode};
+/// use darkmatter::mermaid::mermaid_theme_for_syntect;
+/// use darkmatter::markdown::highlighting::{ThemePair, ColorMode};
 ///
 /// let theme = mermaid_theme_for_syntect(ThemePair::Github, ColorMode::Dark);
 /// assert_eq!(theme.background, "#1a1a2e");

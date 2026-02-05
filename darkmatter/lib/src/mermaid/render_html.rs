@@ -10,7 +10,7 @@
 /// ## Examples
 ///
 /// ```rust
-/// use darkmatter_lib::mermaid::Mermaid;
+/// use darkmatter::mermaid::Mermaid;
 ///
 /// let diagram = Mermaid::new("flowchart LR\n    A --> B");
 /// let html = diagram.render_for_html();
@@ -32,7 +32,7 @@ impl MermaidHtml {
     /// ## Examples
     ///
     /// ```rust
-    /// use darkmatter_lib::mermaid::MermaidHtml;
+    /// use darkmatter::mermaid::MermaidHtml;
     ///
     /// let html = MermaidHtml::new("<script>...</script>", "<pre>...</pre>");
     /// ```
@@ -53,7 +53,7 @@ impl MermaidHtml {
 /// ## Examples
 ///
 /// ```rust
-/// # use darkmatter_lib::mermaid::render_html::detect_diagram_type;
+/// # use darkmatter::mermaid::render_html::detect_diagram_type;
 /// assert_eq!(detect_diagram_type("flowchart LR"), "Flowchart diagram");
 /// assert_eq!(detect_diagram_type("sequenceDiagram"), "Sequence diagram");
 /// assert_eq!(detect_diagram_type("unknown"), "Mermaid diagram");
@@ -93,7 +93,7 @@ pub fn detect_diagram_type(instructions: &str) -> &'static str {
 /// ## Examples
 ///
 /// ```rust
-/// # use darkmatter_lib::mermaid::{DEFAULT_LIGHT_THEME, DEFAULT_DARK_THEME, render_html::generate_css_variables};
+/// # use darkmatter::mermaid::{DEFAULT_LIGHT_THEME, DEFAULT_DARK_THEME, render_html::generate_css_variables};
 /// let css = generate_css_variables(&DEFAULT_LIGHT_THEME, &DEFAULT_DARK_THEME);
 /// assert!(css.contains("--mermaid-primary-color"));
 /// ```

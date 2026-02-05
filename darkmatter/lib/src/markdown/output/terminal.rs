@@ -12,8 +12,8 @@
 //! ## Examples
 //!
 //! ```
-//! use darkmatter_lib::markdown::Markdown;
-//! use darkmatter_lib::markdown::output::terminal::{for_terminal, TerminalOptions};
+//! use darkmatter::markdown::Markdown;
+//! use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
 //!
 //! let content = "# Hello World\n\n\
 //!                ```rust\n\
@@ -63,7 +63,7 @@ use unicode_width::UnicodeWidthStr;
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::output::terminal::parse_alt_and_width;
+/// use darkmatter::markdown::output::terminal::parse_alt_and_width;
 /// use biscuit_terminal::components::terminal_image::ImageWidth;
 ///
 /// // Width specification parsed
@@ -155,7 +155,7 @@ impl ColorDepth {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::output::terminal::{TerminalOptions, ItalicMode};
+/// use darkmatter::markdown::output::terminal::{TerminalOptions, ItalicMode};
 ///
 /// // Auto-detect (safe default)
 /// let mut options = TerminalOptions::default();
@@ -214,7 +214,7 @@ impl ItalicMode {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::output::terminal::{TerminalOptions, MermaidMode};
+/// use darkmatter::markdown::output::terminal::{TerminalOptions, MermaidMode};
 ///
 /// // Disable mermaid rendering (default - show as code block)
 /// let mut options = TerminalOptions::default();
@@ -270,7 +270,7 @@ const CODE_MARKER_END: &str = "\x00/CODE\x00";
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::output::terminal::ImageRenderer;
+/// use darkmatter::markdown::output::terminal::ImageRenderer;
 /// use std::path::Path;
 ///
 /// let renderer = ImageRenderer::new(Some(Path::new("/tmp")));
@@ -310,7 +310,7 @@ impl ImageRenderer {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::output::terminal::ImageRenderer;
+    /// use darkmatter::markdown::output::terminal::ImageRenderer;
     /// use std::path::Path;
     ///
     /// // Use current directory
@@ -472,8 +472,8 @@ impl ImageRenderer {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::highlighting::{ThemePair, ColorMode};
-/// use darkmatter_lib::markdown::output::terminal::{TerminalOptions, ColorDepth};
+/// use darkmatter::markdown::highlighting::{ThemePair, ColorMode};
+/// use darkmatter::markdown::output::terminal::{TerminalOptions, ColorDepth};
 ///
 /// let mut options = TerminalOptions::default();
 /// options.code_theme = ThemePair::Github;
@@ -486,7 +486,7 @@ impl ImageRenderer {
 /// ## Image Rendering
 ///
 /// ```
-/// use darkmatter_lib::markdown::output::terminal::TerminalOptions;
+/// use darkmatter::markdown::output::terminal::TerminalOptions;
 /// use std::path::PathBuf;
 ///
 /// let mut options = TerminalOptions::default();
@@ -497,7 +497,7 @@ impl ImageRenderer {
 /// ## Italic Mode
 ///
 /// ```
-/// use darkmatter_lib::markdown::output::terminal::{TerminalOptions, ItalicMode};
+/// use darkmatter::markdown::output::terminal::{TerminalOptions, ItalicMode};
 ///
 /// let mut options = TerminalOptions::default();
 /// // Auto-detect (default) - uses terminal capability detection
@@ -593,8 +593,8 @@ fn convert_alignment(align: &pulldown_cmark::Alignment) -> comfy_table::CellAlig
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::Markdown;
-/// use darkmatter_lib::markdown::output::terminal::{for_terminal, TerminalOptions};
+/// use darkmatter::markdown::Markdown;
+/// use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
 ///
 /// let md: Markdown = "# Hello\n\n```rust\nfn main() {}\n```".into();
 /// let output = for_terminal(&md, TerminalOptions::default()).unwrap();
@@ -621,8 +621,8 @@ pub fn for_terminal(md: &Markdown, mut options: TerminalOptions) -> Result<Strin
 /// ## Examples
 ///
 /// ```no_run
-/// use darkmatter_lib::markdown::Markdown;
-/// use darkmatter_lib::markdown::output::terminal::{write_terminal, TerminalOptions};
+/// use darkmatter::markdown::Markdown;
+/// use darkmatter::markdown::output::terminal::{write_terminal, TerminalOptions};
 /// use std::io::{self, Write};
 ///
 /// let md: Markdown = "# Hello\n\n![image](./test.png)".into();
@@ -2181,7 +2181,7 @@ impl LineWrapper {
 /// ## Examples
 ///
 /// ```ignore
-/// use darkmatter_lib::markdown::highlighting::ColorMode;
+/// use darkmatter::markdown::highlighting::ColorMode;
 /// use syntect::highlighting::Color;
 ///
 /// let theme_bg = Color { r: 40, g: 40, b: 40, a: 255 };
@@ -2250,9 +2250,9 @@ fn compute_blockquote_bg(theme_bg: Color, color_mode: ColorMode) -> Color {
 /// ## Examples
 ///
 /// ```ignore
-/// use darkmatter_lib::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
-/// use darkmatter_lib::markdown::output::TerminalOptions;
-/// use darkmatter_lib::markdown::dsl::CodeBlockMeta;
+/// use darkmatter::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
+/// use darkmatter::markdown::output::TerminalOptions;
+/// use darkmatter::markdown::dsl::CodeBlockMeta;
 ///
 /// let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
 /// let options = TerminalOptions::default();

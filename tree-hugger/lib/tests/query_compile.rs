@@ -1,6 +1,6 @@
 //! Tests to verify lint queries compile correctly for all languages.
 
-use tree_hugger_lib::ProgrammingLanguage;
+use tree_hugger::ProgrammingLanguage;
 use tree_sitter::Query;
 
 fn test_query_compiles(language: ProgrammingLanguage, query_text: &str) {

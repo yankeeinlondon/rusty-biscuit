@@ -3,7 +3,7 @@
 //! This test suite verifies end-to-end functionality of the list command,
 //! including discovery, filtering, and formatting.
 
-use research_lib::list::{
+use research::list::{
     ResearchOutput, apply_filters, discover_topics, format_json, format_terminal,
 };
 use std::path::PathBuf;

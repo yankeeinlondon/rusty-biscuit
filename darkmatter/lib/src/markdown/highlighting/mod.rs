@@ -21,7 +21,7 @@ use syntect::parsing::SyntaxSet;
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
+/// use darkmatter::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
 ///
 /// let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
 /// ```
@@ -39,7 +39,7 @@ impl CodeHighlighter {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
+    /// use darkmatter::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
     ///
     /// let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
     /// ```
@@ -80,7 +80,7 @@ impl CodeHighlighter {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
+    /// use darkmatter::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
     ///
     /// let mut highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
     /// highlighter.set_color_mode(ColorMode::Light);
@@ -97,7 +97,7 @@ impl CodeHighlighter {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
+    /// use darkmatter::markdown::highlighting::{CodeHighlighter, ThemePair, ColorMode};
     ///
     /// let mut highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
     /// highlighter.set_theme_pair(ThemePair::Solarized);

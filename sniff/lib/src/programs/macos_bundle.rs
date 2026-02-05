@@ -17,7 +17,7 @@
 //! ## Examples
 //!
 //! ```no_run
-//! use sniff_lib::programs::macos_bundle::find_macos_app_bundle;
+//! use sniff::programs::macos_bundle::find_macos_app_bundle;
 //!
 //! // Find VS Code even if "code" isn't in PATH
 //! if let Some(path) = find_macos_app_bundle("code") {
@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::programs::macos_bundle::get_app_bundle_name;
+/// use sniff::programs::macos_bundle::get_app_bundle_name;
 ///
 /// assert_eq!(get_app_bundle_name("code"), Some("Visual Studio Code"));
 /// assert_eq!(get_app_bundle_name("chrome"), Some("Google Chrome"));
@@ -47,6 +47,7 @@ pub fn get_app_bundle_name(binary_name: &str) -> Option<&'static str> {
         "code" => Some("Visual Studio Code"),
         "cursor" => Some("Cursor"),
         "zed" => Some("Zed"),
+        "subl" | "sublime" | "sublime-text" => Some("Sublime Text"),
 
         // Terminal emulators
         "wezterm" | "wezterm-gui" => Some("WezTerm"),
@@ -100,7 +101,7 @@ pub fn get_app_bundle_name(binary_name: &str) -> Option<&'static str> {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::programs::macos_bundle::find_macos_app_bundle;
+/// use sniff::programs::macos_bundle::find_macos_app_bundle;
 ///
 /// // Find VS Code
 /// if let Some(path) = find_macos_app_bundle("code") {
@@ -226,6 +227,9 @@ fn get_executable_candidates(app_name: &str, binary_name: &str) -> Vec<String> {
         "code" => {
             candidates.push("Electron".to_string());
         }
+        "subl" | "sublime" | "sublime-text" => {
+            candidates.push("sublime_text".to_string());
+        }
         "iterm2" => {
             candidates.push("iTerm2".to_string());
         }
@@ -269,6 +273,7 @@ mod tests {
         assert_eq!(get_app_bundle_name("code"), Some("Visual Studio Code"));
         assert_eq!(get_app_bundle_name("cursor"), Some("Cursor"));
         assert_eq!(get_app_bundle_name("zed"), Some("Zed"));
+        assert_eq!(get_app_bundle_name("subl"), Some("Sublime Text"));
     }
 
     #[test]
@@ -438,6 +443,14 @@ mod tests {
             assert!(candidates.contains(&"warp-terminal".to_string()));
             assert!(candidates.contains(&"Warp".to_string()));
             assert!(candidates.contains(&"stable".to_string())); // Special case
+        }
+
+        #[test]
+        fn test_get_executable_candidates_sublime() {
+            let candidates = get_executable_candidates("Sublime Text", "subl");
+            assert!(candidates.contains(&"subl".to_string()));
+            assert!(candidates.contains(&"Sublime Text".to_string()));
+            assert!(candidates.contains(&"sublime_text".to_string())); // Special case
         }
 
         #[test]

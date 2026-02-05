@@ -18,7 +18,7 @@
 //! ## Usage
 //!
 //! ```no_run
-//! use sniff_lib::programs::{ProgramsInfo, ProgramMetadata, Editor};
+//! use sniff::programs::{ProgramsInfo, ProgramMetadata, Editor};
 //!
 //! // Detect all installed programs
 //! let programs = ProgramsInfo::detect();
@@ -76,7 +76,7 @@
 //! ### Example
 //!
 //! ```no_run
-//! use sniff_lib::programs::{find_program_with_source, ExecutableSource};
+//! use sniff::programs::{find_program_with_source, ExecutableSource};
 //!
 //! // Find VS Code - checks PATH first, then macOS app bundles
 //! if let Some((path, source)) = find_program_with_source("code") {

@@ -78,7 +78,7 @@ pub struct UnderlineVariants {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::terminal::color_depth;
+/// use darkmatter::terminal::color_depth;
 ///
 /// let depth = color_depth();
 /// if depth >= 16_777_216 {
@@ -114,7 +114,7 @@ pub fn color_depth() -> u32 {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::terminal::supports_setting_foreground;
+/// use darkmatter::terminal::supports_setting_foreground;
 ///
 /// if supports_setting_foreground() {
 ///     println!("\x1b[31mThis text is red!\x1b[0m");
@@ -151,7 +151,7 @@ pub fn supports_setting_foreground() -> bool {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::terminal::supports_italics;
+/// use darkmatter::terminal::supports_italics;
 ///
 /// if supports_italics() {
 ///     println!("\x1b[3mThis text is italic!\x1b[23m");
@@ -177,7 +177,7 @@ pub fn supports_italics() -> bool {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::terminal::supports_underline;
+/// use darkmatter::terminal::supports_underline;
 ///
 /// let support = supports_underline();
 /// if support.basic {
@@ -217,7 +217,7 @@ pub fn supports_underline() -> UnderlineSupport {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::terminal::supported_underline_variants;
+/// use darkmatter::terminal::supported_underline_variants;
 ///
 /// let variants = supported_underline_variants();
 /// if variants.curly && variants.colored {

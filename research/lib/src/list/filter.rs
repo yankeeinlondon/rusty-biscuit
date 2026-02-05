@@ -37,8 +37,8 @@ pub enum FilterError {
 /// # Examples
 ///
 /// ```
-/// use research_lib::list::filter::apply_filters;
-/// use research_lib::list::types::TopicInfo;
+/// use research::list::filter::apply_filters;
+/// use research::list::types::TopicInfo;
 /// use std::path::PathBuf;
 ///
 /// let topics = vec![

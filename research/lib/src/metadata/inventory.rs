@@ -14,7 +14,7 @@
 //! ## Examples
 //!
 //! ```no_run
-//! use research_lib::metadata::inventory::ResearchInventory;
+//! use research::metadata::inventory::ResearchInventory;
 //!
 //! // Load or create inventory
 //! let inventory = ResearchInventory::load().unwrap();

@@ -2978,7 +2978,7 @@ pub async fn list_with_migrate(
 /// # Example
 ///
 /// ```no_run
-/// # use research_lib::link;
+/// # use research::link;
 /// # async fn example() {
 /// // Link all library topics
 /// link(vec![], vec!["library".to_string()], false).await.unwrap();
@@ -3289,7 +3289,7 @@ async fn delete_research_output_documents(
 ///
 /// Basic research (no flags):
 /// ```no_run
-/// use research_lib::research;
+/// use research::research;
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -3301,7 +3301,7 @@ async fn delete_research_output_documents(
 ///
 /// Regenerate skill files from existing research:
 /// ```no_run
-/// use research_lib::research;
+/// use research::research;
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -3314,7 +3314,7 @@ async fn delete_research_output_documents(
 ///
 /// Force recreation of all research documents:
 /// ```no_run
-/// use research_lib::research;
+/// use research::research;
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {

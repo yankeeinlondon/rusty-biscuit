@@ -257,7 +257,7 @@ pub fn parse_and_validate_frontmatter(
 /// # Examples
 ///
 /// ```
-/// use research_lib::validation::frontmatter::repair_skill_frontmatter;
+/// use research::validation::frontmatter::repair_skill_frontmatter;
 ///
 /// let malformed = r#"---
 ///

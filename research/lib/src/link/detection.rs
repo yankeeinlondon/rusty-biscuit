@@ -159,7 +159,7 @@ pub struct StaleSymlinkScanResult {
 /// # Example
 ///
 /// ```rust,no_run
-/// use research_lib::link::detection::scan_and_remove_stale_symlinks;
+/// use research::link::detection::scan_and_remove_stale_symlinks;
 /// use std::path::Path;
 ///
 /// let result = scan_and_remove_stale_symlinks(Path::new("/home/user/.claude/skills"));

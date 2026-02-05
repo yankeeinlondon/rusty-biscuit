@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
-use tree_hugger_lib::{DiagnosticKind, DiagnosticSeverity, TreeFile};
+use tree_hugger::{DiagnosticKind, DiagnosticSeverity, TreeFile};
 
 fn create_temp_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
     let path = dir.path().join(name);

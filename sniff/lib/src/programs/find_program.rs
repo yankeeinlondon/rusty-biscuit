@@ -17,7 +17,7 @@ use which::which;
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::programs::find_program::find_program;
+/// use sniff::programs::find_program::find_program;
 ///
 /// if let Some(path) = find_program("git") {
 ///     println!("git found at: {}", path.display());
@@ -60,8 +60,8 @@ use super::types::ExecutableSource;
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::programs::find_program::find_program_with_source;
-/// use sniff_lib::programs::ExecutableSource;
+/// use sniff::programs::find_program::find_program_with_source;
+/// use sniff::programs::ExecutableSource;
 ///
 /// if let Some((path, source)) = find_program_with_source("git") {
 ///     assert_eq!(source, ExecutableSource::Path);
@@ -99,7 +99,7 @@ pub fn find_program_with_source<P: AsRef<OsStr>>(
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::programs::find_program::find_programs_with_source_parallel;
+/// use sniff::programs::find_program::find_programs_with_source_parallel;
 ///
 /// let results = find_programs_with_source_parallel(&["git", "code", "vim"]);
 /// for (name, result) in &results {

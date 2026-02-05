@@ -18,6 +18,6 @@ audio-ducking-linux = ["audio-ducking", "playa/audio-ducking-linux"]
 clap = { version = "4.5.53", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 playa = { path = "../lib", features = ["sound-effects"] }
-darkmatter-lib = { path = "../../darkmatter/lib" }
-sniff-lib = { path = "../../sniff/lib" }
+darkmatter = { path = "../../darkmatter/lib" }
+sniff = { path = "../../sniff/lib" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }

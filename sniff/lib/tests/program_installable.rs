@@ -1,13 +1,13 @@
-use sniff_lib::programs::{ProgramDetector, ProgramsInfo};
+use sniff::programs::{ProgramDetector, ProgramsInfo};
 
 #[cfg(target_os = "macos")]
-use sniff_lib::programs::TerminalApp;
+use sniff::programs::TerminalApp;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-use sniff_lib::programs::Editor;
+use sniff::programs::Editor;
 
 #[cfg(target_os = "windows")]
-use sniff_lib::programs::TtsClient;
+use sniff::programs::TtsClient;
 
 #[test]
 fn test_installable_false_for_os_specific_programs() {

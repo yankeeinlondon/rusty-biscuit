@@ -17,7 +17,7 @@ use chrono::{Duration as ChronoDuration, NaiveTime};
 /// ## Examples
 ///
 /// ```
-/// use queue_lib::parse_at_time;
+/// use queue::parse_at_time;
 /// use chrono::NaiveTime;
 ///
 /// let time = parse_at_time("7:00am").unwrap();
@@ -60,7 +60,7 @@ pub fn parse_at_time(value: &str) -> Result<NaiveTime, String> {
 /// ## Examples
 ///
 /// ```
-/// use queue_lib::parse_delay;
+/// use queue::parse_delay;
 /// use chrono::Duration;
 ///
 /// let delay = parse_delay("15").unwrap();

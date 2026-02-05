@@ -1,7 +1,7 @@
 use std::fs;
 
 use tempfile::TempDir;
-use tree_hugger_lib::{ProgrammingLanguage, TreePackage};
+use tree_hugger::{ProgrammingLanguage, TreePackage};
 
 #[test]
 fn discovers_rust_package() -> Result<(), Box<dyn std::error::Error>> {

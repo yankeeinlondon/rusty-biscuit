@@ -7,7 +7,7 @@
 //! ## Examples
 //!
 //! ```rust
-//! use darkmatter_lib::markdown::Markdown;
+//! use darkmatter::markdown::Markdown;
 //!
 //! let content = "# Introduction\n\nWelcome.\n\n## Getting Started\n\nFirst steps.";
 //! let md: Markdown = content.into();

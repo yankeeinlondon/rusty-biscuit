@@ -7,7 +7,7 @@
 //! ## Examples
 //!
 //! ```
-//! use queue_lib::terminal::{TerminalDetector, TerminalKind};
+//! use queue::terminal::{TerminalDetector, TerminalKind};
 //!
 //! let caps = TerminalDetector::detect();
 //! println!("Running in {:?}", caps.kind);

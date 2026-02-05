@@ -6,7 +6,7 @@
 //! ## Usage
 //!
 //! ```no_run
-//! use research_lib::metadata::db::ResearchInventoryDb;
+//! use research::metadata::db::ResearchInventoryDb;
 //! use std::path::Path;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -506,7 +506,7 @@ mod tests {
     #[tokio::test]
     async fn test_all_kind_variants_roundtrip() {
         use crate::metadata::Library;
-        use sniff_lib::package::LanguagePackageManager;
+        use sniff::package::LanguagePackageManager;
 
         let db = ResearchInventoryDb::in_memory().await.unwrap();
 

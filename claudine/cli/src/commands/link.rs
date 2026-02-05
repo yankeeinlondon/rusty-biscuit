@@ -1,7 +1,7 @@
 use clap::Args;
 use color_eyre::eyre::Result;
 
-use claudine_lib::linking::{self, LinkScope};
+use claudine::linking::{self, LinkScope};
 
 use crate::log;
 

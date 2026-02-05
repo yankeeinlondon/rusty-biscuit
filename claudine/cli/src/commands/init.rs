@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use clap::Args;
 use color_eyre::eyre::Result;
 
-use claudine_lib::config::{detect_agents, RegistrationResult, SkipReason};
-use claudine_lib::events::*;
+use claudine::config::{detect_agents, RegistrationResult, SkipReason};
+use claudine::events::*;
 
 use crate::log;
 

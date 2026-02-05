@@ -134,7 +134,7 @@ impl OsPackageManager {
     /// ## Examples
     ///
     /// ```
-    /// use sniff_lib::package::OsPackageManager;
+    /// use sniff::package::OsPackageManager;
     ///
     /// assert_eq!(OsPackageManager::Apt.executable_name(), "apt");
     /// assert_eq!(OsPackageManager::Homebrew.executable_name(), "brew");

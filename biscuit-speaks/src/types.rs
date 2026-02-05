@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
-use sniff_lib::programs::InstalledTtsClients;
+use sniff::programs::InstalledTtsClients;
 
 // ============================================================================
 // Volume Level

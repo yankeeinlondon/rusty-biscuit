@@ -1,8 +1,8 @@
 use clap::Args;
 use color_eyre::eyre::Result;
 
-use claudine_lib::config::{detect_agents, RegistrationResult, SkipReason};
-use claudine_lib::events::Provider;
+use claudine::config::{detect_agents, RegistrationResult, SkipReason};
+use claudine::events::Provider;
 
 use crate::log;
 
@@ -20,7 +20,7 @@ pub struct SyncArgs {
 /// Re-sync hook registrations with detected agents.
 pub async fn run(args: SyncArgs) -> Result<()> {
     // Load current config from user/repo locations
-    let config = claudine_lib::dispatch::loader::load_config(None, None)?;
+    let config = claudine::dispatch::loader::load_config(None, None)?;
 
     let agents = detect_agents();
     let filter_provider = args

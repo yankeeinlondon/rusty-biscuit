@@ -23,8 +23,8 @@ static PLACEHOLDER_RE: LazyLock<Regex> =
 /// ## Examples
 ///
 /// ```
-/// # use claudine_lib::dispatch::template::interpolate;
-/// # use claudine_lib::events::*;
+/// # use claudine::dispatch::template::interpolate;
+/// # use claudine::events::*;
 /// # use std::collections::HashMap;
 /// # use chrono::Utc;
 /// # let meta = EventMeta {

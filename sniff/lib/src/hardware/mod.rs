@@ -14,7 +14,7 @@ pub use memory::MemoryInfo;
 pub use storage::{StorageInfo, StorageKind};
 
 // Re-export OS types from the dedicated os module for backward compatibility.
-// The canonical path is now `sniff_lib::os::*`.
+// The canonical path is now `sniff::os::*`.
 #[doc(inline)]
 pub use crate::os::{
     DetectedPackageManager, LinuxDistro, LinuxFamily, LocaleInfo, NtpStatus, OsInfo, OsType,
@@ -52,7 +52,7 @@ pub struct HardwareInfo {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::hardware::detect_hardware;
+/// use sniff::hardware::detect_hardware;
 ///
 /// let hw = detect_hardware().unwrap();
 /// println!("CPU: {} ({} cores)", hw.cpu.brand, hw.cpu.logical_cores);
@@ -144,7 +144,7 @@ pub fn detect_hardware() -> Result<HardwareInfo> {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::hardware::detect_hardware_with_usage;
+/// use sniff::hardware::detect_hardware_with_usage;
 ///
 /// let hw = detect_hardware_with_usage().unwrap();
 /// println!("CPU: {}", hw.cpu.brand);

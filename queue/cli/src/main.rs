@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use chrono::{Duration as ChronoDuration, Local, NaiveTime, TimeZone, Utc};
 use clap::Parser;
 use crossterm::terminal;
-use queue_lib::{
+use queue::{
     ExecutionTarget, JsonFileStore, ScheduledTask, TerminalDetector, parse_at_time, parse_delay,
 };
 use thiserror::Error;

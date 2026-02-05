@@ -466,7 +466,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "sniff-lib",
+ "sniff",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -492,7 +492,7 @@ dependencies = [
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
  "serial_test",
- "sniff-lib",
+ "sniff",
  "tempfile",
  "terminal_size",
  "termini",
@@ -846,26 +846,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3e64b0cc0439b12df2fa678eae89a1c56a529fd067a9115f7827f1fffd22b32"
 
 [[package]]
-name = "claudine-cli"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "clap 4.5.54",
- "clap_complete",
- "claudine-lib",
- "color-eyre",
- "darkmatter-lib",
- "dirs 6.0.0",
- "inquire",
- "predicates",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "claudine-lib"
+name = "claudine"
 version = "0.1.0"
 dependencies = [
  "biscuit-hash",
@@ -879,7 +860,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
- "sniff-lib",
+ "sniff",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -887,6 +868,25 @@ dependencies = [
  "tracing",
  "url",
  "walkdir",
+]
+
+[[package]]
+name = "claudine-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "clap 4.5.54",
+ "clap_complete",
+ "claudine",
+ "color-eyre",
+ "darkmatter",
+ "dirs 6.0.0",
+ "inquire",
+ "predicates",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1257,25 +1257,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "darkmatter-cli"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "clap 4.5.54",
- "clap_complete",
- "color-eyre",
- "darkmatter-lib",
- "open",
- "predicates",
- "serde_json",
- "serde_yaml 0.9.34+deprecated",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "darkmatter-lib"
+name = "darkmatter"
 version = "0.1.0"
 dependencies = [
  "biscuit-hash",
@@ -1307,6 +1289,24 @@ dependencies = [
  "two-face",
  "unicode-width 0.2.2",
  "url",
+]
+
+[[package]]
+name = "darkmatter-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "clap 4.5.54",
+ "clap_complete",
+ "color-eyre",
+ "darkmatter",
+ "open",
+ "predicates",
+ "serde_json",
+ "serde_yaml 0.9.34+deprecated",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4074,7 +4074,7 @@ dependencies = [
  "infer",
  "pulsectl-rs",
  "reqwest",
- "sniff-lib",
+ "sniff",
  "thiserror 2.0.18",
  "tokio",
  "url",
@@ -4086,9 +4086,9 @@ version = "0.1.0"
 dependencies = [
  "clap 4.5.54",
  "clap_complete",
- "darkmatter-lib",
+ "darkmatter",
  "playa",
- "sniff-lib",
+ "sniff",
  "tokio",
 ]
 
@@ -4322,25 +4322,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "queue-cli"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "chrono",
- "clap 4.5.54",
- "crossterm 0.29.0",
- "dirs 6.0.0",
- "predicates",
- "queue-lib",
- "ratatui",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "queue-lib"
+name = "queue"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -4351,6 +4333,24 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "queue-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "chrono",
+ "clap 4.5.54",
+ "crossterm 0.29.0",
+ "dirs 6.0.0",
+ "predicates",
+ "queue",
+ "ratatui",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4862,29 +4862,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "research-cli"
-version = "0.1.0"
-dependencies = [
- "biscuit-speaks",
- "clap 4.5.54",
- "dirs 5.0.1",
- "dotenvy",
- "glob",
- "open",
- "research-lib",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "research-lib"
+name = "research"
 version = "0.1.0"
 dependencies = [
  "biscuit-speaks",
  "chrono",
  "clap 4.5.54",
- "darkmatter-lib",
+ "darkmatter",
  "dirs 5.0.1",
  "dotenvy",
  "futures",
@@ -4902,7 +4886,7 @@ dependencies = [
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
  "serial_test",
- "sniff-lib",
+ "sniff",
  "sqlx",
  "tempfile",
  "termbg",
@@ -4915,6 +4899,22 @@ dependencies = [
  "walkdir",
  "wiremock",
  "xxhash-rust",
+]
+
+[[package]]
+name = "research-cli"
+version = "0.1.0"
+dependencies = [
+ "biscuit-speaks",
+ "clap 4.5.54",
+ "dirs 5.0.1",
+ "dotenvy",
+ "glob",
+ "open",
+ "research",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -5619,25 +5619,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
 
 [[package]]
-name = "sniff-cli"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "biscuit-terminal",
- "chrono",
- "clap 4.5.54",
- "clap_complete",
- "darkmatter-lib",
- "predicates",
- "serde",
- "serde_json",
- "sniff-lib",
- "strum 0.27.2",
- "tokio",
-]
-
-[[package]]
-name = "sniff-lib"
+name = "sniff"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -5666,13 +5648,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "sniff-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "biscuit-terminal",
+ "chrono",
+ "clap 4.5.54",
+ "clap_complete",
+ "darkmatter",
+ "predicates",
+ "serde",
+ "serde_json",
+ "sniff",
+ "strum 0.27.2",
+ "tokio",
+]
+
+[[package]]
 name = "so-you-say"
 version = "0.1.0"
 dependencies = [
  "biscuit-speaks",
  "clap 4.5.54",
  "clap_complete",
- "darkmatter-lib",
+ "darkmatter",
  "inquire",
  "owo-colors",
  "tokio",
@@ -6763,23 +6763,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tree-hugger-cli"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "clap 4.5.54",
- "clap_complete",
- "ignore",
- "owo-colors",
- "percent-encoding",
- "predicates",
- "serde",
- "serde_json",
- "tree-hugger-lib",
-]
-
-[[package]]
-name = "tree-hugger-lib"
+name = "tree-hugger"
 version = "0.1.0"
 dependencies = [
  "biscuit-hash",
@@ -6804,6 +6788,22 @@ dependencies = [
  "tree-sitter-swift",
  "tree-sitter-typescript",
  "tree-sitter-zsh",
+]
+
+[[package]]
+name = "tree-hugger-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "clap 4.5.54",
+ "clap_complete",
+ "ignore",
+ "owo-colors",
+ "percent-encoding",
+ "predicates",
+ "serde",
+ "serde_json",
+ "tree-hugger",
 ]
 
 [[package]]

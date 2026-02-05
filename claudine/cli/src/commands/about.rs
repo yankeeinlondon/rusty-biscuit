@@ -1,6 +1,6 @@
 use color_eyre::eyre::Result;
-use darkmatter_lib::markdown::Markdown;
-use darkmatter_lib::markdown::output::terminal::{TerminalOptions, for_terminal};
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
 use crate::log;
 

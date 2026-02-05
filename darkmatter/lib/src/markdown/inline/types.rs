@@ -13,7 +13,7 @@ use pulldown_cmark::Event;
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::inline::InlineTag;
+/// use darkmatter::markdown::inline::InlineTag;
 ///
 /// let tag = InlineTag::Mark;
 /// assert_eq!(format!("{:?}", tag), "Mark");
@@ -41,7 +41,7 @@ pub enum InlineTag {
 ///
 /// ```
 /// use pulldown_cmark::Event;
-/// use darkmatter_lib::markdown::inline::{InlineEvent, InlineTag};
+/// use darkmatter::markdown::inline::{InlineEvent, InlineTag};
 ///
 /// // Standard events are wrapped
 /// let text = Event::Text("Hello".into());

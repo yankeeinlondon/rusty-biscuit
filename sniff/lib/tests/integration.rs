@@ -1,4 +1,4 @@
-use sniff_lib::{SniffConfig, detect, detect_with_config};
+use sniff::{SniffConfig, detect, detect_with_config};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -56,7 +56,7 @@ fn test_detect_completes_in_reasonable_time() {
 fn test_serialization_roundtrip() {
     let result = detect().unwrap();
     let json = serde_json::to_string(&result).unwrap();
-    let parsed: sniff_lib::SniffResult = serde_json::from_str(&json).unwrap();
+    let parsed: sniff::SniffResult = serde_json::from_str(&json).unwrap();
     let orig_os = result.os.expect("os should be present");
     let parsed_os = parsed.os.expect("parsed os should be present");
     assert_eq!(orig_os.name, parsed_os.name);
@@ -91,7 +91,7 @@ fn test_detect_pnpm_workspace() {
     assert!(fs.repo.is_some());
     let repo = fs.repo.unwrap();
     assert!(repo.is_monorepo);
-    assert_eq!(repo.monorepo_tool, Some(sniff_lib::filesystem::MonorepoTool::PnpmWorkspaces));
+    assert_eq!(repo.monorepo_tool, Some(sniff::filesystem::MonorepoTool::PnpmWorkspaces));
 }
 
 // === Regression tests for JSON serialization of partial results ===
@@ -148,7 +148,7 @@ fn test_partial_result_deserialization_roundtrip() {
     let config = SniffConfig::new().skip_hardware();
     let result = detect_with_config(config).unwrap();
     let json = serde_json::to_string(&result).unwrap();
-    let parsed: sniff_lib::SniffResult = serde_json::from_str(&json).unwrap();
+    let parsed: sniff::SniffResult = serde_json::from_str(&json).unwrap();
     assert!(parsed.hardware.is_none(), "Deserialized hardware should be None");
     assert!(parsed.network.is_some(), "Deserialized network should be Some");
 }
@@ -160,7 +160,7 @@ fn test_partial_result_deserialization_roundtrip() {
 /// Tests that detect_os returns populated OS detection fields.
 #[test]
 fn test_detect_os_has_detection_fields() {
-    use sniff_lib::hardware::detect_os;
+    use sniff::hardware::detect_os;
 
     let os = detect_os().expect("detect_os should succeed");
 
@@ -170,19 +170,19 @@ fn test_detect_os_has_detection_fields() {
 
     // OS type should match current platform
     #[cfg(target_os = "macos")]
-    assert_eq!(os.os_type, sniff_lib::hardware::OsType::MacOS);
+    assert_eq!(os.os_type, sniff::hardware::OsType::MacOS);
 
     #[cfg(target_os = "linux")]
-    assert_eq!(os.os_type, sniff_lib::hardware::OsType::Linux);
+    assert_eq!(os.os_type, sniff::hardware::OsType::Linux);
 
     #[cfg(target_os = "windows")]
-    assert_eq!(os.os_type, sniff_lib::hardware::OsType::Windows);
+    assert_eq!(os.os_type, sniff::hardware::OsType::Windows);
 }
 
 /// Tests that detect_locale returns valid locale data.
 #[test]
 fn test_detect_locale_returns_valid_data() {
-    use sniff_lib::hardware::detect_locale;
+    use sniff::hardware::detect_locale;
 
     let locale = detect_locale();
 
@@ -204,14 +204,14 @@ fn test_detect_locale_returns_valid_data() {
 
     // LocaleInfo should always have valid structure even if empty
     let json = serde_json::to_string(&locale).expect("LocaleInfo should serialize");
-    let _parsed: sniff_lib::hardware::LocaleInfo =
+    let _parsed: sniff::hardware::LocaleInfo =
         serde_json::from_str(&json).expect("LocaleInfo should deserialize");
 }
 
 /// Tests that detect_timezone returns a valid UTC offset.
 #[test]
 fn test_detect_timezone_returns_valid_offset() {
-    use sniff_lib::hardware::detect_timezone;
+    use sniff::hardware::detect_timezone;
 
     let time_info = detect_timezone();
 
@@ -227,14 +227,14 @@ fn test_detect_timezone_returns_valid_offset() {
 
     // TimeInfo should serialize/deserialize correctly
     let json = serde_json::to_string(&time_info).expect("TimeInfo should serialize");
-    let _parsed: sniff_lib::hardware::TimeInfo =
+    let _parsed: sniff::hardware::TimeInfo =
         serde_json::from_str(&json).expect("TimeInfo should deserialize");
 }
 
 /// Tests that detect_os_type matches the current platform.
 #[test]
 fn test_detect_os_type_matches_platform() {
-    use sniff_lib::hardware::{OsType, detect_os_type};
+    use sniff::hardware::{OsType, detect_os_type};
 
     let os_type = detect_os_type();
 
@@ -264,7 +264,7 @@ fn test_detect_os_type_matches_platform() {
 #[cfg(target_os = "macos")]
 #[test]
 fn test_macos_package_managers_finds_expected_managers() {
-    use sniff_lib::hardware::{SystemPackageManager, detect_macos_package_managers};
+    use sniff::hardware::{SystemPackageManager, detect_macos_package_managers};
 
     let managers = detect_macos_package_managers();
 
@@ -296,7 +296,7 @@ fn test_macos_package_managers_finds_expected_managers() {
 #[cfg(target_os = "linux")]
 #[test]
 fn test_linux_package_managers_finds_at_least_one() {
-    use sniff_lib::hardware::{detect_linux_distro, detect_linux_package_managers};
+    use sniff::hardware::{detect_linux_distro, detect_linux_package_managers};
 
     // Get distro info to determine family
     let linux_family = detect_linux_distro().map(|d| d.family);
@@ -441,7 +441,7 @@ fn test_network_ip_addresses_json_structure() {
 fn test_network_ip_addresses_roundtrip() {
     let result = detect().unwrap();
     let json = serde_json::to_string(&result).expect("SniffResult should serialize");
-    let parsed: sniff_lib::SniffResult =
+    let parsed: sniff::SniffResult =
         serde_json::from_str(&json).expect("JSON should deserialize");
 
     if let (Some(orig_net), Some(parsed_net)) = (&result.network, &parsed.network) {

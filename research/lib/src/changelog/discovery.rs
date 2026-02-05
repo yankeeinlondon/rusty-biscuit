@@ -21,7 +21,7 @@
 //! ## Examples
 //!
 //! ```rust,no_run
-//! use research_lib::changelog::discovery::discover_changelog_file;
+//! use research::changelog::discovery::discover_changelog_file;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let client = reqwest::Client::new();
@@ -84,7 +84,7 @@ pub struct GitHubRepo {
 /// ## Examples
 ///
 /// ```
-/// use research_lib::changelog::discovery::parse_github_url;
+/// use research::changelog::discovery::parse_github_url;
 ///
 /// let repo = parse_github_url("https://github.com/clap-rs/clap").unwrap();
 /// assert_eq!(repo.owner(), "clap-rs");
@@ -166,7 +166,7 @@ impl GitHubRepo {
 /// ## Examples
 ///
 /// ```rust,no_run
-/// use research_lib::changelog::discovery::discover_changelog_file;
+/// use research::changelog::discovery::discover_changelog_file;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = reqwest::Client::new();
@@ -222,7 +222,7 @@ async fn fetch_with_timeout(client: &reqwest::Client, url: &str) -> Result<Strin
 /// ## Examples
 ///
 /// ```
-/// use research_lib::changelog::discovery::parse_keep_a_changelog;
+/// use research::changelog::discovery::parse_keep_a_changelog;
 ///
 /// let content = "# Changelog\n## [1.0.0] - 2024-01-15\n### Added\n- New feature\n### Breaking\n- API change\n";
 ///
@@ -314,7 +314,7 @@ pub fn parse_keep_a_changelog(content: &str) -> Vec<VersionInfo> {
 /// ## Examples
 ///
 /// ```
-/// use research_lib::changelog::discovery::parse_conventional_changelog;
+/// use research::changelog::discovery::parse_conventional_changelog;
 ///
 /// let content = "# Changelog\n## 1.0.0 (2024-01-15)\n### ⚠ BREAKING CHANGES\n* API redesign\n### Features\n* New feature\n";
 ///
@@ -408,7 +408,7 @@ pub fn parse_conventional_changelog(content: &str) -> Vec<VersionInfo> {
 /// ## Examples
 ///
 /// ```
-/// use research_lib::changelog::discovery::parse_generic_changelog;
+/// use research::changelog::discovery::parse_generic_changelog;
 ///
 /// let content = "# Changelog\n## Version 1.0.0 - Released 2024-01-15\nSome changes\n## v0.9.0 (2024-01-01)\nMore changes\n";
 ///

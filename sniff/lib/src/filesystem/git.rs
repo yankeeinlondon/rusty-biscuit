@@ -25,7 +25,7 @@ pub struct GitConfig {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::filesystem::git::ConventionalCommit;
+/// use sniff::filesystem::git::ConventionalCommit;
 ///
 /// let commit = ConventionalCommit::parse("feat(cli): add new flag");
 /// assert_eq!(commit.operation, Some("feat".to_string()));
@@ -167,7 +167,7 @@ pub struct RemoteTrackingStatus {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::filesystem::git::HostingProvider;
+/// use sniff::filesystem::git::HostingProvider;
 ///
 /// let provider = HostingProvider::from_url("https://github.com/user/repo");
 /// assert_eq!(provider, HostingProvider::GitHub);
@@ -208,7 +208,7 @@ impl HostingProvider {
     /// ## Examples
     ///
     /// ```
-    /// use sniff_lib::filesystem::git::HostingProvider;
+    /// use sniff::filesystem::git::HostingProvider;
     ///
     /// assert_eq!(
     ///     HostingProvider::from_url("https://github.com/user/repo"),
@@ -258,7 +258,7 @@ impl HostingProvider {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::filesystem::git::detect_git;
+/// use sniff::filesystem::git::detect_git;
 /// use std::path::Path;
 ///
 /// let git_info = detect_git(Path::new("."), false, 10).unwrap();
@@ -311,7 +311,7 @@ pub struct GitInfo {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::filesystem::git::BehindStatus;
+/// use sniff::filesystem::git::BehindStatus;
 ///
 /// // Not behind any remote
 /// let status = BehindStatus::NotBehind;
@@ -501,7 +501,7 @@ pub struct WorktreeInfo {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::filesystem::git::detect_git;
+/// use sniff::filesystem::git::detect_git;
 /// use std::path::Path;
 ///
 /// let git_info = detect_git(Path::new("."), false, 10).unwrap().unwrap();
@@ -532,7 +532,7 @@ pub struct DirtyFile {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::filesystem::git::detect_git;
+/// use sniff::filesystem::git::detect_git;
 /// use std::path::Path;
 ///
 /// let git_info = detect_git(Path::new("."), false, 10).unwrap().unwrap();
@@ -631,7 +631,7 @@ fn preferred_remote(remotes: &[RemoteInfo]) -> Option<&RemoteInfo> {
 /// ## Examples
 ///
 /// ```no_run
-/// use sniff_lib::filesystem::git::detect_git;
+/// use sniff::filesystem::git::detect_git;
 /// use std::path::Path;
 ///
 /// let result = detect_git(Path::new("."), false, 10).unwrap();

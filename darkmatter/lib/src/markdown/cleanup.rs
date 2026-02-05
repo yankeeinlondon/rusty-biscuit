@@ -11,7 +11,7 @@
 //! ## Examples
 //!
 //! ```
-//! use darkmatter_lib::markdown::Markdown;
+//! use darkmatter::markdown::Markdown;
 //!
 //! let content = "# Header\nSome text\n## Another Header";
 //! let mut md: Markdown = content.into();
@@ -250,7 +250,7 @@ fn unescape_emphasis_chars(output: &mut String) {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::markdown::cleanup::cleanup_content;
+/// use darkmatter::markdown::cleanup::cleanup_content;
 ///
 /// let content = "# Title\nParagraph";
 /// let cleaned = cleanup_content(content);

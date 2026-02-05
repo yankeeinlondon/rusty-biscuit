@@ -8,7 +8,7 @@ use super::{format_bytes, relative_path};
 ///
 /// Returns `None` if no capabilities are detected.
 /// Uses hierarchical display: shows highest AVX level (512 > AVX2 > AVX).
-fn format_simd_caps(simd: &sniff_lib::hardware::SimdCapabilities) -> Option<String> {
+fn format_simd_caps(simd: &sniff::hardware::SimdCapabilities) -> Option<String> {
     let mut caps = Vec::new();
     // AVX hierarchy: show highest level only
     if simd.avx512f {
@@ -37,7 +37,7 @@ fn format_simd_caps(simd: &sniff_lib::hardware::SimdCapabilities) -> Option<Stri
 /// Format GPU capabilities into a comma-separated string.
 ///
 /// Returns `None` if no capabilities are detected.
-fn format_gpu_caps(caps: &sniff_lib::hardware::GpuCapabilities) -> Option<String> {
+fn format_gpu_caps(caps: &sniff::hardware::GpuCapabilities) -> Option<String> {
     let mut cap_list = Vec::new();
     if caps.raytracing {
         cap_list.push("Raytracing");
@@ -59,7 +59,7 @@ fn format_gpu_caps(caps: &sniff_lib::hardware::GpuCapabilities) -> Option<String
 }
 
 pub fn print_hardware_section(
-    hardware: &sniff_lib::HardwareInfo,
+    hardware: &sniff::HardwareInfo,
     verbose: u8,
     repo_root: Option<&Path>,
 ) {
@@ -136,9 +136,9 @@ pub fn print_hardware_section(
     for disk in &hardware.storage {
         let mount_str = relative_path(&disk.mount_point, repo_root);
         let kind_str = match disk.kind {
-            sniff_lib::hardware::StorageKind::Ssd => "SSD",
-            sniff_lib::hardware::StorageKind::Hdd => "HDD",
-            sniff_lib::hardware::StorageKind::Unknown => "",
+            sniff::hardware::StorageKind::Ssd => "SSD",
+            sniff::hardware::StorageKind::Hdd => "HDD",
+            sniff::hardware::StorageKind::Unknown => "",
         };
         if kind_str.is_empty() {
             println!("  {} ({})", mount_str, disk.file_system);
@@ -160,7 +160,7 @@ pub fn print_hardware_section(
 // Subsection print functions (for --cpu, --gpu, --memory, --storage filters)
 // ============================================================================
 
-pub fn print_cpu_section(cpu: &sniff_lib::hardware::CpuInfo, verbose: u8) {
+pub fn print_cpu_section(cpu: &sniff::hardware::CpuInfo, verbose: u8) {
     println!("=== CPU ===");
     println!("Brand: {}", cpu.brand);
     println!("Architecture: {}", cpu.arch);
@@ -179,7 +179,7 @@ pub fn print_cpu_section(cpu: &sniff_lib::hardware::CpuInfo, verbose: u8) {
     println!();
 }
 
-pub fn print_gpu_section(gpus: &[sniff_lib::hardware::GpuInfo], verbose: u8) {
+pub fn print_gpu_section(gpus: &[sniff::hardware::GpuInfo], verbose: u8) {
     println!("=== GPU ===");
     if gpus.is_empty() {
         println!("No GPUs detected");
@@ -215,7 +215,7 @@ pub fn print_gpu_section(gpus: &[sniff_lib::hardware::GpuInfo], verbose: u8) {
     println!();
 }
 
-pub fn print_memory_section(memory: &sniff_lib::hardware::MemoryInfo) {
+pub fn print_memory_section(memory: &sniff::hardware::MemoryInfo) {
     println!("=== Memory ===");
     println!("Total: {}", format_bytes(memory.total_bytes));
     println!("Available: {}", format_bytes(memory.available_bytes));
@@ -237,7 +237,7 @@ pub fn print_memory_section(memory: &sniff_lib::hardware::MemoryInfo) {
 }
 
 pub fn print_storage_section(
-    storage: &[sniff_lib::hardware::StorageInfo],
+    storage: &[sniff::hardware::StorageInfo],
     verbose: u8,
     repo_root: Option<&Path>,
 ) {
@@ -245,9 +245,9 @@ pub fn print_storage_section(
     for disk in storage {
         let mount_str = relative_path(&disk.mount_point, repo_root);
         let kind_str = match disk.kind {
-            sniff_lib::hardware::StorageKind::Ssd => "SSD",
-            sniff_lib::hardware::StorageKind::Hdd => "HDD",
-            sniff_lib::hardware::StorageKind::Unknown => "",
+            sniff::hardware::StorageKind::Ssd => "SSD",
+            sniff::hardware::StorageKind::Hdd => "HDD",
+            sniff::hardware::StorageKind::Unknown => "",
         };
         if kind_str.is_empty() {
             println!("{} ({})", mount_str, disk.file_system);

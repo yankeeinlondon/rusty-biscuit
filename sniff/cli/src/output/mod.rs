@@ -13,7 +13,7 @@ mod services;
 
 use std::path::Path;
 
-use sniff_lib::SniffResult;
+use sniff::SniffResult;
 
 pub use filesystem::print_git_section;
 pub use programs::{print_programs_json, print_programs_markdown};

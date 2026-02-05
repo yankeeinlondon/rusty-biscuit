@@ -58,8 +58,8 @@ pub enum MigrationError {
 /// ## Examples
 ///
 /// ```
-/// use research_lib::metadata::{MetadataV0, migration::migrate_v0_to_v1};
-/// use research_lib::ResearchKind;
+/// use research::metadata::{MetadataV0, migration::migrate_v0_to_v1};
+/// use research::ResearchKind;
 /// use chrono::Utc;
 /// use std::collections::HashMap;
 ///

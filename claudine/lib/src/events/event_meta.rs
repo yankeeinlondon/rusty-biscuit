@@ -71,7 +71,7 @@ pub struct EventMeta {
 
     /// Snapshot of the host and repository environment.
     ///
-    /// Populated once at session start via `sniff_lib` and reused
+    /// Populated once at session start via `sniff` and reused
     /// for all events in the session.
     #[serde(default)]
     pub env: EnvironmentContext,

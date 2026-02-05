@@ -3,7 +3,7 @@
 //! These tests verify the complete end-to-end workflow of the link command,
 //! including topic discovery, filtering, and symlink creation.
 
-use research_lib::link::{SkillAction, link};
+use research::link::{SkillAction, link};
 use serial_test::serial;
 use std::env;
 use std::fs;
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 /// Helper to create a research library directory structure with topics
-fn create_test_research_library(temp_dir: &Path) -> PathBuf {
+fn create_test_researchrary(temp_dir: &Path) -> PathBuf {
     let library = temp_dir.join(".research").join("library");
     fs::create_dir_all(&library).unwrap();
     library
@@ -177,7 +177,7 @@ fn create_local_definition(dir: &Path, name: &str) {
 #[serial]
 async fn test_end_to_end_discover_filter_link_with_mixed_scenarios() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let _ = setup_temp_home_dirs(temp.path());
 
     // Create test skills
@@ -219,7 +219,7 @@ async fn test_end_to_end_discover_filter_link_with_mixed_scenarios() {
 #[serial]
 async fn test_error_handling_continues_when_one_symlink_fails() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let (_claude_skills, _opencode_skills, _roo_skills) = setup_temp_home_dirs(temp.path());
 
     // Create 5 test skills
@@ -274,7 +274,7 @@ async fn test_error_handling_continues_when_one_symlink_fails() {
 #[serial]
 async fn test_asymmetric_failure_claude_succeeds_opencode_fails() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let (_claude_skills, opencode_skills, _roo_skills) = setup_temp_home_dirs(temp.path());
 
     // Create test skill
@@ -319,7 +319,7 @@ async fn test_asymmetric_failure_claude_succeeds_opencode_fails() {
 #[serial]
 async fn test_empty_filter_result_produces_no_symlinks() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let _ = setup_temp_home_dirs(temp.path());
 
     // Create test skills
@@ -354,7 +354,7 @@ async fn test_empty_filter_result_produces_no_symlinks() {
 #[serial]
 async fn test_topic_has_no_skill_directory_verification() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let _ = setup_temp_home_dirs(temp.path());
 
     // Create one valid skill and one invalid skill (missing SKILL.md)
@@ -410,7 +410,7 @@ async fn test_topic_has_no_skill_directory_verification() {
 #[serial]
 async fn test_idempotency_running_twice_produces_same_result() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let _ = setup_temp_home_dirs(temp.path());
 
     // Create test skills
@@ -466,7 +466,7 @@ async fn test_idempotency_running_twice_produces_same_result() {
 #[serial]
 async fn test_filtering_works_correctly_glob_patterns() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let _ = setup_temp_home_dirs(temp.path());
 
     // Create test skills with different names
@@ -507,7 +507,7 @@ async fn test_filtering_works_correctly_glob_patterns() {
 #[serial]
 async fn test_filtering_works_correctly_type_filters() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let _ = setup_temp_home_dirs(temp.path());
 
     // Create test skills with different types
@@ -548,7 +548,7 @@ async fn test_filtering_works_correctly_type_filters() {
 #[serial]
 async fn test_combined_glob_and_type_filters() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let _ = setup_temp_home_dirs(temp.path());
 
     // Create test skills
@@ -594,7 +594,7 @@ async fn test_combined_glob_and_type_filters() {
 #[serial]
 async fn test_symlinks_created_are_accessible() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let (claude_skills, _opencode_skills, _roo_skills) = setup_temp_home_dirs(temp.path());
 
     // Create test skill with some content
@@ -641,7 +641,7 @@ async fn test_symlinks_created_are_accessible() {
 #[cfg(unix)]
 async fn test_stale_symlinks_are_removed_before_linking() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let (claude_skills, _, opencode_skills, _, _roo_skills, _) =
         setup_temp_home_dirs_with_docs(temp.path());
 
@@ -719,7 +719,7 @@ async fn test_stale_symlinks_are_removed_before_linking() {
 #[cfg(unix)]
 async fn test_working_symlinks_are_not_removed() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let (claude_skills, _, _opencode_skills, _, _roo_skills, _) =
         setup_temp_home_dirs_with_docs(temp.path());
 
@@ -767,7 +767,7 @@ async fn test_working_symlinks_are_not_removed() {
 #[serial]
 async fn test_deep_dive_symlinks_created_with_topic_name() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let (_, claude_docs, _, opencode_docs, _, _roo_docs) =
         setup_temp_home_dirs_with_docs(temp.path());
 
@@ -837,7 +837,7 @@ async fn test_deep_dive_symlinks_created_with_topic_name() {
 #[serial]
 async fn test_deep_dive_links_are_idempotent() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let (_, claude_docs, _, _, _, _) = setup_temp_home_dirs_with_docs(temp.path());
 
     // Create skill with deep_dive.md
@@ -897,7 +897,7 @@ async fn test_deep_dive_links_are_idempotent() {
 #[serial]
 async fn test_no_deep_dive_results_in_none_doc_action() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let _ = setup_temp_home_dirs_with_docs(temp.path());
 
     // Create skill WITHOUT deep_dive.md
@@ -935,7 +935,7 @@ async fn test_no_deep_dive_results_in_none_doc_action() {
 #[serial]
 async fn test_multiple_topics_get_distinct_doc_names() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let (_, claude_docs, _, _, _, _) = setup_temp_home_dirs_with_docs(temp.path());
 
     // Create multiple skills with deep_dive.md
@@ -983,7 +983,7 @@ async fn test_multiple_topics_get_distinct_doc_names() {
 #[cfg(unix)]
 async fn test_stale_doc_symlinks_also_removed() {
     let temp = TempDir::new().unwrap();
-    let library = create_test_research_library(temp.path());
+    let library = create_test_researchrary(temp.path());
     let (_, claude_docs, _, opencode_docs, _, _roo_docs) =
         setup_temp_home_dirs_with_docs(temp.path());
 

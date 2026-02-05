@@ -3,8 +3,12 @@
 //! This module provides the core traits and types for program detection,
 //! including metadata lookup, version parsing strategies, and error handling.
 
-use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::path::PathBuf;
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
+
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Errors that can occur during program version detection.
@@ -36,6 +40,8 @@ pub enum ProgramError {
         code: i32,
     },
 }
+
+const VERSION_COMMAND_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Strategy for parsing version output from a program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,7 +175,7 @@ impl ProgramInfo {
 /// ## Examples
 ///
 /// ```ignore
-/// use sniff_lib::programs::schema::ProgramMetadata;
+/// use sniff::programs::schema::ProgramMetadata;
 ///
 /// // Get metadata for a specific editor
 /// let info = Editor::Vim.info();
@@ -229,12 +235,11 @@ pub trait ProgramMetadata: Sized {
         }
 
         // Execute version command
-        let output = std::process::Command::new(&path).args(args).output().map_err(|e| {
-            ProgramError::ExecutionFailed {
+        let output =
+            run_command_with_timeout(&path, args).map_err(|e| ProgramError::ExecutionFailed {
                 program: info.binary_name.to_string(),
                 source: e,
-            }
-        })?;
+            })?;
 
         // Check exit code (some programs return non-zero for --version)
         // We'll be lenient and accept any output
@@ -248,6 +253,51 @@ pub trait ProgramMetadata: Sized {
 
         // Parse version based on strategy
         parse_version(&text, info)
+    }
+}
+
+fn run_command_with_timeout(
+    path: &std::path::Path,
+    args: &[&str],
+) -> Result<Output, std::io::Error> {
+    let mut child = Command::new(path)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let start = Instant::now();
+
+    loop {
+        if let Some(status) = child.try_wait()? {
+            let mut stdout = Vec::new();
+            let mut stderr = Vec::new();
+
+            if let Some(mut out) = child.stdout.take() {
+                out.read_to_end(&mut stdout)?;
+            }
+            if let Some(mut err) = child.stderr.take() {
+                err.read_to_end(&mut stderr)?;
+            }
+
+            return Ok(Output {
+                status,
+                stdout,
+                stderr,
+            });
+        }
+
+        if start.elapsed() >= VERSION_COMMAND_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "version command timed out",
+            ));
+        }
+
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 

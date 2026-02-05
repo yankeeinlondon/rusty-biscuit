@@ -32,7 +32,7 @@ use crate::{LibraryInfoMetadata, ResearchKind};
 /// ## Examples
 ///
 /// ```
-/// use research_lib::metadata::MetadataV0;
+/// use research::metadata::MetadataV0;
 ///
 /// let json = r#"{
 ///     "kind": "library",

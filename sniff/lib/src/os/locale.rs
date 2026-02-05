@@ -58,7 +58,7 @@ pub struct LocaleInfo {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::os::detect_locale;
+/// use sniff::os::detect_locale;
 ///
 /// let locale = detect_locale();
 /// if let Some(lang) = &locale.preferred_language {
@@ -121,7 +121,7 @@ fn is_extractable_locale(locale: &str) -> bool {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::os::extract_language_code;
+/// use sniff::os::extract_language_code;
 ///
 /// assert_eq!(extract_language_code("en_US.UTF-8"), Some("en".to_string()));
 /// assert_eq!(extract_language_code("de_DE"), Some("de".to_string()));
@@ -161,7 +161,7 @@ pub fn extract_language_code(locale: &str) -> Option<String> {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::os::extract_encoding;
+/// use sniff::os::extract_encoding;
 ///
 /// assert_eq!(extract_encoding("en_US.UTF-8"), Some("UTF-8".to_string()));
 /// assert_eq!(extract_encoding("de_DE.ISO-8859-1"), Some("ISO-8859-1".to_string()));

@@ -6,7 +6,7 @@
 //! # Usage
 //!
 //! ```rust,no_run
-//! use research_lib::link::link;
+//! use research::link::link;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -61,7 +61,7 @@ use tracing::instrument;
 /// # Example
 ///
 /// ```rust,no_run
-/// use research_lib::link::link;
+/// use research::link::link;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// // Link all library topics

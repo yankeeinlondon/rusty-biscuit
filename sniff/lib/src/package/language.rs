@@ -233,7 +233,7 @@ impl LanguagePackageManager {
     /// ## Examples
     ///
     /// ```
-    /// use sniff_lib::package::LanguagePackageManager;
+    /// use sniff::package::LanguagePackageManager;
     ///
     /// assert_eq!(LanguagePackageManager::Npm.executable_name(), "npm");
     /// assert_eq!(LanguagePackageManager::Cargo.executable_name(), "cargo");
@@ -342,7 +342,7 @@ impl LanguagePackageManager {
     /// ## Examples
     ///
     /// ```
-    /// use sniff_lib::package::LanguagePackageManager;
+    /// use sniff::package::LanguagePackageManager;
     ///
     /// assert_eq!(LanguagePackageManager::Npm.language(), "JavaScript");
     /// assert_eq!(LanguagePackageManager::Cargo.language(), "Rust");

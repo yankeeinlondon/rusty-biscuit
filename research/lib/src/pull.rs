@@ -14,7 +14,7 @@
 //! ## Examples
 //!
 //! ```no_run
-//! use research_lib::pull::{PullOptions, pull_topic};
+//! use research::pull::{PullOptions, pull_topic};
 //! use std::path::PathBuf;
 //!
 //! let options = PullOptions {
@@ -115,7 +115,7 @@ pub fn get_git_root() -> Result<PathBuf> {
 ///
 /// Uses `$RESEARCH_DIR/.research/library` if `RESEARCH_DIR` is set,
 /// otherwise falls back to `$HOME/.research/library`.
-pub fn get_research_library_path() -> Result<PathBuf> {
+pub fn get_researchrary_path() -> Result<PathBuf> {
     let base = std::env::var("RESEARCH_DIR").unwrap_or_else(|_| {
         std::env::var("HOME").expect("Neither RESEARCH_DIR nor HOME environment variable is set")
     });
@@ -127,7 +127,7 @@ pub fn get_research_library_path() -> Result<PathBuf> {
 #[instrument(skip(options))]
 pub fn pull_topic(options: &PullOptions) -> Result<PullResult> {
     let git_root = get_git_root()?;
-    let library_path = get_research_library_path()?;
+    let library_path = get_researchrary_path()?;
 
     // Check if topic exists in research library
     let topic_dir = library_path.join(&options.topic);

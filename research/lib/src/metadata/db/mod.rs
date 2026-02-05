@@ -15,7 +15,7 @@
 //! ## Examples
 //!
 //! ```no_run
-//! use research_lib::metadata::db::{init_pool, run_migrations};
+//! use research::metadata::db::{init_pool, run_migrations};
 //! use std::path::Path;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {

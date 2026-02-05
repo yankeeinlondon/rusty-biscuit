@@ -1,6 +1,6 @@
 //! History modal for viewing previously queued commands.
 
-use queue_lib::{HistoryStore, JsonFileStore, ScheduledTask, TaskStatus};
+use queue::{HistoryStore, JsonFileStore, ScheduledTask, TaskStatus};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -371,7 +371,7 @@ impl HistoryModal {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use queue_lib::ExecutionTarget;
+    use queue::ExecutionTarget;
 
     fn create_test_task(id: u64, command: &str) -> ScheduledTask {
         ScheduledTask {

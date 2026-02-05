@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 /// ## Examples
 ///
 /// ```
-/// use research_lib::metadata::ResearchDetails;
+/// use research::metadata::ResearchDetails;
 ///
 /// let details = ResearchDetails::Api(Default::default());
 /// let json = serde_json::to_string(&details).unwrap();

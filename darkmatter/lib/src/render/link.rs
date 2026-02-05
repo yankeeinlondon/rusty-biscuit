@@ -64,7 +64,7 @@ fn type_from_string(input: &str) -> LinkType {
 /// ## Examples
 ///
 /// ```
-/// use darkmatter_lib::render::link::Link;
+/// use darkmatter::render::link::Link;
 ///
 /// // Basic usage
 /// let link = Link::new("Click here", "https://example.com");
@@ -128,7 +128,7 @@ impl Link {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::render::link::Link;
+    /// use darkmatter::render::link::Link;
     ///
     /// // Title mode - simple title
     /// let link = Link::with_title_parsed("Click", "https://example.com", "A tooltip");
@@ -271,7 +271,7 @@ impl Link {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::render::link::Link;
+    /// use darkmatter::render::link::Link;
     ///
     /// let link = Link::new("Click", "https://example.com")
     ///     .with_style("color: red; font-size: 14px");
@@ -408,7 +408,7 @@ impl Link {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::render::link::Link;
+    /// use darkmatter::render::link::Link;
     ///
     /// let link = Link::new("Click here", "https://example.com")
     ///     .with_prompt("Opens example.com");
@@ -1162,7 +1162,7 @@ impl TryFrom<String> for Link {
     /// ## Examples
     ///
     /// ```
-    /// use darkmatter_lib::render::link::Link;
+    /// use darkmatter::render::link::Link;
     /// use std::convert::TryFrom;
     ///
     /// // Parse HTML link

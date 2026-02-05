@@ -29,9 +29,9 @@ use biscuit_terminal::components::mermaid::MermaidRenderer;
 /// ## Examples
 ///
 /// ```rust,no_run
-/// use darkmatter_lib::mermaid::render_terminal::render_for_terminal;
+/// use darkmatter::mermaid::render_terminal::render_for_terminal;
 ///
-/// fn example() -> Result<(), darkmatter_lib::mermaid::MermaidRenderError> {
+/// fn example() -> Result<(), darkmatter::mermaid::MermaidRenderError> {
 ///     render_for_terminal("flowchart LR\n    A --> B")?;
 ///     Ok(())
 /// }
@@ -58,7 +58,7 @@ pub fn render_for_terminal(instructions: &str) -> Result<(), MermaidRenderError>
 /// ## Examples
 ///
 /// ```rust
-/// use darkmatter_lib::mermaid::render_terminal::fallback_code_block;
+/// use darkmatter::mermaid::render_terminal::fallback_code_block;
 ///
 /// let output = fallback_code_block("flowchart LR\n    A --> B");
 /// assert!(output.contains("```mermaid"));
@@ -75,7 +75,7 @@ pub fn fallback_code_block(instructions: &str) -> String {
 /// ## Examples
 ///
 /// ```rust
-/// use darkmatter_lib::mermaid::render_terminal::render_fallback_code_block;
+/// use darkmatter::mermaid::render_terminal::render_fallback_code_block;
 ///
 /// render_fallback_code_block("flowchart LR\n    A --> B");
 /// ```

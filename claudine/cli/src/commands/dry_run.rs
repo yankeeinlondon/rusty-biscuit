@@ -4,9 +4,9 @@ use clap::Args;
 use color_eyre::eyre::{Result, bail};
 use serde_json::Value;
 
-use claudine_lib::adapters;
-use claudine_lib::dispatch::template::interpolate;
-use claudine_lib::events::{EventAction, Provider, detect_environment};
+use claudine::adapters;
+use claudine::dispatch::template::interpolate;
+use claudine::events::{EventAction, Provider, detect_environment};
 
 use crate::log;
 
@@ -43,7 +43,7 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
             log::data("");
 
             // Try to load config and show what would fire
-            let config = claudine_lib::dispatch::loader::load_config(None, None);
+            let config = claudine::dispatch::loader::load_config(None, None);
             match config {
                 Ok(cfg) => {
                     if let Some(binding) = cfg.events.get(&event) {

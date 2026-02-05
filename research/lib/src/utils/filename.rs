@@ -66,7 +66,7 @@ struct ResponsePart {
 ///
 /// ## Examples
 /// ```no_run
-/// use research_lib::utils::filename::choose_filename;
+/// use research::utils::filename::choose_filename;
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -180,7 +180,7 @@ pub async fn choose_filename(
 ///
 /// ## Examples
 /// ```
-/// use research_lib::utils::filename::resolve_collision;
+/// use research::utils::filename::resolve_collision;
 ///
 /// let existing = vec!["async_patterns.md".to_string()];
 /// let result = resolve_collision("async_patterns", &existing);
@@ -260,7 +260,7 @@ const CORE_DOCUMENTS: &[&str] = &[
 ///
 /// ## Examples
 /// ```
-/// use research_lib::utils::filename::extract_prompt_name;
+/// use research::utils::filename::extract_prompt_name;
 ///
 /// // Valid filename
 /// let (prompt, filename) = extract_prompt_name("async-patterns -> What are best async patterns?");

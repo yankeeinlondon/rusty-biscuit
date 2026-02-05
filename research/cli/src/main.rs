@@ -1,7 +1,7 @@
 //! Research CLI - Automated research tool for software libraries
 
 use clap::{Parser, Subcommand};
-use research_lib::research;
+use research::research;
 use std::io::{self, BufRead};
 use std::path::PathBuf;
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
@@ -146,7 +146,7 @@ fn read_topic_from_stdin() -> io::Result<String> {
 ///
 /// Discovers topics by globbing for `{RESEARCH_DIR}/.research/library/*/deep_dive.md`.
 fn show_topic(topic: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // Match the pattern used in research_lib (respects RESEARCH_DIR env var)
+    // Match the pattern used in research (respects RESEARCH_DIR env var)
     let base = std::env::var("RESEARCH_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from(".")));
@@ -186,11 +186,11 @@ fn init_tracing(verbose: u8, json: bool) {
             // Default: WARN only to reduce stderr noise
             0 => "warn".to_string(),
             // -v: Show INFO for research progress and tool calls
-            1 => "warn,research_lib=info,shared::tools=info".to_string(),
-            // -vv: Show DEBUG for research_lib and shared
-            2 => "info,research_lib=debug,shared=debug".to_string(),
+            1 => "warn,research=info,shared::tools=info".to_string(),
+            // -vv: Show DEBUG for research and shared
+            2 => "info,research=debug,shared=debug".to_string(),
             // -vvv+: Show TRACE for detailed debugging
-            _ => "debug,research_lib=trace,shared=trace".to_string(),
+            _ => "debug,research=trace,shared=trace".to_string(),
         },
     };
 
@@ -298,7 +298,7 @@ async fn main() {
             json,
             migrate,
         } => {
-            match research_lib::list_with_migrate(filters, types, verbose, json, migrate).await {
+            match research::list_with_migrate(filters, types, verbose, json, migrate).await {
                 Ok(()) => {
                     // Success - output already written to stdout
                 }
@@ -314,7 +314,7 @@ async fn main() {
             types,
             json,
         } => {
-            match research_lib::link(filters, types, json).await {
+            match research::link(filters, types, json).await {
                 Ok(_) => {
                     // Output already printed by library
                 }
@@ -338,7 +338,7 @@ async fn main() {
             output,
             force,
         } => {
-            match research_lib::research_api(&api_name, output, &questions, force).await {
+            match research::research_api(&api_name, output, &questions, force).await {
                 Ok(result) => {
                     println!("\n{}", "=".repeat(60));
                     if result.cancelled {
@@ -375,7 +375,7 @@ async fn main() {
         }
 
         Commands::Pull { topic, local } => {
-            use research_lib::pull::{PullOptions, pull_topic};
+            use research::pull::{PullOptions, pull_topic};
 
             let options = PullOptions { topic, local };
 

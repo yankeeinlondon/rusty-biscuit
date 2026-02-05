@@ -259,7 +259,7 @@ pub fn detect_ntp_status() -> NtpStatus {
 /// ## Examples
 ///
 /// ```
-/// use sniff_lib::os::detect_timezone;
+/// use sniff::os::detect_timezone;
 ///
 /// let time_info = detect_timezone();
 /// println!("Timezone: {:?}", time_info.timezone);

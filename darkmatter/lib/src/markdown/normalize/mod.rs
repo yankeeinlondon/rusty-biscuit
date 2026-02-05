@@ -9,8 +9,8 @@
 //! ## Examples
 //!
 //! ```rust
-//! use darkmatter_lib::markdown::Markdown;
-//! use darkmatter_lib::markdown::normalize::HeadingLevel;
+//! use darkmatter::markdown::Markdown;
+//! use darkmatter::markdown::normalize::HeadingLevel;
 //!
 //! // Validate a document's structure
 //! let doc: Markdown = "## Intro\n### Details\n## Conclusion".into();

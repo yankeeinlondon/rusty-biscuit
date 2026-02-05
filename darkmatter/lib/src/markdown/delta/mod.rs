@@ -10,7 +10,7 @@
 //! ## Examples
 //!
 //! ```rust
-//! use darkmatter_lib::markdown::Markdown;
+//! use darkmatter::markdown::Markdown;
 //!
 //! let original: Markdown = "# Hello\n\nWorld".into();
 //! let updated: Markdown = "# Hello\n\nUniverse".into();

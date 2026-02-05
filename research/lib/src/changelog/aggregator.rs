@@ -14,7 +14,7 @@
 //! ## Examples
 //!
 //! ```rust,no_run
-//! use research_lib::changelog::aggregator::aggregate_version_history;
+//! use research::changelog::aggregator::aggregate_version_history;
 //! use reqwest::Client;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -68,7 +68,7 @@ use std::collections::HashMap;
 /// ## Examples
 ///
 /// ```rust,no_run
-/// # use research_lib::changelog::aggregator::aggregate_version_history;
+/// # use research::changelog::aggregator::aggregate_version_history;
 /// # use reqwest::Client;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = Client::new();
@@ -194,8 +194,8 @@ fn parse_changelog_file(content: &str) -> Vec<VersionInfo> {
 /// ## Examples
 ///
 /// ```
-/// use research_lib::changelog::types::{VersionInfo, VersionSignificance, ChangelogSource};
-/// use research_lib::changelog::aggregator::merge_version_info;
+/// use research::changelog::types::{VersionInfo, VersionSignificance, ChangelogSource};
+/// use research::changelog::aggregator::merge_version_info;
 ///
 /// let mut v1 = VersionInfo::new("1.0.0", VersionSignificance::Major);
 /// v1.add_source(ChangelogSource::GitHubRelease);
@@ -324,8 +324,8 @@ fn get_highest_source_precedence(sources: &[ChangelogSource]) -> u8 {
 /// ## Examples
 ///
 /// ```
-/// use research_lib::changelog::types::{ChangelogSource, ConfidenceLevel};
-/// use research_lib::changelog::aggregator::calculate_confidence;
+/// use research::changelog::types::{ChangelogSource, ConfidenceLevel};
+/// use research::changelog::aggregator::calculate_confidence;
 ///
 /// // High confidence: GitHub + Registry
 /// let sources = vec![ChangelogSource::GitHubRelease, ChangelogSource::RegistryVersion];

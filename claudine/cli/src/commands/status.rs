@@ -1,6 +1,6 @@
 use color_eyre::eyre::Result;
 
-use claudine_lib::config::detect_agents;
+use claudine::config::detect_agents;
 
 use crate::log;
 

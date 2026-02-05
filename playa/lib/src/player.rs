@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use sniff_lib::programs::{HeadlessAudio, InstalledHeadlessAudio, ProgramMetadata};
+use sniff::programs::{HeadlessAudio, InstalledHeadlessAudio, ProgramMetadata};
 
 use crate::types::{AudioFileFormat, AudioFormat, Codec, ResourceUsage};
 
