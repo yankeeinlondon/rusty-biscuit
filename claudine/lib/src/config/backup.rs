@@ -52,10 +52,8 @@ mod tests {
         assert!(backup_path.to_string_lossy().contains("claude"));
         assert!(backup_path.extension().unwrap() == "bak");
 
-        // Verify a backup file was written (content may differ if concurrent
-        // tests write to the same timestamp-based path)
-        let content = fs::read_to_string(&backup_path).unwrap();
-        assert!(!content.is_empty());
+        // Verify file has content (note: concurrent tests may race on same timestamp)
+        assert!(fs::metadata(&backup_path).unwrap().len() > 0);
     }
 
     #[test]

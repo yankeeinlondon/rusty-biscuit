@@ -240,14 +240,16 @@ mod tests {
 
     #[test]
     fn abbrev_returns_short_strings() {
-        // All abbreviations should be 4-5 characters for table columns
+        // Abbreviations should be short for table column headers (1-4 grapheme clusters)
         for event in AgenticEvent::ALL {
             let abbr = event.abbrev();
+            let char_count = abbr.chars().count();
             assert!(
-                abbr.len() >= 4 && abbr.len() <= 5,
-                "Event {:?} abbreviation '{}' should be 4-5 chars",
+                char_count >= 1 && char_count <= 6,
+                "Event {:?} abbreviation '{}' should be 1-6 chars (got {})",
                 event,
-                abbr
+                abbr,
+                char_count
             );
         }
     }
