@@ -22,11 +22,7 @@ use crate::error::Result;
 /// 2. Hashing -- content-hash each skill directory
 /// 3. Analysis -- detect conflicts, candidates, and in-sync state
 /// 4. Linking -- create symlinks for candidates
-pub fn link_skills(
-    scope: LinkScope,
-    filter: Option<&str>,
-    dry_run: bool,
-) -> Result<LinkReport> {
+pub fn link_skills(scope: LinkScope, filter: Option<&str>, dry_run: bool) -> Result<LinkReport> {
     link_skills_inner(&ProviderSkillPaths::new(), scope, filter, dry_run)
 }
 
@@ -49,8 +45,11 @@ fn link_skills_inner(
     }
 
     // Phase 3: Analysis
-    let provider_names: Vec<&str> =
-        provider_paths.for_scope(scope).iter().map(|(n, _)| *n).collect();
+    let provider_names: Vec<&str> = provider_paths
+        .for_scope(scope)
+        .iter()
+        .map(|(n, _)| *n)
+        .collect();
     let also_reads = build_also_reads_from(provider_paths, &provider_names);
     let statuses = conflict::analyze_skills(skills, &provider_names, &also_reads);
 
@@ -77,7 +76,10 @@ fn apply_statuses(
 
     for status in statuses {
         match status {
-            SkillSyncStatus::LinkCandidate { source, target_providers } => {
+            SkillSyncStatus::LinkCandidate {
+                source,
+                target_providers,
+            } => {
                 let mut linked = Vec::new();
                 for target in &target_providers {
                     let dest_dir = if is_command {
@@ -152,8 +154,11 @@ fn link_commands(
         }
     }
 
-    let names: Vec<&str> =
-        provider_paths.commands_for_scope(scope).iter().map(|(n, _)| *n).collect();
+    let names: Vec<&str> = provider_paths
+        .commands_for_scope(scope)
+        .iter()
+        .map(|(n, _)| *n)
+        .collect();
     let also_reads = build_also_reads_from(provider_paths, &names);
     let statuses = conflict::analyze_skills(commands, &names, &also_reads);
 
@@ -282,8 +287,7 @@ mod tests {
         setup_skill(&paths.claude.user_skills, "alpha", "# A\n");
         setup_skill(&paths.claude.user_skills, "beta", "# B\n");
 
-        let report =
-            link_skills_inner(&paths, LinkScope::User, Some("alpha"), true).unwrap();
+        let report = link_skills_inner(&paths, LinkScope::User, Some("alpha"), true).unwrap();
 
         assert_eq!(report.linked.len(), 1);
         assert_eq!(report.linked[0].name, "alpha");

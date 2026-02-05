@@ -100,10 +100,8 @@ impl ProviderSkillPaths {
     /// (Claude, OpenCode). Gemini (TOML) and Codex (none)
     /// are excluded.
     pub fn commands_for_scope(&self, scope: LinkScope) -> Vec<(&str, &PathBuf)> {
-        let providers: Vec<(&str, &ProviderPaths)> = vec![
-            ("claude", &self.claude),
-            ("opencode", &self.opencode),
-        ];
+        let providers: Vec<(&str, &ProviderPaths)> =
+            vec![("claude", &self.claude), ("opencode", &self.opencode)];
 
         providers
             .into_iter()
@@ -145,10 +143,12 @@ mod tests {
         assert!(paths.claude.user_skills.ends_with(".claude/skills"));
         assert!(paths.gemini.user_skills.ends_with(".gemini/skills"));
         assert!(paths.codex.user_skills.ends_with(".codex/skills"));
-        assert!(paths
-            .opencode
-            .user_skills
-            .ends_with(".config/opencode/skills"));
+        assert!(
+            paths
+                .opencode
+                .user_skills
+                .ends_with(".config/opencode/skills")
+        );
     }
 
     #[test]

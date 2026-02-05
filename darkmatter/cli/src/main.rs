@@ -1,12 +1,12 @@
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
 use color_eyre::eyre::{Context, Result, eyre};
-use darkmatter_cli::Cli;
 use darkmatter::markdown::highlighting::{
     ColorMode, ThemePair, detect_code_theme, detect_color_mode, detect_prose_theme,
 };
 use darkmatter::markdown::output::{HtmlOptions, MermaidMode, TerminalOptions, write_terminal};
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
+use darkmatter_cli::Cli;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
@@ -466,9 +466,7 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
     // Print classification header
     let (classification_symbol, classification_name) = match delta.classification {
         darkmatter::markdown::DocumentChange::NoChange => ("✓", "No changes"),
-        darkmatter::markdown::DocumentChange::WhitespaceOnly => {
-            ("~", "Whitespace changes only")
-        }
+        darkmatter::markdown::DocumentChange::WhitespaceOnly => ("~", "Whitespace changes only"),
         darkmatter::markdown::DocumentChange::FrontmatterOnly => ("◈", "Frontmatter only"),
         darkmatter::markdown::DocumentChange::FrontmatterAndWhitespace => {
             ("◈", "Frontmatter and whitespace")
@@ -576,22 +574,12 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
     let content_changes: Vec<_> = delta
         .modified
         .iter()
-        .filter(|c| {
-            !matches!(
-                c.action,
-                darkmatter::markdown::ChangeAction::WhitespaceOnly
-            )
-        })
+        .filter(|c| !matches!(c.action, darkmatter::markdown::ChangeAction::WhitespaceOnly))
         .collect();
     let whitespace_changes: Vec<_> = delta
         .modified
         .iter()
-        .filter(|c| {
-            matches!(
-                c.action,
-                darkmatter::markdown::ChangeAction::WhitespaceOnly
-            )
-        })
+        .filter(|c| matches!(c.action, darkmatter::markdown::ChangeAction::WhitespaceOnly))
         .collect();
 
     // Print content modifications (the important ones)

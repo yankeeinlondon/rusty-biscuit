@@ -123,9 +123,10 @@ impl AgentConfigurator for GeminiConfigurator {
         if let Some(hooks) = root.get("hooks").and_then(|h| h.as_object()) {
             for (_, hook_list) in hooks {
                 if let Some(arr) = hook_list.as_array()
-                    && arr.iter().any(is_claudine_hook) {
-                        return Ok(true);
-                    }
+                    && arr.iter().any(is_claudine_hook)
+                {
+                    return Ok(true);
+                }
             }
         }
 
@@ -237,10 +238,7 @@ mod tests {
             );
         }
         let mut providers = HashMap::new();
-        providers.insert(
-            Provider::Gemini,
-            ProviderConfig { events: event_map },
-        );
+        providers.insert(Provider::Gemini, ProviderConfig { events: event_map });
         HookerConfig {
             version: "1.0".to_string(),
             settings: GlobalSettings::default(),
@@ -265,8 +263,7 @@ mod tests {
             _ => panic!("expected Registered"),
         }
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         let hooks = content.get("hooks").unwrap().as_object().unwrap();
 
         // Check Gemini native names
@@ -284,8 +281,7 @@ mod tests {
         let config = test_config(vec![AgenticEvent::TurnComplete]);
         configurator.register(&config, Some(tmp.path())).unwrap();
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         let hook = &content["hooks"]["AfterAgent"][0];
 
         // Verify ms timeout
@@ -314,8 +310,7 @@ mod tests {
         let configurator = GeminiConfigurator;
         configurator.deregister(Some(tmp.path())).unwrap();
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         let arr = content["hooks"]["AfterAgent"].as_array().unwrap();
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["name"], "my-custom-hook");

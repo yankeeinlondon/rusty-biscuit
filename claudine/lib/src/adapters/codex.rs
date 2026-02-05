@@ -67,10 +67,7 @@ impl ProviderAdapter for CodexAdapter {
                 .and_then(|v| v.as_str())
                 .map(String::from),
             tool_input: raw.get("item").and_then(|item| item.get("input")).cloned(),
-            tool_response: raw
-                .get("item")
-                .and_then(|item| item.get("output"))
-                .cloned(),
+            tool_response: raw.get("item").and_then(|item| item.get("output")).cloned(),
             error: raw
                 .get("error")
                 .and_then(|e| e.get("message"))

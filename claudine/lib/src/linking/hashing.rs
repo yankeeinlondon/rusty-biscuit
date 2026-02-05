@@ -22,9 +22,7 @@ pub fn hash_skill_dir(skill_dir: &Path) -> Result<u64> {
     let mut file_paths: Vec<std::path::PathBuf> = Vec::new();
 
     for entry in WalkDir::new(&resolved).follow_links(true) {
-        let entry = entry.map_err(|e| {
-            std::io::Error::other(e.to_string())
-        })?;
+        let entry = entry.map_err(|e| std::io::Error::other(e.to_string()))?;
         if entry.file_type().is_file() {
             file_paths.push(entry.into_path());
         }

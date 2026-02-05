@@ -80,10 +80,8 @@ pub fn analyze_skills(
 
     for (name, group) in groups {
         // Check if all non-source entries are symlinks
-        let non_symlinks: Vec<&DiscoveredSkill> =
-            group.iter().filter(|s| !s.is_symlink).collect();
-        let symlinks: Vec<&DiscoveredSkill> =
-            group.iter().filter(|s| s.is_symlink).collect();
+        let non_symlinks: Vec<&DiscoveredSkill> = group.iter().filter(|s| !s.is_symlink).collect();
+        let symlinks: Vec<&DiscoveredSkill> = group.iter().filter(|s| s.is_symlink).collect();
 
         // If exactly one non-symlink and the rest are symlinks -> AlreadyLinked
         if non_symlinks.len() == 1 && !symlinks.is_empty() {
@@ -174,12 +172,7 @@ pub fn analyze_skills(
 mod tests {
     use super::*;
 
-    fn make_skill(
-        name: &str,
-        provider: &str,
-        hash: u64,
-        is_symlink: bool,
-    ) -> DiscoveredSkill {
+    fn make_skill(name: &str, provider: &str, hash: u64, is_symlink: bool) -> DiscoveredSkill {
         DiscoveredSkill {
             name: name.to_string(),
             path: PathBuf::from(format!("/home/.{provider}/skills/{name}")),
@@ -343,10 +336,7 @@ mod tests {
         assert_eq!(results.len(), 3);
 
         // alpha: LinkCandidate (one provider)
-        assert!(matches!(
-            &results[0],
-            SkillSyncStatus::LinkCandidate { .. }
-        ));
+        assert!(matches!(&results[0], SkillSyncStatus::LinkCandidate { .. }));
         // beta: InSync (same hash)
         assert!(matches!(&results[1], SkillSyncStatus::InSync { .. }));
         // gamma: Conflict (different hashes)

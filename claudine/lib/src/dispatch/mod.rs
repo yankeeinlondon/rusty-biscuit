@@ -30,11 +30,7 @@ use crate::events::{EnvironmentContext, Provider};
 ///
 /// Returns errors from config loading or action execution.
 /// Unknown events or missing bindings return `Ok(())` silently.
-pub async fn dispatch(
-    raw: &Value,
-    provider: Provider,
-    env: &EnvironmentContext,
-) -> Result<()> {
+pub async fn dispatch(raw: &Value, provider: Provider, env: &EnvironmentContext) -> Result<()> {
     // 1. Get adapter for this provider
     let adapter = adapters::adapter_for(provider);
 

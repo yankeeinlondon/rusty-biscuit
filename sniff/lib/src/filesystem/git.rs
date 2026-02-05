@@ -575,7 +575,10 @@ fn parse_org_repo(url: &str) -> (Option<String>, Option<String>) {
         Some(p) => {
             let segments: Vec<&str> = p.splitn(2, '/').collect();
             match segments.as_slice() {
-                [org, repo] if !org.is_empty() && !repo.is_empty() => {
+                [
+                    org,
+                    repo,
+                ] if !org.is_empty() && !repo.is_empty() => {
                     (Some(org.to_string()), Some(repo.to_string()))
                 }
                 _ => (None, None),
@@ -2710,14 +2713,22 @@ mod tests {
 
     #[test]
     fn test_preferred_remote_origin_preferred() {
-        let remotes = vec![make_remote("upstream"), make_remote("origin"), make_remote("fork")];
+        let remotes = vec![
+            make_remote("upstream"),
+            make_remote("origin"),
+            make_remote("fork"),
+        ];
         let preferred = preferred_remote(&remotes).unwrap();
         assert_eq!(preferred.name, "origin");
     }
 
     #[test]
     fn test_preferred_remote_first_alpha_excluding_upstream() {
-        let remotes = vec![make_remote("upstream"), make_remote("fork"), make_remote("backup")];
+        let remotes = vec![
+            make_remote("upstream"),
+            make_remote("fork"),
+            make_remote("backup"),
+        ];
         let preferred = preferred_remote(&remotes).unwrap();
         assert_eq!(preferred.name, "backup");
     }

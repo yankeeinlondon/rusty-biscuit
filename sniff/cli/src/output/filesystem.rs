@@ -473,11 +473,7 @@ pub fn print_language_section(
     println!();
 }
 
-pub fn print_filesystem_section(
-    fs: &sniff::FilesystemInfo,
-    verbose: u8,
-    repo_root: Option<&Path>,
-) {
+pub fn print_filesystem_section(fs: &sniff::FilesystemInfo, verbose: u8, repo_root: Option<&Path>) {
     println!("=== Filesystem ===");
 
     // Print EditorConfig formatting info at verbose level 2+

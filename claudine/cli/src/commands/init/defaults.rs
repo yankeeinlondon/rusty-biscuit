@@ -148,7 +148,11 @@ mod tests {
     #[test]
     fn ordered_events_contains_all() {
         let ordered = all_events_ordered();
-        assert_eq!(ordered.len(), 15, "Should contain all 15 AgenticEvent variants");
+        assert_eq!(
+            ordered.len(),
+            15,
+            "Should contain all 15 AgenticEvent variants"
+        );
     }
 
     #[test]
@@ -156,7 +160,10 @@ mod tests {
         let recommended = recommended_events();
         let all = all_events_ordered();
         for event in recommended {
-            assert!(all.contains(&event), "{event:?} should be in all_events_ordered");
+            assert!(
+                all.contains(&event),
+                "{event:?} should be in all_events_ordered"
+            );
         }
     }
 }

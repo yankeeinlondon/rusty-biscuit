@@ -3,9 +3,7 @@
 use std::path::PathBuf;
 
 use claudine::config::AgentInfo;
-use claudine::events::{
-    AgenticEvent, EventAction, GlobalSettings, LogTarget, TtsSettings,
-};
+use claudine::events::{AgenticEvent, EventAction, GlobalSettings, LogTarget, TtsSettings};
 use color_eyre::eyre::Result;
 use inquire::{Confirm, MultiSelect, Select, Text};
 
@@ -60,9 +58,10 @@ pub fn prompt_agent_selection(agents: &[AgentInfo]) -> Result<Vec<AgentInfo>> {
     let result: Vec<AgentInfo> = selected
         .iter()
         .filter_map(|opt| {
-            agents.iter().find(|a| {
-                opt.starts_with(a.display_name)
-            }).cloned()
+            agents
+                .iter()
+                .find(|a| opt.starts_with(a.display_name))
+                .cloned()
         })
         .collect();
 
@@ -110,7 +109,10 @@ pub fn prompt_event_selection() -> Result<Vec<AgenticEvent>> {
         .iter()
         .filter_map(|opt| {
             let event_name = opt.split(" - ").next()?;
-            all_events.iter().find(|e| e.to_string() == event_name).cloned()
+            all_events
+                .iter()
+                .find(|e| e.to_string() == event_name)
+                .cloned()
         })
         .collect();
 
@@ -154,19 +156,14 @@ pub fn prompt_action_types(event: &AgenticEvent) -> Result<Vec<ActionType>> {
     // Default to SoundEffect for most events
     let defaults = vec![0]; // SoundEffect
 
-    let selected = MultiSelect::new(
-        &format!("Actions for {} event:", event),
-        option_strings,
-    )
-    .with_default(&defaults)
-    .with_help_message("Select one or more actions")
-    .prompt()?;
+    let selected = MultiSelect::new(&format!("Actions for {} event:", event), option_strings)
+        .with_default(&defaults)
+        .with_help_message("Select one or more actions")
+        .prompt()?;
 
     let result: Vec<ActionType> = selected
         .iter()
-        .filter_map(|s| {
-            options.iter().find(|a| &a.to_string() == s).copied()
-        })
+        .filter_map(|s| options.iter().find(|a| &a.to_string() == s).copied())
         .collect();
 
     Ok(result)
@@ -210,12 +207,9 @@ pub fn prompt_sound_effect(event: &AgenticEvent) -> Result<EventAction> {
     // Find recommended index
     let default_idx = sounds.iter().position(|s| *s == recommended).unwrap_or(0);
 
-    let selected = Select::new(
-        &format!("Sound for {} event:", event),
-        options,
-    )
-    .with_starting_cursor(default_idx)
-    .prompt()?;
+    let selected = Select::new(&format!("Sound for {} event:", event), options)
+        .with_starting_cursor(default_idx)
+        .prompt()?;
 
     let name = selected.replace(" (recommended)", "").to_string();
 

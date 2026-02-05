@@ -270,7 +270,11 @@ mod tests {
         });
         let action: EventAction = serde_json::from_value(json).unwrap();
         match action {
-            EventAction::Run { command, args, blocking } => {
+            EventAction::Run {
+                command,
+                args,
+                blocking,
+            } => {
                 assert_eq!(command, "echo");
                 assert!(args.is_none());
                 assert!(!blocking);

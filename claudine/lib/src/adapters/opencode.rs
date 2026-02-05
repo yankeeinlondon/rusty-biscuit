@@ -33,9 +33,7 @@ impl ProviderAdapter for OpenCodeAdapter {
             "session.deleted" => AgenticEvent::SessionEnd,
             "session.idle" => AgenticEvent::TurnComplete,
             "session.error" => AgenticEvent::TurnError,
-            "session.compacted" | "experimental.session.compacting" => {
-                AgenticEvent::BeforeCompact
-            }
+            "session.compacted" | "experimental.session.compacting" => AgenticEvent::BeforeCompact,
             "permission.asked" => AgenticEvent::PermissionRequest,
             "chat.message" => AgenticEvent::BeforePrompt,
             "tool.execute.before" => AgenticEvent::BeforeTool,
@@ -208,10 +206,7 @@ mod tests {
         assert!(result.is_some());
         let (event, meta) = result.unwrap();
         assert_eq!(event, AgenticEvent::AfterTool);
-        assert_eq!(
-            meta.tool_response,
-            Some(json!({"output": "tests passed"}))
-        );
+        assert_eq!(meta.tool_response, Some(json!({"output": "tests passed"})));
     }
 
     #[test]

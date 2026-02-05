@@ -98,7 +98,10 @@ pub fn discover_commands(
             let is_symlink = fs::symlink_metadata(&path)
                 .map(|m| m.file_type().is_symlink())
                 .unwrap_or(false);
-            let name = file_name.strip_suffix(".md").unwrap_or(&file_name).to_string();
+            let name = file_name
+                .strip_suffix(".md")
+                .unwrap_or(&file_name)
+                .to_string();
             commands.push(DiscoveredSkill {
                 name,
                 path,
@@ -134,7 +137,10 @@ mod tests {
     /// Build paths where only Claude's user_skills points to `dir`.
     fn claude_only_paths(dir: PathBuf) -> ProviderSkillPaths {
         ProviderSkillPaths {
-            claude: ProviderPaths { user_skills: dir, ..empty_paths() },
+            claude: ProviderPaths {
+                user_skills: dir,
+                ..empty_paths()
+            },
             gemini: empty_paths(),
             codex: empty_paths(),
             opencode: empty_paths(),
@@ -207,5 +213,4 @@ mod tests {
         assert_eq!(skills.len(), 1);
         assert!(skills[0].is_symlink);
     }
-
 }

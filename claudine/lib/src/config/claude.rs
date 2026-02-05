@@ -105,9 +105,7 @@ impl AgentConfigurator for ClaudeConfigurator {
                 }
             }
             // Remove empty hook arrays
-            hooks.retain(|_, v| {
-                v.as_array().is_none_or(|a| !a.is_empty())
-            });
+            hooks.retain(|_, v| v.as_array().is_none_or(|a| !a.is_empty()));
         }
 
         let output = serde_json::to_string_pretty(&root)?;
@@ -128,9 +126,10 @@ impl AgentConfigurator for ClaudeConfigurator {
         if let Some(hooks) = root.get("hooks").and_then(|h| h.as_object()) {
             for (_, hook_groups) in hooks {
                 if let Some(arr) = hook_groups.as_array()
-                    && arr.iter().any(is_claudine_hook_group) {
-                        return Ok(true);
-                    }
+                    && arr.iter().any(is_claudine_hook_group)
+                {
+                    return Ok(true);
+                }
             }
         }
 
@@ -278,10 +277,7 @@ mod tests {
             );
         }
         let mut providers = HashMap::new();
-        providers.insert(
-            Provider::Claude,
-            ProviderConfig { events: event_map },
-        );
+        providers.insert(Provider::Claude, ProviderConfig { events: event_map });
         HookerConfig {
             version: "1.0".to_string(),
             settings: GlobalSettings::default(),
@@ -306,8 +302,7 @@ mod tests {
             _ => panic!("expected Registered"),
         }
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         let hooks = content.get("hooks").unwrap().as_object().unwrap();
 
         // Check mapped names
@@ -328,7 +323,10 @@ mod tests {
         let config = test_config(vec![AgenticEvent::BeforeTool]);
 
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
-        assert!(matches!(result, RegistrationResult::Skipped(SkipReason::NotDetected)));
+        assert!(matches!(
+            result,
+            RegistrationResult::Skipped(SkipReason::NotDetected)
+        ));
     }
 
     #[test]
@@ -368,8 +366,7 @@ mod tests {
         let configurator = ClaudeConfigurator;
         configurator.deregister(Some(tmp.path())).unwrap();
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         let hooks = content.get("hooks").unwrap().as_object().unwrap();
         let pre_tool = hooks["PreToolUse"].as_array().unwrap();
 
@@ -395,8 +392,7 @@ mod tests {
         let configurator = ClaudeConfigurator;
         configurator.deregister(Some(tmp.path())).unwrap();
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         let hooks = content.get("hooks").unwrap().as_object().unwrap();
         assert!(!hooks.contains_key("PreToolUse"));
     }
@@ -443,8 +439,7 @@ mod tests {
         let config = test_config(vec![AgenticEvent::TurnComplete]);
         configurator.register(&config, Some(tmp.path())).unwrap();
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         // Original field preserved
         assert!(content.get("permissions").is_some());
     }

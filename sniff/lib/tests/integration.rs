@@ -441,8 +441,7 @@ fn test_network_ip_addresses_json_structure() {
 fn test_network_ip_addresses_roundtrip() {
     let result = detect().unwrap();
     let json = serde_json::to_string(&result).expect("SniffResult should serialize");
-    let parsed: sniff::SniffResult =
-        serde_json::from_str(&json).expect("JSON should deserialize");
+    let parsed: sniff::SniffResult = serde_json::from_str(&json).expect("JSON should deserialize");
 
     if let (Some(orig_net), Some(parsed_net)) = (&result.network, &parsed.network) {
         // Counts should match

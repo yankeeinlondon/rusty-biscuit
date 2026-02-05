@@ -138,7 +138,7 @@ impl ProviderModel {
                 return Err(ProviderModelParseError::UnknownProvider {
                     provider: provider_raw.trim().to_string(),
                     input: trimmed.to_string(),
-                })
+                });
             }
         };
 

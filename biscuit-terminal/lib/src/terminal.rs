@@ -1,21 +1,21 @@
 use std::path::{Path, PathBuf};
 
 use sniff::filesystem::git::detect_git;
-use sniff::filesystem::repo::detect_repo;
 use sniff::filesystem::repo::PackageLocation;
+use sniff::filesystem::repo::detect_repo;
 
 use crate::discovery::config_paths::get_terminal_config_path;
 use crate::discovery::detection::{
-    color_depth, color_mode, detect_connection, get_terminal_app, image_support, is_tty,
-    italics_support, osc8_link_support, terminal_height, terminal_width, underline_support,
-    ColorDepth, ColorMode, Connection, ImageSupport, TerminalApp, UnderlineSupport,
+    ColorDepth, ColorMode, Connection, ImageSupport, TerminalApp, UnderlineSupport, color_depth,
+    color_mode, detect_connection, get_terminal_app, image_support, is_tty, italics_support,
+    osc8_link_support, terminal_height, terminal_width, underline_support,
 };
 use crate::discovery::fonts::{
-    detect_nerd_font, font_ligatures, font_name, font_size, FontLigature,
+    FontLigature, detect_nerd_font, font_ligatures, font_name, font_size,
 };
 use crate::discovery::locale::{CharEncoding, TerminalLocale};
 use crate::discovery::os_detection::{
-    detect_linux_distro, detect_os_type, is_ci, LinuxDistro, OsType,
+    LinuxDistro, OsType, detect_linux_distro, detect_os_type, is_ci,
 };
 
 fn new_terminal() -> Terminal {

@@ -6,8 +6,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Detected once at session start via `sniff::detect_with_config`
 /// and cached for the session lifetime. Attached to every `EventMeta`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EnvironmentContext {
     /// Operating system information.
     #[serde(default)]
@@ -30,10 +29,8 @@ pub struct EnvironmentContext {
     pub primary_language: Option<String>,
 }
 
-
 /// Operating system identification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OsContext {
     /// OS family: "macos", "linux", "windows", etc.
     #[serde(default)]
@@ -65,10 +62,8 @@ pub struct OsContext {
     pub package_managers: Vec<String>,
 }
 
-
 /// Hardware summary relevant to event handling.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HardwareContext {
     /// CPU architecture: "x86_64", "aarch64", etc.
     #[serde(default)]
@@ -90,7 +85,6 @@ pub struct HardwareContext {
     #[serde(default)]
     pub memory_available_bytes: u64,
 }
-
 
 /// Git repository state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,12 +175,7 @@ impl From<sniff::SniffResult> for EnvironmentContext {
 
             let package_managers = os_info
                 .system_package_managers
-                .map(|spm| {
-                    spm.managers
-                        .iter()
-                        .map(|m| m.manager.to_string())
-                        .collect()
-                })
+                .map(|spm| spm.managers.iter().map(|m| m.manager.to_string()).collect())
                 .unwrap_or_default();
 
             OsContext {
@@ -289,13 +278,12 @@ pub fn detect_environment(cwd: &Path) -> EnvironmentContext {
         .commit_count(1)
         .skip_network();
 
-    let result =
-        sniff::detect_with_config(config).unwrap_or(sniff::SniffResult {
-            os: None,
-            hardware: None,
-            network: None,
-            filesystem: None,
-        });
+    let result = sniff::detect_with_config(config).unwrap_or(sniff::SniffResult {
+        os: None,
+        hardware: None,
+        network: None,
+        filesystem: None,
+    });
 
     EnvironmentContext::from(result)
 }

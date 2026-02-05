@@ -22,9 +22,10 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
     // Write to temp file with exclusive lock
     let result = (|| -> Result<()> {
         let mut file = File::create(&tmp_path)?;
-        file.lock_exclusive().map_err(|_| ClaudineError::LockError {
-            path: tmp_path.to_path_buf(),
-        })?;
+        file.lock_exclusive()
+            .map_err(|_| ClaudineError::LockError {
+                path: tmp_path.to_path_buf(),
+            })?;
         file.write_all(content)?;
         file.sync_all()?;
         // Lock released on drop

@@ -12,8 +12,8 @@
 //! - [`terminal`] - Terminal color detection utilities
 //! - [`testing`] - Testing utilities for terminal output verification
 
-pub mod markdown;
 pub mod diff;
+pub mod markdown;
 pub mod mermaid;
 pub mod render;
 pub mod terminal;

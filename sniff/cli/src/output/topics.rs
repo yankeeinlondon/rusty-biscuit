@@ -1,7 +1,7 @@
 //! Topics table output formatting.
 
-use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 
 const TOPIC_COLUMNS: &[(&str, &[&str])] = &[
     ("hardware", &["cpu", "gpu", "memory", "storage"]),

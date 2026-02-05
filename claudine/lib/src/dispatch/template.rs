@@ -78,9 +78,7 @@ fn resolve_placeholder<'a>(key: &str, meta: &'a EventMeta) -> Cow<'a, str> {
         "env.cores" => Cow::Owned(meta.env.hardware.cores.to_string()),
 
         // Environment: Git
-        "env.branch" => opt_nested_to_cow(
-            meta.env.git.as_ref().and_then(|g| g.branch.as_deref()),
-        ),
+        "env.branch" => opt_nested_to_cow(meta.env.git.as_ref().and_then(|g| g.branch.as_deref())),
         "env.is_dirty" => Cow::Owned(
             meta.env
                 .git
@@ -88,21 +86,18 @@ fn resolve_placeholder<'a>(key: &str, meta: &'a EventMeta) -> Cow<'a, str> {
                 .map(|g| g.is_dirty.to_string())
                 .unwrap_or_default(),
         ),
-        "env.head_sha" => opt_nested_to_cow(
-            meta.env.git.as_ref().and_then(|g| g.head_sha.as_deref()),
-        ),
+        "env.head_sha" => {
+            opt_nested_to_cow(meta.env.git.as_ref().and_then(|g| g.head_sha.as_deref()))
+        }
         "env.head_message" => opt_nested_to_cow(
             meta.env
                 .git
                 .as_ref()
                 .and_then(|g| g.head_message.as_deref()),
         ),
-        "env.remote" => opt_nested_to_cow(
-            meta.env
-                .git
-                .as_ref()
-                .and_then(|g| g.remote_name.as_deref()),
-        ),
+        "env.remote" => {
+            opt_nested_to_cow(meta.env.git.as_ref().and_then(|g| g.remote_name.as_deref()))
+        }
         "env.hosting" => opt_nested_to_cow(
             meta.env
                 .git
@@ -234,10 +229,7 @@ mod tests {
     #[test]
     fn unknown_placeholder_left_as_is() {
         let meta = sample_meta();
-        assert_eq!(
-            interpolate("{unknown_field}", &meta),
-            "{unknown_field}"
-        );
+        assert_eq!(interpolate("{unknown_field}", &meta), "{unknown_field}");
     }
 
     #[test]

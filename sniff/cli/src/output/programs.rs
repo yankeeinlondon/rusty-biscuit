@@ -1,7 +1,7 @@
 //! Programs section output formatting (markdown and JSON).
 
-use darkmatter::markdown::output::terminal::{for_terminal, TerminalOptions};
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
 use darkmatter::render::link::Link;
 use sniff::programs::{ExecutableSource, ProgramsInfo};
 

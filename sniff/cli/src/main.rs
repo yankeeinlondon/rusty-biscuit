@@ -795,25 +795,19 @@ mod tests {
 
         #[test]
         fn programs_maps_to_programs_filter() {
-            let cmd = Commands::Programs {
-                json_format: None,
-            };
+            let cmd = Commands::Programs { json_format: None };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Programs);
         }
 
         #[test]
         fn editors_maps_to_editors_filter() {
-            let cmd = Commands::Editors {
-                json_format: None,
-            };
+            let cmd = Commands::Editors { json_format: None };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Editors);
         }
 
         #[test]
         fn audio_maps_to_headless_audio_filter() {
-            let cmd = Commands::Audio {
-                json_format: None,
-            };
+            let cmd = Commands::Audio { json_format: None };
             assert_eq!(cmd.to_output_filter(), OutputFilter::HeadlessAudio);
         }
 
@@ -931,25 +925,19 @@ mod tests {
 
         #[test]
         fn programs_is_programs_mode() {
-            let cmd = Commands::Programs {
-                json_format: None,
-            };
+            let cmd = Commands::Programs { json_format: None };
             assert!(cmd.is_programs_mode());
         }
 
         #[test]
         fn editors_is_programs_mode() {
-            let cmd = Commands::Editors {
-                json_format: None,
-            };
+            let cmd = Commands::Editors { json_format: None };
             assert!(cmd.is_programs_mode());
         }
 
         #[test]
         fn audio_is_programs_mode() {
-            let cmd = Commands::Audio {
-                json_format: None,
-            };
+            let cmd = Commands::Audio { json_format: None };
             assert!(cmd.is_programs_mode());
         }
 

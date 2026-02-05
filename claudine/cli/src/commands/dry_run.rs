@@ -62,10 +62,17 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
                                 EventAction::Report { handler } => {
                                     log::data(&format!("  [{i}] Report: {handler:?}"));
                                 }
-                                EventAction::Run { command, args, blocking } => {
-                                    let args_str = args.as_ref().map(|a| a.join(" ")).unwrap_or_default();
+                                EventAction::Run {
+                                    command,
+                                    args,
+                                    blocking,
+                                } => {
+                                    let args_str =
+                                        args.as_ref().map(|a| a.join(" ")).unwrap_or_default();
                                     let mode = if *blocking { "blocking" } else { "async" };
-                                    log::data(&format!("  [{i}] Run ({mode}): {command} {args_str}"));
+                                    log::data(&format!(
+                                        "  [{i}] Run ({mode}): {command} {args_str}"
+                                    ));
                                 }
                                 EventAction::SoundEffect { name, .. } => {
                                     log::data(&format!("  [{i}] SoundEffect: {name}"));

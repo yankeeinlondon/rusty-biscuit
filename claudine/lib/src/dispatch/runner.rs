@@ -26,7 +26,11 @@ pub async fn execute_actions(
             EventAction::Speak { message } => execute_speak(message, meta),
             EventAction::Log { target } => execute_log(target, meta, settings).await?,
             EventAction::Report { handler } => execute_report(handler.as_ref(), meta),
-            EventAction::Run { command, args, blocking } => {
+            EventAction::Run {
+                command,
+                args,
+                blocking,
+            } => {
                 execute_run(command, args.as_deref(), *blocking).await?;
             }
             EventAction::SoundEffect { name, .. } => execute_sound_effect(name),
@@ -38,7 +42,9 @@ pub async fn execute_actions(
 /// Speak a message via biscuit-speaks TTS (fire-and-forget).
 fn execute_speak(message_template: &str, meta: &EventMeta) {
     let text = interpolate(message_template, meta);
-    if text.is_empty() { return; }
+    if text.is_empty() {
+        return;
+    }
     debug!(%text, "Speaking via TTS");
     tokio::spawn(async move {
         if let Err(e) = biscuit_speaks::Speak::new(text).play().await {
@@ -55,7 +61,10 @@ async fn execute_log(
 ) -> Result<()> {
     match target {
         LogTarget::LocalFile { path } => write_jsonl(path, meta),
-        LogTarget::Server { url } => { post_to_server(url, meta).await; Ok(()) }
+        LogTarget::Server { url } => {
+            post_to_server(url, meta).await;
+            Ok(())
+        }
     }
 }
 
@@ -74,7 +83,9 @@ fn write_jsonl(path: &std::path::Path, meta: &EventMeta) -> Result<()> {
     let mut line = serde_json::to_string(meta)?;
     line.push('\n');
     std::fs::OpenOptions::new()
-        .create(true).append(true).open(&expanded)?
+        .create(true)
+        .append(true)
+        .open(&expanded)?
         .write_all(line.as_bytes())?;
     debug!(?expanded, "Wrote JSONL log entry");
     Ok(())
@@ -82,9 +93,15 @@ fn write_jsonl(path: &std::path::Path, meta: &EventMeta) -> Result<()> {
 
 /// POST event metadata to a remote logging server (10s timeout, non-fatal).
 async fn post_to_server(url: &url::Url, meta: &EventMeta) {
-    let client = match reqwest::Client::builder().timeout(Duration::from_secs(10)).build() {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
         Ok(c) => c,
-        Err(e) => { warn!(%e, "Failed to build HTTP client"); return; }
+        Err(e) => {
+            warn!(%e, "Failed to build HTTP client");
+            return;
+        }
     };
     match client.post(url.as_str()).json(meta).send().await {
         Ok(resp) => debug!(status = %resp.status(), %url, "Log server POST complete"),
@@ -98,7 +115,9 @@ fn execute_report(handler: Option<&crate::events::ReportHandler>, meta: &EventMe
         Some(h) => format_report(h, meta),
         None => format!(
             "[{}] {} ({})",
-            meta.event, meta.tool_name.as_deref().unwrap_or("-"), meta.provider
+            meta.event,
+            meta.tool_name.as_deref().unwrap_or("-"),
+            meta.provider
         ),
     };
     println!("{output}");
@@ -109,20 +128,25 @@ fn format_report(handler: &crate::events::ReportHandler, meta: &EventMeta) -> St
     if let Some(template) = &handler.template {
         let mut output = interpolate(template, meta);
         if handler.include_metadata
-            && let Ok(json) = serde_json::to_string(meta) {
-                output.push(' ');
-                output.push_str(&json);
-            }
+            && let Ok(json) = serde_json::to_string(meta)
+        {
+            output.push(' ');
+            output.push_str(&json);
+        }
         return output;
     }
     match handler.format {
         ReportFormat::Json => serde_json::to_string(meta).unwrap_or_else(|_| "{}".to_string()),
         ReportFormat::Compact => format!(
-            "[{}] {}", meta.event, meta.tool_name.as_deref().unwrap_or("-")
+            "[{}] {}",
+            meta.event,
+            meta.tool_name.as_deref().unwrap_or("-")
         ),
         ReportFormat::Text => format!(
             "Event: {}, Provider: {}, Tool: {}",
-            meta.event, meta.provider, meta.tool_name.as_deref().unwrap_or("-")
+            meta.event,
+            meta.provider,
+            meta.tool_name.as_deref().unwrap_or("-")
         ),
     }
 }
@@ -131,11 +155,7 @@ fn format_report(handler: &crate::events::ReportHandler, meta: &EventMeta) -> St
 ///
 /// Validates the command exists on PATH via `sniff::programs::find_program`.
 /// Non-fatal: logs a warning and returns `Ok(())` if the command is not found.
-async fn execute_run(
-    command: &str,
-    args: Option<&[String]>,
-    blocking: bool,
-) -> Result<()> {
+async fn execute_run(command: &str, args: Option<&[String]>, blocking: bool) -> Result<()> {
     if sniff::programs::find_program(command).is_none() {
         warn!(%command, "Run action skipped: command not found on PATH");
         return Ok(());
@@ -176,7 +196,10 @@ async fn execute_run(
 fn execute_sound_effect(name: &str) {
     let effect = match playa::SoundEffect::from_name(name) {
         Some(e) => e,
-        None => { warn!(%name, "Unknown sound effect name"); return; }
+        None => {
+            warn!(%name, "Unknown sound effect name");
+            return;
+        }
     };
     debug!(%name, "Playing sound effect");
     tokio::spawn(async move {
@@ -201,8 +224,12 @@ mod tests {
             session_id: Some("test-session".to_string()),
             cwd: Some("/tmp".to_string()),
             tool_name: Some("Bash".to_string()),
-            tool_input: None, tool_response: None, error: None,
-            prompt: None, agent_type: None, notification_type: None,
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
             notification_message: None,
             extra: HashMap::new(),
             env: EnvironmentContext::default(),
@@ -210,15 +237,22 @@ mod tests {
     }
 
     fn log_action(path: std::path::PathBuf) -> Vec<EventAction> {
-        vec![EventAction::Log { target: LogTarget::LocalFile { path } }]
+        vec![EventAction::Log {
+            target: LogTarget::LocalFile { path },
+        }]
     }
 
     #[tokio::test]
     async fn log_local_file_writes_jsonl() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("events.jsonl");
-        execute_actions(&log_action(path.clone()), &meta(), &GlobalSettings::default())
-            .await.unwrap();
+        execute_actions(
+            &log_action(path.clone()),
+            &meta(),
+            &GlobalSettings::default(),
+        )
+        .await
+        .unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
         let parsed: EventMeta = serde_json::from_str(content.trim()).unwrap();
         assert_eq!(parsed.provider, Provider::Claude);
@@ -229,8 +263,13 @@ mod tests {
     async fn log_local_file_creates_parent_dirs() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("nested/deep/events.jsonl");
-        execute_actions(&log_action(path.clone()), &meta(), &GlobalSettings::default())
-            .await.unwrap();
+        execute_actions(
+            &log_action(path.clone()),
+            &meta(),
+            &GlobalSettings::default(),
+        )
+        .await
+        .unwrap();
         assert!(path.exists());
     }
 
@@ -265,13 +304,21 @@ mod tests {
 
     #[test]
     fn report_json_format() {
-        let h = ReportHandler { format: ReportFormat::Json, template: None, include_metadata: false };
+        let h = ReportHandler {
+            format: ReportFormat::Json,
+            template: None,
+            include_metadata: false,
+        };
         let _: serde_json::Value = serde_json::from_str(&format_report(&h, &meta())).unwrap();
     }
 
     #[test]
     fn report_text_format() {
-        let h = ReportHandler { format: ReportFormat::Text, template: None, include_metadata: false };
+        let h = ReportHandler {
+            format: ReportFormat::Text,
+            template: None,
+            include_metadata: false,
+        };
         let out = format_report(&h, &meta());
         assert!(out.contains("before_tool") && out.contains("Claude") && out.contains("Bash"));
     }

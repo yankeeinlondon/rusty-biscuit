@@ -159,10 +159,7 @@ impl AgentConfigurator for OpenCodeConfigurator {
         let has_plugin = root
             .get("plugins")
             .and_then(|p| p.as_array())
-            .is_some_and(|arr| {
-                arr.iter()
-                    .any(|p| p.as_str() == Some(PLUGIN_NAME))
-            });
+            .is_some_and(|arr| arr.iter().any(|p| p.as_str() == Some(PLUGIN_NAME)));
 
         Ok(has_plugin)
     }
@@ -235,9 +232,7 @@ fn config_path(config_dir: Option<&Path>) -> PathBuf {
         Some(dir) => dir.join("opencode.json"),
         None => {
             let home = dirs::home_dir().unwrap_or_default();
-            home.join(".config")
-                .join("opencode")
-                .join("opencode.json")
+            home.join(".config").join("opencode").join("opencode.json")
         }
     }
 }
@@ -306,10 +301,7 @@ mod tests {
             );
         }
         let mut providers = HashMap::new();
-        providers.insert(
-            Provider::OpenCode,
-            ProviderConfig { events: event_map },
-        );
+        providers.insert(Provider::OpenCode, ProviderConfig { events: event_map });
         HookerConfig {
             version: "1.0".to_string(),
             settings: GlobalSettings::default(),
@@ -324,8 +316,7 @@ mod tests {
         fs::write(&opencode, r#"{"plugins": []}"#).unwrap();
 
         let configurator = OpenCodeConfigurator;
-        let config =
-            test_config(vec![AgenticEvent::TurnComplete, AgenticEvent::BeforeTool]);
+        let config = test_config(vec![AgenticEvent::TurnComplete, AgenticEvent::BeforeTool]);
 
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
         match result {
@@ -336,8 +327,7 @@ mod tests {
         }
 
         // Check plugin registered in config
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&opencode).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&opencode).unwrap()).unwrap();
         let plugins = content["plugins"].as_array().unwrap();
         assert!(plugins.iter().any(|p| p == "claudine-bridge"));
     }
@@ -382,8 +372,7 @@ mod tests {
         let configurator = OpenCodeConfigurator;
         configurator.deregister(Some(tmp.path())).unwrap();
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&opencode).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&opencode).unwrap()).unwrap();
         let plugins = content["plugins"].as_array().unwrap();
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0], "other-plugin");
@@ -439,8 +428,7 @@ mod tests {
         let config = test_config(vec![AgenticEvent::TurnComplete]);
         configurator.register(&config, Some(tmp.path())).unwrap();
 
-        let content: Value =
-            serde_json::from_str(&fs::read_to_string(&opencode).unwrap()).unwrap();
+        let content: Value = serde_json::from_str(&fs::read_to_string(&opencode).unwrap()).unwrap();
         assert_eq!(content["theme"], "dark");
         assert_eq!(content["editor"], "vim");
     }

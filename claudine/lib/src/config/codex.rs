@@ -38,24 +38,22 @@ impl AgentConfigurator for CodexConfigurator {
         let mut doc: DocumentMut = content.parse()?;
 
         // Check for existing notify value
-        let existing_notify = doc
-            .get("notify")
-            .and_then(|v| {
-                // Extract existing command from array or string
-                if let Some(arr) = v.as_array() {
-                    let parts: Vec<String> = arr
-                        .iter()
-                        .filter_map(|item| item.as_str().map(String::from))
-                        .collect();
-                    if !parts.is_empty() {
-                        Some(parts.join(" "))
-                    } else {
-                        None
-                    }
+        let existing_notify = doc.get("notify").and_then(|v| {
+            // Extract existing command from array or string
+            if let Some(arr) = v.as_array() {
+                let parts: Vec<String> = arr
+                    .iter()
+                    .filter_map(|item| item.as_str().map(String::from))
+                    .collect();
+                if !parts.is_empty() {
+                    Some(parts.join(" "))
                 } else {
-                    v.as_str().map(String::from)
+                    None
                 }
-            });
+            } else {
+                v.as_str().map(String::from)
+            }
+        });
 
         let claudine_bin = claudine_command();
 
@@ -98,7 +96,9 @@ impl AgentConfigurator for CodexConfigurator {
             .get("notify")
             .and_then(|v| {
                 if let Some(arr) = v.as_array() {
-                    arr.get(0).and_then(|item| item.as_str()).map(|s| s.to_string())
+                    arr.get(0)
+                        .and_then(|item| item.as_str())
+                        .map(|s| s.to_string())
                 } else {
                     v.as_str().map(String::from)
                 }
@@ -173,15 +173,13 @@ fn is_claudine_notify(doc: &DocumentMut) -> bool {
 
 /// Check if notify points to a claudine wrapper script.
 fn is_claudine_wrapper(doc: &DocumentMut, config_dir: Option<&Path>) -> bool {
-    let notify_cmd = doc
-        .get("notify")
-        .and_then(|v| {
-            if let Some(arr) = v.as_array() {
-                arr.get(0).and_then(|item| item.as_str()).map(String::from)
-            } else {
-                v.as_str().map(String::from)
-            }
-        });
+    let notify_cmd = doc.get("notify").and_then(|v| {
+        if let Some(arr) = v.as_array() {
+            arr.get(0).and_then(|item| item.as_str()).map(String::from)
+        } else {
+            v.as_str().map(String::from)
+        }
+    });
 
     if let Some(cmd) = notify_cmd {
         let wrapper_path = wrapper_script_path(config_dir);
@@ -279,10 +277,7 @@ mod tests {
             },
         );
         let mut providers = HashMap::new();
-        providers.insert(
-            Provider::Codex,
-            ProviderConfig { events },
-        );
+        providers.insert(Provider::Codex, ProviderConfig { events });
         HookerConfig {
             version: "1.0".to_string(),
             settings: GlobalSettings::default(),

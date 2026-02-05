@@ -137,7 +137,10 @@ mod tests {
         let (event, meta) = result.unwrap();
         assert_eq!(event, AgenticEvent::AfterTool);
         assert_eq!(meta.tool_name.as_deref(), Some("Read"));
-        assert_eq!(meta.tool_response, Some(json!({"content": "file contents"})));
+        assert_eq!(
+            meta.tool_response,
+            Some(json!({"content": "file contents"}))
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@ use std::process::Command;
 use crate::{
     components::renderable::Renderable,
     terminal::Terminal,
-    utils::color::{Tailwind, WebColor, WEB_COLOR_LOOKUP},
+    utils::color::{Tailwind, WEB_COLOR_LOOKUP, WebColor},
     utils::layout::{Layout, Margin, WordWrap},
 };
 

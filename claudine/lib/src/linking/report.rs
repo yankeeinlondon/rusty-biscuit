@@ -159,10 +159,7 @@ mod tests {
             linked: vec![LinkedEntry {
                 name: "clap".to_string(),
                 source_provider: "claude".to_string(),
-                target_providers: vec![
-                    "codex".to_string(),
-                    "gemini".to_string(),
-                ],
+                target_providers: vec!["codex".to_string(), "gemini".to_string()],
             }],
             ..Default::default()
         };

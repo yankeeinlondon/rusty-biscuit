@@ -21,10 +21,7 @@ const REPO_CONFIG_NAME: &str = ".hooker";
 ///
 /// Returns `ConfigNotFound` when no configuration file is found at any
 /// expected location.
-pub fn load_config(
-    user: Option<&Path>,
-    repo_root: Option<&Path>,
-) -> Result<HookerConfig> {
+pub fn load_config(user: Option<&Path>, repo_root: Option<&Path>) -> Result<HookerConfig> {
     let user_config = load_user_config(user)?;
     let repo_config = load_repo_config(repo_root);
 
@@ -36,13 +33,11 @@ pub fn load_config(
         (Some(cfg), None) => Ok(cfg),
         (None, Some(cfg)) => Ok(cfg),
         (None, None) => {
-            let path = user
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    dirs::home_dir()
-                        .unwrap_or_else(|| PathBuf::from("~"))
-                        .join(USER_CONFIG_NAMES[0])
-                });
+            let path = user.map(PathBuf::from).unwrap_or_else(|| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("~"))
+                    .join(USER_CONFIG_NAMES[0])
+            });
             Err(ClaudineError::ConfigNotFound(path))
         }
     }
@@ -189,9 +184,11 @@ mod tests {
         let loaded = load_config(Some(&path), None).unwrap();
         assert_eq!(loaded.version, "1.0");
         assert!(loaded.providers.contains_key(&Provider::Claude));
-        assert!(loaded.providers[&Provider::Claude]
-            .events
-            .contains_key(&AgenticEvent::SessionStart));
+        assert!(
+            loaded.providers[&Provider::Claude]
+                .events
+                .contains_key(&AgenticEvent::SessionStart)
+        );
     }
 
     #[test]
@@ -339,8 +336,10 @@ mod tests {
 
         let loaded = load_config(Some(&tmp.path().join("nope")), Some(&repo_dir)).unwrap();
         assert!(loaded.providers.contains_key(&Provider::Claude));
-        assert!(loaded.providers[&Provider::Claude]
-            .events
-            .contains_key(&AgenticEvent::BeforeTool));
+        assert!(
+            loaded.providers[&Provider::Claude]
+                .events
+                .contains_key(&AgenticEvent::BeforeTool)
+        );
     }
 }

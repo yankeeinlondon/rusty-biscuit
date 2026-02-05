@@ -37,36 +37,41 @@ pub enum LinkResult {
 /// - The source has no file name component
 /// - The parent directory cannot be created
 /// - The symlink cannot be created
-pub fn create_skill_link(
-    source: &Path,
-    dest_dir: &Path,
-    scope: LinkScope,
-) -> Result<LinkResult> {
-    let skill_name = source
-        .file_name()
-        .ok_or_else(|| ClaudineError::LinkingError(format!(
+pub fn create_skill_link(source: &Path, dest_dir: &Path, scope: LinkScope) -> Result<LinkResult> {
+    let skill_name = source.file_name().ok_or_else(|| {
+        ClaudineError::LinkingError(format!(
             "source path has no file name: {}",
             source.display()
-        )))?;
+        ))
+    })?;
 
     let dest = dest_dir.join(skill_name);
 
     // Safety: never overwrite existing non-symlink directories
-    if dest.exists() && !dest.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+    if dest.exists()
+        && !dest
+            .symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+    {
         return Ok(LinkResult::Skipped {
             reason: format!("real directory already exists at {}", dest.display()),
         });
     }
 
     // If a symlink already exists, check if it points to our source
-    if dest.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+    if dest
+        .symlink_metadata()
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
         let existing_target = fs::read_link(&dest)?;
         let expected = match scope {
             LinkScope::User => source.to_path_buf(),
             LinkScope::Repo => {
-                let parent = dest.parent().ok_or_else(|| {
-                    ClaudineError::LinkingError("dest has no parent".to_string())
-                })?;
+                let parent = dest
+                    .parent()
+                    .ok_or_else(|| ClaudineError::LinkingError("dest has no parent".to_string()))?;
                 relative_path(parent, source)
             }
         };
@@ -93,9 +98,9 @@ pub fn create_skill_link(
     let link_target = match scope {
         LinkScope::User => source.to_path_buf(),
         LinkScope::Repo => {
-            let parent = dest.parent().ok_or_else(|| {
-                ClaudineError::LinkingError("dest has no parent".to_string())
-            })?;
+            let parent = dest
+                .parent()
+                .ok_or_else(|| ClaudineError::LinkingError("dest has no parent".to_string()))?;
             relative_path(parent, source)
         }
     };
@@ -240,10 +245,7 @@ mod tests {
             LinkResult::Linked { link_target, .. } => {
                 // Repo scope: link target should be relative
                 assert!(link_target.is_relative());
-                assert_eq!(
-                    link_target,
-                    PathBuf::from("../../.claude/skills/my-skill")
-                );
+                assert_eq!(link_target, PathBuf::from("../../.claude/skills/my-skill"));
             }
             other => panic!("expected Linked, got {other:?}"),
         }
