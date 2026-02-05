@@ -35,6 +35,9 @@ oc *args="":
   @echo
   @opencode {{args}}
 
+modules:
+  @cargo modules structure
+
 # build all areas that have a build target
 build *args="":
     #!/usr/bin/env bash

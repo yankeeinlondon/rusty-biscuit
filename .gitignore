@@ -61,3 +61,4 @@ trace/*
 **/.ai/prompts/archived
 **/target/*
 *.afphoto~lock*
+.aider*
