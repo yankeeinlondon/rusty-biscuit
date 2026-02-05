@@ -32,6 +32,18 @@ fn test_help_flag() {
 }
 
 #[test]
+fn test_columns_help() {
+    cargo_bin_cmd!("bt")
+        .arg("columns")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Render two columns"))
+        .stdout(predicate::str::contains("--gap"))
+        .stdout(predicate::str::contains("--left"));
+}
+
+#[test]
 fn test_version_flag() {
     cargo_bin_cmd!("bt")
         .arg("--version")

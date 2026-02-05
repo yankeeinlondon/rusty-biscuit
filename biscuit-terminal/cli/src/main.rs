@@ -13,6 +13,7 @@ use biscuit_terminal::{
     components::{
         mermaid::{MermaidRenderer, QuadrantTheme},
         terminal_image::{ImageWidth, TerminalImage, parse_filepath_and_width, parse_width_spec},
+        two_column::{ColumnWidth, TwoColumn},
     },
     discovery::{
         clipboard,
@@ -1135,6 +1136,48 @@ enum Command {
         #[command(flatten)]
         layout: LayoutArgs,
     },
+
+    /// Render two columns of text side by side
+    #[command(
+        display_order = 14,
+        after_long_help = r#"
+[1m[4mExamples:[0m
+  Basic columns:
+    bt columns "Left column" "Right column"
+
+  With custom gap:
+    bt columns --gap 6 "Left" "Right"
+
+  Fixed left width:
+    bt columns --left 24 "Title" "Longer description on the right"
+
+  Percentage left width:
+    bt columns --left 40% "Short" "Longer content that wraps"
+
+  With margins and alignment:
+    bt columns --margin-left 2 --margin-right 2 --alignment center "Left" "Right"
+"#
+    )]
+    Columns {
+        /// Left column content
+        #[arg(value_name = "LEFT", id = "left_content")]
+        left: String,
+
+        /// Right column content
+        #[arg(value_name = "RIGHT")]
+        right: String,
+
+        /// Gap between columns in characters
+        #[arg(long, default_value_t = 3)]
+        gap: u32,
+
+        /// Left column width (e.g., "20", "20ch", "40%")
+        #[arg(long = "left", value_name = "WIDTH")]
+        left_width: Option<String>,
+
+        #[command(flatten)]
+        layout: LayoutArgs,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -1621,6 +1664,15 @@ fn main() -> color_eyre::Result<()> {
         }) => {
             return render_list(items, bullet, no_hanging_indent, layout);
         }
+        Some(Command::Columns {
+            ref left,
+            ref right,
+            gap,
+            ref left_width,
+            ref layout,
+        }) => {
+            return render_columns(left, right, gap, left_width.as_deref(), layout);
+        }
         None => {
             // Default behavior: content analysis or terminal metadata
         }
@@ -1772,6 +1824,17 @@ fn apply_image_layout(term_image: &mut TerminalImage, layout: &LayoutArgs) {
             layout::Alignment::Center => std::fmt::Alignment::Center,
             layout::Alignment::Right => std::fmt::Alignment::Right,
         };
+    }
+}
+
+fn parse_column_width(spec: &str) -> color_eyre::Result<ColumnWidth> {
+    let width = parse_width_spec(spec).map_err(|e| color_eyre::eyre::eyre!("{}", e))?;
+    match width {
+        ImageWidth::Percent(percent) => Ok(ColumnWidth::Percent(percent)),
+        ImageWidth::Characters(chars) => Ok(ColumnWidth::Fixed(chars)),
+        ImageWidth::Fill => Err(color_eyre::eyre::eyre!(
+            "Column width does not support 'fill'. Use a percentage (e.g., 40%) or a character width (e.g., 24 or 24ch)."
+        )),
     }
 }
 
@@ -3794,6 +3857,51 @@ fn render_list(
     // Render using fallback_render for terminal-aware output
     let term = Terminal::new();
     let output = list.fallback_render(&term);
+
+    emit_vertical_margins(layout, || {
+        println!("{}", output);
+        Ok(())
+    })
+}
+
+/// Render two columns of text side by side.
+fn render_columns(
+    left: &str,
+    right: &str,
+    gap: u32,
+    left_width: Option<&str>,
+    layout: &LayoutArgs,
+) -> color_eyre::Result<()> {
+    use biscuit_terminal::components::renderable::Renderable;
+    use biscuit_terminal::utils::layout::Margin;
+
+    let left_text = left
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\\r", "\r");
+    let right_text = right
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\\r", "\r");
+
+    let mut columns = TwoColumn::new(left_text, right_text).with_gap(gap);
+
+    if let Some(spec) = left_width {
+        columns = columns.with_left_width(parse_column_width(spec)?);
+    }
+
+    if let Some(left) = layout.margin_left {
+        columns = columns.left_margin(Margin::Chars(left));
+    }
+    if let Some(right) = layout.margin_right {
+        columns = columns.right_margin(Margin::Chars(right));
+    }
+    if let Some(align) = layout.alignment {
+        columns = columns.alignment(align);
+    }
+
+    let term = Terminal::new();
+    let output = columns.fallback_render(&term);
 
     emit_vertical_margins(layout, || {
         println!("{}", output);

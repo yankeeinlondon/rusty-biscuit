@@ -4,6 +4,7 @@
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage};
 use biscuit_terminal::components::two_column::TwoColumn;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::WordWrap;
@@ -12,14 +13,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Detect terminal capabilities (image support, width, etc.).
     let term = Terminal::new();
 
-    // Show where the image would be; keep it text-only so TwoColumn renders cleanly
-    // in all terminals. The path is relative to the workspace root.
+    // Image is rendered inline when the terminal supports it.
     let image_path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/biscuit-terminal.png");
-    let left_column = Prose::new(format!(
-        "🖼️  biscuit-terminal.png\n({})",
-        image_path.display()
-    ));
+    let left_column = TerminalImage::new(&image_path)?
+        .with_width(ImageWidth::Fill)
+        .with_alt_text("biscuit-terminal.png");
 
     // Right-hand column with a short description.
     let description = Prose::new(concat!(

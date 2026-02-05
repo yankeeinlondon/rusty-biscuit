@@ -136,6 +136,10 @@ impl Renderable for OrderedList {
         self.layout.apply_layout(&content, width)
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn layout(&self) -> &Layout {
         &self.layout
     }
@@ -302,6 +306,10 @@ impl Renderable for UnorderedList {
         let available = self.layout.available_width(width);
         let content = self.render_content(Some(term), available);
         self.layout.apply_layout(&content, width)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 
     fn layout(&self) -> &Layout {

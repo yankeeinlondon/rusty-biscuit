@@ -371,6 +371,10 @@ impl Renderable for Table {
         self.layout.apply_layout(&content, width)
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn layout(&self) -> &Layout {
         &self.layout
     }
@@ -712,5 +716,43 @@ mod tests {
     fn test_default_integer_right_alignment() {
         let col = TableColumn::new("Count").with_type(ColumnType::Integer);
         assert_eq!(col.effective_alignment(), Alignment::Right);
+    }
+
+    // ── Regression: table without title should not emit a title line ──
+
+    #[test]
+    fn test_table_without_title_has_no_title_line() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Age")])
+            .with_data(vec![vec!["Alice".into(), "30".into()]]);
+
+        let result = table.render_content(None);
+        // First line must be the top border, not a title
+        assert!(
+            result.starts_with('┌'),
+            "Table without title should start with top border, got: {}",
+            result.lines().next().unwrap_or("")
+        );
+    }
+
+    // ── Regression: left margin is applied to every line ──
+
+    #[test]
+    fn test_table_with_left_margin() {
+        use crate::utils::layout::Margin;
+
+        let mut table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![vec!["A".into()]]);
+        table.layout_mut().left_margin = Margin::Chars(1);
+
+        let rendered = table.render(Some(60));
+        for line in rendered.lines() {
+            assert!(
+                line.starts_with(' '),
+                "Every line should have left margin padding, got: {:?}",
+                line
+            );
+        }
     }
 }

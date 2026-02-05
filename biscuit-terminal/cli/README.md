@@ -30,6 +30,7 @@ just -f biscuit-terminal/justfile install
 | `bt timeline` | Timeline diagrams |
 | `bt state-diagram` | State machine diagrams |
 | `bt erd` | Entity relationship diagrams |
+| `bt columns` | Two-column text layout |
 
 ## Usage
 
@@ -93,6 +94,22 @@ Options:
 - `-l`/`--left-margin`: Left margin in characters
 - `-r`/`--right-margin`: Right margin in characters
 - `--no-wrap`: Disable word wrapping
+
+### Columns Rendering
+
+Render two columns of text with optional gap and width control:
+
+```bash
+bt columns "Left column" "Right column"
+bt columns --gap 6 "Left" "Right"
+bt columns --left 24 "Title" "Longer description on the right"
+bt columns --left 40% "Short" "Longer content that wraps"
+bt columns --margin-left 2 --margin-right 2 --alignment center "Left" "Right"
+```
+
+Options:
+- `--gap`: Gap between columns in characters (default: 3)
+- `--left`: Left column width (e.g., `20`, `20ch`, `40%`)
 
 ### Flowchart Rendering
 

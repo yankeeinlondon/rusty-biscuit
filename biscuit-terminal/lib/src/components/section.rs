@@ -122,6 +122,10 @@ impl Renderable for Section {
         self.layout.apply_layout(&content, width)
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn layout(&self) -> &Layout {
         &self.layout
     }

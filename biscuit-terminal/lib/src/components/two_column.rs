@@ -1,6 +1,30 @@
 use crate::prelude::*;
 use crate::utils::block_constraint::{split_lines, visible_width, wrap_lines};
 
+/// Determines how wide a column should be.
+#[derive(Debug, Clone, Copy)]
+pub enum ColumnWidth {
+    /// Fixed width in characters.
+    Fixed(u32),
+    /// Percentage of the available width (0.0..=1.0).
+    Percent(f32),
+}
+
+const DEFAULT_GAP: u32 = 3;
+
+struct RenderedColumn {
+    lines: Vec<String>,
+    uses_cursor_padding: bool,
+}
+
+fn cursor_forward(chars: u32) -> String {
+    if chars == 0 {
+        String::new()
+    } else {
+        format!("\x1b[{}C", chars)
+    }
+}
+
 /// Renders content into two columns side by side.
 ///
 /// - allows for columns to be of variant widths to each other
@@ -9,8 +33,21 @@ use crate::utils::block_constraint::{split_lines, visible_width, wrap_lines};
 pub struct TwoColumn {
     left: RenderableContent,
     right: RenderableContent,
-    left_percent: f32,
+    left_width: ColumnWidth,
+    gap: u32,
     layout: Layout,
+}
+
+impl Default for TwoColumn {
+    fn default() -> Self {
+        TwoColumn {
+            left: "".into(),
+            right: "".into(),
+            left_width: ColumnWidth::Percent(0.5),
+            gap: DEFAULT_GAP,
+            layout: Layout::default(),
+        }
+    }
 }
 
 impl TwoColumn {
@@ -19,7 +56,8 @@ impl TwoColumn {
         TwoColumn {
             left: left.into(),
             right: right.into(),
-            left_percent: 0.5,
+            left_width: ColumnWidth::Percent(0.5),
+            gap: DEFAULT_GAP,
             layout: Layout::default(),
         }
     }
@@ -28,7 +66,22 @@ impl TwoColumn {
     ///
     /// Values are clamped to the range 0.0..=1.0; defaults to 0.5.
     pub fn with_left_percent(mut self, percent: f32) -> Self {
-        self.left_percent = percent.clamp(0.0, 1.0);
+        self.left_width = ColumnWidth::Percent(percent.clamp(0.0, 1.0));
+        self
+    }
+
+    /// Adjust the width of the left column.
+    pub fn with_left_width(mut self, width: ColumnWidth) -> Self {
+        self.left_width = match width {
+            ColumnWidth::Percent(percent) => ColumnWidth::Percent(percent.clamp(0.0, 1.0)),
+            ColumnWidth::Fixed(chars) => ColumnWidth::Fixed(chars),
+        };
+        self
+    }
+
+    /// Adjust the number of characters between columns.
+    pub fn with_gap(mut self, gap: u32) -> Self {
+        self.gap = gap;
         self
     }
 
@@ -37,15 +90,18 @@ impl TwoColumn {
             return String::new();
         }
 
-        // Leave a single-space gutter between columns when possible.
-        let gutter: u32 = 1;
-        if width <= gutter {
+        if width <= self.gap {
             return self.render_stacked(width, term);
         }
 
-        let available = width.saturating_sub(gutter);
+        let available = width.saturating_sub(self.gap);
         // Determine column widths, ensuring both receive space when possible.
-        let mut left_width = (available as f32 * self.left_percent).round() as u32;
+        let mut left_width = match self.left_width {
+            ColumnWidth::Fixed(chars) => chars,
+            ColumnWidth::Percent(percent) => {
+                (available as f32 * percent.clamp(0.0, 1.0)).round() as u32
+            }
+        };
         left_width = left_width.clamp(1, available.saturating_sub(1).max(1));
         let right_width = available.saturating_sub(left_width);
 
@@ -53,25 +109,31 @@ impl TwoColumn {
             return self.render_stacked(width, term);
         }
 
-        let left_lines = self.render_column(&self.left, left_width, term);
-        let right_lines = self.render_column(&self.right, right_width, term);
-        let max_lines = left_lines.len().max(right_lines.len());
-        let gutter_str = " ";
+        let left_render = self.render_column(&self.left, left_width, term);
+        let right_render = self.render_column(&self.right, right_width, term);
+        let max_lines = left_render.lines.len().max(right_render.lines.len());
+        let gutter_str = " ".repeat(self.gap as usize);
 
         let mut combined = Vec::with_capacity(max_lines);
         for i in 0..max_lines {
-            let left_line = left_lines.get(i).map(String::as_str).unwrap_or("");
-            let right_line = right_lines.get(i).map(String::as_str).unwrap_or("");
+            let left_line = left_render.lines.get(i).map(String::as_str).unwrap_or("");
+            let right_line = right_render.lines.get(i).map(String::as_str).unwrap_or("");
 
             let mut row = String::new();
             let left_pad = left_width.saturating_sub(visible_width(left_line));
             let right_pad = right_width.saturating_sub(visible_width(right_line));
 
             row.push_str(left_line);
-            row.push_str(&" ".repeat(left_pad as usize));
-            row.push_str(gutter_str);
+            if left_render.uses_cursor_padding {
+                row.push_str(&cursor_forward(left_pad));
+            } else {
+                row.push_str(&" ".repeat(left_pad as usize));
+            }
+            row.push_str(&gutter_str);
             row.push_str(right_line);
-            row.push_str(&" ".repeat(right_pad as usize));
+            if !right_render.uses_cursor_padding {
+                row.push_str(&" ".repeat(right_pad as usize));
+            }
 
             combined.push(row);
         }
@@ -80,8 +142,11 @@ impl TwoColumn {
     }
 
     fn render_stacked(&self, width: u32, term: Option<&Terminal>) -> String {
-        let left = self.render_column(&self.left, width, term).join("\n");
-        let right = self.render_column(&self.right, width, term).join("\n");
+        let left = self.render_column(&self.left, width, term).lines.join("\n");
+        let right = self
+            .render_column(&self.right, width, term)
+            .lines
+            .join("\n");
 
         if right.is_empty() {
             left
@@ -97,16 +162,48 @@ impl TwoColumn {
         content: &RenderableContent,
         width: u32,
         term: Option<&Terminal>,
-    ) -> Vec<String> {
+    ) -> RenderedColumn {
         if width == 0 {
-            return vec![String::new()];
+            return RenderedColumn {
+                lines: vec![String::new()],
+                uses_cursor_padding: false,
+            };
         }
 
         match content {
-            RenderableContent::String(s) => {
-                wrap_lines(split_lines(s), &WordWrap::WrapProse(None, None), width)
-            }
+            RenderableContent::String(s) => RenderedColumn {
+                lines: wrap_lines(split_lines(s), &WordWrap::WrapProse(None, None), width),
+                uses_cursor_padding: false,
+            },
             RenderableContent::Component(component) => {
+                if let Some(t) = term {
+                    if let Some(image) = component.as_any().downcast_ref::<TerminalImage>() {
+                        let mut column_term = Terminal::from(t);
+                        column_term.fixed_width = Some(width);
+                        if let Ok((sequence, height)) = image.render_inline(&column_term) {
+                            let mut lines = Vec::with_capacity(height as usize);
+                            lines.push(sequence);
+                            for _ in 1..height {
+                                lines.push(String::new());
+                            }
+                            return RenderedColumn {
+                                lines,
+                                uses_cursor_padding: true,
+                            };
+                        }
+
+                        let fallback = image.generate_alt_text();
+                        return RenderedColumn {
+                            lines: wrap_lines(
+                                split_lines(fallback),
+                                &WordWrap::WrapProse(None, None),
+                                width,
+                            ),
+                            uses_cursor_padding: false,
+                        };
+                    }
+                }
+
                 let rendered = if let Some(t) = term {
                     let mut column_term = Terminal::from(t);
                     column_term.fixed_width = Some(width);
@@ -114,7 +211,10 @@ impl TwoColumn {
                 } else {
                     component.render(Some(width))
                 };
-                split_lines(rendered)
+                RenderedColumn {
+                    lines: split_lines(rendered),
+                    uses_cursor_padding: false,
+                }
             }
         }
     }
@@ -159,6 +259,10 @@ impl Renderable for TwoColumn {
     fn fallback_render(&self, term: &Terminal) -> String {
         let width = term.width();
         self.render_with_width(width, Some(term))
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 
     fn is_block_level(&self) -> bool {

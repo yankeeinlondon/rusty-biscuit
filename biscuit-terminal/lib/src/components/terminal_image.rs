@@ -154,6 +154,10 @@ impl Renderable for TerminalImage {
         String::new()
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn layout(&self) -> &Layout {
         &self.layout
     }
@@ -315,6 +319,72 @@ impl TerminalImage {
 
         // Unsupported terminal: no alt-text fallback
         Ok(String::new())
+    }
+
+    pub(crate) fn render_inline(
+        &self,
+        term: &crate::terminal::Terminal,
+    ) -> Result<(String, u32), TerminalImageError> {
+        use crate::discovery::detection::ImageSupport;
+
+        if !term.is_tty || matches!(term.image_support, ImageSupport::None) {
+            return Err(TerminalImageError::UnsupportedTerminal);
+        }
+
+        let term_width = term.width().max(1);
+        let resolved_left = Layout::resolve_margin(&self.layout.left_margin, term_width)
+            .saturating_add(self.margin_left);
+        let resolved_right = Layout::resolve_margin(&self.layout.right_margin, term_width)
+            .saturating_add(self.margin_right);
+        let available_width = term_width
+            .saturating_sub(resolved_left + resolved_right)
+            .max(1);
+
+        let width_cells = match &self.width {
+            ImageWidth::Fill => available_width,
+            ImageWidth::Percent(pct) => ((available_width as f32) * pct).round() as u32,
+            ImageWidth::Characters(chars) => (*chars).min(available_width),
+        }
+        .clamp(1, available_width);
+
+        let img = self.load_image()?;
+        let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
+            .map(|cs| (cs.width.max(1), cs.height.max(1)))
+            .unwrap_or((8u32, 16u32));
+        let image_aspect = img.height() as f32 / img.width() as f32;
+        let cell_aspect = cell_pixel_width as f32 / cell_pixel_height as f32;
+        let height_cells =
+            (((width_cells as f32) * image_aspect * cell_aspect).ceil() as u32).max(1);
+
+        let slack = available_width.saturating_sub(width_cells);
+        let x_offset = match self.alignment {
+            Alignment::Left => resolved_left,
+            Alignment::Center => resolved_left + slack / 2,
+            Alignment::Right => resolved_left + slack,
+        };
+
+        let png_data = self.encode_as_png(&img)?;
+        let image = match term.image_support {
+            ImageSupport::Kitty => self.render_kitty_cells(&png_data, width_cells, height_cells),
+            ImageSupport::ITerm => {
+                let filename = Path::new(&self.filename)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "image.png".to_string());
+                self.render_iterm2(&png_data, &width_cells.to_string(), &filename)
+            }
+            ImageSupport::None => return Err(TerminalImageError::UnsupportedTerminal),
+        };
+
+        let prefix = if x_offset > 0 {
+            format!("\x1b[{}C", x_offset)
+        } else {
+            String::new()
+        };
+
+        let sequence = format!("\x1b[s{}{}\x1b[u", prefix, image);
+
+        Ok((sequence, height_cells))
     }
 
     /// Render the image using viuer with the instance's width setting.

@@ -4,7 +4,7 @@ use std::process::Command;
 use crate::{
     components::renderable::Renderable,
     terminal::Terminal,
-    utils::color::{Tailwind, WEB_COLOR_LOOKUP, WebColor},
+    utils::color::{Tailwind, WebColor, WEB_COLOR_LOOKUP},
     utils::layout::{Layout, Margin, WordWrap},
 };
 
@@ -243,6 +243,10 @@ impl Renderable for Prose {
         let width = term.width();
         let parsed = self.parse_tokens(Some(term));
         self.layout.apply_layout(&parsed, width)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 
     fn layout(&self) -> &Layout {

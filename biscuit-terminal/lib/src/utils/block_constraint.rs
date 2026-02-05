@@ -131,6 +131,17 @@ fn escape_sequence_end(content: &str, start: usize) -> usize {
             }
             idx
         }
+        b'G' => {
+            let mut idx = start + 2;
+            while idx < bytes.len() {
+                if bytes[idx] == 0x1b && idx + 1 < bytes.len() && bytes[idx + 1] == b'\\' {
+                    idx += 2;
+                    break;
+                }
+                idx += 1;
+            }
+            idx
+        }
         _ => (start + 2).min(bytes.len()),
     }
 }
@@ -509,6 +520,12 @@ mod tests {
     fn visible_width_strips_escape_codes() {
         let content = "\x1b[31mred\x1b[0m\x1b]8;;https://example.com\x07link\x1b]8;;\x07";
         assert_eq!(visible_width(content), 7);
+    }
+
+    #[test]
+    fn visible_width_strips_kitty_graphics() {
+        let content = "\x1b_Gf=100,a=T,t=d,c=10,m=0;AAAA\x1b\\text";
+        assert_eq!(visible_width(content), 4);
     }
 
     #[test]

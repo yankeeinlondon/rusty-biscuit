@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::sync::Arc;
 
 use crate::terminal::Terminal;
@@ -12,7 +13,7 @@ use crate::utils::layout::{Alignment, Layout, Margin, RowFill, WordWrap};
 /// accessors `layout()` / `layout_mut()` expose it, while
 /// the provided builder methods let callers configure it
 /// fluently.
-pub trait Renderable: std::fmt::Debug {
+pub trait Renderable: std::fmt::Debug + Any {
     /// **Opportunistic Render**
     ///
     /// Renders without knowledge of the underlying terminal's
@@ -121,6 +122,8 @@ pub trait Renderable: std::fmt::Debug {
         self.layout_mut().right_margin = parent.right_margin.clone().add_chars(right_offset);
         self
     }
+
+    fn as_any(&self) -> &dyn Any;
 }
 
 #[derive(Debug)]
