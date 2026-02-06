@@ -140,6 +140,14 @@ pub struct GitContext {
     /// Values: "github", "gitlab", "bitbucket", "azure_devops", etc.
     #[serde(default)]
     pub hosting_provider: Option<String>,
+
+    /// Repository name from the primary remote (e.g., "cargo").
+    #[serde(default)]
+    pub repo_name: Option<String>,
+
+    /// Organization or owner name from the primary remote (e.g., "rust-lang").
+    #[serde(default)]
+    pub repo_org: Option<String>,
 }
 
 /// Project and monorepo structure.
@@ -225,6 +233,8 @@ impl From<sniff::SniffResult> for EnvironmentContext {
                     remote_url: primary_remote.and_then(|r| r.url.clone()),
                     hosting_provider: primary_remote
                         .map(|r| format!("{:?}", r.provider).to_lowercase()),
+                    repo_name: g.repo.clone(),
+                    repo_org: g.org.clone(),
                 }
             })
         });
@@ -342,7 +352,9 @@ mod tests {
                 "unstaged_count": 1,
                 "untracked_count": 0,
                 "head_sha": "abc123",
-                "user_name": "Test User"
+                "user_name": "Test User",
+                "repo_name": "my-project",
+                "repo_org": "my-org"
             },
             "repo": {
                 "is_monorepo": true,
@@ -358,6 +370,11 @@ mod tests {
         assert_eq!(ctx.git.as_ref().unwrap().branch.as_deref(), Some("main"));
         assert!(ctx.git.as_ref().unwrap().is_dirty);
         assert_eq!(ctx.git.as_ref().unwrap().staged_count, 2);
+        assert_eq!(
+            ctx.git.as_ref().unwrap().repo_name.as_deref(),
+            Some("my-project")
+        );
+        assert_eq!(ctx.git.as_ref().unwrap().repo_org.as_deref(), Some("my-org"));
         assert!(ctx.repo.as_ref().unwrap().is_monorepo);
         assert_eq!(ctx.repo.as_ref().unwrap().packages.len(), 2);
         assert_eq!(ctx.primary_language.as_deref(), Some("Rust"));

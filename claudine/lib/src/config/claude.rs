@@ -269,6 +269,7 @@ fn to_claude_native(event: &AgenticEvent) -> Option<String> {
         AgenticEvent::SessionStart => Some("SessionStart".to_string()),
         AgenticEvent::SessionEnd => Some("SessionEnd".to_string()),
         AgenticEvent::PermissionRequest => Some("PermissionRequest".to_string()),
+        AgenticEvent::HumanInTheLoop => Some("HumanInTheLoop".to_string()),
         AgenticEvent::SubagentStart => Some("SubagentStart".to_string()),
         AgenticEvent::SubagentStop => Some("SubagentStop".to_string()),
         AgenticEvent::Notification => Some("Notification".to_string()),

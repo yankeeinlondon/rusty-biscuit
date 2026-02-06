@@ -8,6 +8,7 @@ use crate::{
 };
 
 use super::types::{ColumnType, Currency, VerticalAlign};
+use crate::discovery::detection::{ColorDepth, ColorMode};
 
 /// Content for a table cell.
 #[derive(Debug, Clone)]
@@ -376,6 +377,14 @@ pub struct Table {
     /// space-based padding. This can improve alignment when glyphs render
     /// narrower than their computed Unicode width.
     prefer_cursor_alignment: bool,
+    /// When true, apply a subtle background color to even data rows (0-indexed,
+    /// so the second, fourth, etc. rows get the stripe). Requires true color
+    /// support; silently ignored otherwise.
+    alternate_background_color: bool,
+    /// When true, apply a subtle text color shift to even data rows (0-indexed,
+    /// so the second, fourth, etc. rows get the tint). Requires true color
+    /// support; silently ignored otherwise.
+    alternate_text_color: bool,
 }
 
 impl Default for Table {
@@ -386,6 +395,8 @@ impl Default for Table {
             data: Vec::new(),
             layout: Layout::default(),
             prefer_cursor_alignment: false,
+            alternate_background_color: false,
+            alternate_text_color: false,
         }
     }
 }
@@ -430,6 +441,32 @@ impl Table {
     /// alignment, and row fill.
     pub fn prefer_cursor_alignment(mut self) -> Self {
         self.prefer_cursor_alignment = true;
+        self
+    }
+
+    /// Enable alternating row background colors.
+    ///
+    /// When enabled, even data rows (0-indexed: rows 1, 3, 5, ...) receive a
+    /// very subtle background tint. The tint adapts to the terminal's light or
+    /// dark color mode.
+    ///
+    /// Requires true-color (24-bit) support. On terminals without true color
+    /// the setting is silently ignored and rows render without background.
+    pub fn alternate_background_color(mut self) -> Self {
+        self.alternate_background_color = true;
+        self
+    }
+
+    /// Enable alternating row text colors.
+    ///
+    /// When enabled, even data rows (0-indexed: rows 1, 3, 5, ...) receive a
+    /// subtle text color shift. The tint adapts to the terminal's light or
+    /// dark color mode.
+    ///
+    /// Requires true-color (24-bit) support. On terminals without true color
+    /// the setting is silently ignored and rows render without text tint.
+    pub fn alternate_text_color(mut self) -> Self {
+        self.alternate_text_color = true;
         self
     }
 
@@ -579,7 +616,15 @@ impl Table {
     ///
     /// If `available_width` is provided, columns will be constrained to fit
     /// within that space (accounting for border overhead).
-    fn render_content(&self, available_width: Option<u32>) -> String {
+    ///
+    /// If `stripe_color_mode` is `Some`, even data rows (0-indexed: 1, 3, 5, ...)
+    /// receive a subtle background tint adapted to the given color mode.
+    fn render_content(
+        &self,
+        available_width: Option<u32>,
+        stripe_color_mode: Option<&ColorMode>,
+        text_color_mode: Option<&ColorMode>,
+    ) -> String {
         let mut result = String::new();
         let widths = self.calculate_column_widths(available_width);
 
@@ -671,9 +716,16 @@ impl Table {
         // Calculate row heights for multi-line support
         let row_heights = calculate_row_heights(&self.data, &self.columns, &widths);
 
+        // Resolve stripe escape once (if enabled)
+        let stripe_bg = stripe_color_mode.map(stripe_bg_escape);
+        let stripe_fg = text_color_mode.map(stripe_fg_escape);
+
         // Render data rows with multi-line support
         for (row_idx, row) in self.data.iter().enumerate() {
             let row_height = row_heights.get(row_idx).copied().unwrap_or(1);
+            let is_striped = (stripe_bg.is_some() || stripe_fg.is_some()) && row_idx % 2 == 1;
+            let active_bg = if stripe_bg.is_some() && row_idx % 2 == 1 { stripe_bg } else { None };
+            let active_fg = if stripe_fg.is_some() && row_idx % 2 == 1 { stripe_fg } else { None };
 
             // Prepare wrapped and vertically-aligned content for each cell
             let mut cell_lines: Vec<Vec<String>> = Vec::with_capacity(row.len());
@@ -698,7 +750,16 @@ impl Table {
 
             // Render each line of the row
             for line_idx in 0..row_height {
-                let mut row_str = String::from("│ ");
+                let mut row_str = String::new();
+                // Left border is always outside the stripe
+                row_str.push('│');
+                if let Some(bg) = active_bg {
+                    row_str.push_str(bg);
+                }
+                if let Some(fg) = active_fg {
+                    row_str.push_str(fg);
+                }
+                row_str.push(' ');
                 for (i, _cell) in row.iter().enumerate() {
                     let width = widths.get(i).copied().unwrap_or(0);
                     let col = self.columns.get(i);
@@ -718,12 +779,37 @@ impl Table {
                         .map(|s| s.as_str())
                         .unwrap_or("");
 
-                    row_str.push_str(&pad_cell(line_content, width, alignment, max_width));
+                    // Cell content may contain \x1b[0m (full SGR reset) which
+                    // kills the stripe bg/fg.  Append restores so that the
+                    // padding spaces added by pad_cell keep the stripe.
+                    if is_striped {
+                        let mut restore = String::new();
+                        if let Some(bg) = active_bg {
+                            restore.push_str(bg);
+                        }
+                        if let Some(fg) = active_fg {
+                            restore.push_str(fg);
+                        }
+                        let restored = format!("{}{}", line_content, restore);
+                        row_str.push_str(&pad_cell(&restored, width, alignment, max_width));
+                    } else {
+                        row_str.push_str(&pad_cell(line_content, width, alignment, max_width));
+                    }
                     if i < row.len() - 1 {
                         row_str.push_str(" │ ");
                     }
                 }
-                row_str.push_str(" │");
+                row_str.push(' ');
+                if active_bg.is_some() || active_fg.is_some() {
+                    if active_bg.is_some() {
+                        row_str.push_str(BG_RESET);
+                    }
+                    if active_fg.is_some() {
+                        row_str.push_str(FG_RESET);
+                    }
+                }
+                // Right border is always outside the stripe
+                row_str.push('│');
                 result.push_str(&row_str);
                 result.push('\n');
             }
@@ -747,7 +833,12 @@ impl Table {
     ///
     /// Uses ANSI cursor positioning (`\x1b[{n}G`) instead of space padding
     /// to ensure table borders align correctly regardless of glyph rendering.
-    fn render_with_cursor_positioning(&self, term_width: u32) -> String {
+    fn render_with_cursor_positioning(
+        &self,
+        term_width: u32,
+        stripe_color_mode: Option<&ColorMode>,
+        text_color_mode: Option<&ColorMode>,
+    ) -> String {
         let mut result = String::new();
 
         // Calculate margins first to determine available width for column calculation
@@ -897,6 +988,8 @@ impl Table {
                     table_start,
                     fill_end_col,
                     None, // Headers don't use max_content_widths
+                    None, // Headers are never striped
+                    None, // Headers are never text-tinted
                 ));
                 result.push('\n');
             }
@@ -915,6 +1008,10 @@ impl Table {
 
         // Calculate row heights for multi-line support
         let row_heights = calculate_row_heights(&self.data, &self.columns, &widths);
+
+        // Resolve stripe escapes once (if enabled)
+        let stripe_bg = stripe_color_mode.map(stripe_bg_escape);
+        let stripe_fg = text_color_mode.map(stripe_fg_escape);
 
         // Data rows with multi-line support
         for (row_idx, row) in self.data.iter().enumerate() {
@@ -953,6 +1050,8 @@ impl Table {
                     })
                     .collect();
 
+                let row_stripe = if row_idx % 2 == 1 { stripe_bg } else { None };
+                let row_text = if row_idx % 2 == 1 { stripe_fg } else { None };
                 result.push_str(&render_row_with_cursor_positioning(
                     &line_cells,
                     &widths,
@@ -960,6 +1059,8 @@ impl Table {
                     table_start,
                     fill_end_col,
                     Some(&max_content_widths),
+                    row_stripe,
+                    row_text,
                 ));
                 result.push('\n');
             }
@@ -982,25 +1083,45 @@ impl Table {
 impl Renderable for Table {
     fn render(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
+        // Opportunistic render assumes full capability; stripe if requested
+        let stripe = if self.alternate_background_color {
+            Some(Terminal::color_mode())
+        } else {
+            None
+        };
+        let text_tint = if self.alternate_text_color {
+            Some(Terminal::color_mode())
+        } else {
+            None
+        };
         if self.prefer_cursor_alignment {
-            // Cursor positioning always qualifies for opportunistic render
-            // (assumes TTY that supports ANSI escape codes)
-            self.render_with_cursor_positioning(width)
+            self.render_with_cursor_positioning(width, stripe.as_ref(), text_tint.as_ref())
         } else {
             let available = self.layout.available_width(width);
-            let content = self.render_content(Some(available));
+            let content = self.render_content(Some(available), stripe.as_ref(), text_tint.as_ref());
             self.layout.apply_layout(&content, width)
         }
     }
 
     fn fallback_render(&self, term: &Terminal) -> String {
         let width = term.width();
+        let has_true_color = term.color_depth == ColorDepth::TrueColor;
+        // Only stripe when the terminal actually supports true color
+        let stripe = if self.alternate_background_color && has_true_color {
+            Some(Terminal::color_mode())
+        } else {
+            None
+        };
+        let text_tint = if self.alternate_text_color && has_true_color {
+            Some(Terminal::color_mode())
+        } else {
+            None
+        };
         if self.prefer_cursor_alignment {
-            // Cursor positioning works on any terminal that supports ANSI codes
-            self.render_with_cursor_positioning(width)
+            self.render_with_cursor_positioning(width, stripe.as_ref(), text_tint.as_ref())
         } else {
             let available = self.layout.available_width(width);
-            let content = self.render_content(Some(available));
+            let content = self.render_content(Some(available), stripe.as_ref(), text_tint.as_ref());
             self.layout.apply_layout(&content, width)
         }
     }
@@ -1027,6 +1148,9 @@ impl Renderable for Table {
 /// If `fill_end_col` is Some, fills with spaces to that column for background color support.
 /// If `max_content_widths` is provided, alignment offsets use these widths instead of
 /// individual content widths, ensuring all rows in a column align at the same position.
+/// If `stripe_bg` is Some, the background escape is applied after the left border and
+/// reset before the right border so the outer `│` characters remain uncolored.
+/// If `stripe_fg` is Some, the foreground escape is applied similarly and reset at borders.
 fn render_row_with_cursor_positioning(
     cells: &[String],
     widths: &[usize],
@@ -1034,9 +1158,24 @@ fn render_row_with_cursor_positioning(
     table_start: u32,
     fill_end_col: Option<u32>,
     max_content_widths: Option<&[u32]>,
+    stripe_bg: Option<&str>,
+    stripe_fg: Option<&str>,
 ) -> String {
+    let has_stripe = stripe_bg.is_some() || stripe_fg.is_some();
     let mut row = String::new();
+    // Left border is always outside the stripe
     row.push_str(&format!("\x1b[{}G│", table_start));
+    if has_stripe {
+        if let Some(bg) = stripe_bg {
+            row.push_str(bg);
+        }
+        if let Some(fg) = stripe_fg {
+            row.push_str(fg);
+        }
+        // Explicitly fill the border padding space after left │ so the
+        // cursor jump to cell_start doesn't leave it with default bg.
+        row.push(' ');
+    }
 
     // Track cursor position for row fill
     let mut last_col = table_start + 1;
@@ -1062,13 +1201,50 @@ fn render_row_with_cursor_positioning(
             Alignment::Center => cell_width.saturating_sub(width_for_alignment) / 2,
         };
 
+        // For striped rows, pre-fill the cell area with bg-colored spaces.
+        // Cursor positioning jumps over positions without writing, so
+        // alignment gaps would show the default bg without this fill.
+        // The actual content overwrites its portion; the remaining spaces
+        // keep the stripe bg.
+        if stripe_bg.is_some() {
+            row.push_str(&format!(
+                "\x1b[{}G{}",
+                cell_start,
+                " ".repeat(cell_width as usize)
+            ));
+        }
+
         let content_col = cell_start.saturating_add(cursor_offset);
         row.push_str(&format!("\x1b[{}G{}", content_col, content));
+
+        // Cell content may contain \x1b[0m (full SGR reset) which kills the
+        // stripe bg/fg.  Re-apply so separators and subsequent cells keep it.
+        if has_stripe {
+            if let Some(bg) = stripe_bg {
+                row.push_str(bg);
+            }
+            if let Some(fg) = stripe_fg {
+                row.push_str(fg);
+            }
+        }
 
         // Position separator at end of cell
         let sep_col = cell_start.saturating_add(cell_width);
         if index + 1 == widths.len() {
-            row.push_str(&format!("\x1b[{}G │", sep_col));
+            // Last cell: reset bg/fg before right border so │ is uncolored
+            if has_stripe {
+                let mut resets = String::new();
+                if stripe_bg.is_some() {
+                    resets.push_str(BG_RESET);
+                }
+                if stripe_fg.is_some() {
+                    resets.push_str(FG_RESET);
+                }
+                row.push_str(&format!("\x1b[{}G {}", sep_col, resets));
+                row.push('│');
+            } else {
+                row.push_str(&format!("\x1b[{}G │", sep_col));
+            }
             last_col = sep_col + 2;
         } else {
             row.push_str(&format!("\x1b[{}G │ ", sep_col));
@@ -1178,6 +1354,36 @@ fn apply_vertical_padding(
     }
     result
 }
+
+/// Returns the ANSI escape sequence for the alternating row background color.
+///
+/// Produces a very subtle tint that adapts to the terminal's color mode:
+/// - **Dark mode**: a faint warm gray (`rgb(30, 30, 34)`)
+/// - **Light mode**: a faint cool gray (`rgb(235, 235, 238)`)
+fn stripe_bg_escape(color_mode: &ColorMode) -> &'static str {
+    match color_mode {
+        ColorMode::Light => "\x1b[48;2;235;235;238m",
+        ColorMode::Dark | ColorMode::Unknown => "\x1b[48;2;30;30;34m",
+    }
+}
+
+/// Returns the ANSI escape sequence for the alternating row text color.
+///
+/// Produces a subtle shift from the default foreground:
+/// - **Dark mode**: a slightly muted light gray (`rgb(180, 180, 190)`)
+/// - **Light mode**: a slightly softened dark gray (`rgb(80, 80, 90)`)
+fn stripe_fg_escape(color_mode: &ColorMode) -> &'static str {
+    match color_mode {
+        ColorMode::Light => "\x1b[38;2;80;80;90m",
+        ColorMode::Dark | ColorMode::Unknown => "\x1b[38;2;180;180;190m",
+    }
+}
+
+/// The escape sequence that resets only the background color.
+const BG_RESET: &str = "\x1b[49m";
+
+/// The escape sequence that resets only the foreground color.
+const FG_RESET: &str = "\x1b[39m";
 
 fn build_border(widths: &[usize], left: char, junction: char, right: char) -> String {
     if widths.is_empty() {
@@ -1411,7 +1617,7 @@ mod tests {
                 vec!["Bob".into(), TableCellContent::Text("Inactive".to_string())],
             ]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
         // Top border, header, separator, row1, row2, bottom border
         assert_eq!(lines.len(), 6);
@@ -1433,7 +1639,7 @@ mod tests {
                 vec!["Python".into(), "1991".into()],
             ]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
         assert_eq!(lines.len(), 6);
         let header_width = visible_width(lines[1]);
@@ -1452,7 +1658,7 @@ mod tests {
                 vec!["".into(), "42".into()],
             ]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
         let header_width = visible_width(lines[1]);
         let row1_width = visible_width(lines[3]);
@@ -1481,7 +1687,7 @@ mod tests {
                 ],
             ]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
         // Both values should start at the same position (aligned by max content width).
         // With max_width alignment, content is positioned consistently across rows.
@@ -1523,7 +1729,7 @@ mod tests {
             ])
             .with_data(vec![vec![TableCellContent::Integer(42)]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
         // Header line (index 1) should have right-aligned "ID" (integer type defaults to right)
         // "│      ID │" - ID right-aligned in 8-char width
@@ -1542,7 +1748,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X").with_fixed_width(10)])
             .with_data(vec![vec!["A".into()]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
         let header_width = visible_width(lines[1]);
         let row_width = visible_width(lines[3]);
@@ -1559,7 +1765,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("Name"), TableColumn::new("Age")])
             .with_data(vec![vec!["Alice".into(), "30".into()]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         // First line must be the top border, not a title
         assert!(
             result.starts_with('┌'),
@@ -2167,7 +2373,7 @@ mod tests {
                 vec!["Bob".into(), "25".into()],
             ]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         // Should have: top border, header, separator, 2 data rows, bottom border = 6 lines
         assert_eq!(result.lines().count(), 6);
     }
@@ -2181,7 +2387,7 @@ mod tests {
             ])
             .with_data(vec![vec!["Rust".into(), TableCellContent::Integer(99800)]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
 
         // Should have: top border, 2 header lines, separator, 1 data row, bottom border = 6 lines
@@ -2214,7 +2420,7 @@ mod tests {
                 "Line 1\nLine 2\nLine 3".to_string(),
             )]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         // Should have: top border, header, separator, 3 data lines, bottom border = 7 lines
         let lines: Vec<&str> = result.lines().collect();
         assert_eq!(
@@ -2244,7 +2450,7 @@ mod tests {
                 TableCellContent::Text("B\nC".to_string()),
             ]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         // Row should span 2 lines
         let lines: Vec<&str> = result.lines().collect();
         // top border, header, separator, 2 data lines, bottom border = 6 lines
@@ -2263,7 +2469,7 @@ mod tests {
                 TableCellContent::Text("Line1\nLine2\nLine3".to_string()),
             ]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
 
         // Data starts at line 3 (after border, header, separator)
@@ -2287,7 +2493,7 @@ mod tests {
                 TableCellContent::Text("Line1\nLine2\nLine3".to_string()),
             ]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
 
         // Data is at lines 3, 4, 5 (3 lines for 3-line content)
@@ -2311,7 +2517,7 @@ mod tests {
                 TableCellContent::Text("Line1\nLine2\nLine3".to_string()),
             ]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
 
         // Data is at lines 3, 4, 5 (3 lines for 3-line content)
@@ -2329,7 +2535,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("X")])
             .with_data(vec![vec![TableCellContent::Text("A\nB".to_string())]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
 
         // All content lines should have consistent border positions
@@ -2474,7 +2680,7 @@ mod tests {
                 TableCellContent::Text("A\nB\nC".to_string()),
             ]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
 
         // Row should have 3 data lines
@@ -2501,7 +2707,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("Colored")])
             .with_data(vec![vec![TableCellContent::Text(colored_multiline)]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
 
         // ANSI codes should be preserved
         assert!(result.contains("\x1b[31m"), "Red escape should be preserved");
@@ -2528,7 +2734,7 @@ mod tests {
                 TableCellContent::Integer(12345),
             ]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
 
         // Row should span 2 lines
@@ -2548,7 +2754,7 @@ mod tests {
             ])
             .with_data(vec![vec![TableCellContent::Integer(1_000_000)]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
 
         // Number should NOT be wrapped even if exceeds width
         // (word wrap is forced to None for numeric columns)
@@ -2637,7 +2843,7 @@ mod tests {
                 vec![TableCellContent::Text("One\nTwo\nThree".to_string())],
             ]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
 
         // Total: border + header + sep + 1 + 2 + 3 + border = 10 lines
@@ -2657,7 +2863,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("Links")])
             .with_data(vec![vec![TableCellContent::Text(link_multiline)]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
 
         // OSC8 sequences should be preserved
         assert!(
@@ -2679,7 +2885,7 @@ mod tests {
                 TableCellContent::Text("Line 1\nLine 2".to_string()),
             ]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
         let lines: Vec<&str> = result.lines().collect();
 
         // All content lines (non-border) should have the same visible width
@@ -2705,7 +2911,7 @@ mod tests {
             .with_columns(vec![TableColumn::new("Desc").with_max_width(10)])
             .with_data(vec![vec!["This is a longer text that should wrap".into()]]);
 
-        let result = table.render_content(None);
+        let result = table.render_content(None, None, None);
 
         // Content should wrap at column width
         let lines: Vec<&str> = result.lines().collect();
@@ -2713,6 +2919,590 @@ mod tests {
             lines.len() > 4,
             "Long content should cause multi-line row: {} lines",
             lines.len()
+        );
+    }
+
+    // ── Alternate background color tests ─────────────────────────────
+
+    #[test]
+    fn test_alternate_background_color_builder() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .alternate_background_color();
+        assert!(table.alternate_background_color);
+    }
+
+    #[test]
+    fn test_alternate_background_color_default_is_false() {
+        let table = Table::new();
+        assert!(!table.alternate_background_color);
+    }
+
+    #[test]
+    fn test_stripe_bg_escape_dark_mode() {
+        let esc = stripe_bg_escape(&ColorMode::Dark);
+        assert_eq!(esc, "\x1b[48;2;30;30;34m");
+    }
+
+    #[test]
+    fn test_stripe_bg_escape_light_mode() {
+        let esc = stripe_bg_escape(&ColorMode::Light);
+        assert_eq!(esc, "\x1b[48;2;235;235;238m");
+    }
+
+    #[test]
+    fn test_stripe_bg_escape_unknown_uses_dark() {
+        let esc = stripe_bg_escape(&ColorMode::Unknown);
+        assert_eq!(esc, stripe_bg_escape(&ColorMode::Dark));
+    }
+
+    #[test]
+    fn test_render_content_no_stripe_without_flag() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["A".into()],
+                vec!["B".into()],
+            ]);
+
+        let result = table.render_content(None, None, None);
+        // No background escape codes should be present
+        assert!(
+            !result.contains("\x1b[48;2;"),
+            "Should not contain background color escapes without stripe flag"
+        );
+    }
+
+    #[test]
+    fn test_render_content_stripe_on_even_rows() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["Row0".into()],
+                vec!["Row1".into()],
+                vec!["Row2".into()],
+                vec!["Row3".into()],
+            ]);
+
+        let result = table.render_content(None, Some(&ColorMode::Dark), None);
+        let lines: Vec<&str> = result.lines().collect();
+
+        // Data rows start at line 3 (border=0, header=1, separator=2)
+        // Row 0 (line 3): no stripe
+        // Row 1 (line 4): stripe (odd index = even row in 0-based)
+        // Row 2 (line 5): no stripe
+        // Row 3 (line 6): stripe
+
+        let bg_dark = stripe_bg_escape(&ColorMode::Dark);
+        assert!(
+            !lines[3].contains(bg_dark),
+            "Row 0 should not be striped"
+        );
+        assert!(
+            lines[4].contains(bg_dark),
+            "Row 1 should be striped: {:?}",
+            lines[4]
+        );
+        assert!(
+            !lines[5].contains(bg_dark),
+            "Row 2 should not be striped"
+        );
+        assert!(
+            lines[6].contains(bg_dark),
+            "Row 3 should be striped: {:?}",
+            lines[6]
+        );
+    }
+
+    #[test]
+    fn test_render_content_stripe_resets_background() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["A".into()],
+                vec!["B".into()],
+            ]);
+
+        let result = table.render_content(None, Some(&ColorMode::Dark), None);
+        // Striped rows should have a background reset at the end
+        let striped_lines: Vec<&str> = result
+            .lines()
+            .filter(|l| l.contains("\x1b[48;2;"))
+            .collect();
+
+        assert!(!striped_lines.is_empty(), "Should have striped lines");
+        for line in &striped_lines {
+            assert!(
+                line.contains(BG_RESET),
+                "Striped line should end with background reset: {:?}",
+                line
+            );
+        }
+    }
+
+    #[test]
+    fn test_render_content_stripe_light_mode_uses_light_color() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["A".into()],
+                vec!["B".into()],
+            ]);
+
+        let result = table.render_content(None, Some(&ColorMode::Light), None);
+        let bg_light = stripe_bg_escape(&ColorMode::Light);
+        assert!(
+            result.contains(bg_light),
+            "Light mode should use light stripe color"
+        );
+    }
+
+    #[test]
+    fn test_render_content_stripe_single_row_no_stripe() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![vec!["Only".into()]]);
+
+        let result = table.render_content(None, Some(&ColorMode::Dark), None);
+        // Single row at index 0 should not be striped
+        assert!(
+            !result.contains("\x1b[48;2;"),
+            "Single row should not be striped (row 0 is unstriped)"
+        );
+    }
+
+    #[test]
+    fn test_cursor_alignment_with_stripe() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["A".into()],
+                vec!["B".into()],
+            ])
+            .prefer_cursor_alignment();
+
+        let result = table.render_with_cursor_positioning(80, Some(&ColorMode::Dark), None);
+        let bg_dark = stripe_bg_escape(&ColorMode::Dark);
+        // Row 1 (index 1) should be striped
+        assert!(
+            result.contains(bg_dark),
+            "Cursor-positioned table should support striping"
+        );
+        assert!(
+            result.contains(BG_RESET),
+            "Striped rows should reset background"
+        );
+    }
+
+    #[test]
+    fn test_stripe_outer_borders_uncolored_space_padded() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["A".into()],
+                vec!["B".into()],
+            ]);
+
+        let result = table.render_content(None, Some(&ColorMode::Dark), None);
+        let bg = stripe_bg_escape(&ColorMode::Dark);
+
+        // Find the striped line (row index 1 = second data row)
+        let striped_line = result
+            .lines()
+            .find(|l| l.contains(bg))
+            .expect("Should have a striped line");
+
+        // Left border: line should start with │ THEN the bg escape
+        assert!(
+            striped_line.starts_with(&format!("│{}", bg)),
+            "Left │ should precede stripe bg: {:?}",
+            striped_line
+        );
+
+        // Right border: line should end with bg reset THEN │
+        assert!(
+            striped_line.ends_with(&format!("{}│", BG_RESET)),
+            "Right │ should follow bg reset: {:?}",
+            striped_line
+        );
+    }
+
+    #[test]
+    fn test_stripe_outer_borders_uncolored_cursor_positioned() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["A".into()],
+                vec!["B".into()],
+            ])
+            .prefer_cursor_alignment();
+
+        let result = table.render_with_cursor_positioning(80, Some(&ColorMode::Dark), None);
+        let bg = stripe_bg_escape(&ColorMode::Dark);
+
+        // Find the striped line
+        let striped_line = result
+            .lines()
+            .find(|l| l.contains(bg))
+            .expect("Should have a striped line");
+
+        // Left border: the line has cursor positioning then │ then bg
+        // Pattern: \x1b[nG│<bg_escape>
+        assert!(
+            striped_line.contains(&format!("│{}", bg)),
+            "Left │ should precede stripe bg: {:?}",
+            striped_line
+        );
+
+        // Right border: bg reset then │ (no bg escape between reset and │)
+        assert!(
+            striped_line.contains(&format!("{}│", BG_RESET)),
+            "Right │ should follow bg reset: {:?}",
+            striped_line
+        );
+    }
+
+    #[test]
+    fn test_stripe_survives_sgr_reset_in_cell_space_padded() {
+        // Cell content with \x1b[0m (full SGR reset) must not break the stripe
+        // for padding spaces and subsequent separators.
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("A"),
+                TableColumn::new("B").with_min_width(10),
+            ])
+            .with_data(vec![
+                vec!["row0".into(), "plain".into()],
+                vec![
+                    "row1".into(),
+                    TableCellContent::Text("\x1b[2mdim\x1b[0m".to_string()),
+                ],
+            ]);
+
+        let bg = stripe_bg_escape(&ColorMode::Dark);
+        let result = table.render_content(None, Some(&ColorMode::Dark), None);
+
+        // Find the striped line (row 1)
+        let striped_line = result
+            .lines()
+            .find(|l| l.contains("row1"))
+            .expect("Should have row1 line");
+
+        // The bg must be re-applied after the cell content's \x1b[0m,
+        // so the trailing padding spaces keep the stripe.  Verify the
+        // bg escape appears AFTER the \x1b[0m.
+        let after_reset = striped_line
+            .rfind("\x1b[0m")
+            .expect("Should contain SGR reset");
+        let bg_restore = striped_line[after_reset..]
+            .find(bg)
+            .expect("Stripe bg should be re-applied after SGR reset in cell");
+        assert!(
+            bg_restore > 0,
+            "Stripe bg must follow the SGR reset"
+        );
+    }
+
+    #[test]
+    fn test_stripe_survives_sgr_reset_in_cell_cursor_positioned() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("A"),
+                TableColumn::new("B").with_min_width(10),
+            ])
+            .with_data(vec![
+                vec!["row0".into(), "plain".into()],
+                vec![
+                    "row1".into(),
+                    TableCellContent::Text("\x1b[2mdim\x1b[0m".to_string()),
+                ],
+            ])
+            .prefer_cursor_alignment();
+
+        let bg = stripe_bg_escape(&ColorMode::Dark);
+        let result = table.render_with_cursor_positioning(80, Some(&ColorMode::Dark), None);
+
+        // Find the striped data line containing "row1"
+        let striped_line = result
+            .lines()
+            .find(|l| l.contains("row1"))
+            .expect("Should have row1 line");
+
+        // Stripe bg must be re-applied after the cell content's \x1b[0m
+        let after_reset = striped_line
+            .rfind("\x1b[0m")
+            .expect("Should contain SGR reset");
+        let bg_restore = striped_line[after_reset..]
+            .find(bg)
+            .expect("Stripe bg should be re-applied after SGR reset in cell");
+        assert!(
+            bg_restore > 0,
+            "Stripe bg must follow the SGR reset"
+        );
+    }
+
+    // ── Alternate text color tests ──────────────────────────────────
+
+    #[test]
+    fn test_alternate_text_color_builder() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .alternate_text_color();
+        assert!(table.alternate_text_color);
+    }
+
+    #[test]
+    fn test_alternate_text_color_default_is_false() {
+        let table = Table::new();
+        assert!(!table.alternate_text_color);
+    }
+
+    #[test]
+    fn test_stripe_fg_escape_dark_mode() {
+        let esc = stripe_fg_escape(&ColorMode::Dark);
+        assert_eq!(esc, "\x1b[38;2;180;180;190m");
+    }
+
+    #[test]
+    fn test_stripe_fg_escape_light_mode() {
+        let esc = stripe_fg_escape(&ColorMode::Light);
+        assert_eq!(esc, "\x1b[38;2;80;80;90m");
+    }
+
+    #[test]
+    fn test_stripe_fg_escape_unknown_uses_dark() {
+        let esc = stripe_fg_escape(&ColorMode::Unknown);
+        assert_eq!(esc, stripe_fg_escape(&ColorMode::Dark));
+    }
+
+    #[test]
+    fn test_render_content_no_text_tint_without_flag() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["A".into()],
+                vec!["B".into()],
+            ]);
+
+        let result = table.render_content(None, None, None);
+        assert!(
+            !result.contains("\x1b[38;2;"),
+            "Should not contain foreground color escapes without text color flag"
+        );
+    }
+
+    #[test]
+    fn test_render_content_text_tint_on_even_rows() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["Row0".into()],
+                vec!["Row1".into()],
+                vec!["Row2".into()],
+                vec!["Row3".into()],
+            ]);
+
+        let result = table.render_content(None, None, Some(&ColorMode::Dark));
+        let lines: Vec<&str> = result.lines().collect();
+
+        let fg_dark = stripe_fg_escape(&ColorMode::Dark);
+        // Data rows start at line 3
+        assert!(
+            !lines[3].contains(fg_dark),
+            "Row 0 should not have text tint"
+        );
+        assert!(
+            lines[4].contains(fg_dark),
+            "Row 1 should have text tint: {:?}",
+            lines[4]
+        );
+        assert!(
+            !lines[5].contains(fg_dark),
+            "Row 2 should not have text tint"
+        );
+        assert!(
+            lines[6].contains(fg_dark),
+            "Row 3 should have text tint: {:?}",
+            lines[6]
+        );
+    }
+
+    #[test]
+    fn test_render_content_text_tint_resets_foreground() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["A".into()],
+                vec!["B".into()],
+            ]);
+
+        let result = table.render_content(None, None, Some(&ColorMode::Dark));
+        let tinted_lines: Vec<&str> = result
+            .lines()
+            .filter(|l| l.contains("\x1b[38;2;"))
+            .collect();
+
+        assert!(!tinted_lines.is_empty(), "Should have tinted lines");
+        for line in &tinted_lines {
+            assert!(
+                line.contains(FG_RESET),
+                "Tinted line should contain foreground reset: {:?}",
+                line
+            );
+        }
+    }
+
+    #[test]
+    fn test_render_content_text_tint_light_mode_uses_light_color() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["A".into()],
+                vec!["B".into()],
+            ]);
+
+        let result = table.render_content(None, None, Some(&ColorMode::Light));
+        let fg_light = stripe_fg_escape(&ColorMode::Light);
+        assert!(
+            result.contains(fg_light),
+            "Light mode should use light text tint color"
+        );
+    }
+
+    #[test]
+    fn test_render_content_text_tint_single_row_no_tint() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![vec!["Only".into()]]);
+
+        let result = table.render_content(None, None, Some(&ColorMode::Dark));
+        assert!(
+            !result.contains("\x1b[38;2;"),
+            "Single row should not have text tint (row 0 is untinted)"
+        );
+    }
+
+    #[test]
+    fn test_text_tint_outer_borders_uncolored_space_padded() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["A".into()],
+                vec!["B".into()],
+            ]);
+
+        let result = table.render_content(None, None, Some(&ColorMode::Dark));
+        let fg = stripe_fg_escape(&ColorMode::Dark);
+
+        let tinted_line = result
+            .lines()
+            .find(|l| l.contains(fg))
+            .expect("Should have a tinted line");
+
+        // Left border: line should start with │ THEN the fg escape
+        assert!(
+            tinted_line.starts_with(&format!("│{}", fg)),
+            "Left │ should precede text tint: {:?}",
+            tinted_line
+        );
+
+        // Right border: line should end with fg reset THEN │
+        assert!(
+            tinted_line.ends_with(&format!("{}│", FG_RESET)),
+            "Right │ should follow fg reset: {:?}",
+            tinted_line
+        );
+    }
+
+    #[test]
+    fn test_cursor_alignment_with_text_tint() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["A".into()],
+                vec!["B".into()],
+            ])
+            .prefer_cursor_alignment();
+
+        let result = table.render_with_cursor_positioning(80, None, Some(&ColorMode::Dark));
+        let fg_dark = stripe_fg_escape(&ColorMode::Dark);
+        assert!(
+            result.contains(fg_dark),
+            "Cursor-positioned table should support text tinting"
+        );
+        assert!(
+            result.contains(FG_RESET),
+            "Tinted rows should reset foreground"
+        );
+    }
+
+    #[test]
+    fn test_combined_bg_and_fg_stripe() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("X")])
+            .with_data(vec![
+                vec!["A".into()],
+                vec!["B".into()],
+            ]);
+
+        let result = table.render_content(
+            None,
+            Some(&ColorMode::Dark),
+            Some(&ColorMode::Dark),
+        );
+        let bg = stripe_bg_escape(&ColorMode::Dark);
+        let fg = stripe_fg_escape(&ColorMode::Dark);
+
+        // Striped row should contain both bg and fg escapes
+        let tinted_line = result
+            .lines()
+            .find(|l| l.contains(bg) && l.contains(fg))
+            .expect("Should have a line with both bg and fg stripe");
+
+        // Both resets should be present
+        assert!(
+            tinted_line.contains(BG_RESET),
+            "Should reset background"
+        );
+        assert!(
+            tinted_line.contains(FG_RESET),
+            "Should reset foreground"
+        );
+    }
+
+    #[test]
+    fn test_text_tint_survives_sgr_reset_in_cell() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("A"),
+                TableColumn::new("B").with_min_width(10),
+            ])
+            .with_data(vec![
+                vec!["row0".into(), "plain".into()],
+                vec![
+                    "row1".into(),
+                    TableCellContent::Text("\x1b[2mdim\x1b[0m".to_string()),
+                ],
+            ]);
+
+        let fg = stripe_fg_escape(&ColorMode::Dark);
+        let result = table.render_content(None, None, Some(&ColorMode::Dark));
+
+        let tinted_line = result
+            .lines()
+            .find(|l| l.contains("row1"))
+            .expect("Should have row1 line");
+
+        // The fg must be re-applied after the cell content's \x1b[0m
+        let after_reset = tinted_line
+            .rfind("\x1b[0m")
+            .expect("Should contain SGR reset");
+        let fg_restore = tinted_line[after_reset..]
+            .find(fg)
+            .expect("Text tint should be re-applied after SGR reset in cell");
+        assert!(
+            fg_restore > 0,
+            "Text tint must follow the SGR reset"
         );
     }
 }

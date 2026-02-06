@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
+use crate::config::atomic::atomic_write;
 use crate::error::{ClaudineError, Result};
-use crate::events::HookerConfig;
+use crate::events::{HookerConfig, Provider};
 
 /// Candidate file names for user-level configuration.
 const USER_CONFIG_NAMES: &[&str] = &[".hooker", ".hook-config"];
@@ -109,6 +110,76 @@ fn load_repo_config(repo_root: Option<&Path>) -> Option<HookerConfig> {
             None
         }
     }
+}
+
+/// Get the path to the user config file.
+///
+/// Returns the first existing config file path, or the default path if none exists.
+pub fn user_config_path() -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+
+    for name in USER_CONFIG_NAMES {
+        let path = home.join(name);
+        if path.exists() {
+            return path;
+        }
+    }
+
+    // Return default path
+    home.join(USER_CONFIG_NAMES[0])
+}
+
+/// Save the configuration to the user config file.
+///
+/// Writes the config to `~/.hooker` (or existing config location) using atomic writes.
+///
+/// ## Errors
+///
+/// Returns errors if serialization fails or the file cannot be written.
+pub fn save_config(config: &HookerConfig) -> Result<PathBuf> {
+    let path = user_config_path();
+    let content = serde_json::to_string_pretty(config)?;
+    atomic_write(&path, content.as_bytes())?;
+    info!(?path, "Saved config");
+    Ok(path)
+}
+
+/// Remove unsupported events from the config.
+///
+/// For each provider, removes events that are not supported via hooks.
+/// Returns a list of `(Provider, Vec<removed_event_names>)` for reporting.
+///
+/// ## Example
+///
+/// If Codex has `tool_error` and `subagent_stop` configured but doesn't support them
+/// via hooks, those events will be removed from the Codex config.
+pub fn remove_unsupported_events(config: &mut HookerConfig) -> Vec<(Provider, Vec<String>)> {
+    let mut removed: Vec<(Provider, Vec<String>)> = Vec::new();
+
+    for (provider, provider_config) in config.providers.iter_mut() {
+        let unsupported_events: Vec<_> = provider_config
+            .events
+            .keys()
+            .filter(|event| !provider.supports_event_via_hook(event))
+            .cloned()
+            .collect();
+
+        if !unsupported_events.is_empty() {
+            let event_names: Vec<String> = unsupported_events
+                .iter()
+                .map(|e| e.to_string())
+                .collect();
+
+            // Remove the unsupported events
+            for event in &unsupported_events {
+                provider_config.events.remove(event);
+            }
+
+            removed.push((*provider, event_names));
+        }
+    }
+
+    removed
 }
 
 /// Merge two configs: repo provider configs replace user provider configs,
@@ -341,5 +412,117 @@ mod tests {
                 .events
                 .contains_key(&AgenticEvent::BeforeTool)
         );
+    }
+
+    #[test]
+    fn remove_unsupported_events_removes_from_codex() {
+        let mut config = empty_cfg();
+
+        // Codex only supports turn_complete via hook
+        // tool_error and subagent_stop are not supported via hook
+        let mut codex_config = ProviderConfig::default();
+        codex_config
+            .events
+            .insert(AgenticEvent::TurnComplete, speak_binding("turn done"));
+        codex_config
+            .events
+            .insert(AgenticEvent::ToolError, speak_binding("tool error"));
+        codex_config
+            .events
+            .insert(AgenticEvent::SubagentStop, speak_binding("subagent stop"));
+        config.providers.insert(Provider::Codex, codex_config);
+
+        let removed = remove_unsupported_events(&mut config);
+
+        // Should have removed 2 events from Codex
+        assert_eq!(removed.len(), 1);
+        let (provider, events) = &removed[0];
+        assert_eq!(*provider, Provider::Codex);
+        assert_eq!(events.len(), 2);
+        assert!(events.contains(&"tool_error".to_string()));
+        assert!(events.contains(&"subagent_stop".to_string()));
+
+        // Config should only have turn_complete remaining
+        let codex = config.providers.get(&Provider::Codex).unwrap();
+        assert_eq!(codex.events.len(), 1);
+        assert!(codex.events.contains_key(&AgenticEvent::TurnComplete));
+    }
+
+    #[test]
+    fn remove_unsupported_events_preserves_supported() {
+        let mut config = empty_cfg();
+
+        // Claude supports all these events via hook
+        let mut claude_config = ProviderConfig::default();
+        claude_config
+            .events
+            .insert(AgenticEvent::TurnComplete, speak_binding("turn done"));
+        claude_config
+            .events
+            .insert(AgenticEvent::BeforeTool, speak_binding("before tool"));
+        claude_config
+            .events
+            .insert(AgenticEvent::SessionStart, speak_binding("session start"));
+        config.providers.insert(Provider::Claude, claude_config);
+
+        let removed = remove_unsupported_events(&mut config);
+
+        // Nothing should be removed - Claude supports all these via hooks
+        assert!(removed.is_empty());
+
+        // All events should still be present
+        let claude = config.providers.get(&Provider::Claude).unwrap();
+        assert_eq!(claude.events.len(), 3);
+    }
+
+    #[test]
+    fn remove_unsupported_events_handles_multiple_providers() {
+        let mut config = empty_cfg();
+
+        // Codex: turn_complete supported, tool_error not
+        let mut codex_config = ProviderConfig::default();
+        codex_config
+            .events
+            .insert(AgenticEvent::TurnComplete, speak_binding("codex done"));
+        codex_config
+            .events
+            .insert(AgenticEvent::ToolError, speak_binding("codex error"));
+        config.providers.insert(Provider::Codex, codex_config);
+
+        // OpenCode: turn_complete and before_tool supported, subagent_stop not
+        let mut opencode_config = ProviderConfig::default();
+        opencode_config
+            .events
+            .insert(AgenticEvent::TurnComplete, speak_binding("opencode done"));
+        opencode_config
+            .events
+            .insert(AgenticEvent::BeforeTool, speak_binding("opencode tool"));
+        opencode_config
+            .events
+            .insert(AgenticEvent::SubagentStop, speak_binding("opencode subagent"));
+        config.providers.insert(Provider::OpenCode, opencode_config);
+
+        let removed = remove_unsupported_events(&mut config);
+
+        // Should have removed events from both providers
+        assert_eq!(removed.len(), 2);
+
+        // Verify Codex had tool_error removed
+        let codex = config.providers.get(&Provider::Codex).unwrap();
+        assert_eq!(codex.events.len(), 1);
+        assert!(codex.events.contains_key(&AgenticEvent::TurnComplete));
+
+        // Verify OpenCode had subagent_stop removed
+        let opencode = config.providers.get(&Provider::OpenCode).unwrap();
+        assert_eq!(opencode.events.len(), 2);
+        assert!(opencode.events.contains_key(&AgenticEvent::TurnComplete));
+        assert!(opencode.events.contains_key(&AgenticEvent::BeforeTool));
+    }
+
+    #[test]
+    fn user_config_path_returns_default_when_none_exists() {
+        // This test just verifies the function doesn't panic
+        let path = user_config_path();
+        assert!(path.to_string_lossy().contains(".hooker"));
     }
 }

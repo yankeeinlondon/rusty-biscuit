@@ -1,4 +1,4 @@
-mod atomic;
+pub mod atomic;
 mod backup;
 mod claude;
 mod codex;

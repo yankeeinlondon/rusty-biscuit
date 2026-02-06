@@ -333,3 +333,15 @@ skill-unchained-ai:
     @if command -v unchained-ai >/dev/null 2>&1; then \
         unchained-ai "The unchained-ai package has synced it's documents for drift and updated the skill tree."; \
     fi
+
+# Update docs and then update the skill for the claudine package
+skill-claudine:
+    @echo "Fixing documentation drift and rebuilding the skill for the {{BOLD}}claudine{{RESET}} package"
+    @echo "-------------------------------------------------------------------------------"
+    @unset ANTHROPIC_API_KEY && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-claudine.md)"\'
+    @echo ""
+    @echo "The {{BOLD}}claudine{{RESET}} skill has been rebuilt"
+    @echo ""
+    @if command -v claudine >/dev/null 2>&1; then \
+        claudine "The claudine package has synced it's documents for drift and updated the skill tree."; \
+    fi

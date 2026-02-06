@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{IsTerminal, Read};
 
 use clap::Args;
 use color_eyre::eyre::{Result, bail};
@@ -29,20 +29,13 @@ pub async fn run(args: HandleArgs) -> Result<()> {
     Ok(())
 }
 
-/// Default handler when no subcommand is given (reads from stdin).
-pub async fn run_default() -> Result<()> {
-    let raw = read_stdin_json()?;
-    let provider = resolve_provider(None, &raw)?;
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let env = detect_environment(&cwd);
-
-    claudine::dispatch::dispatch(&raw, provider, &env).await?;
-    Ok(())
-}
-
 fn read_stdin_json() -> Result<Value> {
+    let mut stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        bail!("No input provided. Pipe JSON event data to stdin.\n\nExample:\n  echo '{{\"hook_event_name\": \"...\", ...}}' | claudine handle <event>");
+    }
     let mut buf = String::new();
-    std::io::stdin().read_to_string(&mut buf)?;
+    stdin.read_to_string(&mut buf)?;
     let raw: Value = serde_json::from_str(&buf)?;
     Ok(raw)
 }

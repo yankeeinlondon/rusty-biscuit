@@ -15,6 +15,7 @@ pub fn recommended_sound(event: &AgenticEvent) -> &'static str {
         AgenticEvent::AfterTool => "electronic-hit-fx2",
         AgenticEvent::ToolError => "sad-trombone",
         AgenticEvent::PermissionRequest => "doorbell",
+        AgenticEvent::HumanInTheLoop => "doorbell-2",
         AgenticEvent::TurnComplete => "electronic-hit-fx1",
         AgenticEvent::TurnError => "space-alarm",
         AgenticEvent::SubagentStart => "phase-jump-2",
@@ -38,6 +39,7 @@ pub fn default_speak_template(event: &AgenticEvent) -> &'static str {
         AgenticEvent::AfterTool => "{tool_name} completed",
         AgenticEvent::ToolError => "Tool {tool_name} failed",
         AgenticEvent::PermissionRequest => "Permission needed",
+        AgenticEvent::HumanInTheLoop => "Question for you",
         AgenticEvent::TurnComplete => "Turn complete",
         AgenticEvent::TurnError => "Turn failed with error",
         AgenticEvent::SubagentStart => "Subagent started",
@@ -59,6 +61,7 @@ pub fn event_description(event: &AgenticEvent) -> &'static str {
         AgenticEvent::AfterTool => "After a tool call completes successfully",
         AgenticEvent::ToolError => "When a tool call fails",
         AgenticEvent::PermissionRequest => "When the agent requests user permission",
+        AgenticEvent::HumanInTheLoop => "When the agent asks a clarifying question",
         AgenticEvent::TurnComplete => "When a request/response cycle completes",
         AgenticEvent::TurnError => "When a turn fails with an error",
         AgenticEvent::SubagentStart => "When a sub-agent is spawned",
@@ -87,8 +90,9 @@ pub fn all_events_ordered() -> Vec<AgenticEvent> {
         // Model lifecycle
         AgenticEvent::BeforeModel,
         AgenticEvent::AfterModel,
-        // Permission
+        // Permission and user interaction
         AgenticEvent::PermissionRequest,
+        AgenticEvent::HumanInTheLoop,
         // Subagents
         AgenticEvent::SubagentStart,
         AgenticEvent::SubagentStop,
@@ -151,8 +155,8 @@ mod tests {
         let ordered = all_events_ordered();
         assert_eq!(
             ordered.len(),
-            15,
-            "Should contain all 15 AgenticEvent variants"
+            16,
+            "Should contain all 16 AgenticEvent variants"
         );
     }
 

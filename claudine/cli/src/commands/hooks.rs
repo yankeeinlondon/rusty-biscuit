@@ -10,7 +10,12 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Alignment, Margin};
 use claudine::config::{detect_agents, AgentConfigurator};
 use claudine::dispatch::loader::load_config;
-use claudine::events::{AgenticEvent, EventSupportLevel, HookerConfig, Provider};
+use claudine::dispatch::template::{TemplateVariable, VariableCategory};
+use claudine::events::{
+    detect_environment, AgenticEvent, EventAction, EventBinding, EventMeta, EventSupportLevel,
+    HookerConfig, LogTarget, Provider, ReportFormat,
+};
+use playa::SoundEffect;
 use sniff::programs::{enums::AiCli, InstalledAiClients};
 
 use crate::log;
@@ -18,6 +23,10 @@ use crate::log;
 /// Arguments for the hooks command.
 #[derive(Args)]
 pub struct HooksArgs {
+    /// Optional provider name for detailed view (fuzzy matching supported)
+    #[arg(value_name = "PROVIDER")]
+    pub provider: Option<String>,
+
     /// Show provider event support matrix (✅ hook / ⛔️ non-hook / ❌ none)
     #[arg(long)]
     pub support: bool,
@@ -29,6 +38,14 @@ pub struct HooksArgs {
     /// Show event descriptions and schemas
     #[arg(long)]
     pub describe: bool,
+
+    /// Show available template variables for speak/report actions
+    #[arg(long)]
+    pub variables: bool,
+
+    /// Automatically fix invalid sound effect names using suggestions
+    #[arg(long)]
+    pub fix: bool,
 }
 
 /// All supported providers in display order.
@@ -108,13 +125,49 @@ fn expected_events_for_provider(
         .unwrap_or_default()
 }
 
-/// Format an event with color based on sync status.
+/// Get ALL enabled events for a provider from the claudine config.
 ///
+/// Returns events that are enabled, regardless of whether the provider supports them.
+/// Use this to detect configuration errors (events configured for unsupporting providers).
+fn all_enabled_events_for_provider(config: &HookerConfig, provider: Provider) -> HashSet<String> {
+    config
+        .providers
+        .get(&provider)
+        .map(|p| {
+            p.events
+                .iter()
+                .filter(|(_, binding)| binding.enabled)
+                .map(|(event, _)| event.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Check if an event is supported by a provider (via hook).
+fn is_event_supported(provider: Provider, event_name: &str) -> bool {
+    AgenticEvent::ALL
+        .iter()
+        .find(|e| e.to_string() == event_name)
+        .map(|e| provider.supports_event_via_hook(e))
+        .unwrap_or(false)
+}
+
+/// Format an event with color based on sync status and support.
+///
+/// - RED + strikethrough: configured but not supported by provider (invalid)
 /// - RED: registered but not in config (stale)
 /// - ORANGE: in config but not registered (missing)
 /// - Normal: in sync
-fn format_event_with_color(event: &str, is_stale: bool, is_missing: bool) -> String {
-    if is_stale {
+fn format_event_with_color(
+    event: &str,
+    is_stale: bool,
+    is_missing: bool,
+    is_unsupported: bool,
+) -> String {
+    if is_unsupported {
+        // Unsupported events get red + strikethrough
+        format!("{{{{red}}}}{{{{strikethrough}}}}{event}{{{{reset}}}}")
+    } else if is_stale {
         format!("{{{{red}}}}{event}{{{{reset}}}}")
     } else if is_missing {
         format!("{{{{yellow}}}}{event}{{{{reset}}}}")
@@ -140,9 +193,514 @@ fn action_count_indicator(count: usize) -> &'static str {
     }
 }
 
+/// An invalid sound effect with its suggested replacement.
+struct InvalidEffect {
+    invalid_name: String,
+    suggestion: Option<&'static str>,
+}
+
+/// Find all invalid sound effect names in the config.
+///
+/// Returns a list of invalid effect names with their suggested replacements.
+fn find_invalid_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut invalid_effects: Vec<InvalidEffect> = Vec::new();
+
+    for (_provider, provider_config) in &config.providers {
+        for (_event_name, binding) in &provider_config.events {
+            for action in &binding.actions {
+                if let EventAction::SoundEffect { name, .. } = action {
+                    if SoundEffect::from_name(name).is_none() && !seen.contains(name) {
+                        seen.insert(name.clone());
+                        invalid_effects.push(InvalidEffect {
+                            invalid_name: name.clone(),
+                            suggestion: find_similar_effect(name),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    invalid_effects
+}
+
+/// Validate sound effect names in the config and display warnings.
+///
+/// Returns the list of invalid effects for potential fixing.
+fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
+    let invalid_effects = find_invalid_sound_effects(config);
+
+    if invalid_effects.is_empty() {
+        return invalid_effects;
+    }
+
+    log::data("");
+    let header = Prose::new("{{yellow}}{{bold}}⚠ Invalid sound effects:{{reset}}");
+    log::data(&format!(" {}", header.render(Some(100))));
+
+    let mut has_fixable = false;
+    for effect in &invalid_effects {
+        let msg = match effect.suggestion {
+            Some(similar) => {
+                has_fixable = true;
+                format!(
+                    "  {{{{dim}}}}-{{{{reset}}}} {{{{red}}}}{}{{{{reset}}}} {{{{dim}}}}(did you mean {{{{green}}}}{}{{{{reset}}}}{{{{dim}}}}){{{{reset}}}}",
+                    effect.invalid_name, similar
+                )
+            }
+            None => format!(
+                "  {{{{dim}}}}-{{{{reset}}}} {{{{red}}}}{}{{{{reset}}}} {{{{dim}}}}(no similar effect found){{{{reset}}}}",
+                effect.invalid_name
+            ),
+        };
+        log::data(&format!(" {}", Prose::new(msg).render(Some(100))));
+    }
+
+    log::data("");
+    if has_fixable {
+        let hint = Prose::new("{{dim}}Use {{blue}}--fix{{reset}}{{dim}} to automatically apply suggested fixes{{reset}}");
+        log::data(&format!(" {}", hint.render(Some(100))));
+    }
+    let hint = Prose::new("{{dim}}Run {{blue}}playa list-effects{{reset}}{{dim}} to see available effects{{reset}}");
+    log::data(&format!(" {}", hint.render(Some(100))));
+
+    invalid_effects
+}
+
+/// Fix invalid sound effect names in the user config file.
+///
+/// Replaces invalid names with their suggested alternatives directly in the JSON file.
+fn fix_sound_effects(invalid_effects: &[InvalidEffect]) -> Result<usize> {
+    // Find the user config file
+    let home = dirs::home_dir().ok_or_else(|| {
+        color_eyre::eyre::eyre!("Could not determine home directory")
+    })?;
+
+    let config_names = [".hooker", ".hook-config"];
+    let config_path = config_names
+        .iter()
+        .map(|name| home.join(name))
+        .find(|path| path.exists())
+        .ok_or_else(|| {
+            color_eyre::eyre::eyre!("No config file found at ~/.hooker or ~/.hook-config")
+        })?;
+
+    // Read the config file as text (to preserve formatting as much as possible)
+    let mut content = std::fs::read_to_string(&config_path)?;
+
+    let mut fixed_count = 0;
+    for effect in invalid_effects {
+        if let Some(suggestion) = effect.suggestion {
+            // Simple string replacement - replace the invalid name with suggestion
+            // We search for the name in quotes to avoid partial matches
+            let search = format!("\"{}\"", effect.invalid_name);
+            let replace = format!("\"{}\"", suggestion);
+            if content.contains(&search) {
+                content = content.replace(&search, &replace);
+                fixed_count += 1;
+                let msg = Prose::new(format!(
+                    "{{{{green}}}}✓{{{{reset}}}} {{{{dim}}}}{}{{{{reset}}}} → {{{{green}}}}{}{{{{reset}}}}",
+                    effect.invalid_name, suggestion
+                ));
+                log::data(&format!(" {}", msg.render(Some(100))));
+            }
+        }
+    }
+
+    if fixed_count > 0 {
+        std::fs::write(&config_path, content)?;
+        log::data("");
+        let msg = Prose::new(format!(
+            "{{{{green}}}}{{{{bold}}}}Fixed {} sound effect(s) in {}{{{{reset}}}}",
+            fixed_count,
+            config_path.display()
+        ));
+        log::data(&format!(" {}", msg.render(Some(100))));
+    }
+
+    Ok(fixed_count)
+}
+
+/// Find a similar valid effect name using simple heuristics.
+fn find_similar_effect(invalid: &str) -> Option<&'static str> {
+    let all_effects = SoundEffect::all();
+
+    // First try: normalize dashes and numbers (handles "fx-01" vs "fx1")
+    let normalized = normalize_effect_name(invalid);
+    for effect in &all_effects {
+        let effect_name = effect.name();
+        if normalize_effect_name(effect_name) == normalized {
+            return Some(effect_name);
+        }
+    }
+
+    // Second try: find effects that contain the invalid name or vice versa
+    let invalid_lower = invalid.to_lowercase();
+    for effect in &all_effects {
+        let effect_name = effect.name();
+        let effect_lower = effect_name.to_lowercase();
+        if effect_lower.contains(&invalid_lower) || invalid_lower.contains(&effect_lower) {
+            return Some(effect_name);
+        }
+    }
+
+    // Third try: check for shared suffix (handles "swoosh" matching "air-woosh")
+    // Look for effects where the last N chars match
+    if invalid.len() >= 4 {
+        let suffix = &invalid_lower[1..]; // Skip first char to handle s/w differences
+        for effect in &all_effects {
+            let effect_name = effect.name();
+            let effect_lower = effect_name.to_lowercase();
+            if effect_lower.ends_with(suffix) || effect_lower.contains(suffix) {
+                return Some(effect_name);
+            }
+        }
+    }
+
+    // Fourth try: find effects that start with the same prefix
+    let prefix = invalid.split('-').next().unwrap_or(invalid);
+    let mut candidates: Vec<&str> = all_effects
+        .iter()
+        .filter(|e| e.name().starts_with(prefix))
+        .map(|e| e.name())
+        .collect();
+
+    if !candidates.is_empty() {
+        candidates.sort_by_key(|c| (c.len() as i32 - invalid.len() as i32).abs());
+        return Some(candidates[0]);
+    }
+
+    // Fifth try: check if any effect contains the prefix
+    for effect in &all_effects {
+        let effect_name = effect.name();
+        if effect_name.contains(prefix) {
+            return Some(effect_name);
+        }
+    }
+
+    None
+}
+
+/// Normalize an effect name by removing separators and lowercasing.
+fn normalize_effect_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// Fuzzy match a user input string to a provider.
+///
+/// Matching rules (case-insensitive):
+/// 1. Exact match on display name or slug
+/// 2. Prefix match on display name or slug
+/// 3. Contains match anywhere in display name or slug
+fn fuzzy_match_provider(input: &str) -> Option<Provider> {
+    let input_lower = input.to_lowercase();
+
+    // Try exact match first
+    for provider in ALL_PROVIDERS {
+        let display = provider.to_string().to_lowercase();
+        let slug = provider.as_slug().to_lowercase();
+        if display == input_lower || slug == input_lower {
+            return Some(provider);
+        }
+    }
+
+    // Try prefix match
+    for provider in ALL_PROVIDERS {
+        let display = provider.to_string().to_lowercase();
+        let slug = provider.as_slug().to_lowercase();
+        if display.starts_with(&input_lower) || slug.starts_with(&input_lower) {
+            return Some(provider);
+        }
+    }
+
+    // Try contains match
+    for provider in ALL_PROVIDERS {
+        let display = provider.to_string().to_lowercase();
+        let slug = provider.as_slug().to_lowercase();
+        if display.contains(&input_lower) || slug.contains(&input_lower) {
+            return Some(provider);
+        }
+    }
+
+    None
+}
+
+/// Format an action for display in the detailed provider view.
+fn format_action(action: &EventAction) -> String {
+    match action {
+        EventAction::Speak { message } => {
+            format!("{{{{cyan}}}}speak{{{{reset}}}} \"{}\"", truncate_string(message, 40))
+        }
+        EventAction::SoundEffect { name, volume, speed } => {
+            let mut parts = vec![format!("{{{{magenta}}}}sound{{{{reset}}}} {}", name)];
+            if *volume != 1.0 {
+                parts.push(format!("vol={:.1}", volume));
+            }
+            if *speed != 1.0 {
+                parts.push(format!("speed={:.1}", speed));
+            }
+            parts.join(" ")
+        }
+        EventAction::Log { target } => match target {
+            LogTarget::LocalFile { path } => {
+                format!("{{{{blue}}}}log{{{{reset}}}} → {}", path.display())
+            }
+            LogTarget::Server { url } => {
+                format!("{{{{blue}}}}log{{{{reset}}}} → {}", url)
+            }
+        },
+        EventAction::Report { handler } => match handler {
+            None => "{{yellow}}report{{reset}} (default)".to_string(),
+            Some(h) => {
+                let format_str = match h.format {
+                    ReportFormat::Text => "text",
+                    ReportFormat::Json => "json",
+                    ReportFormat::Compact => "compact",
+                };
+                if let Some(template) = &h.template {
+                    format!(
+                        "{{{{yellow}}}}report{{{{reset}}}} [{}] \"{}\"",
+                        format_str,
+                        truncate_string(template, 30)
+                    )
+                } else {
+                    format!("{{{{yellow}}}}report{{{{reset}}}} [{}]", format_str)
+                }
+            }
+        },
+        EventAction::Run {
+            command,
+            args,
+            blocking,
+        } => {
+            let cmd_str = if let Some(a) = args {
+                format!("{} {}", command, a.join(" "))
+            } else {
+                command.clone()
+            };
+            let blocking_marker = if *blocking { " (blocking)" } else { "" };
+            format!(
+                "{{{{green}}}}run{{{{reset}}}} `{}`{}",
+                truncate_string(&cmd_str, 35),
+                blocking_marker
+            )
+        }
+    }
+}
+
+/// Truncate a string with ellipsis if it exceeds max length.
+fn truncate_string(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max_len - 1])
+    }
+}
+
+/// Show detailed event/action configuration for a specific provider.
+fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Result<()> {
+    let term = Terminal::new();
+    let clients = InstalledAiClients::new();
+    let installed = clients.is_installed(provider_to_ai_cli(provider));
+
+    // Header
+    let status_icon = if installed { "✅" } else { "❌" };
+    let header = Prose::new(format!(
+        "{{{{bold}}}}{}{{{{reset}}}} {} {{{{dim}}}}({}installed){{{{reset}}}}",
+        provider,
+        status_icon,
+        if installed { "" } else { "not " }
+    ));
+    log::data(&format!("\n {}", header.fallback_render(&term)));
+
+    // Show docs URL
+    let docs = Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", provider.docs_url()));
+    log::data(&format!(" {}", docs.fallback_render(&term)));
+    log::data("");
+
+    // Get provider config if available
+    let provider_config = config.and_then(|c| c.providers.get(&provider));
+
+    // Build a sorted list of all events with their status
+    let mut event_rows: Vec<(AgenticEvent, Option<&EventBinding>)> = Vec::new();
+    for event in AgenticEvent::ALL {
+        let binding = provider_config.and_then(|pc| pc.events.get(&event));
+        event_rows.push((event, binding));
+    }
+
+    // Build table
+    let columns = vec![
+        TableColumn::new("Event"),
+        TableColumn::new("Support"),
+        TableColumn::new("Status"),
+        TableColumn::new("Actions"),
+    ];
+    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
+    table.layout_mut().left_margin = Margin::Chars(1);
+
+    for (event, binding) in &event_rows {
+        let support_level = provider.event_support_level(event);
+        let support_cell: TableCellContent = match support_level {
+            EventSupportLevel::Hook => "hook".into(),
+            EventSupportLevel::NonHook => Prose::new("{{dim}}non-hook{{reset}}")
+                .fallback_render(&term)
+                .into(),
+            EventSupportLevel::NotSupported => Prose::new("{{dim}}-{{reset}}")
+                .fallback_render(&term)
+                .into(),
+        };
+
+        let (status_cell, actions_cell): (TableCellContent, TableCellContent) = match binding {
+            None => {
+                if support_level.is_supported() {
+                    (
+                        Prose::new("{{dim}}not configured{{reset}}")
+                            .fallback_render(&term)
+                            .into(),
+                        "-".into(),
+                    )
+                } else {
+                    ("-".into(), "-".into())
+                }
+            }
+            Some(b) if !b.enabled => (
+                Prose::new("{{yellow}}disabled{{reset}}")
+                    .fallback_render(&term)
+                    .into(),
+                "-".into(),
+            ),
+            Some(b) => {
+                // Check if event is unsupported but enabled (configuration error)
+                let is_unsupported = !support_level.is_hook();
+
+                let status = if is_unsupported {
+                    // Red warning for unsupported events
+                    "{{red}}{{bold}}⚠ unsupported{{reset}}".to_string()
+                } else if b.matcher.is_some() {
+                    format!(
+                        "{{{{green}}}}enabled{{{{reset}}}} {{{{dim}}}}(filter: {}){{{{reset}}}}",
+                        b.matcher.as_ref().unwrap()
+                    )
+                } else {
+                    "{{green}}enabled{{reset}}".to_string()
+                };
+
+                let actions_str = if b.actions.is_empty() {
+                    "{{dim}}(no actions){{reset}}".to_string()
+                } else {
+                    b.actions
+                        .iter()
+                        .map(format_action)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
+
+                (
+                    Prose::new(status).fallback_render(&term).into(),
+                    Prose::new(actions_str).fallback_render(&term).into(),
+                )
+            }
+        };
+
+        table.add_row(vec![
+            event.to_string().into(),
+            support_cell,
+            status_cell,
+            actions_cell,
+        ]);
+    }
+
+    let rendered = table.fallback_render(&term);
+    log::data(&rendered);
+
+    // Summary stats
+    let configured_count = event_rows
+        .iter()
+        .filter(|row| row.1.map_or(false, |eb| eb.enabled))
+        .count();
+    let total_actions: usize = event_rows
+        .iter()
+        .filter_map(|row| row.1.map(|eb| if eb.enabled { eb.actions.len() } else { 0 }))
+        .sum();
+
+    log::data("");
+    let summary = Prose::new(format!(
+        "{{{{dim}}}}Configured: {} events, {} total actions{{{{reset}}}}",
+        configured_count, total_actions
+    ));
+    log::data(&format!(" {}", summary.fallback_render(&term)));
+
+    // Show enabled events table with descriptions
+    let enabled_events: Vec<&AgenticEvent> = event_rows
+        .iter()
+        .filter(|(_, binding)| binding.map_or(false, |b| b.enabled))
+        .map(|(event, _)| event)
+        .collect();
+
+    // Count unsupported events
+    let unsupported_count = enabled_events
+        .iter()
+        .filter(|e| !provider.supports_event_via_hook(e))
+        .count();
+
+    if !enabled_events.is_empty() {
+        log::data("");
+        let enabled_header = if unsupported_count > 0 {
+            Prose::new(format!(
+                "{{{{bold}}}}Enabled Events{{{{reset}}}} {{{{red}}}}(⚠ {} unsupported){{{{reset}}}}",
+                unsupported_count
+            ))
+        } else {
+            Prose::new("{{bold}}Enabled Events{{reset}}")
+        };
+        log::data(&format!(" {}", enabled_header.fallback_render(&term)));
+
+        let desc_columns = vec![
+            TableColumn::new("Event"),
+            TableColumn::new("Description"),
+        ];
+        let mut desc_table = Table::new().with_columns(desc_columns).prefer_cursor_alignment();
+        desc_table.layout_mut().left_margin = Margin::Chars(1);
+
+        for event in enabled_events {
+            let is_unsupported = !provider.supports_event_via_hook(event);
+            let event_cell: TableCellContent = if is_unsupported {
+                Prose::new(format!(
+                    "{{{{red}}}}{{{{strikethrough}}}}{}{{{{reset}}}}",
+                    event
+                ))
+                .fallback_render(&term)
+                .into()
+            } else {
+                event.to_string().into()
+            };
+            let desc_cell: TableCellContent = if is_unsupported {
+                Prose::new(format!(
+                    "{{{{dim}}}}{}{{{{reset}}}}",
+                    event.description()
+                ))
+                .fallback_render(&term)
+                .into()
+            } else {
+                event.description().into()
+            };
+            desc_table.add_row(vec![event_cell, desc_cell]);
+        }
+
+        let desc_rendered = desc_table.fallback_render(&term);
+        log::data(&desc_rendered);
+    }
+
+    Ok(())
+}
+
 /// Show registered hooks for all providers.
 pub fn run(args: HooksArgs, verbose: bool) -> Result<()> {
-    // Handle --support, --mapping, and --describe flags first
+    // Handle --support, --mapping, --describe, and --variables flags first
     if args.support {
         return run_support();
     }
@@ -152,18 +710,64 @@ pub fn run(args: HooksArgs, verbose: bool) -> Result<()> {
     if args.describe {
         return run_describe();
     }
-
-    let agents = detect_agents();
-    let clients = InstalledAiClients::new();
+    if args.variables {
+        return run_variables();
+    }
 
     // Try to load claudine config for sync checking
     let config = load_config(None, None).ok();
 
-    if verbose {
+    // If a provider is specified, show detailed view for that provider
+    if let Some(ref provider_input) = args.provider {
+        match fuzzy_match_provider(provider_input) {
+            Some(provider) => {
+                let result = run_provider_detail(provider, config.as_ref());
+
+                // Validate sound effects for this provider only
+                if let Some(cfg) = config.as_ref() {
+                    let invalid_effects = validate_sound_effects(cfg);
+                    if args.fix && !invalid_effects.is_empty() {
+                        log::data("");
+                        fix_sound_effects(&invalid_effects)?;
+                    }
+                }
+
+                return result;
+            }
+            None => {
+                let available: Vec<String> =
+                    ALL_PROVIDERS.iter().map(|p| p.to_string()).collect();
+                log::error(&format!(
+                    "Unknown provider '{}'. Available: {}",
+                    provider_input,
+                    available.join(", ")
+                ));
+                return Ok(());
+            }
+        }
+    }
+
+    let agents = detect_agents();
+    let clients = InstalledAiClients::new();
+
+    let result = if verbose {
         run_verbose(&agents, &clients, config.as_ref())
     } else {
         run_simple(&agents, &clients, config.as_ref())
+    };
+
+    // Validate sound effects in the config
+    if let Some(cfg) = config.as_ref() {
+        let invalid_effects = validate_sound_effects(cfg);
+
+        // If --fix was passed, apply the fixes
+        if args.fix && !invalid_effects.is_empty() {
+            log::data("");
+            fix_sound_effects(&invalid_effects)?;
+        }
     }
+
+    result
 }
 
 /// Simple table view showing provider, installed status, and subscribed hooks list.
@@ -180,6 +784,7 @@ fn run_simple(
     table.layout_mut().left_margin = Margin::Chars(1);
 
     let mut has_sync_issues = false;
+    let mut has_unsupported_issues = false;
 
     for provider in ALL_PROVIDERS {
         let installed = clients.is_installed(provider_to_ai_cli(provider));
@@ -195,27 +800,44 @@ fn run_simple(
                 .into_iter()
                 .collect();
 
-            // Get expected events from claudine config for this provider
+            // Get expected events from claudine config for this provider (supported only)
             let expected: HashSet<String> = config
                 .map(|c| expected_events_for_provider(c, provider, configurator))
                 .unwrap_or_default();
 
-            if registered.is_empty() && expected.is_empty() {
+            // Get ALL enabled events (including unsupported) to detect config errors
+            let all_enabled: HashSet<String> = config
+                .map(|c| all_enabled_events_for_provider(c, provider))
+                .unwrap_or_default();
+
+            // Find unsupported events (enabled but not in expected because provider doesn't support them)
+            let unsupported: HashSet<&String> = all_enabled
+                .iter()
+                .filter(|e| !is_event_supported(provider, e))
+                .collect();
+
+            if registered.is_empty() && expected.is_empty() && unsupported.is_empty() {
                 "-".into()
             } else {
-                // Combine all events and sort
-                let mut all_events: Vec<&String> = registered.union(&expected).collect();
+                // Combine all events: registered + expected + unsupported
+                let mut all_events: HashSet<&String> = registered.union(&expected).collect();
+                all_events.extend(&unsupported);
+                let mut all_events: Vec<&String> = all_events.into_iter().collect();
                 all_events.sort();
 
                 let formatted: Vec<String> = all_events
                     .into_iter()
                     .map(|event| {
+                        let is_unsupported = unsupported.contains(event);
                         let is_stale = registered.contains(event) && !expected.contains(event);
                         let is_missing = expected.contains(event) && !registered.contains(event);
                         if is_stale || is_missing {
                             has_sync_issues = true;
                         }
-                        format_event_with_color(event, is_stale, is_missing)
+                        if is_unsupported {
+                            has_unsupported_issues = true;
+                        }
+                        format_event_with_color(event, is_stale, is_missing, is_unsupported)
                     })
                     .collect();
 
@@ -238,13 +860,22 @@ fn run_simple(
     let rendered = table.fallback_render(&term);
     log::data(&format!("\n{}", rendered));
 
-    // Show color legend if there are sync issues
-    if has_sync_issues {
+    // Show color legend if there are issues
+    if has_sync_issues || has_unsupported_issues {
         log::data("");
-        let legend = Prose::new(
-            "{{dim}}- Legend: {{red}}red{{reset}}{{dim}} = stale (remove with sync), {{yellow}}orange{{reset}}{{dim}} = missing (add with sync){{reset}}",
-        );
-        log::data(&format!(" {}", legend.render(Some(100))));
+        let mut legend_parts = Vec::new();
+        if has_unsupported_issues {
+            legend_parts.push("{{red}}{{strikethrough}}strikethrough{{reset}}{{dim}} = unsupported (won't fire)");
+        }
+        if has_sync_issues {
+            legend_parts.push("{{red}}red{{reset}}{{dim}} = stale (remove with sync)");
+            legend_parts.push("{{yellow}}orange{{reset}}{{dim}} = missing (add with sync)");
+        }
+        let legend = Prose::new(format!(
+            "{{{{dim}}}}- Legend: {}{{{{reset}}}}",
+            legend_parts.join(", ")
+        ));
+        log::data(&format!(" {}", legend.render(Some(120))));
     }
 
     // Show hints about available flags
@@ -254,6 +885,7 @@ fn run_simple(
         "{{dim}}- Use <blue><bold>--support</bold></blue>{{dim}} to see which events each provider supports{{reset}}",
         "{{dim}}- Use <blue><bold>--mapping</bold></blue>{{dim}} to see native event name mappings{{reset}}",
         "{{dim}}- Use <blue><bold>--describe</bold></blue>{{dim}} to see event descriptions and schemas{{reset}}",
+        "{{dim}}- Use <blue><bold>--variables</bold></blue>{{dim}} to see template variables for speak/report{{reset}}",
     ];
     for hint in hints {
         log::data(&format!(" {}", Prose::new(hint).render(Some(100))));
@@ -340,6 +972,7 @@ fn run_verbose(
         "{{dim}}- Use <blue><bold>--support</bold></blue>{{dim}} to see which events each provider supports{{reset}}",
         "{{dim}}- Use <blue><bold>--mapping</bold></blue>{{dim}} to see native event name mappings{{reset}}",
         "{{dim}}- Use <blue><bold>--describe</bold></blue>{{dim}} to see event descriptions and schemas{{reset}}",
+        "{{dim}}- Use <blue><bold>--variables</bold></blue>{{dim}} to see template variables for speak/report{{reset}}",
     ];
     for hint in hints {
         log::data(&format!(" {}", Prose::new(hint).fallback_render(&term)));
@@ -514,6 +1147,126 @@ fn run_describe() -> Result<()> {
         "{{dim}}- Return Schema: what hooks can return to influence agent behavior (blocking hooks only){{reset}}",
     );
     log::data(&format!(" {}", legend2.fallback_render(&term)));
+
+    Ok(())
+}
+
+/// Show available template variables for speak/report actions.
+///
+/// Uses `TemplateVariable::all()` as the single source of truth - adding new
+/// variables to the enum automatically updates this display.
+fn run_variables() -> Result<()> {
+    let term = Terminal::new();
+
+    let header = Prose::new("{{bold}}Template Variables{{reset}}");
+    log::data(&format!("\n {}", header.fallback_render(&term)));
+    log::data("");
+    let intro = Prose::new(
+        "{{dim}}Use these in speak messages and report templates: {{reset}}{{cyan}}\"Tool {tool_name} failed: {error}\"{{reset}}",
+    );
+    log::data(&format!(" {}", intro.fallback_render(&term)));
+    log::data("");
+
+    // Event fields table
+    let columns = vec![
+        TableColumn::new("Variable"),
+        TableColumn::new("Description"),
+        TableColumn::new("Available For"),
+    ];
+    let mut table = Table::new().with_columns(columns);
+    table.layout_mut().left_margin = Margin::Chars(1);
+
+    for var in TemplateVariable::event_variables() {
+        table.add_row(vec![
+            Prose::new(format!("{{{{cyan}}}}{}{{{{reset}}}}", var.placeholder()))
+                .fallback_render(&term)
+                .into(),
+            var.description().into(),
+            Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", var.availability()))
+                .fallback_render(&term)
+                .into(),
+        ]);
+    }
+
+    let rendered = table.fallback_render(&term);
+    log::data(&rendered);
+
+    // Context variables - grouped by category with current values
+    log::data("");
+    let ctx_header =
+        Prose::new("{{bold}}Context Variables{{reset}} {{dim}}(auto-detected at runtime){{reset}}");
+    log::data(&format!(" {}", ctx_header.fallback_render(&term)));
+
+    // Detect current environment to show live values
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let env_context = detect_environment(&cwd);
+    let dummy_meta = EventMeta::dummy_with_env(env_context);
+
+    let ctx_columns = vec![
+        TableColumn::new("Variable"),
+        TableColumn::new("Description"),
+        TableColumn::new("Current Value"),
+    ];
+    let mut ctx_table = Table::new().with_columns(ctx_columns);
+    ctx_table.layout_mut().left_margin = Margin::Chars(1);
+
+    // Track current category for section headers
+    let mut current_category: Option<VariableCategory> = None;
+
+    for var in TemplateVariable::context_variables() {
+        let cat = var.category();
+
+        // Add category header when it changes
+        if current_category != Some(cat) {
+            current_category = Some(cat);
+            ctx_table.add_row(vec![
+                Prose::new(format!("{{{{dim}}}}# {}{{{{reset}}}}", cat.label()))
+                    .fallback_render(&term)
+                    .into(),
+                "".into(),
+                "".into(),
+            ]);
+        }
+
+        // Resolve current value
+        let current_value = var.resolve(&dummy_meta);
+        let value_display = if current_value.is_empty() {
+            Prose::new("{{dim}}-{{reset}}").fallback_render(&term)
+        } else {
+            // Truncate long values
+            let truncated = if current_value.len() > 40 {
+                format!("{}…", &current_value[..39])
+            } else {
+                current_value.to_string()
+            };
+            Prose::new(format!("{{{{green}}}}{}{{{{reset}}}}", truncated)).fallback_render(&term)
+        };
+
+        ctx_table.add_row(vec![
+            Prose::new(format!("{{{{cyan}}}}{}{{{{reset}}}}", var.placeholder()))
+                .fallback_render(&term)
+                .into(),
+            var.description().into(),
+            value_display.into(),
+        ]);
+    }
+
+    let ctx_rendered = ctx_table.fallback_render(&term);
+    log::data(&ctx_rendered);
+
+    // Example
+    log::data("");
+    let example_header = Prose::new("{{bold}}Example{{reset}}");
+    log::data(&format!(" {}", example_header.fallback_render(&term)));
+    log::data("");
+    let example = Prose::new(
+        r#"{{dim}}  {
+    "type": "speak",
+    "message": "Tool {tool_name} failed on {git.branch}: {error}"
+  }{{reset}}"#,
+    );
+    log::data(&example.fallback_render(&term));
+    log::data("");
 
     Ok(())
 }

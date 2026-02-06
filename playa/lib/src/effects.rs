@@ -14,13 +14,13 @@
 //!
 //! | Feature | Contents | Effects | Size |
 //! |---------|----------|---------|------|
-//! | `sfx-ui` | Doorbells, alerts, hits | 11 | ~3MB |
+//! | `sfx-ui` | Doorbells, alerts, clicks, selections, window actions | 44 | ~4MB |
 //! | `sfx-cartoon` | Cartoon accents, cries | 13 | ~8MB |
 //! | `sfx-reactions` | Laughs, cheers, trombone | 6 | ~4MB |
 //! | `sfx-scifi` | Phase jumps, phasers | 11 | ~3MB |
 //! | `sfx-atmosphere` | Music stings, transitions | 5 | ~7MB |
 //! | `sfx-motion` | Whooshes, air sounds | 7 | ~5MB |
-//! | **`sound-effects`** | **All categories** | **53** | **~30MB** |
+//! | **`sound-effects`** | **All categories** | **86** | **~31MB** |
 //!
 //! ## Usage
 //!
@@ -102,6 +102,102 @@ pub enum SoundEffect {
     /// Electronic hit effect 6.
     #[cfg(feature = "sfx-ui")]
     ElectronicHitFx6,
+    /// Bong/bell notification sound.
+    #[cfg(feature = "sfx-ui")]
+    Bong,
+    /// Click sound.
+    #[cfg(feature = "sfx-ui")]
+    Click,
+    /// Confirmation sound.
+    #[cfg(feature = "sfx-ui")]
+    Confirmation,
+    /// Drop sound, variant 1.
+    #[cfg(feature = "sfx-ui")]
+    Drop1,
+    /// Drop sound, variant 2.
+    #[cfg(feature = "sfx-ui")]
+    Drop2,
+    /// Drop sound, variant 3.
+    #[cfg(feature = "sfx-ui")]
+    Drop3,
+    /// Drop sound, variant 4.
+    #[cfg(feature = "sfx-ui")]
+    Drop4,
+    /// Error sound, variant 1.
+    #[cfg(feature = "sfx-ui")]
+    Error1,
+    /// Error sound, variant 2.
+    #[cfg(feature = "sfx-ui")]
+    Error2,
+    /// Glass/chime sound, variant 1.
+    #[cfg(feature = "sfx-ui")]
+    Glass1,
+    /// Glass/chime sound, variant 2.
+    #[cfg(feature = "sfx-ui")]
+    Glass2,
+    /// Glass/chime sound, variant 3.
+    #[cfg(feature = "sfx-ui")]
+    Glass3,
+    /// Glass/chime sound, variant 4.
+    #[cfg(feature = "sfx-ui")]
+    Glass4,
+    /// Window maximize sound, variant 1.
+    #[cfg(feature = "sfx-ui")]
+    Maximize1,
+    /// Window maximize sound, variant 2.
+    #[cfg(feature = "sfx-ui")]
+    Maximize2,
+    /// Window maximize sound, variant 3.
+    #[cfg(feature = "sfx-ui")]
+    Maximize3,
+    /// Window maximize sound, variant 4.
+    #[cfg(feature = "sfx-ui")]
+    Maximize4,
+    /// Window maximize sound, variant 5.
+    #[cfg(feature = "sfx-ui")]
+    Maximize5,
+    /// Window minimize sound, variant 1.
+    #[cfg(feature = "sfx-ui")]
+    Minimize1,
+    /// Window minimize sound, variant 2.
+    #[cfg(feature = "sfx-ui")]
+    Minimize2,
+    /// Window minimize sound, variant 3.
+    #[cfg(feature = "sfx-ui")]
+    Minimize3,
+    /// Mouse click sound.
+    #[cfg(feature = "sfx-ui")]
+    MouseClick,
+    /// Pluck sound, variant 1.
+    #[cfg(feature = "sfx-ui")]
+    Pluck1,
+    /// Pluck sound, variant 2.
+    #[cfg(feature = "sfx-ui")]
+    Pluck2,
+    /// Question/prompt sound, variant 1.
+    #[cfg(feature = "sfx-ui")]
+    Question1,
+    /// Question/prompt sound, variant 2.
+    #[cfg(feature = "sfx-ui")]
+    Question2,
+    /// Selection sound, variant 1.
+    #[cfg(feature = "sfx-ui")]
+    Select1,
+    /// Selection sound, variant 2.
+    #[cfg(feature = "sfx-ui")]
+    Select2,
+    /// Selection sound, variant 3.
+    #[cfg(feature = "sfx-ui")]
+    Select3,
+    /// Selection sound, variant 4.
+    #[cfg(feature = "sfx-ui")]
+    Select4,
+    /// Switch/toggle sound, variant 1.
+    #[cfg(feature = "sfx-ui")]
+    Switch1,
+    /// Switch/toggle sound, variant 2.
+    #[cfg(feature = "sfx-ui")]
+    Switch2,
 
     // === Cartoon Sounds (sfx-cartoon) ===
     /// Cartoon accent sound 1.
@@ -270,6 +366,70 @@ const ELECTRONIC_HIT_FX_4_BYTES: &[u8] = include_bytes!("../../effects/electroni
 const ELECTRONIC_HIT_FX_5_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx5.wav");
 #[cfg(feature = "sfx-ui")]
 const ELECTRONIC_HIT_FX_6_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx6.wav");
+#[cfg(feature = "sfx-ui")]
+const BONG_BYTES: &[u8] = include_bytes!("../../effects/bong.ogg");
+#[cfg(feature = "sfx-ui")]
+const CLICK_BYTES: &[u8] = include_bytes!("../../effects/click.ogg");
+#[cfg(feature = "sfx-ui")]
+const CONFIRMATION_BYTES: &[u8] = include_bytes!("../../effects/confirmation.ogg");
+#[cfg(feature = "sfx-ui")]
+const DROP_1_BYTES: &[u8] = include_bytes!("../../effects/drop1.ogg");
+#[cfg(feature = "sfx-ui")]
+const DROP_2_BYTES: &[u8] = include_bytes!("../../effects/drop2.ogg");
+#[cfg(feature = "sfx-ui")]
+const DROP_3_BYTES: &[u8] = include_bytes!("../../effects/drop3.ogg");
+#[cfg(feature = "sfx-ui")]
+const DROP_4_BYTES: &[u8] = include_bytes!("../../effects/drop4.ogg");
+#[cfg(feature = "sfx-ui")]
+const ERROR_1_BYTES: &[u8] = include_bytes!("../../effects/error1.ogg");
+#[cfg(feature = "sfx-ui")]
+const ERROR_2_BYTES: &[u8] = include_bytes!("../../effects/error2.ogg");
+#[cfg(feature = "sfx-ui")]
+const GLASS_1_BYTES: &[u8] = include_bytes!("../../effects/glass1.ogg");
+#[cfg(feature = "sfx-ui")]
+const GLASS_2_BYTES: &[u8] = include_bytes!("../../effects/glass2.ogg");
+#[cfg(feature = "sfx-ui")]
+const GLASS_3_BYTES: &[u8] = include_bytes!("../../effects/glass3.ogg");
+#[cfg(feature = "sfx-ui")]
+const GLASS_4_BYTES: &[u8] = include_bytes!("../../effects/glass4.ogg");
+#[cfg(feature = "sfx-ui")]
+const MAXIMIZE_1_BYTES: &[u8] = include_bytes!("../../effects/maximize1.ogg");
+#[cfg(feature = "sfx-ui")]
+const MAXIMIZE_2_BYTES: &[u8] = include_bytes!("../../effects/maximize2.ogg");
+#[cfg(feature = "sfx-ui")]
+const MAXIMIZE_3_BYTES: &[u8] = include_bytes!("../../effects/maximize3.ogg");
+#[cfg(feature = "sfx-ui")]
+const MAXIMIZE_4_BYTES: &[u8] = include_bytes!("../../effects/maximize4.ogg");
+#[cfg(feature = "sfx-ui")]
+const MAXIMIZE_5_BYTES: &[u8] = include_bytes!("../../effects/maximize5.ogg");
+#[cfg(feature = "sfx-ui")]
+const MINIMIZE_1_BYTES: &[u8] = include_bytes!("../../effects/minimize1.ogg");
+#[cfg(feature = "sfx-ui")]
+const MINIMIZE_2_BYTES: &[u8] = include_bytes!("../../effects/minimize2.ogg");
+#[cfg(feature = "sfx-ui")]
+const MINIMIZE_3_BYTES: &[u8] = include_bytes!("../../effects/minimize3.ogg");
+#[cfg(feature = "sfx-ui")]
+const MOUSE_CLICK_BYTES: &[u8] = include_bytes!("../../effects/mouseclick.ogg");
+#[cfg(feature = "sfx-ui")]
+const PLUCK_1_BYTES: &[u8] = include_bytes!("../../effects/pluck1.ogg");
+#[cfg(feature = "sfx-ui")]
+const PLUCK_2_BYTES: &[u8] = include_bytes!("../../effects/pluck2.ogg");
+#[cfg(feature = "sfx-ui")]
+const QUESTION_1_BYTES: &[u8] = include_bytes!("../../effects/question1.ogg");
+#[cfg(feature = "sfx-ui")]
+const QUESTION_2_BYTES: &[u8] = include_bytes!("../../effects/question2.ogg");
+#[cfg(feature = "sfx-ui")]
+const SELECT_1_BYTES: &[u8] = include_bytes!("../../effects/select1.ogg");
+#[cfg(feature = "sfx-ui")]
+const SELECT_2_BYTES: &[u8] = include_bytes!("../../effects/select2.ogg");
+#[cfg(feature = "sfx-ui")]
+const SELECT_3_BYTES: &[u8] = include_bytes!("../../effects/select3.ogg");
+#[cfg(feature = "sfx-ui")]
+const SELECT_4_BYTES: &[u8] = include_bytes!("../../effects/select4.ogg");
+#[cfg(feature = "sfx-ui")]
+const SWITCH_1_BYTES: &[u8] = include_bytes!("../../effects/switch.ogg");
+#[cfg(feature = "sfx-ui")]
+const SWITCH_2_BYTES: &[u8] = include_bytes!("../../effects/switch2.ogg");
 
 // === Cartoon Sounds (sfx-cartoon) ===
 #[cfg(feature = "sfx-cartoon")]
@@ -409,6 +569,70 @@ impl SoundEffect {
             Self::ElectronicHitFx5 => "electronic-hit-fx5",
             #[cfg(feature = "sfx-ui")]
             Self::ElectronicHitFx6 => "electronic-hit-fx6",
+            #[cfg(feature = "sfx-ui")]
+            Self::Bong => "bong",
+            #[cfg(feature = "sfx-ui")]
+            Self::Click => "click",
+            #[cfg(feature = "sfx-ui")]
+            Self::Confirmation => "confirmation",
+            #[cfg(feature = "sfx-ui")]
+            Self::Drop1 => "drop-1",
+            #[cfg(feature = "sfx-ui")]
+            Self::Drop2 => "drop-2",
+            #[cfg(feature = "sfx-ui")]
+            Self::Drop3 => "drop-3",
+            #[cfg(feature = "sfx-ui")]
+            Self::Drop4 => "drop-4",
+            #[cfg(feature = "sfx-ui")]
+            Self::Error1 => "error-1",
+            #[cfg(feature = "sfx-ui")]
+            Self::Error2 => "error-2",
+            #[cfg(feature = "sfx-ui")]
+            Self::Glass1 => "glass-1",
+            #[cfg(feature = "sfx-ui")]
+            Self::Glass2 => "glass-2",
+            #[cfg(feature = "sfx-ui")]
+            Self::Glass3 => "glass-3",
+            #[cfg(feature = "sfx-ui")]
+            Self::Glass4 => "glass-4",
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize1 => "maximize-1",
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize2 => "maximize-2",
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize3 => "maximize-3",
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize4 => "maximize-4",
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize5 => "maximize-5",
+            #[cfg(feature = "sfx-ui")]
+            Self::Minimize1 => "minimize-1",
+            #[cfg(feature = "sfx-ui")]
+            Self::Minimize2 => "minimize-2",
+            #[cfg(feature = "sfx-ui")]
+            Self::Minimize3 => "minimize-3",
+            #[cfg(feature = "sfx-ui")]
+            Self::MouseClick => "mouseclick",
+            #[cfg(feature = "sfx-ui")]
+            Self::Pluck1 => "pluck-1",
+            #[cfg(feature = "sfx-ui")]
+            Self::Pluck2 => "pluck-2",
+            #[cfg(feature = "sfx-ui")]
+            Self::Question1 => "question-1",
+            #[cfg(feature = "sfx-ui")]
+            Self::Question2 => "question-2",
+            #[cfg(feature = "sfx-ui")]
+            Self::Select1 => "select-1",
+            #[cfg(feature = "sfx-ui")]
+            Self::Select2 => "select-2",
+            #[cfg(feature = "sfx-ui")]
+            Self::Select3 => "select-3",
+            #[cfg(feature = "sfx-ui")]
+            Self::Select4 => "select-4",
+            #[cfg(feature = "sfx-ui")]
+            Self::Switch1 => "switch-1",
+            #[cfg(feature = "sfx-ui")]
+            Self::Switch2 => "switch-2",
 
             // === Cartoon Sounds (sfx-cartoon) ===
             #[cfg(feature = "sfx-cartoon")]
@@ -536,6 +760,38 @@ impl SoundEffect {
             Self::ElectronicHitFx4,
             Self::ElectronicHitFx5,
             Self::ElectronicHitFx6,
+            Self::Bong,
+            Self::Click,
+            Self::Confirmation,
+            Self::Drop1,
+            Self::Drop2,
+            Self::Drop3,
+            Self::Drop4,
+            Self::Error1,
+            Self::Error2,
+            Self::Glass1,
+            Self::Glass2,
+            Self::Glass3,
+            Self::Glass4,
+            Self::Maximize1,
+            Self::Maximize2,
+            Self::Maximize3,
+            Self::Maximize4,
+            Self::Maximize5,
+            Self::Minimize1,
+            Self::Minimize2,
+            Self::Minimize3,
+            Self::MouseClick,
+            Self::Pluck1,
+            Self::Pluck2,
+            Self::Question1,
+            Self::Question2,
+            Self::Select1,
+            Self::Select2,
+            Self::Select3,
+            Self::Select4,
+            Self::Switch1,
+            Self::Switch2,
         ]);
 
         #[cfg(feature = "sfx-cartoon")]
@@ -606,6 +862,8 @@ impl SoundEffect {
     /// Parse a CLI effect name into a `SoundEffect`.
     ///
     /// Accepts kebab-case names and normalizes case, underscores, and spaces.
+    /// Also handles variations like `electronic-hit-fx-1` vs `electronic-hit-fx1`
+    /// by falling back to fuzzy matching when exact matching fails.
     ///
     /// ## Examples
     ///
@@ -614,6 +872,10 @@ impl SoundEffect {
     ///
     /// let effect = SoundEffect::from_name("sad-trombone");
     /// assert_eq!(effect, Some(SoundEffect::SadTrombone));
+    ///
+    /// // Fuzzy matching handles dash variations
+    /// let effect = SoundEffect::from_name("electronic-hit-fx-1");
+    /// assert_eq!(effect, Some(SoundEffect::ElectronicHitFx1));
     /// ```
     ///
     /// ## Returns
@@ -621,8 +883,9 @@ impl SoundEffect {
     /// - `Some(effect)` when the name matches a compiled effect.
     /// - `None` when no match is found.
     pub fn from_name(name: &str) -> Option<Self> {
+        // First try exact matching with basic normalization
         let normalized = normalize_effect_name(name);
-        match normalized.as_str() {
+        let exact_match = match normalized.as_str() {
             // === UI Sounds (sfx-ui) ===
             #[cfg(feature = "sfx-ui")]
             "doorbell" => Some(Self::Doorbell),
@@ -646,6 +909,70 @@ impl SoundEffect {
             "electronic-hit-fx5" => Some(Self::ElectronicHitFx5),
             #[cfg(feature = "sfx-ui")]
             "electronic-hit-fx6" => Some(Self::ElectronicHitFx6),
+            #[cfg(feature = "sfx-ui")]
+            "bong" => Some(Self::Bong),
+            #[cfg(feature = "sfx-ui")]
+            "click" => Some(Self::Click),
+            #[cfg(feature = "sfx-ui")]
+            "confirmation" => Some(Self::Confirmation),
+            #[cfg(feature = "sfx-ui")]
+            "drop-1" => Some(Self::Drop1),
+            #[cfg(feature = "sfx-ui")]
+            "drop-2" => Some(Self::Drop2),
+            #[cfg(feature = "sfx-ui")]
+            "drop-3" => Some(Self::Drop3),
+            #[cfg(feature = "sfx-ui")]
+            "drop-4" => Some(Self::Drop4),
+            #[cfg(feature = "sfx-ui")]
+            "error-1" => Some(Self::Error1),
+            #[cfg(feature = "sfx-ui")]
+            "error-2" => Some(Self::Error2),
+            #[cfg(feature = "sfx-ui")]
+            "glass-1" => Some(Self::Glass1),
+            #[cfg(feature = "sfx-ui")]
+            "glass-2" => Some(Self::Glass2),
+            #[cfg(feature = "sfx-ui")]
+            "glass-3" => Some(Self::Glass3),
+            #[cfg(feature = "sfx-ui")]
+            "glass-4" => Some(Self::Glass4),
+            #[cfg(feature = "sfx-ui")]
+            "maximize-1" => Some(Self::Maximize1),
+            #[cfg(feature = "sfx-ui")]
+            "maximize-2" => Some(Self::Maximize2),
+            #[cfg(feature = "sfx-ui")]
+            "maximize-3" => Some(Self::Maximize3),
+            #[cfg(feature = "sfx-ui")]
+            "maximize-4" => Some(Self::Maximize4),
+            #[cfg(feature = "sfx-ui")]
+            "maximize-5" => Some(Self::Maximize5),
+            #[cfg(feature = "sfx-ui")]
+            "minimize-1" => Some(Self::Minimize1),
+            #[cfg(feature = "sfx-ui")]
+            "minimize-2" => Some(Self::Minimize2),
+            #[cfg(feature = "sfx-ui")]
+            "minimize-3" => Some(Self::Minimize3),
+            #[cfg(feature = "sfx-ui")]
+            "mouseclick" => Some(Self::MouseClick),
+            #[cfg(feature = "sfx-ui")]
+            "pluck-1" => Some(Self::Pluck1),
+            #[cfg(feature = "sfx-ui")]
+            "pluck-2" => Some(Self::Pluck2),
+            #[cfg(feature = "sfx-ui")]
+            "question-1" => Some(Self::Question1),
+            #[cfg(feature = "sfx-ui")]
+            "question-2" => Some(Self::Question2),
+            #[cfg(feature = "sfx-ui")]
+            "select-1" => Some(Self::Select1),
+            #[cfg(feature = "sfx-ui")]
+            "select-2" => Some(Self::Select2),
+            #[cfg(feature = "sfx-ui")]
+            "select-3" => Some(Self::Select3),
+            #[cfg(feature = "sfx-ui")]
+            "select-4" => Some(Self::Select4),
+            #[cfg(feature = "sfx-ui")]
+            "switch-1" => Some(Self::Switch1),
+            #[cfg(feature = "sfx-ui")]
+            "switch-2" => Some(Self::Switch2),
 
             // === Cartoon Sounds (sfx-cartoon) ===
             #[cfg(feature = "sfx-cartoon")]
@@ -741,7 +1068,18 @@ impl SoundEffect {
             #[cfg(feature = "sfx-motion")]
             "bullet" => Some(Self::Bullet),
             _ => None,
+        };
+
+        if exact_match.is_some() {
+            return exact_match;
         }
+
+        // Fall back to fuzzy matching (strips all non-alphanumeric chars)
+        // This handles variations like "electronic-hit-fx-1" vs "electronic-hit-fx1"
+        let fuzzy = normalize_for_matching(name);
+        Self::all()
+            .into_iter()
+            .find(|effect| normalize_for_matching(effect.name()) == fuzzy)
     }
 
     /// Returns the embedded audio bytes for this sound effect.
@@ -774,6 +1112,70 @@ impl SoundEffect {
             Self::ElectronicHitFx5 => ELECTRONIC_HIT_FX_5_BYTES,
             #[cfg(feature = "sfx-ui")]
             Self::ElectronicHitFx6 => ELECTRONIC_HIT_FX_6_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Bong => BONG_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Click => CLICK_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Confirmation => CONFIRMATION_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Drop1 => DROP_1_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Drop2 => DROP_2_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Drop3 => DROP_3_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Drop4 => DROP_4_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Error1 => ERROR_1_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Error2 => ERROR_2_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Glass1 => GLASS_1_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Glass2 => GLASS_2_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Glass3 => GLASS_3_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Glass4 => GLASS_4_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize1 => MAXIMIZE_1_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize2 => MAXIMIZE_2_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize3 => MAXIMIZE_3_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize4 => MAXIMIZE_4_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize5 => MAXIMIZE_5_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Minimize1 => MINIMIZE_1_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Minimize2 => MINIMIZE_2_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Minimize3 => MINIMIZE_3_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::MouseClick => MOUSE_CLICK_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Pluck1 => PLUCK_1_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Pluck2 => PLUCK_2_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Question1 => QUESTION_1_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Question2 => QUESTION_2_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Select1 => SELECT_1_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Select2 => SELECT_2_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Select3 => SELECT_3_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Select4 => SELECT_4_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Switch1 => SWITCH_1_BYTES,
+            #[cfg(feature = "sfx-ui")]
+            Self::Switch2 => SWITCH_2_BYTES,
 
             // === Cartoon Sounds (sfx-cartoon) ===
             #[cfg(feature = "sfx-cartoon")]
@@ -884,7 +1286,7 @@ impl SoundEffect {
     ///
     /// ## Examples
     ///
-    /// ```no_run
+    /// ```ignore
     /// use playa::SoundEffect;
     ///
     /// // With sfx-reactions feature enabled:
@@ -932,7 +1334,39 @@ impl SoundEffect {
             | Self::ElectronicHitFx3
             | Self::ElectronicHitFx4
             | Self::ElectronicHitFx5
-            | Self::ElectronicHitFx6 => "UI",
+            | Self::ElectronicHitFx6
+            | Self::Bong
+            | Self::Click
+            | Self::Confirmation
+            | Self::Drop1
+            | Self::Drop2
+            | Self::Drop3
+            | Self::Drop4
+            | Self::Error1
+            | Self::Error2
+            | Self::Glass1
+            | Self::Glass2
+            | Self::Glass3
+            | Self::Glass4
+            | Self::Maximize1
+            | Self::Maximize2
+            | Self::Maximize3
+            | Self::Maximize4
+            | Self::Maximize5
+            | Self::Minimize1
+            | Self::Minimize2
+            | Self::Minimize3
+            | Self::MouseClick
+            | Self::Pluck1
+            | Self::Pluck2
+            | Self::Question1
+            | Self::Question2
+            | Self::Select1
+            | Self::Select2
+            | Self::Select3
+            | Self::Select4
+            | Self::Switch1
+            | Self::Switch2 => "UI",
 
             #[cfg(feature = "sfx-cartoon")]
             Self::CartoonAccent1
@@ -1014,6 +1448,70 @@ impl SoundEffect {
             Self::ElectronicHitFx5 => "electronic hit",
             #[cfg(feature = "sfx-ui")]
             Self::ElectronicHitFx6 => "electronic hit",
+            #[cfg(feature = "sfx-ui")]
+            Self::Bong => "bong notification",
+            #[cfg(feature = "sfx-ui")]
+            Self::Click => "click sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Confirmation => "confirmation sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Drop1 => "drop sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Drop2 => "drop sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Drop3 => "drop sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Drop4 => "drop sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Error1 => "error sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Error2 => "error sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Glass1 => "glass chime",
+            #[cfg(feature = "sfx-ui")]
+            Self::Glass2 => "glass chime",
+            #[cfg(feature = "sfx-ui")]
+            Self::Glass3 => "glass chime",
+            #[cfg(feature = "sfx-ui")]
+            Self::Glass4 => "glass chime",
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize1 => "window maximize",
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize2 => "window maximize",
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize3 => "window maximize",
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize4 => "window maximize",
+            #[cfg(feature = "sfx-ui")]
+            Self::Maximize5 => "window maximize",
+            #[cfg(feature = "sfx-ui")]
+            Self::Minimize1 => "window minimize",
+            #[cfg(feature = "sfx-ui")]
+            Self::Minimize2 => "window minimize",
+            #[cfg(feature = "sfx-ui")]
+            Self::Minimize3 => "window minimize",
+            #[cfg(feature = "sfx-ui")]
+            Self::MouseClick => "mouse click",
+            #[cfg(feature = "sfx-ui")]
+            Self::Pluck1 => "pluck sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Pluck2 => "pluck sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Question1 => "question prompt",
+            #[cfg(feature = "sfx-ui")]
+            Self::Question2 => "question prompt",
+            #[cfg(feature = "sfx-ui")]
+            Self::Select1 => "selection sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Select2 => "selection sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Select3 => "selection sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Select4 => "selection sound",
+            #[cfg(feature = "sfx-ui")]
+            Self::Switch1 => "switch toggle",
+            #[cfg(feature = "sfx-ui")]
+            Self::Switch2 => "switch toggle",
 
             // Cartoon
             #[cfg(feature = "sfx-cartoon")]
@@ -1139,9 +1637,23 @@ impl SoundEffect {
     }
 }
 
+/// Normalize an effect name by lowercasing and converting separators.
+///
+/// This keeps the structure (dashes) for exact matching in `from_name`.
 fn normalize_effect_name(name: &str) -> String {
     name.trim()
         .to_ascii_lowercase()
         .replace('_', "-")
         .replace(' ', "-")
+}
+
+/// Normalize an effect name by stripping all non-alphanumeric characters.
+///
+/// This is used for fuzzy matching to handle variations like
+/// `electronic-hit-fx-1` vs `electronic-hit-fx1`.
+fn normalize_for_matching(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect::<String>()
+        .to_lowercase()
 }

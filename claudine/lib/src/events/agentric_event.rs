@@ -39,11 +39,13 @@ pub enum AgenticEvent {
     BeforeCompact,
     /// Provider-specific notification.
     Notification,
+    /// Agent is asking user a clarifying question (human-in-the-loop).
+    HumanInTheLoop,
 }
 
 impl AgenticEvent {
     /// Returns all event variants in display order.
-    pub const ALL: [AgenticEvent; 15] = [
+    pub const ALL: [AgenticEvent; 16] = [
         AgenticEvent::SessionStart,
         AgenticEvent::SessionEnd,
         AgenticEvent::BeforePrompt,
@@ -51,6 +53,7 @@ impl AgenticEvent {
         AgenticEvent::AfterTool,
         AgenticEvent::ToolError,
         AgenticEvent::PermissionRequest,
+        AgenticEvent::HumanInTheLoop,
         AgenticEvent::TurnComplete,
         AgenticEvent::TurnError,
         AgenticEvent::SubagentStart,
@@ -73,6 +76,7 @@ impl AgenticEvent {
             AgenticEvent::AfterTool => "🔧→",
             AgenticEvent::ToolError => "⚒️",
             AgenticEvent::PermissionRequest => "🪪",
+            AgenticEvent::HumanInTheLoop => "🙋",
             AgenticEvent::TurnComplete => "⏎",
             AgenticEvent::TurnError => "⧳",
             AgenticEvent::SubagentStart => "🧑‍💼🎉",
@@ -94,6 +98,7 @@ impl AgenticEvent {
             AgenticEvent::AfterTool => "Tool call completed successfully",
             AgenticEvent::ToolError => "Tool call failed with an error",
             AgenticEvent::PermissionRequest => "Agent is requesting user permission",
+            AgenticEvent::HumanInTheLoop => "Agent is asking user a clarifying question",
             AgenticEvent::TurnComplete => "Agent turn (request/response cycle) completed",
             AgenticEvent::TurnError => "Agent turn failed with an error",
             AgenticEvent::SubagentStart => "Sub-agent spawned",
@@ -117,6 +122,7 @@ impl AgenticEvent {
             AgenticEvent::AfterTool => "tool_name, tool_input, tool_response",
             AgenticEvent::ToolError => "tool_name, tool_input, error",
             AgenticEvent::PermissionRequest => "tool_name, tool_input",
+            AgenticEvent::HumanInTheLoop => "questions, options",
             AgenticEvent::TurnComplete => "session_id",
             AgenticEvent::TurnError => "error, session_id",
             AgenticEvent::SubagentStart => "agent_type, session_id",
@@ -140,6 +146,7 @@ impl AgenticEvent {
             AgenticEvent::AfterTool => "(none)",
             AgenticEvent::ToolError => "(none)",
             AgenticEvent::PermissionRequest => "allow/deny (blocking)",
+            AgenticEvent::HumanInTheLoop => "answers (blocking)",
             AgenticEvent::TurnComplete => "(none)",
             AgenticEvent::TurnError => "(none)",
             AgenticEvent::SubagentStart => "(none)",
@@ -185,6 +192,7 @@ mod tests {
             (AgenticEvent::AfterTool, "after_tool"),
             (AgenticEvent::ToolError, "tool_error"),
             (AgenticEvent::PermissionRequest, "permission_request"),
+            (AgenticEvent::HumanInTheLoop, "human_in_the_loop"),
             (AgenticEvent::TurnComplete, "turn_complete"),
             (AgenticEvent::TurnError, "turn_error"),
             (AgenticEvent::SubagentStart, "subagent_start"),
@@ -216,8 +224,8 @@ mod tests {
 
     #[test]
     fn all_contains_all_variants() {
-        // Verify ALL array has exactly 15 elements (all variants)
-        assert_eq!(AgenticEvent::ALL.len(), 15);
+        // Verify ALL array has exactly 16 elements (all variants)
+        assert_eq!(AgenticEvent::ALL.len(), 16);
 
         // Verify each variant is present
         let all_set: std::collections::HashSet<_> = AgenticEvent::ALL.iter().collect();
@@ -228,6 +236,7 @@ mod tests {
         assert!(all_set.contains(&AgenticEvent::AfterTool));
         assert!(all_set.contains(&AgenticEvent::ToolError));
         assert!(all_set.contains(&AgenticEvent::PermissionRequest));
+        assert!(all_set.contains(&AgenticEvent::HumanInTheLoop));
         assert!(all_set.contains(&AgenticEvent::TurnComplete));
         assert!(all_set.contains(&AgenticEvent::TurnError));
         assert!(all_set.contains(&AgenticEvent::SubagentStart));

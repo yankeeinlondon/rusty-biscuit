@@ -134,50 +134,56 @@ impl Provider {
 
         match self {
             // Claude: All supported events use native hooks
+            // HumanInTheLoop captured via PreToolUse hook with AskUserQuestion tool matcher
             Provider::Claude => match event {
                 BeforeModel | AfterModel | TurnError => NotSupported,
                 _ => Hook,
             },
 
             // Gemini: All supported events use native hooks
+            // No native support for HumanInTheLoop
             Provider::Gemini => match event {
-                ToolError | PermissionRequest | TurnError | SubagentStart | SubagentStop => {
-                    NotSupported
-                }
+                ToolError | PermissionRequest | TurnError | SubagentStart | SubagentStop
+                | HumanInTheLoop => NotSupported,
                 _ => Hook,
             },
 
             // OpenCode: All supported events use plugin hooks
+            // HumanInTheLoop via permission.asked hook
             Provider::OpenCode => match event {
                 ToolError | SubagentStart | SubagentStop => NotSupported,
                 _ => Hook,
             },
 
             // Codex: Only turn_complete via notify config, rest via JSONL stream
+            // HumanInTheLoop via tool/requestUserInput in JSONL stream
             Provider::Codex => match event {
                 TurnComplete => Hook,
                 SessionEnd | PermissionRequest | SubagentStart | SubagentStop | BeforeModel
                 | BeforeCompact => NotSupported,
-                _ => NonHook, // SessionStart, BeforePrompt, BeforeTool, AfterTool, ToolError, TurnError, AfterModel, Notification
+                _ => NonHook, // SessionStart, BeforePrompt, BeforeTool, AfterTool, ToolError, TurnError, AfterModel, Notification, HumanInTheLoop
             },
 
             // Goose: All events via stream-json/env var (no config hooks)
+            // HumanInTheLoop via request_permission in ACP stream
             Provider::Goose => match event {
                 SessionStart | SessionEnd | BeforePrompt | BeforeTool | AfterTool | ToolError
                 | PermissionRequest | BeforeModel | BeforeCompact => NotSupported,
-                _ => NonHook, // TurnComplete, TurnError, AfterModel, Notification, SubagentStart, SubagentStop
+                _ => NonHook, // TurnComplete, TurnError, AfterModel, Notification, SubagentStart, SubagentStop, HumanInTheLoop
             },
 
             // Kimi Code: All events via wire mode JSON-RPC (requires proxy)
+            // HumanInTheLoop via ApprovalRequest in wire mode
             Provider::KimiCode => match event {
                 SessionStart | SessionEnd | BeforeModel => NotSupported,
-                _ => NonHook, // All other events via wire mode
+                _ => NonHook, // All other events via wire mode, including HumanInTheLoop
             },
 
             // Qwen Code: Limited events via stream-json output
+            // No native support for HumanInTheLoop
             Provider::QwenCode => match event {
                 TurnComplete | TurnError | AfterModel | Notification => NonHook,
-                _ => NotSupported,
+                _ => NotSupported, // Including HumanInTheLoop
             },
         }
     }
@@ -221,6 +227,7 @@ impl Provider {
                 AfterTool => "PostToolUse",
                 ToolError => "PostToolUse",
                 PermissionRequest => "PreToolUse",
+                HumanInTheLoop => "PreToolUse", // AskUserQuestion tool
                 TurnComplete => "Stop",
                 TurnError => "",
                 SubagentStart => "PreToolUse",
@@ -238,6 +245,7 @@ impl Provider {
                 AfterTool => "item.completed",
                 ToolError => "error",
                 PermissionRequest => "",
+                HumanInTheLoop => "tool/requestUserInput",
                 TurnComplete => "turn.completed",
                 TurnError => "turn.failed",
                 SubagentStart => "",
@@ -255,6 +263,7 @@ impl Provider {
                 AfterTool => "AfterTool",
                 ToolError => "",
                 PermissionRequest => "",
+                HumanInTheLoop => "",
                 TurnComplete => "AfterAgent",
                 TurnError => "",
                 SubagentStart => "",
@@ -272,6 +281,7 @@ impl Provider {
                 AfterTool => "",
                 ToolError => "",
                 PermissionRequest => "",
+                HumanInTheLoop => "request_permission",
                 TurnComplete => "complete",
                 TurnError => "error",
                 SubagentStart => "subagent_tool_request",
@@ -289,6 +299,7 @@ impl Provider {
                 AfterTool => "ToolResult",
                 ToolError => "ToolResult",
                 PermissionRequest => "ApprovalRequest",
+                HumanInTheLoop => "ApprovalRequest",
                 TurnComplete => "TurnEnd",
                 TurnError => "prompt.status",
                 SubagentStart => "SubagentEvent",
@@ -306,6 +317,7 @@ impl Provider {
                 AfterTool => "tool.execute.after",
                 ToolError => "",
                 PermissionRequest => "permission.ask",
+                HumanInTheLoop => "permission.asked",
                 TurnComplete => "session.idle",
                 TurnError => "session.error",
                 SubagentStart => "",
@@ -324,6 +336,7 @@ impl Provider {
                 AfterTool => "",
                 ToolError => "",
                 PermissionRequest => "",
+                HumanInTheLoop => "",
                 TurnComplete => "result",
                 TurnError => "result",
                 SubagentStart => "",

@@ -699,6 +699,38 @@ fn sound_effect_names_roundtrip() {
 }
 
 #[test]
+fn sound_effect_fuzzy_name_matching() {
+    // These variations should all match the canonical name.
+    // Fuzzy matching strips all non-alphanumeric characters and lowercases,
+    // so "electronic-hit-fx-1" becomes "electronichitfx1" matching "electronic-hit-fx1".
+    let test_cases = [
+        // electronic-hit-fx1 should match with extra dashes
+        ("electronic-hit-fx-1", SoundEffect::ElectronicHitFx1),
+        ("electronic_hit_fx_1", SoundEffect::ElectronicHitFx1),
+        ("electronic_hit_fx1", SoundEffect::ElectronicHitFx1),
+        // dit-hit variations
+        ("dit_hit_1", SoundEffect::DitHit1),
+        ("dithit1", SoundEffect::DitHit1),
+        // phase-jump variations
+        ("phasejump1", SoundEffect::PhaseJump1),
+        ("phase_jump_1", SoundEffect::PhaseJump1),
+        // doorbell variations
+        ("doorbell2", SoundEffect::Doorbell2),
+        ("doorbell_2", SoundEffect::Doorbell2),
+    ];
+
+    for (input, expected) in test_cases {
+        assert_eq!(
+            SoundEffect::from_name(input),
+            Some(expected),
+            "Expected '{}' to match {:?}",
+            input,
+            expected
+        );
+    }
+}
+
+#[test]
 fn sound_effect_all_matches_total_count() {
     assert_eq!(SoundEffect::all().len(), 53, "Expected 53 total effects");
 }

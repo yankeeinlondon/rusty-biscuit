@@ -1,3 +1,4 @@
+mod capabilities;
 mod conflict;
 mod discovery;
 mod hashing;
@@ -5,6 +6,10 @@ mod paths;
 mod report;
 mod symlink;
 
+pub use capabilities::{
+    all_capabilities, capabilities_for, LinkableResource, ProviderCapabilities, ResourceFormat,
+    ResourceSupport, SkillFrontmatter, SupportLevel, ALL_PROVIDERS,
+};
 pub use conflict::SkillSyncStatus;
 pub use discovery::DiscoveredSkill;
 pub use paths::{LinkScope, ProviderPaths, ProviderSkillPaths};

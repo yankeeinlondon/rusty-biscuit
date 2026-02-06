@@ -17,20 +17,10 @@ impl AgentConfigurator for KimiCodeConfigurator {
         _config: &HookerConfig,
         _config_dir: Option<&Path>,
     ) -> Result<RegistrationResult> {
-        // Kimi Code supports hooks via "wire mode" (--wire flag), which is a
-        // bidirectional JSON-RPC protocol. The CLI sends events and waits for
-        // responses, enabling blocking hooks like ApprovalRequest and ToolCallRequest.
-        //
-        // This requires a wrapper approach where:
-        // 1. A middleware process intercepts JSON-RPC messages
-        // 2. Routes claudine events appropriately
-        // 3. Handles ApprovalRequest/ToolCallRequest blocking hooks
-        //
-        // TODO: Implement wire-mode proxy for Kimi Code.
-        // For now, we skip registration with guidance.
-        Ok(RegistrationResult::Skipped(SkipReason::WrapperOnly {
-            guidance: "Use `kimi --wire` with a claudine JSON-RPC proxy".to_string(),
-        }))
+        // Kimi Code doesn't support hooks via config files.
+        // It uses a "wire mode" (--wire flag) JSON-RPC protocol that would
+        // require a wrapper/proxy approach - not currently implemented.
+        Ok(RegistrationResult::Skipped(SkipReason::NoHookSupport))
     }
 
     fn deregister(&self, _config_dir: Option<&Path>) -> Result<()> {
@@ -67,15 +57,13 @@ fn config_path(config_dir: Option<&Path>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
     use tempfile::TempDir;
 
     use super::*;
 
     #[test]
-    fn register_returns_wrapper_only() {
-        // KimiCode always returns WrapperOnly since it requires wire-mode proxy
+    fn register_returns_no_hook_support() {
+        // KimiCode always returns NoHookSupport since it doesn't support config-based hooks
         let tmp = TempDir::new().unwrap();
         let configurator = KimiCodeConfigurator;
         let config = crate::events::HookerConfig {
@@ -87,7 +75,7 @@ mod tests {
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
         assert!(matches!(
             result,
-            RegistrationResult::Skipped(SkipReason::WrapperOnly { .. })
+            RegistrationResult::Skipped(SkipReason::NoHookSupport)
         ));
     }
 

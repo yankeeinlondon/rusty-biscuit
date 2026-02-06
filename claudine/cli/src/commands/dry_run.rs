@@ -1,29 +1,58 @@
-use std::io::Read;
+use std::io::{IsTerminal, Read};
 
 use clap::Args;
 use color_eyre::eyre::{Result, bail};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use claudine::adapters;
 use claudine::dispatch::template::interpolate;
-use claudine::events::{EventAction, Provider, detect_environment};
+use claudine::events::{AgenticEvent, EventAction, Provider, detect_environment};
 
 use crate::log;
 
 /// Arguments for the dry-run subcommand.
 #[derive(Args)]
+#[command(after_help = r#"EXAMPLES:
+    # Test with a mock event (no stdin needed)
+    claudine dry-run turn_complete
+    claudine dry-run permission_request
+    claudine dry-run tool_error
+
+    # Test with custom JSON payload
+    echo '{"hook_event_name":"Stop","session_id":"test"}' | claudine dry-run turn_complete
+
+    # Specify provider explicitly
+    claudine dry-run turn_complete --provider codex
+
+AVAILABLE EVENTS:
+    session_start, session_end, before_prompt, before_tool, after_tool,
+    tool_error, permission_request, turn_complete, turn_error,
+    subagent_start, subagent_stop, before_model, after_model,
+    before_compact, notification
+"#)]
 pub struct DryRunArgs {
-    /// Event name to simulate.
+    /// Event name to simulate (e.g., turn_complete, permission_request).
     pub event: String,
-    /// Optional provider hint.
-    #[arg(long)]
-    pub provider: Option<String>,
+
+    /// Provider to simulate (default: claude).
+    ///
+    /// Supported: claude, codex, gemini, opencode
+    #[arg(long, default_value = "claude")]
+    pub provider: String,
 }
 
 /// Show what would happen for an event without side effects.
 pub async fn run(args: DryRunArgs) -> Result<()> {
-    let raw = read_stdin_json()?;
-    let provider = resolve_provider(args.provider.as_deref(), &raw)?;
+    let provider = parse_provider(&args.provider)?;
+    let event = parse_event(&args.event)?;
+
+    // Use stdin if piped, otherwise use mock payload
+    let raw = if std::io::stdin().is_terminal() {
+        mock_payload(provider, &event)
+    } else {
+        read_stdin_json()?
+    };
+
     let cwd = std::env::current_dir().unwrap_or_default();
     let env = detect_environment(&cwd);
 
@@ -31,14 +60,20 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
     let parsed = adapter.parse_event(&raw, &env);
 
     match parsed {
-        Some((event, meta)) => {
+        Some((parsed_event, meta)) => {
             log::data(&format!("Provider: {provider}"));
-            log::data(&format!("Event:    {event}"));
+            log::data(&format!("Event:    {parsed_event}"));
             if let Some(tool) = &meta.tool_name {
                 log::data(&format!("Tool:     {tool}"));
             }
             if let Some(sid) = &meta.session_id {
                 log::data(&format!("Session:  {sid}"));
+            }
+            if let Some(prompt) = &meta.prompt {
+                log::data(&format!("Prompt:   {prompt}"));
+            }
+            if let Some(error) = &meta.error {
+                log::data(&format!("Error:    {error}"));
             }
             log::data("");
 
@@ -46,7 +81,7 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
             let config = claudine::dispatch::loader::load_config(None, None);
             match config {
                 Ok(cfg) => {
-                    if let Some(binding) = cfg.get_binding(provider, &event) {
+                    if let Some(binding) = cfg.get_binding(provider, &parsed_event) {
                         log::data("Matching binding found:");
                         log::data(&format!("  Enabled: {}", binding.enabled));
                         log::data(&format!("  Actions: {}", binding.actions.len()));
@@ -74,13 +109,15 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
                                         "  [{i}] Run ({mode}): {command} {args_str}"
                                     ));
                                 }
-                                EventAction::SoundEffect { name, .. } => {
-                                    log::data(&format!("  [{i}] SoundEffect: {name}"));
+                                EventAction::SoundEffect { name, volume, speed } => {
+                                    log::data(&format!(
+                                        "  [{i}] SoundEffect: {name} (vol={volume}, speed={speed})"
+                                    ));
                                 }
                             }
                         }
                     } else {
-                        log::data(&format!("No binding found for {provider}/{event}"));
+                        log::data(&format!("No binding found for {provider}/{parsed_event}"));
                     }
                 }
                 Err(e) => {
@@ -97,30 +134,170 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
     Ok(())
 }
 
+/// Parse event name from string (supports both canonical and native names).
+fn parse_event(name: &str) -> Result<AgenticEvent> {
+    // Normalize: convert PascalCase to snake_case, handle separators
+    let mut normalized = String::new();
+    let mut prev_was_lower = false;
+
+    for c in name.chars() {
+        if c == '-' || c == '_' {
+            if !normalized.ends_with('_') {
+                normalized.push('_');
+            }
+            prev_was_lower = false;
+        } else if c.is_uppercase() {
+            // Only add underscore if previous char was lowercase (PascalCase boundary)
+            if prev_was_lower && !normalized.ends_with('_') {
+                normalized.push('_');
+            }
+            normalized.push(c.to_ascii_lowercase());
+            prev_was_lower = false;
+        } else {
+            normalized.push(c);
+            prev_was_lower = c.is_lowercase();
+        }
+    }
+
+    let event = match normalized.as_str() {
+        "session_start" => AgenticEvent::SessionStart,
+        "session_end" => AgenticEvent::SessionEnd,
+        "before_prompt" | "user_prompt_submit" => AgenticEvent::BeforePrompt,
+        "before_tool" | "pre_tool_use" => AgenticEvent::BeforeTool,
+        "after_tool" | "post_tool_use" => AgenticEvent::AfterTool,
+        "tool_error" | "post_tool_use_failure" => AgenticEvent::ToolError,
+        "permission_request" => AgenticEvent::PermissionRequest,
+        "turn_complete" | "stop" => AgenticEvent::TurnComplete,
+        "turn_error" => AgenticEvent::TurnError,
+        "subagent_start" => AgenticEvent::SubagentStart,
+        "subagent_stop" => AgenticEvent::SubagentStop,
+        "before_model" => AgenticEvent::BeforeModel,
+        "after_model" => AgenticEvent::AfterModel,
+        "before_compact" | "pre_compact" => AgenticEvent::BeforeCompact,
+        "notification" => AgenticEvent::Notification,
+        other => bail!(
+            "Unknown event: {other}\n\n\
+            Available events:\n  \
+            session_start, session_end, before_prompt, before_tool, after_tool,\n  \
+            tool_error, permission_request, turn_complete, turn_error,\n  \
+            subagent_start, subagent_stop, before_model, after_model,\n  \
+            before_compact, notification"
+        ),
+    };
+    Ok(event)
+}
+
+/// Generate a mock payload for testing an event.
+fn mock_payload(provider: Provider, event: &AgenticEvent) -> Value {
+    match provider {
+        Provider::Claude => mock_claude_payload(event),
+        Provider::Codex => mock_codex_payload(event),
+        Provider::Gemini => mock_gemini_payload(event),
+        Provider::OpenCode => mock_opencode_payload(event),
+        _ => mock_claude_payload(event), // Fallback to Claude format
+    }
+}
+
+/// Mock payload in Claude format.
+fn mock_claude_payload(event: &AgenticEvent) -> Value {
+    let hook_event_name = match event {
+        AgenticEvent::SessionStart => "SessionStart",
+        AgenticEvent::SessionEnd => "SessionEnd",
+        AgenticEvent::BeforePrompt => "UserPromptSubmit",
+        AgenticEvent::BeforeTool => "PreToolUse",
+        AgenticEvent::AfterTool => "PostToolUse",
+        AgenticEvent::ToolError => "PostToolUseFailure",
+        AgenticEvent::PermissionRequest => "PermissionRequest",
+        AgenticEvent::TurnComplete => "Stop",
+        AgenticEvent::SubagentStart => "SubagentStart",
+        AgenticEvent::SubagentStop => "SubagentStop",
+        AgenticEvent::BeforeCompact => "PreCompact",
+        AgenticEvent::Notification => "Notification",
+        _ => "Stop", // Fallback for unsupported events
+    };
+
+    let mut payload = json!({
+        "hook_event_name": hook_event_name,
+        "session_id": "mock-session-001",
+        "cwd": "/home/user/project"
+    });
+
+    // Add event-specific fields
+    match event {
+        AgenticEvent::BeforePrompt => {
+            payload["prompt"] = json!("Fix the bug in main.rs");
+        }
+        AgenticEvent::BeforeTool | AgenticEvent::AfterTool | AgenticEvent::PermissionRequest => {
+            payload["tool_name"] = json!("Bash");
+            payload["tool_input"] = json!({"command": "cargo build"});
+        }
+        AgenticEvent::ToolError => {
+            payload["tool_name"] = json!("Bash");
+            payload["error"] = json!("command failed with exit code 1");
+        }
+        AgenticEvent::SubagentStart | AgenticEvent::SubagentStop => {
+            payload["agent_type"] = json!("task");
+        }
+        AgenticEvent::Notification => {
+            payload["notification"] = json!({
+                "type": "info",
+                "message": "Context window 80% full"
+            });
+        }
+        _ => {}
+    }
+
+    payload
+}
+
+/// Mock payload in Codex format.
+fn mock_codex_payload(event: &AgenticEvent) -> Value {
+    let type_field = match event {
+        AgenticEvent::TurnComplete => "agent_turn_complete",
+        AgenticEvent::PermissionRequest => "approval_request",
+        _ => "agent_turn_complete",
+    };
+
+    json!({
+        "type": type_field,
+        "thread_id": "mock-thread-001",
+        "session_id": "mock-session-001"
+    })
+}
+
+/// Mock payload in Gemini format.
+fn mock_gemini_payload(event: &AgenticEvent) -> Value {
+    let hook_event_name = match event {
+        AgenticEvent::TurnComplete => "turn_end",
+        AgenticEvent::PermissionRequest => "turn_end",
+        _ => "turn_end",
+    };
+
+    json!({
+        "hook_event_name": hook_event_name,
+        "session_id": "mock-session-001"
+    })
+}
+
+/// Mock payload in OpenCode format.
+fn mock_opencode_payload(event: &AgenticEvent) -> Value {
+    let event_type = match event {
+        AgenticEvent::TurnComplete => "turn_complete",
+        AgenticEvent::PermissionRequest => "permission_request",
+        _ => "turn_complete",
+    };
+
+    json!({
+        "event_type": event_type,
+        "session_id": "mock-session-001"
+    })
+}
+
 fn read_stdin_json() -> Result<Value> {
     let mut buf = String::new();
     std::io::stdin().read_to_string(&mut buf)?;
     let raw: Value = serde_json::from_str(&buf)?;
     Ok(raw)
-}
-
-fn resolve_provider(hint: Option<&str>, raw: &Value) -> Result<Provider> {
-    if let Some(name) = hint {
-        return parse_provider(name);
-    }
-    if raw.get("hook_event_name").is_some() {
-        return Ok(Provider::Claude);
-    }
-    if raw.get("type").is_some() && raw.get("thread_id").is_some() {
-        return Ok(Provider::Codex);
-    }
-    if raw.get("event_type").is_some() {
-        return Ok(Provider::OpenCode);
-    }
-    if raw.get("event_name").is_some() {
-        return Ok(Provider::Gemini);
-    }
-    bail!("Could not detect provider from payload. Use --provider to specify.")
 }
 
 fn parse_provider(name: &str) -> Result<Provider> {
@@ -129,6 +306,64 @@ fn parse_provider(name: &str) -> Result<Provider> {
         "codex" => Ok(Provider::Codex),
         "gemini" => Ok(Provider::Gemini),
         "opencode" | "open_code" => Ok(Provider::OpenCode),
-        other => bail!("Unknown provider: {other}"),
+        other => bail!("Unknown provider: {other}\n\nSupported: claude, codex, gemini, opencode"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_event_canonical_names() {
+        assert_eq!(parse_event("turn_complete").unwrap(), AgenticEvent::TurnComplete);
+        assert_eq!(parse_event("permission_request").unwrap(), AgenticEvent::PermissionRequest);
+        assert_eq!(parse_event("tool_error").unwrap(), AgenticEvent::ToolError);
+        assert_eq!(parse_event("session_start").unwrap(), AgenticEvent::SessionStart);
+    }
+
+    #[test]
+    fn parse_event_native_names() {
+        // Claude native names
+        assert_eq!(parse_event("Stop").unwrap(), AgenticEvent::TurnComplete);
+        assert_eq!(parse_event("PreToolUse").unwrap(), AgenticEvent::BeforeTool);
+        assert_eq!(parse_event("PostToolUseFailure").unwrap(), AgenticEvent::ToolError);
+    }
+
+    #[test]
+    fn parse_event_case_insensitive() {
+        assert_eq!(parse_event("TURN_COMPLETE").unwrap(), AgenticEvent::TurnComplete);
+        assert_eq!(parse_event("Turn_Complete").unwrap(), AgenticEvent::TurnComplete);
+    }
+
+    #[test]
+    fn parse_event_hyphen_or_underscore() {
+        assert_eq!(parse_event("turn-complete").unwrap(), AgenticEvent::TurnComplete);
+        assert_eq!(parse_event("before-tool").unwrap(), AgenticEvent::BeforeTool);
+    }
+
+    #[test]
+    fn parse_event_unknown_fails() {
+        assert!(parse_event("not_an_event").is_err());
+    }
+
+    #[test]
+    fn mock_claude_payload_has_required_fields() {
+        let payload = mock_claude_payload(&AgenticEvent::TurnComplete);
+        assert_eq!(payload["hook_event_name"], "Stop");
+        assert!(payload["session_id"].is_string());
+    }
+
+    #[test]
+    fn mock_claude_payload_tool_events_have_tool_name() {
+        let payload = mock_claude_payload(&AgenticEvent::BeforeTool);
+        assert_eq!(payload["tool_name"], "Bash");
+        assert!(payload["tool_input"].is_object());
+    }
+
+    #[test]
+    fn mock_claude_payload_error_has_error_field() {
+        let payload = mock_claude_payload(&AgenticEvent::ToolError);
+        assert!(payload["error"].is_string());
     }
 }

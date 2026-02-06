@@ -22,6 +22,13 @@ pub struct SyncArgs {
     /// Sync only a specific provider.
     #[arg(long)]
     pub provider: Option<String>,
+    /// Remove unsupported events from config.
+    ///
+    /// When enabled, removes event bindings from providers that don't support
+    /// those events via hooks. This cleans up the config file to eliminate
+    /// "These events won't fire" warnings.
+    #[arg(long)]
+    pub fix: bool,
 }
 
 /// Action taken for a hook during sync.
@@ -31,8 +38,6 @@ enum SyncAction {
     Added(String),
     /// Stale hook was removed from provider config.
     RemovedStale(String),
-    /// Invalid hook found in claudine config, removed.
-    RemovedInvalid(String),
     /// Provider has no hook support.
     NoSupport,
     /// Provider requires wrapper/proxy approach.
@@ -123,14 +128,6 @@ fn prose_error(msg: &str) -> Prose {
     Prose::new(format!("<red><b>error:</b> {}</red>", msg))
 }
 
-/// Format a prose for an invalid hook found in config.
-fn prose_removed_invalid(hook: &str) -> Prose {
-    Prose::new(format!(
-        "found invalid hook <inverse> {} </inverse> in claudine config, <b>removed</b>",
-        hook
-    ))
-}
-
 /// Build a provider section with its actions.
 fn build_provider_section(provider: Provider, actions: Vec<SyncAction>) -> UnorderedList {
     let mut items: Vec<RenderableContent> = vec![];
@@ -146,7 +143,6 @@ fn build_provider_section(provider: Provider, actions: Vec<SyncAction>) -> Unord
             let prose = match action {
                 SyncAction::Added(hook) => prose_added(&hook),
                 SyncAction::RemovedStale(hook) => prose_removed_stale(&hook),
-                SyncAction::RemovedInvalid(hook) => prose_removed_invalid(&hook),
                 SyncAction::NoSupport => prose_no_support(),
                 SyncAction::WrapperOnly(guidance) => prose_wrapper_only(&guidance),
                 SyncAction::NotDetected => prose_not_detected(),
@@ -331,6 +327,110 @@ pub async fn run(args: SyncArgs) -> Result<()> {
     }
 
     log::data("");
+
+    // Check for unsupported events in config
+    if let Some(cfg) = &config {
+        let mut unsupported_warnings: Vec<(Provider, Vec<String>)> = Vec::new();
+
+        for (provider, provider_config) in &cfg.providers {
+            let unsupported: Vec<String> = provider_config
+                .events
+                .iter()
+                .filter(|(event, binding)| {
+                    binding.enabled && !provider.supports_event_via_hook(event)
+                })
+                .map(|(event, _)| event.to_string())
+                .collect();
+
+            if !unsupported.is_empty() {
+                unsupported_warnings.push((*provider, unsupported));
+            }
+        }
+
+        if !unsupported_warnings.is_empty() {
+            if args.fix && !args.dry_run {
+                // Fix: Remove unsupported events and save config
+                let mut fixed_config = cfg.clone();
+                let removed =
+                    claudine::dispatch::loader::remove_unsupported_events(&mut fixed_config);
+
+                // Save the fixed config
+                match claudine::dispatch::loader::save_config(&fixed_config) {
+                    Ok(path) => {
+                        let header = Prose::new(
+                            "<green><b>Fixed:</b></green> Removed unsupported events from config:",
+                        );
+                        log::data(&format!("✓ {}", header.fallback_render(&term)));
+                        log::data("");
+
+                        for (provider, events) in &removed {
+                            let events_str = events.join(", ");
+                            let line = Prose::new(format!(
+                                "  <b>{}</b>: <dim><strikethrough>{}</strikethrough></dim>",
+                                provider, events_str
+                            ));
+                            log::data(&line.fallback_render(&term));
+                        }
+
+                        log::data("");
+                        let saved_msg = Prose::new(format!(
+                            "<dim>Config saved to {}</dim>",
+                            path.display()
+                        ));
+                        log::data(&saved_msg.fallback_render(&term));
+                        log::data("");
+                    }
+                    Err(e) => {
+                        let error_msg =
+                            Prose::new(format!("<red><b>Error:</b></red> Failed to save config: {}", e));
+                        log::data(&error_msg.fallback_render(&term));
+                        log::data("");
+                    }
+                }
+            } else if args.fix && args.dry_run {
+                // Dry run: Show what would be removed
+                let header = Prose::new(
+                    "<yellow><b>Would fix:</b></yellow> These unsupported events would be removed:",
+                );
+                log::data(&format!("⚠ {}", header.fallback_render(&term)));
+                log::data("");
+
+                for (provider, events) in &unsupported_warnings {
+                    let events_str = events.join(", ");
+                    let line = Prose::new(format!(
+                        "  <b>{}</b>: <dim><strikethrough>{}</strikethrough></dim>",
+                        provider, events_str
+                    ));
+                    log::data(&line.fallback_render(&term));
+                }
+
+                log::data("");
+            } else {
+                // No fix: Show warning
+                let warning_header = Prose::new(
+                    "<yellow><b>Warning:</b></yellow> Some configured events are not supported by their providers:",
+                );
+                log::data(&format!("⚠ {}", warning_header.fallback_render(&term)));
+                log::data("");
+
+                for (provider, events) in &unsupported_warnings {
+                    let events_str = events.join(", ");
+                    let line = Prose::new(format!(
+                        "  <b>{}</b>: <red><strikethrough>{}</strikethrough></red>",
+                        provider, events_str
+                    ));
+                    log::data(&line.fallback_render(&term));
+                }
+
+                log::data("");
+                let hint = Prose::new(
+                    "<dim>These events won't fire. Use --fix to remove them, or edit ~/.hooker manually.</dim>",
+                );
+                log::data(&hint.fallback_render(&term));
+                log::data("");
+            }
+        }
+    }
 
     Ok(())
 }

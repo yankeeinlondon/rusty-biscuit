@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use color_eyre::eyre::Result;
 
 mod commands;
@@ -64,8 +64,9 @@ async fn main() -> Result<()> {
         Some(Commands::Hooks(args)) => commands::hooks::run(args, cli.verbose > 0),
         Some(Commands::Uninstall(args)) => commands::uninstall::run(args),
         None => {
-            // Default: read from stdin as handle command
-            commands::handle::run_default().await
+            // No subcommand given - show help
+            Cli::command().print_help()?;
+            Ok(())
         }
     }
 }

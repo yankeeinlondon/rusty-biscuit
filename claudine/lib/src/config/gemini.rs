@@ -246,7 +246,7 @@ impl GeminiConfigurator {
 /// Map Claudine event names to Gemini CLI native hook names.
 ///
 /// Returns `None` for events that Gemini doesn't support natively.
-/// Unsupported events: ToolError, PermissionRequest (uses Notification),
+/// Unsupported events: ToolError, PermissionRequest, HumanInTheLoop,
 /// TurnError, SubagentStart, SubagentStop.
 fn to_gemini_native(event: &AgenticEvent) -> Option<String> {
     match event {
@@ -263,6 +263,7 @@ fn to_gemini_native(event: &AgenticEvent) -> Option<String> {
         // Unsupported events - Gemini doesn't have these hook types
         AgenticEvent::ToolError
         | AgenticEvent::PermissionRequest
+        | AgenticEvent::HumanInTheLoop
         | AgenticEvent::TurnError
         | AgenticEvent::SubagentStart
         | AgenticEvent::SubagentStop => None,

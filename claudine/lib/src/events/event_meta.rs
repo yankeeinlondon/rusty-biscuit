@@ -77,6 +77,31 @@ pub struct EventMeta {
     pub env: EnvironmentContext,
 }
 
+impl EventMeta {
+    /// Create a minimal EventMeta with only environment context populated.
+    ///
+    /// Useful for resolving context variables without a real event.
+    pub fn dummy_with_env(env: EnvironmentContext) -> Self {
+        Self {
+            provider: Provider::Claude,
+            event: AgenticEvent::SessionStart,
+            timestamp: Utc::now(),
+            session_id: None,
+            cwd: None,
+            tool_name: None,
+            tool_input: None,
+            tool_response: None,
+            error: None,
+            prompt: None,
+            agent_type: None,
+            notification_type: None,
+            notification_message: None,
+            extra: HashMap::new(),
+            env,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

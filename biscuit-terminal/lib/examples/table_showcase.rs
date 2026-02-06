@@ -120,7 +120,9 @@ fn main() {
                 "2012".into(),
                 TableCellContent::Integer(102000),
             ],
-        ]);
+        ])
+        .alternate_background_color()
+        .alternate_text_color();
     println!("{}\n", table.render(Some(80)));
 
     // ── 4. Multi-Currency ─────────────────────────────────────────
