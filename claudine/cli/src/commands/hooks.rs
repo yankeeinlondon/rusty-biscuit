@@ -1121,7 +1121,7 @@ fn run_describe() -> Result<()> {
     ];
 
     let term = Terminal::new();
-    let mut table = Table::new().with_columns(columns);
+    let mut table = Table::new().with_columns(columns).alternate_text_color();
     table.layout_mut().left_margin = Margin::Chars(1);
 
     // Add a row for each event

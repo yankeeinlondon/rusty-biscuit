@@ -110,8 +110,8 @@ Ask the user:
 **Actions:**
 
 1. **Create log file:**
-   - Path: `.ai/logs/YYYY-MM-[planName]-phase[N]-log.md`
-   - Create `.ai/logs/` directory if it doesn't exist
+   - Path: `.ai/plans/YYYY-MM-[planName]-phase[N]-log.md`
+   - Create `.ai/plans/` directory if it doesn't exist
 
 2. **Write log file with starting state:**
 
@@ -320,13 +320,13 @@ Ask the user:
    1. Review design artifacts in [paths]
    2. Run `/execute-phase [N+1]` to continue to next phase
 
-   **Log file:** `.ai/logs/YYYY-MM-[planName]-phase[N]-log.md`
+   **Log file:** `.ai/plans/YYYY-MM-[planName]-phase[N]-log.md`
    ```
 
 ## Design Phase Checklist
 
 - [ ] Phase identified as DESIGN phase
-- [ ] LOG created in `.ai/logs/`
+- [ ] LOG created in `.ai/plans/`
 - [ ] Starting position documented
 - [ ] Existing architecture explored
 - [ ] Design artifacts created (ADRs, schemas, APIs, etc.)
@@ -462,9 +462,9 @@ Ask the user:
 **Actions:**
 
 1. **Create log file:**
-   - Path: `.ai/logs/YYYY-MM-[planName]-phase[N]-log.md`
-   - Example: `.ai/logs/2025-12-user-auth-phase1-log.md`
-   - Create `.ai/logs/` directory if it doesn't exist
+   - Path: `.ai/plans/YYYY-MM-[planName]-phase[N]-log.md`
+   - Example: `.ai/plans/2025-12-user-auth-phase1-log.md`
+   - Create `.ai/plans/` directory if it doesn't exist
 
 2. **Write log file with starting state:**
 
@@ -826,7 +826,7 @@ Testing mistakes caught here save hours of debugging and rework later. If you're
    1. Run `/execute-phase [N+1]` to continue to next phase
    2. Or review the implementation in [paths]
 
-   **Log file:** `.ai/logs/YYYY-MM-[planName]-phase[N]-log.md`
+   **Log file:** `.ai/plans/YYYY-MM-[planName]-phase[N]-log.md`
    ```
 
 ## Important Reminders
@@ -858,7 +858,7 @@ Use this checklist to ensure you don't miss any steps:
 - [ ] **All skills activated**
 - [ ] Plan and phase identified
 - [ ] **Phase type detected** (DESIGN vs IMPLEMENTATION)
-- [ ] LOG created in `.ai/logs/`
+- [ ] LOG created in `.ai/plans/`
 - [ ] Starting position documented
 
 ### Design Phase Checklist

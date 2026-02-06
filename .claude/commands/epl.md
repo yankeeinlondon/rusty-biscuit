@@ -65,7 +65,7 @@ Before starting:
 
 1. Ensure required directories exist:
    ```bash
-   mkdir -p .ai/plans .ai/logs
+   mkdir -p .ai/plans
    ```
 
 2. A plan must exist in `.ai/plans/` directory (format: `YYYY-MM-DD.plan-name.md`)
@@ -269,7 +269,7 @@ If any pre-flight check fails, report to the user and ask whether to proceed or 
    **This must happen BEFORE any phases are launched.** It establishes the baseline for tracking.
 
 7. **Create execution log:**
-   - Path: `.ai/logs/YYYY-MM-DD.plan-execution-log.md`
+   - Path: `.ai/plans/YYYY-MM-DD.plan-execution-log.md`
    - Document plan name, phases, and execution strategy
 
 ---
@@ -434,7 +434,7 @@ Load the guidelines for the principal owner and any supporting sub-agents:
 ### Step 1: Create Design Phase Log
 
 Create a log file for this design phase:
-- Path: \`.ai/logs/YYYY-MM-DD.[planName]-phase-[N]-log.md\`
+- Path: \`.ai/plans/YYYY-MM-DD.[planName]-phase-[N]-log.md\`
 
 Document:
 - Phase type: DESIGN
@@ -874,7 +874,7 @@ if (phase2Result.status === "COMPLETE") {
 
 ### 4.3 Update Execution Log
 
-After each phase completes, update `.ai/logs/YYYY-MM-DD.plan-execution-log.md`:
+After each phase completes, update `.ai/plans/YYYY-MM-DD.plan-execution-log.md`:
 
 ```markdown
 ## Execution Progress
@@ -1013,7 +1013,7 @@ Provide a comprehensive summary:
 
 ### Logs
 
-- Execution log: `.ai/logs/YYYY-MM-DD.plan-execution-log.md`
+- Execution log: `.ai/plans/YYYY-MM-DD.plan-execution-log.md`
 - Plan file: `.ai/plans/[plan-file].md`
 ```
 
@@ -1191,7 +1191,7 @@ Phase orchestrators must actively manage context to prevent overflow in large mu
 
 1. **Request summaries from sub-agents, not full file contents:**
    - Sub-agents should return only: status, file paths, key decisions, blockers
-   - Full implementation details go to `.ai/logs/YYYY-MM-DD.[planName]-phase-N-details.md`
+   - Full implementation details go to `.ai/plans/YYYY-MM-DD.[planName]-phase-N-details.md`
 
 2. **Use the standard output format:**
    Sub-agents return a structured response with:
@@ -1205,7 +1205,7 @@ Phase orchestrators must actively manage context to prevent overflow in large mu
 
 3. **Store detailed outputs in log files:**
    ```
-   .ai/logs/
+   .ai/plans/
    ├── YYYY-MM-DD.plan-execution-log.md           (main log)
    ├── YYYY-MM-DD.[planName]-phase-1-details.md   (sub-agent details)
    ├── YYYY-MM-DD.[planName]-phase-2-details.md
@@ -1221,7 +1221,7 @@ Phase orchestrators must actively manage context to prevent overflow in large mu
    Include in sub-agent prompts:
    ```
    Return a SUMMARY to the orchestrator (max 500 tokens).
-   Write DETAILED notes to: .ai/logs/YYYY-MM-DD.[planName]-phase-N-details.md
+   Write DETAILED notes to: .ai/plans/YYYY-MM-DD.[planName]-phase-N-details.md
    ```
 
 ### Context Budget Guidelines

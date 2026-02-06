@@ -121,8 +121,7 @@ fn main() {
                 TableCellContent::Integer(102000),
             ],
         ])
-        .alternate_background_color()
-        .alternate_text_color();
+        .alternate_background_color();
     println!("{}\n", table.render(Some(80)));
 
     // ── 4. Multi-Currency ─────────────────────────────────────────
@@ -179,6 +178,7 @@ fn main() {
             vec!["B".into(), TableCellContent::Integer(23), "46%".into()],
             vec!["C".into(), TableCellContent::Integer(8), "16%".into()],
             vec!["D".into(), TableCellContent::Integer(4), "8%".into()],
-        ]);
+        ])
+        .alternate_text_color();
     println!("{}\n", table.render(Some(80)));
 }

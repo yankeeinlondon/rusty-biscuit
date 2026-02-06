@@ -32,3 +32,5 @@ This can be useful for CLI apps to provide rich rendering to the console that do
 ### Markdown-to-HTML
 
 Rendering to HTML (aka, the Browser) is deploying to the most feature-rich platform and therefore there are a large number of features that only operate on this output target. This can be useful for producing web content and documentation for users. It _could_ be used for AI too but in general AI tends to like Markdown better.
+
+

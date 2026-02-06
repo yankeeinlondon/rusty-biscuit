@@ -75,7 +75,11 @@ enum Command {
     },
 
     /// List available built-in sound effects
-    ListEffects,
+    ListEffects {
+        /// Filter effects by name, description, or category (case-insensitive)
+        #[arg(value_name = "FILTER")]
+        filter: Option<String>,
+    },
 
     /// Show a table of available audio players
     Players,
@@ -188,8 +192,8 @@ async fn run_cli() {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Command::ListEffects) => {
-            list_sound_effects();
+        Some(Command::ListEffects { filter }) => {
+            list_sound_effects(filter.as_deref());
         }
         Some(Command::Players) => {
             let (markdown, missing) = build_metadata_markdown();
@@ -227,8 +231,8 @@ fn run_cli_sync() {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Command::ListEffects) => {
-            list_sound_effects();
+        Some(Command::ListEffects { filter }) => {
+            list_sound_effects(filter.as_deref());
         }
         Some(Command::Players) => {
             let (markdown, missing) = build_metadata_markdown();
@@ -344,7 +348,7 @@ fn play_effect_sync(name: &str, opts: &PlaybackOptions) {
     }
 }
 
-fn list_sound_effects() {
+fn list_sound_effects(filter: Option<&str>) {
     let effects = SoundEffect::all();
     if effects.is_empty() {
         eprintln!(
@@ -353,13 +357,35 @@ fn list_sound_effects() {
         std::process::exit(1);
     }
 
+    // Apply fuzzy filter: case-insensitive, strip non-alphanumeric, match against
+    // name, description, and category
+    let effects: Vec<SoundEffect> = match filter {
+        Some(query) => {
+            let normalized_query = fuzzy_normalize(query);
+            effects
+                .into_iter()
+                .filter(|effect| {
+                    fuzzy_normalize(effect.name()).contains(&normalized_query)
+                        || fuzzy_normalize(effect.description()).contains(&normalized_query)
+                        || fuzzy_normalize(effect.category()).contains(&normalized_query)
+                })
+                .collect()
+        }
+        None => effects,
+    };
+
+    if effects.is_empty() {
+        eprintln!("No effects match filter {:?}.", filter.unwrap_or(""));
+        std::process::exit(1);
+    }
+
     // Group effects by category
     let mut categories: BTreeMap<&str, Vec<SoundEffect>> = BTreeMap::new();
-    for effect in effects {
+    for effect in &effects {
         categories
             .entry(effect.category())
             .or_default()
-            .push(effect);
+            .push(*effect);
     }
 
     // Build the nested list structure
@@ -390,6 +416,14 @@ fn list_sound_effects() {
     // Render and print
     let output = top_list.render(None);
     println!("{}", output);
+}
+
+/// Normalize a string for fuzzy matching: lowercase, strip non-alphanumeric.
+fn fuzzy_normalize(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect::<String>()
+        .to_lowercase()
 }
 
 #[cfg(feature = "audio-ducking")]
