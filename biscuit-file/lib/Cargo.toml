@@ -1,0 +1,45 @@
+[package]
+name = "biscuit-file"
+version = "0.1.0"
+edition = "2024"
+description = "File format utilities for PDF, TOML, and YAML"
+license = "MIT"
+
+[features]
+default = ["toml", "yaml", "extract", "lopdf"]
+
+# Format support
+toml = ["dep:toml"]
+yaml = ["dep:serde_yaml_ng"]
+
+# PDF backends
+extract = ["dep:pdf-extract"]
+lopdf = ["dep:lopdf"]
+pdfium = ["dep:pdfium-render"]
+
+# Optional features
+schema = ["dep:jsonschema"]
+full = ["toml", "yaml", "extract", "lopdf", "pdfium", "schema"]
+
+[dependencies]
+# Core serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+
+# File type detection
+infer = "0.19"
+
+# TOML support (optional, default)
+toml = { version = "0.8", optional = true }
+
+# YAML support (optional, default)
+serde_yaml_ng = { version = "0.10", optional = true }
+
+# PDF backends
+pdf-extract = { version = "0.7", optional = true }
+lopdf = { version = "0.36", optional = true }
+pdfium-render = { version = "0.8", optional = true }
+
+# Schema validation
+jsonschema = { version = "0.28", optional = true }

@@ -77,16 +77,8 @@ check:
 
 # Open Claude Code in yolo mode
 oc *args="":
-    @clear
-    @cd ..
-    @echo "Loading {{BOLD}}Opencode{{RESET}}"
-    @opencode {{args}}
-    @cd -
+    @cd .. && echo "Loading {{BOLD}}Opencode{{RESET}}" && opencode {{args}}
 
 # Open Opencode
 cc *args="":
-    @cd ..
-    @clear
-    @echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @claude --dangerously-skip-permissions {{args}}
-    @cd -
+    @cd .. && echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})" && claude --dangerously-skip-permissions {{args}}

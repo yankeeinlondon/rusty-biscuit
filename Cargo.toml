@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
+    "biscuit-file/cli",
+    "biscuit-file/lib",
     "biscuit-hash/cli",
     "biscuit-hash/lib",
     "biscuit-speaks",
