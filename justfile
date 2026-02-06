@@ -2,7 +2,7 @@ set dotenv-load
 set positional-arguments
 
 # List of areas in this monorepo
-areas := "biscuit-hash biscuit-speaks biscuit-terminal playa playa-cli unchained-ai research so-you-say tree-hugger tree-hugger-cli darkmatter sniff claudine"
+areas := "biscuit-hash biscuit-speaks biscuit-terminal biscuit-file playa playa-cli unchained-ai research so-you-say tree-hugger tree-hugger-cli darkmatter sniff claudine"
 
 BOLD := '\033[1m'
 RESET := '\033[0m'
@@ -105,6 +105,9 @@ install:
             echo "- no justfile for the area **$area**" >&2
         fi
     done
+    if command -v so-you-say >/dev/null 2>&1; then \
+        so-you-say "all apps in the monorepo have been rebuilt and installed"; \
+    fi
 
 # executes the latest Darkmatter CLI code in debug mode
 md *args="":

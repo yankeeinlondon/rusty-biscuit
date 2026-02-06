@@ -1,16 +1,18 @@
 # Darkmatter Processing Pipeline
 
-| Stage 1          | Stage 2       | Stage 3        |  Stage 4          |
-| -------------    | ------------- | -------        | ---------------   |
-| Interpolation    | Transclusion  | Summarization  | Table Rendering   |
-| Text Replacement | Charting      | Consolidation  | YouTube Embedding |
-| Mermaid Rendering|               | Normalization  | Popover           |
-| Image Rendering  |               |                | List Expansion    |
-|                  |               |                | Smart Image       |
-|                  |               |                | Disclosure Blocks |
-|                  |               |                | Block Columns     |
-|                  |               |                | Audio Content     |
-
+| **Stage 1**: Preparation  | **Stage 2**: Early Composition | Stage 3: AI Mut & Gen |  Stage 4: Optimization |
+| -------------             | -------------                  | -------               | ---------------        |
+| Cleaning                  | Transclusion                   | Summarization         | Table Rendering        |
+| Interpolation             |                                | Consolidation         | YouTube Embedding      |
+| Text Replacement          |                                | Normalization         | Popover                |
+|                           |                                |                       | List Expansion         |
+|                           |                                |                       | Smart Image            |
+|                           |                                |                       | Image Rendering        |
+|                           |                                |                       | Disclosure Blocks      |
+|                           |                                |                       | Block Columns          |
+|                           |                                |                       | Audio Content          |
+|                           |                                |                       | Charting               |
+|                           |                                |                       | Mermaid Rendering      |
 
 
 ## Variance by Output Target
@@ -33,4 +35,17 @@ This can be useful for CLI apps to provide rich rendering to the console that do
 
 Rendering to HTML (aka, the Browser) is deploying to the most feature-rich platform and therefore there are a large number of features that only operate on this output target. This can be useful for producing web content and documentation for users. It _could_ be used for AI too but in general AI tends to like Markdown better.
 
+## Features
+
+| Feature                                    | Status  | HTML | MD | Term |
+| ----------------                           | ------- | ---- | -- | ---- |
+|[Cleaning](./cleaning.md)                   | ✅      |   -  | ✅ |   -  |
+|[Interpolation](./interpolation.md)         | -       |  ✅  | ✅ |   ✅ |
+|[Text Replacement](./text-replacement.md)   | -       |  ✅  | ✅ |   ✅ |
+|[Transclusion](./transclusion.md)           | -       |  ✅  | ✅ |   ✅ |
+|[Summarization](./summarization.md)         | -       |  ✅  | ✅ |   ✅ |
+|[Consolidation](./consolidation.md)         | -       |  ✅  | ✅ |   ✅ |
+|[Normalization](./Normalization.md)         | -       |  ✅  | ✅ |   ✅ |
+|[Charting](./charting.md)                   | -       |      |    |      |
+|[Mermaid Rendering](./mermaid-rendering.md) | ✅      |  -   | -  |  ✅  |
 
