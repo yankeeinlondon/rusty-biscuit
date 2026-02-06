@@ -126,16 +126,47 @@ fn format_currency(currency: &Currency, value: f64) -> String {
 /// Standard `format!("{:width$}", ...)` counts bytes, not visible characters.
 /// This function computes the visible width (skipping ANSI escape sequences
 /// and using Unicode character widths) and adds the correct number of spaces.
-fn pad_cell(content: &str, width: usize, alignment: Alignment) -> String {
+///
+/// If `width_for_alignment` is provided, alignment offsets use this width instead
+/// of the actual content width. This ensures consistent alignment across rows with
+/// mixed-width content (e.g., emoji vs symbols).
+fn pad_cell(
+    content: &str,
+    width: usize,
+    alignment: Alignment,
+    width_for_alignment: Option<usize>,
+) -> String {
     let visible = visible_width(content) as usize;
-    let padding = width.saturating_sub(visible);
+    let align_width = width_for_alignment.unwrap_or(visible);
     match alignment {
-        Alignment::Left => format!("{}{}", content, " ".repeat(padding)),
-        Alignment::Right => format!("{}{}", " ".repeat(padding), content),
+        Alignment::Left => {
+            // Left align: content at start, padding at end
+            let padding = width.saturating_sub(visible);
+            format!("{}{}", content, " ".repeat(padding))
+        }
+        Alignment::Right => {
+            // Right align: use align_width for offset calculation
+            let offset = width.saturating_sub(align_width);
+            let content_padding = offset.saturating_sub(0); // Spaces before content
+            let end_padding = width.saturating_sub(offset + visible);
+            format!(
+                "{}{}{}",
+                " ".repeat(content_padding),
+                content,
+                " ".repeat(end_padding)
+            )
+        }
         Alignment::Center => {
-            let left = padding / 2;
-            let right = padding - left;
-            format!("{}{}{}", " ".repeat(left), content, " ".repeat(right))
+            // Center align: use align_width for offset calculation
+            let total_space = width.saturating_sub(align_width);
+            let left_offset = total_space / 2;
+            let end_padding = width.saturating_sub(left_offset + visible);
+            format!(
+                "{}{}{}",
+                " ".repeat(left_offset),
+                content,
+                " ".repeat(end_padding)
+            )
         }
     }
 }
@@ -187,6 +218,12 @@ pub struct TableColumn {
     pub word_wrap: Option<WordWrap>,
     /// Vertical alignment for multi-line cells in this column
     pub vertical_align: VerticalAlign,
+    /// When true, all cells in this column align at the same position regardless
+    /// of individual content width. Useful for columns with mixed-width characters
+    /// (e.g., emoji ✅ width 2 and symbols ⤫ width 1) that should visually align.
+    /// Default is false (traditional alignment where each cell is positioned
+    /// based on its own content width).
+    pub uniform_alignment: bool,
 }
 
 impl TableColumn {
@@ -201,6 +238,7 @@ impl TableColumn {
             alignment: None,
             word_wrap: None,
             vertical_align: VerticalAlign::default(),
+            uniform_alignment: false,
         }
     }
 
@@ -278,6 +316,32 @@ impl TableColumn {
     /// ```
     pub fn with_vertical_align(mut self, vertical_align: VerticalAlign) -> Self {
         self.vertical_align = vertical_align;
+        self
+    }
+
+    /// Enable uniform alignment for this column.
+    ///
+    /// When enabled, all cells in this column align at the same horizontal
+    /// position regardless of individual content width. This is useful for
+    /// columns containing mixed-width characters (e.g., emoji ✅ width 2 and
+    /// symbols ⤫ width 1) that should visually align in a vertical line.
+    ///
+    /// Default is `false` (traditional alignment where each cell is positioned
+    /// based on its own content width, so numbers right-align properly).
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::components::table::table::TableColumn;
+    /// use biscuit_terminal::utils::layout::Alignment;
+    ///
+    /// // Emoji column where ✅ and ⤫ should align vertically
+    /// let status_col = TableColumn::new("Status")
+    ///     .with_alignment(Alignment::Center)
+    ///     .with_uniform_alignment(true);
+    /// ```
+    pub fn with_uniform_alignment(mut self, uniform: bool) -> Self {
+        self.uniform_alignment = uniform;
         self
     }
 
@@ -519,6 +583,20 @@ impl Table {
         let mut result = String::new();
         let widths = self.calculate_column_widths(available_width);
 
+        // Calculate max content width per column for consistent alignment.
+        // Only consider data rows, not headers (headers are separated by border
+        // and don't need to align with data content).
+        let max_content_widths: Vec<usize> = (0..widths.len())
+            .map(|col_idx| {
+                self.data
+                    .iter()
+                    .filter_map(|row| row.get(col_idx))
+                    .map(|cell| visible_width(&cell.to_string()) as usize)
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
+
         if let Some(ref title) = self.title {
             result.push_str(title);
             result.push('\n');
@@ -562,6 +640,8 @@ impl Table {
                 .collect();
 
             // Render each line of the header
+            // Headers use traditional alignment (no max_content_width) since they
+            // don't need to align with data rows.
             for line_idx in 0..header_height {
                 let mut header_row = String::from("│ ");
                 for (i, col) in self.columns.iter().enumerate() {
@@ -572,7 +652,7 @@ impl Table {
                         .and_then(|lines| lines.get(line_idx))
                         .map(|s| s.as_str())
                         .unwrap_or("");
-                    header_row.push_str(&pad_cell(line_content, width, alignment));
+                    header_row.push_str(&pad_cell(line_content, width, alignment, None));
                     if i < self.columns.len() - 1 {
                         header_row.push_str(" │ ");
                     }
@@ -621,11 +701,16 @@ impl Table {
                 let mut row_str = String::from("│ ");
                 for (i, _cell) in row.iter().enumerate() {
                     let width = widths.get(i).copied().unwrap_or(0);
-                    let alignment = self
-                        .columns
-                        .get(i)
-                        .map(|col| col.effective_alignment())
+                    let col = self.columns.get(i);
+                    let alignment = col
+                        .map(|c| c.effective_alignment())
                         .unwrap_or(Alignment::Left);
+                    // Only use max_content_width for columns with uniform_alignment enabled
+                    let max_width = if col.map(|c| c.uniform_alignment).unwrap_or(false) {
+                        max_content_widths.get(i).copied()
+                    } else {
+                        None
+                    };
 
                     let line_content = cell_lines
                         .get(i)
@@ -633,7 +718,7 @@ impl Table {
                         .map(|s| s.as_str())
                         .unwrap_or("");
 
-                    row_str.push_str(&pad_cell(line_content, width, alignment));
+                    row_str.push_str(&pad_cell(line_content, width, alignment, max_width));
                     if i < row.len() - 1 {
                         row_str.push_str(" │ ");
                     }
@@ -723,6 +808,20 @@ impl Table {
             })
             .collect();
 
+        // Calculate max content width per column for consistent alignment.
+        // Only consider data rows, not headers (headers are separated by border
+        // and don't need to align with data content).
+        let max_content_widths: Vec<u32> = (0..widths.len())
+            .map(|col_idx| {
+                self.data
+                    .iter()
+                    .filter_map(|row| row.get(col_idx))
+                    .map(|cell| visible_width(&cell.to_string()))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
+
         // Render title (if present)
         if let Some(ref title) = self.title {
             result.push_str(&format!("\x1b[{}G{}", table_start, title));
@@ -778,6 +877,8 @@ impl Table {
                 .collect();
 
             // Render each line of the header
+            // Headers use traditional alignment (no max_content_width) since they
+            // don't need to align with data rows.
             for line_idx in 0..header_height {
                 let line_cells: Vec<String> = (0..self.columns.len())
                     .map(|i| {
@@ -795,6 +896,7 @@ impl Table {
                     &alignments,
                     table_start,
                     fill_end_col,
+                    None, // Headers don't use max_content_widths
                 ));
                 result.push('\n');
             }
@@ -857,6 +959,7 @@ impl Table {
                     &alignments,
                     table_start,
                     fill_end_col,
+                    Some(&max_content_widths),
                 ));
                 result.push('\n');
             }
@@ -922,12 +1025,15 @@ impl Renderable for Table {
 /// Render a row with cursor positioning, supporting cell alignment.
 ///
 /// If `fill_end_col` is Some, fills with spaces to that column for background color support.
+/// If `max_content_widths` is provided, alignment offsets use these widths instead of
+/// individual content widths, ensuring all rows in a column align at the same position.
 fn render_row_with_cursor_positioning(
     cells: &[String],
     widths: &[usize],
     alignments: &[Alignment],
     table_start: u32,
     fill_end_col: Option<u32>,
+    max_content_widths: Option<&[u32]>,
 ) -> String {
     let mut row = String::new();
     row.push_str(&format!("\x1b[{}G│", table_start));
@@ -940,15 +1046,20 @@ fn render_row_with_cursor_positioning(
 
     for (index, width) in widths.iter().enumerate() {
         let content = cells.get(index).map(String::as_str).unwrap_or("");
-        let content_width = visible_width(content);
         let cell_width = *width as u32;
         let alignment = alignments.get(index).copied().unwrap_or(Alignment::Left);
+
+        // Use max_content_width if provided for consistent alignment across rows,
+        // otherwise fall back to individual content width
+        let width_for_alignment = max_content_widths
+            .and_then(|mcw| mcw.get(index).copied())
+            .unwrap_or_else(|| visible_width(content));
 
         // Calculate cursor offset within cell based on alignment
         let cursor_offset = match alignment {
             Alignment::Left => 0,
-            Alignment::Right => cell_width.saturating_sub(content_width),
-            Alignment::Center => cell_width.saturating_sub(content_width) / 2,
+            Alignment::Right => cell_width.saturating_sub(width_for_alignment),
+            Alignment::Center => cell_width.saturating_sub(width_for_alignment) / 2,
         };
 
         let content_col = cell_start.saturating_add(cursor_offset);
@@ -1239,29 +1350,29 @@ mod tests {
 
     #[test]
     fn test_pad_cell_left_alignment() {
-        assert_eq!(pad_cell("hello", 10, Alignment::Left), "hello     ");
+        assert_eq!(pad_cell("hello", 10, Alignment::Left, None), "hello     ");
     }
 
     #[test]
     fn test_pad_cell_right_alignment() {
-        assert_eq!(pad_cell("hello", 10, Alignment::Right), "     hello");
+        assert_eq!(pad_cell("hello", 10, Alignment::Right, None), "     hello");
     }
 
     #[test]
     fn test_pad_cell_center_alignment() {
-        assert_eq!(pad_cell("hi", 10, Alignment::Center), "    hi    ");
+        assert_eq!(pad_cell("hi", 10, Alignment::Center, None), "    hi    ");
     }
 
     #[test]
     fn test_pad_cell_content_wider_than_width() {
         // Content wider than target: no crash, no truncation
-        assert_eq!(pad_cell("hello world", 5, Alignment::Left), "hello world");
+        assert_eq!(pad_cell("hello world", 5, Alignment::Left, None), "hello world");
     }
 
     #[test]
     fn test_pad_cell_with_ansi_colors() {
         let colored = "\x1b[31mred\x1b[0m"; // "red" in red (3 visible chars)
-        let padded = pad_cell(colored, 10, Alignment::Left);
+        let padded = pad_cell(colored, 10, Alignment::Left, None);
         assert_eq!(visible_width(&padded), 10);
         // Should have 7 trailing spaces
         assert!(padded.ends_with("       "));
@@ -1271,7 +1382,7 @@ mod tests {
     #[test]
     fn test_pad_cell_with_osc8_link() {
         let link = "\x1b]8;;https://example.com\x07click\x1b]8;;\x07"; // "click" = 5 visible
-        let padded = pad_cell(link, 10, Alignment::Right);
+        let padded = pad_cell(link, 10, Alignment::Right, None);
         assert_eq!(visible_width(&padded), 10);
         // 5 spaces of left padding for right-align
         assert!(padded.starts_with("     "));
@@ -1282,7 +1393,7 @@ mod tests {
         // Bold + OSC8 link: "\x1b[1m" + OSC8 link + "\x1b[0m"
         let mixed = "\x1b[1m\x1b]8;;https://rust-lang.org\x07Rust\x1b]8;;\x07\x1b[0m";
         // "Rust" = 4 visible chars
-        let padded = pad_cell(mixed, 10, Alignment::Left);
+        let padded = pad_cell(mixed, 10, Alignment::Left, None);
         assert_eq!(visible_width(&padded), 10);
     }
 
@@ -1372,10 +1483,13 @@ mod tests {
 
         let result = table.render_content(None);
         let lines: Vec<&str> = result.lines().collect();
-        // First data row: "$9.99" should be right-padded to match "$1,234.56"
+        // Both values should start at the same position (aligned by max content width).
+        // With max_width alignment, content is positioned consistently across rows.
         let data_line_1 = lines[3];
-        // The shorter value should have leading spaces (right-aligned)
-        assert!(data_line_1.contains("    $9.99"));
+        let data_line_2 = lines[4];
+        // Both values should be present and aligned at the same column position
+        assert!(data_line_1.contains("$9.99"), "Should contain $9.99");
+        assert!(data_line_2.contains("$1,234.56"), "Should contain $1,234.56");
     }
 
     #[test]

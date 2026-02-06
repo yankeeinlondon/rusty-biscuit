@@ -68,6 +68,8 @@ pub struct Prose {
     layout: Layout,
 }
 
+
+
 impl Prose {
     /// Create a new Prose instance with the given content.
     pub fn new<T: Into<String>>(content: T) -> Self {

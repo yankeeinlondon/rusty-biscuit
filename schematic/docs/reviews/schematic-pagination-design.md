@@ -9,17 +9,20 @@ codegen-focused contract sketched in
 `schematic/docs/pagination/schema-design.md`.
 
 ## Goals
+
 - Define pagination strategies at the API level with endpoint overrides.
 - Generate ergonomic, strongly typed pagination APIs in `schematic-schema`.
 - Support the dominant strategies (offset/page/cursor/keyset/anchor/link/token).
 - Make pagination self-documenting, discoverable, and safe by default.
 
 ## Non-goals
+
 - Runtime auto-detection of pagination strategies.
 - OpenAPI inference or HTTP traffic observation.
 - Full GraphQL support outside of REST-style JSON responses (tracked separately).
 
 ## Strategy taxonomy (from `docs/pagination/design-patterns.md`)
+
 - Offset + limit
 - Page number + page size
 - Cursor token (opaque)
@@ -63,6 +66,7 @@ pub enum Pagination {
 ```
 
 Notes:
+
 - `Pagination::Default` requires `RestApi.pagination` to be `Some`, otherwise
   `schematic-gen` should fail validation.
 - `Pagination::Refine` merges into the API default (see below).
@@ -136,6 +140,7 @@ pub enum PaginationValueType {
 ```
 
 Notes:
+
 - Most REST pagination uses `Query` controls.
 - Body controls are necessary for GraphQL or REST endpoints that embed
   pagination inside a JSON body.
@@ -163,6 +168,7 @@ pub struct PaginationLinkRels {
 ```
 
 Notes:
+
 - Link-header pagination requires header parsing and optional absolute URLs.
 - Body links should use JSON-pointer paths ("/links/next").
 
@@ -179,6 +185,7 @@ pub struct PaginationItems {
 ```
 
 #### Limits, direction, ordering
+
 ```rust
 pub struct PaginationLimits {
     pub default: Option<u32>,
@@ -208,6 +215,7 @@ pub enum PaginationSortDirection {
 
 ### Refinement semantics
 `Pagination::Refine` merges with `RestApi.pagination`:
+
 - Any `Some(...)` in the refinement replaces the default field.
 - `None` means keep the API-level default.
 - `PaginationKind` cannot change unless the refinement specifies a full
@@ -321,6 +329,7 @@ while let Some(item) = stream.next().await {
 ```
 
 ### Strategy-specific behavior
+
 - **Offset/Limit**: state holds `offset` and `limit`; next offset is
   `offset + items.len()`; termination when `items.len() < limit`.
 - **Page/PageSize**: state holds `page` and `page_size`; next page is `page + 1`;
@@ -345,6 +354,7 @@ When an endpoint is paginated, generate pagination fields and helpers:
 
 ### Validation rules
 `schematic-gen` should validate and fail generation for:
+
 - `Pagination::Default` with no API-level pagination.
 - Pagination on a non-JSON response where item extraction is impossible.
 - Missing `items_path` when the response type is not a bare array.
@@ -352,21 +362,24 @@ When an endpoint is paginated, generate pagination fields and helpers:
 - Keyset strategies without ordering metadata or item key extraction fields.
 
 ## Migration and compatibility
+
 - Default behavior remains unchanged when pagination is omitted.
 - Existing APIs can opt in by setting `RestApi.pagination` and
   `Endpoint.pagination`.
 - No breaking changes to request/response schemas for non-paginated endpoints.
 
 ## Test plan (minimum)
+
 - `schematic-define`: serialization and builder tests for pagination types.
 - `schematic-gen`: generated code validation for:
-  - RequestParts includes query params
-  - pagination fields and helper methods in request structs
-  - `PaginatedEndpoint` implementations compile
-  - link-header and cursor extraction paths
+    - RequestParts includes query params
+    - pagination fields and helper methods in request structs
+    - `PaginatedEndpoint` implementations compile
+    - link-header and cursor extraction paths
 - `schematic-schema`: compile checks for generated pagination APIs.
 
 ## Phased delivery (recommended)
+
 - Phase 1: Offset/Page/Cursor/Continuation/Anchor (query-based + JSON response).
 - Phase 2: Link header + body links (requires raw response handling and URL override).
 - Phase 3: Keyset + GraphQL connection (requires item key extraction and body controls).

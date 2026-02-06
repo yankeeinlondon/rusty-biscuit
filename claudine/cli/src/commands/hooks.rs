@@ -8,17 +8,17 @@ use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Alignment, Margin};
-use claudine::config::{AgentConfigurator, detect_agents};
+use claudine::config::{detect_agents, AgentConfigurator};
 use claudine::dispatch::loader::load_config;
 use claudine::events::{AgenticEvent, EventSupportLevel, HookerConfig, Provider};
-use sniff::programs::{InstalledAiClients, enums::AiCli};
+use sniff::programs::{enums::AiCli, InstalledAiClients};
 
 use crate::log;
 
 /// Arguments for the hooks command.
 #[derive(Args)]
 pub struct HooksArgs {
-    /// Show provider event support matrix (✅ hook / ⛔️ non-hook / ⤫ none)
+    /// Show provider event support matrix (✅ hook / ⛔️ non-hook / ❌ none)
     #[arg(long)]
     pub support: bool,
 
@@ -363,14 +363,14 @@ fn find_configurator(
 const HOOK_SUPPORT: &str = "✅";
 /// Indicator for non-hook support (wrapper/wire-mode required).
 const NON_HOOK_SUPPORT: &str = "⛔️";
-/// Indicator for no support.
-const NO_SUPPORT: &str = "⤫";
+/// Indicator for no support (using ❌ U+274C which has width 2 like other emoji).
+const NO_SUPPORT: &str = "❌";
 
-/// Show provider event support matrix with ✅/⛔️/⤫ indicators.
+/// Show provider event support matrix with ✅/⛔️/❌ indicators.
 ///
 /// - ✅ Hook: Event can be registered via config file
 /// - ⛔️ NonHook: Event requires wrapper/proxy (not yet implemented)
-/// - ⤫ NotSupported: Event is not available from this provider
+/// - ❌ NotSupported: Event is not available from this provider
 fn run_support() -> Result<()> {
     let term = Terminal::new();
 
@@ -380,7 +380,7 @@ fn run_support() -> Result<()> {
         columns.push(TableColumn::new(provider.to_string()).with_alignment(Alignment::Center));
     }
 
-    let mut table = Table::new().with_columns(columns);
+    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
     table.layout_mut().left_margin = Margin::Chars(1);
 
     // Add a row for each event
@@ -405,7 +405,7 @@ fn run_support() -> Result<()> {
     // Show legend
     log::data("");
     let legend = Prose::new(
-        "{{dim}}Legend: {{reset}}✅{{dim}} = hook support (config file), {{reset}}⛔️{{dim}} = non-hook (wrapper/proxy required), {{reset}}{NO_SUPPORT}{{dim}} = not supported{{reset}}",
+        "{{dim}}Legend: {{reset}}✅{{dim}} = hook support (config file), {{reset}}⛔️{{dim}} = non-hook (wrapper/proxy required), {{reset}}{{NO_SUPPORT}}{{dim}} = not supported{{reset}}",
     );
     log::data(&format!(" {}\n", legend.fallback_render(&term)));
 
@@ -441,9 +441,8 @@ fn run_mapping() -> Result<()> {
 
     // Show legend
     log::data("");
-    let legend = Prose::new(
-        "{{dim}}- Legend: (blank) = not supported or no specific native name{{reset}}",
-    );
+    let legend =
+        Prose::new("{{dim}}- Legend: (blank) = not supported or no specific native name{{reset}}");
     log::data(&format!(" {}", legend.render(Some(100))));
 
     Ok(())
@@ -466,9 +465,9 @@ fn build_mapping_table(providers: &[Provider]) -> Table {
 
         for provider in providers {
             let cell: TableCellContent = match provider.native_event_name(&event) {
-                None => "".into(),          // Not supported - blank
-                Some("") => "".into(),      // Supported but no specific name
-                Some(name) => name.into(),  // Native name
+                None => "".into(),         // Not supported - blank
+                Some("") => "".into(),     // Supported but no specific name
+                Some(name) => name.into(), // Native name
             };
             row.push(cell);
         }

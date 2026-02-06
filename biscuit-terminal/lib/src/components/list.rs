@@ -1,7 +1,5 @@
 use crate::{
-    components::renderable::{Renderable, RenderableContent},
-    terminal::Terminal,
-    utils::layout::Layout,
+    components::renderable::{Renderable, RenderableContent}, prelude::Prose, terminal::Terminal, utils::layout::Layout
 };
 
 /// An **OrderedList** contains a list of renderable items
@@ -225,6 +223,24 @@ impl From<Vec<&RenderableContent>> for UnorderedList {
     fn from(value: Vec<&RenderableContent>) -> Self {
         UnorderedList {
             items: value.into_iter().cloned().collect(),
+            ..UnorderedList::default()
+        }
+    }
+}
+
+impl From<Prose> for UnorderedList {
+    fn from(value: Prose) -> Self {
+        UnorderedList {
+            items: vec![value.into()],
+            ..UnorderedList::default()
+        }
+    }
+}
+
+impl From<&Prose> for UnorderedList {
+    fn from(value: &Prose) -> Self {
+        UnorderedList {
+            items: vec![value.clone().into()],
             ..UnorderedList::default()
         }
     }

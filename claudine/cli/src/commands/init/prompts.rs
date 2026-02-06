@@ -209,25 +209,9 @@ pub fn prompt_action_types(event: &AgenticEvent) -> Result<Vec<ActionType>> {
 pub fn prompt_sound_effect(event: &AgenticEvent) -> Result<EventAction> {
     let recommended = recommended_sound(event);
 
-    // Common sound effects from playa
-    let sounds = vec![
-        "success",
-        "error",
-        "notification",
-        "power-up",
-        "power-down",
-        "high-up",
-        "phase-jump-1",
-        "electronic-hit-fx1",
-        "dit-hit-1",
-        "dit-hit-2",
-        "sad-trombone",
-        "doorbell",
-        "quick-blip-1",
-        "sending",
-        "receiving",
-        "swoosh",
-    ];
+    // Get available sound effects from playa
+    let effects = playa::SoundEffect::all();
+    let sounds: Vec<&str> = effects.iter().map(|e| e.name()).collect();
 
     let options: Vec<String> = sounds
         .iter()

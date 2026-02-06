@@ -6,6 +6,7 @@ response types) and post-deserialization mutation of response objects, with an
 explicit path for additive response properties.
 
 ## Goals
+
 - Preserve everything the current `variant()` call can do (base URL, env auth names,
   auth update strategy).
 - Provide a fluent builder for partial overrides instead of mandatory args.
@@ -15,12 +16,14 @@ explicit path for additive response properties.
 - Keep the default request/response fast path when no hooks are configured.
 
 ## Non-goals
+
 - Changing the API definition model in `schematic/define`.
 - Adding runtime introspection of unknown response shapes.
 - Supporting full response type substitution for convenience methods
   (still returns the defined response type unless a separate method is used).
 
 ## Current behavior (baseline)
+
 - `variant(base_url, env_auth, UpdateStrategy)` clones the reqwest client and
   replaces base URL + auth envs, optionally changing auth strategy.
 - Response handling is fixed: JSON responses deserialize directly into the
@@ -187,6 +190,7 @@ where
 ```
 
 ## Request pipeline updates (generated clients)
+
 - Capture `endpoint_id` before consuming the request enum.
 - Build `ResponseContext` once a response is received and successful.
 - If no hooks are configured, keep the current fast path:
@@ -204,6 +208,7 @@ endpoint trait or response hook type across crates, we can add it to
 `schematic/schema` without touching `schematic/define`.
 
 ## Migration notes
+
 - Introduce `variant()` builder and `variant_with(...)` helper in generated
   clients.
 - Deprecate the existing `variant(base_url, env_auth, strategy)` signature

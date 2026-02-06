@@ -162,7 +162,10 @@ pub fn visible_width(content: &str) -> u32 {
             Some(ch) => ch,
             None => break,
         };
-        width = width.saturating_add(UnicodeWidthChar::width(ch).unwrap_or(0) as u32);
+        // Characters with ambiguous/unknown width (e.g., emoji like ✅, ⛔) typically
+        // render as 2 columns in modern terminals. Regular symbols like ✗ return
+        // Some(1) from unicode_width and are handled correctly.
+        width = width.saturating_add(UnicodeWidthChar::width(ch).unwrap_or(1) as u32);
         idx += ch.len_utf8();
     }
 
@@ -192,7 +195,7 @@ pub fn split_at_visible_width(content: &str, width: u32) -> (String, String) {
             Some(ch) => ch,
             None => break,
         };
-        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0) as u32;
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1) as u32;
         let ch_len = ch.len_utf8();
 
         if visible.saturating_add(ch_width) > width {
@@ -269,7 +272,7 @@ fn find_break_position(
             Some(ch) => ch,
             None => break,
         };
-        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0) as u32;
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1) as u32;
         let ch_len = ch.len_utf8();
 
         if ch_width == 0 {
@@ -314,7 +317,7 @@ fn find_bespoke_break_position(
             Some(ch) => ch,
             None => break,
         };
-        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0) as u32;
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1) as u32;
         let ch_len = ch.len_utf8();
 
         if ch_width == 0 {
@@ -533,6 +536,22 @@ mod tests {
     fn plain_text_length_respects_unicode_width() {
         let content = "\u{4F60}\u{597D}".to_string();
         assert_eq!(plain_text_length(&content, None), 4);
+    }
+
+    #[test]
+    fn visible_width_handles_emoji_with_ambiguous_width() {
+        // Emoji like ✅ (U+2705) may return None from unicode_width.
+        // We default to 1 for unknown characters.
+        // Note: actual terminal rendering varies - some show emoji as 1 wide, others as 2.
+        let checkmark = "\u{2705}"; // ✅
+        let width = visible_width(checkmark);
+        assert!(width >= 1, "Emoji should have width >= 1, got {}", width);
+
+        // Ballot X (U+2717) - this is a dingbat symbol.
+        // unicode_width returns Some(1) for this.
+        let ballot_x = "\u{2717}"; // ✗
+        let width = visible_width(ballot_x);
+        assert_eq!(width, 1, "Ballot X should have width 1, got {}", width);
     }
 
     #[test]

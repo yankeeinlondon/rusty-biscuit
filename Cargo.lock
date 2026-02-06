@@ -883,6 +883,7 @@ dependencies = [
  "darkmatter",
  "dirs 6.0.0",
  "inquire",
+ "playa",
  "predicates",
  "serde_json",
  "shellexpand",

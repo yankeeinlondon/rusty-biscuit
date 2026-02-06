@@ -5,23 +5,24 @@ use claudine::events::AgenticEvent;
 /// Returns the recommended sound effect for an event.
 ///
 /// These are curated defaults based on the semantic meaning of each event.
+/// All names correspond to effects available in `playa::SoundEffect`.
 pub fn recommended_sound(event: &AgenticEvent) -> &'static str {
     match event {
         AgenticEvent::SessionStart => "high-up",
         AgenticEvent::SessionEnd => "phase-jump-1",
-        AgenticEvent::BeforePrompt => "quick-blip-1",
-        AgenticEvent::BeforeTool => "dit-hit-1",
-        AgenticEvent::AfterTool => "dit-hit-2",
+        AgenticEvent::BeforePrompt => "dit-hit-1",
+        AgenticEvent::BeforeTool => "dit-hit-2",
+        AgenticEvent::AfterTool => "electronic-hit-fx2",
         AgenticEvent::ToolError => "sad-trombone",
         AgenticEvent::PermissionRequest => "doorbell",
         AgenticEvent::TurnComplete => "electronic-hit-fx1",
-        AgenticEvent::TurnError => "error",
-        AgenticEvent::SubagentStart => "power-up",
-        AgenticEvent::SubagentStop => "power-down",
-        AgenticEvent::BeforeModel => "sending",
-        AgenticEvent::AfterModel => "receiving",
-        AgenticEvent::BeforeCompact => "swoosh",
-        AgenticEvent::Notification => "notification",
+        AgenticEvent::TurnError => "space-alarm",
+        AgenticEvent::SubagentStart => "phase-jump-2",
+        AgenticEvent::SubagentStop => "high-down",
+        AgenticEvent::BeforeModel => "two-tone",
+        AgenticEvent::AfterModel => "phase-jump-3",
+        AgenticEvent::BeforeCompact => "air-woosh",
+        AgenticEvent::Notification => "doorbell-2",
     }
 }
 
@@ -163,6 +164,19 @@ mod tests {
             assert!(
                 all.contains(&event),
                 "{event:?} should be in all_events_ordered"
+            );
+        }
+    }
+
+    #[test]
+    fn all_recommended_sounds_exist_in_playa() {
+        for event in all_events_ordered() {
+            let name = recommended_sound(&event);
+            assert!(
+                playa::SoundEffect::from_name(name).is_some(),
+                "Sound effect '{}' for {:?} does not exist in playa",
+                name,
+                event
             );
         }
     }
