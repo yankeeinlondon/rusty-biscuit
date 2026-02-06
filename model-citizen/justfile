@@ -1,0 +1,99 @@
+set dotenv-load
+set positional-arguments
+
+BOLD := '\033[1m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+YELLOW2 := '\033[38;5;3m'
+BLACK := '\033[30m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+WHITE := '\033[37m'
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    if command -v md &> /dev/null; then
+        md just.md
+    else
+        echo "Model Citizen"
+        echo "============="
+    fi
+
+    echo ""
+    just --list | grep -v 'default'
+    echo
+
+# build schematic packages (define, definitions, gen)
+build *args="":
+    @echo ""
+    @echo "Build Schematic Packages"
+    @echo "------------------------"
+    @echo ""
+    @cargo build -p model-citizen -p model-citizen-cli {{args}}
+
+# run tests for schematic packages
+test *args="":
+    @echo ""
+    @echo "Testing Schematic Packages"
+    @echo "--------------------------"
+    @echo ""
+    @cargo test -p model-citizen -p model-citizen-cli {{args}}
+
+# run clippy on schematic packages
+lint:
+    @echo ""
+    @echo "Linting Schematic Packages"
+    @echo "--------------------------"
+    @echo ""
+    @cargo clippy -p model-citizen -- -D warnings
+    @cargo clippy -p model-citizen-cli -- -D warnings
+
+install:
+    @echo ""
+    @echo "Installing Schematic CLI"
+    @echo "--------------------------"
+    @echo ""
+    @echo "{{BOLD}}Building Schematic Library{{RESET}}"
+    @cargo build -p model-citizen --release
+    @echo ""
+    @echo "{{BOLD}}{{YELLOW}}Installing Schematic CLI{{RESET}}"
+    @cargo install --path ./cli
+    @echo ""
+
+check:
+    @echo ""
+    @echo "Checking Model Citizen"
+    @echo ""
+    @cargo check -p model-citizen -p model-citizen-cli
+
+# Open Opencode
+oc *args="":
+    @clear
+    @cd ..
+    @echo "Loading {{BOLD}}Opencode{{RESET}}"
+    @opencode {{args}}
+    @cd -
+
+# Open Claude Code in yolo mode
+cc *args="":
+    @clear
+    @cd ..
+    @echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @claude --dangerously-skip-permissions {{args}}
+    @cd -
+
+# Use GPT 5.2 to commit staged changes
+commit:
+    @cd ..
+    @opencode run commit "-f" --model "openai/gpt-5.2"
+    @if command -v so-you-say >/dev/null 2>&1; then \
+        so-you-say "git commits completed in rusty-biscuit monorepo"; \
+    fi
+    @cd -

@@ -103,7 +103,7 @@ The `schematic` package provides type-safe REST API client generation:
 
 **Definition → Generation → Client:**
 - `schematic-define`: Primitives for describing APIs (`RestApi`, `Endpoint`, `AuthStrategy`)
-- `schematic-definitions`: Pre-built API definitions (OpenAI, HuggingFace, Ollama, ElevenLabs)
+- `schematic-definitions`: Pre-built API definitions (Anthropic, OpenAI, HuggingFace, Ollama, ElevenLabs, EMQX)
 - `schematic-gen`: Code generator CLI with `validate` and `generate` subcommands
 - `schematic-schema`: Generated API clients ready for consumption
 
@@ -129,6 +129,14 @@ just -f schematic/justfile generate
 - `From<BodyType>` for body-only request structs
 - `#[must_use]` on all async request methods
 - `#[non_exhaustive]` on all public enums in `schematic-define` (match statements need wildcard arms)
+
+**Variant Builder & Response Hooks:**
+- `variant()` returns a `VariantBuilder` with fluent configuration (base URL, auth, headers)
+- `variant_with(base_url, env_auth, strategy)` convenience method for simple environment switching
+- `pre_response_json(hook)` transforms raw JSON before deserialization (e.g., unwrap envelopes)
+- `mutate_response::<RequestType>(hook)` for type-safe post-deserialization response mutation
+- `EndpointSpec` trait on generated request structs associates request → response types
+- `ResponseContext` provides hook callbacks with endpoint_id, method, path, url, status, headers
 
 **⚠️ CRITICAL - Response Type Selection:**
 

@@ -43,7 +43,8 @@
 //! ## Variants
 //!
 //! Create alternate client configurations for staging, testing, or different
-//! environments using [`variant()`](anthropic::Anthropic::variant):
+//! environments using the [`variant()`](anthropic::Anthropic::variant) builder
+//! or [`variant_with()`](anthropic::Anthropic::variant_with) convenience method:
 //!
 //! ```ignore
 //! use schematic_schema::prelude::*;
@@ -51,21 +52,22 @@
 //!
 //! let client = Anthropic::new();
 //!
-//! // Point to a staging server with different credentials
-//! let staging = client.variant(
+//! // Simple environment switch with variant_with()
+//! let staging = client.variant_with(
 //!     "https://staging.example.com/v1",
 //!     vec!["STAGING_ANTHROPIC_API_KEY".to_string()],
 //!     UpdateStrategy::NoChange,
 //! );
 //!
-//! // Switch auth strategy entirely
-//! let custom = client.variant(
-//!     "http://localhost:8080/v1",
-//!     vec!["LOCAL_KEY".to_string()],
-//!     UpdateStrategy::ChangeTo(schematic_define::AuthStrategy::ApiKey {
+//! // Full builder with response hooks
+//! let custom = client.variant()
+//!     .base_url("http://localhost:8080/v1")
+//!     .env_auth(vec!["LOCAL_KEY".to_string()])
+//!     .auth_update(UpdateStrategy::ChangeTo(schematic_define::AuthStrategy::ApiKey {
 //!         header: "X-API-Key".to_string(),
-//!     }),
-//! );
+//!     }))
+//!     .pre_response_json(|_ctx, json| Ok(json))
+//!     .build();
 //! ```
 //!
 //! ## Error Handling

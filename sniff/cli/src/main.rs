@@ -67,6 +67,9 @@ pub enum Commands {
     /// Show a table of subsection topics for each top-level command
     Topics,
 
+    /// Show a structural overview of sniff output fields
+    Structure,
+
     // === Hardware detail sections ===
     /// Show only CPU information
     Cpu,
@@ -178,6 +181,7 @@ impl Commands {
             Commands::Network => OutputFilter::Network,
             Commands::Filesystem => OutputFilter::Filesystem,
             Commands::Topics => OutputFilter::All,
+            Commands::Structure => OutputFilter::All,
 
             // Hardware detail sections
             Commands::Cpu => OutputFilter::Cpu,
@@ -281,6 +285,7 @@ Commands:
     sniff network     Show only network information
     sniff filesystem  Show only filesystem information
     sniff topics      Show subsection topics as a table
+    sniff structure   Show a structural overview of sniff output
 
   Hardware details:
     sniff cpu         Show only CPU information
@@ -368,6 +373,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if matches!(cli.command, Some(Commands::Topics)) {
         output::print_topics_table();
+        return Ok(());
+    }
+
+    if matches!(cli.command, Some(Commands::Structure)) {
+        output::print_structure();
         return Ok(());
     }
 
@@ -694,6 +704,12 @@ mod tests {
         }
 
         #[test]
+        fn structure_subcommand_parses() {
+            let cli = parse_args(&["structure"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Structure)));
+        }
+
+        #[test]
         fn hardware_subcommand_parses() {
             let cli = parse_args(&["hardware"]).unwrap();
             assert!(matches!(cli.command, Some(Commands::Hardware)));
@@ -749,6 +765,12 @@ mod tests {
         fn filesystem_maps_to_filesystem_filter() {
             let cmd = Commands::Filesystem;
             assert_eq!(cmd.to_output_filter(), OutputFilter::Filesystem);
+        }
+
+        #[test]
+        fn structure_maps_to_all_filter() {
+            let cmd = Commands::Structure;
+            assert_eq!(cmd.to_output_filter(), OutputFilter::All);
         }
 
         #[test]

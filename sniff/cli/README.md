@@ -70,6 +70,13 @@ sniff network     # Network information (interfaces, IP addresses)
 sniff filesystem  # Filesystem information (git, languages, monorepo)
 ```
 
+**Discovery Tools:**
+
+```bash
+sniff topics      # Table of subsection topics
+sniff structure   # Structural overview of sniff output
+```
+
 **Hardware Details:**
 
 ```bash

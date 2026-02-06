@@ -7,7 +7,7 @@
 //!
 //! ## Update Strategy
 //!
-//! When creating API variants with [`RestApi::variant()`](crate::RestApi::variant),
+//! When creating API variants with the generated `variant()` builder method,
 //! the [`UpdateStrategy`] enum controls how the authentication strategy is handled:
 //!
 //! - [`UpdateStrategy::NoChange`] - Keep the existing auth strategy

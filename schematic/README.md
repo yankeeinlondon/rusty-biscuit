@@ -37,8 +37,8 @@ schematic/
 ```txt
 ┌─────────────────────────────┐     ┌─────────────────────────────┐
 │      schematic-define       │     │   schematic-definitions     │
-│  (primitives: RestApi,      │◄────│  (actual APIs: OpenAI,      │
-│   Endpoint, AuthStrategy)   │     │   future: Anthropic, etc.)  │
+│  (primitives: RestApi,      │◄────│  (actual APIs: Anthropic,   │
+│   Endpoint, AuthStrategy)   │     │   OpenAI, ElevenLabs, etc.) │
 └──────────────┬──────────────┘     └──────────────┬──────────────┘
                │                                   │
                └───────────────┬───────────────────┘
@@ -117,7 +117,8 @@ async fn main() -> Result<(), SchematicError> {
 - **Compile-time enforcement**: Required path parameters and bodies are enforced via `new()` constructors
 - **Ergonomic conversions**: `From<&str>`/`From<String>` for single-param requests, `From<Body>` for body-only requests
 - **Automatic authentication**: Bearer, API Key, and Basic auth with env var fallback chains
-- **Runtime configuration**: `DOCS_URL` constant on API structs, `variant()` for alternate environments
+- **Runtime configuration**: `DOCS_URL` constant on API structs, `variant()` builder for alternate environments
+- **Response hooks**: Pre-response JSON transformation and type-safe post-response mutation via `VariantBuilder`
 - **Proper error handling**: `MissingCredential` errors with documented error handling patterns
 - **Path parameters**: `{param}` syntax in paths become struct fields with `impl Into<String>` for ergonomic usage
 - **Multiple response types**: JSON, Text, Binary, and Empty responses with type-specific methods and `#[must_use]` attributes
@@ -126,6 +127,60 @@ async fn main() -> Result<(), SchematicError> {
 - **Validation**: Pre-generation checks for naming collisions and configuration errors
 - **Doc examples**: Generated request structs include usage examples in doc comments
 - **Future-proof enums**: All public enums use `#[non_exhaustive]` for backward-compatible extension
+
+## Variant Builder & Response Hooks
+
+The `variant()` builder creates alternate API client configurations with optional response hooks. This enables environment switching, staging/production setups, and response transformation.
+
+### Basic Variant
+
+```rust
+use schematic_define::UpdateStrategy;
+
+let client = OpenAI::new()?;
+
+// Simple environment switch
+let staging = client.variant_with(
+    "https://staging.api.com/v1",
+    vec!["STAGING_API_KEY".to_string()],
+    UpdateStrategy::NoChange,
+);
+```
+
+### Builder Pattern with Hooks
+
+```rust
+let staging = client.variant()
+    .base_url("https://staging.api.com/v1")
+    .env_auth(vec!["STAGING_API_KEY".to_string()])
+    .auth_update(UpdateStrategy::NoChange)
+    // Pre-response: transform raw JSON before deserialization
+    .pre_response_json(|ctx, json| {
+        // Unwrap envelope: { "data": { ... } } → { ... }
+        if let Some(inner) = json.get("data").cloned() {
+            Ok(inner)
+        } else {
+            Ok(json)
+        }
+    })
+    // Post-response: mutate typed response after deserialization
+    .mutate_response::<ListModelsRequest>(|ctx, response| {
+        response.data.retain(|m| !m.id.contains("deprecated"));
+        Ok(())
+    })
+    .build();
+```
+
+### Hook Types
+
+| Hook | Signature | Runs |
+|------|-----------|------|
+| `pre_response_json` | `Fn(&ResponseContext, Value) → Result<Value>` | Before deserialization, on raw JSON |
+| `mutate_response::<R>` | `Fn(&ResponseContext, &mut R::Response) → Result<()>` | After deserialization, per-endpoint |
+
+- **`ResponseContext`** provides: `endpoint_id`, `method`, `path`, `url`, `status`, `headers`
+- **`EndpointSpec`** trait on request structs enables type-safe `mutate_response` registration
+- Hooks are stored in `Arc` and the variant is `Clone`-able
 
 ## Critical Development Requirements
 

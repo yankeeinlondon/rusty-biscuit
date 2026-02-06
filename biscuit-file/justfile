@@ -1,0 +1,92 @@
+set dotenv-load
+set positional-arguments
+
+BOLD := '\033[1m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+YELLOW2 := '\033[38;5;3m'
+BLACK := '\033[30m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+WHITE := '\033[37m'
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    if command -v md &> /dev/null; then
+        md just.md
+    else
+        echo "Biscuit File"
+        echo "============"
+    fi
+
+    echo ""
+    just --list | grep -v 'default'
+    echo
+
+# build biscuit-file packages (lib,cli)
+build *args="":
+    @echo ""
+    @echo "Build {{BOLD}}biscuit-file{{RESET}} Packages"
+    @echo "------------------------"
+    @echo ""
+    @cargo build -p biscuit-file -p biscuit-file-cli {{args}}
+
+# run tests for biscuit-file packages
+test *args="":
+    @echo ""
+    @echo "Testing {{BOLD}}biscuit-file{{RESET}} Packages"
+    @echo "--------------------------"
+    @echo ""
+    @cargo test -p biscuit-file -p biscuit-file-cli {{args}}
+
+# run clippy on biscuit-file packages
+lint:
+    @echo ""
+    @echo "Linting {{BOLD}}biscuit-file{{RESET}} Packages"
+    @echo "--------------------------"
+    @echo ""
+    @cargo clippy -p biscuit-file -- -D warnings
+    @cargo clippy -p biscuit-file-cli -- -D warnings
+
+# install the biscuit-file CLI
+install:
+    @echo ""
+    @echo "Installing biscuit-file CLI"
+    @echo "--------------------------"
+    @echo ""
+    @echo "{{BOLD}}Building biscuit-file Library{{RESET}}"
+    @cargo build -p biscuit-file --release
+    @echo ""
+    @echo "{{BOLD}}{{YELLOW}}Installing biscuit-file CLI{{RESET}}"
+    @cargo install --path ./cli
+    @echo ""
+
+# check biscuit-file lib and CLI
+check:
+    @echo ""
+    @echo "Checking {{BOLD}}biscuit-file{{RESET}}"
+    @echo ""
+    @cargo check -p biscuit-file -p biscuit-file-cli
+
+# Open Claude Code in yolo mode
+oc *args="":
+    @clear
+    @cd ..
+    @echo "Loading {{BOLD}}Opencode{{RESET}}"
+    @opencode {{args}}
+    @cd -
+
+# Open Opencode
+cc *args="":
+    @clear
+    @cd ..
+    @echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @claude --dangerously-skip-permissions {{args}}
+    @cd -
