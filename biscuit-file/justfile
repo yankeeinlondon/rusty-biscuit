@@ -85,8 +85,8 @@ oc *args="":
 
 # Open Opencode
 cc *args="":
-    @clear
     @cd ..
+    @clear
     @echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
     @claude --dangerously-skip-permissions {{args}}
     @cd -
