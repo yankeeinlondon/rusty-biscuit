@@ -40,7 +40,13 @@ test *args="":
 
 # install the `research` binary into the executable path
 install:
+    @echo
+    @echo "{{BOLD}}Building Research Library{{RESET}}"
+    @echo ""
     @cargo build --release -p research-cli
+    @echo
+    @echo "{{BOLD}}{{YELLOW}}Installing Research CLI{{RESET}}"
+    @echo ""
     @cargo install --path ./cli --locked
 
 # run the debug release of the Research CLI
