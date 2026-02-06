@@ -2,13 +2,28 @@
 
 //! Convenient re-exports for working with generated API clients.
 //!
-//! This prelude exports the API clients and request enums. For response types,
-//! import from the specific API module to avoid naming conflicts:
+//! This prelude exports the client structs, request enums, and shared error
+//! types. Response types are **not** re-exported here to avoid naming conflicts.
+//! Import them from specific API modules instead:
 //!
 //! ```ignore
-//! use schematic_schema::openai::ChatCompletionResponse;
-//! use schematic_schema::anthropic::MessageResponse;
+//! use schematic_schema::openai::Model;
+//! use schematic_schema::anthropic::CreateMessageResponse;
 //! ```
+//!
+//! ## Re-exports
+//!
+//! **Clients and request enums:**
+//!
+//! - [`Anthropic`] + [`AnthropicRequest`]
+//! - [`OpenAI`] + [`OpenAIRequest`]
+//! - [`ElevenLabs`] + [`ElevenLabsRequest`]
+//! - [`HuggingFaceHub`] + [`HuggingFaceHubRequest`]
+//!
+//! **Shared types:**
+//!
+//! - [`SchematicError`] - Error type for all API operations
+//! - [`RequestParts`] - Low-level request decomposition tuple
 //!
 //! ## Examples
 //!
@@ -18,7 +33,16 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), SchematicError> {
 //!     let client = OpenAI::new();
-//!     // Use client...
+//!
+//!     // Typed request with new()
+//!     let models = client.list_models().await?;
+//!
+//!     // Ergonomic From<&str> for single-param endpoints
+//!     use schematic_schema::openai::{RetrieveModelRequest, Model};
+//!     let model: Model = client
+//!         .request(RetrieveModelRequest::from("gpt-4"))
+//!         .await?;
+//!
 //!     Ok(())
 //! }
 //! ```

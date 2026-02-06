@@ -2,10 +2,17 @@
 
 //! Generated REST API clients.
 //!
-//! ## Available APIs
-//!
 //! Each API is available as a separate module with its client struct,
 //! request types, and response types re-exported from definitions.
+//!
+//! ## Available APIs
+//!
+//! | Module | Client | Description | Auth |
+//! |--------|--------|-------------|------|
+//! | [`anthropic`] | [`Anthropic`](anthropic::Anthropic) | Anthropic Messages API for Claude AI interactions and agent tool use | API Key (`X-Api-Key`) |
+//! | [`openai`] | [`OpenAI`](openai::OpenAI) | OpenAI REST API for model management | Bearer |
+//! | [`elevenlabs`] | [`ElevenLabs`](elevenlabs::ElevenLabs) | ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation | API Key (`xi-api-key`) |
+//! | [`huggingface`] | [`HuggingFaceHub`](huggingface::HuggingFaceHub) | Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations | Bearer |
 //!
 //! ## Quick Start
 //!
@@ -13,7 +20,58 @@
 //!
 //! ```ignore
 //! use schematic_schema::prelude::*;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), SchematicError> {
+//!     let client = Anthropic::new();
+//!     let response = client.list_models().await?;
+//!     println!("{:?}", response);
+//!     Ok(())
+//! }
 //! ```
+//!
+//! ## Ergonomic Features
+//!
+//! Generated clients include several convenience features:
+//!
+//! - **`From<&str>` / `From<String>`** on single-param request structs
+//! - **`From<BodyType>`** on body-only request structs
+//! - **`#[must_use]`** on all async methods to catch missing `.await`
+//! - **`DOCS_URL`** constant on each client for programmatic doc access
+//! - **`variant()`** method for creating alternate configurations
+//!
+//! ## Variants
+//!
+//! Create alternate client configurations for staging, testing, or different
+//! environments using [`variant()`](anthropic::Anthropic::variant):
+//!
+//! ```ignore
+//! use schematic_schema::prelude::*;
+//! use schematic_define::UpdateStrategy;
+//!
+//! let client = Anthropic::new();
+//!
+//! // Point to a staging server with different credentials
+//! let staging = client.variant(
+//!     "https://staging.example.com/v1",
+//!     vec!["STAGING_ANTHROPIC_API_KEY".to_string()],
+//!     UpdateStrategy::NoChange,
+//! );
+//!
+//! // Switch auth strategy entirely
+//! let custom = client.variant(
+//!     "http://localhost:8080/v1",
+//!     vec!["LOCAL_KEY".to_string()],
+//!     UpdateStrategy::ChangeTo(schematic_define::AuthStrategy::ApiKey {
+//!         header: "X-API-Key".to_string(),
+//!     }),
+//! );
+//! ```
+//!
+//! ## Error Handling
+//!
+//! All request methods return `Result<T, SchematicError>`. See
+//! [`shared::SchematicError`] for the full error enum and handling examples.
 pub mod shared;
 pub mod prelude;
 pub mod anthropic;

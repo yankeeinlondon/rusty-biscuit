@@ -25,7 +25,7 @@ use std::path::Path;
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use schematic_define::RestApi;
+use schematic_define::{AuthStrategy, RestApi, RestMethod};
 
 use crate::codegen::{
     ModuleDocBuilder, generate_api_struct, generate_error_type, generate_request_enum_with_suffix,
@@ -34,6 +34,22 @@ use crate::codegen::{
 };
 use crate::errors::GeneratorError;
 use crate::inference::infer_module_path;
+
+/// Converts a PascalCase string to snake_case.
+fn to_snake_case(s: &str) -> String {
+    let mut result = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() {
+            if i > 0 {
+                result.push('_');
+            }
+            result.push(c.to_lowercase().next().unwrap());
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
 
 /// Returns the module path for the given API.
 ///
@@ -213,21 +229,154 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
         })
         .collect();
 
+    // Build the API table rows for documentation
+    let api_rows: Vec<String> = apis
+        .iter()
+        .map(|api| {
+            let module = get_module_path(api);
+            let name = &api.name;
+            let desc = &api.description;
+            let auth_desc = match &api.auth {
+                AuthStrategy::None => "None".to_string(),
+                AuthStrategy::BearerToken { .. } => "Bearer".to_string(),
+                AuthStrategy::ApiKey { header } => format!("API Key (`{}`)", header),
+                AuthStrategy::Basic => "Basic".to_string(),
+                _ => "Custom".to_string(),
+            };
+            format!(
+                "//! | [`{module}`] | [`{name}`]({module}::{name}) | {desc} | {auth_desc} |"
+            )
+        })
+        .collect();
+    let api_table = api_rows.join("\n");
+
+    // Choose the first API with a GET endpoint for the quick start example
+    let example_api = apis.iter().find(|api| {
+        api.endpoints.iter().any(|ep| ep.method == RestMethod::Get)
+    }).or_else(|| apis.first());
+
+    let quick_start_example = if let Some(api) = example_api {
+        let api_name = &api.name;
+        let first_get = api
+            .endpoints
+            .iter()
+            .find(|ep| ep.method == RestMethod::Get);
+        if let Some(ep) = first_get {
+            let method_name = to_snake_case(&ep.id);
+            let has_path_params = ep.path.contains('{');
+            let call = if has_path_params {
+                format!(
+                    "let response = client.{}(\"example\").await?;",
+                    method_name
+                )
+            } else {
+                format!("let response = client.{}().await?;", method_name)
+            };
+            format!(
+                r#"//! ```ignore
+//! use schematic_schema::prelude::*;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), SchematicError> {{
+//!     let client = {api_name}::new();
+//!     {call}
+//!     println!("{{:?}}", response);
+//!     Ok(())
+//! }}
+//! ```"#
+            )
+        } else {
+            String::from(
+                r#"//! ```ignore
+//! use schematic_schema::prelude::*;
+//! ```"#,
+            )
+        }
+    } else {
+        String::from(
+            r#"//! ```ignore
+//! use schematic_schema::prelude::*;
+//! ```"#,
+        )
+    };
+
+    let variant_example = if let Some(api) = example_api {
+        let api_name = &api.name;
+        let env_var = api.env_auth.first().map(|s| s.as_str()).unwrap_or("API_KEY");
+        let staging_var = format!("STAGING_{}", env_var);
+        format!(
+            r#"//! ## Variants
+//!
+//! Create alternate client configurations for staging, testing, or different
+//! environments using [`variant()`]({module}::{api_name}::variant):
+//!
+//! ```ignore
+//! use schematic_schema::prelude::*;
+//! use schematic_define::UpdateStrategy;
+//!
+//! let client = {api_name}::new();
+//!
+//! // Point to a staging server with different credentials
+//! let staging = client.variant(
+//!     "https://staging.example.com/v1",
+//!     vec!["{staging_var}".to_string()],
+//!     UpdateStrategy::NoChange,
+//! );
+//!
+//! // Switch auth strategy entirely
+//! let custom = client.variant(
+//!     "http://localhost:8080/v1",
+//!     vec!["LOCAL_KEY".to_string()],
+//!     UpdateStrategy::ChangeTo(schematic_define::AuthStrategy::ApiKey {{
+//!         header: "X-API-Key".to_string(),
+//!     }}),
+//! );
+//! ```"#,
+            module = get_module_path(api),
+        )
+    } else {
+        String::new()
+    };
+
+    // Parse the dynamic sections into token streams
+    let api_table_tokens: TokenStream = api_table.parse().unwrap_or_default();
+    let quick_start_tokens: TokenStream = quick_start_example.parse().unwrap_or_default();
+    let variant_tokens: TokenStream = variant_example.parse().unwrap_or_default();
+
     quote! {
         //! Generated REST API clients.
         //!
-        //! ## Available APIs
-        //!
         //! Each API is available as a separate module with its client struct,
         //! request types, and response types re-exported from definitions.
+        //!
+        //! ## Available APIs
+        //!
+        //! | Module | Client | Description | Auth |
+        //! |--------|--------|-------------|------|
+        #api_table_tokens
         //!
         //! ## Quick Start
         //!
         //! Use the prelude for convenient imports:
         //!
-        //! ```ignore
-        //! use schematic_schema::prelude::*;
-        //! ```
+        #quick_start_tokens
+        //!
+        //! ## Ergonomic Features
+        //!
+        //! Generated clients include several convenience features:
+        //!
+        //! - **`From<&str>` / `From<String>`** on single-param request structs
+        //! - **`From<BodyType>`** on body-only request structs
+        //! - **`#[must_use]`** on all async methods to catch missing `.await`
+        //! - **`DOCS_URL`** constant on each client for programmatic doc access
+        //! - **`variant()`** method for creating alternate configurations
+        //!
+        #variant_tokens
+        //!
+        //! ## Error Handling
+        //!
+        //! All request methods return `Result<T, SchematicError>`. See
+        //! [`shared::SchematicError`] for the full error enum and handling examples.
 
         // Shared types and utilities
         pub mod shared;
@@ -272,16 +421,39 @@ pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
         })
         .collect();
 
+    // Build a list of re-exported items for documentation
+    // These names are re-exported in prelude, so rustdoc resolves them directly
+    let client_list: Vec<String> = apis
+        .iter()
+        .map(|api| {
+            format!("//! - [`{name}`] + [`{name}Request`]", name = api.name)
+        })
+        .collect();
+    let client_list_str = client_list.join("\n");
+    let client_list_tokens: TokenStream = client_list_str.parse().unwrap_or_default();
+
     quote! {
         //! Convenient re-exports for working with generated API clients.
         //!
-        //! This prelude exports the API clients and request enums. For response types,
-        //! import from the specific API module to avoid naming conflicts:
+        //! This prelude exports the client structs, request enums, and shared error
+        //! types. Response types are **not** re-exported here to avoid naming conflicts.
+        //! Import them from specific API modules instead:
         //!
         //! ```ignore
-        //! use schematic_schema::openai::ChatCompletionResponse;
-        //! use schematic_schema::anthropic::MessageResponse;
+        //! use schematic_schema::openai::Model;
+        //! use schematic_schema::anthropic::CreateMessageResponse;
         //! ```
+        //!
+        //! ## Re-exports
+        //!
+        //! **Clients and request enums:**
+        //!
+        #client_list_tokens
+        //!
+        //! **Shared types:**
+        //!
+        //! - [`SchematicError`] - Error type for all API operations
+        //! - [`RequestParts`] - Low-level request decomposition tuple
         //!
         //! ## Examples
         //!
@@ -291,7 +463,16 @@ pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
         //! #[tokio::main]
         //! async fn main() -> Result<(), SchematicError> {
         //!     let client = OpenAI::new();
-        //!     // Use client...
+        //!
+        //!     // Typed request with new()
+        //!     let models = client.list_models().await?;
+        //!
+        //!     // Ergonomic From<&str> for single-param endpoints
+        //!     use schematic_schema::openai::{RetrieveModelRequest, Model};
+        //!     let model: Model = client
+        //!         .request(RetrieveModelRequest::from("gpt-4"))
+        //!         .await?;
+        //!
         //!     Ok(())
         //! }
         //! ```
