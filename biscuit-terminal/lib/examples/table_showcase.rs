@@ -97,7 +97,7 @@ fn main() {
         .with_columns(vec![
             TableColumn::new("Language"),
             TableColumn::new("Year"),
-            TableColumn::new("GitHub Stars").with_type(ColumnType::Integer),
+            TableColumn::new("GitHub\nStars").with_type(ColumnType::Integer),
         ])
         .with_data(vec![
             vec![
@@ -126,12 +126,15 @@ fn main() {
     // ── 4. Multi-Currency ─────────────────────────────────────────
     println!("--- 4. Multi-Currency ---\n");
 
+    // Note: Column types determine alignment, not cell content types.
+    // Use any Currency variant to get right-alignment; the cell content
+    // determines the actual currency symbol displayed.
     let table = Table::new()
         .with_title("Exchange Rates (from $1,000 USD)")
         .with_columns(vec![
             TableColumn::new("To"),
-            TableColumn::new("Amount"),
-            TableColumn::new("Rate"),
+            TableColumn::new("Amount").with_type(ColumnType::Currency(Currency::USD)),
+            TableColumn::new("Rate").with_type(ColumnType::Float),
         ])
         .with_data(vec![
             vec![
