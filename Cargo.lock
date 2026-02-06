@@ -4088,6 +4088,7 @@ dependencies = [
 name = "playa-cli"
 version = "0.1.0"
 dependencies = [
+ "biscuit-terminal",
  "clap 4.5.54",
  "clap_complete",
  "darkmatter",

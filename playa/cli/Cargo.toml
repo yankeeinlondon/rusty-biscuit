@@ -15,6 +15,7 @@ audio-ducking-macos = ["audio-ducking", "playa/audio-ducking-macos"]
 audio-ducking-linux = ["audio-ducking", "playa/audio-ducking-linux"]
 
 [dependencies]
+biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 clap = { version = "4.5.53", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 playa = { path = "../lib", features = ["sound-effects"] }

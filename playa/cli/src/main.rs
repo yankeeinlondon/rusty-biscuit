@@ -1,9 +1,14 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::CompleteEnv;
 use sniff::programs::InstalledHeadlessAudio;
 
+use biscuit_terminal::components::list::UnorderedList;
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use playa::{AudioFileFormat, AudioPlayer, Codec, PLAYER_LOOKUP, Playa, SoundEffect, all_players};
 
 use darkmatter::markdown::Markdown;
@@ -348,10 +353,43 @@ fn list_sound_effects() {
         std::process::exit(1);
     }
 
-    println!("Available sound effects ({}):", effects.len());
+    // Group effects by category
+    let mut categories: BTreeMap<&str, Vec<SoundEffect>> = BTreeMap::new();
     for effect in effects {
-        println!("  {}", effect.name());
+        categories
+            .entry(effect.category())
+            .or_default()
+            .push(effect);
     }
+
+    // Build the nested list structure
+    let mut top_list = UnorderedList::empty();
+
+    for (category, cat_effects) in categories {
+        // Category header as a Prose with blue bold styling
+        let header = Prose::new(format!("<blue><bold>{}</bold></blue>", category));
+        top_list.add(header);
+
+        // Build the inner list of effects
+        let effect_items: Vec<RenderableContent> = cat_effects
+            .iter()
+            .map(|effect| {
+                let styled = Prose::new(format!(
+                    "{} <dim><italic>{}</italic></dim>",
+                    effect.name(),
+                    effect.description()
+                ));
+                RenderableContent::Component(Arc::new(styled))
+            })
+            .collect();
+
+        let inner_list = UnorderedList::from(effect_items);
+        top_list.add(inner_list);
+    }
+
+    // Render and print
+    let output = top_list.render(None);
+    println!("{}", output);
 }
 
 #[cfg(feature = "audio-ducking")]

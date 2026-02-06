@@ -84,62 +84,62 @@ pub enum SoundEffect {
     /// Short digital hit sound, variant 2.
     #[cfg(feature = "sfx-ui")]
     DitHit2,
-    /// Electronic hit effect 01.
+    /// Electronic hit effect 1.
     #[cfg(feature = "sfx-ui")]
-    ElectronicHitFx01,
-    /// Electronic hit effect 03.
+    ElectronicHitFx1,
+    /// Electronic hit effect 2.
     #[cfg(feature = "sfx-ui")]
-    ElectronicHitFx03,
-    /// Electronic hit effect 06.
+    ElectronicHitFx2,
+    /// Electronic hit effect 3.
     #[cfg(feature = "sfx-ui")]
-    ElectronicHitFx06,
-    /// Electronic hit effect 07.
+    ElectronicHitFx3,
+    /// Electronic hit effect 4.
     #[cfg(feature = "sfx-ui")]
-    ElectronicHitFx07,
-    /// Electronic hit effect 14.
+    ElectronicHitFx4,
+    /// Electronic hit effect 5.
     #[cfg(feature = "sfx-ui")]
-    ElectronicHitFx14,
-    /// Electronic hit effect 16.
+    ElectronicHitFx5,
+    /// Electronic hit effect 6.
     #[cfg(feature = "sfx-ui")]
-    ElectronicHitFx16,
+    ElectronicHitFx6,
 
     // === Cartoon Sounds (sfx-cartoon) ===
-    /// Cartoon accent sound 01.
+    /// Cartoon accent sound 1.
     #[cfg(feature = "sfx-cartoon")]
-    CartoonAccent01,
-    /// Cartoon accent sound 02.
+    CartoonAccent1,
+    /// Cartoon accent sound 2.
     #[cfg(feature = "sfx-cartoon")]
-    CartoonAccent02,
-    /// Cartoon accent sound 04.
+    CartoonAccent2,
+    /// Cartoon accent sound 3.
     #[cfg(feature = "sfx-cartoon")]
-    CartoonAccent04,
-    /// Cartoon accent sound 07.
+    CartoonAccent3,
+    /// Cartoon accent sound 4.
     #[cfg(feature = "sfx-cartoon")]
-    CartoonAccent07,
-    /// Cartoon accent sound 09.
+    CartoonAccent4,
+    /// Cartoon accent sound 5.
     #[cfg(feature = "sfx-cartoon")]
-    CartoonAccent09,
+    CartoonAccent5,
+    /// Cartoon accent sound 6.
+    #[cfg(feature = "sfx-cartoon")]
+    CartoonAccent6,
+    /// Cartoon accent sound 7.
+    #[cfg(feature = "sfx-cartoon")]
+    CartoonAccent7,
+    /// Cartoon accent sound 8.
+    #[cfg(feature = "sfx-cartoon")]
+    CartoonAccent8,
+    /// Cartoon accent sound 9.
+    #[cfg(feature = "sfx-cartoon")]
+    CartoonAccent9,
     /// Cartoon accent sound 10.
     #[cfg(feature = "sfx-cartoon")]
     CartoonAccent10,
+    /// Cartoon accent sound 11.
+    #[cfg(feature = "sfx-cartoon")]
+    CartoonAccent11,
     /// Cartoon accent sound 12.
     #[cfg(feature = "sfx-cartoon")]
     CartoonAccent12,
-    /// Cartoon accent sound 17.
-    #[cfg(feature = "sfx-cartoon")]
-    CartoonAccent17,
-    /// Cartoon accent sound 25.
-    #[cfg(feature = "sfx-cartoon")]
-    CartoonAccent25,
-    /// Cartoon accent sound 31.
-    #[cfg(feature = "sfx-cartoon")]
-    CartoonAccent31,
-    /// Cartoon accent sound 33.
-    #[cfg(feature = "sfx-cartoon")]
-    CartoonAccent33,
-    /// Cartoon accent sound 35.
-    #[cfg(feature = "sfx-cartoon")]
-    CartoonAccent35,
     /// Exaggerated cartoon crying sound.
     #[cfg(feature = "sfx-cartoon")]
     CartoonCry,
@@ -259,49 +259,43 @@ const DIT_HIT_1_BYTES: &[u8] = include_bytes!("../../effects/dit-hit-1.wav");
 #[cfg(feature = "sfx-ui")]
 const DIT_HIT_2_BYTES: &[u8] = include_bytes!("../../effects/dit-hit-2.wav");
 #[cfg(feature = "sfx-ui")]
-const ELECTRONIC_HIT_FX_01_BYTES: &[u8] =
-    include_bytes!("../../effects/electronic-hit-fx-01_1.wav");
+const ELECTRONIC_HIT_FX_1_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx1.wav");
 #[cfg(feature = "sfx-ui")]
-const ELECTRONIC_HIT_FX_03_BYTES: &[u8] =
-    include_bytes!("../../effects/electronic-hit-fx-03_1.wav");
+const ELECTRONIC_HIT_FX_2_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx2.wav");
 #[cfg(feature = "sfx-ui")]
-const ELECTRONIC_HIT_FX_06_BYTES: &[u8] =
-    include_bytes!("../../effects/electronic-hit-fx-06_1.wav");
+const ELECTRONIC_HIT_FX_3_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx3.wav");
 #[cfg(feature = "sfx-ui")]
-const ELECTRONIC_HIT_FX_07_BYTES: &[u8] =
-    include_bytes!("../../effects/electronic-hit-fx-07_1.wav");
+const ELECTRONIC_HIT_FX_4_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx4.wav");
 #[cfg(feature = "sfx-ui")]
-const ELECTRONIC_HIT_FX_14_BYTES: &[u8] =
-    include_bytes!("../../effects/electronic-hit-fx-14_1.wav");
+const ELECTRONIC_HIT_FX_5_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx5.wav");
 #[cfg(feature = "sfx-ui")]
-const ELECTRONIC_HIT_FX_16_BYTES: &[u8] =
-    include_bytes!("../../effects/electronic-hit-fx-16_1.wav");
+const ELECTRONIC_HIT_FX_6_BYTES: &[u8] = include_bytes!("../../effects/electronic-hit-fx6.wav");
 
 // === Cartoon Sounds (sfx-cartoon) ===
 #[cfg(feature = "sfx-cartoon")]
-const CARTOON_ACCENT_01_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent-01.wav");
+const CARTOON_ACCENT_1_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent1.wav");
 #[cfg(feature = "sfx-cartoon")]
-const CARTOON_ACCENT_02_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent-02.wav");
+const CARTOON_ACCENT_2_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent2.wav");
 #[cfg(feature = "sfx-cartoon")]
-const CARTOON_ACCENT_04_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent-04.wav");
+const CARTOON_ACCENT_3_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent3.wav");
 #[cfg(feature = "sfx-cartoon")]
-const CARTOON_ACCENT_07_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent-07.wav");
+const CARTOON_ACCENT_4_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent4.wav");
 #[cfg(feature = "sfx-cartoon")]
-const CARTOON_ACCENT_09_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent-09.wav");
+const CARTOON_ACCENT_5_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent5.wav");
 #[cfg(feature = "sfx-cartoon")]
-const CARTOON_ACCENT_10_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent-10.wav");
+const CARTOON_ACCENT_6_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent6.wav");
 #[cfg(feature = "sfx-cartoon")]
-const CARTOON_ACCENT_12_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent-12.wav");
+const CARTOON_ACCENT_7_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent7.wav");
 #[cfg(feature = "sfx-cartoon")]
-const CARTOON_ACCENT_17_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent-17.wav");
+const CARTOON_ACCENT_8_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent8.wav");
 #[cfg(feature = "sfx-cartoon")]
-const CARTOON_ACCENT_25_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent-25.wav");
+const CARTOON_ACCENT_9_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent9.wav");
 #[cfg(feature = "sfx-cartoon")]
-const CARTOON_ACCENT_31_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent-31.wav");
+const CARTOON_ACCENT_10_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent10.wav");
 #[cfg(feature = "sfx-cartoon")]
-const CARTOON_ACCENT_33_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent-33.wav");
+const CARTOON_ACCENT_11_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent11.wav");
 #[cfg(feature = "sfx-cartoon")]
-const CARTOON_ACCENT_35_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent-35.wav");
+const CARTOON_ACCENT_12_BYTES: &[u8] = include_bytes!("../../effects/cartoon-accent12.wav");
 #[cfg(feature = "sfx-cartoon")]
 const CARTOON_CRY_BYTES: &[u8] = include_bytes!("../../effects/cartoon-cry.wav");
 
@@ -404,43 +398,43 @@ impl SoundEffect {
             #[cfg(feature = "sfx-ui")]
             Self::DitHit2 => "dit-hit-2",
             #[cfg(feature = "sfx-ui")]
-            Self::ElectronicHitFx01 => "electronic-hit-fx-01",
+            Self::ElectronicHitFx1 => "electronic-hit-fx1",
             #[cfg(feature = "sfx-ui")]
-            Self::ElectronicHitFx03 => "electronic-hit-fx-03",
+            Self::ElectronicHitFx2 => "electronic-hit-fx2",
             #[cfg(feature = "sfx-ui")]
-            Self::ElectronicHitFx06 => "electronic-hit-fx-06",
+            Self::ElectronicHitFx3 => "electronic-hit-fx3",
             #[cfg(feature = "sfx-ui")]
-            Self::ElectronicHitFx07 => "electronic-hit-fx-07",
+            Self::ElectronicHitFx4 => "electronic-hit-fx4",
             #[cfg(feature = "sfx-ui")]
-            Self::ElectronicHitFx14 => "electronic-hit-fx-14",
+            Self::ElectronicHitFx5 => "electronic-hit-fx5",
             #[cfg(feature = "sfx-ui")]
-            Self::ElectronicHitFx16 => "electronic-hit-fx-16",
+            Self::ElectronicHitFx6 => "electronic-hit-fx6",
 
             // === Cartoon Sounds (sfx-cartoon) ===
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent01 => "cartoon-accent-01",
+            Self::CartoonAccent1 => "cartoon-accent1",
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent02 => "cartoon-accent-02",
+            Self::CartoonAccent2 => "cartoon-accent2",
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent04 => "cartoon-accent-04",
+            Self::CartoonAccent3 => "cartoon-accent3",
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent07 => "cartoon-accent-07",
+            Self::CartoonAccent4 => "cartoon-accent4",
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent09 => "cartoon-accent-09",
+            Self::CartoonAccent5 => "cartoon-accent5",
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent10 => "cartoon-accent-10",
+            Self::CartoonAccent6 => "cartoon-accent6",
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent12 => "cartoon-accent-12",
+            Self::CartoonAccent7 => "cartoon-accent7",
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent17 => "cartoon-accent-17",
+            Self::CartoonAccent8 => "cartoon-accent8",
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent25 => "cartoon-accent-25",
+            Self::CartoonAccent9 => "cartoon-accent9",
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent31 => "cartoon-accent-31",
+            Self::CartoonAccent10 => "cartoon-accent10",
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent33 => "cartoon-accent-33",
+            Self::CartoonAccent11 => "cartoon-accent11",
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent35 => "cartoon-accent-35",
+            Self::CartoonAccent12 => "cartoon-accent12",
             #[cfg(feature = "sfx-cartoon")]
             Self::CartoonCry => "cartoon-cry",
 
@@ -536,28 +530,28 @@ impl SoundEffect {
             Self::SpaceAlarm,
             Self::DitHit1,
             Self::DitHit2,
-            Self::ElectronicHitFx01,
-            Self::ElectronicHitFx03,
-            Self::ElectronicHitFx06,
-            Self::ElectronicHitFx07,
-            Self::ElectronicHitFx14,
-            Self::ElectronicHitFx16,
+            Self::ElectronicHitFx1,
+            Self::ElectronicHitFx2,
+            Self::ElectronicHitFx3,
+            Self::ElectronicHitFx4,
+            Self::ElectronicHitFx5,
+            Self::ElectronicHitFx6,
         ]);
 
         #[cfg(feature = "sfx-cartoon")]
         effects.extend_from_slice(&[
-            Self::CartoonAccent01,
-            Self::CartoonAccent02,
-            Self::CartoonAccent04,
-            Self::CartoonAccent07,
-            Self::CartoonAccent09,
+            Self::CartoonAccent1,
+            Self::CartoonAccent2,
+            Self::CartoonAccent3,
+            Self::CartoonAccent4,
+            Self::CartoonAccent5,
+            Self::CartoonAccent6,
+            Self::CartoonAccent7,
+            Self::CartoonAccent8,
+            Self::CartoonAccent9,
             Self::CartoonAccent10,
+            Self::CartoonAccent11,
             Self::CartoonAccent12,
-            Self::CartoonAccent17,
-            Self::CartoonAccent25,
-            Self::CartoonAccent31,
-            Self::CartoonAccent33,
-            Self::CartoonAccent35,
             Self::CartoonCry,
         ]);
 
@@ -641,43 +635,43 @@ impl SoundEffect {
             #[cfg(feature = "sfx-ui")]
             "dit-hit-2" => Some(Self::DitHit2),
             #[cfg(feature = "sfx-ui")]
-            "electronic-hit-fx-01" => Some(Self::ElectronicHitFx01),
+            "electronic-hit-fx1" => Some(Self::ElectronicHitFx1),
             #[cfg(feature = "sfx-ui")]
-            "electronic-hit-fx-03" => Some(Self::ElectronicHitFx03),
+            "electronic-hit-fx2" => Some(Self::ElectronicHitFx2),
             #[cfg(feature = "sfx-ui")]
-            "electronic-hit-fx-06" => Some(Self::ElectronicHitFx06),
+            "electronic-hit-fx3" => Some(Self::ElectronicHitFx3),
             #[cfg(feature = "sfx-ui")]
-            "electronic-hit-fx-07" => Some(Self::ElectronicHitFx07),
+            "electronic-hit-fx4" => Some(Self::ElectronicHitFx4),
             #[cfg(feature = "sfx-ui")]
-            "electronic-hit-fx-14" => Some(Self::ElectronicHitFx14),
+            "electronic-hit-fx5" => Some(Self::ElectronicHitFx5),
             #[cfg(feature = "sfx-ui")]
-            "electronic-hit-fx-16" => Some(Self::ElectronicHitFx16),
+            "electronic-hit-fx6" => Some(Self::ElectronicHitFx6),
 
             // === Cartoon Sounds (sfx-cartoon) ===
             #[cfg(feature = "sfx-cartoon")]
-            "cartoon-accent-01" => Some(Self::CartoonAccent01),
+            "cartoon-accent1" => Some(Self::CartoonAccent1),
             #[cfg(feature = "sfx-cartoon")]
-            "cartoon-accent-02" => Some(Self::CartoonAccent02),
+            "cartoon-accent2" => Some(Self::CartoonAccent2),
             #[cfg(feature = "sfx-cartoon")]
-            "cartoon-accent-04" => Some(Self::CartoonAccent04),
+            "cartoon-accent3" => Some(Self::CartoonAccent3),
             #[cfg(feature = "sfx-cartoon")]
-            "cartoon-accent-07" => Some(Self::CartoonAccent07),
+            "cartoon-accent4" => Some(Self::CartoonAccent4),
             #[cfg(feature = "sfx-cartoon")]
-            "cartoon-accent-09" => Some(Self::CartoonAccent09),
+            "cartoon-accent5" => Some(Self::CartoonAccent5),
             #[cfg(feature = "sfx-cartoon")]
-            "cartoon-accent-10" => Some(Self::CartoonAccent10),
+            "cartoon-accent6" => Some(Self::CartoonAccent6),
             #[cfg(feature = "sfx-cartoon")]
-            "cartoon-accent-12" => Some(Self::CartoonAccent12),
+            "cartoon-accent7" => Some(Self::CartoonAccent7),
             #[cfg(feature = "sfx-cartoon")]
-            "cartoon-accent-17" => Some(Self::CartoonAccent17),
+            "cartoon-accent8" => Some(Self::CartoonAccent8),
             #[cfg(feature = "sfx-cartoon")]
-            "cartoon-accent-25" => Some(Self::CartoonAccent25),
+            "cartoon-accent9" => Some(Self::CartoonAccent9),
             #[cfg(feature = "sfx-cartoon")]
-            "cartoon-accent-31" => Some(Self::CartoonAccent31),
+            "cartoon-accent10" => Some(Self::CartoonAccent10),
             #[cfg(feature = "sfx-cartoon")]
-            "cartoon-accent-33" => Some(Self::CartoonAccent33),
+            "cartoon-accent11" => Some(Self::CartoonAccent11),
             #[cfg(feature = "sfx-cartoon")]
-            "cartoon-accent-35" => Some(Self::CartoonAccent35),
+            "cartoon-accent12" => Some(Self::CartoonAccent12),
             #[cfg(feature = "sfx-cartoon")]
             "cartoon-cry" => Some(Self::CartoonCry),
 
@@ -769,43 +763,43 @@ impl SoundEffect {
             #[cfg(feature = "sfx-ui")]
             Self::DitHit2 => DIT_HIT_2_BYTES,
             #[cfg(feature = "sfx-ui")]
-            Self::ElectronicHitFx01 => ELECTRONIC_HIT_FX_01_BYTES,
+            Self::ElectronicHitFx1 => ELECTRONIC_HIT_FX_1_BYTES,
             #[cfg(feature = "sfx-ui")]
-            Self::ElectronicHitFx03 => ELECTRONIC_HIT_FX_03_BYTES,
+            Self::ElectronicHitFx2 => ELECTRONIC_HIT_FX_2_BYTES,
             #[cfg(feature = "sfx-ui")]
-            Self::ElectronicHitFx06 => ELECTRONIC_HIT_FX_06_BYTES,
+            Self::ElectronicHitFx3 => ELECTRONIC_HIT_FX_3_BYTES,
             #[cfg(feature = "sfx-ui")]
-            Self::ElectronicHitFx07 => ELECTRONIC_HIT_FX_07_BYTES,
+            Self::ElectronicHitFx4 => ELECTRONIC_HIT_FX_4_BYTES,
             #[cfg(feature = "sfx-ui")]
-            Self::ElectronicHitFx14 => ELECTRONIC_HIT_FX_14_BYTES,
+            Self::ElectronicHitFx5 => ELECTRONIC_HIT_FX_5_BYTES,
             #[cfg(feature = "sfx-ui")]
-            Self::ElectronicHitFx16 => ELECTRONIC_HIT_FX_16_BYTES,
+            Self::ElectronicHitFx6 => ELECTRONIC_HIT_FX_6_BYTES,
 
             // === Cartoon Sounds (sfx-cartoon) ===
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent01 => CARTOON_ACCENT_01_BYTES,
+            Self::CartoonAccent1 => CARTOON_ACCENT_1_BYTES,
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent02 => CARTOON_ACCENT_02_BYTES,
+            Self::CartoonAccent2 => CARTOON_ACCENT_2_BYTES,
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent04 => CARTOON_ACCENT_04_BYTES,
+            Self::CartoonAccent3 => CARTOON_ACCENT_3_BYTES,
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent07 => CARTOON_ACCENT_07_BYTES,
+            Self::CartoonAccent4 => CARTOON_ACCENT_4_BYTES,
             #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent09 => CARTOON_ACCENT_09_BYTES,
+            Self::CartoonAccent5 => CARTOON_ACCENT_5_BYTES,
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent6 => CARTOON_ACCENT_6_BYTES,
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent7 => CARTOON_ACCENT_7_BYTES,
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent8 => CARTOON_ACCENT_8_BYTES,
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent9 => CARTOON_ACCENT_9_BYTES,
             #[cfg(feature = "sfx-cartoon")]
             Self::CartoonAccent10 => CARTOON_ACCENT_10_BYTES,
             #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent11 => CARTOON_ACCENT_11_BYTES,
+            #[cfg(feature = "sfx-cartoon")]
             Self::CartoonAccent12 => CARTOON_ACCENT_12_BYTES,
-            #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent17 => CARTOON_ACCENT_17_BYTES,
-            #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent25 => CARTOON_ACCENT_25_BYTES,
-            #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent31 => CARTOON_ACCENT_31_BYTES,
-            #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent33 => CARTOON_ACCENT_33_BYTES,
-            #[cfg(feature = "sfx-cartoon")]
-            Self::CartoonAccent35 => CARTOON_ACCENT_35_BYTES,
             #[cfg(feature = "sfx-cartoon")]
             Self::CartoonCry => CARTOON_CRY_BYTES,
 
@@ -919,6 +913,202 @@ impl SoundEffect {
     /// ```
     pub fn bytes(&self) -> &'static [u8] {
         self.as_bytes()
+    }
+
+    /// Returns the category name for this sound effect.
+    ///
+    /// Categories correspond to the feature flags used to enable groups
+    /// of effects (e.g., "UI", "Cartoon", "Reactions").
+    pub fn category(&self) -> &'static str {
+        match self {
+            #[cfg(feature = "sfx-ui")]
+            Self::Doorbell
+            | Self::Doorbell2
+            | Self::SpaceAlarm
+            | Self::DitHit1
+            | Self::DitHit2
+            | Self::ElectronicHitFx1
+            | Self::ElectronicHitFx2
+            | Self::ElectronicHitFx3
+            | Self::ElectronicHitFx4
+            | Self::ElectronicHitFx5
+            | Self::ElectronicHitFx6 => "UI",
+
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent1
+            | Self::CartoonAccent2
+            | Self::CartoonAccent3
+            | Self::CartoonAccent4
+            | Self::CartoonAccent5
+            | Self::CartoonAccent6
+            | Self::CartoonAccent7
+            | Self::CartoonAccent8
+            | Self::CartoonAccent9
+            | Self::CartoonAccent10
+            | Self::CartoonAccent11
+            | Self::CartoonAccent12
+            | Self::CartoonCry => "Cartoon",
+
+            #[cfg(feature = "sfx-reactions")]
+            Self::CrowdLaugh
+            | Self::CrowdLaughApplause
+            | Self::SadTrombone
+            | Self::SmallGroupCheer
+            | Self::FemaleAstonishedGasp
+            | Self::Sneeze => "Reactions",
+
+            #[cfg(feature = "sfx-scifi")]
+            Self::HighDown
+            | Self::HighUp
+            | Self::TwoTone
+            | Self::PhaseJump1
+            | Self::PhaseJump2
+            | Self::PhaseJump3
+            | Self::PhaseJump4
+            | Self::PhaseJump5
+            | Self::PhaserDown1
+            | Self::PhaserDown2
+            | Self::PhaserDown3 => "Sci-Fi",
+
+            #[cfg(feature = "sfx-atmosphere")]
+            Self::CreepyDarkLogo
+            | Self::ElementalMagicSpellImpact
+            | Self::EpicOrchestraTransition
+            | Self::MysteriousBass
+            | Self::RetroGame => "Atmosphere",
+
+            #[cfg(feature = "sfx-motion")]
+            Self::AirReverseBurst
+            | Self::AirWoosh
+            | Self::AirZoomVacuum
+            | Self::ArrowWhoosh
+            | Self::BicycleHorn
+            | Self::BottleCork
+            | Self::Bullet => "Motion",
+        }
+    }
+
+    /// Returns a short description for this sound effect.
+    pub fn description(&self) -> &'static str {
+        match self {
+            // UI
+            #[cfg(feature = "sfx-ui")]
+            Self::Doorbell => "classic doorbell",
+            #[cfg(feature = "sfx-ui")]
+            Self::Doorbell2 => "alternative doorbell",
+            #[cfg(feature = "sfx-ui")]
+            Self::SpaceAlarm => "space station alarm",
+            #[cfg(feature = "sfx-ui")]
+            Self::DitHit1 => "short digital hit",
+            #[cfg(feature = "sfx-ui")]
+            Self::DitHit2 => "short digital hit variant",
+            #[cfg(feature = "sfx-ui")]
+            Self::ElectronicHitFx1 => "electronic hit",
+            #[cfg(feature = "sfx-ui")]
+            Self::ElectronicHitFx2 => "electronic hit",
+            #[cfg(feature = "sfx-ui")]
+            Self::ElectronicHitFx3 => "electronic hit",
+            #[cfg(feature = "sfx-ui")]
+            Self::ElectronicHitFx4 => "electronic hit",
+            #[cfg(feature = "sfx-ui")]
+            Self::ElectronicHitFx5 => "electronic hit",
+            #[cfg(feature = "sfx-ui")]
+            Self::ElectronicHitFx6 => "electronic hit",
+
+            // Cartoon
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent1 => "cartoon accent",
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent2 => "cartoon accent",
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent3 => "cartoon accent",
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent4 => "cartoon accent",
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent5 => "cartoon accent",
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent6 => "cartoon accent",
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent7 => "cartoon accent",
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent8 => "cartoon accent",
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent9 => "cartoon accent",
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent10 => "cartoon accent",
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent11 => "cartoon accent",
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonAccent12 => "cartoon accent",
+            #[cfg(feature = "sfx-cartoon")]
+            Self::CartoonCry => "exaggerated crying",
+
+            // Reactions
+            #[cfg(feature = "sfx-reactions")]
+            Self::CrowdLaugh => "crowd laughter",
+            #[cfg(feature = "sfx-reactions")]
+            Self::CrowdLaughApplause => "crowd laughter with applause",
+            #[cfg(feature = "sfx-reactions")]
+            Self::SadTrombone => "classic wah-wah",
+            #[cfg(feature = "sfx-reactions")]
+            Self::SmallGroupCheer => "small group cheering",
+            #[cfg(feature = "sfx-reactions")]
+            Self::FemaleAstonishedGasp => "astonished gasp",
+            #[cfg(feature = "sfx-reactions")]
+            Self::Sneeze => "sneeze",
+
+            // Sci-Fi
+            #[cfg(feature = "sfx-scifi")]
+            Self::HighDown => "descending tone",
+            #[cfg(feature = "sfx-scifi")]
+            Self::HighUp => "ascending tone",
+            #[cfg(feature = "sfx-scifi")]
+            Self::TwoTone => "two-tone alert",
+            #[cfg(feature = "sfx-scifi")]
+            Self::PhaseJump1 => "phase jump",
+            #[cfg(feature = "sfx-scifi")]
+            Self::PhaseJump2 => "phase jump",
+            #[cfg(feature = "sfx-scifi")]
+            Self::PhaseJump3 => "phase jump",
+            #[cfg(feature = "sfx-scifi")]
+            Self::PhaseJump4 => "phase jump",
+            #[cfg(feature = "sfx-scifi")]
+            Self::PhaseJump5 => "phase jump",
+            #[cfg(feature = "sfx-scifi")]
+            Self::PhaserDown1 => "phaser descending",
+            #[cfg(feature = "sfx-scifi")]
+            Self::PhaserDown2 => "phaser descending",
+            #[cfg(feature = "sfx-scifi")]
+            Self::PhaserDown3 => "phaser descending",
+
+            // Atmosphere
+            #[cfg(feature = "sfx-atmosphere")]
+            Self::CreepyDarkLogo => "creepy logo sting",
+            #[cfg(feature = "sfx-atmosphere")]
+            Self::ElementalMagicSpellImpact => "magic spell impact",
+            #[cfg(feature = "sfx-atmosphere")]
+            Self::EpicOrchestraTransition => "orchestra transition",
+            #[cfg(feature = "sfx-atmosphere")]
+            Self::MysteriousBass => "mysterious bass pulse",
+            #[cfg(feature = "sfx-atmosphere")]
+            Self::RetroGame => "retro game sound",
+
+            // Motion
+            #[cfg(feature = "sfx-motion")]
+            Self::AirReverseBurst => "air reverse burst",
+            #[cfg(feature = "sfx-motion")]
+            Self::AirWoosh => "air woosh",
+            #[cfg(feature = "sfx-motion")]
+            Self::AirZoomVacuum => "air zoom vacuum",
+            #[cfg(feature = "sfx-motion")]
+            Self::ArrowWhoosh => "arrow whoosh",
+            #[cfg(feature = "sfx-motion")]
+            Self::BicycleHorn => "bicycle horn honk",
+            #[cfg(feature = "sfx-motion")]
+            Self::BottleCork => "bottle cork pop",
+            #[cfg(feature = "sfx-motion")]
+            Self::Bullet => "bullet sound",
+        }
     }
 
     /// Play this sound effect asynchronously.
