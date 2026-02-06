@@ -123,6 +123,13 @@ pub fn generate_error_type() -> TokenStream {
                 /// The environment variable names that were checked.
                 env_vars: Vec<String>,
             },
+
+            /// Internal error in schematic runtime.
+            ///
+            /// This indicates a bug in the generated code or type system violation.
+            /// Should never occur in normal operation.
+            #[error("Internal error: {0}")]
+            InternalError(String),
         }
     }
 }

@@ -117,14 +117,16 @@ fn generate_build_request_method(
     auth_setup: &TokenStream,
 ) -> TokenStream {
     quote! {
-        /// Builds and sends an HTTP request, returning the raw response.
+        /// Builds and sends an HTTP request, returning the raw response plus context.
         ///
         /// This is an internal helper method used by the public request methods.
+        /// Returns both the response and the context needed for hook processing.
         async fn build_and_send_request(
             &self,
             request: impl Into<#request_enum>,
-        ) -> Result<reqwest::Response, SchematicError> {
+        ) -> Result<(reqwest::Response, crate::shared::ResponseContext), SchematicError> {
             let request = request.into();
+            let endpoint_id = request.endpoint_id();
             let (method, path, body, endpoint_headers) = request.into_parts()?;
             let url = format!("{}{}", self.base_url, path);
 
@@ -159,11 +161,28 @@ fn generate_build_request_method(
 
             if !response.status().is_success() {
                 let status = response.status().as_u16();
-                let body = response.text().await.unwrap_or_default();
-                return Err(SchematicError::ApiError { status, body });
+                let body_text = response.text().await.unwrap_or_default();
+                return Err(SchematicError::ApiError { status, body: body_text });
             }
 
-            Ok(response)
+            // Build response context for hooks
+            let status = response.status().as_u16();
+            let headers: Vec<(String, String)> = response
+                .headers()
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                .collect();
+
+            let ctx = crate::shared::ResponseContext::new(
+                endpoint_id,
+                method,
+                path.clone(),
+                url,
+                status,
+                headers,
+            );
+
+            Ok((response, ctx))
         }
     }
 }
@@ -210,7 +229,14 @@ fn generate_json_request_method(
         /// Executes an API request expecting a JSON response.
         ///
         /// Takes any request type that can be converted into the request enum
-        /// and returns the deserialized response.
+        /// and returns the deserialized response. If response hooks are configured
+        /// via the variant builder, they will be applied.
+        ///
+        /// ## Hooks
+        ///
+        /// If configured via `variant()`:
+        /// - `pre_response_json` - Transforms JSON before deserialization
+        /// - `mutate_response` - Mutates the response after deserialization
         ///
         /// ## Errors
         ///
@@ -218,14 +244,42 @@ fn generate_json_request_method(
         /// - The HTTP request fails (network error, timeout, etc.)
         /// - The response indicates a non-success status code
         /// - The response body cannot be deserialized as JSON
+        /// - A hook returns an error
         #[must_use = "this returns a Future that must be awaited"]
-        pub async fn request<T: serde::de::DeserializeOwned>(
+        pub async fn request<T: serde::de::DeserializeOwned + Send + Sync + 'static>(
             &self,
             request: impl Into<#request_enum>,
         ) -> Result<T, SchematicError> {
-            let response = self.build_and_send_request(request).await?;
-            let result = response.json::<T>().await?;
-            Ok(result)
+            let (response, ctx) = self.build_and_send_request(request).await?;
+
+            // Check if hooks are configured
+            let has_pre_hook = self.variant_hooks.pre_response_json.is_some();
+            let has_mutator = self.variant_hooks.response_mutators.contains_key(ctx.endpoint_id);
+
+            if has_pre_hook || has_mutator {
+                // Hook path: read bytes, apply pre-hook, deserialize, apply mutator
+                let bytes = response.bytes().await?;
+                let mut json_value: serde_json::Value = serde_json::from_slice(&bytes)?;
+
+                // Apply pre-response JSON hook if configured
+                if let Some(ref hook) = self.variant_hooks.pre_response_json {
+                    json_value = hook(&ctx, json_value)?;
+                }
+
+                // Deserialize to target type
+                let mut result: T = serde_json::from_value(json_value)?;
+
+                // Apply response mutator if registered for this endpoint
+                if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
+                    mutator.mutate(&ctx, &mut result)?;
+                }
+
+                Ok(result)
+            } else {
+                // Fast path: no hooks, direct deserialization
+                let result = response.json::<T>().await?;
+                Ok(result)
+            }
         }
     }
 }
@@ -251,7 +305,7 @@ fn generate_bytes_request_method(
             &self,
             request: impl Into<#request_enum>,
         ) -> Result<bytes::Bytes, SchematicError> {
-            let response = self.build_and_send_request(request).await?;
+            let (response, _ctx) = self.build_and_send_request(request).await?;
             let bytes = response.bytes().await?;
             Ok(bytes)
         }
@@ -278,7 +332,7 @@ fn generate_text_request_method(
             &self,
             request: impl Into<#request_enum>,
         ) -> Result<String, SchematicError> {
-            let response = self.build_and_send_request(request).await?;
+            let (response, _ctx) = self.build_and_send_request(request).await?;
             let text = response.text().await?;
             Ok(text)
         }
@@ -306,7 +360,7 @@ fn generate_empty_request_method(
             &self,
             request: impl Into<#request_enum>,
         ) -> Result<(), SchematicError> {
-            let _response = self.build_and_send_request(request).await?;
+            let (_response, _ctx) = self.build_and_send_request(request).await?;
             Ok(())
         }
     }
@@ -529,15 +583,19 @@ mod tests {
         let tokens = generate_request_method(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        // Check method signature
+        // Check method signature (now includes Send + Sync + 'static for hook compatibility)
         assert!(code.contains("impl NoAuth"));
-        assert!(code.contains("pub async fn request<T: serde::de::DeserializeOwned>"));
+        assert!(
+            code.contains("pub async fn request<T: serde::de::DeserializeOwned + Send + Sync + 'static>"),
+            "Expected new signature with Send + Sync + 'static bounds"
+        );
         assert!(code.contains("request: impl Into<NoAuthRequest>"));
         assert!(code.contains("Result<T, SchematicError>"));
 
-        // Check build_and_send_request helper exists
+        // Check build_and_send_request helper exists and returns tuple
         assert!(code.contains("async fn build_and_send_request"));
         assert!(code.contains("let request = request.into()"));
+        assert!(code.contains("let endpoint_id = request.endpoint_id()"));
         assert!(
             code.contains("let (method, path, body, endpoint_headers) = request.into_parts()?")
         );
@@ -562,8 +620,10 @@ mod tests {
         assert!(code.contains("if let Some(body) = body"));
         assert!(code.contains(r#"header("Content-Type", "application/json")"#));
 
-        // Check response handling
+        // Check response handling with hook support
         assert!(code.contains("response.status().is_success()"));
+        assert!(code.contains("variant_hooks.pre_response_json"));
+        // Fast path still uses direct JSON deserialization
         assert!(code.contains("response.json::<T>().await"));
     }
 

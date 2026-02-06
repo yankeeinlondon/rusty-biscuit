@@ -30,7 +30,7 @@ use schematic_define::{AuthStrategy, RestApi, RestMethod};
 use crate::codegen::{
     ModuleDocBuilder, generate_api_struct, generate_error_type, generate_request_enum_with_suffix,
     generate_request_method_with_suffix, generate_request_parts_type,
-    generate_request_struct_with_options,
+    generate_request_struct_with_options, generate_variant_types,
 };
 use crate::errors::GeneratorError;
 use crate::inference::infer_module_path;
@@ -117,6 +117,7 @@ pub fn assemble_shared_module() -> TokenStream {
     // Generate shared types
     let request_parts_type = generate_request_parts_type();
     let error_type = generate_error_type();
+    let variant_types = generate_variant_types();
 
     quote! {
         //! Shared types and utilities for generated API clients.
@@ -130,6 +131,8 @@ pub fn assemble_shared_module() -> TokenStream {
         #request_parts_type
 
         #error_type
+
+        #variant_types
     }
 }
 

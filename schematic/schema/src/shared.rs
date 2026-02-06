@@ -73,4 +73,226 @@ pub enum SchematicError {
         /// The environment variable names that were checked.
         env_vars: Vec<String>,
     },
+    /// Internal error in schematic runtime.
+    ///
+    /// This indicates a bug in the generated code or type system violation.
+    /// Should never occur in normal operation.
+    #[error("Internal error: {0}")]
+    InternalError(String),
+}
+/// Context passed to response hooks containing request/response metadata.
+///
+/// This struct provides hooks with information about the HTTP exchange,
+/// enabling context-aware response processing.
+///
+/// ## Examples
+///
+/// ```rust,ignore
+/// let variant = api.variant()
+///     .mutate_response::<ListModelsRequest>(|ctx, response| {
+///         if ctx.status == 200 {
+///             // Process successful response
+///         }
+///         Ok(())
+///     })
+///     .build();
+/// ```
+#[derive(Debug, Clone)]
+pub struct ResponseContext {
+    /// The endpoint identifier (e.g., "ListModels", "CreateCompletion").
+    pub endpoint_id: &'static str,
+    /// The HTTP method used (e.g., "GET", "POST").
+    pub method: &'static str,
+    /// The URL path with parameters substituted.
+    pub path: String,
+    /// The full request URL.
+    pub url: String,
+    /// The HTTP status code from the response.
+    pub status: u16,
+    /// Response headers as (name, value) pairs.
+    ///
+    /// Using Vec instead of HeaderMap for decoupling from reqwest.
+    pub headers: Vec<(String, String)>,
+}
+impl ResponseContext {
+    /// Creates a new ResponseContext from response details.
+    ///
+    /// This is typically called internally by generated client code
+    /// after receiving an HTTP response.
+    #[must_use]
+    pub fn new(
+        endpoint_id: &'static str,
+        method: &'static str,
+        path: String,
+        url: String,
+        status: u16,
+        headers: Vec<(String, String)>,
+    ) -> Self {
+        Self {
+            endpoint_id,
+            method,
+            path,
+            url,
+            status,
+            headers,
+        }
+    }
+    /// Gets a header value by name (case-insensitive).
+    ///
+    /// Returns the first matching header value, or None if not found.
+    #[must_use]
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+}
+/// Associates a request type with its response type and endpoint identifier.
+///
+/// This trait is implemented by generated request structs to enable
+/// type-safe response hook registration via the variant builder.
+///
+/// ## Examples
+///
+/// ```rust,ignore
+/// // Generated implementation for ListModelsRequest
+/// impl EndpointSpec for ListModelsRequest {
+///     type Response = ListModelsResponse;
+///     const ENDPOINT_ID: &'static str = "ListModels";
+/// }
+///
+/// // Allows type-safe hook registration
+/// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
+///     // `response` is &mut ListModelsResponse
+///     Ok(())
+/// })
+/// ```
+pub trait EndpointSpec {
+    /// The response type for this endpoint.
+    type Response;
+    /// Static identifier for this endpoint.
+    const ENDPOINT_ID: &'static str;
+}
+/// Hook for transforming JSON before deserialization.
+///
+/// This hook receives the raw JSON response and can reshape it
+/// to match the expected response type structure.
+///
+/// ## Examples
+///
+/// ```rust,ignore
+/// // Unwrap nested data envelope
+/// let variant = api.variant()
+///     .pre_response_json(|ctx, json| {
+///         Ok(json.get("data").cloned().unwrap_or(json))
+///     })
+///     .build();
+/// ```
+pub type PreResponseJsonHook = dyn Fn(
+    &ResponseContext,
+    serde_json::Value,
+) -> Result<serde_json::Value, SchematicError> + Send + Sync;
+/// Type-erased trait for response mutation hooks.
+///
+/// This trait allows storing hooks for different response types in
+/// a single collection. The actual type is preserved through the
+/// `TypedMutator` wrapper and recovered via `Any` downcast.
+///
+/// ## Safety
+///
+/// The downcast in `mutate` is guaranteed to succeed because:
+/// 1. Registration via `mutate_response::<R>()` ensures type consistency
+/// 2. Lookup is keyed by endpoint_id which maps 1:1 to response type
+/// 3. Type mismatch would require incorrect ENDPOINT_ID (impossible with codegen)
+pub trait AnyResponseMutator: Send + Sync {
+    /// Applies the mutation to the response object.
+    ///
+    /// The `response` parameter is guaranteed to be the correct type
+    /// for this mutator. Returns error if mutation fails.
+    fn mutate(
+        &self,
+        ctx: &ResponseContext,
+        response: &mut dyn std::any::Any,
+    ) -> Result<(), SchematicError>;
+}
+/// Concrete wrapper for type-erased response mutators.
+///
+/// This struct wraps a typed closure and implements `AnyResponseMutator`
+/// by downcasting the `dyn Any` to the expected type.
+pub struct TypedMutator<T, F>
+where
+    T: Send + Sync + 'static,
+    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync
+        + 'static,
+{
+    hook: F,
+    _marker: std::marker::PhantomData<T>,
+}
+impl<T, F> TypedMutator<T, F>
+where
+    T: Send + Sync + 'static,
+    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync
+        + 'static,
+{
+    /// Creates a new TypedMutator wrapping the given hook.
+    #[must_use]
+    pub fn new(hook: F) -> Self {
+        Self {
+            hook,
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+impl<T, F> AnyResponseMutator for TypedMutator<T, F>
+where
+    T: Send + Sync + 'static,
+    F: Fn(&ResponseContext, &mut T) -> Result<(), SchematicError> + Send + Sync
+        + 'static,
+{
+    fn mutate(
+        &self,
+        ctx: &ResponseContext,
+        response: &mut dyn std::any::Any,
+    ) -> Result<(), SchematicError> {
+        let typed = response
+            .downcast_mut::<T>()
+            .ok_or_else(|| SchematicError::InternalError(
+                format!(
+                    "Type mismatch in response mutator for endpoint '{}'", ctx
+                    .endpoint_id
+                ),
+            ))?;
+        (self.hook)(ctx, typed)
+    }
+}
+/// Container for all variant-specific hooks and configuration.
+///
+/// This struct is stored in API client instances created via
+/// the `variant()` builder and holds response hooks.
+#[derive(Default)]
+pub struct VariantHooks {
+    /// Optional hook for JSON transformation before deserialization.
+    pub pre_response_json: Option<std::sync::Arc<PreResponseJsonHook>>,
+    /// Per-endpoint response mutators, keyed by endpoint_id.
+    pub response_mutators: std::collections::HashMap<
+        &'static str,
+        std::sync::Arc<dyn AnyResponseMutator>,
+    >,
+}
+impl std::fmt::Debug for VariantHooks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VariantHooks")
+            .field("pre_response_json", &self.pre_response_json.is_some())
+            .field("response_mutators_count", &self.response_mutators.len())
+            .finish()
+    }
+}
+impl Clone for VariantHooks {
+    fn clone(&self) -> Self {
+        Self {
+            pre_response_json: self.pre_response_json.clone(),
+            response_mutators: self.response_mutators.clone(),
+        }
+    }
 }

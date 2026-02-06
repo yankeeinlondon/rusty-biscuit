@@ -64,6 +64,10 @@ impl ListModelsRequest {
         Ok(("GET", path, None, vec![]))
     }
 }
+impl crate::shared::EndpointSpec for ListModelsRequest {
+    type Response = ListModelsResponse;
+    const ENDPOINT_ID: &'static str = "ListModels";
+}
 /// Request for `RetrieveModel` endpoint.
 ///
 /// ## Example
@@ -111,6 +115,10 @@ impl From<String> for RetrieveModelRequest {
     fn from(param: String) -> Self {
         Self { model: param }
     }
+}
+impl crate::shared::EndpointSpec for RetrieveModelRequest {
+    type Response = Model;
+    const ENDPOINT_ID: &'static str = "RetrieveModel";
 }
 /// Request for `DeleteModel` endpoint.
 ///
@@ -160,6 +168,10 @@ impl From<String> for DeleteModelRequest {
         Self { model: param }
     }
 }
+impl crate::shared::EndpointSpec for DeleteModelRequest {
+    type Response = DeleteModelResponse;
+    const ENDPOINT_ID: &'static str = "DeleteModel";
+}
 /// Request enum for OpenAI API.
 ///
 /// Each variant wraps a strongly-typed request struct.
@@ -185,6 +197,23 @@ impl OpenAIRequest {
             Self::ListModels(req) => req.into_parts(),
             Self::RetrieveModel(req) => req.into_parts(),
             Self::DeleteModel(req) => req.into_parts(),
+        }
+    }
+    /// Returns the endpoint identifier for this request.
+    ///
+    /// This is used internally for response hook lookup.
+    #[must_use]
+    pub fn endpoint_id(&self) -> &'static str {
+        match self {
+            Self::ListModels(_) => {
+                <ListModelsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::RetrieveModel(_) => {
+                <RetrieveModelRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::DeleteModel(_) => {
+                <DeleteModelRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
         }
     }
 }
@@ -215,6 +244,8 @@ pub struct OpenAI {
     env_username: Option<String>,
     /// Default HTTP headers to include with every request.
     headers: Vec<(String, String)>,
+    /// Variant-specific hooks for response customization.
+    variant_hooks: crate::shared::VariantHooks,
 }
 impl OpenAI {
     /// Base URL for the API.
@@ -234,6 +265,7 @@ impl OpenAI {
             },
             env_username: None,
             headers: vec![],
+            variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
     /// Creates a new API client with a custom base URL.
@@ -253,6 +285,7 @@ impl OpenAI {
             },
             env_username: None,
             headers: vec![],
+            variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
     /// Creates a new API client with a pre-configured reqwest client.
@@ -278,6 +311,7 @@ impl OpenAI {
             },
             env_username: None,
             headers: vec![],
+            variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
     /// Creates a new API client with a pre-configured reqwest client and custom base URL.
@@ -304,22 +338,16 @@ impl OpenAI {
             },
             env_username: None,
             headers: vec![],
+            variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
-    /// Creates a variant of this API client with different configuration.
+    /// Creates a variant builder for customizing this API client.
     ///
-    /// This method clones the underlying HTTP client and allows customizing:
+    /// The builder pattern allows fluent configuration of:
     /// - Base URL (for proxies, mock servers, or different environments)
     /// - Authentication credentials (different env var names)
-    /// - Authentication strategy (via `UpdateStrategy`)
-    ///
-    /// ## Arguments
-    ///
-    /// * `base_url` - New base URL for this variant
-    /// * `env_auth` - New environment variable names for credentials
-    /// * `strategy` - How to update the auth strategy:
-    ///   - `UpdateStrategy::NoChange` - Keep current auth strategy
-    ///   - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
+    /// - Authentication strategy
+    /// - Response hooks for JSON transformation and mutation
     ///
     /// ## Examples
     ///
@@ -328,41 +356,49 @@ impl OpenAI {
     ///
     /// let api = Api::new();
     ///
-    /// // Create a variant pointing to a staging server
-    /// let staging = api.variant(
-    ///     "https://staging.api.com/v1",
-    ///     vec!["STAGING_API_KEY".to_string()],
-    ///     UpdateStrategy::NoChange,
-    /// );
-    ///
-    /// // Create a variant with different auth
-    /// let other = api.variant(
-    ///     "https://other.api.com/v1",
-    ///     vec!["OTHER_TOKEN".to_string()],
-    ///     UpdateStrategy::ChangeTo(schematic_define::AuthStrategy::ApiKey {
-    ///         header: "X-API-Key".to_string(),
-    ///     }),
-    /// );
+    /// // Create a variant pointing to a staging server with a response hook
+    /// let staging = api.variant()
+    ///     .base_url("https://staging.api.com/v1")
+    ///     .env_auth(vec!["STAGING_API_KEY".to_string()])
+    ///     .mutate_response::<ListModelsRequest>(|ctx, response| {
+    ///         response.data.retain(|m| !m.id.contains("deprecated"));
+    ///         Ok(())
+    ///     })
+    ///     .build();
     /// ```
-    pub fn variant(
+    #[must_use]
+    pub fn variant(&self) -> OpenAIVariantBuilder<'_> {
+        OpenAIVariantBuilder::new(self)
+    }
+    /// Creates a variant of this API client with different configuration.
+    ///
+    /// This is a convenience method equivalent to:
+    /// ```ignore
+    /// api.variant()
+    ///     .base_url(base_url)
+    ///     .env_auth(env_auth)
+    ///     .auth_update(strategy)
+    ///     .build()
+    /// ```
+    ///
+    /// ## Arguments
+    ///
+    /// * `base_url` - New base URL for this variant
+    /// * `env_auth` - New environment variable names for credentials
+    /// * `strategy` - How to update the auth strategy:
+    ///   - `UpdateStrategy::NoChange` - Keep current auth strategy
+    ///   - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
+    pub fn variant_with(
         &self,
         base_url: impl Into<String>,
         env_auth: Vec<String>,
         strategy: schematic_define::UpdateStrategy,
     ) -> Self {
-        let auth_strategy = match strategy {
-            schematic_define::UpdateStrategy::NoChange => self.auth_strategy.clone(),
-            schematic_define::UpdateStrategy::ChangeTo(auth) => auth,
-            _ => self.auth_strategy.clone(),
-        };
-        Self {
-            client: self.client.clone(),
-            base_url: base_url.into(),
-            env_auth,
-            auth_strategy,
-            env_username: self.env_username.clone(),
-            headers: self.headers.clone(),
-        }
+        self.variant()
+            .base_url(base_url)
+            .env_auth(env_auth)
+            .auth_update(strategy)
+            .build()
     }
     /// Returns a reference to the underlying HTTP client.
     ///
@@ -398,15 +434,161 @@ impl Default for OpenAI {
         Self::new()
     }
 }
+/// Builder for creating customized variants of the API client.
+///
+/// Use [`#struct_name::variant()`] to create a builder, then chain
+/// configuration methods and call [`build()`](Self::build) to create
+/// the variant client.
+pub struct OpenAIVariantBuilder<'a> {
+    base: &'a OpenAI,
+    base_url: Option<String>,
+    env_auth: Option<Vec<String>>,
+    auth_update: schematic_define::UpdateStrategy,
+    headers: Option<Vec<(String, String)>>,
+    pre_response_json: Option<std::sync::Arc<crate::shared::PreResponseJsonHook>>,
+    response_mutators: std::collections::HashMap<
+        &'static str,
+        std::sync::Arc<dyn crate::shared::AnyResponseMutator>,
+    >,
+}
+impl<'a> OpenAIVariantBuilder<'a> {
+    /// Creates a new variant builder from the base API client.
+    fn new(base: &'a OpenAI) -> Self {
+        Self {
+            base,
+            base_url: None,
+            env_auth: None,
+            auth_update: schematic_define::UpdateStrategy::NoChange,
+            headers: None,
+            pre_response_json: None,
+            response_mutators: std::collections::HashMap::new(),
+        }
+    }
+    /// Sets the base URL for the variant.
+    ///
+    /// If not set, the original client's base URL is used.
+    #[must_use]
+    pub fn base_url(mut self, url: impl Into<String>) -> Self {
+        self.base_url = Some(url.into());
+        self
+    }
+    /// Sets the environment variable names for authentication.
+    ///
+    /// If not set, the original client's env_auth is used.
+    #[must_use]
+    pub fn env_auth(mut self, env_auth: Vec<String>) -> Self {
+        self.env_auth = Some(env_auth);
+        self
+    }
+    /// Sets how the authentication strategy should be updated.
+    ///
+    /// - `UpdateStrategy::NoChange` - Keep current auth strategy (default)
+    /// - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
+    #[must_use]
+    pub fn auth_update(mut self, strategy: schematic_define::UpdateStrategy) -> Self {
+        self.auth_update = strategy;
+        self
+    }
+    /// Sets custom headers for the variant.
+    ///
+    /// If not set, the original client's headers are used.
+    #[must_use]
+    pub fn headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.headers = Some(headers);
+        self
+    }
+    /// Sets a pre-response JSON transformation hook.
+    ///
+    /// This hook runs after receiving an HTTP response but before
+    /// deserializing to the response type. Use it to reshape JSON
+    /// payloads to match expected structures.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// // Unwrap a { data: ... } envelope
+    /// variant.pre_response_json(|ctx, json| {
+    ///     Ok(json.get("data").cloned().unwrap_or(json))
+    /// })
+    /// ```
+    #[must_use]
+    pub fn pre_response_json<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(
+                &crate::shared::ResponseContext,
+                serde_json::Value,
+            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
+            + 'static,
+    {
+        self.pre_response_json = Some(std::sync::Arc::new(hook));
+        self
+    }
+    /// Registers a response mutation hook for a specific endpoint.
+    ///
+    /// This hook runs after deserializing the response and can mutate
+    /// the response object in place. The endpoint is identified by its
+    /// request type.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
+    ///     response.data.retain(|m| !m.id.contains("deprecated"));
+    ///     Ok(())
+    /// })
+    /// ```
+    #[must_use]
+    pub fn mutate_response<R, F>(mut self, hook: F) -> Self
+    where
+        R: crate::shared::EndpointSpec,
+        R::Response: Send + Sync + 'static,
+        F: Fn(
+                &crate::shared::ResponseContext,
+                &mut R::Response,
+            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
+    {
+        self.response_mutators
+            .insert(
+                R::ENDPOINT_ID,
+                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+            );
+        self
+    }
+    /// Builds the variant API client with the configured options.
+    ///
+    /// Options not explicitly set will inherit from the base client.
+    #[must_use]
+    pub fn build(self) -> OpenAI {
+        let auth_strategy = match self.auth_update {
+            schematic_define::UpdateStrategy::NoChange => self.base.auth_strategy.clone(),
+            schematic_define::UpdateStrategy::ChangeTo(auth) => auth,
+            _ => self.base.auth_strategy.clone(),
+        };
+        OpenAI {
+            client: self.base.client.clone(),
+            base_url: self.base_url.unwrap_or_else(|| self.base.base_url.clone()),
+            env_auth: self.env_auth.unwrap_or_else(|| self.base.env_auth.clone()),
+            auth_strategy,
+            env_username: self.base.env_username.clone(),
+            headers: self.headers.unwrap_or_else(|| self.base.headers.clone()),
+            variant_hooks: crate::shared::VariantHooks {
+                pre_response_json: self.pre_response_json,
+                response_mutators: self.response_mutators,
+            },
+        }
+    }
+}
 impl OpenAI {
-    /// Builds and sends an HTTP request, returning the raw response.
+    /// Builds and sends an HTTP request, returning the raw response plus context.
     ///
     /// This is an internal helper method used by the public request methods.
+    /// Returns both the response and the context needed for hook processing.
     async fn build_and_send_request(
         &self,
         request: impl Into<OpenAIRequest>,
-    ) -> Result<reqwest::Response, SchematicError> {
+    ) -> Result<(reqwest::Response, crate::shared::ResponseContext), SchematicError> {
         let request = request.into();
+        let endpoint_id = request.endpoint_id();
         let (method, path, body, endpoint_headers) = request.into_parts()?;
         let url = format!("{}{}", self.base_url, path);
         let mut req_builder = match method {
@@ -474,13 +656,27 @@ impl OpenAI {
         let response = req_builder.send().await?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            let body = response.text().await.unwrap_or_default();
+            let body_text = response.text().await.unwrap_or_default();
             return Err(SchematicError::ApiError {
                 status,
-                body,
+                body: body_text,
             });
         }
-        Ok(response)
+        let status = response.status().as_u16();
+        let headers: Vec<(String, String)> = response
+            .headers()
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+        let ctx = crate::shared::ResponseContext::new(
+            endpoint_id,
+            method,
+            path.clone(),
+            url,
+            status,
+            headers,
+        );
+        Ok((response, ctx))
     }
     /// Merges API-level and endpoint-level headers.
     ///
@@ -507,7 +703,14 @@ impl OpenAI {
     /// Executes an API request expecting a JSON response.
     ///
     /// Takes any request type that can be converted into the request enum
-    /// and returns the deserialized response.
+    /// and returns the deserialized response. If response hooks are configured
+    /// via the variant builder, they will be applied.
+    ///
+    /// ## Hooks
+    ///
+    /// If configured via `variant()`:
+    /// - `pre_response_json` - Transforms JSON before deserialization
+    /// - `mutate_response` - Mutates the response after deserialization
     ///
     /// ## Errors
     ///
@@ -515,13 +718,36 @@ impl OpenAI {
     /// - The HTTP request fails (network error, timeout, etc.)
     /// - The response indicates a non-success status code
     /// - The response body cannot be deserialized as JSON
+    /// - A hook returns an error
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn request<T: serde::de::DeserializeOwned>(
+    pub async fn request<T: serde::de::DeserializeOwned + Send + Sync + 'static>(
         &self,
         request: impl Into<OpenAIRequest>,
     ) -> Result<T, SchematicError> {
-        let response = self.build_and_send_request(request).await?;
-        let result = response.json::<T>().await?;
-        Ok(result)
+        let (response, ctx) = self.build_and_send_request(request).await?;
+        let has_pre_hook = self.variant_hooks.pre_response_json.is_some();
+        let has_mutator = self
+            .variant_hooks
+            .response_mutators
+            .contains_key(ctx.endpoint_id);
+        if has_pre_hook || has_mutator {
+            let bytes = response.bytes().await?;
+            let mut json_value: serde_json::Value = serde_json::from_slice(&bytes)?;
+            if let Some(ref hook) = self.variant_hooks.pre_response_json {
+                json_value = hook(&ctx, json_value)?;
+            }
+            let mut result: T = serde_json::from_value(json_value)?;
+            if let Some(mutator) = self
+                .variant_hooks
+                .response_mutators
+                .get(ctx.endpoint_id)
+            {
+                mutator.mutate(&ctx, &mut result)?;
+            }
+            Ok(result)
+        } else {
+            let result = response.json::<T>().await?;
+            Ok(result)
+        }
     }
 }

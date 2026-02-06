@@ -78,6 +78,9 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
         None => quote! { None },
     };
 
+    // Generate builder struct name
+    let builder_name = format_ident!("{}VariantBuilder", api.name);
+
     quote! {
         #[doc = #description]
         pub struct #struct_name {
@@ -91,6 +94,8 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
             env_username: Option<String>,
             /// Default HTTP headers to include with every request.
             headers: Vec<(String, String)>,
+            /// Variant-specific hooks for response customization.
+            variant_hooks: crate::shared::VariantHooks,
         }
 
         impl #struct_name {
@@ -109,6 +114,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     auth_strategy: #auth_strategy_init,
                     env_username: #env_username_init,
                     headers: #headers_init,
+                    variant_hooks: crate::shared::VariantHooks::default(),
                 }
             }
 
@@ -127,6 +133,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     auth_strategy: #auth_strategy_init,
                     env_username: #env_username_init,
                     headers: #headers_init,
+                    variant_hooks: crate::shared::VariantHooks::default(),
                 }
             }
 
@@ -151,6 +158,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     auth_strategy: #auth_strategy_init,
                     env_username: #env_username_init,
                     headers: #headers_init,
+                    variant_hooks: crate::shared::VariantHooks::default(),
                 }
             }
 
@@ -173,23 +181,17 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     auth_strategy: #auth_strategy_init,
                     env_username: #env_username_init,
                     headers: #headers_init,
+                    variant_hooks: crate::shared::VariantHooks::default(),
                 }
             }
 
-            /// Creates a variant of this API client with different configuration.
+            /// Creates a variant builder for customizing this API client.
             ///
-            /// This method clones the underlying HTTP client and allows customizing:
+            /// The builder pattern allows fluent configuration of:
             /// - Base URL (for proxies, mock servers, or different environments)
             /// - Authentication credentials (different env var names)
-            /// - Authentication strategy (via `UpdateStrategy`)
-            ///
-            /// ## Arguments
-            ///
-            /// * `base_url` - New base URL for this variant
-            /// * `env_auth` - New environment variable names for credentials
-            /// * `strategy` - How to update the auth strategy:
-            ///   - `UpdateStrategy::NoChange` - Keep current auth strategy
-            ///   - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
+            /// - Authentication strategy
+            /// - Response hooks for JSON transformation and mutation
             ///
             /// ## Examples
             ///
@@ -198,42 +200,50 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
             ///
             /// let api = Api::new();
             ///
-            /// // Create a variant pointing to a staging server
-            /// let staging = api.variant(
-            ///     "https://staging.api.com/v1",
-            ///     vec!["STAGING_API_KEY".to_string()],
-            ///     UpdateStrategy::NoChange,
-            /// );
-            ///
-            /// // Create a variant with different auth
-            /// let other = api.variant(
-            ///     "https://other.api.com/v1",
-            ///     vec!["OTHER_TOKEN".to_string()],
-            ///     UpdateStrategy::ChangeTo(schematic_define::AuthStrategy::ApiKey {
-            ///         header: "X-API-Key".to_string(),
-            ///     }),
-            /// );
+            /// // Create a variant pointing to a staging server with a response hook
+            /// let staging = api.variant()
+            ///     .base_url("https://staging.api.com/v1")
+            ///     .env_auth(vec!["STAGING_API_KEY".to_string()])
+            ///     .mutate_response::<ListModelsRequest>(|ctx, response| {
+            ///         response.data.retain(|m| !m.id.contains("deprecated"));
+            ///         Ok(())
+            ///     })
+            ///     .build();
             /// ```
-            pub fn variant(
+            #[must_use]
+            pub fn variant(&self) -> #builder_name<'_> {
+                #builder_name::new(self)
+            }
+
+            /// Creates a variant of this API client with different configuration.
+            ///
+            /// This is a convenience method equivalent to:
+            /// ```ignore
+            /// api.variant()
+            ///     .base_url(base_url)
+            ///     .env_auth(env_auth)
+            ///     .auth_update(strategy)
+            ///     .build()
+            /// ```
+            ///
+            /// ## Arguments
+            ///
+            /// * `base_url` - New base URL for this variant
+            /// * `env_auth` - New environment variable names for credentials
+            /// * `strategy` - How to update the auth strategy:
+            ///   - `UpdateStrategy::NoChange` - Keep current auth strategy
+            ///   - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
+            pub fn variant_with(
                 &self,
                 base_url: impl Into<String>,
                 env_auth: Vec<String>,
                 strategy: schematic_define::UpdateStrategy,
             ) -> Self {
-                let auth_strategy = match strategy {
-                    schematic_define::UpdateStrategy::NoChange => self.auth_strategy.clone(),
-                    schematic_define::UpdateStrategy::ChangeTo(auth) => auth,
-                    // Handle future variants (non_exhaustive)
-                    _ => self.auth_strategy.clone(),
-                };
-                Self {
-                    client: self.client.clone(),
-                    base_url: base_url.into(),
-                    env_auth,
-                    auth_strategy,
-                    env_username: self.env_username.clone(),
-                    headers: self.headers.clone(),
-                }
+                self.variant()
+                    .base_url(base_url)
+                    .env_auth(env_auth)
+                    .auth_update(strategy)
+                    .build()
             }
 
             /// Returns a reference to the underlying HTTP client.
@@ -271,6 +281,161 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
         impl Default for #struct_name {
             fn default() -> Self {
                 Self::new()
+            }
+        }
+
+        /// Builder for creating customized variants of the API client.
+        ///
+        /// Use [`#struct_name::variant()`] to create a builder, then chain
+        /// configuration methods and call [`build()`](Self::build) to create
+        /// the variant client.
+        pub struct #builder_name<'a> {
+            base: &'a #struct_name,
+            base_url: Option<String>,
+            env_auth: Option<Vec<String>>,
+            auth_update: schematic_define::UpdateStrategy,
+            headers: Option<Vec<(String, String)>>,
+            pre_response_json: Option<std::sync::Arc<crate::shared::PreResponseJsonHook>>,
+            response_mutators: std::collections::HashMap<
+                &'static str,
+                std::sync::Arc<dyn crate::shared::AnyResponseMutator>,
+            >,
+        }
+
+        impl<'a> #builder_name<'a> {
+            /// Creates a new variant builder from the base API client.
+            fn new(base: &'a #struct_name) -> Self {
+                Self {
+                    base,
+                    base_url: None,
+                    env_auth: None,
+                    auth_update: schematic_define::UpdateStrategy::NoChange,
+                    headers: None,
+                    pre_response_json: None,
+                    response_mutators: std::collections::HashMap::new(),
+                }
+            }
+
+            /// Sets the base URL for the variant.
+            ///
+            /// If not set, the original client's base URL is used.
+            #[must_use]
+            pub fn base_url(mut self, url: impl Into<String>) -> Self {
+                self.base_url = Some(url.into());
+                self
+            }
+
+            /// Sets the environment variable names for authentication.
+            ///
+            /// If not set, the original client's env_auth is used.
+            #[must_use]
+            pub fn env_auth(mut self, env_auth: Vec<String>) -> Self {
+                self.env_auth = Some(env_auth);
+                self
+            }
+
+            /// Sets how the authentication strategy should be updated.
+            ///
+            /// - `UpdateStrategy::NoChange` - Keep current auth strategy (default)
+            /// - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
+            #[must_use]
+            pub fn auth_update(mut self, strategy: schematic_define::UpdateStrategy) -> Self {
+                self.auth_update = strategy;
+                self
+            }
+
+            /// Sets custom headers for the variant.
+            ///
+            /// If not set, the original client's headers are used.
+            #[must_use]
+            pub fn headers(mut self, headers: Vec<(String, String)>) -> Self {
+                self.headers = Some(headers);
+                self
+            }
+
+            /// Sets a pre-response JSON transformation hook.
+            ///
+            /// This hook runs after receiving an HTTP response but before
+            /// deserializing to the response type. Use it to reshape JSON
+            /// payloads to match expected structures.
+            ///
+            /// ## Examples
+            ///
+            /// ```ignore
+            /// // Unwrap a { data: ... } envelope
+            /// variant.pre_response_json(|ctx, json| {
+            ///     Ok(json.get("data").cloned().unwrap_or(json))
+            /// })
+            /// ```
+            #[must_use]
+            pub fn pre_response_json<F>(mut self, hook: F) -> Self
+            where
+                F: Fn(&crate::shared::ResponseContext, serde_json::Value)
+                    -> Result<serde_json::Value, crate::shared::SchematicError>
+                    + Send
+                    + Sync
+                    + 'static,
+            {
+                self.pre_response_json = Some(std::sync::Arc::new(hook));
+                self
+            }
+
+            /// Registers a response mutation hook for a specific endpoint.
+            ///
+            /// This hook runs after deserializing the response and can mutate
+            /// the response object in place. The endpoint is identified by its
+            /// request type.
+            ///
+            /// ## Examples
+            ///
+            /// ```ignore
+            /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
+            ///     response.data.retain(|m| !m.id.contains("deprecated"));
+            ///     Ok(())
+            /// })
+            /// ```
+            #[must_use]
+            pub fn mutate_response<R, F>(mut self, hook: F) -> Self
+            where
+                R: crate::shared::EndpointSpec,
+                R::Response: Send + Sync + 'static,
+                F: Fn(&crate::shared::ResponseContext, &mut R::Response)
+                    -> Result<(), crate::shared::SchematicError>
+                    + Send
+                    + Sync
+                    + 'static,
+            {
+                self.response_mutators.insert(
+                    R::ENDPOINT_ID,
+                    std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+                );
+                self
+            }
+
+            /// Builds the variant API client with the configured options.
+            ///
+            /// Options not explicitly set will inherit from the base client.
+            #[must_use]
+            pub fn build(self) -> #struct_name {
+                let auth_strategy = match self.auth_update {
+                    schematic_define::UpdateStrategy::NoChange => self.base.auth_strategy.clone(),
+                    schematic_define::UpdateStrategy::ChangeTo(auth) => auth,
+                    // Handle future variants (non_exhaustive)
+                    _ => self.base.auth_strategy.clone(),
+                };
+
+                #struct_name {
+                    client: self.base.client.clone(),
+                    base_url: self.base_url.unwrap_or_else(|| self.base.base_url.clone()),
+                    env_auth: self.env_auth.unwrap_or_else(|| self.base.env_auth.clone()),
+                    auth_strategy,
+                    env_username: self.base.env_username.clone(),
+                    headers: self.headers.unwrap_or_else(|| self.base.headers.clone()),
+                    variant_hooks: crate::shared::VariantHooks {
+                        pre_response_json: self.pre_response_json,
+                        response_mutators: self.response_mutators,
+                    },
+                }
             }
         }
     }
@@ -558,52 +723,62 @@ mod tests {
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        // Check variant() method exists with correct signature
-        assert!(code.contains("pub fn variant("));
-        assert!(code.contains("&self"));
+        // Check variant() method returns a builder
+        assert!(code.contains("pub fn variant(&self) -> TestApiVariantBuilder"));
+        assert!(code.contains("TestApiVariantBuilder::new(self)"));
+    }
+
+    #[test]
+    fn generate_api_struct_has_variant_with_method() {
+        let api = make_api("TestApi", "https://api.test.com", "Test API");
+        let tokens = generate_api_struct(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Check variant_with() convenience method exists
+        assert!(code.contains("pub fn variant_with("));
         assert!(code.contains("base_url: impl Into<String>"));
         assert!(code.contains("env_auth: Vec<String>"));
         assert!(code.contains("strategy: schematic_define::UpdateStrategy"));
     }
 
     #[test]
-    fn variant_method_handles_no_change() {
+    fn variant_builder_handles_no_change() {
         let api = make_api("TestApi", "https://api.test.com", "Test API");
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        // Should check for UpdateStrategy::NoChange and clone auth_strategy
-        assert!(code.contains("UpdateStrategy::NoChange => self.auth_strategy.clone()"));
+        // Check builder's build() method handles UpdateStrategy::NoChange
+        assert!(code.contains("UpdateStrategy::NoChange => self.base.auth_strategy.clone()"));
     }
 
     #[test]
-    fn variant_method_handles_change_to() {
+    fn variant_builder_handles_change_to() {
         let api = make_api("TestApi", "https://api.test.com", "Test API");
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        // Should check for UpdateStrategy::ChangeTo and use new auth
+        // Check builder's build() method handles UpdateStrategy::ChangeTo
         assert!(code.contains("UpdateStrategy::ChangeTo(auth) => auth"));
     }
 
     #[test]
-    fn variant_method_clones_client() {
+    fn variant_builder_clones_client() {
         let api = make_api("TestApi", "https://api.test.com", "Test API");
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        // Should clone the client instead of creating new
-        assert!(code.contains("client: self.client.clone()"));
+        // Builder's build() should clone the client
+        assert!(code.contains("client: self.base.client.clone()"));
     }
 
     #[test]
-    fn variant_method_clones_env_username() {
+    fn variant_builder_clones_env_username() {
         let api = make_api("TestApi", "https://api.test.com", "Test API");
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        // Should clone env_username
-        assert!(code.contains("env_username: self.env_username.clone()"));
+        // Builder's build() should clone env_username
+        assert!(code.contains("env_username: self.base.env_username.clone()"));
     }
 
     #[test]
@@ -667,13 +842,34 @@ mod tests {
     }
 
     #[test]
-    fn variant_method_clones_headers() {
+    fn variant_builder_clones_headers() {
         let api = make_api("TestApi", "https://api.test.com", "Test API");
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        // Should clone headers
-        assert!(code.contains("headers: self.headers.clone()"));
+        // Builder's build() should clone headers via unwrap_or_else
+        assert!(code.contains("self.base.headers.clone()"));
+    }
+
+    #[test]
+    fn variant_builder_has_mutate_response_method() {
+        let api = make_api("TestApi", "https://api.test.com", "Test API");
+        let tokens = generate_api_struct(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Check mutate_response method exists
+        assert!(code.contains("pub fn mutate_response<R, F>(mut self, hook: F) -> Self"));
+        assert!(code.contains("R: crate::shared::EndpointSpec"));
+    }
+
+    #[test]
+    fn variant_builder_has_pre_response_json_method() {
+        let api = make_api("TestApi", "https://api.test.com", "Test API");
+        let tokens = generate_api_struct(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Check pre_response_json method exists
+        assert!(code.contains("pub fn pre_response_json<F>(mut self, hook: F) -> Self"));
     }
 
     #[test]

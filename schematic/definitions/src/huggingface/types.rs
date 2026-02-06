@@ -2525,3 +2525,62 @@ mod tests {
         assert_eq!(SpaceHardware::default(), SpaceHardware::CpuBasic);
     }
 }
+
+// =============================================================================
+// Stub Types (TODO: implement proper types)
+// =============================================================================
+
+/// Status response for mutation operations.
+///
+/// TODO: Define proper fields based on HuggingFace API docs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct StatusResponse {
+    /// Operation success status.
+    pub ok: Option<bool>,
+    /// Optional message.
+    pub message: Option<String>,
+}
+
+/// Git commit information.
+///
+/// TODO: Define proper fields based on HuggingFace API docs.
+pub type Commit = CommitInfo;
+
+/// File metadata in a repository.
+///
+/// TODO: Define proper fields based on HuggingFace API docs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FileMetadata {
+    /// File path.
+    pub path: String,
+    /// File size in bytes.
+    pub size: Option<u64>,
+    /// File blob ID (git SHA).
+    pub oid: Option<String>,
+    /// MIME type.
+    #[serde(rename = "type")]
+    pub file_type: Option<String>,
+}
+
+/// Repository information summary.
+///
+/// TODO: Define proper fields based on HuggingFace API docs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RepoInfo {
+    /// Repository ID (owner/name).
+    pub id: String,
+    /// Repository type.
+    #[serde(rename = "type")]
+    pub repo_type: Option<RepoType>,
+    /// Whether private.
+    pub private: Option<bool>,
+}
+
+/// Repository URL after creation/modification.
+///
+/// TODO: Define proper fields based on HuggingFace API docs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RepoUrl {
+    /// Full URL to the repository.
+    pub url: String,
+}

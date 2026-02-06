@@ -131,6 +131,10 @@ impl CreateSpeechRequest {
         ))
     }
 }
+impl crate::shared::EndpointSpec for CreateSpeechRequest {
+    type Response = bytes::Bytes;
+    const ENDPOINT_ID: &'static str = "CreateSpeech";
+}
 /// Request for `StreamSpeech` endpoint.
 ///
 /// ## Example
@@ -186,6 +190,10 @@ impl StreamSpeechRequest {
         ))
     }
 }
+impl crate::shared::EndpointSpec for StreamSpeechRequest {
+    type Response = bytes::Bytes;
+    const ENDPOINT_ID: &'static str = "StreamSpeech";
+}
 /// Request for `CreateSpeechWithTimestamps` endpoint.
 ///
 /// ## Example
@@ -240,6 +248,10 @@ impl CreateSpeechWithTimestampsRequest {
             vec![],
         ))
     }
+}
+impl crate::shared::EndpointSpec for CreateSpeechWithTimestampsRequest {
+    type Response = SpeechWithTimestampsResponse;
+    const ENDPOINT_ID: &'static str = "CreateSpeechWithTimestamps";
 }
 /// Request for `StreamSpeechWithTimestamps` endpoint.
 ///
@@ -298,6 +310,10 @@ impl StreamSpeechWithTimestampsRequest {
         ))
     }
 }
+impl crate::shared::EndpointSpec for StreamSpeechWithTimestampsRequest {
+    type Response = SpeechWithTimestampsResponse;
+    const ENDPOINT_ID: &'static str = "StreamSpeechWithTimestamps";
+}
 /// Request for `ListVoices` endpoint.
 ///
 /// ## Example
@@ -328,6 +344,10 @@ impl ListVoicesRequest {
         let path = "/v2/voices".to_string();
         Ok(("GET", path, None, vec![]))
     }
+}
+impl crate::shared::EndpointSpec for ListVoicesRequest {
+    type Response = ListVoicesResponse;
+    const ENDPOINT_ID: &'static str = "ListVoices";
 }
 /// Request for `GetVoice` endpoint.
 ///
@@ -379,6 +399,10 @@ impl From<String> for GetVoiceRequest {
         Self { voice_id: param }
     }
 }
+impl crate::shared::EndpointSpec for GetVoiceRequest {
+    type Response = VoiceResponseModel;
+    const ENDPOINT_ID: &'static str = "GetVoice";
+}
 /// Request for `DeleteVoice` endpoint.
 ///
 /// ## Example
@@ -429,6 +453,10 @@ impl From<String> for DeleteVoiceRequest {
         Self { voice_id: param }
     }
 }
+impl crate::shared::EndpointSpec for DeleteVoiceRequest {
+    type Response = StatusResponse;
+    const ENDPOINT_ID: &'static str = "DeleteVoice";
+}
 /// Request for `GetDefaultVoiceSettings` endpoint.
 ///
 /// ## Example
@@ -459,6 +487,10 @@ impl GetDefaultVoiceSettingsRequest {
         let path = "/v1/voices/settings/default".to_string();
         Ok(("GET", path, None, vec![]))
     }
+}
+impl crate::shared::EndpointSpec for GetDefaultVoiceSettingsRequest {
+    type Response = VoiceSettings;
+    const ENDPOINT_ID: &'static str = "GetDefaultVoiceSettings";
 }
 /// Request for `GetVoiceSettings` endpoint.
 ///
@@ -509,6 +541,10 @@ impl From<String> for GetVoiceSettingsRequest {
     fn from(param: String) -> Self {
         Self { voice_id: param }
     }
+}
+impl crate::shared::EndpointSpec for GetVoiceSettingsRequest {
+    type Response = VoiceSettings;
+    const ENDPOINT_ID: &'static str = "GetVoiceSettings";
 }
 /// Request for `UpdateVoiceSettings` endpoint.
 ///
@@ -565,6 +601,10 @@ impl UpdateVoiceSettingsRequest {
         ))
     }
 }
+impl crate::shared::EndpointSpec for UpdateVoiceSettingsRequest {
+    type Response = StatusResponse;
+    const ENDPOINT_ID: &'static str = "UpdateVoiceSettings";
+}
 /// Request for `GetVoiceSampleAudio` endpoint.
 ///
 /// ## Example
@@ -610,6 +650,10 @@ impl GetVoiceSampleAudioRequest {
         Ok(("GET", path, None, vec![]))
     }
 }
+impl crate::shared::EndpointSpec for GetVoiceSampleAudioRequest {
+    type Response = bytes::Bytes;
+    const ENDPOINT_ID: &'static str = "GetVoiceSampleAudio";
+}
 /// Request for `DeleteVoiceSample` endpoint.
 ///
 /// ## Example
@@ -652,6 +696,10 @@ impl DeleteVoiceSampleRequest {
         let path = format!("/v1/voices/{}/samples/{}", self.voice_id, self.sample_id);
         Ok(("DELETE", path, None, vec![]))
     }
+}
+impl crate::shared::EndpointSpec for DeleteVoiceSampleRequest {
+    type Response = StatusResponse;
+    const ENDPOINT_ID: &'static str = "DeleteVoiceSample";
 }
 /// Request for `AddVoiceSample` endpoint.
 ///
@@ -703,6 +751,10 @@ impl From<String> for AddVoiceSampleRequest {
         Self { voice_id: param }
     }
 }
+impl crate::shared::EndpointSpec for AddVoiceSampleRequest {
+    type Response = AddSampleResponse;
+    const ENDPOINT_ID: &'static str = "AddVoiceSample";
+}
 /// Request for `ListSharedVoices` endpoint.
 ///
 /// ## Example
@@ -733,6 +785,10 @@ impl ListSharedVoicesRequest {
         let path = "/v1/shared-voices".to_string();
         Ok(("GET", path, None, vec![]))
     }
+}
+impl crate::shared::EndpointSpec for ListSharedVoicesRequest {
+    type Response = ListSharedVoicesResponse;
+    const ENDPOINT_ID: &'static str = "ListSharedVoices";
 }
 /// Request for `AddSharedVoice` endpoint.
 ///
@@ -796,6 +852,10 @@ impl AddSharedVoiceRequest {
         ))
     }
 }
+impl crate::shared::EndpointSpec for AddSharedVoiceRequest {
+    type Response = AddSharedVoiceResponse;
+    const ENDPOINT_ID: &'static str = "AddSharedVoice";
+}
 /// Request for `CreatePvcVoice` endpoint.
 ///
 /// ## Example
@@ -850,6 +910,10 @@ impl From<CreatePvcVoiceBody> for CreatePvcVoiceRequest {
     fn from(body: CreatePvcVoiceBody) -> Self {
         Self { body }
     }
+}
+impl crate::shared::EndpointSpec for CreatePvcVoiceRequest {
+    type Response = AddSharedVoiceResponse;
+    const ENDPOINT_ID: &'static str = "CreatePvcVoice";
 }
 /// Request for `UpdatePvcVoice` endpoint.
 ///
@@ -906,6 +970,10 @@ impl UpdatePvcVoiceRequest {
         ))
     }
 }
+impl crate::shared::EndpointSpec for UpdatePvcVoiceRequest {
+    type Response = StatusResponse;
+    const ENDPOINT_ID: &'static str = "UpdatePvcVoice";
+}
 /// Request for `TrainPvcVoice` endpoint.
 ///
 /// ## Example
@@ -960,6 +1028,10 @@ impl TrainPvcVoiceRequest {
             vec![],
         ))
     }
+}
+impl crate::shared::EndpointSpec for TrainPvcVoiceRequest {
+    type Response = StatusResponse;
+    const ENDPOINT_ID: &'static str = "TrainPvcVoice";
 }
 /// Request for `CreateSoundEffect` endpoint.
 ///
@@ -1016,6 +1088,10 @@ impl From<CreateSoundEffectBody> for CreateSoundEffectRequest {
         Self { body }
     }
 }
+impl crate::shared::EndpointSpec for CreateSoundEffectRequest {
+    type Response = bytes::Bytes;
+    const ENDPOINT_ID: &'static str = "CreateSoundEffect";
+}
 /// Request for `ListModels` endpoint.
 ///
 /// ## Example
@@ -1046,6 +1122,10 @@ impl ListModelsRequest {
         let path = "/v1/models".to_string();
         Ok(("GET", path, None, vec![]))
     }
+}
+impl crate::shared::EndpointSpec for ListModelsRequest {
+    type Response = Vec<ModelInfo>;
+    const ENDPOINT_ID: &'static str = "ListModels";
 }
 /// Request for `CreateSingleUseToken` endpoint.
 ///
@@ -1099,6 +1179,10 @@ impl From<String> for CreateSingleUseTokenRequest {
         Self { token_type: param }
     }
 }
+impl crate::shared::EndpointSpec for CreateSingleUseTokenRequest {
+    type Response = SingleUseTokenResponse;
+    const ENDPOINT_ID: &'static str = "CreateSingleUseToken";
+}
 /// Request for `GetHistory` endpoint.
 ///
 /// ## Example
@@ -1129,6 +1213,10 @@ impl GetHistoryRequest {
         let path = "/v1/history".to_string();
         Ok(("GET", path, None, vec![]))
     }
+}
+impl crate::shared::EndpointSpec for GetHistoryRequest {
+    type Response = GetHistoryResponse;
+    const ENDPOINT_ID: &'static str = "GetHistory";
 }
 /// Request for `GetHistoryItem` endpoint.
 ///
@@ -1182,6 +1270,10 @@ impl From<String> for GetHistoryItemRequest {
         Self { history_item_id: param }
     }
 }
+impl crate::shared::EndpointSpec for GetHistoryItemRequest {
+    type Response = SpeechHistoryItemResponseModel;
+    const ENDPOINT_ID: &'static str = "GetHistoryItem";
+}
 /// Request for `DeleteHistoryItem` endpoint.
 ///
 /// ## Example
@@ -1234,6 +1326,10 @@ impl From<String> for DeleteHistoryItemRequest {
         Self { history_item_id: param }
     }
 }
+impl crate::shared::EndpointSpec for DeleteHistoryItemRequest {
+    type Response = StatusResponse;
+    const ENDPOINT_ID: &'static str = "DeleteHistoryItem";
+}
 /// Request for `GetHistoryItemAudio` endpoint.
 ///
 /// ## Example
@@ -1285,6 +1381,10 @@ impl From<String> for GetHistoryItemAudioRequest {
     fn from(param: String) -> Self {
         Self { history_item_id: param }
     }
+}
+impl crate::shared::EndpointSpec for GetHistoryItemAudioRequest {
+    type Response = bytes::Bytes;
+    const ENDPOINT_ID: &'static str = "GetHistoryItemAudio";
 }
 /// Request for `DownloadHistoryItems` endpoint.
 ///
@@ -1341,6 +1441,10 @@ impl From<DownloadHistoryBody> for DownloadHistoryItemsRequest {
         Self { body }
     }
 }
+impl crate::shared::EndpointSpec for DownloadHistoryItemsRequest {
+    type Response = bytes::Bytes;
+    const ENDPOINT_ID: &'static str = "DownloadHistoryItems";
+}
 /// Request for `GetUsageStats` endpoint.
 ///
 /// ## Example
@@ -1371,6 +1475,10 @@ impl GetUsageStatsRequest {
         let path = "/v1/usage/character-stats".to_string();
         Ok(("GET", path, None, vec![]))
     }
+}
+impl crate::shared::EndpointSpec for GetUsageStatsRequest {
+    type Response = UsageStatsResponse;
+    const ENDPOINT_ID: &'static str = "GetUsageStats";
 }
 /// Request for `GetUser` endpoint.
 ///
@@ -1403,6 +1511,10 @@ impl GetUserRequest {
         Ok(("GET", path, None, vec![]))
     }
 }
+impl crate::shared::EndpointSpec for GetUserRequest {
+    type Response = UserResponse;
+    const ENDPOINT_ID: &'static str = "GetUser";
+}
 /// Request for `GetUserSubscription` endpoint.
 ///
 /// ## Example
@@ -1433,6 +1545,10 @@ impl GetUserSubscriptionRequest {
         let path = "/v1/user/subscription".to_string();
         Ok(("GET", path, None, vec![]))
     }
+}
+impl crate::shared::EndpointSpec for GetUserSubscriptionRequest {
+    type Response = SubscriptionModel;
+    const ENDPOINT_ID: &'static str = "GetUserSubscription";
 }
 /// Request for `GetResource` endpoint.
 ///
@@ -1485,6 +1601,10 @@ impl From<String> for GetResourceRequest {
     fn from(param: String) -> Self {
         Self { resource_id: param }
     }
+}
+impl crate::shared::EndpointSpec for GetResourceRequest {
+    type Response = ResourceResponse;
+    const ENDPOINT_ID: &'static str = "GetResource";
 }
 /// Request for `ShareResource` endpoint.
 ///
@@ -1541,6 +1661,10 @@ impl ShareResourceRequest {
         ))
     }
 }
+impl crate::shared::EndpointSpec for ShareResourceRequest {
+    type Response = StatusResponse;
+    const ENDPOINT_ID: &'static str = "ShareResource";
+}
 /// Request for `UnshareResource` endpoint.
 ///
 /// ## Example
@@ -1595,6 +1719,10 @@ impl UnshareResourceRequest {
             vec![],
         ))
     }
+}
+impl crate::shared::EndpointSpec for UnshareResourceRequest {
+    type Response = StatusResponse;
+    const ENDPOINT_ID: &'static str = "UnshareResource";
 }
 /// Request for `CopyResourceToWorkspace` endpoint.
 ///
@@ -1653,6 +1781,10 @@ impl CopyResourceToWorkspaceRequest {
         ))
     }
 }
+impl crate::shared::EndpointSpec for CopyResourceToWorkspaceRequest {
+    type Response = StatusResponse;
+    const ENDPOINT_ID: &'static str = "CopyResourceToWorkspace";
+}
 /// Request for `ListServiceAccounts` endpoint.
 ///
 /// ## Example
@@ -1683,6 +1815,10 @@ impl ListServiceAccountsRequest {
         let path = "/v1/service-accounts".to_string();
         Ok(("GET", path, None, vec![]))
     }
+}
+impl crate::shared::EndpointSpec for ListServiceAccountsRequest {
+    type Response = ListServiceAccountsResponse;
+    const ENDPOINT_ID: &'static str = "ListServiceAccounts";
 }
 /// Request for `ListServiceAccountApiKeys` endpoint.
 ///
@@ -1739,6 +1875,10 @@ impl From<String> for ListServiceAccountApiKeysRequest {
             service_account_user_id: param,
         }
     }
+}
+impl crate::shared::EndpointSpec for ListServiceAccountApiKeysRequest {
+    type Response = ListApiKeysResponse;
+    const ENDPOINT_ID: &'static str = "ListServiceAccountApiKeys";
 }
 /// Request for `CreateApiKey` endpoint.
 ///
@@ -1799,6 +1939,10 @@ impl CreateApiKeyRequest {
             vec![],
         ))
     }
+}
+impl crate::shared::EndpointSpec for CreateApiKeyRequest {
+    type Response = CreateApiKeyResponse;
+    const ENDPOINT_ID: &'static str = "CreateApiKey";
 }
 /// Request for `UpdateApiKey` endpoint.
 ///
@@ -1865,6 +2009,10 @@ impl UpdateApiKeyRequest {
         ))
     }
 }
+impl crate::shared::EndpointSpec for UpdateApiKeyRequest {
+    type Response = StatusResponse;
+    const ENDPOINT_ID: &'static str = "UpdateApiKey";
+}
 /// Request for `DeleteApiKey` endpoint.
 ///
 /// ## Example
@@ -1914,6 +2062,10 @@ impl DeleteApiKeyRequest {
         Ok(("DELETE", path, None, vec![]))
     }
 }
+impl crate::shared::EndpointSpec for DeleteApiKeyRequest {
+    type Response = StatusResponse;
+    const ENDPOINT_ID: &'static str = "DeleteApiKey";
+}
 /// Request for `ListWebhooks` endpoint.
 ///
 /// ## Example
@@ -1944,6 +2096,10 @@ impl ListWebhooksRequest {
         let path = "/v1/workspace/webhooks".to_string();
         Ok(("GET", path, None, vec![]))
     }
+}
+impl crate::shared::EndpointSpec for ListWebhooksRequest {
+    type Response = ListWebhooksResponse;
+    const ENDPOINT_ID: &'static str = "ListWebhooks";
 }
 /// Request for `CreateWebhook` endpoint.
 ///
@@ -2000,6 +2156,10 @@ impl From<CreateWebhookBody> for CreateWebhookRequest {
         Self { body }
     }
 }
+impl crate::shared::EndpointSpec for CreateWebhookRequest {
+    type Response = CreateWebhookResponse;
+    const ENDPOINT_ID: &'static str = "CreateWebhook";
+}
 /// Request for `UpdateWebhook` endpoint.
 ///
 /// ## Example
@@ -2055,6 +2215,10 @@ impl UpdateWebhookRequest {
         ))
     }
 }
+impl crate::shared::EndpointSpec for UpdateWebhookRequest {
+    type Response = StatusResponse;
+    const ENDPOINT_ID: &'static str = "UpdateWebhook";
+}
 /// Request for `DeleteWebhook` endpoint.
 ///
 /// ## Example
@@ -2106,6 +2270,10 @@ impl From<String> for DeleteWebhookRequest {
     fn from(param: String) -> Self {
         Self { webhook_id: param }
     }
+}
+impl crate::shared::EndpointSpec for DeleteWebhookRequest {
+    type Response = StatusResponse;
+    const ENDPOINT_ID: &'static str = "DeleteWebhook";
 }
 /// Request enum for ElevenLabs API.
 ///
@@ -2249,6 +2417,140 @@ impl ElevenLabsRequest {
             Self::CreateWebhook(req) => req.into_parts(),
             Self::UpdateWebhook(req) => req.into_parts(),
             Self::DeleteWebhook(req) => req.into_parts(),
+        }
+    }
+    /// Returns the endpoint identifier for this request.
+    ///
+    /// This is used internally for response hook lookup.
+    #[must_use]
+    pub fn endpoint_id(&self) -> &'static str {
+        match self {
+            Self::CreateSpeech(_) => {
+                <CreateSpeechRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::StreamSpeech(_) => {
+                <StreamSpeechRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::CreateSpeechWithTimestamps(_) => {
+                <CreateSpeechWithTimestampsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::StreamSpeechWithTimestamps(_) => {
+                <StreamSpeechWithTimestampsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::ListVoices(_) => {
+                <ListVoicesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetVoice(_) => {
+                <GetVoiceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::DeleteVoice(_) => {
+                <DeleteVoiceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetDefaultVoiceSettings(_) => {
+                <GetDefaultVoiceSettingsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetVoiceSettings(_) => {
+                <GetVoiceSettingsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::UpdateVoiceSettings(_) => {
+                <UpdateVoiceSettingsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetVoiceSampleAudio(_) => {
+                <GetVoiceSampleAudioRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::DeleteVoiceSample(_) => {
+                <DeleteVoiceSampleRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::AddVoiceSample(_) => {
+                <AddVoiceSampleRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::ListSharedVoices(_) => {
+                <ListSharedVoicesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::AddSharedVoice(_) => {
+                <AddSharedVoiceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::CreatePvcVoice(_) => {
+                <CreatePvcVoiceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::UpdatePvcVoice(_) => {
+                <UpdatePvcVoiceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::TrainPvcVoice(_) => {
+                <TrainPvcVoiceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::CreateSoundEffect(_) => {
+                <CreateSoundEffectRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::ListModels(_) => {
+                <ListModelsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::CreateSingleUseToken(_) => {
+                <CreateSingleUseTokenRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetHistory(_) => {
+                <GetHistoryRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetHistoryItem(_) => {
+                <GetHistoryItemRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::DeleteHistoryItem(_) => {
+                <DeleteHistoryItemRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetHistoryItemAudio(_) => {
+                <GetHistoryItemAudioRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::DownloadHistoryItems(_) => {
+                <DownloadHistoryItemsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetUsageStats(_) => {
+                <GetUsageStatsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetUser(_) => {
+                <GetUserRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetUserSubscription(_) => {
+                <GetUserSubscriptionRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetResource(_) => {
+                <GetResourceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::ShareResource(_) => {
+                <ShareResourceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::UnshareResource(_) => {
+                <UnshareResourceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::CopyResourceToWorkspace(_) => {
+                <CopyResourceToWorkspaceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::ListServiceAccounts(_) => {
+                <ListServiceAccountsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::ListServiceAccountApiKeys(_) => {
+                <ListServiceAccountApiKeysRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::CreateApiKey(_) => {
+                <CreateApiKeyRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::UpdateApiKey(_) => {
+                <UpdateApiKeyRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::DeleteApiKey(_) => {
+                <DeleteApiKeyRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::ListWebhooks(_) => {
+                <ListWebhooksRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::CreateWebhook(_) => {
+                <CreateWebhookRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::UpdateWebhook(_) => {
+                <UpdateWebhookRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::DeleteWebhook(_) => {
+                <DeleteWebhookRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
         }
     }
 }
@@ -2474,6 +2776,8 @@ pub struct ElevenLabs {
     env_username: Option<String>,
     /// Default HTTP headers to include with every request.
     headers: Vec<(String, String)>,
+    /// Variant-specific hooks for response customization.
+    variant_hooks: crate::shared::VariantHooks,
 }
 impl ElevenLabs {
     /// Base URL for the API.
@@ -2495,6 +2799,7 @@ impl ElevenLabs {
             },
             env_username: None,
             headers: vec![],
+            variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
     /// Creates a new API client with a custom base URL.
@@ -2516,6 +2821,7 @@ impl ElevenLabs {
             },
             env_username: None,
             headers: vec![],
+            variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
     /// Creates a new API client with a pre-configured reqwest client.
@@ -2543,6 +2849,7 @@ impl ElevenLabs {
             },
             env_username: None,
             headers: vec![],
+            variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
     /// Creates a new API client with a pre-configured reqwest client and custom base URL.
@@ -2571,22 +2878,16 @@ impl ElevenLabs {
             },
             env_username: None,
             headers: vec![],
+            variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
-    /// Creates a variant of this API client with different configuration.
+    /// Creates a variant builder for customizing this API client.
     ///
-    /// This method clones the underlying HTTP client and allows customizing:
+    /// The builder pattern allows fluent configuration of:
     /// - Base URL (for proxies, mock servers, or different environments)
     /// - Authentication credentials (different env var names)
-    /// - Authentication strategy (via `UpdateStrategy`)
-    ///
-    /// ## Arguments
-    ///
-    /// * `base_url` - New base URL for this variant
-    /// * `env_auth` - New environment variable names for credentials
-    /// * `strategy` - How to update the auth strategy:
-    ///   - `UpdateStrategy::NoChange` - Keep current auth strategy
-    ///   - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
+    /// - Authentication strategy
+    /// - Response hooks for JSON transformation and mutation
     ///
     /// ## Examples
     ///
@@ -2595,41 +2896,49 @@ impl ElevenLabs {
     ///
     /// let api = Api::new();
     ///
-    /// // Create a variant pointing to a staging server
-    /// let staging = api.variant(
-    ///     "https://staging.api.com/v1",
-    ///     vec!["STAGING_API_KEY".to_string()],
-    ///     UpdateStrategy::NoChange,
-    /// );
-    ///
-    /// // Create a variant with different auth
-    /// let other = api.variant(
-    ///     "https://other.api.com/v1",
-    ///     vec!["OTHER_TOKEN".to_string()],
-    ///     UpdateStrategy::ChangeTo(schematic_define::AuthStrategy::ApiKey {
-    ///         header: "X-API-Key".to_string(),
-    ///     }),
-    /// );
+    /// // Create a variant pointing to a staging server with a response hook
+    /// let staging = api.variant()
+    ///     .base_url("https://staging.api.com/v1")
+    ///     .env_auth(vec!["STAGING_API_KEY".to_string()])
+    ///     .mutate_response::<ListModelsRequest>(|ctx, response| {
+    ///         response.data.retain(|m| !m.id.contains("deprecated"));
+    ///         Ok(())
+    ///     })
+    ///     .build();
     /// ```
-    pub fn variant(
+    #[must_use]
+    pub fn variant(&self) -> ElevenLabsVariantBuilder<'_> {
+        ElevenLabsVariantBuilder::new(self)
+    }
+    /// Creates a variant of this API client with different configuration.
+    ///
+    /// This is a convenience method equivalent to:
+    /// ```ignore
+    /// api.variant()
+    ///     .base_url(base_url)
+    ///     .env_auth(env_auth)
+    ///     .auth_update(strategy)
+    ///     .build()
+    /// ```
+    ///
+    /// ## Arguments
+    ///
+    /// * `base_url` - New base URL for this variant
+    /// * `env_auth` - New environment variable names for credentials
+    /// * `strategy` - How to update the auth strategy:
+    ///   - `UpdateStrategy::NoChange` - Keep current auth strategy
+    ///   - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
+    pub fn variant_with(
         &self,
         base_url: impl Into<String>,
         env_auth: Vec<String>,
         strategy: schematic_define::UpdateStrategy,
     ) -> Self {
-        let auth_strategy = match strategy {
-            schematic_define::UpdateStrategy::NoChange => self.auth_strategy.clone(),
-            schematic_define::UpdateStrategy::ChangeTo(auth) => auth,
-            _ => self.auth_strategy.clone(),
-        };
-        Self {
-            client: self.client.clone(),
-            base_url: base_url.into(),
-            env_auth,
-            auth_strategy,
-            env_username: self.env_username.clone(),
-            headers: self.headers.clone(),
-        }
+        self.variant()
+            .base_url(base_url)
+            .env_auth(env_auth)
+            .auth_update(strategy)
+            .build()
     }
     /// Returns a reference to the underlying HTTP client.
     ///
@@ -2665,15 +2974,161 @@ impl Default for ElevenLabs {
         Self::new()
     }
 }
+/// Builder for creating customized variants of the API client.
+///
+/// Use [`#struct_name::variant()`] to create a builder, then chain
+/// configuration methods and call [`build()`](Self::build) to create
+/// the variant client.
+pub struct ElevenLabsVariantBuilder<'a> {
+    base: &'a ElevenLabs,
+    base_url: Option<String>,
+    env_auth: Option<Vec<String>>,
+    auth_update: schematic_define::UpdateStrategy,
+    headers: Option<Vec<(String, String)>>,
+    pre_response_json: Option<std::sync::Arc<crate::shared::PreResponseJsonHook>>,
+    response_mutators: std::collections::HashMap<
+        &'static str,
+        std::sync::Arc<dyn crate::shared::AnyResponseMutator>,
+    >,
+}
+impl<'a> ElevenLabsVariantBuilder<'a> {
+    /// Creates a new variant builder from the base API client.
+    fn new(base: &'a ElevenLabs) -> Self {
+        Self {
+            base,
+            base_url: None,
+            env_auth: None,
+            auth_update: schematic_define::UpdateStrategy::NoChange,
+            headers: None,
+            pre_response_json: None,
+            response_mutators: std::collections::HashMap::new(),
+        }
+    }
+    /// Sets the base URL for the variant.
+    ///
+    /// If not set, the original client's base URL is used.
+    #[must_use]
+    pub fn base_url(mut self, url: impl Into<String>) -> Self {
+        self.base_url = Some(url.into());
+        self
+    }
+    /// Sets the environment variable names for authentication.
+    ///
+    /// If not set, the original client's env_auth is used.
+    #[must_use]
+    pub fn env_auth(mut self, env_auth: Vec<String>) -> Self {
+        self.env_auth = Some(env_auth);
+        self
+    }
+    /// Sets how the authentication strategy should be updated.
+    ///
+    /// - `UpdateStrategy::NoChange` - Keep current auth strategy (default)
+    /// - `UpdateStrategy::ChangeTo(auth)` - Use specified auth strategy
+    #[must_use]
+    pub fn auth_update(mut self, strategy: schematic_define::UpdateStrategy) -> Self {
+        self.auth_update = strategy;
+        self
+    }
+    /// Sets custom headers for the variant.
+    ///
+    /// If not set, the original client's headers are used.
+    #[must_use]
+    pub fn headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.headers = Some(headers);
+        self
+    }
+    /// Sets a pre-response JSON transformation hook.
+    ///
+    /// This hook runs after receiving an HTTP response but before
+    /// deserializing to the response type. Use it to reshape JSON
+    /// payloads to match expected structures.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// // Unwrap a { data: ... } envelope
+    /// variant.pre_response_json(|ctx, json| {
+    ///     Ok(json.get("data").cloned().unwrap_or(json))
+    /// })
+    /// ```
+    #[must_use]
+    pub fn pre_response_json<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(
+                &crate::shared::ResponseContext,
+                serde_json::Value,
+            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
+            + 'static,
+    {
+        self.pre_response_json = Some(std::sync::Arc::new(hook));
+        self
+    }
+    /// Registers a response mutation hook for a specific endpoint.
+    ///
+    /// This hook runs after deserializing the response and can mutate
+    /// the response object in place. The endpoint is identified by its
+    /// request type.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// variant.mutate_response::<ListModelsRequest>(|ctx, response| {
+    ///     response.data.retain(|m| !m.id.contains("deprecated"));
+    ///     Ok(())
+    /// })
+    /// ```
+    #[must_use]
+    pub fn mutate_response<R, F>(mut self, hook: F) -> Self
+    where
+        R: crate::shared::EndpointSpec,
+        R::Response: Send + Sync + 'static,
+        F: Fn(
+                &crate::shared::ResponseContext,
+                &mut R::Response,
+            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
+    {
+        self.response_mutators
+            .insert(
+                R::ENDPOINT_ID,
+                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+            );
+        self
+    }
+    /// Builds the variant API client with the configured options.
+    ///
+    /// Options not explicitly set will inherit from the base client.
+    #[must_use]
+    pub fn build(self) -> ElevenLabs {
+        let auth_strategy = match self.auth_update {
+            schematic_define::UpdateStrategy::NoChange => self.base.auth_strategy.clone(),
+            schematic_define::UpdateStrategy::ChangeTo(auth) => auth,
+            _ => self.base.auth_strategy.clone(),
+        };
+        ElevenLabs {
+            client: self.base.client.clone(),
+            base_url: self.base_url.unwrap_or_else(|| self.base.base_url.clone()),
+            env_auth: self.env_auth.unwrap_or_else(|| self.base.env_auth.clone()),
+            auth_strategy,
+            env_username: self.base.env_username.clone(),
+            headers: self.headers.unwrap_or_else(|| self.base.headers.clone()),
+            variant_hooks: crate::shared::VariantHooks {
+                pre_response_json: self.pre_response_json,
+                response_mutators: self.response_mutators,
+            },
+        }
+    }
+}
 impl ElevenLabs {
-    /// Builds and sends an HTTP request, returning the raw response.
+    /// Builds and sends an HTTP request, returning the raw response plus context.
     ///
     /// This is an internal helper method used by the public request methods.
+    /// Returns both the response and the context needed for hook processing.
     async fn build_and_send_request(
         &self,
         request: impl Into<ElevenLabsRequest>,
-    ) -> Result<reqwest::Response, SchematicError> {
+    ) -> Result<(reqwest::Response, crate::shared::ResponseContext), SchematicError> {
         let request = request.into();
+        let endpoint_id = request.endpoint_id();
         let (method, path, body, endpoint_headers) = request.into_parts()?;
         let url = format!("{}{}", self.base_url, path);
         let mut req_builder = match method {
@@ -2741,13 +3196,27 @@ impl ElevenLabs {
         let response = req_builder.send().await?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            let body = response.text().await.unwrap_or_default();
+            let body_text = response.text().await.unwrap_or_default();
             return Err(SchematicError::ApiError {
                 status,
-                body,
+                body: body_text,
             });
         }
-        Ok(response)
+        let status = response.status().as_u16();
+        let headers: Vec<(String, String)> = response
+            .headers()
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+        let ctx = crate::shared::ResponseContext::new(
+            endpoint_id,
+            method,
+            path.clone(),
+            url,
+            status,
+            headers,
+        );
+        Ok((response, ctx))
     }
     /// Merges API-level and endpoint-level headers.
     ///
@@ -2774,7 +3243,14 @@ impl ElevenLabs {
     /// Executes an API request expecting a JSON response.
     ///
     /// Takes any request type that can be converted into the request enum
-    /// and returns the deserialized response.
+    /// and returns the deserialized response. If response hooks are configured
+    /// via the variant builder, they will be applied.
+    ///
+    /// ## Hooks
+    ///
+    /// If configured via `variant()`:
+    /// - `pre_response_json` - Transforms JSON before deserialization
+    /// - `mutate_response` - Mutates the response after deserialization
     ///
     /// ## Errors
     ///
@@ -2782,14 +3258,37 @@ impl ElevenLabs {
     /// - The HTTP request fails (network error, timeout, etc.)
     /// - The response indicates a non-success status code
     /// - The response body cannot be deserialized as JSON
+    /// - A hook returns an error
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn request<T: serde::de::DeserializeOwned>(
+    pub async fn request<T: serde::de::DeserializeOwned + Send + Sync + 'static>(
         &self,
         request: impl Into<ElevenLabsRequest>,
     ) -> Result<T, SchematicError> {
-        let response = self.build_and_send_request(request).await?;
-        let result = response.json::<T>().await?;
-        Ok(result)
+        let (response, ctx) = self.build_and_send_request(request).await?;
+        let has_pre_hook = self.variant_hooks.pre_response_json.is_some();
+        let has_mutator = self
+            .variant_hooks
+            .response_mutators
+            .contains_key(ctx.endpoint_id);
+        if has_pre_hook || has_mutator {
+            let bytes = response.bytes().await?;
+            let mut json_value: serde_json::Value = serde_json::from_slice(&bytes)?;
+            if let Some(ref hook) = self.variant_hooks.pre_response_json {
+                json_value = hook(&ctx, json_value)?;
+            }
+            let mut result: T = serde_json::from_value(json_value)?;
+            if let Some(mutator) = self
+                .variant_hooks
+                .response_mutators
+                .get(ctx.endpoint_id)
+            {
+                mutator.mutate(&ctx, &mut result)?;
+            }
+            Ok(result)
+        } else {
+            let result = response.json::<T>().await?;
+            Ok(result)
+        }
     }
     /// Executes an API request expecting a binary response.
     ///
@@ -2806,7 +3305,7 @@ impl ElevenLabs {
         &self,
         request: impl Into<ElevenLabsRequest>,
     ) -> Result<bytes::Bytes, SchematicError> {
-        let response = self.build_and_send_request(request).await?;
+        let (response, _ctx) = self.build_and_send_request(request).await?;
         let bytes = response.bytes().await?;
         Ok(bytes)
     }

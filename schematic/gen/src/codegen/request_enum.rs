@@ -70,6 +70,9 @@ pub fn generate_request_enum_with_suffix(api: &RestApi, suffix: &str) -> TokenSt
     // Generate into_parts match arms
     let match_arms = generate_match_arms(api);
 
+    // Generate endpoint_id match arms
+    let endpoint_id_arms = generate_endpoint_id_arms(api, suffix);
+
     // Generate individual From implementations
     let from_impls = generate_from_impls(api, &enum_name, suffix);
 
@@ -93,6 +96,16 @@ pub fn generate_request_enum_with_suffix(api: &RestApi, suffix: &str) -> TokenSt
             pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
                 match self {
                     #match_arms
+                }
+            }
+
+            /// Returns the endpoint identifier for this request.
+            ///
+            /// This is used internally for response hook lookup.
+            #[must_use]
+            pub fn endpoint_id(&self) -> &'static str {
+                match self {
+                    #endpoint_id_arms
                 }
             }
         }
@@ -125,6 +138,21 @@ fn generate_match_arms(api: &RestApi) -> TokenStream {
 
         quote! {
             Self::#variant_name(req) => req.into_parts(),
+        }
+    });
+
+    quote! { #(#arms)* }
+}
+
+/// Generates match arms for `endpoint_id()` method.
+fn generate_endpoint_id_arms(api: &RestApi, suffix: &str) -> TokenStream {
+    let arms = api.endpoints.iter().map(|endpoint| {
+        let variant_name = format_ident!("{}", endpoint.id);
+        let struct_name = format_ident!("{}{}", endpoint.id, suffix);
+
+        // Use fully qualified syntax to access the trait const
+        quote! {
+            Self::#variant_name(_) => <#struct_name as crate::shared::EndpointSpec>::ENDPOINT_ID,
         }
     });
 

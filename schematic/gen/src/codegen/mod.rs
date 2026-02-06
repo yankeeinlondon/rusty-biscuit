@@ -34,6 +34,7 @@ pub mod error;
 pub mod module_docs;
 pub mod request_enum;
 pub mod request_structs;
+pub mod variant;
 
 pub use api_struct::generate_api_struct;
 pub use client::{generate_request_method, generate_request_method_with_suffix};
@@ -44,3 +45,4 @@ pub use request_structs::{
     generate_request_struct, generate_request_struct_with_options,
     generate_request_struct_with_suffix,
 };
+pub use variant::generate_variant_types;
