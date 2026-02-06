@@ -24,6 +24,7 @@
 //!     auth: AuthStrategy::None,
 //!     env_auth: vec![],
 //!     env_username: None,
+//!     env_mapping: None,
 //!     headers: vec![],
 //!     endpoints: vec![],
 //!     module_path: None,
@@ -67,6 +68,7 @@ const DEFAULT_REQUEST_SUFFIX: &str = "Request";
 ///     auth: AuthStrategy::None,
 ///     env_auth: vec![],
 ///     env_username: None,
+///     env_mapping: None,
 ///     headers: vec![],
 ///     endpoints: vec![
 ///         Endpoint {
@@ -155,6 +157,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,

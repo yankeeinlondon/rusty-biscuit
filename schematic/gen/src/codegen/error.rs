@@ -124,6 +124,13 @@ pub fn generate_error_type() -> TokenStream {
                 env_vars: Vec<String>,
             },
 
+            /// Header validation or construction failed.
+            ///
+            /// This occurs when header names contain invalid characters or when
+            /// required environment variables for header values are not set.
+            #[error("Header error: {0}")]
+            Header(#[from] schematic_define::HeaderError),
+
             /// Internal error in schematic runtime.
             ///
             /// This indicates a bug in the generated code or type system violation.
@@ -320,6 +327,44 @@ mod tests {
         assert!(
             code.contains("Err(e) => return Err(e.into())"),
             "Should show fallback error handling"
+        );
+    }
+
+    #[test]
+    fn generate_error_type_has_header_variant() {
+        let tokens = generate_error_type();
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Check that Header variant exists with #[from] attribute
+        assert!(
+            code.contains("Header(#[from] schematic_define::HeaderError)"),
+            "Should have Header variant with #[from] attribute"
+        );
+
+        // Check that Header variant has documentation
+        assert!(
+            code.contains("/// Header validation or construction failed"),
+            "Header variant should have doc comment"
+        );
+    }
+
+    #[test]
+    fn generate_error_type_supports_from_conversion() {
+        let tokens = generate_error_type();
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Verify #[from] attributes enable automatic conversion via ? operator
+        assert!(
+            code.contains("#[from] reqwest::Error"),
+            "reqwest::Error should have #[from] for automatic conversion"
+        );
+        assert!(
+            code.contains("#[from] serde_json::Error"),
+            "serde_json::Error should have #[from] for automatic conversion"
+        );
+        assert!(
+            code.contains("#[from] schematic_define::HeaderError"),
+            "HeaderError should have #[from] for automatic conversion"
         );
     }
 }

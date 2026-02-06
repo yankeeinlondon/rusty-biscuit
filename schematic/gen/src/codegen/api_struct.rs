@@ -69,8 +69,8 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
         None => quote! { None },
     };
 
-    // Generate headers initialization
-    let headers_init = generate_headers_init(&api.headers);
+    // Generate headers initialization from env_mapping
+    let headers_init = generate_headers_init_from_mapping(api);
 
     // Generate DOCS_URL constant
     let docs_url_init = match &api.docs_url {
@@ -92,8 +92,8 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
             auth_strategy: schematic_define::AuthStrategy,
             /// Environment variable for Basic auth username.
             env_username: Option<String>,
-            /// Default HTTP headers to include with every request.
-            headers: Vec<(String, String)>,
+            /// Headers builder with environment variable support for credentials.
+            headers: schematic_define::Headers,
             /// Variant-specific hooks for response customization.
             variant_hooks: crate::shared::VariantHooks,
         }
@@ -246,6 +246,35 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                     .build()
             }
 
+            /// Creates a variant of this API client with custom headers configuration.
+            ///
+            /// This is a convenience method for creating variants with fully customized
+            /// headers, including environment variable mapping for credentials.
+            ///
+            /// ## Arguments
+            ///
+            /// * `headers` - Headers builder with environment mapping configured
+            ///
+            /// ## Examples
+            ///
+            /// ```ignore
+            /// use schematic_define::{Headers, EnvMapping, EnvList};
+            ///
+            /// let custom_headers = Headers::default()
+            ///     .with_env_mapping(EnvMapping {
+            ///         bearer_token: Some(EnvList::single("STAGING_TOKEN")),
+            ///         basic_user: None,
+            ///         basic_pass: None,
+            ///         api_key: None,
+            ///     })
+            ///     .header("X-Environment", "staging");
+            ///
+            /// let staging_client = api.variant_with_headers(custom_headers);
+            /// ```
+            pub fn variant_with_headers(&self, headers: schematic_define::Headers) -> Self {
+                self.variant().headers_builder(headers).build()
+            }
+
             /// Returns a reference to the underlying HTTP client.
             ///
             /// Use this for custom requests that aren't covered by the generated methods,
@@ -294,7 +323,7 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
             base_url: Option<String>,
             env_auth: Option<Vec<String>>,
             auth_update: schematic_define::UpdateStrategy,
-            headers: Option<Vec<(String, String)>>,
+            headers: Option<schematic_define::Headers>,
             pre_response_json: Option<std::sync::Arc<crate::shared::PreResponseJsonHook>>,
             response_mutators: std::collections::HashMap<
                 &'static str,
@@ -344,11 +373,29 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                 self
             }
 
-            /// Sets custom headers for the variant.
+            /// Sets custom headers for the variant using a Headers builder.
             ///
-            /// If not set, the original client's headers are used.
+            /// This replaces the entire headers configuration, including environment
+            /// variable mapping. If not set, the original client's headers are used.
+            ///
+            /// ## Examples
+            ///
+            /// ```ignore
+            /// use schematic_define::{Headers, EnvMapping, EnvList};
+            ///
+            /// let custom = Headers::default()
+            ///     .with_env_mapping(EnvMapping {
+            ///         bearer_token: Some(EnvList::single("STAGING_KEY")),
+            ///         basic_user: None,
+            ///         basic_pass: None,
+            ///         api_key: None,
+            ///     })
+            ///     .header("X-Custom", "value");
+            ///
+            /// let variant = api.variant().headers_builder(custom).build();
+            /// ```
             #[must_use]
-            pub fn headers(mut self, headers: Vec<(String, String)>) -> Self {
+            pub fn headers_builder(mut self, headers: schematic_define::Headers) -> Self {
                 self.headers = Some(headers);
                 self
             }
@@ -460,7 +507,81 @@ fn generate_auth_strategy_init(auth: &AuthStrategy) -> TokenStream {
     }
 }
 
-/// Generates the initialization code for the headers Vec.
+/// Generates the initialization code for Headers from EnvMapping.
+///
+/// Creates a Headers builder configured with environment variable mapping
+/// and any static headers from the API definition.
+fn generate_headers_init_from_mapping(api: &RestApi) -> TokenStream {
+    // Build the env_mapping at compile time using api.default_env_mapping()
+    // and inline the values into the generated code
+    let mapping = api.default_env_mapping();
+
+    // Generate env_mapping initialization from the resolved mapping
+    let env_mapping_init = {
+        let bearer_token_init = if let Some(ref token_list) = mapping.bearer_token {
+            let names = token_list.names();
+            quote! { Some(schematic_define::EnvList::new(vec![#(#names.to_string()),*])) }
+        } else {
+            quote! { None }
+        };
+
+        let basic_user_init = if let Some(ref user_list) = mapping.basic_user {
+            let names = user_list.names();
+            quote! { Some(schematic_define::EnvList::new(vec![#(#names.to_string()),*])) }
+        } else {
+            quote! { None }
+        };
+
+        let basic_pass_init = if let Some(ref pass_list) = mapping.basic_pass {
+            let names = pass_list.names();
+            quote! { Some(schematic_define::EnvList::new(vec![#(#names.to_string()),*])) }
+        } else {
+            quote! { None }
+        };
+
+        let api_key_init = if let Some(ref api_key) = mapping.api_key {
+            let names = api_key.names.names();
+            let header = &api_key.header;
+            quote! {
+                Some(schematic_define::ApiKeyEnv {
+                    names: schematic_define::EnvList::new(vec![#(#names.to_string()),*]),
+                    header: #header.to_string(),
+                })
+            }
+        } else {
+            quote! { None }
+        };
+
+        quote! {
+            schematic_define::EnvMapping {
+                bearer_token: #bearer_token_init,
+                basic_user: #basic_user_init,
+                basic_pass: #basic_pass_init,
+                api_key: #api_key_init,
+            }
+        }
+    };
+
+    // Add static headers if any
+    if api.headers.is_empty() {
+        quote! {
+            schematic_define::Headers::default()
+                .with_env_mapping(#env_mapping_init)
+        }
+    } else {
+        let header_methods = api.headers.iter().map(|(k, v)| {
+            quote! { .header(#k, #v) }
+        });
+        quote! {
+            schematic_define::Headers::default()
+                .with_env_mapping(#env_mapping_init)
+                #(#header_methods)*
+        }
+    }
+}
+
+/// Generates the initialization code for the headers Vec (legacy, kept for reference).
+#[allow(dead_code)]
 fn generate_headers_init(headers: &[(String, String)]) -> TokenStream {
     if headers.is_empty() {
         quote! { vec![] }
@@ -487,6 +608,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -615,6 +737,7 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             env_auth: vec!["BEARER_TOKEN".to_string()],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -639,6 +762,7 @@ mod tests {
             },
             env_auth: vec!["API_KEY".to_string()],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -662,6 +786,7 @@ mod tests {
             auth: AuthStrategy::Basic,
             env_auth: vec!["BASIC_PASS".to_string()],
             env_username: Some("BASIC_USER".to_string()),
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -787,8 +912,8 @@ mod tests {
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        // Should have headers field in struct
-        assert!(code.contains("headers: Vec<(String, String)>"));
+        // Should have headers field in struct (now uses Headers type)
+        assert!(code.contains("headers: schematic_define::Headers"));
     }
 
     #[test]
@@ -801,6 +926,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            env_mapping: None,
             headers: vec![
                 ("X-Api-Version".to_string(), "2024-01".to_string()),
                 ("X-Custom-Header".to_string(), "custom-value".to_string()),
@@ -882,6 +1008,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,
@@ -903,7 +1030,11 @@ mod tests {
 
     #[test]
     fn generate_api_struct_docs_url_none() {
-        let api = make_api("NoDocsApi", "https://api.nodocs.com", "API without documentation");
+        let api = make_api(
+            "NoDocsApi",
+            "https://api.nodocs.com",
+            "API without documentation",
+        );
         let tokens = generate_api_struct(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 

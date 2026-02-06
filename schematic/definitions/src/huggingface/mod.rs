@@ -56,7 +56,7 @@ mod types;
 
 pub use types::*;
 
-use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod};
 
 /// Creates the Hugging Face Hub API definition.
 ///
@@ -352,6 +352,14 @@ pub fn define_huggingface_hub_api() -> RestApi {
         ],
         module_path: None,
         request_suffix: None,
+        env_mapping: Some(EnvMapping {
+            bearer_token: Some(EnvList::new(vec![
+                "HF_TOKEN".to_string(),
+                "HUGGING_FACE_API_KEY".to_string(),
+                "HF_API_KEY".to_string(),
+            ])),
+            ..Default::default()
+        }),
     }
 }
 

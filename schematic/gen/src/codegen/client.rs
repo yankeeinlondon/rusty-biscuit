@@ -144,8 +144,11 @@ fn generate_build_request_method(
             // Apply authentication
             #auth_setup
 
+            // Build headers from Headers builder (resolves environment variables)
+            let api_headers = self.headers.clone().from_env().build()?;
+
             // Merge API-level and endpoint-level headers
-            let merged_headers = Self::merge_headers(&self.headers, &endpoint_headers);
+            let merged_headers = Self::merge_headers(&api_headers, &endpoint_headers);
             for (key, value) in merged_headers {
                 req_builder = req_builder.header(key.as_str(), value.as_str());
             }
@@ -521,6 +524,7 @@ mod tests {
             auth,
             env_auth,
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![Endpoint {
                 id: "ListItems".to_string(),
@@ -545,6 +549,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints,
             module_path: None,
@@ -562,6 +567,7 @@ mod tests {
             auth: AuthStrategy::Basic,
             env_auth: vec![password_env.to_string()], // Password from env_auth[0]
             env_username: Some(username_env.to_string()),
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![Endpoint {
                 id: "ListItems".to_string(),
@@ -586,7 +592,9 @@ mod tests {
         // Check method signature (now includes Send + Sync + 'static for hook compatibility)
         assert!(code.contains("impl NoAuth"));
         assert!(
-            code.contains("pub async fn request<T: serde::de::DeserializeOwned + Send + Sync + 'static>"),
+            code.contains(
+                "pub async fn request<T: serde::de::DeserializeOwned + Send + Sync + 'static>"
+            ),
             "Expected new signature with Send + Sync + 'static bounds"
         );
         assert!(code.contains("request: impl Into<NoAuthRequest>"));
@@ -799,8 +807,9 @@ mod tests {
         let tokens = generate_request_method(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        // Should call merge_headers and iterate to apply them
-        assert!(code.contains("merge_headers(&self.headers, &endpoint_headers)"));
+        // Should build headers from Headers builder and merge with endpoint headers
+        assert!(code.contains(".from_env().build()?"));
+        assert!(code.contains("merge_headers(&api_headers, &endpoint_headers)"));
         assert!(code.contains("for (key, value) in merged_headers"));
         assert!(code.contains("req_builder.header(key.as_str(), value.as_str())"));
     }

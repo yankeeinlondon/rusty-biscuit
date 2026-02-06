@@ -2774,8 +2774,8 @@ pub struct ElevenLabs {
     auth_strategy: schematic_define::AuthStrategy,
     /// Environment variable for Basic auth username.
     env_username: Option<String>,
-    /// Default HTTP headers to include with every request.
-    headers: Vec<(String, String)>,
+    /// Headers builder with environment variable support for credentials.
+    headers: schematic_define::Headers,
     /// Variant-specific hooks for response customization.
     variant_hooks: crate::shared::VariantHooks,
 }
@@ -2798,7 +2798,21 @@ impl ElevenLabs {
                 header: "xi-api-key".to_string(),
             },
             env_username: None,
-            headers: vec![],
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: None,
+                    basic_user: None,
+                    basic_pass: None,
+                    api_key: Some(schematic_define::ApiKeyEnv {
+                        names: schematic_define::EnvList::new(
+                            vec![
+                                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY"
+                                .to_string()
+                            ],
+                        ),
+                        header: "xi-api-key".to_string(),
+                    }),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -2820,7 +2834,21 @@ impl ElevenLabs {
                 header: "xi-api-key".to_string(),
             },
             env_username: None,
-            headers: vec![],
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: None,
+                    basic_user: None,
+                    basic_pass: None,
+                    api_key: Some(schematic_define::ApiKeyEnv {
+                        names: schematic_define::EnvList::new(
+                            vec![
+                                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY"
+                                .to_string()
+                            ],
+                        ),
+                        header: "xi-api-key".to_string(),
+                    }),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -2848,7 +2876,21 @@ impl ElevenLabs {
                 header: "xi-api-key".to_string(),
             },
             env_username: None,
-            headers: vec![],
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: None,
+                    basic_user: None,
+                    basic_pass: None,
+                    api_key: Some(schematic_define::ApiKeyEnv {
+                        names: schematic_define::EnvList::new(
+                            vec![
+                                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY"
+                                .to_string()
+                            ],
+                        ),
+                        header: "xi-api-key".to_string(),
+                    }),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -2877,7 +2919,21 @@ impl ElevenLabs {
                 header: "xi-api-key".to_string(),
             },
             env_username: None,
-            headers: vec![],
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: None,
+                    basic_user: None,
+                    basic_pass: None,
+                    api_key: Some(schematic_define::ApiKeyEnv {
+                        names: schematic_define::EnvList::new(
+                            vec![
+                                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY"
+                                .to_string()
+                            ],
+                        ),
+                        header: "xi-api-key".to_string(),
+                    }),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -2940,6 +2996,34 @@ impl ElevenLabs {
             .auth_update(strategy)
             .build()
     }
+    /// Creates a variant of this API client with custom headers configuration.
+    ///
+    /// This is a convenience method for creating variants with fully customized
+    /// headers, including environment variable mapping for credentials.
+    ///
+    /// ## Arguments
+    ///
+    /// * `headers` - Headers builder with environment mapping configured
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// use schematic_define::{Headers, EnvMapping, EnvList};
+    ///
+    /// let custom_headers = Headers::default()
+    ///     .with_env_mapping(EnvMapping {
+    ///         bearer_token: Some(EnvList::single("STAGING_TOKEN")),
+    ///         basic_user: None,
+    ///         basic_pass: None,
+    ///         api_key: None,
+    ///     })
+    ///     .header("X-Environment", "staging");
+    ///
+    /// let staging_client = api.variant_with_headers(custom_headers);
+    /// ```
+    pub fn variant_with_headers(&self, headers: schematic_define::Headers) -> Self {
+        self.variant().headers_builder(headers).build()
+    }
     /// Returns a reference to the underlying HTTP client.
     ///
     /// Use this for custom requests that aren't covered by the generated methods,
@@ -2984,7 +3068,7 @@ pub struct ElevenLabsVariantBuilder<'a> {
     base_url: Option<String>,
     env_auth: Option<Vec<String>>,
     auth_update: schematic_define::UpdateStrategy,
-    headers: Option<Vec<(String, String)>>,
+    headers: Option<schematic_define::Headers>,
     pre_response_json: Option<std::sync::Arc<crate::shared::PreResponseJsonHook>>,
     response_mutators: std::collections::HashMap<
         &'static str,
@@ -3029,11 +3113,29 @@ impl<'a> ElevenLabsVariantBuilder<'a> {
         self.auth_update = strategy;
         self
     }
-    /// Sets custom headers for the variant.
+    /// Sets custom headers for the variant using a Headers builder.
     ///
-    /// If not set, the original client's headers are used.
+    /// This replaces the entire headers configuration, including environment
+    /// variable mapping. If not set, the original client's headers are used.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// use schematic_define::{Headers, EnvMapping, EnvList};
+    ///
+    /// let custom = Headers::default()
+    ///     .with_env_mapping(EnvMapping {
+    ///         bearer_token: Some(EnvList::single("STAGING_KEY")),
+    ///         basic_user: None,
+    ///         basic_pass: None,
+    ///         api_key: None,
+    ///     })
+    ///     .header("X-Custom", "value");
+    ///
+    /// let variant = api.variant().headers_builder(custom).build();
+    /// ```
     #[must_use]
-    pub fn headers(mut self, headers: Vec<(String, String)>) -> Self {
+    pub fn headers_builder(mut self, headers: schematic_define::Headers) -> Self {
         self.headers = Some(headers);
         self
     }
@@ -3184,7 +3286,8 @@ impl ElevenLabs {
             }
             _ => {}
         }
-        let merged_headers = Self::merge_headers(&self.headers, &endpoint_headers);
+        let api_headers = self.headers.clone().from_env().build()?;
+        let merged_headers = Self::merge_headers(&api_headers, &endpoint_headers);
         for (key, value) in merged_headers {
             req_builder = req_builder.header(key.as_str(), value.as_str());
         }

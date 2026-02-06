@@ -19,6 +19,15 @@
 //! - [`FormFieldKind`] - Form field type classification (Text, File, Files, Json)
 //! - [`Schema`] - Type information for request/response bodies
 //!
+//! ### Header and Authentication Types
+//!
+//! - [`Headers`] - Fluent builder for HTTP headers with auth support
+//! - [`SensitiveString`] - Secure wrapper for passwords/tokens (redacts Debug output)
+//! - [`EnvList`] - Environment variable fallback chain for credentials
+//! - [`ApiKeyEnv`] - API key header configuration with environment source
+//! - [`EnvMapping`] - Complete environment variable mapping for auth credentials
+//! - [`HeaderError`] - Errors from header validation and credential resolution
+//!
 //! ### WebSocket API Types
 //!
 //! - [`WebSocketApi`] - Complete WebSocket API definition with base URL, auth, and endpoints
@@ -58,6 +67,7 @@
 //!     ],
 //!     module_path: None,
 //!     request_suffix: None,
+//!     env_mapping: None,
 //! };
 //!
 //! assert_eq!(api.name, "OpenAI");
@@ -97,6 +107,7 @@
 //! See `schematic_definitions::anthropic` for a comprehensive example.
 
 pub mod auth;
+pub mod headers;
 pub mod prelude;
 pub mod request;
 pub mod response;
@@ -106,6 +117,7 @@ pub mod websocket;
 
 // Re-export main types at crate root
 pub use auth::{AuthStrategy, UpdateStrategy};
+pub use headers::{ApiKeyEnv, EnvList, EnvMapping, HeaderError, Headers, SensitiveString};
 pub use request::{ApiRequest, FormField, FormFieldKind};
 pub use response::ApiResponse;
 pub use schema::{Schema, SchemaObject};

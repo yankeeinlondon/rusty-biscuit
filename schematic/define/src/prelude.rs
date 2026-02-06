@@ -21,6 +21,7 @@
 //!     endpoints: vec![],
 //!     module_path: None,
 //!     request_suffix: None,
+//!     env_mapping: None,
 //! };
 //! ```
 //!

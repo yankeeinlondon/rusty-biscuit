@@ -248,6 +248,7 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             env_auth: vec!["TEST_API_KEY".to_string()],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![Endpoint {
                 id: "ListItems".to_string(),

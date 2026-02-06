@@ -192,6 +192,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints,
             module_path: None,

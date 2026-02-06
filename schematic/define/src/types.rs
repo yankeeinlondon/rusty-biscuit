@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
 
 use crate::auth::AuthStrategy;
+use crate::headers::{EnvList, EnvMapping};
 use crate::request::ApiRequest;
 use crate::response::ApiResponse;
 
@@ -105,6 +106,7 @@ pub enum RestMethod {
 ///     ],
 ///     module_path: None,
 ///     request_suffix: None,
+///     env_mapping: None,
 /// };
 ///
 /// assert_eq!(api.name, "SimpleApi");
@@ -160,6 +162,143 @@ pub struct RestApi {
     /// This allows APIs to customize the naming of request structs. For example,
     /// using "Params" would generate `ListModelsParams` instead of `ListModelsRequest`.
     pub request_suffix: Option<String>,
+    /// Environment variable mapping for authentication credentials.
+    ///
+    /// This provides a structured way to configure which environment variables to check
+    /// for authentication credentials. If `None`, the mapping is built from legacy fields
+    /// (`env_auth`, `env_username`) for backward compatibility.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_define::{RestApi, AuthStrategy, EnvMapping, EnvList};
+    ///
+    /// let api = RestApi {
+    ///     name: "Example".to_string(),
+    ///     description: "Example API".to_string(),
+    ///     base_url: "https://api.example.com".to_string(),
+    ///     docs_url: None,
+    ///     auth: AuthStrategy::BearerToken { header: None },
+    ///     env_auth: vec![],
+    ///     env_username: None,
+    ///     headers: vec![],
+    ///     endpoints: vec![],
+    ///     module_path: None,
+    ///     request_suffix: None,
+    ///     env_mapping: Some(EnvMapping {
+    ///         bearer_token: Some(EnvList::from_strs(&["API_KEY", "TOKEN"])),
+    ///         basic_user: None,
+    ///         basic_pass: None,
+    ///         api_key: None,
+    ///     }),
+    /// };
+    /// ```
+    pub env_mapping: Option<EnvMapping>,
+}
+
+impl RestApi {
+    /// Get the environment variable mapping for this API.
+    ///
+    /// If `env_mapping` is set, returns a clone. Otherwise, builds a mapping
+    /// from the legacy fields (`env_auth`, `env_username`) for backward compatibility.
+    ///
+    /// ## Returns
+    ///
+    /// An `EnvMapping` struct containing the environment variable configuration.
+    ///
+    /// ## Examples
+    ///
+    /// With explicit env_mapping:
+    ///
+    /// ```
+    /// use schematic_define::{RestApi, AuthStrategy, EnvMapping, EnvList};
+    ///
+    /// let api = RestApi {
+    ///     name: "Example".to_string(),
+    ///     description: "Example API".to_string(),
+    ///     base_url: "https://api.example.com".to_string(),
+    ///     docs_url: None,
+    ///     auth: AuthStrategy::BearerToken { header: None },
+    ///     env_auth: vec![],
+    ///     env_username: None,
+    ///     headers: vec![],
+    ///     endpoints: vec![],
+    ///     module_path: None,
+    ///     request_suffix: None,
+    ///     env_mapping: Some(EnvMapping {
+    ///         bearer_token: Some(EnvList::from_strs(&["CUSTOM_TOKEN"])),
+    ///         basic_user: None,
+    ///         basic_pass: None,
+    ///         api_key: None,
+    ///     }),
+    /// };
+    ///
+    /// let mapping = api.default_env_mapping();
+    /// assert!(mapping.bearer_token.is_some());
+    /// ```
+    ///
+    /// With legacy fields (backward compatible):
+    ///
+    /// ```
+    /// use schematic_define::{RestApi, AuthStrategy};
+    ///
+    /// let api = RestApi {
+    ///     name: "Example".to_string(),
+    ///     description: "Example API".to_string(),
+    ///     base_url: "https://api.example.com".to_string(),
+    ///     docs_url: None,
+    ///     auth: AuthStrategy::BearerToken { header: None },
+    ///     env_auth: vec!["OPENAI_API_KEY".to_string()],
+    ///     env_username: None,
+    ///     headers: vec![],
+    ///     endpoints: vec![],
+    ///     module_path: None,
+    ///     request_suffix: None,
+    ///     env_mapping: None,
+    /// };
+    ///
+    /// let mapping = api.default_env_mapping();
+    /// assert!(mapping.bearer_token.is_some());
+    /// assert_eq!(mapping.bearer_token.unwrap().names(), &["OPENAI_API_KEY"]);
+    /// ```
+    pub fn default_env_mapping(&self) -> EnvMapping {
+        // If env_mapping is explicitly set, use it
+        if let Some(ref mapping) = self.env_mapping {
+            return mapping.clone();
+        }
+
+        // Otherwise, build from legacy fields for backward compatibility
+        // If env_username is set, this is basic auth (env_auth contains password)
+        // Otherwise, env_auth contains bearer token
+        let (bearer_token, basic_user, basic_pass) = if let Some(ref username_env) =
+            self.env_username
+        {
+            // Basic auth mode
+            let user = Some(EnvList::single(username_env.clone()));
+            let pass = if !self.env_auth.is_empty() {
+                // For basic auth, password comes from first element of env_auth
+                Some(EnvList::single(self.env_auth[0].clone()))
+            } else {
+                None
+            };
+            (None, user, pass)
+        } else {
+            // Bearer token mode (or no auth)
+            let bearer = if !self.env_auth.is_empty() {
+                Some(EnvList::new(self.env_auth.clone()))
+            } else {
+                None
+            };
+            (bearer, None, None)
+        };
+
+        EnvMapping {
+            bearer_token,
+            basic_user,
+            basic_pass,
+            api_key: None,
+        }
+    }
 }
 
 /// A single API endpoint definition.
@@ -320,5 +459,213 @@ mod tests {
 
         let deserialized: RestMethod = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, method);
+    }
+
+    // ========================================
+    // RestApi::default_env_mapping Tests
+    // ========================================
+
+    #[test]
+    fn default_env_mapping_returns_explicit_mapping_when_set() {
+        let explicit_mapping = EnvMapping {
+            bearer_token: Some(EnvList::from_strs(&["CUSTOM_TOKEN", "FALLBACK_TOKEN"])),
+            basic_user: None,
+            basic_pass: None,
+            api_key: None,
+        };
+
+        let api = RestApi {
+            name: "TestApi".to_string(),
+            description: "Test API".to_string(),
+            base_url: "https://api.test.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::BearerToken { header: None },
+            env_auth: vec!["IGNORED_ENV".to_string()],
+            env_username: None,
+            headers: vec![],
+            endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
+            env_mapping: Some(explicit_mapping.clone()),
+        };
+
+        let mapping = api.default_env_mapping();
+        assert_eq!(mapping, explicit_mapping);
+        assert_eq!(
+            mapping.bearer_token.unwrap().names(),
+            &["CUSTOM_TOKEN", "FALLBACK_TOKEN"]
+        );
+    }
+
+    #[test]
+    fn default_env_mapping_builds_from_env_auth_when_none() {
+        let api = RestApi {
+            name: "TestApi".to_string(),
+            description: "Test API".to_string(),
+            base_url: "https://api.test.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::BearerToken { header: None },
+            env_auth: vec!["OPENAI_API_KEY".to_string(), "OPENAI_KEY".to_string()],
+            env_username: None,
+            headers: vec![],
+            endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
+            env_mapping: None,
+        };
+
+        let mapping = api.default_env_mapping();
+        assert!(mapping.bearer_token.is_some());
+        assert_eq!(
+            mapping.bearer_token.unwrap().names(),
+            &["OPENAI_API_KEY", "OPENAI_KEY"]
+        );
+        assert!(mapping.basic_user.is_none());
+        assert!(mapping.basic_pass.is_none());
+        assert!(mapping.api_key.is_none());
+    }
+
+    #[test]
+    fn default_env_mapping_builds_basic_auth_from_legacy_fields() {
+        let api = RestApi {
+            name: "TestApi".to_string(),
+            description: "Test API".to_string(),
+            base_url: "https://api.test.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::Basic,
+            env_auth: vec!["API_PASSWORD".to_string()],
+            env_username: Some("API_USERNAME".to_string()),
+            headers: vec![],
+            endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
+            env_mapping: None,
+        };
+
+        let mapping = api.default_env_mapping();
+        assert!(mapping.basic_user.is_some());
+        assert_eq!(mapping.basic_user.unwrap().names(), &["API_USERNAME"]);
+        assert!(mapping.basic_pass.is_some());
+        assert_eq!(mapping.basic_pass.unwrap().names(), &["API_PASSWORD"]);
+        assert!(mapping.bearer_token.is_none());
+        assert!(mapping.api_key.is_none());
+    }
+
+    #[test]
+    fn default_env_mapping_empty_when_no_env_fields() {
+        let api = RestApi {
+            name: "TestApi".to_string(),
+            description: "Test API".to_string(),
+            base_url: "https://api.test.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::None,
+            env_auth: vec![],
+            env_username: None,
+            headers: vec![],
+            endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
+            env_mapping: None,
+        };
+
+        let mapping = api.default_env_mapping();
+        assert!(mapping.bearer_token.is_none());
+        assert!(mapping.basic_user.is_none());
+        assert!(mapping.basic_pass.is_none());
+        assert!(mapping.api_key.is_none());
+    }
+
+    #[test]
+    fn default_env_mapping_basic_auth_without_password_env() {
+        let api = RestApi {
+            name: "TestApi".to_string(),
+            description: "Test API".to_string(),
+            base_url: "https://api.test.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::Basic,
+            env_auth: vec![], // Empty env_auth
+            env_username: Some("API_USERNAME".to_string()),
+            headers: vec![],
+            endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
+            env_mapping: None,
+        };
+
+        let mapping = api.default_env_mapping();
+        assert!(mapping.basic_user.is_some());
+        assert_eq!(mapping.basic_user.unwrap().names(), &["API_USERNAME"]);
+        assert!(mapping.basic_pass.is_none()); // No password env available
+        assert!(mapping.bearer_token.is_none());
+    }
+
+    #[test]
+    fn default_env_mapping_api_key_only_in_explicit_mapping() {
+        use crate::headers::ApiKeyEnv;
+
+        let explicit_mapping = EnvMapping {
+            bearer_token: None,
+            basic_user: None,
+            basic_pass: None,
+            api_key: Some(ApiKeyEnv {
+                names: EnvList::from_strs(&["HF_TOKEN", "HUGGINGFACE_TOKEN"]),
+                header: "Authorization".to_string(),
+            }),
+        };
+
+        let api = RestApi {
+            name: "TestApi".to_string(),
+            description: "Test API".to_string(),
+            base_url: "https://api.test.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::ApiKey {
+                header: "Authorization".to_string(),
+            },
+            env_auth: vec![],
+            env_username: None,
+            headers: vec![],
+            endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
+            env_mapping: Some(explicit_mapping.clone()),
+        };
+
+        let mapping = api.default_env_mapping();
+        assert_eq!(mapping, explicit_mapping);
+        assert!(mapping.api_key.is_some());
+        let api_key = mapping.api_key.unwrap();
+        assert_eq!(api_key.names.names(), &["HF_TOKEN", "HUGGINGFACE_TOKEN"]);
+        assert_eq!(api_key.header, "Authorization");
+    }
+
+    #[test]
+    fn default_env_mapping_clone_independence() {
+        let explicit_mapping = EnvMapping {
+            bearer_token: Some(EnvList::single("TOKEN")),
+            basic_user: None,
+            basic_pass: None,
+            api_key: None,
+        };
+
+        let api = RestApi {
+            name: "TestApi".to_string(),
+            description: "Test API".to_string(),
+            base_url: "https://api.test.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::BearerToken { header: None },
+            env_auth: vec![],
+            env_username: None,
+            headers: vec![],
+            endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
+            env_mapping: Some(explicit_mapping),
+        };
+
+        let mapping1 = api.default_env_mapping();
+        let mapping2 = api.default_env_mapping();
+
+        // Should be equal but independent clones
+        assert_eq!(mapping1, mapping2);
     }
 }

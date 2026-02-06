@@ -246,32 +246,25 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
                 AuthStrategy::Basic => "Basic".to_string(),
                 _ => "Custom".to_string(),
             };
-            format!(
-                "//! | [`{module}`] | [`{name}`]({module}::{name}) | {desc} | {auth_desc} |"
-            )
+            format!("//! | [`{module}`] | [`{name}`]({module}::{name}) | {desc} | {auth_desc} |")
         })
         .collect();
     let api_table = api_rows.join("\n");
 
     // Choose the first API with a GET endpoint for the quick start example
-    let example_api = apis.iter().find(|api| {
-        api.endpoints.iter().any(|ep| ep.method == RestMethod::Get)
-    }).or_else(|| apis.first());
+    let example_api = apis
+        .iter()
+        .find(|api| api.endpoints.iter().any(|ep| ep.method == RestMethod::Get))
+        .or_else(|| apis.first());
 
     let quick_start_example = if let Some(api) = example_api {
         let api_name = &api.name;
-        let first_get = api
-            .endpoints
-            .iter()
-            .find(|ep| ep.method == RestMethod::Get);
+        let first_get = api.endpoints.iter().find(|ep| ep.method == RestMethod::Get);
         if let Some(ep) = first_get {
             let method_name = to_snake_case(&ep.id);
             let has_path_params = ep.path.contains('{');
             let call = if has_path_params {
-                format!(
-                    "let response = client.{}(\"example\").await?;",
-                    method_name
-                )
+                format!("let response = client.{}(\"example\").await?;", method_name)
             } else {
                 format!("let response = client.{}().await?;", method_name)
             };
@@ -305,7 +298,11 @@ pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
 
     let variant_example = if let Some(api) = example_api {
         let api_name = &api.name;
-        let env_var = api.env_auth.first().map(|s| s.as_str()).unwrap_or("API_KEY");
+        let env_var = api
+            .env_auth
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("API_KEY");
         let staging_var = format!("STAGING_{}", env_var);
         format!(
             r#"//! ## Variants
@@ -430,9 +427,7 @@ pub fn assemble_prelude(apis: &[&RestApi]) -> TokenStream {
     // These names are re-exported in prelude, so rustdoc resolves them directly
     let client_list: Vec<String> = apis
         .iter()
-        .map(|api| {
-            format!("//! - [`{name}`] + [`{name}Request`]", name = api.name)
-        })
+        .map(|api| format!("//! - [`{name}`] + [`{name}Request`]", name = api.name))
         .collect();
     let client_list_str = client_list.join("\n");
     let client_list_tokens: TokenStream = client_list_str.parse().unwrap_or_default();
@@ -718,6 +713,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![Endpoint {
                 id: "ListItems".to_string(),
@@ -742,6 +738,7 @@ mod tests {
             auth: AuthStrategy::BearerToken { header: None },
             env_auth: vec!["OPENAI_API_KEY".to_string()],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![
                 Endpoint {
@@ -1104,6 +1101,7 @@ mod tests {
                 auth: auth.clone(),
                 env_auth,
                 env_username,
+                env_mapping: None,
                 headers: vec![],
                 endpoints: vec![Endpoint {
                     id: "Test".to_string(),
@@ -1158,6 +1156,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints,
             module_path: None,
@@ -1189,6 +1188,7 @@ mod tests {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![],
             module_path: None,

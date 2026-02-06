@@ -114,7 +114,8 @@ pub fn generate_request_struct_with_options(
     let from_string_impls = generate_from_string_impls(&struct_name, &path_params, has_body);
 
     // Generate EndpointSpec implementation for type-safe hook registration
-    let endpoint_spec_impl = generate_endpoint_spec_impl(&struct_name, &endpoint.id, &endpoint.response);
+    let endpoint_spec_impl =
+        generate_endpoint_spec_impl(&struct_name, &endpoint.id, &endpoint.response);
 
     // Generate into_parts method
     let into_parts = generate_into_parts(endpoint, &path_params, &method_str);
@@ -1214,9 +1215,7 @@ mod tests {
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Count occurrences of "impl RetrieveModelRequest" (non-From impls)
-        let impl_count = code
-            .matches("impl RetrieveModelRequest")
-            .count();
+        let impl_count = code.matches("impl RetrieveModelRequest").count();
 
         assert_eq!(
             impl_count, 1,
@@ -1248,9 +1247,7 @@ mod tests {
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Count occurrences of "impl CreateCompletionRequest" (non-From impls)
-        let impl_count = code
-            .matches("impl CreateCompletionRequest")
-            .count();
+        let impl_count = code.matches("impl CreateCompletionRequest").count();
 
         assert_eq!(
             impl_count, 1,

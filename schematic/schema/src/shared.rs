@@ -73,6 +73,12 @@ pub enum SchematicError {
         /// The environment variable names that were checked.
         env_vars: Vec<String>,
     },
+    /// Header validation or construction failed.
+    ///
+    /// This occurs when header names contain invalid characters or when
+    /// required environment variables for header values are not set.
+    #[error("Header error: {0}")]
+    Header(#[from] schematic_define::HeaderError),
     /// Internal error in schematic runtime.
     ///
     /// This indicates a bug in the generated code or type system violation.

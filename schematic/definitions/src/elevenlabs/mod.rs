@@ -33,7 +33,7 @@ mod types;
 pub use types::*;
 
 use schematic_define::{
-    ApiRequest, ApiResponse, AuthStrategy, Endpoint, FormField, RestApi, RestMethod, Schema,
+    ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, FormField, RestApi, RestMethod, Schema,
 };
 
 /// Creates the ElevenLabs REST API definition.
@@ -526,6 +526,16 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
         ],
         module_path: None,
         request_suffix: None,
+        env_mapping: Some(EnvMapping {
+            api_key: Some(ApiKeyEnv {
+                names: EnvList::new(vec![
+                    "ELEVEN_LABS_API_KEY".to_string(),
+                    "ELEVENLABS_API_KEY".to_string(),
+                ]),
+                header: "xi-api-key".to_string(),
+            }),
+            ..Default::default()
+        }),
     }
 }
 

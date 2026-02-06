@@ -7,7 +7,7 @@ mod types;
 
 pub use types::{DeleteModelResponse, ListModelsResponse, Model};
 
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+use schematic_define::{ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod};
 
 /// Creates the OpenAI API definition.
 ///
@@ -70,6 +70,10 @@ pub fn define_openai_api() -> RestApi {
         ],
         module_path: None,
         request_suffix: None,
+        env_mapping: Some(EnvMapping {
+            bearer_token: Some(EnvList::new(vec!["OPENAI_API_KEY".to_string()])),
+            ..Default::default()
+        }),
     }
 }
 

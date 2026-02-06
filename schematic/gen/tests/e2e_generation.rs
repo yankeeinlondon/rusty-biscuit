@@ -193,7 +193,9 @@ fn generated_files_exist_and_have_expected_structure() {
 /// Tests generating code for multiple different API configurations.
 #[test]
 fn generate_code_for_various_api_configurations() {
-    use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+    use schematic_define::{
+        ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod,
+    };
 
     let test_cases = [
         // Simple API with no auth
@@ -205,6 +207,7 @@ fn generate_code_for_various_api_configurations() {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![Endpoint {
                 id: "GetRoot".to_string(),
@@ -227,6 +230,7 @@ fn generate_code_for_various_api_configurations() {
             auth: AuthStrategy::None,
             env_auth: vec![],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![
                 Endpoint {
@@ -287,6 +291,7 @@ fn generate_code_for_various_api_configurations() {
             auth: AuthStrategy::BearerToken { header: None },
             env_auth: vec!["NESTED_API_KEY".to_string()],
             env_username: None,
+            env_mapping: None,
             headers: vec![],
             endpoints: vec![Endpoint {
                 id: "GetItem".to_string(),
@@ -358,7 +363,7 @@ fn generate_code_for_various_api_configurations() {
 /// of their declared response type.
 #[test]
 fn binary_response_generates_request_bytes_method() {
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod};
 
     // Note: "BinaryTest" avoids the "Api" suffix which triggers module path inference
     let api = RestApi {
@@ -369,6 +374,7 @@ fn binary_response_generates_request_bytes_method() {
         auth: AuthStrategy::None,
         env_auth: vec![],
         env_username: None,
+        env_mapping: None,
         headers: vec![],
         endpoints: vec![Endpoint {
             id: "GetAudio".to_string(),
@@ -421,7 +427,7 @@ fn binary_response_generates_request_bytes_method() {
 /// Tests that Text response endpoints generate `request_text()` method.
 #[test]
 fn text_response_generates_request_text_method() {
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod};
 
     let api = RestApi {
         name: "TextTest".to_string(),
@@ -431,6 +437,7 @@ fn text_response_generates_request_text_method() {
         auth: AuthStrategy::None,
         env_auth: vec![],
         env_username: None,
+        env_mapping: None,
         headers: vec![],
         endpoints: vec![Endpoint {
             id: "GetPlainText".to_string(),
@@ -470,7 +477,7 @@ fn text_response_generates_request_text_method() {
 /// Tests that Empty response endpoints generate `request_empty()` method.
 #[test]
 fn empty_response_generates_request_empty_method() {
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod};
 
     let api = RestApi {
         name: "EmptyTest".to_string(),
@@ -480,6 +487,7 @@ fn empty_response_generates_request_empty_method() {
         auth: AuthStrategy::None,
         env_auth: vec![],
         env_username: None,
+        env_mapping: None,
         headers: vec![],
         endpoints: vec![Endpoint {
             id: "DeleteItem".to_string(),
@@ -515,7 +523,7 @@ fn empty_response_generates_request_empty_method() {
 /// Tests that mixed response types generate all appropriate methods.
 #[test]
 fn mixed_response_types_generate_all_methods() {
-    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+    use schematic_define::{ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod};
 
     let api = RestApi {
         name: "MixedTest".to_string(),
@@ -525,6 +533,7 @@ fn mixed_response_types_generate_all_methods() {
         auth: AuthStrategy::None,
         env_auth: vec![],
         env_username: None,
+        env_mapping: None,
         headers: vec![],
         endpoints: vec![
             Endpoint {

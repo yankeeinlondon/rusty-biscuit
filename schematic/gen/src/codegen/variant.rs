@@ -362,12 +362,21 @@ mod tests {
         let tokens = generate_response_context();
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        assert!(code.contains("endpoint_id: &'static str"), "Missing endpoint_id field");
-        assert!(code.contains("method: &'static str"), "Missing method field");
+        assert!(
+            code.contains("endpoint_id: &'static str"),
+            "Missing endpoint_id field"
+        );
+        assert!(
+            code.contains("method: &'static str"),
+            "Missing method field"
+        );
         assert!(code.contains("path: String"), "Missing path field");
         assert!(code.contains("url: String"), "Missing url field");
         assert!(code.contains("status: u16"), "Missing status field");
-        assert!(code.contains("headers: Vec<(String, String)>"), "Missing headers field");
+        assert!(
+            code.contains("headers: Vec<(String, String)>"),
+            "Missing headers field"
+        );
     }
 
     #[test]
@@ -384,8 +393,14 @@ mod tests {
         let tokens = generate_endpoint_spec_trait();
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        assert!(code.contains("type Response"), "Missing Response associated type");
-        assert!(code.contains("const ENDPOINT_ID: &'static str"), "Missing ENDPOINT_ID const");
+        assert!(
+            code.contains("type Response"),
+            "Missing Response associated type"
+        );
+        assert!(
+            code.contains("const ENDPOINT_ID: &'static str"),
+            "Missing ENDPOINT_ID const"
+        );
     }
 
     #[test]
@@ -402,8 +417,14 @@ mod tests {
         let tokens = generate_response_mutator_types();
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        assert!(code.contains("pub trait AnyResponseMutator"), "Missing AnyResponseMutator trait");
-        assert!(code.contains("pub struct TypedMutator"), "Missing TypedMutator struct");
+        assert!(
+            code.contains("pub trait AnyResponseMutator"),
+            "Missing AnyResponseMutator trait"
+        );
+        assert!(
+            code.contains("pub struct TypedMutator"),
+            "Missing TypedMutator struct"
+        );
     }
 
     #[test]
@@ -420,8 +441,14 @@ mod tests {
         let tokens = generate_variant_hooks();
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        assert!(code.contains("pre_response_json:"), "Missing pre_response_json field");
-        assert!(code.contains("response_mutators:"), "Missing response_mutators field");
+        assert!(
+            code.contains("pre_response_json:"),
+            "Missing pre_response_json field"
+        );
+        assert!(
+            code.contains("response_mutators:"),
+            "Missing response_mutators field"
+        );
     }
 
     #[test]
@@ -431,7 +458,10 @@ mod tests {
 
         assert!(code.contains("ResponseContext"), "Missing ResponseContext");
         assert!(code.contains("EndpointSpec"), "Missing EndpointSpec");
-        assert!(code.contains("AnyResponseMutator"), "Missing AnyResponseMutator");
+        assert!(
+            code.contains("AnyResponseMutator"),
+            "Missing AnyResponseMutator"
+        );
         assert!(code.contains("TypedMutator"), "Missing TypedMutator");
         assert!(code.contains("VariantHooks"), "Missing VariantHooks");
     }

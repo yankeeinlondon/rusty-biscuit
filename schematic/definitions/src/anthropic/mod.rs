@@ -41,7 +41,7 @@ mod types;
 
 pub use types::*;
 
-use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+use schematic_define::{ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod};
 
 /// Creates the Anthropic API definition.
 ///
@@ -123,6 +123,13 @@ pub fn define_anthropic_api() -> RestApi {
         ],
         module_path: None,
         request_suffix: None,
+        env_mapping: Some(EnvMapping {
+            api_key: Some(ApiKeyEnv {
+                names: EnvList::new(vec!["ANTHROPIC_API_KEY".to_string()]),
+                header: "X-Api-Key".to_string(),
+            }),
+            ..Default::default()
+        }),
     }
 }
 

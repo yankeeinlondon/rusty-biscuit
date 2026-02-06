@@ -26,6 +26,7 @@ fn make_api(name: &str, auth: AuthStrategy, env_auth: Vec<String>) -> RestApi {
         auth,
         env_auth,
         env_username: None,
+        env_mapping: None,
         headers: vec![],
         endpoints: vec![
             Endpoint {
@@ -63,6 +64,7 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
         auth: AuthStrategy::Basic,
         env_auth: vec![password_env.to_string()], // Password from env_auth[0]
         env_username: Some(username_env.to_string()),
+        env_mapping: None,
         headers: vec![],
         endpoints: vec![Endpoint {
             id: "GetItems".to_string(),

@@ -59,7 +59,7 @@ mod types;
 
 pub use types::*;
 
-use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod};
 
 /// Creates the EMQX REST API definition with Basic Authentication.
 ///
@@ -143,6 +143,11 @@ pub fn define_emqx_basic_api() -> RestApi {
         endpoints: build_common_endpoints(),
         module_path: Some("emqx".to_string()),
         request_suffix: Some("BasicRequest".to_string()),
+        env_mapping: Some(EnvMapping {
+            basic_user: Some(EnvList::single("EMQX_API_KEY")),
+            basic_pass: Some(EnvList::single("EMQX_API_SECRET")),
+            ..Default::default()
+        }),
     }
 }
 
@@ -222,6 +227,10 @@ pub fn define_emqx_bearer_api() -> RestApi {
         endpoints,
         module_path: Some("emqx".to_string()),
         request_suffix: Some("BearerRequest".to_string()),
+        env_mapping: Some(EnvMapping {
+            bearer_token: Some(EnvList::single("EMQX_TOKEN")),
+            ..Default::default()
+        }),
     }
 }
 

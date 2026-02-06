@@ -771,6 +771,7 @@ mod tests {
             ],
             module_path: None,
             request_suffix: None,
+            env_mapping: None,
         };
 
         assert_eq!(api.name, "FileService");

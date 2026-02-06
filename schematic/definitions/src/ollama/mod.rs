@@ -26,7 +26,7 @@ mod types;
 
 pub use types::*;
 
-use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, RestApi, RestMethod};
+use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod};
 
 /// Creates the native Ollama API definition.
 ///
@@ -180,6 +180,7 @@ pub fn define_ollama_native_api() -> RestApi {
         ],
         module_path: None,
         request_suffix: None,
+        env_mapping: Some(EnvMapping::default()),
     }
 }
 
@@ -257,6 +258,7 @@ pub fn define_ollama_openai_api() -> RestApi {
         ],
         module_path: None,
         request_suffix: None,
+        env_mapping: Some(EnvMapping::default()),
     }
 }
 
