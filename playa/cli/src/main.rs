@@ -401,9 +401,10 @@ fn list_sound_effects(filter: Option<&str>) {
             .iter()
             .map(|effect| {
                 let styled = Prose::new(format!(
-                    "{} <dim><italic>{}</italic></dim>",
+                    "{} <dim><italic>{}</italic></dim> [<dim>{}</dim>]",
                     effect.name(),
-                    effect.description()
+                    effect.description(),
+                    format_duration(effect.duration_ms())
                 ));
                 RenderableContent::Component(Arc::new(styled))
             })
@@ -424,6 +425,14 @@ fn fuzzy_normalize(s: &str) -> String {
         .filter(|c| c.is_alphanumeric())
         .collect::<String>()
         .to_lowercase()
+}
+
+fn format_duration(duration_ms: Option<u32>) -> String {
+    match duration_ms {
+        Some(ms) if ms < 1000 => format!("{}ms", ms),
+        Some(ms) => format!("<orange>{:.2}s</orange>", ms as f64 / 1000.0),
+        None => "unknown".to_string(),
+    }
 }
 
 #[cfg(feature = "audio-ducking")]

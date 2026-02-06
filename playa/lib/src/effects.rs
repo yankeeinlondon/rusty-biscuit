@@ -52,6 +52,10 @@
 //!
 //! Format detection is automatic - you don't need to know the underlying format.
 
+mod effect_durations {
+    include!(concat!(env!("OUT_DIR"), "/effect_durations.rs"));
+}
+
 /// A categorized sound effect with embedded audio data.
 ///
 /// Enable feature flags to include effect categories in your binary.
@@ -728,6 +732,16 @@ impl SoundEffect {
             #[cfg(feature = "sfx-motion")]
             Self::Bullet => "bullet",
         }
+    }
+
+    /// Return the duration of this effect in milliseconds.
+    ///
+    /// ## Returns
+    ///
+    /// - `Some(duration_ms)` when the effect exists in the build-time manifest.
+    /// - `None` if duration metadata is unavailable.
+    pub fn duration_ms(&self) -> Option<u32> {
+        effect_durations::duration_ms_for_name(self.name())
     }
 
     /// Return all available effects compiled into this build.
