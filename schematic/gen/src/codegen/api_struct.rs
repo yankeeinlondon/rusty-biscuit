@@ -11,6 +11,7 @@ use schematic_define::{AuthStrategy, RestApi};
 ///
 /// Creates a struct with:
 /// - `BASE_URL` constant containing the API's base URL
+/// - `DOCS_URL` constant containing the API's documentation URL (or `None`)
 /// - `new()` constructor using the default base URL
 /// - `with_base_url()` constructor for custom base URLs
 /// - `with_client()` constructor for custom reqwest clients
@@ -71,6 +72,12 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
     // Generate headers initialization
     let headers_init = generate_headers_init(&api.headers);
 
+    // Generate DOCS_URL constant
+    let docs_url_init = match &api.docs_url {
+        Some(url) => quote! { Some(#url) },
+        None => quote! { None },
+    };
+
     quote! {
         #[doc = #description]
         pub struct #struct_name {
@@ -89,6 +96,9 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
         impl #struct_name {
             /// Base URL for the API.
             pub const BASE_URL: &'static str = #base_url;
+
+            /// Official API documentation URL, if available.
+            pub const DOCS_URL: Option<&'static str> = #docs_url_init;
 
             /// Creates a new API client with the default base URL.
             pub fn new() -> Self {
@@ -213,6 +223,8 @@ pub fn generate_api_struct(api: &RestApi) -> TokenStream {
                 let auth_strategy = match strategy {
                     schematic_define::UpdateStrategy::NoChange => self.auth_strategy.clone(),
                     schematic_define::UpdateStrategy::ChangeTo(auth) => auth,
+                    // Handle future variants (non_exhaustive)
+                    _ => self.auth_strategy.clone(),
                 };
                 Self {
                     client: self.client.clone(),
@@ -278,6 +290,8 @@ fn generate_auth_strategy_init(auth: &AuthStrategy) -> TokenStream {
             quote! { schematic_define::AuthStrategy::ApiKey { header: #header.to_string() } }
         }
         AuthStrategy::Basic => quote! { schematic_define::AuthStrategy::Basic },
+        // Handle future variants (non_exhaustive)
+        _ => quote! { schematic_define::AuthStrategy::None },
     }
 }
 
@@ -660,5 +674,51 @@ mod tests {
 
         // Should clone headers
         assert!(code.contains("headers: self.headers.clone()"));
+    }
+
+    #[test]
+    fn generate_api_struct_has_docs_url_constant() {
+        let api = RestApi {
+            name: "DocsApi".to_string(),
+            description: "API with documentation URL".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            docs_url: Some("https://docs.example.com/api".to_string()),
+            auth: AuthStrategy::None,
+            env_auth: vec![],
+            env_username: None,
+            headers: vec![],
+            endpoints: vec![],
+            module_path: None,
+            request_suffix: None,
+        };
+        let tokens = generate_api_struct(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Check DOCS_URL constant exists and is Some
+        assert!(
+            code.contains("pub const DOCS_URL: Option<&'static str>"),
+            "Expected DOCS_URL constant declaration"
+        );
+        assert!(
+            code.contains("Some(\"https://docs.example.com/api\")"),
+            "Expected DOCS_URL to contain the documentation URL"
+        );
+    }
+
+    #[test]
+    fn generate_api_struct_docs_url_none() {
+        let api = make_api("NoDocsApi", "https://api.nodocs.com", "API without documentation");
+        let tokens = generate_api_struct(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Check DOCS_URL constant exists and is None
+        assert!(
+            code.contains("pub const DOCS_URL: Option<&'static str>"),
+            "Expected DOCS_URL constant declaration"
+        );
+        assert!(
+            code.contains("DOCS_URL: Option<&'static str> = None"),
+            "Expected DOCS_URL to be None when docs_url is not provided"
+        );
     }
 }

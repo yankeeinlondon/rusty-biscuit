@@ -37,6 +37,7 @@ use crate::schema::Schema;
 ///
 /// let response = ApiResponse::Empty;
 /// ```
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApiResponse {
     /// JSON response with a typed schema.

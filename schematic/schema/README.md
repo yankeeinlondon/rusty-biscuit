@@ -56,6 +56,11 @@ async fn main() -> Result<(), schematic_schema::openai::SchematicError> {
         .request(RetrieveModelRequest::new("gpt-4"))
         .await?;
 
+    // Or use From<&str> for single-param requests
+    let gpt4: Model = client
+        .request(RetrieveModelRequest::from("gpt-4"))
+        .await?;
+
     println!("Model {} created at {}", gpt4.id, gpt4.created);
     Ok(())
 }
@@ -86,6 +91,7 @@ The prelude (`schematic_schema::prelude`) exports:
 - **Client structs**: `Anthropic`, `OpenAI`, `HuggingFaceHub`, `ElevenLabs`
 - **Request enums**: `AnthropicRequest`, `OpenAIRequest`, `HuggingFaceHubRequest`, `ElevenLabsRequest`
 - **Shared types**: `SchematicError`, `RequestParts`
+- **Constants**: Each client has `BASE_URL` and `DOCS_URL` constants
 
 **Note**: Response types must be imported from specific API modules to avoid naming conflicts:
 
@@ -114,6 +120,10 @@ pub struct ListModelsRequest {}
 Examples show the appropriate construction pattern:
 - `default()` for requests with no required fields
 - `new(...)` for requests with required path parameters or body
+- `From<&str>`/`From<String>` for single-param no-body requests
+- `From<BodyType>` for body-only requests
+
+All async request methods are marked `#[must_use]` to warn if the returned Future is discarded without `.await`.
 
 ## Client Configuration
 
@@ -122,6 +132,10 @@ Examples show the appropriate construction pattern:
 ```rust
 // Uses default base URL and reads credentials from environment
 let client = OpenAI::new()?;
+
+// Access API metadata
+println!("Base URL: {}", OpenAI::BASE_URL);
+println!("Docs: {:?}", OpenAI::DOCS_URL);
 ```
 
 ### Custom Base URL

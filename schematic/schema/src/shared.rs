@@ -19,6 +19,25 @@ pub type RequestParts = (&'static str, String, Option<String>, Vec<(String, Stri
 /// This enum captures all error conditions that may arise during
 /// API communication, including network failures, serialization
 /// issues, and API-level errors.
+///
+/// ## Error Handling Examples
+///
+/// ```rust,ignore
+/// match client.request::<Response>(req).await {
+///     Ok(response) => { /* success */ }
+///     Err(SchematicError::MissingCredential { env_vars }) => {
+///         eprintln!("Set one of: {:?}", env_vars);
+///     }
+///     Err(SchematicError::ApiError { status: 429, body }) => {
+///         // Rate limited - implement backoff
+///         eprintln!("Rate limited: {}", body);
+///     }
+///     Err(SchematicError::ApiError { status, body }) => {
+///         eprintln!("API error {}: {}", status, body);
+///     }
+///     Err(e) => return Err(e.into()),
+/// }
+/// ```
 #[derive(Debug, thiserror::Error)]
 pub enum SchematicError {
     /// HTTP request failed (network error, timeout, etc.).

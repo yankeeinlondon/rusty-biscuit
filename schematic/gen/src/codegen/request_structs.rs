@@ -103,8 +103,15 @@ pub fn generate_request_struct_with_options(
     // Generate Default impl if we have a body (manual impl needed)
     let default_impl = generate_default_impl(&struct_name, &path_params, has_body);
 
-    // Generate new() constructor for type-safe construction
-    let new_impl = generate_new_impl(&struct_name, &path_params, has_body, body_type_name);
+    // Generate new() constructor method body for type-safe construction
+    let new_method = generate_new_method(&path_params, has_body, body_type_name);
+
+    // Generate From<Body> impl for body-only structs
+    let from_body_impl =
+        generate_from_body_impl(&struct_name, &path_params, has_body, body_type_name);
+
+    // Generate From<&str> and From<String> impls for single-param no-body structs
+    let from_string_impls = generate_from_string_impls(&struct_name, &path_params, has_body);
 
     // Generate into_parts method
     let into_parts = generate_into_parts(endpoint, &path_params, &method_str);
@@ -138,11 +145,14 @@ pub fn generate_request_struct_with_options(
 
         #default_impl
 
-        #new_impl
-
         impl #struct_name {
+            #new_method
             #into_parts
         }
+
+        #from_body_impl
+
+        #from_string_impls
     }
 }
 
@@ -268,6 +278,8 @@ fn generate_body_field(endpoint: &Endpoint) -> TokenStream {
         | Some(ApiRequest::UrlEncoded { .. })
         | Some(ApiRequest::Text { .. })
         | Some(ApiRequest::Binary { .. }) => quote! {},
+        // Handle future variants (non_exhaustive)
+        Some(_) => quote! {},
         None => quote! {},
     }
 }
@@ -290,17 +302,86 @@ fn generate_default_impl(
     quote! {}
 }
 
-/// Generates a `new()` constructor for the request struct.
+/// Generates a `From<BodyType>` impl for body-only request structs.
+///
+/// This allows ergonomic conversion from the body type to the request struct:
+/// ```ignore
+/// let req: CreateCompletionRequest = body.into();
+/// ```
+///
+/// ## Returns
+///
+/// - For structs with body and no path params: `impl From<BodyType> for StructName`
+/// - Otherwise: empty `TokenStream`
+fn generate_from_body_impl(
+    struct_name: &proc_macro2::Ident,
+    path_params: &[&str],
+    has_body: bool,
+    body_type: Option<&str>,
+) -> TokenStream {
+    // Only generate From impl for body-only structs (no path params)
+    if has_body && path_params.is_empty() {
+        let body_ty = format_ident!("{}", body_type.unwrap());
+        quote! {
+            impl From<#body_ty> for #struct_name {
+                fn from(body: #body_ty) -> Self {
+                    Self { body }
+                }
+            }
+        }
+    } else {
+        quote! {}
+    }
+}
+
+/// Generates `From<&str>` and `From<String>` impls for single-param no-body request structs.
+///
+/// This allows ergonomic conversion from string types to the request struct:
+/// ```ignore
+/// let req: RetrieveModelRequest = "gpt-4".into();
+/// let req = RetrieveModelRequest::from("gpt-4");
+/// ```
+///
+/// ## Returns
+///
+/// - For structs with exactly one path param and no body: `impl From<&str>` and `impl From<String>`
+/// - Otherwise: empty `TokenStream`
+fn generate_from_string_impls(
+    struct_name: &proc_macro2::Ident,
+    path_params: &[&str],
+    has_body: bool,
+) -> TokenStream {
+    // Only generate From impls for single-param no-body structs
+    if path_params.len() == 1 && !has_body {
+        let field_name = format_ident!("{}", path_params[0]);
+        quote! {
+            impl From<&str> for #struct_name {
+                fn from(param: &str) -> Self {
+                    Self { #field_name: param.to_string() }
+                }
+            }
+
+            impl From<String> for #struct_name {
+                fn from(param: String) -> Self {
+                    Self { #field_name: param }
+                }
+            }
+        }
+    } else {
+        quote! {}
+    }
+}
+
+/// Generates a `new()` constructor method body for the request struct.
 ///
 /// The constructor requires all path parameters and the body (if present),
 /// providing compile-time enforcement of required fields.
 ///
 /// ## Returns
 ///
-/// - For structs with path params or body: `impl` block with `new()` method
+/// - For structs with path params or body: method body for `new()` (no impl wrapper)
 /// - For empty structs (no params, no body): empty `TokenStream` (use `Default`)
-fn generate_new_impl(
-    struct_name: &proc_macro2::Ident,
+fn generate_new_method(
     path_params: &[&str],
     has_body: bool,
     body_type: Option<&str>,
@@ -324,24 +405,20 @@ fn generate_new_impl(
     if has_body {
         let body_ty = format_ident!("{}", body_type.unwrap());
         quote! {
-            impl #struct_name {
-                /// Creates a new request with the required path parameters and body.
-                pub fn new(#(#params,)* body: #body_ty) -> Self {
-                    Self {
-                        #(#field_inits,)*
-                        body,
-                    }
+            /// Creates a new request with the required path parameters and body.
+            pub fn new(#(#params,)* body: #body_ty) -> Self {
+                Self {
+                    #(#field_inits,)*
+                    body,
                 }
             }
         }
     } else if !path_params.is_empty() {
         quote! {
-            impl #struct_name {
-                /// Creates a new request with the required path parameters.
-                pub fn new(#(#params),*) -> Self {
-                    Self {
-                        #(#field_inits,)*
-                    }
+            /// Creates a new request with the required path parameters.
+            pub fn new(#(#params),*) -> Self {
+                Self {
+                    #(#field_inits,)*
                 }
             }
         }
@@ -898,6 +975,270 @@ mod tests {
             code.contains("GetMessageRequest::new(\"thread_id_value\", \"message_id_value\")"),
             "Expected new with both params, got:\n{}",
             code
+        );
+    }
+
+    // === From<Body> tests ===
+
+    #[test]
+    fn generates_from_body_for_body_only_request() {
+        let endpoint = make_endpoint(
+            "CreateCompletion",
+            RestMethod::Post,
+            "/completions",
+            Some(ApiRequest::json_type("CreateCompletionBody")),
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should have From<Body> impl for body-only request
+        assert!(
+            code.contains("impl From<CreateCompletionBody> for CreateCompletionRequest"),
+            "Expected From<Body> impl for body-only request, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains("fn from(body: CreateCompletionBody) -> Self"),
+            "Expected from() method signature, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains("Self { body }"),
+            "Expected Self {{ body }} in from(), got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn skips_from_body_for_request_with_path_params() {
+        let endpoint = make_endpoint(
+            "CreateMessage",
+            RestMethod::Post,
+            "/threads/{thread_id}/messages",
+            Some(ApiRequest::json_type("CreateMessageBody")),
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should NOT have From<Body> impl for request with path params
+        assert!(
+            !code.contains("impl From<CreateMessageBody> for CreateMessageRequest"),
+            "Expected no From<Body> impl for request with path params, got:\n{}",
+            code
+        );
+    }
+
+    // === From<&str> and From<String> impl tests ===
+
+    #[test]
+    fn generates_from_str_for_single_path_param_no_body() {
+        let endpoint = make_endpoint("RetrieveModel", RestMethod::Get, "/models/{model}", None);
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should generate From<&str>
+        assert!(
+            code.contains("impl From<&str> for RetrieveModelRequest"),
+            "Expected From<&str> impl, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains("model: param.to_string()"),
+            "Expected param.to_string() in From<&str>, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn generates_from_string_for_single_path_param_no_body() {
+        let endpoint = make_endpoint("RetrieveModel", RestMethod::Get, "/models/{model}", None);
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should generate From<String>
+        assert!(
+            code.contains("impl From<String> for RetrieveModelRequest"),
+            "Expected From<String> impl, got:\n{}",
+            code
+        );
+        // The From<String> impl should directly use the param
+        assert!(
+            code.contains("Self { model: param }"),
+            "Expected direct param assignment in From<String>, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn skips_from_string_impls_for_multi_param_requests() {
+        let endpoint = make_endpoint(
+            "GetMessage",
+            RestMethod::Get,
+            "/threads/{thread_id}/messages/{message_id}",
+            None,
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should NOT generate From impls for multi-param
+        assert!(
+            !code.contains("impl From<&str> for GetMessageRequest"),
+            "Should NOT have From<&str> for multi-param, got:\n{}",
+            code
+        );
+        assert!(
+            !code.contains("impl From<String> for GetMessageRequest"),
+            "Should NOT have From<String> for multi-param, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn skips_from_string_impls_for_requests_with_body() {
+        let endpoint = make_endpoint(
+            "CreateCompletion",
+            RestMethod::Post,
+            "/completions",
+            Some(ApiRequest::json_type("CreateCompletionBody")),
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should NOT generate From<&str>/From<String> impls for body requests
+        assert!(
+            !code.contains("impl From<&str> for CreateCompletionRequest"),
+            "Should NOT have From<&str> for body request, got:\n{}",
+            code
+        );
+        assert!(
+            !code.contains("impl From<String> for CreateCompletionRequest"),
+            "Should NOT have From<String> for body request, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn skips_from_string_impls_for_single_param_with_body() {
+        let endpoint = make_endpoint(
+            "UpdateModel",
+            RestMethod::Patch,
+            "/models/{model}",
+            Some(ApiRequest::json_type("UpdateModelBody")),
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should NOT generate From<&str>/From<String> impls - has body
+        assert!(
+            !code.contains("impl From<&str> for UpdateModelRequest"),
+            "Should NOT have From<&str> for body request, got:\n{}",
+            code
+        );
+        assert!(
+            !code.contains("impl From<String> for UpdateModelRequest"),
+            "Should NOT have From<String> for body request, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn skips_from_string_impls_for_no_params() {
+        let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Should NOT generate From<&str>/From<String> impls - no params
+        assert!(
+            !code.contains("impl From<&str> for ListModelsRequest"),
+            "Should NOT have From<&str> for no params, got:\n{}",
+            code
+        );
+        assert!(
+            !code.contains("impl From<String> for ListModelsRequest"),
+            "Should NOT have From<String> for no params, got:\n{}",
+            code
+        );
+    }
+
+    // === Merged impl block tests ===
+
+    #[test]
+    fn single_impl_block_with_new_and_into_parts() {
+        // Test request with path param (has new() and into_parts())
+        let endpoint = make_endpoint("RetrieveModel", RestMethod::Get, "/models/{model}", None);
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Count occurrences of "impl RetrieveModelRequest" (non-From impls)
+        let impl_count = code
+            .matches("impl RetrieveModelRequest")
+            .count();
+
+        assert_eq!(
+            impl_count, 1,
+            "Expected exactly 1 impl block for RetrieveModelRequest (excluding From impls), got {}\n\nCode:\n{}",
+            impl_count, code
+        );
+
+        // Both new() and into_parts() should be in same impl block
+        assert!(
+            code.contains("pub fn new("),
+            "Expected new() method in impl block"
+        );
+        assert!(
+            code.contains("pub fn into_parts("),
+            "Expected into_parts() method in impl block"
+        );
+    }
+
+    #[test]
+    fn single_impl_block_with_body_and_both_methods() {
+        // Test request with body (has new() and into_parts())
+        let endpoint = make_endpoint(
+            "CreateCompletion",
+            RestMethod::Post,
+            "/completions",
+            Some(ApiRequest::json_type("CreateCompletionBody")),
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Count occurrences of "impl CreateCompletionRequest" (non-From impls)
+        let impl_count = code
+            .matches("impl CreateCompletionRequest")
+            .count();
+
+        assert_eq!(
+            impl_count, 1,
+            "Expected exactly 1 impl block for CreateCompletionRequest (excluding From impls), got {}\n\nCode:\n{}",
+            impl_count, code
+        );
+    }
+
+    #[test]
+    fn single_impl_block_for_no_param_request() {
+        // Test request with no params (only into_parts(), no new())
+        let endpoint = make_endpoint("ListModels", RestMethod::Get, "/models", None);
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Count occurrences of "impl ListModelsRequest" (non-From impls)
+        let impl_count = code.matches("impl ListModelsRequest").count();
+
+        assert_eq!(
+            impl_count, 1,
+            "Expected exactly 1 impl block for ListModelsRequest, got {}\n\nCode:\n{}",
+            impl_count, code
+        );
+
+        // Should only have into_parts(), not new()
+        assert!(
+            !code.contains("pub fn new("),
+            "Expected no new() method for no-param request"
+        );
+        assert!(
+            code.contains("pub fn into_parts("),
+            "Expected into_parts() method"
         );
     }
 }

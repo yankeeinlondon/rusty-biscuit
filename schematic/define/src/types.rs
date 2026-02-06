@@ -47,6 +47,7 @@ use crate::response::ApiResponse;
 /// let methods: Vec<_> = RestMethod::iter().collect();
 /// assert_eq!(methods.len(), 7);
 /// ```
+#[non_exhaustive]
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, EnumIter, EnumString,
 )]

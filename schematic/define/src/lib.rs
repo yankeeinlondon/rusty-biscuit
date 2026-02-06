@@ -68,6 +68,33 @@
 //!
 //! Actual API definitions (like OpenAI) are in the separate `schematic-definitions` crate,
 //! which uses these primitives to define real-world APIs.
+//!
+//! ## Body Type Patterns
+//!
+//! Request body types in API definitions should follow the builder pattern
+//! for ergonomic construction:
+//!
+//! ```ignore
+//! // Core constructor with required fields
+//! CreateMessageBody::new("claude-sonnet-4-5-20250514", messages, 1024)
+//!     .with_system("You are a helpful assistant")
+//!     .with_temperature(0.7)
+//!     .with_tools(tools)
+//! ```
+//!
+//! ### Recommended Methods
+//!
+//! - `new()` - Constructor requiring all mandatory fields
+//! - `with_*()` - Builder methods for optional fields (return `Self` for chaining)
+//! - `Default` - Implement when all fields have sensible defaults
+//!
+//! ### Pattern Benefits
+//!
+//! - **Discoverability**: IDE autocomplete reveals all optional fields
+//! - **Readability**: Configuration intent is clear at the call site
+//! - **Flexibility**: Add new optional fields without breaking existing code
+//!
+//! See `schematic_definitions::anthropic` for a comprehensive example.
 
 pub mod auth;
 pub mod prelude;

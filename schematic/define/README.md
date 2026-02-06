@@ -16,7 +16,7 @@ The definition process is intentionally **data-driven**: you describe *what* the
 |------|---------|
 | `RestApi` | Complete API definition with base URL, auth, endpoints, and codegen options |
 | `Endpoint` | Single endpoint with method, path, request/response schemas |
-| `RestMethod` | HTTP methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS) |
+| `RestMethod` | HTTP methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS); supports `FromStr`, `TryFrom<String>` |
 | `AuthStrategy` | Authentication configuration (Bearer, API Key, Basic, None) |
 | `ApiRequest` | Request body type (JSON, FormData, UrlEncoded, Text, Binary) |
 | `ApiResponse` | Response type (JSON, Text, Binary, Empty) |
@@ -66,7 +66,7 @@ The definition process is intentionally **data-driven**: you describe *what* the
 Authentication is configured in two parts:
 
 1. `AuthStrategy` on `RestApi::auth` - defines *how* auth is applied
-2. `env_auth`, `env_username`, `env_password` on `RestApi` - defines *where* credentials come from
+2. `env_auth`, `env_username` on `RestApi` - defines *where* credentials come from
 
 ### Bearer Token (Most Common)
 
@@ -110,7 +110,7 @@ use schematic_define::{RestApi, AuthStrategy};
 let api = RestApi {
     auth: AuthStrategy::Basic,
     env_username: Some("SERVICE_USER".to_string()),
-    env_password: Some("SERVICE_PASSWORD".to_string()),
+    env_auth: vec!["SERVICE_PASSWORD".to_string()], // Password from env_auth[0]
     // ...
 };
 ```
@@ -245,6 +245,25 @@ let samples = FormField::files_with_constraints(
 );
 ```
 
+## Enum Extensibility
+
+All public enums in `schematic-define` are marked `#[non_exhaustive]`, allowing new variants to be added in future versions without breaking downstream code. Match statements on these enums must include a wildcard arm:
+
+```rust
+use schematic_define::AuthStrategy;
+
+let auth = AuthStrategy::BearerToken { header: None };
+match auth {
+    AuthStrategy::None => { /* ... */ }
+    AuthStrategy::BearerToken { header } => { /* ... */ }
+    AuthStrategy::ApiKey { header } => { /* ... */ }
+    AuthStrategy::Basic => { /* ... */ }
+    _ => { /* future variants */ }
+}
+```
+
+This applies to: `AuthStrategy`, `UpdateStrategy`, `ApiRequest`, `FormFieldKind`, `ApiResponse`, `RestMethod`.
+
 ## Response Types
 
 | Variant | Generated Return Type | Use Case |
@@ -362,7 +381,6 @@ let api = RestApi {
     auth: AuthStrategy::None,
     env_auth: vec![],
     env_username: None,
-    env_password: None,
     endpoints: vec![
         Endpoint {
             id: "GetHealth".to_string(),
@@ -401,7 +419,6 @@ let api = RestApi {
     auth: AuthStrategy::BearerToken { header: None },
     env_auth: vec!["MYSERVICE_API_KEY".to_string()],
     env_username: None,
-    env_password: None,
     headers: vec![],
     endpoints: vec![
         // List all users
@@ -475,7 +492,6 @@ let api = RestApi {
     auth: AuthStrategy::ApiKey { header: "X-Storage-Key".to_string() },
     env_auth: vec!["STORAGE_API_KEY".to_string()],
     env_username: None,
-    env_password: None,
     headers: vec![],
     endpoints: vec![
         // List files - returns JSON
@@ -624,6 +640,33 @@ assert_eq!(simple.full_path(), "User");
 let qualified = Schema::with_path("User", "crate::models::user");
 assert_eq!(qualified.full_path(), "crate::models::user::User");
 ```
+
+### Usage Guide
+
+Use `Schema::new()` when:
+- The type is defined in the same generated module
+- The type will be re-exported via `pub use`
+
+Use `Schema::with_path()` when:
+- The type is defined in a different crate or module
+- You need explicit qualification to avoid naming conflicts
+
+### Body Type Patterns
+
+Request body types should follow the builder pattern for ergonomic construction:
+
+```rust,ignore
+// Core constructor with required fields, then chain optional fields
+CreateMessageBody::new("claude-sonnet-4-5-20250514", messages, 1024)
+    .with_system("You are a helpful assistant")
+    .with_temperature(0.7)
+    .with_tools(tools)
+```
+
+Recommended methods:
+- `new()` - Constructor requiring all mandatory fields
+- `with_*()` - Builder methods for optional fields
+- `Default` - Implement when all fields have sensible defaults
 
 ## Migration from Schema to ApiRequest
 

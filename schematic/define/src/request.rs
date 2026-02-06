@@ -37,6 +37,7 @@ use crate::schema::Schema;
 ///     accept: vec!["audio/*".into()],
 /// };
 /// ```
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FormFieldKind {
     /// Plain text field (Content-Type: text/plain).
@@ -320,6 +321,7 @@ impl FormField {
 ///     FormField::text("name").optional(),
 /// ]);
 /// ```
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApiRequest {
     /// JSON request body.

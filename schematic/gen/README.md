@@ -368,10 +368,18 @@ impl RetrieveModelRequest {
         Self { model: model.into() }
     }
 
-    pub fn into_parts(self) -> (&'static str, String, Option<String>) {
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!("/models/{}", self.model);
-        ("GET", path, None)
+        Ok(("GET", path, None, vec![]))
     }
+}
+
+// From<&str> and From<String> for single-param, no-body requests
+impl From<&str> for RetrieveModelRequest {
+    fn from(param: &str) -> Self { Self { model: param.to_string() } }
+}
+impl From<String> for RetrieveModelRequest {
+    fn from(param: String) -> Self { Self { model: param } }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -413,6 +421,8 @@ pub struct OpenAI {
 
 impl OpenAI {
     pub const BASE_URL: &'static str = "https://api.openai.com/v1";
+    /// Official API documentation URL, if available.
+    pub const DOCS_URL: Option<&'static str> = Some("https://platform.openai.com/docs/api-reference");
 
     pub fn new() -> Self { ... }
     pub fn with_base_url(base_url: impl Into<String>) -> Self { ... }
@@ -431,6 +441,7 @@ impl OpenAI {
     /// Get the API key header name and value (if using ApiKey auth)
     pub fn api_key_header(&self) -> Option<(String, String)> { ... }
 
+    #[must_use = "this returns a Future that must be awaited"]
     pub async fn request<T: serde::de::DeserializeOwned>(
         &self,
         request: impl Into<OpenAIRequest>,
@@ -455,6 +466,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Retrieve a specific model - type-safe construction with new()
     let model: Model = client
         .request(RetrieveModelRequest::new("gpt-4"))
+        .await?;
+
+    // Ergonomic: use From<&str> for single-param requests
+    let model: Model = client
+        .request(RetrieveModelRequest::from("gpt-4"))
         .await?;
 
     // Alternative: struct literal (still works for flexibility)
@@ -758,6 +774,34 @@ Generated runtime error types (`SchematicError`):
 | `UnsupportedMethod` | Unknown HTTP method (should never occur) |
 | `SerializationError` | Request body serialization failed |
 | `MissingCredential` | Required auth env vars not found |
+
+## Ergonomic Conversions
+
+The generator produces convenience `From` implementations for request structs:
+
+### Single-Parameter Requests
+
+For endpoints with exactly one path parameter and no body, `From<&str>` and `From<String>` are generated:
+
+```rust
+// Instead of:
+let req = RetrieveModelRequest::new("gpt-4");
+// You can write:
+let req = RetrieveModelRequest::from("gpt-4");
+let req: RetrieveModelRequest = "gpt-4".into();
+```
+
+### Body-Only Requests
+
+For endpoints with a body and no path parameters, `From<BodyType>` is generated:
+
+```rust
+// Instead of:
+let req = CreateMessageRequest::new(body);
+// You can write:
+let req = CreateMessageRequest::from(body);
+let req: CreateMessageRequest = body.into();
+```
 
 ## Safety Guarantees
 

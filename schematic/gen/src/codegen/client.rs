@@ -218,6 +218,7 @@ fn generate_json_request_method(
         /// - The HTTP request fails (network error, timeout, etc.)
         /// - The response indicates a non-success status code
         /// - The response body cannot be deserialized as JSON
+        #[must_use = "this returns a Future that must be awaited"]
         pub async fn request<T: serde::de::DeserializeOwned>(
             &self,
             request: impl Into<#request_enum>,
@@ -245,6 +246,7 @@ fn generate_bytes_request_method(
         /// Returns an error if:
         /// - The HTTP request fails (network error, timeout, etc.)
         /// - The response indicates a non-success status code
+        #[must_use = "this returns a Future that must be awaited"]
         pub async fn request_bytes(
             &self,
             request: impl Into<#request_enum>,
@@ -271,6 +273,7 @@ fn generate_text_request_method(
         /// Returns an error if:
         /// - The HTTP request fails (network error, timeout, etc.)
         /// - The response indicates a non-success status code
+        #[must_use = "this returns a Future that must be awaited"]
         pub async fn request_text(
             &self,
             request: impl Into<#request_enum>,
@@ -298,6 +301,7 @@ fn generate_empty_request_method(
         /// Returns an error if:
         /// - The HTTP request fails (network error, timeout, etc.)
         /// - The response indicates a non-success status code
+        #[must_use = "this returns a Future that must be awaited"]
         pub async fn request_empty(
             &self,
             request: impl Into<#request_enum>,
@@ -337,6 +341,7 @@ pub fn generate_convenience_methods(api: &RestApi, request_suffix: &str) -> Toke
                     #[doc = #doc]
                     ///
                     #[doc = #desc_doc]
+                    #[must_use = "this returns a Future that must be awaited"]
                     pub async fn #method_name(
                         &self,
                         request: #request_struct,
@@ -349,6 +354,7 @@ pub fn generate_convenience_methods(api: &RestApi, request_suffix: &str) -> Toke
                     #[doc = #doc]
                     ///
                     #[doc = #desc_doc]
+                    #[must_use = "this returns a Future that must be awaited"]
                     pub async fn #method_name(
                         &self,
                         request: #request_struct,
@@ -361,6 +367,7 @@ pub fn generate_convenience_methods(api: &RestApi, request_suffix: &str) -> Toke
                     #[doc = #doc]
                     ///
                     #[doc = #desc_doc]
+                    #[must_use = "this returns a Future that must be awaited"]
                     pub async fn #method_name(
                         &self,
                         request: #request_struct,
@@ -439,6 +446,8 @@ fn generate_auth_setup(_api: &RestApi) -> TokenStream {
                     })?;
                 req_builder = req_builder.basic_auth(username, Some(password));
             }
+            // Handle future variants (non_exhaustive)
+            _ => {}
         }
     }
 }
@@ -915,6 +924,97 @@ mod tests {
             !code.contains("pub async fn list_items"),
             "Should not have list_items convenience method"
         );
+    }
+
+    #[test]
+    fn generate_request_method_has_must_use() {
+        // Test that all async request methods have #[must_use] attribute
+        // to warn users if they accidentally discard the returned Future
+        let api = make_api_with_endpoints(
+            "MustUseApi",
+            vec![
+                Endpoint {
+                    id: "ListItems".to_string(),
+                    method: RestMethod::Get,
+                    path: "/items".to_string(),
+                    description: "Lists items".to_string(),
+                    request: None,
+                    response: ApiResponse::json_type("ListItemsResponse"),
+                    headers: vec![],
+                },
+                Endpoint {
+                    id: "CreateSpeech".to_string(),
+                    method: RestMethod::Post,
+                    path: "/speech".to_string(),
+                    description: "Creates speech audio".to_string(),
+                    request: None,
+                    response: ApiResponse::Binary,
+                    headers: vec![],
+                },
+                Endpoint {
+                    id: "GetText".to_string(),
+                    method: RestMethod::Get,
+                    path: "/text".to_string(),
+                    description: "Gets plain text".to_string(),
+                    request: None,
+                    response: ApiResponse::Text,
+                    headers: vec![],
+                },
+                Endpoint {
+                    id: "DeleteItem".to_string(),
+                    method: RestMethod::Delete,
+                    path: "/items/{id}".to_string(),
+                    description: "Deletes an item".to_string(),
+                    request: None,
+                    response: ApiResponse::Empty,
+                    headers: vec![],
+                },
+            ],
+        );
+        let tokens = generate_request_method(&api);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Verify #[must_use] on request<T> (JSON)
+        assert!(
+            code.contains(r#"#[must_use = "this returns a Future that must be awaited"]"#),
+            "Missing #[must_use] attribute on request methods.\nGenerated code:\n{}",
+            code
+        );
+
+        // Count must_use attributes - should be at least 4 (one for each request method type)
+        // plus 3 convenience methods (binary, text, empty)
+        let must_use_count = code
+            .matches(r#"#[must_use = "this returns a Future that must be awaited"]"#)
+            .count();
+        assert!(
+            must_use_count >= 7,
+            "Expected at least 7 #[must_use] attributes (4 request methods + 3 convenience), found {}.\nGenerated code:\n{}",
+            must_use_count,
+            code
+        );
+
+        // Verify each method type has the attribute by checking it appears before the method
+        let check_must_use_before = |method_sig: &str| {
+            let must_use_attr = r#"#[must_use = "this returns a Future that must be awaited"]"#;
+            if let Some(method_pos) = code.find(method_sig) {
+                let before_method = &code[..method_pos];
+                let last_must_use = before_method.rfind(must_use_attr);
+                assert!(
+                    last_must_use.is_some(),
+                    "#[must_use] not found before {}\nGenerated code:\n{}",
+                    method_sig,
+                    code
+                );
+            }
+        };
+
+        check_must_use_before("pub async fn request<T");
+        check_must_use_before("pub async fn request_bytes");
+        check_must_use_before("pub async fn request_text");
+        check_must_use_before("pub async fn request_empty");
+        check_must_use_before("pub async fn create_speech");
+        check_must_use_before("pub async fn get_text");
+        check_must_use_before("pub async fn delete_item");
     }
 
     #[test]

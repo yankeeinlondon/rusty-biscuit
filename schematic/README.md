@@ -77,6 +77,13 @@ async fn main() -> Result<(), SchematicError> {
         .request(RetrieveModelRequest::new("gpt-4"))
         .await?;
 
+    // Or use From<&str> for single-param requests
+    let model: Model = client
+        .request(RetrieveModelRequest::from("gpt-4"))
+        .await?;
+
+    // Access documentation URL
+    println!("API docs: {:?}", OpenAI::DOCS_URL);
     println!("Model: {}", model.id);
     Ok(())
 }
@@ -108,14 +115,17 @@ async fn main() -> Result<(), SchematicError> {
 
 - **Type-safe requests**: Each endpoint gets a strongly-typed request struct with `new()` constructors
 - **Compile-time enforcement**: Required path parameters and bodies are enforced via `new()` constructors
+- **Ergonomic conversions**: `From<&str>`/`From<String>` for single-param requests, `From<Body>` for body-only requests
 - **Automatic authentication**: Bearer, API Key, and Basic auth with env var fallback chains
-- **Proper error handling**: `MissingCredential` errors instead of silent failures
+- **Runtime configuration**: `DOCS_URL` constant on API structs, `variant()` for alternate environments
+- **Proper error handling**: `MissingCredential` errors with documented error handling patterns
 - **Path parameters**: `{param}` syntax in paths become struct fields with `impl Into<String>` for ergonomic usage
-- **Multiple response types**: JSON, Text, Binary, and Empty responses with type-specific methods
+- **Multiple response types**: JSON, Text, Binary, and Empty responses with type-specific methods and `#[must_use]` attributes
 - **Per-API modules**: Each API gets its own module file with configurable paths
 - **Prelude exports**: Convenient imports via `use schematic_*::prelude::*`
 - **Validation**: Pre-generation checks for naming collisions and configuration errors
 - **Doc examples**: Generated request structs include usage examples in doc comments
+- **Future-proof enums**: All public enums use `#[non_exhaustive]` for backward-compatible extension
 
 ## Critical Development Requirements
 

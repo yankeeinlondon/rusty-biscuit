@@ -66,6 +66,25 @@ pub fn generate_error_type() -> TokenStream {
         /// This enum captures all error conditions that may arise during
         /// API communication, including network failures, serialization
         /// issues, and API-level errors.
+        ///
+        /// ## Error Handling Examples
+        ///
+        /// ```rust,ignore
+        /// match client.request::<Response>(req).await {
+        ///     Ok(response) => { /* success */ }
+        ///     Err(SchematicError::MissingCredential { env_vars }) => {
+        ///         eprintln!("Set one of: {:?}", env_vars);
+        ///     }
+        ///     Err(SchematicError::ApiError { status: 429, body }) => {
+        ///         // Rate limited - implement backoff
+        ///         eprintln!("Rate limited: {}", body);
+        ///     }
+        ///     Err(SchematicError::ApiError { status, body }) => {
+        ///         eprintln!("API error {}: {}", status, body);
+        ///     }
+        ///     Err(e) => return Err(e.into()),
+        /// }
+        /// ```
         #[derive(Debug, thiserror::Error)]
         pub enum SchematicError {
             /// HTTP request failed (network error, timeout, etc.).
@@ -258,6 +277,42 @@ mod tests {
         assert!(
             code.contains("pub enum SchematicError"),
             "Enum should be public"
+        );
+    }
+
+    #[test]
+    fn generate_error_type_has_error_handling_examples() {
+        let tokens = generate_error_type();
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Check that the Error Handling Examples section is present
+        assert!(
+            code.contains("## Error Handling Examples"),
+            "Should have Error Handling Examples section"
+        );
+
+        // Check for MissingCredential example
+        assert!(
+            code.contains("SchematicError::MissingCredential { env_vars }"),
+            "Should show MissingCredential handling example"
+        );
+
+        // Check for rate limiting (429) example
+        assert!(
+            code.contains("SchematicError::ApiError { status: 429, body }"),
+            "Should show rate limit (429) handling example"
+        );
+
+        // Check for generic ApiError example
+        assert!(
+            code.contains("SchematicError::ApiError { status, body }"),
+            "Should show generic ApiError handling example"
+        );
+
+        // Check for fallback error handling
+        assert!(
+            code.contains("Err(e) => return Err(e.into())"),
+            "Should show fallback error handling"
         );
     }
 }

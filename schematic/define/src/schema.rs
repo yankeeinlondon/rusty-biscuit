@@ -82,6 +82,34 @@ impl<T> SchemaObject for T where
 /// let schema = Schema::with_path("Model", "crate::types");
 /// assert_eq!(schema.full_path(), "crate::types::Model");
 /// ```
+///
+/// ## Usage Guide
+///
+/// Use [`Schema::new()`] when:
+/// - The type is defined in the same generated module
+/// - The type will be re-exported via `pub use`
+/// - You want the type name used directly without qualification
+///
+/// Use [`Schema::with_path()`] when:
+/// - The type is defined in a different crate or module
+/// - You need explicit qualification to avoid naming conflicts
+/// - Referencing shared types from a common module (e.g., `crate::common::Error`)
+///
+/// ## Code Generation Behavior
+///
+/// The generator uses [`Schema::full_path()`] to produce type references in generated code:
+///
+/// | Constructor | Result | Generated Code |
+/// |-------------|--------|----------------|
+/// | `Schema::new("Foo")` | `"Foo"` | Uses `Foo` directly (assumed in scope) |
+/// | `Schema::with_path("Foo", "crate::models")` | `"crate::models::Foo"` | Uses fully qualified `crate::models::Foo` |
+///
+/// The generator does **not** emit `use` statements for schemas. Instead, it relies on:
+/// - Local types being defined in the same generated file
+/// - External types being referenced by their full path
+///
+/// This design keeps generated code self-contained and avoids import conflicts
+/// when multiple APIs define types with the same name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Schema {
     /// The Rust type name (e.g., "ListModelsResponse").

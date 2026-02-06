@@ -40,23 +40,25 @@ impl<'a> ModuleDocBuilder<'a> {
 
     /// Builds the complete module documentation as a token stream.
     ///
-    /// The generated tokens include `#![doc = "..."]` attributes that
-    /// form the module-level documentation.
+    /// The generated tokens are `//!` style line doc comments rather than
+    /// `#![doc = "..."]` attributes, for consistency with hand-written code.
     pub fn build(&self) -> TokenStream {
         let intro = self.intro_paragraph();
         let auth_section = self.auth_section();
         let features_section = self.features_section();
         let example_section = self.example_section();
 
-        quote! {
-            #![doc = #intro]
-            //!
-            #![doc = #auth_section]
-            //!
-            #![doc = #features_section]
-            //!
-            #![doc = #example_section]
-        }
+        // Combine all sections with blank lines between them
+        let full_doc = format!(
+            "{}\n\n{}\n\n{}\n\n{}",
+            intro.trim(),
+            auth_section.trim(),
+            features_section.trim(),
+            example_section.trim()
+        );
+
+        // Convert to //! style line comments
+        lines_to_doc_comments(&full_doc)
     }
 
     /// Generates the introduction paragraph.
@@ -69,11 +71,11 @@ impl<'a> ModuleDocBuilder<'a> {
 
         if let Some(docs_url) = &self.api.docs_url {
             format!(
-                " Generated API client for [{}]({}).\n\n {}",
+                "Generated API client for [{}]({}).\n\n{}",
                 name, docs_url, desc
             )
         } else {
-            format!(" Generated API client for {}.\n\n {}", name, desc)
+            format!("Generated API client for {}.\n\n{}", name, desc)
         }
     }
 
@@ -95,6 +97,8 @@ impl<'a> ModuleDocBuilder<'a> {
                 format!("Uses API key authentication via the `{}` header.", header)
             }
             AuthStrategy::Basic => "Uses HTTP Basic authentication.".to_string(),
+            // Handle future variants (non_exhaustive)
+            _ => "Uses custom authentication.".to_string(),
         };
 
         let env_info = if !self.api.env_auth.is_empty() {
@@ -106,7 +110,7 @@ impl<'a> ModuleDocBuilder<'a> {
             String::new()
         };
 
-        format!(" ## Authentication\n\n {}{}", auth_desc, env_info)
+        format!("## Authentication\n\n{}{}", auth_desc, env_info)
     }
 
     /// Groups endpoints by their HTTP method.
@@ -131,14 +135,14 @@ impl<'a> ModuleDocBuilder<'a> {
     fn features_section(&self) -> String {
         let categories = self.categorize_endpoints();
         if categories.is_empty() {
-            return " ## Features\n\n No endpoints defined.".to_string();
+            return "## Features\n\nNo endpoints defined.".to_string();
         }
 
-        let mut lines = vec![" ## Features".to_string(), String::new()];
+        let mut lines = vec!["## Features".to_string(), String::new()];
         for (method, endpoints) in &categories {
-            lines.push(format!(" **{}**:", method));
+            lines.push(format!("**{}**:", method));
             for (id, desc) in endpoints {
-                lines.push(format!(" - `{}` - {}", id, desc));
+                lines.push(format!("- `{}` - {}", id, desc));
             }
             lines.push(String::new());
         }
@@ -159,29 +163,59 @@ impl<'a> ModuleDocBuilder<'a> {
             .or_else(|| self.api.endpoints.first());
 
         let Some(endpoint) = endpoint else {
-            return " ## Example\n\n No endpoints available for example.".to_string();
+            return "## Example\n\nNo endpoints available for example.".to_string();
         };
 
         let api_name = &self.api.name;
         let method_name = to_snake_case(&endpoint.id);
 
         format!(
-            r#" ## Example
+            r#"## Example
 
- ```ignore
- use schematic_schema::prelude::*;
+```ignore
+use schematic_schema::prelude::*;
 
- #[tokio::main]
- async fn main() -> Result<(), SchematicError> {{
-     let client = {}::new();
-     let response = client.{}().await?;
-     println!("{{:?}}", response);
-     Ok(())
- }}
- ```"#,
+#[tokio::main]
+async fn main() -> Result<(), SchematicError> {{
+    let client = {}::new();
+    let response = client.{}().await?;
+    println!("{{:?}}", response);
+    Ok(())
+}}
+```"#,
             api_name, method_name
         )
     }
+}
+
+/// Converts a multi-line documentation string into `//!` style line comments.
+///
+/// Each line of the input becomes a separate `#![doc = "..."]` attribute.
+/// When prettyplease formats these single-line doc attributes, they become
+/// `//! ` style comments rather than `/*! */` block comments.
+///
+/// Content lines are prefixed with a space for standard formatting:
+/// `//! Content here` rather than `//!Content here`.
+///
+/// Preserves indentation within lines (important for code blocks).
+fn lines_to_doc_comments(doc: &str) -> TokenStream {
+    let lines: Vec<TokenStream> = doc
+        .lines()
+        .map(|line| {
+            // Use #![doc = ...] for each line - prettyplease formats single-line
+            // doc attributes as //! style comments.
+            // Add leading space for non-empty lines to match standard formatting,
+            // but preserve internal indentation (e.g., inside code blocks).
+            let doc_content = if line.trim().is_empty() {
+                String::new()
+            } else {
+                format!(" {}", line)
+            };
+            quote! { #![doc = #doc_content] }
+        })
+        .collect();
+
+    quote! { #(#lines)* }
 }
 
 /// Converts a PascalCase string to snake_case.
@@ -427,5 +461,44 @@ mod tests {
         let builder = ModuleDocBuilder::new(&api);
         let auth = builder.auth_section();
         assert!(auth.contains("`PRIMARY_KEY` or `FALLBACK_KEY`"));
+    }
+
+    #[test]
+    fn build_produces_line_doc_attributes() {
+        let api = make_test_api();
+        let builder = ModuleDocBuilder::new(&api);
+        let tokens = builder.build();
+        let code = tokens.to_string();
+
+        // quote! renders #![doc = ...] with spaces: # ! [doc = ...]
+        // These become //! style when formatted by prettyplease
+        assert!(
+            code.contains("# ! [doc ="),
+            "Expected #![doc = ...] attributes, got: {}",
+            &code[..code.len().min(200)]
+        );
+
+        // Verify we have multiple separate doc attributes (one per line)
+        // rather than one big block that would become /*! */
+        let doc_count = code.matches("# ! [doc =").count();
+        assert!(
+            doc_count > 5,
+            "Expected multiple doc attributes (one per line), found {}",
+            doc_count
+        );
+    }
+
+    #[test]
+    fn build_preserves_code_block_indentation() {
+        let api = make_test_api();
+        let builder = ModuleDocBuilder::new(&api);
+        let tokens = builder.build();
+        let code = tokens.to_string();
+
+        // The code block should have indented lines preserved
+        assert!(
+            code.contains("    let client"),
+            "Expected indented 'let client' in code block"
+        );
     }
 }

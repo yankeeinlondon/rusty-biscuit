@@ -61,6 +61,7 @@ use serde::{Deserialize, Serialize};
 /// let auth = AuthStrategy::Basic;
 /// // Username from RestApi::env_username, password from RestApi::env_auth[0]
 /// ```
+#[non_exhaustive]
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AuthStrategy {
     /// No authentication required.
@@ -126,6 +127,7 @@ pub enum AuthStrategy {
 /// let result = match strategy {
 ///     UpdateStrategy::NoChange => current.clone(),
 ///     UpdateStrategy::ChangeTo(new) => new,
+///     _ => unreachable!(),
 /// };
 /// assert_eq!(result, current);
 /// ```
@@ -142,9 +144,11 @@ pub enum AuthStrategy {
 /// let result = match strategy {
 ///     UpdateStrategy::NoChange => AuthStrategy::None,
 ///     UpdateStrategy::ChangeTo(new) => new,
+///     _ => unreachable!(),
 /// };
 /// assert!(matches!(result, AuthStrategy::ApiKey { .. }));
 /// ```
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpdateStrategy {
     /// Keep the current authentication strategy unchanged.

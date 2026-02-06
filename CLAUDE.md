@@ -123,6 +123,13 @@ just -f schematic/justfile generate
 - `module_path`: Override generated module name (for multi-API modules)
 - `request_suffix`: Customize wrapper struct suffix (default: "Request")
 
+**Ergonomic Features:**
+- `DOCS_URL` constant on generated API structs (`Option<&'static str>`)
+- `From<&str>`/`From<String>` for single-param no-body request structs
+- `From<BodyType>` for body-only request structs
+- `#[must_use]` on all async request methods
+- `#[non_exhaustive]` on all public enums in `schematic-define` (match statements need wildcard arms)
+
 **⚠️ CRITICAL - Response Type Selection:**
 
 When defining endpoints, choose the correct `ApiResponse`:
