@@ -49,9 +49,13 @@ install:
     @echo ""
     @cargo build -p claudine --release
     @echo ""
-    @echo ""
+    @echo -e ""
     @cargo install --path ./cli
 
 # Validate the source code without doing a full build
 check:
     @cargo check -p claudine -p claudine-cli
+
+# Run the latest debug build of the Claudine CLI
+cli *args="":
+    @cargo run -p claudine-cli {{args}}

@@ -3,6 +3,8 @@ mod backup;
 mod claude;
 mod codex;
 mod gemini;
+mod goose;
+mod kimicode;
 mod opencode;
 mod qwen;
 mod trait_def;
@@ -28,6 +30,8 @@ use crate::events::Provider;
 use claude::ClaudeConfigurator;
 use codex::CodexConfigurator;
 use gemini::GeminiConfigurator;
+use goose::GooseConfigurator;
+use kimicode::KimiCodeConfigurator;
 use opencode::OpenCodeConfigurator;
 use qwen::QwenConfigurator;
 
@@ -124,6 +128,23 @@ pub fn discover_agents_full() -> Vec<AgentInfo> {
         .collect()
 }
 
+/// Get the configurator for a specific provider.
+///
+/// Returns the appropriate configurator regardless of whether the provider's
+/// config file exists. Use this when you want to register hooks for a provider
+/// that may not have been set up yet.
+pub fn get_configurator(provider: Provider) -> Box<dyn AgentConfigurator> {
+    match provider {
+        Provider::Claude => Box::new(ClaudeConfigurator),
+        Provider::Codex => Box::new(CodexConfigurator),
+        Provider::Gemini => Box::new(GeminiConfigurator),
+        Provider::Goose => Box::new(GooseConfigurator),
+        Provider::KimiCode => Box::new(KimiCodeConfigurator),
+        Provider::OpenCode => Box::new(OpenCodeConfigurator),
+        Provider::QwenCode => Box::new(QwenConfigurator),
+    }
+}
+
 /// Detect available agents by checking for their config files.
 ///
 /// Returns a list of `(Provider, Configurator)` pairs for every provider
@@ -163,6 +184,21 @@ pub fn detect_agents() -> Vec<(Provider, Box<dyn AgentConfigurator>)> {
     // Qwen Code: ~/.qwen/settings.json
     if home.join(".qwen").join("settings.json").exists() {
         agents.push((Provider::QwenCode, Box::new(QwenConfigurator)));
+    }
+
+    // Goose: ~/.config/goose/config.yaml
+    if home
+        .join(".config")
+        .join("goose")
+        .join("config.yaml")
+        .exists()
+    {
+        agents.push((Provider::Goose, Box::new(GooseConfigurator)));
+    }
+
+    // Kimi Code: ~/.kimi/config.json
+    if home.join(".kimi").join("config.json").exists() {
+        agents.push((Provider::KimiCode, Box::new(KimiCodeConfigurator)));
     }
 
     agents

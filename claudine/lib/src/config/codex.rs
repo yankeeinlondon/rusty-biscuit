@@ -4,12 +4,18 @@ use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
 
 use crate::error::Result;
-use crate::events::{HookerConfig, Provider};
+use crate::events::{AgenticEvent, HookerConfig, Provider};
 
 use super::atomic::atomic_write;
 use super::backup::create_backup;
 use super::claudine_command;
 use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
+
+/// Minimal valid config.toml for Codex CLI.
+///
+/// An empty TOML file (or one with just a comment) is valid for Codex.
+/// Note: TOML requires root keys to appear before tables.
+const MINIMAL_CONFIG: &str = "# Codex CLI configuration\n# Created by claudine for hook registration\n";
 
 pub(crate) struct CodexConfigurator;
 
@@ -18,23 +24,55 @@ impl AgentConfigurator for CodexConfigurator {
         Provider::Codex
     }
 
-    fn register(
-        &self,
-        _config: &HookerConfig,
-        config_dir: Option<&Path>,
-    ) -> Result<RegistrationResult> {
-        let config_path = config_path(config_dir);
-        if !config_path.exists() {
-            return Ok(RegistrationResult::Skipped(SkipReason::NotDetected));
+    fn create_minimal_config(&self, config_dir: Option<&Path>) -> crate::error::Result<()> {
+        let toml_path = config_path(config_dir);
+
+        // Create parent directory if needed
+        if let Some(parent) = toml_path.parent() {
+            fs::create_dir_all(parent)?;
         }
 
-        if self.is_registered(config_dir)? {
+        atomic_write(&toml_path, MINIMAL_CONFIG.as_bytes())?;
+        Ok(())
+    }
+
+    fn register(
+        &self,
+        config: &HookerConfig,
+        config_dir: Option<&Path>,
+    ) -> Result<RegistrationResult> {
+        let toml_path = config_path(config_dir);
+
+        // If config doesn't exist but CLI is installed, create minimal config
+        if !toml_path.exists() {
+            if self.is_cli_installed() {
+                self.create_minimal_config(config_dir)?;
+            } else {
+                return Ok(RegistrationResult::Skipped(SkipReason::NotDetected));
+            }
+        }
+
+        // Check if already in sync (Codex only supports turn_complete)
+        if self.is_in_sync(config, config_dir)? {
             return Ok(RegistrationResult::Skipped(SkipReason::AlreadyRegistered));
         }
 
-        create_backup(&config_path, Provider::Codex)?;
+        // Check if we should register (turn_complete is enabled in config)
+        let should_register = config
+            .providers
+            .get(&Provider::Codex)
+            .and_then(|p| p.events.get(&AgenticEvent::TurnComplete))
+            .is_some_and(|b| b.enabled);
 
-        let content = fs::read_to_string(&config_path)?;
+        if !should_register {
+            // Config exists but turn_complete is disabled - deregister
+            self.deregister(config_dir)?;
+            return Ok(RegistrationResult::Registered { event_count: 0 });
+        }
+
+        create_backup(&toml_path, Provider::Codex)?;
+
+        let content = fs::read_to_string(&toml_path)?;
         let mut doc: DocumentMut = content.parse()?;
 
         // Check for existing notify value
@@ -74,21 +112,21 @@ impl AgentConfigurator for CodexConfigurator {
             doc["notify"] = toml_edit::value(arr);
         }
 
-        atomic_write(&config_path, doc.to_string().as_bytes())?;
+        atomic_write(&toml_path, doc.to_string().as_bytes())?;
 
         // Only TurnComplete is available in Codex
         Ok(RegistrationResult::Registered { event_count: 1 })
     }
 
     fn deregister(&self, config_dir: Option<&Path>) -> Result<()> {
-        let config_path = config_path(config_dir);
-        if !config_path.exists() {
+        let toml_path = config_path(config_dir);
+        if !toml_path.exists() {
             return Ok(());
         }
 
-        create_backup(&config_path, Provider::Codex)?;
+        create_backup(&toml_path, Provider::Codex)?;
 
-        let content = fs::read_to_string(&config_path)?;
+        let content = fs::read_to_string(&toml_path)?;
         let mut doc: DocumentMut = content.parse()?;
 
         // Check if the notify points to our wrapper
@@ -128,18 +166,18 @@ impl AgentConfigurator for CodexConfigurator {
             doc.remove("notify");
         }
 
-        atomic_write(&config_path, doc.to_string().as_bytes())?;
+        atomic_write(&toml_path, doc.to_string().as_bytes())?;
 
         Ok(())
     }
 
     fn is_registered(&self, config_dir: Option<&Path>) -> Result<bool> {
-        let config_path = config_path(config_dir);
-        if !config_path.exists() {
+        let toml_path = config_path(config_dir);
+        if !toml_path.exists() {
             return Ok(false);
         }
 
-        let content = fs::read_to_string(&config_path)?;
+        let content = fs::read_to_string(&toml_path)?;
         let doc: DocumentMut = content.parse()?;
 
         Ok(is_claudine_notify(&doc) || is_claudine_wrapper(&doc, config_dir))
@@ -152,6 +190,27 @@ impl AgentConfigurator for CodexConfigurator {
         } else {
             Ok(vec![])
         }
+    }
+
+    fn registerable_events(&self) -> Option<Vec<crate::events::AgenticEvent>> {
+        // Codex can only register turn_complete via the notify option
+        Some(vec![crate::events::AgenticEvent::TurnComplete])
+    }
+}
+
+impl CodexConfigurator {
+    /// Check if the registered hooks match the expected events from config.
+    fn is_in_sync(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<bool> {
+        let is_registered = self.is_registered(config_dir)?;
+
+        // Codex only supports turn_complete
+        let should_be_registered = config
+            .providers
+            .get(&Provider::Codex)
+            .and_then(|p| p.events.get(&AgenticEvent::TurnComplete))
+            .is_some_and(|b| b.enabled);
+
+        Ok(is_registered == should_be_registered)
     }
 }
 
@@ -399,5 +458,62 @@ mod tests {
         assert!(script.starts_with("#!/bin/bash"));
         assert!(script.contains("my-tool done \"$@\""));
         assert!(script.contains("claudine handle turn_complete \"$@\""));
+    }
+
+    #[test]
+    fn register_handles_missing_config() {
+        // When config doesn't exist:
+        // - If CLI is installed → creates minimal config and registers hooks
+        // - If CLI is not installed → returns NotDetected
+        let tmp = TempDir::new().unwrap();
+        let configurator = CodexConfigurator;
+        let config = test_config();
+
+        let result = configurator.register(&config, Some(tmp.path())).unwrap();
+
+        if configurator.is_cli_installed() {
+            // CLI installed: should create config and register
+            assert!(
+                matches!(result, RegistrationResult::Registered { event_count: 1 }),
+                "Expected Registered when CLI is installed, got {:?}",
+                result
+            );
+            // Verify config was created
+            let config_path = tmp.path().join("config.toml");
+            assert!(config_path.exists(), "Config file should be created");
+        } else {
+            // CLI not installed: should skip
+            assert!(
+                matches!(result, RegistrationResult::Skipped(SkipReason::NotDetected)),
+                "Expected NotDetected when CLI is not installed, got {:?}",
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn create_minimal_config_creates_valid_toml() {
+        let tmp = TempDir::new().unwrap();
+        let configurator = CodexConfigurator;
+
+        configurator.create_minimal_config(Some(tmp.path())).unwrap();
+
+        let config_path = tmp.path().join("config.toml");
+        assert!(config_path.exists());
+
+        // Verify it's valid TOML
+        let content = fs::read_to_string(&config_path).unwrap();
+        let _doc: toml_edit::DocumentMut = content.parse().expect("Should be valid TOML");
+    }
+
+    #[test]
+    fn create_minimal_config_creates_parent_directory() {
+        let tmp = TempDir::new().unwrap();
+        let nested = tmp.path().join("nested").join("dir");
+        let configurator = CodexConfigurator;
+
+        configurator.create_minimal_config(Some(&nested)).unwrap();
+
+        assert!(nested.join("config.toml").exists());
     }
 }

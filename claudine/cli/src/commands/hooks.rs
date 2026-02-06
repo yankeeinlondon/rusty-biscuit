@@ -10,7 +10,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Alignment, Margin};
 use claudine::config::{AgentConfigurator, detect_agents};
 use claudine::dispatch::loader::load_config;
-use claudine::events::{AgenticEvent, HookerConfig, Provider};
+use claudine::events::{AgenticEvent, EventSupportLevel, HookerConfig, Provider};
 use sniff::programs::{InstalledAiClients, enums::AiCli};
 
 use crate::log;
@@ -18,7 +18,7 @@ use crate::log;
 /// Arguments for the hooks command.
 #[derive(Args)]
 pub struct HooksArgs {
-    /// Show provider event support matrix (✅/❌)
+    /// Show provider event support matrix (✅ hook / ⛔️ non-hook / ⤫ none)
     #[arg(long)]
     pub support: bool,
 
@@ -65,15 +65,43 @@ fn bool_indicator(value: bool) -> TableCellContent {
 
 /// Get the expected events for a provider from the claudine config.
 ///
-/// Returns events that are enabled for this specific provider.
-fn expected_events_for_provider(config: &HookerConfig, provider: Provider) -> HashSet<String> {
+/// Returns events that are enabled for this specific provider AND can be
+/// registered via the provider's config file.
+///
+/// Takes an optional configurator to check for provider-specific registerable events.
+fn expected_events_for_provider(
+    config: &HookerConfig,
+    provider: Provider,
+    configurator: Option<&dyn claudine::config::AgentConfigurator>,
+) -> HashSet<String> {
+    // If configurator exists and doesn't support config registration, return empty
+    if let Some(cfg) = configurator {
+        if !cfg.supports_config_registration() {
+            return HashSet::new();
+        }
+    }
+
     config
         .providers
         .get(&provider)
         .map(|p| {
             p.events
                 .iter()
-                .filter(|(_, binding)| binding.enabled)
+                .filter(|(event, binding)| {
+                    if !binding.enabled {
+                        return false;
+                    }
+
+                    // Check if configurator has specific registerable events
+                    if let Some(cfg) = configurator {
+                        if let Some(registerable) = cfg.registerable_events() {
+                            return registerable.contains(event);
+                        }
+                    }
+
+                    // Default: filter by provider's hook-based event support only
+                    provider.supports_event_via_hook(event)
+                })
                 .map(|(event, _)| event.to_string())
                 .collect()
         })
@@ -169,7 +197,7 @@ fn run_simple(
 
             // Get expected events from claudine config for this provider
             let expected: HashSet<String> = config
-                .map(|c| expected_events_for_provider(c, provider))
+                .map(|c| expected_events_for_provider(c, provider, configurator))
                 .unwrap_or_default();
 
             if registered.is_empty() && expected.is_empty() {
@@ -331,18 +359,28 @@ fn find_configurator(
         .map(|(_, cfg)| cfg.as_ref())
 }
 
-const SUPPORTED: &str = "✅";
-const NOT_SUPPORTED: &str = "❌";
+/// Indicator for hook-based support (config file registration).
+const HOOK_SUPPORT: &str = "✅";
+/// Indicator for non-hook support (wrapper/wire-mode required).
+const NON_HOOK_SUPPORT: &str = "⛔️";
+/// Indicator for no support.
+const NO_SUPPORT: &str = "⤫";
 
-/// Show provider event support matrix with ✅/❌ indicators.
+/// Show provider event support matrix with ✅/⛔️/⤫ indicators.
+///
+/// - ✅ Hook: Event can be registered via config file
+/// - ⛔️ NonHook: Event requires wrapper/proxy (not yet implemented)
+/// - ⤫ NotSupported: Event is not available from this provider
 fn run_support() -> Result<()> {
-    // Build columns: Event name, then one per provider
+    let term = Terminal::new();
+
+    // Build columns: Event name (left-aligned), then one per provider (centered)
     let mut columns = vec![TableColumn::new("Event")];
     for provider in ALL_PROVIDERS {
-        columns.push(TableColumn::new(provider.to_string()));
+        columns.push(TableColumn::new(provider.to_string()).with_alignment(Alignment::Center));
     }
 
-    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
+    let mut table = Table::new().with_columns(columns);
     table.layout_mut().left_margin = Margin::Chars(1);
 
     // Add a row for each event
@@ -350,10 +388,10 @@ fn run_support() -> Result<()> {
         let mut row: Vec<TableCellContent> = vec![event.to_string().into()];
 
         for provider in ALL_PROVIDERS {
-            let cell = if provider.supports_event(&event) {
-                SUPPORTED.into()
-            } else {
-                NOT_SUPPORTED.into()
+            let cell = match provider.event_support_level(&event) {
+                EventSupportLevel::Hook => HOOK_SUPPORT.into(),
+                EventSupportLevel::NonHook => NON_HOOK_SUPPORT.into(),
+                EventSupportLevel::NotSupported => NO_SUPPORT.into(),
             };
             row.push(cell);
         }
@@ -361,9 +399,15 @@ fn run_support() -> Result<()> {
         table.add_row(row);
     }
 
-    let term = Terminal::new();
     let rendered = table.fallback_render(&term);
     log::data(&format!("\n{}", rendered));
+
+    // Show legend
+    log::data("");
+    let legend = Prose::new(
+        "{{dim}}Legend: {{reset}}✅{{dim}} = hook support (config file), {{reset}}⛔️{{dim}} = non-hook (wrapper/proxy required), {{reset}}{NO_SUPPORT}{{dim}} = not supported{{reset}}",
+    );
+    log::data(&format!(" {}\n", legend.fallback_render(&term)));
 
     Ok(())
 }
@@ -398,7 +442,7 @@ fn run_mapping() -> Result<()> {
     // Show legend
     log::data("");
     let legend = Prose::new(
-        "{{dim}}- Legend: {{reset}}❌{{dim}} = not supported, {{reset}}(blank){{dim}} = supported but no specific native name{{reset}}",
+        "{{dim}}- Legend: (blank) = not supported or no specific native name{{reset}}",
     );
     log::data(&format!(" {}", legend.render(Some(100))));
 
@@ -422,9 +466,9 @@ fn build_mapping_table(providers: &[Provider]) -> Table {
 
         for provider in providers {
             let cell: TableCellContent = match provider.native_event_name(&event) {
-                None => NOT_SUPPORTED.into(), // Not supported
-                Some("") => "".into(),        // Supported but no specific name
-                Some(name) => name.into(),    // Native name
+                None => "".into(),          // Not supported - blank
+                Some("") => "".into(),      // Supported but no specific name
+                Some(name) => name.into(),  // Native name
             };
             row.push(cell);
         }
@@ -445,7 +489,7 @@ fn run_describe() -> Result<()> {
     ];
 
     let term = Terminal::new();
-    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
+    let mut table = Table::new().with_columns(columns);
     table.layout_mut().left_margin = Margin::Chars(1);
 
     // Add a row for each event

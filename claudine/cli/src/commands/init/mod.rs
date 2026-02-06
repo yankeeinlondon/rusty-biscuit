@@ -73,7 +73,8 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     // Phase 2: Event Selection
     log::message("Phase 2: Event Selection");
     log::message("-------------------------");
-    let selected_events = prompts::prompt_event_selection()?;
+    let selected_providers: Vec<_> = selected_agents.iter().map(|a| a.provider).collect();
+    let selected_events = prompts::prompt_event_selection(&selected_providers)?;
 
     if selected_events.is_empty() {
         log::warn("No events selected. Configuration will be minimal.");

@@ -14,7 +14,7 @@ pub fn recommended_sound(event: &AgenticEvent) -> &'static str {
         AgenticEvent::AfterTool => "dit-hit-2",
         AgenticEvent::ToolError => "sad-trombone",
         AgenticEvent::PermissionRequest => "doorbell",
-        AgenticEvent::TurnComplete => "electronic-hit-fx-01",
+        AgenticEvent::TurnComplete => "electronic-hit-fx1",
         AgenticEvent::TurnError => "error",
         AgenticEvent::SubagentStart => "power-up",
         AgenticEvent::SubagentStop => "power-down",

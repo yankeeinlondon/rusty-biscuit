@@ -14,6 +14,15 @@ use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
 /// Plugin name registered in opencode.json.
 const PLUGIN_NAME: &str = "claudine-bridge";
 
+/// Minimal valid opencode.json for OpenCode CLI.
+///
+/// The schema property is the only required field. All other settings
+/// are optional and will use defaults.
+const MINIMAL_CONFIG: &str = r#"{
+  "$schema": "https://opencode.ai/config.json"
+}
+"#;
+
 /// TypeScript bridge template for the Claudine OpenCode plugin.
 ///
 /// Placeholders:
@@ -63,24 +72,47 @@ impl AgentConfigurator for OpenCodeConfigurator {
         Provider::OpenCode
     }
 
+    fn create_minimal_config(&self, config_dir: Option<&Path>) -> crate::error::Result<()> {
+        let opencode_path = config_path(config_dir);
+
+        // Create parent directory if needed
+        if let Some(parent) = opencode_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        atomic_write(&opencode_path, MINIMAL_CONFIG.as_bytes())?;
+        Ok(())
+    }
+
     fn register(
         &self,
         config: &HookerConfig,
         config_dir: Option<&Path>,
     ) -> Result<RegistrationResult> {
         let opencode_path = config_path(config_dir);
+
+        // If config doesn't exist but CLI is installed, create minimal config
         if !opencode_path.exists() {
-            return Ok(RegistrationResult::Skipped(SkipReason::NotDetected));
+            if self.is_cli_installed() {
+                self.create_minimal_config(config_dir)?;
+            } else {
+                return Ok(RegistrationResult::Skipped(SkipReason::NotDetected));
+            }
         }
 
-        if self.is_registered(config_dir)? {
+        // Check if already in sync (same events registered as in config)
+        if self.is_in_sync(config, config_dir)? {
             return Ok(RegistrationResult::Skipped(SkipReason::AlreadyRegistered));
         }
 
         // Get events configured for this provider
         let provider_config = match config.providers.get(&Provider::OpenCode) {
             Some(pc) => pc,
-            None => return Ok(RegistrationResult::Registered { event_count: 0 }),
+            None => {
+                // No config for OpenCode - remove plugin
+                self.deregister(config_dir)?;
+                return Ok(RegistrationResult::Registered { event_count: 0 });
+            }
         };
 
         create_backup(&opencode_path, Provider::OpenCode)?;
@@ -178,6 +210,34 @@ impl AgentConfigurator for OpenCodeConfigurator {
         let source = fs::read_to_string(&bridge_path)?;
         let events = extract_events_from_bridge(&source);
         Ok(events)
+    }
+}
+
+impl OpenCodeConfigurator {
+    /// Check if the registered hooks match the expected events from config.
+    fn is_in_sync(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<bool> {
+        use std::collections::HashSet;
+
+        let registered: HashSet<String> = self
+            .registered_events(config_dir)?
+            .into_iter()
+            .collect();
+
+        let expected: HashSet<String> = config
+            .providers
+            .get(&Provider::OpenCode)
+            .map(|p| {
+                p.events
+                    .iter()
+                    .filter(|(event, binding)| {
+                        binding.enabled && to_opencode_native(event).is_some()
+                    })
+                    .map(|(event, _)| event.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(registered == expected)
     }
 }
 
@@ -402,16 +462,64 @@ mod tests {
     }
 
     #[test]
-    fn skips_when_not_detected() {
+    fn register_handles_missing_config() {
+        // When config doesn't exist:
+        // - If CLI is installed → creates minimal config and registers hooks
+        // - If CLI is not installed → returns NotDetected
         let tmp = TempDir::new().unwrap();
         let configurator = OpenCodeConfigurator;
         let config = test_config(vec![AgenticEvent::TurnComplete]);
 
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
-        assert!(matches!(
-            result,
-            RegistrationResult::Skipped(SkipReason::NotDetected)
-        ));
+
+        if configurator.is_cli_installed() {
+            // CLI installed: should create config and register
+            assert!(
+                matches!(result, RegistrationResult::Registered { event_count: 1 }),
+                "Expected Registered when CLI is installed, got {:?}",
+                result
+            );
+            // Verify config was created
+            let opencode_path = tmp.path().join("opencode.json");
+            assert!(opencode_path.exists(), "Config file should be created");
+        } else {
+            // CLI not installed: should skip
+            assert!(
+                matches!(result, RegistrationResult::Skipped(SkipReason::NotDetected)),
+                "Expected NotDetected when CLI is not installed, got {:?}",
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn create_minimal_config_creates_valid_json() {
+        let tmp = TempDir::new().unwrap();
+        let configurator = OpenCodeConfigurator;
+
+        configurator.create_minimal_config(Some(tmp.path())).unwrap();
+
+        let opencode_path = tmp.path().join("opencode.json");
+        assert!(opencode_path.exists());
+
+        // Verify it's valid JSON and has the schema
+        let content = fs::read_to_string(&opencode_path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert!(json
+            .get("$schema")
+            .and_then(|s| s.as_str())
+            .is_some_and(|s| s.contains("opencode.ai")));
+    }
+
+    #[test]
+    fn create_minimal_config_creates_parent_directory() {
+        let tmp = TempDir::new().unwrap();
+        let nested = tmp.path().join("nested").join("dir");
+        let configurator = OpenCodeConfigurator;
+
+        configurator.create_minimal_config(Some(&nested)).unwrap();
+
+        assert!(nested.join("opencode.json").exists());
     }
 
     #[test]

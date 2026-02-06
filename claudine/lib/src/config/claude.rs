@@ -13,9 +13,30 @@ use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
 
 pub(crate) struct ClaudeConfigurator;
 
+/// Minimal valid settings.json for Claude Code.
+///
+/// An empty object with just the schema URL is sufficient for Claude Code
+/// to function and for hooks to be registered.
+const MINIMAL_CONFIG: &str = r#"{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json"
+}
+"#;
+
 impl AgentConfigurator for ClaudeConfigurator {
     fn provider(&self) -> Provider {
         Provider::Claude
+    }
+
+    fn create_minimal_config(&self, config_dir: Option<&Path>) -> crate::error::Result<()> {
+        let settings_path = config_path(config_dir);
+
+        // Create parent directory if needed
+        if let Some(parent) = settings_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        atomic_write(&settings_path, MINIMAL_CONFIG.as_bytes())?;
+        Ok(())
     }
 
     fn register(
@@ -24,11 +45,18 @@ impl AgentConfigurator for ClaudeConfigurator {
         config_dir: Option<&Path>,
     ) -> Result<RegistrationResult> {
         let settings_path = config_path(config_dir);
+
+        // If config doesn't exist but CLI is installed, create minimal config
         if !settings_path.exists() {
-            return Ok(RegistrationResult::Skipped(SkipReason::NotDetected));
+            if self.is_cli_installed() {
+                self.create_minimal_config(config_dir)?;
+            } else {
+                return Ok(RegistrationResult::Skipped(SkipReason::NotDetected));
+            }
         }
 
-        if self.is_registered(config_dir)? {
+        // Check if already in sync (same events registered as in config)
+        if self.is_in_sync(config, config_dir)? {
             return Ok(RegistrationResult::Skipped(SkipReason::AlreadyRegistered));
         }
 
@@ -47,12 +75,42 @@ impl AgentConfigurator for ClaudeConfigurator {
         // Get events configured for this provider
         let provider_config = match config.providers.get(&Provider::Claude) {
             Some(pc) => pc,
-            None => return Ok(RegistrationResult::Registered { event_count: 0 }),
+            None => {
+                // No config for Claude - remove all claudine hooks
+                self.deregister(config_dir)?;
+                return Ok(RegistrationResult::Registered { event_count: 0 });
+            }
         };
 
+        // Build set of native event names we want to keep
+        let expected_natives: std::collections::HashSet<String> = provider_config
+            .events
+            .iter()
+            .filter(|(_, binding)| binding.enabled)
+            .filter_map(|(event, _)| to_claude_native(event))
+            .collect();
+
+        // First pass: remove claudine hooks for events NOT in config
+        let hook_keys: Vec<String> = hooks.keys().cloned().collect();
+        for native_name in hook_keys {
+            if !expected_natives.contains(&native_name) {
+                // Remove claudine hooks from this event
+                if let Some(arr) = hooks.get_mut(&native_name).and_then(|v| v.as_array_mut()) {
+                    arr.retain(|entry| !is_claudine_hook_group(entry));
+                }
+            }
+        }
+        // Clean up empty hook arrays
+        hooks.retain(|_, v| v.as_array().is_none_or(|a| !a.is_empty()));
+
+        // Second pass: add/update hooks for events in config
         let claudine_bin = claudine_command();
         let mut event_count = 0;
-        for event in provider_config.events.keys() {
+        for (event, binding) in &provider_config.events {
+            // Skip disabled events
+            if !binding.enabled {
+                continue;
+            }
             // Skip events that Claude Code doesn't support
             let Some(native_name) = to_claude_native(event) else {
                 continue;
@@ -161,6 +219,38 @@ impl AgentConfigurator for ClaudeConfigurator {
         events.sort();
         events.dedup();
         Ok(events)
+    }
+}
+
+impl ClaudeConfigurator {
+    /// Check if the registered hooks match the expected events from config.
+    ///
+    /// Returns true only if both sets contain exactly the same events.
+    fn is_in_sync(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<bool> {
+        use std::collections::HashSet;
+
+        let registered: HashSet<String> = self
+            .registered_events(config_dir)?
+            .into_iter()
+            .collect();
+
+        // Get expected events from config for this provider
+        let expected: HashSet<String> = config
+            .providers
+            .get(&Provider::Claude)
+            .map(|p| {
+                p.events
+                    .iter()
+                    .filter(|(event, binding)| {
+                        // Only count enabled events that Claude supports
+                        binding.enabled && to_claude_native(event).is_some()
+                    })
+                    .map(|(event, _)| event.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(registered == expected)
     }
 }
 
@@ -317,16 +407,64 @@ mod tests {
     }
 
     #[test]
-    fn register_skips_when_not_detected() {
+    fn register_handles_missing_config() {
+        // When config doesn't exist:
+        // - If CLI is installed → creates minimal config and registers hooks
+        // - If CLI is not installed → returns NotDetected
         let tmp = TempDir::new().unwrap();
         let configurator = ClaudeConfigurator;
         let config = test_config(vec![AgenticEvent::BeforeTool]);
 
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
-        assert!(matches!(
-            result,
-            RegistrationResult::Skipped(SkipReason::NotDetected)
-        ));
+
+        if configurator.is_cli_installed() {
+            // CLI installed: should create config and register
+            assert!(
+                matches!(result, RegistrationResult::Registered { event_count: 1 }),
+                "Expected Registered when CLI is installed, got {:?}",
+                result
+            );
+            // Verify config was created
+            let settings_path = tmp.path().join("settings.json");
+            assert!(settings_path.exists(), "Config file should be created");
+        } else {
+            // CLI not installed: should skip
+            assert!(
+                matches!(result, RegistrationResult::Skipped(SkipReason::NotDetected)),
+                "Expected NotDetected when CLI is not installed, got {:?}",
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn create_minimal_config_creates_valid_json() {
+        let tmp = TempDir::new().unwrap();
+        let configurator = ClaudeConfigurator;
+
+        configurator.create_minimal_config(Some(tmp.path())).unwrap();
+
+        let settings_path = tmp.path().join("settings.json");
+        assert!(settings_path.exists());
+
+        // Verify it's valid JSON and has the schema
+        let content = fs::read_to_string(&settings_path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert!(json
+            .get("$schema")
+            .and_then(|s| s.as_str())
+            .is_some_and(|s| s.contains("claude-code-settings")));
+    }
+
+    #[test]
+    fn create_minimal_config_creates_parent_directory() {
+        let tmp = TempDir::new().unwrap();
+        let nested = tmp.path().join("nested").join("dir");
+        let configurator = ClaudeConfigurator;
+
+        configurator.create_minimal_config(Some(&nested)).unwrap();
+
+        assert!(nested.join("settings.json").exists());
     }
 
     #[test]
@@ -481,5 +619,101 @@ mod tests {
         assert_eq!(to_claude_native(&AgenticEvent::BeforeModel), None);
         assert_eq!(to_claude_native(&AgenticEvent::AfterModel), None);
         assert_eq!(to_claude_native(&AgenticEvent::TurnError), None);
+    }
+
+    #[test]
+    fn re_register_adds_new_events() {
+        // Regression test: re-running init with more events should register them
+        let tmp = TempDir::new().unwrap();
+        let settings = tmp.path().join("settings.json");
+        fs::write(&settings, r#"{"hooks": {}}"#).unwrap();
+
+        let configurator = ClaudeConfigurator;
+
+        // First register with one event
+        let config1 = test_config(vec![AgenticEvent::BeforeTool]);
+        configurator.register(&config1, Some(tmp.path())).unwrap();
+
+        // Verify initial state
+        let events = configurator.registered_events(Some(tmp.path())).unwrap();
+        assert_eq!(events, vec!["before_tool"]);
+
+        // Re-register with two events
+        let config2 = test_config(vec![AgenticEvent::BeforeTool, AgenticEvent::TurnComplete]);
+        let result = configurator.register(&config2, Some(tmp.path())).unwrap();
+
+        // Should register (not skip)
+        match result {
+            RegistrationResult::Registered { event_count } => {
+                assert_eq!(event_count, 2);
+            }
+            _ => panic!("expected Registered, got AlreadyRegistered"),
+        }
+
+        // Verify both events are now registered
+        let events = configurator.registered_events(Some(tmp.path())).unwrap();
+        assert!(events.contains(&"before_tool".to_string()));
+        assert!(events.contains(&"turn_complete".to_string()));
+    }
+
+    #[test]
+    fn re_register_removes_stale_events() {
+        // Regression test: removing events from config should remove them from settings
+        let tmp = TempDir::new().unwrap();
+        let settings = tmp.path().join("settings.json");
+        fs::write(&settings, r#"{"hooks": {}}"#).unwrap();
+
+        let configurator = ClaudeConfigurator;
+
+        // First register with two events
+        let config1 = test_config(vec![AgenticEvent::BeforeTool, AgenticEvent::TurnComplete]);
+        configurator.register(&config1, Some(tmp.path())).unwrap();
+
+        // Verify initial state
+        let events = configurator.registered_events(Some(tmp.path())).unwrap();
+        assert_eq!(events.len(), 2);
+
+        // Re-register with only one event
+        let config2 = test_config(vec![AgenticEvent::BeforeTool]);
+        let result = configurator.register(&config2, Some(tmp.path())).unwrap();
+
+        // Should register (not skip)
+        match result {
+            RegistrationResult::Registered { event_count } => {
+                assert_eq!(event_count, 1);
+            }
+            _ => panic!("expected Registered"),
+        }
+
+        // Verify only before_tool remains
+        let events = configurator.registered_events(Some(tmp.path())).unwrap();
+        assert_eq!(events, vec!["before_tool"]);
+
+        // Verify Stop hook was removed from JSON
+        let content: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+        let hooks = content.get("hooks").unwrap().as_object().unwrap();
+        assert!(!hooks.contains_key("Stop"));
+    }
+
+    #[test]
+    fn already_in_sync_skips_registration() {
+        // Verify that identical config doesn't cause unnecessary writes
+        let tmp = TempDir::new().unwrap();
+        let settings = tmp.path().join("settings.json");
+        fs::write(&settings, r#"{"hooks": {}}"#).unwrap();
+
+        let configurator = ClaudeConfigurator;
+
+        // First register
+        let config = test_config(vec![AgenticEvent::BeforeTool]);
+        configurator.register(&config, Some(tmp.path())).unwrap();
+
+        // Re-register with identical config
+        let result = configurator.register(&config, Some(tmp.path())).unwrap();
+
+        assert!(matches!(
+            result,
+            RegistrationResult::Skipped(SkipReason::AlreadyRegistered)
+        ));
     }
 }

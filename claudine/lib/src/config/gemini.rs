@@ -14,11 +14,29 @@ use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
 /// Name prefix used to identify Claudine-managed hooks in Gemini config.
 const CLAUDINE_NAME_PREFIX: &str = "claudine-";
 
+/// Minimal valid settings.json for Gemini CLI.
+///
+/// An empty JSON object is sufficient for Gemini CLI to function
+/// and for hooks to be registered.
+const MINIMAL_CONFIG: &str = "{}\n";
+
 pub(crate) struct GeminiConfigurator;
 
 impl AgentConfigurator for GeminiConfigurator {
     fn provider(&self) -> Provider {
         Provider::Gemini
+    }
+
+    fn create_minimal_config(&self, config_dir: Option<&Path>) -> crate::error::Result<()> {
+        let settings_path = config_path(config_dir);
+
+        // Create parent directory if needed
+        if let Some(parent) = settings_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        atomic_write(&settings_path, MINIMAL_CONFIG.as_bytes())?;
+        Ok(())
     }
 
     fn register(
@@ -27,11 +45,18 @@ impl AgentConfigurator for GeminiConfigurator {
         config_dir: Option<&Path>,
     ) -> Result<RegistrationResult> {
         let settings_path = config_path(config_dir);
+
+        // If config doesn't exist but CLI is installed, create minimal config
         if !settings_path.exists() {
-            return Ok(RegistrationResult::Skipped(SkipReason::NotDetected));
+            if self.is_cli_installed() {
+                self.create_minimal_config(config_dir)?;
+            } else {
+                return Ok(RegistrationResult::Skipped(SkipReason::NotDetected));
+            }
         }
 
-        if self.is_registered(config_dir)? {
+        // Check if already in sync (same events registered as in config)
+        if self.is_in_sync(config, config_dir)? {
             return Ok(RegistrationResult::Skipped(SkipReason::AlreadyRegistered));
         }
 
@@ -50,12 +75,41 @@ impl AgentConfigurator for GeminiConfigurator {
         // Get events configured for this provider
         let provider_config = match config.providers.get(&Provider::Gemini) {
             Some(pc) => pc,
-            None => return Ok(RegistrationResult::Registered { event_count: 0 }),
+            None => {
+                // No config for Gemini - remove all claudine hooks
+                self.deregister(config_dir)?;
+                return Ok(RegistrationResult::Registered { event_count: 0 });
+            }
         };
 
+        // Build set of native event names we want to keep
+        let expected_natives: std::collections::HashSet<String> = provider_config
+            .events
+            .iter()
+            .filter(|(_, binding)| binding.enabled)
+            .filter_map(|(event, _)| to_gemini_native(event))
+            .collect();
+
+        // First pass: remove claudine hooks for events NOT in config
+        let hook_keys: Vec<String> = hooks.keys().cloned().collect();
+        for native_name in hook_keys {
+            if !expected_natives.contains(&native_name)
+                && let Some(arr) = hooks.get_mut(&native_name).and_then(|v| v.as_array_mut())
+            {
+                arr.retain(|entry| !is_claudine_hook(entry));
+            }
+        }
+        // Clean up empty hook arrays
+        hooks.retain(|_, v| v.as_array().is_none_or(|a| !a.is_empty()));
+
+        // Second pass: add/update hooks for events in config
         let claudine_bin = claudine_command();
         let mut event_count = 0;
-        for event in provider_config.events.keys() {
+        for (event, binding) in &provider_config.events {
+            // Skip disabled events
+            if !binding.enabled {
+                continue;
+            }
             // Skip events that Gemini doesn't support
             let Some(native_name) = to_gemini_native(event) else {
                 continue;
@@ -158,6 +212,34 @@ impl AgentConfigurator for GeminiConfigurator {
         events.sort();
         events.dedup();
         Ok(events)
+    }
+}
+
+impl GeminiConfigurator {
+    /// Check if the registered hooks match the expected events from config.
+    fn is_in_sync(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<bool> {
+        use std::collections::HashSet;
+
+        let registered: HashSet<String> = self
+            .registered_events(config_dir)?
+            .into_iter()
+            .collect();
+
+        let expected: HashSet<String> = config
+            .providers
+            .get(&Provider::Gemini)
+            .map(|p| {
+                p.events
+                    .iter()
+                    .filter(|(event, binding)| {
+                        binding.enabled && to_gemini_native(event).is_some()
+                    })
+                    .map(|(event, _)| event.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(registered == expected)
     }
 }
 
@@ -353,5 +435,112 @@ mod tests {
         assert_eq!(to_gemini_native(&AgenticEvent::TurnError), None);
         assert_eq!(to_gemini_native(&AgenticEvent::SubagentStart), None);
         assert_eq!(to_gemini_native(&AgenticEvent::SubagentStop), None);
+    }
+
+    #[test]
+    fn re_register_adds_new_events() {
+        let tmp = TempDir::new().unwrap();
+        let settings = tmp.path().join("settings.json");
+        fs::write(&settings, r#"{"hooks": {}}"#).unwrap();
+
+        let configurator = GeminiConfigurator;
+
+        // First register with one event
+        let config1 = test_config(vec![AgenticEvent::BeforePrompt]);
+        configurator.register(&config1, Some(tmp.path())).unwrap();
+
+        // Re-register with two events
+        let config2 = test_config(vec![AgenticEvent::BeforePrompt, AgenticEvent::TurnComplete]);
+        let result = configurator.register(&config2, Some(tmp.path())).unwrap();
+
+        match result {
+            RegistrationResult::Registered { event_count } => {
+                assert_eq!(event_count, 2);
+            }
+            _ => panic!("expected Registered"),
+        }
+
+        let events = configurator.registered_events(Some(tmp.path())).unwrap();
+        assert!(events.contains(&"before_prompt".to_string()));
+        assert!(events.contains(&"turn_complete".to_string()));
+    }
+
+    #[test]
+    fn re_register_removes_stale_events() {
+        let tmp = TempDir::new().unwrap();
+        let settings = tmp.path().join("settings.json");
+        fs::write(&settings, r#"{"hooks": {}}"#).unwrap();
+
+        let configurator = GeminiConfigurator;
+
+        // First register with two events
+        let config1 = test_config(vec![AgenticEvent::BeforePrompt, AgenticEvent::TurnComplete]);
+        configurator.register(&config1, Some(tmp.path())).unwrap();
+
+        // Re-register with only one event
+        let config2 = test_config(vec![AgenticEvent::BeforePrompt]);
+        configurator.register(&config2, Some(tmp.path())).unwrap();
+
+        // Verify only before_prompt remains
+        let events = configurator.registered_events(Some(tmp.path())).unwrap();
+        assert_eq!(events, vec!["before_prompt"]);
+    }
+
+    #[test]
+    fn register_handles_missing_config() {
+        // When config doesn't exist:
+        // - If CLI is installed → creates minimal config and registers hooks
+        // - If CLI is not installed → returns NotDetected
+        let tmp = TempDir::new().unwrap();
+        let configurator = GeminiConfigurator;
+        let config = test_config(vec![AgenticEvent::BeforePrompt]);
+
+        let result = configurator.register(&config, Some(tmp.path())).unwrap();
+
+        if configurator.is_cli_installed() {
+            // CLI installed: should create config and register
+            assert!(
+                matches!(result, RegistrationResult::Registered { event_count: 1 }),
+                "Expected Registered when CLI is installed, got {:?}",
+                result
+            );
+            // Verify config was created
+            let settings_path = tmp.path().join("settings.json");
+            assert!(settings_path.exists(), "Config file should be created");
+        } else {
+            // CLI not installed: should skip
+            assert!(
+                matches!(result, RegistrationResult::Skipped(SkipReason::NotDetected)),
+                "Expected NotDetected when CLI is not installed, got {:?}",
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn create_minimal_config_creates_valid_json() {
+        let tmp = TempDir::new().unwrap();
+        let configurator = GeminiConfigurator;
+
+        configurator.create_minimal_config(Some(tmp.path())).unwrap();
+
+        let settings_path = tmp.path().join("settings.json");
+        assert!(settings_path.exists());
+
+        // Verify it's valid JSON
+        let content = fs::read_to_string(&settings_path).unwrap();
+        let _json: serde_json::Value =
+            serde_json::from_str(&content).expect("Should be valid JSON");
+    }
+
+    #[test]
+    fn create_minimal_config_creates_parent_directory() {
+        let tmp = TempDir::new().unwrap();
+        let nested = tmp.path().join("nested").join("dir");
+        let configurator = GeminiConfigurator;
+
+        configurator.create_minimal_config(Some(&nested)).unwrap();
+
+        assert!(nested.join("settings.json").exists());
     }
 }

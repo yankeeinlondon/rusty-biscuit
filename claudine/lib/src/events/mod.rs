@@ -12,4 +12,4 @@ pub use environment::{
 };
 pub use event_action::{EventAction, LogTarget, ReportFormat, ReportHandler};
 pub use event_meta::EventMeta;
-pub use provider::Provider;
+pub use provider::{EventSupportLevel, Provider};

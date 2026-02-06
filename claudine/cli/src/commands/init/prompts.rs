@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use claudine::config::AgentInfo;
-use claudine::events::{AgenticEvent, EventAction, GlobalSettings, LogTarget, TtsSettings};
+use claudine::events::{AgenticEvent, EventAction, EventSupportLevel, GlobalSettings, LogTarget, Provider, TtsSettings};
 use color_eyre::eyre::Result;
 use inquire::{Confirm, MultiSelect, Select, Text};
 
@@ -72,14 +72,41 @@ pub fn prompt_agent_selection(agents: &[AgentInfo]) -> Result<Vec<AgentInfo>> {
     Ok(result)
 }
 
+/// Check if an event has hook-based support from at least one of the given providers.
+fn has_hook_support(event: &AgenticEvent, providers: &[Provider]) -> bool {
+    providers
+        .iter()
+        .any(|p| p.event_support_level(event) == EventSupportLevel::Hook)
+}
+
 /// Prompt user to select which events to configure.
 ///
+/// Only shows events that have hook-based support from at least one of the
+/// selected providers. Events that require non-hook methods (wrapper/proxy)
+/// are excluded since those features are not yet implemented.
+///
 /// Returns the selected events. Pre-selects recommended events.
-pub fn prompt_event_selection() -> Result<Vec<AgenticEvent>> {
+pub fn prompt_event_selection(selected_providers: &[Provider]) -> Result<Vec<AgenticEvent>> {
     let all_events = all_events_ordered();
     let recommended = recommended_events();
 
-    let options: Vec<String> = all_events
+    // Filter to only events that have hook support from at least one provider
+    let hookable_events: Vec<AgenticEvent> = all_events
+        .iter()
+        .filter(|e| has_hook_support(e, selected_providers))
+        .cloned()
+        .collect();
+
+    // Count excluded events for info message
+    let excluded_count = all_events.len() - hookable_events.len();
+
+    if hookable_events.is_empty() {
+        eprintln!("\nNo events with hook support for the selected providers.");
+        eprintln!("Selected providers only support non-hook methods (wrapper/proxy) which are not yet implemented.");
+        return Ok(vec![]);
+    }
+
+    let options: Vec<String> = hookable_events
         .iter()
         .map(|e| {
             let desc = event_description(e);
@@ -87,7 +114,7 @@ pub fn prompt_event_selection() -> Result<Vec<AgenticEvent>> {
         })
         .collect();
 
-    let defaults: Vec<usize> = all_events
+    let defaults: Vec<usize> = hookable_events
         .iter()
         .enumerate()
         .filter_map(|(i, e)| {
@@ -99,9 +126,18 @@ pub fn prompt_event_selection() -> Result<Vec<AgenticEvent>> {
         })
         .collect();
 
+    let help_msg = if excluded_count > 0 {
+        format!(
+            "Recommended events pre-selected. {} events excluded (require non-hook methods).",
+            excluded_count
+        )
+    } else {
+        "Recommended events are pre-selected".to_string()
+    };
+
     let selected = MultiSelect::new("Select events to configure:", options)
         .with_default(&defaults)
-        .with_help_message("Recommended events are pre-selected")
+        .with_help_message(&help_msg)
         .prompt()?;
 
     // Map back to AgenticEvent
@@ -109,7 +145,7 @@ pub fn prompt_event_selection() -> Result<Vec<AgenticEvent>> {
         .iter()
         .filter_map(|opt| {
             let event_name = opt.split(" - ").next()?;
-            all_events
+            hookable_events
                 .iter()
                 .find(|e| e.to_string() == event_name)
                 .cloned()
@@ -182,7 +218,7 @@ pub fn prompt_sound_effect(event: &AgenticEvent) -> Result<EventAction> {
         "power-down",
         "high-up",
         "phase-jump-1",
-        "electronic-hit-fx-01",
+        "electronic-hit-fx1",
         "dit-hit-1",
         "dit-hit-2",
         "sad-trombone",

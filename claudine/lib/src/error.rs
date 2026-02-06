@@ -53,6 +53,13 @@ pub enum ClaudineError {
     /// URL parsing failed.
     #[error("invalid URL: {0}")]
     UrlError(#[from] url::ParseError),
+
+    /// Provider does not support automatic config creation.
+    #[error("config creation not supported for provider: {provider}")]
+    ConfigCreationNotSupported {
+        /// Provider name.
+        provider: String,
+    },
 }
 
 /// Convenience type alias for Claudine results.

@@ -69,6 +69,10 @@ impl AgentConfigurator for QwenConfigurator {
         // No events registered since Qwen Code doesn't support hooks yet
         Ok(vec![])
     }
+
+    fn supports_config_registration(&self) -> bool {
+        false // QwenCode uses stream-json output, not config file hooks
+    }
 }
 
 /// Resolve the settings.json path, using override dir for tests.

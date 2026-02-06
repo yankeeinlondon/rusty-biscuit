@@ -1,6 +1,39 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+/// Level of event support for a provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventSupportLevel {
+    /// Event is supported via native hooks (config-file based).
+    ///
+    /// These events can be registered by modifying the provider's config file.
+    /// Examples: Claude hooks, Gemini hooks, OpenCode plugins.
+    Hook,
+
+    /// Event is supported via non-hook methods (wrapper/wire-mode/stream parsing).
+    ///
+    /// These events require alternative capture methods that are not yet implemented:
+    /// - **Wrapper scripts**: Intercept CLI invocation (Goose GOOSE_STATUS_HOOK)
+    /// - **Wire mode proxy**: JSON-RPC interception (Kimi Code --wire)
+    /// - **Stream parsing**: Parse CLI output (Codex JSONL, Qwen stream-json)
+    NonHook,
+
+    /// Event is not supported by this provider.
+    NotSupported,
+}
+
+impl EventSupportLevel {
+    /// Returns whether this level indicates any form of support.
+    pub fn is_supported(&self) -> bool {
+        !matches!(self, EventSupportLevel::NotSupported)
+    }
+
+    /// Returns whether this level indicates hook-based support.
+    pub fn is_hook(&self) -> bool {
+        matches!(self, EventSupportLevel::Hook)
+    }
+}
+
 /// Supported agentic CLI providers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -76,94 +109,96 @@ impl Provider {
         }
     }
 
-    /// Returns whether this provider supports the given event natively.
+    /// Returns the level of support for the given event.
     ///
-    /// Events that are not supported cannot be registered with the provider's
-    /// hook system and will be skipped during sync.
+    /// ## Support Levels
     ///
-    /// ## Provider Event Sources
+    /// - `Hook`: Event can be registered via config file modification
+    /// - `NonHook`: Event requires wrapper/proxy (not yet implemented)
+    /// - `NotSupported`: Event is not available from this provider
     ///
-    /// - **Claude**: Native hooks system
-    /// - **Codex**: JSONL event stream (`codex exec --json`) + `notify` hook
-    /// - **Gemini**: Native hooks system
-    /// - **Goose**: No hook support yet
-    /// - **Kimi Code**: Wire mode JSON-RPC (`kimi --wire`) with blocking requests
-    /// - **OpenCode**: Native hooks system
-    pub fn supports_event(&self, event: &super::AgenticEvent) -> bool {
+    /// ## Provider Capabilities
+    ///
+    /// | Provider   | Hook Method                | Non-Hook Method              |
+    /// |------------|----------------------------|------------------------------|
+    /// | Claude     | settings.json hooks        | -                            |
+    /// | Gemini     | settings.json hooks        | -                            |
+    /// | OpenCode   | opencode.json plugins      | -                            |
+    /// | Codex      | config.toml notify         | JSONL stream parsing         |
+    /// | Goose      | -                          | stream-json + env var        |
+    /// | Kimi Code  | -                          | Wire mode JSON-RPC proxy     |
+    /// | Qwen Code  | -                          | stream-json parsing          |
+    pub fn event_support_level(&self, event: &super::AgenticEvent) -> EventSupportLevel {
         use super::AgenticEvent::*;
+        use EventSupportLevel::*;
+
         match self {
-            Provider::Claude => !matches!(event, BeforeModel | AfterModel | TurnError),
-            Provider::Codex => {
-                // JSONL stream: thread.started, turn.started/completed/failed,
-                // item events (agent_message, command_execution, file_change, mcp_tool_call)
-                // notify hook: agent-turn-complete
-                // Missing: permission requests, subagents, compaction, BeforeModel
-                !matches!(
-                    event,
-                    SessionEnd
-                        | PermissionRequest
-                        | SubagentStart
-                        | SubagentStop
-                        | BeforeModel
-                        | BeforeCompact
-                )
-            }
-            Provider::Gemini => !matches!(
-                event,
-                ToolError | PermissionRequest | TurnError | SubagentStart | SubagentStop
-            ),
-            Provider::Goose => {
-                // Stream-json events: message, notification, model_change, error, complete
-                // MCP notifications: subagent_tool_request, task_execution
-                // GOOSE_STATUS_HOOK: waiting/thinking status (fire-and-forget)
-                // Missing: session lifecycle, tool events, permission, BeforeModel, compaction
-                !matches!(
-                    event,
-                    SessionStart
-                        | SessionEnd
-                        | BeforePrompt
-                        | BeforeTool
-                        | AfterTool
-                        | ToolError
-                        | PermissionRequest
-                        | BeforeModel
-                        | BeforeCompact
-                )
-            }
-            Provider::KimiCode => {
-                // Wire mode events: TurnBegin/End, ToolCall/Result, StatusUpdate,
-                // ContentPart, SubagentEvent, CompactionBegin/End
-                // Blocking hooks: ApprovalRequest (permission), ToolCallRequest (tool exec)
-                // Missing: session lifecycle, BeforeModel
-                !matches!(event, SessionStart | SessionEnd | BeforeModel)
-            }
-            Provider::OpenCode => {
-                // Plugin hooks: tool.execute.before/after, permission.ask, chat.*, event
-                // Events: session.*, message.part.updated (streaming), permission.asked
-                // Missing: ToolError (no tool.execute.error hook), subagent interception
-                !matches!(event, ToolError | SubagentStart | SubagentStop)
-            }
-            Provider::QwenCode => {
-                // Stream-json events: system (session_start), assistant, result (success/error)
-                // SDK callback: canUseTool (permission gating, but not blocking)
-                // Missing: BeforeTool, AfterTool, ToolError, BeforePrompt, session lifecycle,
-                //          subagents, permission request (canUseTool is SDK-only), compaction
-                !matches!(
-                    event,
-                    SessionStart
-                        | SessionEnd
-                        | BeforePrompt
-                        | BeforeTool
-                        | AfterTool
-                        | ToolError
-                        | PermissionRequest
-                        | SubagentStart
-                        | SubagentStop
-                        | BeforeModel
-                        | BeforeCompact
-                )
-            }
+            // Claude: All supported events use native hooks
+            Provider::Claude => match event {
+                BeforeModel | AfterModel | TurnError => NotSupported,
+                _ => Hook,
+            },
+
+            // Gemini: All supported events use native hooks
+            Provider::Gemini => match event {
+                ToolError | PermissionRequest | TurnError | SubagentStart | SubagentStop => {
+                    NotSupported
+                }
+                _ => Hook,
+            },
+
+            // OpenCode: All supported events use plugin hooks
+            Provider::OpenCode => match event {
+                ToolError | SubagentStart | SubagentStop => NotSupported,
+                _ => Hook,
+            },
+
+            // Codex: Only turn_complete via notify config, rest via JSONL stream
+            Provider::Codex => match event {
+                TurnComplete => Hook,
+                SessionEnd | PermissionRequest | SubagentStart | SubagentStop | BeforeModel
+                | BeforeCompact => NotSupported,
+                _ => NonHook, // SessionStart, BeforePrompt, BeforeTool, AfterTool, ToolError, TurnError, AfterModel, Notification
+            },
+
+            // Goose: All events via stream-json/env var (no config hooks)
+            Provider::Goose => match event {
+                SessionStart | SessionEnd | BeforePrompt | BeforeTool | AfterTool | ToolError
+                | PermissionRequest | BeforeModel | BeforeCompact => NotSupported,
+                _ => NonHook, // TurnComplete, TurnError, AfterModel, Notification, SubagentStart, SubagentStop
+            },
+
+            // Kimi Code: All events via wire mode JSON-RPC (requires proxy)
+            Provider::KimiCode => match event {
+                SessionStart | SessionEnd | BeforeModel => NotSupported,
+                _ => NonHook, // All other events via wire mode
+            },
+
+            // Qwen Code: Limited events via stream-json output
+            Provider::QwenCode => match event {
+                TurnComplete | TurnError | AfterModel | Notification => NonHook,
+                _ => NotSupported,
+            },
         }
+    }
+
+    /// Returns whether this provider supports the given event (via any method).
+    ///
+    /// This includes both hook-based support and non-hook methods (wrapper/stream).
+    /// Use [`event_support_level`](Self::event_support_level) to distinguish between them.
+    ///
+    /// Events that return `false` cannot be captured from this provider at all.
+    pub fn supports_event(&self, event: &super::AgenticEvent) -> bool {
+        self.event_support_level(event).is_supported()
+    }
+
+    /// Returns whether this provider supports the given event via native hooks.
+    ///
+    /// Only events with hook-based support can be registered via config file
+    /// modification. Events that return `false` either require non-hook methods
+    /// (wrapper/proxy) or are not supported at all.
+    pub fn supports_event_via_hook(&self, event: &super::AgenticEvent) -> bool {
+        self.event_support_level(event).is_hook()
     }
 
     /// Returns the native event name used by this provider for the given event.
@@ -543,5 +578,104 @@ mod tests {
         assert!(!Provider::QwenCode.supports_event(&SubagentStop));
         assert!(!Provider::QwenCode.supports_event(&BeforeModel));
         assert!(!Provider::QwenCode.supports_event(&BeforeCompact));
+    }
+
+    #[test]
+    fn event_support_level_claude_all_hook() {
+        use crate::events::AgenticEvent::*;
+        use super::EventSupportLevel::*;
+        // Claude: all supported events are via hooks
+        assert_eq!(Provider::Claude.event_support_level(&TurnComplete), Hook);
+        assert_eq!(Provider::Claude.event_support_level(&BeforeTool), Hook);
+        assert_eq!(
+            Provider::Claude.event_support_level(&BeforeModel),
+            NotSupported
+        );
+    }
+
+    #[test]
+    fn event_support_level_codex_mixed() {
+        use crate::events::AgenticEvent::*;
+        use super::EventSupportLevel::*;
+        // Codex: turn_complete via hook, others via JSONL stream
+        assert_eq!(Provider::Codex.event_support_level(&TurnComplete), Hook);
+        assert_eq!(Provider::Codex.event_support_level(&BeforeTool), NonHook);
+        assert_eq!(Provider::Codex.event_support_level(&AfterTool), NonHook);
+        assert_eq!(Provider::Codex.event_support_level(&SessionStart), NonHook);
+        assert_eq!(
+            Provider::Codex.event_support_level(&PermissionRequest),
+            NotSupported
+        );
+    }
+
+    #[test]
+    fn event_support_level_goose_all_non_hook() {
+        use crate::events::AgenticEvent::*;
+        use super::EventSupportLevel::*;
+        // Goose: all supported events via stream-json/env var
+        assert_eq!(Provider::Goose.event_support_level(&TurnComplete), NonHook);
+        assert_eq!(Provider::Goose.event_support_level(&Notification), NonHook);
+        assert_eq!(
+            Provider::Goose.event_support_level(&SessionStart),
+            NotSupported
+        );
+        assert_eq!(
+            Provider::Goose.event_support_level(&BeforeTool),
+            NotSupported
+        );
+    }
+
+    #[test]
+    fn event_support_level_kimicode_all_non_hook() {
+        use crate::events::AgenticEvent::*;
+        use super::EventSupportLevel::*;
+        // Kimi Code: all supported events via wire mode
+        assert_eq!(
+            Provider::KimiCode.event_support_level(&TurnComplete),
+            NonHook
+        );
+        assert_eq!(Provider::KimiCode.event_support_level(&BeforeTool), NonHook);
+        assert_eq!(
+            Provider::KimiCode.event_support_level(&PermissionRequest),
+            NonHook
+        );
+        assert_eq!(
+            Provider::KimiCode.event_support_level(&SessionStart),
+            NotSupported
+        );
+    }
+
+    #[test]
+    fn event_support_level_qwencode_all_non_hook() {
+        use crate::events::AgenticEvent::*;
+        use super::EventSupportLevel::*;
+        // Qwen Code: limited events via stream-json
+        assert_eq!(
+            Provider::QwenCode.event_support_level(&TurnComplete),
+            NonHook
+        );
+        assert_eq!(Provider::QwenCode.event_support_level(&AfterModel), NonHook);
+        assert_eq!(
+            Provider::QwenCode.event_support_level(&BeforeTool),
+            NotSupported
+        );
+    }
+
+    #[test]
+    fn supports_event_via_hook() {
+        use crate::events::AgenticEvent::*;
+        // Hook-based providers
+        assert!(Provider::Claude.supports_event_via_hook(&TurnComplete));
+        assert!(Provider::Gemini.supports_event_via_hook(&TurnComplete));
+        assert!(Provider::OpenCode.supports_event_via_hook(&TurnComplete));
+        assert!(Provider::Codex.supports_event_via_hook(&TurnComplete));
+
+        // Codex: only turn_complete via hook
+        assert!(!Provider::Codex.supports_event_via_hook(&BeforeTool));
+
+        // Non-hook providers
+        assert!(!Provider::Goose.supports_event_via_hook(&TurnComplete));
+        assert!(!Provider::KimiCode.supports_event_via_hook(&TurnComplete));
+        assert!(!Provider::QwenCode.supports_event_via_hook(&TurnComplete));
     }
 }
