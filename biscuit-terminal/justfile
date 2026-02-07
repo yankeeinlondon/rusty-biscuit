@@ -101,3 +101,22 @@ example-two-column-text:
 # Example: use the `TwoColumn` struct with image in left column, text in right
 example-two-column-image:
     @cargo run -p biscuit-terminal --example two_column_with_image
+
+# Open Claude Code in yolo mode
+oc *args="":
+    @clear
+    @echo "Loading {{BOLD}}Opencode{{RESET}}"
+    @cd .. && echo "Loading {{BOLD}}Opencode{{RESET}}" && opencode {{args}}
+
+# Open Opencode
+cc *args="":
+    @clear
+    @echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @cd .. && echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})" && claude --dangerously-skip-permissions {{args}}
+
+# Use GPT 5.2 to commit staged changes
+commit:
+    @cd .. && opencode run commit "-f" --model "openai/gpt-5.2"
+    @if command -v so-you-say >/dev/null 2>&1; then \
+        so-you-say "git commits completed in rusty-biscuit monorepo"; \
+    fi

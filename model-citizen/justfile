@@ -76,18 +76,14 @@ check:
 # Open Opencode
 oc *args="":
     @clear
-    @cd ..
     @echo "Loading {{BOLD}}Opencode{{RESET}}"
-    @opencode {{args}}
-    @cd -
+    @cd .. && echo "Loading {{BOLD}}Opencode{{RESET}}" && opencode {{args}}
 
 # Open Claude Code in yolo mode
 cc *args="":
     @clear
-    @cd ..
     @echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @claude --dangerously-skip-permissions {{args}}
-    @cd -
+    @cd .. && echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})" && claude --dangerously-skip-permissions {{args}}
 
 # Use GPT 5.2 to commit staged changes
 commit:
@@ -96,4 +92,3 @@ commit:
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
-    @cd -
