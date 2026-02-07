@@ -2,6 +2,38 @@
 name = "model-citizen-cli"
 version = "0.1.0"
 edition = "2024"
+description = "CLI for managing local LLM models"
+license = "MIT"
+
+[[bin]]
+name = "model"
+path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4.5.57", features = ["derive"] }
+# Core library
+model-citizen = { path = "../lib" }
+
+# CLI framework
+clap = { version = "4.5", features = ["derive"] }
+
+# Error reporting
+color-eyre = "0.6"
+
+# Interactive prompts
+inquire = "0.7"
+
+# Table formatting
+tabled = "0.18"
+
+# Progress bars
+indicatif = "0.17"
+
+# Serialization for JSON output
+serde_json = "1.0"
+
+# Async runtime
+tokio = { version = "1.48", features = ["full"] }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
