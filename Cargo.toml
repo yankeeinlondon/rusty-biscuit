@@ -11,7 +11,7 @@ members = [
     "claudine/cli",
     "claudine/lib",
     "darkmatter/cli",
-    "darkmatter/lib",
+    "darkmatter/lib", "model-citizen/cli", "model-citizen/lib",
     "model_id",
     "playa/cli",
     "playa/lib",

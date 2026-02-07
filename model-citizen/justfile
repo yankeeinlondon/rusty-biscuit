@@ -57,14 +57,13 @@ lint:
 
 install:
     @echo ""
-    @echo "Installing Schematic CLI"
-    @echo "--------------------------"
-    @echo ""
-    @echo "{{BOLD}}Building Schematic Library{{RESET}}"
+    @echo "{{BOLD}}Building Model Citizen Library{{RESET}}"
     @cargo build -p model-citizen --release
     @echo ""
-    @echo "{{BOLD}}{{YELLOW}}Installing Schematic CLI{{RESET}}"
+    @echo "{{BOLD}}{{YELLOW}}Installing Model Citizen CLI{{RESET}}"
     @cargo install --path ./cli
+    @echo ""
+    @echo "{{BOLD}}{{BLUE}}Model Citizen CLI installed{{RESET}}"
     @echo ""
 
 check:
@@ -92,3 +91,4 @@ commit:
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
+
