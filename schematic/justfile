@@ -80,6 +80,24 @@ generate-one api:
     @echo ""
     @cargo run -p schematic-gen -- --api {{api}} --output schema/src -v
 
+# generate all API clients and OpenAPI specs
+generate-openapi:
+    @echo ""
+    @echo "Generating API Clients + OpenAPI Specs"
+    @echo "---------------------------------------"
+    @echo ""
+    @mkdir -p openapi
+    @cargo run -p schematic-gen -- generate --api all --output schema/src --openapi-out openapi -v
+
+# export OpenAPI specs only (no code generation)
+export-openapi api="openai" format="json":
+    @echo ""
+    @echo "Exporting OpenAPI Spec for {{api}}"
+    @echo "-----------------------------------"
+    @echo ""
+    @mkdir -p openapi
+    @cargo run -p schematic-gen -- generate --api {{api}} --output schema/src --openapi-out openapi --openapi-format {{format}} -v
+
 # clean generated schema code
 clean-generated:
     @echo ""
@@ -124,24 +142,18 @@ release:
 # Open Claude Code in yolo mode
 oc *args="":
     @clear
-    @cd ..
     @echo "Loading {{BOLD}}Opencode{{RESET}}"
-    @opencode {{args}}
-    @cd -
+    @cd .. && echo "Loading {{BOLD}}Opencode{{RESET}}" && opencode {{args}}
 
 # Open Opencode
 cc *args="":
     @clear
-    @cd ..
     @echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @claude --dangerously-skip-permissions {{args}}
-    @cd -
+    @cd .. && echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})" && claude --dangerously-skip-permissions {{args}}
 
 # Use GPT 5.2 to commit staged changes
 commit:
-    @cd ..
-    @opencode run commit "-f" --model "openai/gpt-5.2"
+    @cd .. && opencode run commit "-f" --model "openai/gpt-5.2"
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
-    @cd -

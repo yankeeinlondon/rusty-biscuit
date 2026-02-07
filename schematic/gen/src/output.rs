@@ -723,6 +723,7 @@ mod tests {
                 request: None,
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
+                params: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -749,6 +750,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::json_type("ListModelsResponse"),
                     headers: vec![],
+                params: None,
                 },
                 Endpoint {
                     id: "RetrieveModel".to_string(),
@@ -758,6 +760,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::json_type("Model"),
                     headers: vec![],
+                params: None,
                 },
                 Endpoint {
                     id: "CreateCompletion".to_string(),
@@ -767,6 +770,7 @@ mod tests {
                     request: Some(ApiRequest::json_type("CreateCompletionRequest")),
                     response: ApiResponse::json_type("Completion"),
                     headers: vec![],
+                params: None,
                 },
             ],
             module_path: None,
@@ -1111,6 +1115,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::json_type("TestResponse"),
                     headers: vec![],
+                params: None,
                 }],
                 module_path: None,
                 request_suffix: None,
@@ -1145,6 +1150,7 @@ mod tests {
                 request: None,
                 response: ApiResponse::json_type("Response"),
                 headers: vec![],
+                params: None,
             })
             .collect();
 

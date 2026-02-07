@@ -38,6 +38,25 @@
 //! - [`MessageSchema`] - Single message type with direction and schema
 //! - [`MessageDirection`] - Message flow direction (Client, Server, Bidirectional)
 //!
+//! ### Model Definition Types (for API schema import)
+//!
+//! - [`ModelCatalog`] - Collection of model definitions with optional module path
+//! - [`ModelDef`] - Union of model types (struct, enum, or alias)
+//! - [`StructDef`] - Structure definition with fields
+//! - [`EnumDef`] - Enumeration definition with variants
+//! - [`TypeAlias`] - Type alias definition
+//! - [`FieldDef`] - Field definition for structs
+//! - [`EnumVariant`] - Variant definition for enums
+//! - [`TypeRef`] - Type reference (primitives, arrays, named types, combinators)
+//! - [`PrimitiveType`] - Basic primitive types
+//!
+//! ### Parameter Definition Types (for API endpoint import)
+//!
+//! - [`EndpointParams`] - Collection of endpoint parameters (query, header, cookie)
+//! - [`ParamDef`] - Single parameter definition
+//! - [`QueryParamType`] - Parameter value type
+//! - [`ParamStyle`] - Parameter serialization style
+//!
 //! ## Examples
 //!
 //! Define a simple API with bearer token authentication:
@@ -63,6 +82,7 @@
 //!             request: None,
 //!             response: ApiResponse::json_type("ListModelsResponse"),
 //!             headers: vec![],
+//!             params: None,
 //!         },
 //!     ],
 //!     module_path: None,
@@ -108,6 +128,8 @@
 
 pub mod auth;
 pub mod headers;
+pub mod models;
+pub mod params;
 pub mod prelude;
 pub mod request;
 pub mod response;
@@ -115,9 +137,17 @@ pub mod schema;
 pub mod types;
 pub mod websocket;
 
+#[cfg(feature = "openapi")]
+pub mod openapi;
+
 // Re-export main types at crate root
-pub use auth::{AuthStrategy, UpdateStrategy};
+pub use auth::{ApiKeyLocation, AuthStrategy, UpdateStrategy};
 pub use headers::{ApiKeyEnv, EnvList, EnvMapping, HeaderError, Headers, SensitiveString};
+pub use models::{
+    EnumDef, EnumVariant, FieldDef, ModelCatalog, ModelDef, PrimitiveType, StructDef, TypeAlias,
+    TypeRef,
+};
+pub use params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
 pub use request::{ApiRequest, FormField, FormFieldKind};
 pub use response::ApiResponse;
 pub use schema::{Schema, SchemaObject};

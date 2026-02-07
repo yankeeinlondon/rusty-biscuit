@@ -258,6 +258,7 @@ mod tests {
                 request: None,
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
+                params: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -373,6 +374,7 @@ mod tests {
             request: None,
             response: ApiResponse::json_type("CreateItemResponse"),
             headers: vec![],
+                params: None,
         });
         api.endpoints.push(Endpoint {
             id: "GetItem".to_string(),
@@ -382,6 +384,7 @@ mod tests {
             request: None,
             response: ApiResponse::json_type("Item"),
             headers: vec![],
+                params: None,
         });
 
         let builder = ModuleDocBuilder::new(&api);
@@ -416,6 +419,7 @@ mod tests {
                 request: None,
                 response: ApiResponse::json_type("CreateItemResponse"),
                 headers: vec![],
+                params: None,
             },
         );
 
@@ -438,6 +442,7 @@ mod tests {
             request: None,
             response: ApiResponse::json_type("CreateItemResponse"),
             headers: vec![],
+                params: None,
         }];
 
         let builder = ModuleDocBuilder::new(&api);

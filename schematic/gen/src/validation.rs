@@ -79,6 +79,7 @@ const DEFAULT_REQUEST_SUFFIX: &str = "Request";
 ///             request: Some(ApiRequest::json_type("CreateUserBody")), // Different from CreateUserRequest
 ///             response: ApiResponse::json_type("User"),
 ///             headers: vec![],
+///             params: None,
 ///         },
 ///     ],
 ///     module_path: None,
@@ -175,6 +176,7 @@ mod tests {
             request: Some(ApiRequest::json_type(body_type)),
             response: ApiResponse::json_type("Response"),
             headers: vec![],
+                params: None,
         }
     }
 
@@ -188,6 +190,7 @@ mod tests {
             request: None,
             response: ApiResponse::json_type("Response"),
             headers: vec![],
+                params: None,
         }
     }
 
@@ -389,6 +392,7 @@ mod tests {
             request: Some(ApiRequest::form_data(vec![FormField::file("document")])),
             response: ApiResponse::json_type("UploadResponse"),
             headers: vec![],
+                params: None,
         }];
 
         // FormData doesn't have a body type name, so no collision possible

@@ -76,6 +76,7 @@ pub fn make_endpoint(
         request,
         response: ApiResponse::json_type("TestResponse"),
         headers: vec![],
+                params: None,
     }
 }
 
@@ -99,6 +100,7 @@ pub fn make_simple_api() -> RestApi {
             request: None,
             response: ApiResponse::json_type("ListItemsResponse"),
             headers: vec![],
+                params: None,
         }],
         module_path: None,
         request_suffix: None,
@@ -131,6 +133,7 @@ pub fn make_complex_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("ListModelsResponse"),
                 headers: vec![],
+                params: None,
             },
             Endpoint {
                 id: "RetrieveModel".to_string(),
@@ -140,6 +143,7 @@ pub fn make_complex_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("Model"),
                 headers: vec![],
+                params: None,
             },
             Endpoint {
                 id: "CreateCompletion".to_string(),
@@ -149,6 +153,7 @@ pub fn make_complex_api() -> RestApi {
                 request: Some(ApiRequest::json_type("CreateCompletionRequest")),
                 response: ApiResponse::json_type("Completion"),
                 headers: vec![],
+                params: None,
             },
         ],
         module_path: None,

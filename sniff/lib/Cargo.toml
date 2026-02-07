@@ -5,6 +5,7 @@ edition = "2024"
 license = "AGPL-3.0-only"
 
 [dependencies]
+biscuit-hash = { path = "../../biscuit-hash/lib" }
 chrono = { version = "0.4", features = ["serde"] }
 ec4rs = "1"
 futures = { version = "0.3", optional = true }

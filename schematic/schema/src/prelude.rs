@@ -15,10 +15,7 @@
 //!
 //! **Clients and request enums:**
 //!
-//! - [`Anthropic`] + [`AnthropicRequest`]
 //! - [`OpenAI`] + [`OpenAIRequest`]
-//! - [`ElevenLabs`] + [`ElevenLabsRequest`]
-//! - [`HuggingFaceHub`] + [`HuggingFaceHubRequest`]
 //!
 //! **Shared types:**
 //!
@@ -47,7 +44,4 @@
 //! }
 //! ```
 pub use crate::shared::{RequestParts, SchematicError};
-pub use crate::anthropic::{Anthropic, AnthropicRequest};
 pub use crate::openai::{OpenAI, OpenAIRequest};
-pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};
-pub use crate::huggingface::{HuggingFaceHub, HuggingFaceHubRequest};

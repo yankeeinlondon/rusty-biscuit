@@ -107,6 +107,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("Vec<ModelInfo>"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "GetModel".to_string(),
@@ -116,6 +117,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("ModelInfo"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "ListModelFiles".to_string(),
@@ -125,6 +127,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("Vec<RepoFile>"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "GetModelFile".to_string(),
@@ -134,6 +137,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("FileMetadata"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "ListModelCommits".to_string(),
@@ -143,6 +147,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("Vec<Commit>"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "GetModelReadme".to_string(),
@@ -152,6 +157,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::Text,
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "ListModelDiscussions".to_string(),
@@ -161,6 +167,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("DiscussionList"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "GetModelCard".to_string(),
@@ -170,6 +177,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::Text,
                 headers: vec![],
+                    params: None,
             },
 
             // =================================================================
@@ -183,6 +191,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("Vec<DatasetInfo>"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "GetDataset".to_string(),
@@ -192,6 +201,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("DatasetInfo"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "ListDatasetFiles".to_string(),
@@ -201,6 +211,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("Vec<RepoFile>"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "GetDatasetFile".to_string(),
@@ -210,6 +221,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("FileMetadata"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "ListDatasetCommits".to_string(),
@@ -219,6 +231,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("Vec<Commit>"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "GetDatasetReadme".to_string(),
@@ -228,6 +241,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::Text,
                 headers: vec![],
+                    params: None,
             },
 
             // =================================================================
@@ -241,6 +255,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("Vec<SpaceInfo>"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "GetSpace".to_string(),
@@ -250,6 +265,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("SpaceInfo"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "ListSpaceFiles".to_string(),
@@ -259,6 +275,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("Vec<RepoFile>"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "GetSpaceFile".to_string(),
@@ -268,6 +285,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("FileMetadata"),
                 headers: vec![],
+                    params: None,
             },
 
             // =================================================================
@@ -281,6 +299,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: Some(ApiRequest::json_type("CreateRepoBody")),
                 response: ApiResponse::json_type("RepoUrl"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "DeleteRepo".to_string(),
@@ -290,6 +309,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: Some(ApiRequest::json_type("DeleteRepoBody")),
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "UpdateRepoSettings".to_string(),
@@ -299,6 +319,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: Some(ApiRequest::json_type("UpdateRepoSettingsBody")),
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "MoveRepo".to_string(),
@@ -308,6 +329,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: Some(ApiRequest::json_type("MoveRepoBody")),
                 response: ApiResponse::json_type("StatusResponse"),
                 headers: vec![],
+                    params: None,
             },
 
             // =================================================================
@@ -321,6 +343,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("UserInfo"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "GetUser".to_string(),
@@ -330,6 +353,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("UserInfo"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "ListUserRepos".to_string(),
@@ -339,6 +363,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("Vec<RepoInfo>"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "GetUserCollections".to_string(),
@@ -348,6 +373,7 @@ pub fn define_huggingface_hub_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("Vec<Collection>"),
                 headers: vec![],
+                    params: None,
             },
         ],
         module_path: None,

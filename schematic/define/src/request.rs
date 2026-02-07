@@ -731,6 +731,7 @@ mod tests {
                     request: Some(ApiRequest::json_type("CreateFolderRequest")),
                     response: ApiResponse::json_type("Folder"),
                     headers: vec![],
+                    params: None,
                 },
                 // FormData endpoint with file upload
                 Endpoint {
@@ -747,6 +748,7 @@ mod tests {
                     ])),
                     response: ApiResponse::json_type("File"),
                     headers: vec![],
+                    params: None,
                 },
                 // GET endpoint with no request body
                 Endpoint {
@@ -757,6 +759,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::json_type("ListFilesResponse"),
                     headers: vec![],
+                    params: None,
                 },
                 // Binary download
                 Endpoint {
@@ -767,6 +770,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::Binary,
                     headers: vec![],
+                    params: None,
                 },
             ],
             module_path: None,

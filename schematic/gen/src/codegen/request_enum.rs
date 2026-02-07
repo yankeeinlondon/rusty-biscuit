@@ -214,6 +214,7 @@ mod tests {
             request,
             response: ApiResponse::json_type("TestResponse"),
             headers: vec![],
+                params: None,
         }
     }
 
@@ -345,6 +346,7 @@ mod tests {
                 request: None,
                 response: ApiResponse::json_type("User"),
                 headers: vec![],
+                params: None,
             }],
         );
 

@@ -2,12 +2,13 @@
 //!
 //! This module contains the data types used in OpenAI API responses.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// An OpenAI model object.
 ///
 /// Describes a model available through the OpenAI API.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Model {
     /// The model identifier (e.g., "gpt-4").
     pub id: String,
@@ -20,7 +21,7 @@ pub struct Model {
 }
 
 /// Response from the List Models endpoint.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ListModelsResponse {
     /// The object type, always "list".
     pub object: String,
@@ -29,7 +30,7 @@ pub struct ListModelsResponse {
 }
 
 /// Response from the Delete Model endpoint.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteModelResponse {
     /// The model identifier that was deleted.
     pub id: String,

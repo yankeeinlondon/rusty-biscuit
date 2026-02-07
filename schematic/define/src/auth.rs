@@ -105,6 +105,67 @@ pub enum AuthStrategy {
     /// Username is read from `RestApi::env_username` and password from
     /// the first element of `RestApi::env_auth` (i.e., `env_auth[0]`).
     Basic,
+
+    /// API key in a non-header location (query parameter or cookie).
+    ///
+    /// Used when the API key is passed in the query string or as a cookie
+    /// rather than in a header. Imported from OpenAPI `apiKey` security
+    /// schemes with `in: query` or `in: cookie`.
+    ///
+    /// The key is read from environment variables specified in
+    /// `RestApi::env_auth`. Multiple env vars can be specified as a fallback chain.
+    ///
+    /// ## Examples
+    ///
+    /// Query parameter API key:
+    ///
+    /// ```
+    /// use schematic_define::auth::{AuthStrategy, ApiKeyLocation};
+    ///
+    /// let auth = AuthStrategy::ApiKeyParam {
+    ///     name: "api_key".to_string(),
+    ///     location: ApiKeyLocation::Query,
+    /// };
+    /// ```
+    ///
+    /// Cookie-based API key:
+    ///
+    /// ```
+    /// use schematic_define::auth::{AuthStrategy, ApiKeyLocation};
+    ///
+    /// let auth = AuthStrategy::ApiKeyParam {
+    ///     name: "session".to_string(),
+    ///     location: ApiKeyLocation::Cookie,
+    /// };
+    /// ```
+    ApiKeyParam {
+        /// Parameter name (e.g., "api_key", "token").
+        name: String,
+        /// Where the API key is sent.
+        location: ApiKeyLocation,
+    },
+}
+
+/// Location for API key authentication.
+///
+/// Specifies where an API key is sent when using the `ApiKeyParam` auth strategy.
+/// This is typically imported from OpenAPI `apiKey` security schemes.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::auth::ApiKeyLocation;
+///
+/// let query = ApiKeyLocation::Query;
+/// let cookie = ApiKeyLocation::Cookie;
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ApiKeyLocation {
+    /// API key in query string: `?api_key=xxx`
+    Query,
+    /// API key in cookie: `Cookie: api_key=xxx`
+    Cookie,
 }
 
 /// Strategy for updating authentication when creating API variants.
@@ -166,6 +227,97 @@ pub enum UpdateStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ========== ApiKeyLocation Tests ==========
+
+    #[test]
+    fn api_key_location_debug_clone_eq() {
+        let location = ApiKeyLocation::Query;
+        let cloned = location.clone();
+        assert_eq!(location, cloned);
+        assert!(format!("{:?}", location).contains("Query"));
+    }
+
+    #[test]
+    fn api_key_location_copy() {
+        let original = ApiKeyLocation::Cookie;
+        let copied = original; // Copy, not move
+        assert_eq!(original, copied);
+    }
+
+    #[test]
+    fn api_key_location_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(ApiKeyLocation::Query);
+        set.insert(ApiKeyLocation::Cookie);
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn api_key_location_serde_roundtrip() {
+        let location = ApiKeyLocation::Query;
+        let serialized = serde_json::to_string(&location).unwrap();
+        let deserialized: ApiKeyLocation = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(location, deserialized);
+    }
+
+    // ========== AuthStrategy::ApiKeyParam Tests ==========
+
+    #[test]
+    fn auth_strategy_api_key_param_query() {
+        let auth = AuthStrategy::ApiKeyParam {
+            name: "api_key".to_string(),
+            location: ApiKeyLocation::Query,
+        };
+
+        match auth {
+            AuthStrategy::ApiKeyParam { name, location } => {
+                assert_eq!(name, "api_key");
+                assert_eq!(location, ApiKeyLocation::Query);
+            }
+            _ => panic!("Expected ApiKeyParam"),
+        }
+    }
+
+    #[test]
+    fn auth_strategy_api_key_param_cookie() {
+        let auth = AuthStrategy::ApiKeyParam {
+            name: "session".to_string(),
+            location: ApiKeyLocation::Cookie,
+        };
+
+        match auth {
+            AuthStrategy::ApiKeyParam { name, location } => {
+                assert_eq!(name, "session");
+                assert_eq!(location, ApiKeyLocation::Cookie);
+            }
+            _ => panic!("Expected ApiKeyParam"),
+        }
+    }
+
+    #[test]
+    fn auth_strategy_api_key_param_clone_eq() {
+        let auth = AuthStrategy::ApiKeyParam {
+            name: "token".to_string(),
+            location: ApiKeyLocation::Query,
+        };
+        let cloned = auth.clone();
+        assert_eq!(auth, cloned);
+    }
+
+    #[test]
+    fn auth_strategy_api_key_param_serde_roundtrip() {
+        let auth = AuthStrategy::ApiKeyParam {
+            name: "api_key".to_string(),
+            location: ApiKeyLocation::Query,
+        };
+        let serialized = serde_json::to_string(&auth).unwrap();
+        let deserialized: AuthStrategy = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(auth, deserialized);
+    }
+
+    // ========== UpdateStrategy Tests ==========
 
     #[test]
     fn update_strategy_no_change_preserves_auth() {

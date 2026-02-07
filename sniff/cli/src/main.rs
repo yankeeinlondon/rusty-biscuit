@@ -98,6 +98,9 @@ pub enum Commands {
     /// Show only language detection results
     Language,
 
+    /// Show markdown documents in the repository
+    Docs,
+
     // === Programs sections ===
     /// Show all installed programs detection
     Programs {
@@ -193,6 +196,7 @@ impl Commands {
             Commands::Git { .. } => OutputFilter::Git,
             Commands::Repo => OutputFilter::Repo,
             Commands::Language => OutputFilter::Language,
+            Commands::Docs => OutputFilter::Docs,
 
             // Programs sections
             Commands::Programs { .. } => OutputFilter::Programs,
@@ -297,6 +301,7 @@ Commands:
     sniff git         Show only git repository information
     sniff repo        Show only repository/monorepo structure
     sniff language    Show only language detection results
+    sniff docs        Show markdown documents in the repository
 
   Programs:
     sniff programs                   Show all installed programs
@@ -460,7 +465,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config = config.skip_os().skip_network().skip_filesystem();
         }
         // Filesystem detail filters: show only filesystem section
-        OutputFilter::Git | OutputFilter::Repo | OutputFilter::Language => {
+        OutputFilter::Git | OutputFilter::Repo | OutputFilter::Language | OutputFilter::Docs => {
             config = config.skip_os().skip_hardware().skip_network();
         }
         // All: no subcommand means full detection
@@ -692,6 +697,12 @@ mod tests {
         }
 
         #[test]
+        fn docs_subcommand_parses() {
+            let cli = parse_args(&["docs"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Docs)));
+        }
+
+        #[test]
         fn filesystem_subcommand_parses() {
             let cli = parse_args(&["filesystem"]).unwrap();
             assert!(matches!(cli.command, Some(Commands::Filesystem)));
@@ -813,6 +824,12 @@ mod tests {
         fn language_maps_to_language_filter() {
             let cmd = Commands::Language;
             assert_eq!(cmd.to_output_filter(), OutputFilter::Language);
+        }
+
+        #[test]
+        fn docs_maps_to_docs_filter() {
+            let cmd = Commands::Docs;
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Docs);
         }
 
         #[test]

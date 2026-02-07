@@ -4,6 +4,8 @@
 //! The response type determines how the generated client deserializes
 //! the response body.
 
+use serde::{Deserialize, Serialize};
+
 use crate::schema::Schema;
 
 /// Describes the expected response from an API endpoint.
@@ -38,7 +40,7 @@ use crate::schema::Schema;
 /// let response = ApiResponse::Empty;
 /// ```
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApiResponse {
     /// JSON response with a typed schema.
     ///

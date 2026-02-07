@@ -5,21 +5,43 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
+use schematic_define::openapi::{ExportFormat, ExportOptions};
 use schematic_definitions::anthropic::define_anthropic_api;
 use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
 use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
 use schematic_definitions::huggingface::define_huggingface_hub_api;
 use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
 use schematic_definitions::openai::define_openai_api;
+use schematic_definitions::registry::get_registry;
 use schematic_gen::cargo_gen::write_cargo_toml;
 use schematic_gen::errors::GeneratorError;
+use schematic_gen::openapi_output::write_openapi;
 use schematic_gen::output::{generate_and_write, generate_and_write_all};
 use schematic_gen::validate_api;
 
 /// List of available API names for error messages.
 const AVAILABLE_APIS: &str = "anthropic, openai, elevenlabs, huggingface, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all";
+
+/// OpenAPI output format for CLI.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub enum OpenApiFormat {
+    /// JSON format (default).
+    #[default]
+    Json,
+    /// YAML format.
+    Yaml,
+}
+
+impl From<OpenApiFormat> for ExportFormat {
+    fn from(format: OpenApiFormat) -> Self {
+        match format {
+            OpenApiFormat::Json => ExportFormat::Json,
+            OpenApiFormat::Yaml => ExportFormat::Yaml,
+        }
+    }
+}
 
 /// Schematic code generator - transforms API definitions into typed Rust clients
 #[derive(Parser, Debug)]
@@ -62,6 +84,17 @@ enum Commands {
         /// Print generated code without writing files
         #[arg(long)]
         dry_run: bool,
+
+        /// Output directory for OpenAPI specification files
+        ///
+        /// When provided, exports the API definition to an OpenAPI 3.0.3 spec
+        /// after generating Rust client code.
+        #[arg(long, value_name = "DIR")]
+        openapi_out: Option<String>,
+
+        /// Output format for OpenAPI specification
+        #[arg(long, value_enum, default_value = "json")]
+        openapi_format: OpenApiFormat,
     },
 
     /// Validate an API definition without generating code
@@ -194,9 +227,11 @@ fn run_generate(
     output: &str,
     dry_run: bool,
     verbose: u8,
+    openapi_out: Option<&str>,
+    openapi_format: OpenApiFormat,
 ) -> Result<(), GeneratorError> {
     if api_name == "all" {
-        return run_generate_all(output, dry_run, verbose);
+        return run_generate_all(output, dry_run, verbose, openapi_out, openapi_format);
     }
 
     let api = resolve_api(api_name)?;
@@ -252,11 +287,89 @@ fn run_generate(
         );
     }
 
+    // Export OpenAPI spec if requested
+    if let Some(openapi_dir) = openapi_out {
+        run_openapi_export(api_name, &api, openapi_dir, openapi_format, dry_run, verbose)?;
+    }
+
+    Ok(())
+}
+
+/// Exports an API definition to OpenAPI format.
+fn run_openapi_export(
+    api_name: &str,
+    api: &schematic_define::RestApi,
+    openapi_dir: &str,
+    format: OpenApiFormat,
+    dry_run: bool,
+    verbose: u8,
+) -> Result<(), GeneratorError> {
+    // Get the schema registry for this API
+    let registry = match get_registry(api_name) {
+        Some(r) => r,
+        None => {
+            println!(
+                "{} Skipping OpenAPI export for '{}' - schema registry not available",
+                "[WARN]".yellow().bold(),
+                api_name
+            );
+            println!(
+                "         {} Currently only 'openai' has complete schema registries.",
+                "Hint:".cyan()
+            );
+            return Ok(());
+        }
+    };
+
+    if verbose > 0 {
+        println!("{}", "Exporting OpenAPI specification...".dimmed());
+    }
+
+    let openapi_path = Path::new(openapi_dir);
+
+    // Create the directory if it doesn't exist
+    if !dry_run && !openapi_path.exists() {
+        std::fs::create_dir_all(openapi_path).map_err(|e| GeneratorError::WriteError {
+            path: openapi_dir.to_string(),
+            source: e,
+        })?;
+    }
+
+    let options = ExportOptions::new()
+        .with_version("1.0.0")
+        .with_format(format.into());
+
+    if dry_run {
+        println!(
+            "{} Would export OpenAPI spec to {}/{}.{}",
+            "[OK]".green().bold(),
+            openapi_dir,
+            api.name.to_lowercase(),
+            match format {
+                OpenApiFormat::Json => "json",
+                OpenApiFormat::Yaml => "yaml",
+            }
+        );
+    } else {
+        let path = write_openapi(api, &registry, &options, openapi_path)?;
+        println!(
+            "{} Exported OpenAPI spec to {}",
+            "[OK]".green().bold(),
+            path.display()
+        );
+    }
+
     Ok(())
 }
 
 /// Runs the generate command for all APIs at once.
-fn run_generate_all(output: &str, dry_run: bool, verbose: u8) -> Result<(), GeneratorError> {
+fn run_generate_all(
+    output: &str,
+    dry_run: bool,
+    verbose: u8,
+    openapi_out: Option<&str>,
+    openapi_format: OpenApiFormat,
+) -> Result<(), GeneratorError> {
     let apis = resolve_all_apis();
 
     if verbose > 0 {
@@ -320,6 +433,28 @@ fn run_generate_all(output: &str, dry_run: bool, verbose: u8) -> Result<(), Gene
         );
     }
 
+    // Export OpenAPI specs if requested
+    if let Some(openapi_dir) = openapi_out {
+        // Map API structs to names for registry lookup
+        let api_names = [
+            ("Anthropic", "anthropic"),
+            ("OpenAI", "openai"),
+            ("ElevenLabs", "elevenlabs"),
+            ("HuggingFaceHub", "huggingface"),
+        ];
+
+        for api in &apis {
+            let api_name_lower = api.name.to_lowercase();
+            let api_name = api_names
+                .iter()
+                .find(|(name, _)| *name == api.name)
+                .map(|(_, key)| *key)
+                .unwrap_or(&api_name_lower);
+
+            run_openapi_export(api_name, api, openapi_dir, openapi_format, dry_run, verbose)?;
+        }
+    }
+
     Ok(())
 }
 
@@ -343,13 +478,29 @@ fn main() -> ExitCode {
             api,
             output,
             dry_run,
-        }) => run_generate(&api, &output, dry_run, cli.verbose),
+            openapi_out,
+            openapi_format,
+        }) => run_generate(
+            &api,
+            &output,
+            dry_run,
+            cli.verbose,
+            openapi_out.as_deref(),
+            openapi_format,
+        ),
         // Explicit subcommand: validate
         Some(Commands::Validate { api }) => run_validate(&api, cli.verbose),
         // No subcommand: backwards-compatible mode (acts like generate)
         None => {
             if let Some(api_name) = cli.api {
-                run_generate(&api_name, &cli.output, cli.dry_run, cli.verbose)
+                run_generate(
+                    &api_name,
+                    &cli.output,
+                    cli.dry_run,
+                    cli.verbose,
+                    None, // Legacy mode doesn't support OpenAPI export
+                    OpenApiFormat::default(),
+                )
             } else {
                 eprintln!(
                     "{} Missing required argument: --api <NAME>",

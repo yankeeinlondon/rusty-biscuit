@@ -80,6 +80,7 @@ pub fn define_ollama_native_api() -> RestApi {
                 request: Some(ApiRequest::json_type("GenerateBody")),
                 response: ApiResponse::Binary, // Streaming NDJSON
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "Chat".to_string(),
@@ -90,6 +91,7 @@ pub fn define_ollama_native_api() -> RestApi {
                 request: Some(ApiRequest::json_type("ChatBody")),
                 response: ApiResponse::Binary, // Streaming NDJSON
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "Embeddings".to_string(),
@@ -99,6 +101,7 @@ pub fn define_ollama_native_api() -> RestApi {
                 request: Some(ApiRequest::json_type("EmbeddingsBody")),
                 response: ApiResponse::json_type("EmbeddingsResponse"),
                 headers: vec![],
+                    params: None,
             },
             // Model management endpoints
             Endpoint {
@@ -109,6 +112,7 @@ pub fn define_ollama_native_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("ListModelsResponse"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "ShowModel".to_string(),
@@ -118,6 +122,7 @@ pub fn define_ollama_native_api() -> RestApi {
                 request: Some(ApiRequest::json_type("ShowModelBody")),
                 response: ApiResponse::json_type("ShowModelResponse"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "PullModel".to_string(),
@@ -129,6 +134,7 @@ pub fn define_ollama_native_api() -> RestApi {
                 request: Some(ApiRequest::json_type("PullModelBody")),
                 response: ApiResponse::Binary, // Streaming progress
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "PushModel".to_string(),
@@ -139,6 +145,7 @@ pub fn define_ollama_native_api() -> RestApi {
                 request: Some(ApiRequest::json_type("PushModelBody")),
                 response: ApiResponse::Binary, // Streaming progress
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "CopyModel".to_string(),
@@ -148,6 +155,7 @@ pub fn define_ollama_native_api() -> RestApi {
                 request: Some(ApiRequest::json_type("CopyModelBody")),
                 response: ApiResponse::Empty,
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "DeleteModel".to_string(),
@@ -157,6 +165,7 @@ pub fn define_ollama_native_api() -> RestApi {
                 request: Some(ApiRequest::json_type("DeleteModelBody")),
                 response: ApiResponse::Empty,
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "CreateModel".to_string(),
@@ -167,6 +176,7 @@ pub fn define_ollama_native_api() -> RestApi {
                 request: Some(ApiRequest::json_type("CreateModelBody")),
                 response: ApiResponse::Binary, // Streaming progress
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "ListRunningModels".to_string(),
@@ -176,6 +186,7 @@ pub fn define_ollama_native_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("ListRunningModelsResponse"),
                 headers: vec![],
+                    params: None,
             },
         ],
         module_path: None,
@@ -227,6 +238,7 @@ pub fn define_ollama_openai_api() -> RestApi {
                 request: Some(ApiRequest::json_type("OpenAIChatCompletionRequest")),
                 response: ApiResponse::Binary, // SSE streaming
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "Completions".to_string(),
@@ -236,6 +248,7 @@ pub fn define_ollama_openai_api() -> RestApi {
                 request: Some(ApiRequest::json_type("OpenAICompletionRequest")),
                 response: ApiResponse::Binary, // SSE streaming
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "Embeddings".to_string(),
@@ -245,6 +258,7 @@ pub fn define_ollama_openai_api() -> RestApi {
                 request: Some(ApiRequest::json_type("OpenAIEmbeddingRequest")),
                 response: ApiResponse::json_type("OpenAIEmbeddingResponse"),
                 headers: vec![],
+                    params: None,
             },
             Endpoint {
                 id: "ListModels".to_string(),
@@ -254,6 +268,7 @@ pub fn define_ollama_openai_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("OpenAIListModelsResponse"),
                 headers: vec![],
+                    params: None,
             },
         ],
         module_path: None,

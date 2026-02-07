@@ -148,7 +148,7 @@ impl From<&str> for SensitiveString {
 /// let env = EnvList::from_strs(&["OPENAI_API_KEY", "OPENAI_KEY", "API_KEY"]);
 /// assert_eq!(env.names().len(), 3);
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EnvList {
     /// Environment variable names in priority order (first match wins).
     names: Vec<String>,
@@ -233,7 +233,7 @@ impl EnvList {
 ///     header: "Authorization".to_string(),
 /// };
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ApiKeyEnv {
     /// Environment variables to check (in priority order).
     pub names: EnvList,
@@ -273,7 +273,7 @@ pub struct ApiKeyEnv {
 ///     api_key: None,
 /// };
 /// ```
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EnvMapping {
     /// Environment variables for bearer token (e.g., for Authorization: Bearer TOKEN).
     pub bearer_token: Option<EnvList>,

@@ -81,6 +81,7 @@ pub mod huggingface;
 pub mod ollama;
 pub mod openai;
 pub mod prelude;
+pub mod registry;
 
 // Re-export API definition functions for convenience
 pub use anthropic::define_anthropic_api;

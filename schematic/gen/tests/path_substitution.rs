@@ -29,6 +29,7 @@ fn single_path_param_struct_has_field() {
         request: None,
         response: ApiResponse::json_type("User"),
         headers: vec![],
+                params: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -56,6 +57,7 @@ fn single_path_param_into_parts_format_string() {
         request: None,
         response: ApiResponse::json_type("User"),
         headers: vec![],
+                params: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -85,6 +87,7 @@ fn multiple_path_params_struct_has_all_fields() {
         request: None,
         response: ApiResponse::json_type("Message"),
         headers: vec![],
+                params: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -111,6 +114,7 @@ fn multiple_path_params_into_parts_format_string() {
         request: None,
         response: ApiResponse::json_type("Message"),
         headers: vec![],
+                params: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -134,6 +138,7 @@ fn three_path_params_into_parts_format_string() {
         request: None,
         response: ApiResponse::json_type("Comments"),
         headers: vec![],
+                params: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -174,6 +179,7 @@ fn no_path_params_no_fields() {
         request: None,
         response: ApiResponse::json_type("ListResponse"),
         headers: vec![],
+                params: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -207,6 +213,7 @@ fn path_param_with_body_has_both_fields() {
         request: Some(ApiRequest::json_type("UpdateThreadBody")),
         response: ApiResponse::json_type("Thread"),
         headers: vec![],
+                params: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -252,6 +259,7 @@ fn multiple_path_params_with_body() {
         request: Some(ApiRequest::json_type("CreateCommentBody")),
         response: ApiResponse::json_type("Comment"),
         headers: vec![],
+                params: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -309,6 +317,7 @@ fn all_http_methods_generate_correct_method_string() {
             request: None,
             response: ApiResponse::json_type("Response"),
             headers: vec![],
+                params: None,
         };
 
         let tokens = generate_request_struct(&endpoint);
@@ -338,6 +347,7 @@ fn consecutive_path_params() {
         request: None,
         response: ApiResponse::json_type("Response"),
         headers: vec![],
+                params: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -363,6 +373,7 @@ fn path_param_at_start() {
         request: None,
         response: ApiResponse::json_type("Response"),
         headers: vec![],
+                params: None,
     };
 
     let tokens = generate_request_struct(&endpoint);
@@ -389,6 +400,7 @@ fn underscore_in_param_name() {
         request: None,
         response: ApiResponse::json_type("Profile"),
         headers: vec![],
+                params: None,
     };
 
     let tokens = generate_request_struct(&endpoint);

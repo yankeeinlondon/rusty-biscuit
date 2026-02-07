@@ -24,7 +24,9 @@ pub use structure::print_structure;
 pub use topics::print_topics_table;
 
 // Re-export types needed by submodules
-pub(crate) use filesystem::{print_filesystem_section, print_language_section, print_repo_section};
+pub(crate) use filesystem::{
+    print_docs_section, print_filesystem_section, print_language_section, print_repo_section,
+};
 pub(crate) use hardware::{
     print_cpu_section, print_gpu_section, print_hardware_section, print_memory_section,
     print_storage_section,
@@ -64,6 +66,8 @@ pub enum OutputFilter {
     Repo,
     /// Show only language detection (filesystem subsection, flattened in JSON)
     Language,
+    /// Show only markdown document metadata (filesystem subsection, flattened in JSON)
+    Docs,
     /// Show only programs info (installed programs detection)
     Programs,
     /// Show only editors (programs subsection)
@@ -264,6 +268,13 @@ pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter, histo
                 print_language_section(langs, verbose);
             }
         }
+        OutputFilter::Docs => {
+            if let Some(ref filesystem) = result.filesystem
+                && let Some(ref docs) = filesystem.docs
+            {
+                print_docs_section(docs);
+            }
+        }
         // Programs and Services filters are handled separately in main.rs
         OutputFilter::Programs
         | OutputFilter::Editors
@@ -382,6 +393,14 @@ fn apply_filter_to_json(result: &SniffResult, filter: OutputFilter) -> serde_jso
                 serde_json::to_value(&fs.languages).unwrap_or(Value::Null)
             } else {
                 json!({})
+            }
+        }
+        OutputFilter::Docs => {
+            // Flatten: return docs array at top level
+            if let Some(ref fs) = result.filesystem {
+                serde_json::to_value(&fs.docs).unwrap_or(json!([]))
+            } else {
+                json!([])
             }
         }
         // Programs and Services filters are handled separately

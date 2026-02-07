@@ -1,0 +1,154 @@
+openapi: 3.0.3
+info:
+  title: OpenAI
+  description: OpenAI REST API for model management
+  version: 1.0.0
+servers:
+- url: https://api.openai.com/v1
+  description: OpenAI API Server
+paths:
+  /models:
+    get:
+      summary: Lists the currently available models
+      description: Lists the currently available models
+      operationId: ListModels
+      responses:
+        '200':
+          description: Successful JSON response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListModelsResponse'
+      x-schematic:
+        response:
+          Json:
+            module_path: null
+            type_name: ListModelsResponse
+  /models/{model}:
+    get:
+      summary: Retrieves a model instance
+      description: Retrieves a model instance
+      operationId: RetrieveModel
+      responses:
+        '200':
+          description: Successful JSON response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+      x-schematic:
+        response:
+          Json:
+            module_path: null
+            type_name: Model
+    delete:
+      summary: Delete a fine-tuned model
+      description: Delete a fine-tuned model
+      operationId: DeleteModel
+      responses:
+        '200':
+          description: Successful JSON response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteModelResponse'
+      x-schematic:
+        response:
+          Json:
+            module_path: null
+            type_name: DeleteModelResponse
+    parameters:
+    - in: path
+      name: model
+      required: true
+      schema:
+        type: string
+      style: simple
+    - in: path
+      name: model
+      required: true
+      schema:
+        type: string
+      style: simple
+components:
+  schemas:
+    Model:
+      title: Model
+      description: |-
+        An OpenAI model object.
+
+        Describes a model available through the OpenAI API.
+      type: object
+      properties:
+        created:
+          description: Unix timestamp of when the model was created.
+          type: integer
+          format: int64
+        id:
+          description: The model identifier (e.g., "gpt-4").
+          type: string
+        object:
+          description: The object type, always "model".
+          type: string
+        owned_by:
+          description: The organization that owns the model.
+          type: string
+      required:
+      - id
+      - object
+      - created
+      - owned_by
+    ListModelsResponse:
+      title: ListModelsResponse
+      description: Response from the List Models endpoint.
+      type: object
+      properties:
+        data:
+          description: List of model objects.
+          type: array
+          items:
+            allOf:
+            - $ref: '#/components/schemas/Model'
+        object:
+          description: The object type, always "list".
+          type: string
+      required:
+      - object
+      - data
+    DeleteModelResponse:
+      title: DeleteModelResponse
+      description: Response from the Delete Model endpoint.
+      type: object
+      properties:
+        deleted:
+          description: Whether the deletion was successful.
+          type: boolean
+        id:
+          description: The model identifier that was deleted.
+          type: string
+        object:
+          description: The object type, always "model".
+          type: string
+      required:
+      - id
+      - object
+      - deleted
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Bearer token authentication
+security:
+- bearerAuth: []
+externalDocs:
+  description: API Documentation
+  url: https://platform.openai.com/docs/api-reference
+x-schematic:
+  env_mapping:
+    api_key: null
+    basic_pass: null
+    basic_user: null
+    bearer_token:
+      names:
+      - OPENAI_API_KEY

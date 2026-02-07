@@ -534,6 +534,7 @@ mod tests {
                 request: None,
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
+                params: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -577,6 +578,7 @@ mod tests {
                 request: None,
                 response: ApiResponse::json_type("ListItemsResponse"),
                 headers: vec![],
+                params: None,
             }],
             module_path: None,
             request_suffix: None,
@@ -841,6 +843,7 @@ mod tests {
                 request: None,
                 response: ApiResponse::Binary,
                 headers: vec![],
+                params: None,
             }],
         );
         let tokens = generate_request_method(&api);
@@ -885,6 +888,7 @@ mod tests {
                 request: None,
                 response: ApiResponse::Text,
                 headers: vec![],
+                params: None,
             }],
         );
         let tokens = generate_request_method(&api);
@@ -923,6 +927,7 @@ mod tests {
                 request: None,
                 response: ApiResponse::Empty,
                 headers: vec![],
+                params: None,
             }],
         );
         let tokens = generate_request_method(&api);
@@ -958,6 +963,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::json_type("ListItemsResponse"),
                     headers: vec![],
+                params: None,
                 },
                 Endpoint {
                     id: "CreateSpeech".to_string(),
@@ -967,6 +973,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::Binary,
                     headers: vec![],
+                params: None,
                 },
             ],
         );
@@ -1010,6 +1017,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::json_type("ListItemsResponse"),
                     headers: vec![],
+                params: None,
                 },
                 Endpoint {
                     id: "CreateSpeech".to_string(),
@@ -1019,6 +1027,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::Binary,
                     headers: vec![],
+                params: None,
                 },
                 Endpoint {
                     id: "GetText".to_string(),
@@ -1028,6 +1037,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::Text,
                     headers: vec![],
+                params: None,
                 },
                 Endpoint {
                     id: "DeleteItem".to_string(),
@@ -1037,6 +1047,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::Empty,
                     headers: vec![],
+                params: None,
                 },
             ],
         );
@@ -1099,6 +1110,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::Binary,
                     headers: vec![],
+                params: None,
                 },
                 Endpoint {
                     id: "GetVoiceSampleAudio".to_string(),
@@ -1108,6 +1120,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::Binary,
                     headers: vec![],
+                params: None,
                 },
             ],
         );

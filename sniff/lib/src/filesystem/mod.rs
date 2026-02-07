@@ -2,11 +2,13 @@ use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+pub mod docs;
 pub mod formatting;
 pub mod git;
 pub mod languages;
 pub mod repo;
 
+pub use docs::{MarkdownMeta, RepoDocuments, detect_docs};
 pub use formatting::{EditorConfigSection, FormattingConfig, detect_formatting};
 pub use git::{
     BehindStatus, CommitInfo, GitInfo, HostingProvider, RemoteInfo, RepoStatus, detect_git,
@@ -27,6 +29,9 @@ pub struct FilesystemInfo {
     pub repo: Option<RepoInfo>,
     /// EditorConfig formatting configuration
     pub formatting: Option<FormattingConfig>,
+    /// Markdown documents in the repository
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docs: Option<Vec<MarkdownMeta>>,
 }
 
 /// Detect all filesystem information for a directory.
@@ -41,11 +46,13 @@ pub fn detect_filesystem(root: &Path, deep: bool, commit_count: usize) -> Result
     let git = detect_git(root, deep, commit_count)?;
     let repo = detect_repo(root)?;
     let formatting = detect_formatting(root).ok().flatten();
+    let docs = detect_docs(root);
 
     Ok(FilesystemInfo {
         languages,
         git,
         repo,
         formatting,
+        docs,
     })
 }

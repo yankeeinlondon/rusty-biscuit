@@ -1,10 +1,11 @@
-//! Filesystem section output formatting (Git, Repo, Languages).
+//! Filesystem section output formatting (Git, Repo, Languages, Docs).
 
 use std::path::Path;
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
+use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{BehindStatus, ConventionalCommit, FileStatus, RefKind};
 
 use super::{format_number, relative_path};
@@ -704,5 +705,52 @@ pub fn print_filesystem_section(fs: &sniff::FilesystemInfo, verbose: u8, repo_ro
                 println!("    ... and {} more", packages.len() - show_count);
             }
         }
+    }
+}
+
+/// Print markdown documents section.
+pub(crate) fn print_docs_section(docs: &[MarkdownMeta]) {
+    let prompt_count = docs.iter().filter(|d| d.prompt.is_some()).count();
+
+    let header = if prompt_count > 0 {
+        format!(
+            "<b>Docs</b> <dim>({} documents, {} with prompts)</dim>",
+            docs.len(),
+            prompt_count
+        )
+    } else {
+        format!("<b>Docs</b> <dim>({} documents)</dim>", docs.len())
+    };
+    println!("\n{}\n", Prose::new(&header).render(None));
+
+    for doc in docs {
+        let pkg_display = doc.package.as_deref().unwrap_or("(root)");
+
+        let date_str = doc.last_updated.format("%Y-%m-%d").to_string();
+
+        let mut details = vec![
+            format!("<dim>Package:</dim> {pkg_display}"),
+            format!("<dim>Updated:</dim> {date_str}"),
+        ];
+
+        if !doc.title.is_empty() {
+            details.insert(0, format!("<dim>Title:</dim> {}", doc.title));
+        }
+
+        if doc.prompt.is_some() {
+            details.push("<dim>Prompt:</dim> <green>yes</green>".to_string());
+        }
+        if let Some(ref model) = doc.model {
+            details.push(format!("<dim>Model:</dim> {model}"));
+        }
+
+        println!(
+            "  {}",
+            Prose::new(&format!("<cyan>{}</cyan>", doc.relative)).render(None)
+        );
+        for detail in &details {
+            println!("    {}", Prose::new(detail).render(None));
+        }
+        println!();
     }
 }

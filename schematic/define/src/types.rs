@@ -11,6 +11,7 @@ use strum::{Display, EnumIter, EnumString};
 
 use crate::auth::AuthStrategy;
 use crate::headers::{EnvList, EnvMapping};
+use crate::params::EndpointParams;
 use crate::request::ApiRequest;
 use crate::response::ApiResponse;
 
@@ -102,6 +103,7 @@ pub enum RestMethod {
 ///             request: None,
 ///             response: ApiResponse::json_type("HealthResponse"),
 ///             headers: vec![],
+///             params: None,
 ///         },
 ///     ],
 ///     module_path: None,
@@ -326,6 +328,7 @@ impl RestApi {
 ///     request: None,
 ///     response: ApiResponse::json_type("User"),
 ///     headers: vec![],
+///     params: None,
 /// };
 ///
 /// assert!(endpoint.path.contains("{user_id}"));
@@ -344,6 +347,7 @@ impl RestApi {
 ///     request: Some(ApiRequest::json_type("CreateUserRequest")),
 ///     response: ApiResponse::json_type("User"),
 ///     headers: vec![],
+///     params: None,
 /// };
 ///
 /// assert!(endpoint.request.is_some());
@@ -365,6 +369,7 @@ impl RestApi {
 ///     ])),
 ///     response: ApiResponse::json_type("FileUploadResponse"),
 ///     headers: vec![],
+///     params: None,
 /// };
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -398,6 +403,14 @@ pub struct Endpoint {
     /// headers: vec![("anthropic-beta".to_string(), "message-batches-2024-09-24".to_string())]
     /// ```
     pub headers: Vec<(String, String)>,
+    /// Query, header, and cookie parameters for this endpoint.
+    ///
+    /// These parameters are imported from API specifications like OpenAPI and
+    /// define additional request parameters beyond the body and path parameters.
+    ///
+    /// If `None`, the endpoint has no imported parameters (backwards compatible
+    /// with existing endpoint definitions).
+    pub params: Option<EndpointParams>,
 }
 
 #[cfg(test)]
