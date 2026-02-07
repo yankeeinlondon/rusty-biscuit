@@ -45,11 +45,12 @@ commit:
 
 # Install the Claudine CLI
 install:
+    @echo ""
     @echo -e "{{BOLD}}Building Claudine Library{{RESET}}"
     @echo ""
     @cargo build -p claudine --release
     @echo ""
-    @echo -e ""
+    @echo -e "{{BOLD}}{{YELLOW}}Installing Claudine CLI{{RESET}}"
     @cargo install --path ./cli
 
 # Validate the source code without doing a full build

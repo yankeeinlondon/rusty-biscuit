@@ -56,3 +56,15 @@ cli *args="":
 
 docs:
   @cargo clean --doc && cargo doc --no-deps --lib
+
+install:
+    @echo ""
+    @echo "{{BOLD}}Building Unchained AI Library{{RESET}}"
+    @cargo build -p unchained-ai
+    @echo ""
+    @echo "{{BOLD}}{{RED}}Skipping Unchained AI CLI{{RESET}}"
+    @echo ""
+    # @cargo install --path cli
+    # @echo ""
+    # @echo ""
+    # @echo ""

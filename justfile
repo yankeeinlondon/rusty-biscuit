@@ -2,7 +2,7 @@ set dotenv-load
 set positional-arguments
 
 # List of areas in this monorepo
-areas := "biscuit-hash biscuit-speaks biscuit-terminal biscuit-file playa playa-cli unchained-ai research so-you-say tree-hugger tree-hugger-cli darkmatter sniff claudine"
+areas := "biscuit-hash biscuit-speaks biscuit-terminal schematic biscuit-file unchained-ai playa so-you-say tree-hugger darkmatter sniff model-citizen claudine research queue"
 
 BOLD := '\033[1m'
 RESET := '\033[0m'

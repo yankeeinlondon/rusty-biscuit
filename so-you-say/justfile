@@ -43,11 +43,15 @@ lint *args="":
     @echo "Linting so-you-say CLI"
     @echo "----------------------"
     @echo ""
-    @cargo clippy 
+    @cargo clippy {{args}}
 
 # install the `speak` binary into the executable path
 install:
+    @echo ""
+    @echo "{{BOLD}}Building Sniff Library{{RESET}}"
     @cargo build --release -p so-you-say
+    @echo ""
+    @echo "{{BOLD}}{{YELLOW}}Installing Sniff CLI{{RESET}}"
     @cargo install --path "." --locked
 
 # run the debug release of the so-you-say CLI

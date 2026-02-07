@@ -33,7 +33,15 @@ lint *args="":
 
 # install latest release version of CLI
 install *args="":
+    @echo ""
+    @echo "{{BOLD}}Building Queue Library"
+    @cargo build --release -p queue
+    @echo ""
+    @echo "{{BOLD}}{{YELLOW}}Installing Queue CLI{{RESET}}"
     @cargo install --path cli {{args}}
+    @echo ""
+    @echo "{{BOLD}}{{BLUE}}Queue CLI Installed!{{RESET}}"
+    @echo ""
 
 # build and show the docs for the library code
 docs:

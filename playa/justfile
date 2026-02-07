@@ -57,6 +57,9 @@ install:
     @echo "{{BOLD}}{{YELLOW}}Installing the Playa CLI{{RESET}}"
     @echo ""
     @cargo install --path ./cli
+    @echo ""
+    @echo "{{BOLD}}{{BLUE}}Playa CLI Installed!{{RESET}}"
+    @echo ""
 
 # Validate the source code without doing a full build
 check:

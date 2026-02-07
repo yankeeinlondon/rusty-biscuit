@@ -30,7 +30,14 @@ lint *args="":
 
 # install latest release version of CLI
 install *args="":
+    @echo ""
+    @echo "{{BOLD}}Build Tree Hugger Library{{RESET}}"
+    @cargo build --release -p tree-hugger-cli
+    @echo "{{BOLD}}{{YELLOW}}Installing Tree Hugger CLI{{RESET}}"
     @cargo install --path cli -- {{args}}
+    @echo ""
+    @echo "{{BOLD}}{{BLUE}}Tree Hugger CLI installed{{RESET}}"
+    @echo ""
 
 # build and show the docs for the library code
 docs:
