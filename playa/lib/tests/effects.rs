@@ -732,5 +732,5 @@ fn sound_effect_fuzzy_name_matching() {
 
 #[test]
 fn sound_effect_all_matches_total_count() {
-    assert_eq!(SoundEffect::all().len(), 53, "Expected 53 total effects");
+    assert_eq!(SoundEffect::all().len(), 85, "Expected 85 total effects");
 }

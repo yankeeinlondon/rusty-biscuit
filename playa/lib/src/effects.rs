@@ -14,13 +14,13 @@
 //!
 //! | Feature | Contents | Effects | Size |
 //! |---------|----------|---------|------|
-//! | `sfx-ui` | Doorbells, alerts, clicks, selections, window actions | 44 | ~4MB |
+//! | `sfx-ui` | Doorbells, alerts, clicks, selections, window actions | 43 | ~4MB |
 //! | `sfx-cartoon` | Cartoon accents, cries | 13 | ~8MB |
 //! | `sfx-reactions` | Laughs, cheers, trombone | 6 | ~4MB |
 //! | `sfx-scifi` | Phase jumps, phasers | 11 | ~3MB |
 //! | `sfx-atmosphere` | Music stings, transitions | 5 | ~7MB |
 //! | `sfx-motion` | Whooshes, air sounds | 7 | ~5MB |
-//! | **`sound-effects`** | **All categories** | **86** | **~31MB** |
+//! | **`sound-effects`** | **All categories** | **85** | **~31MB** |
 //!
 //! ## Usage
 //!

@@ -16,7 +16,7 @@ audio-ducking-linux = ["audio-ducking", "pulsectl-rs", "alsa"]
 sound-effects = ["sfx-ui", "sfx-cartoon", "sfx-reactions", "sfx-scifi", "sfx-atmosphere", "sfx-motion"]
 
 # Individual categories (users pick what they need)
-sfx-ui = []         # doorbells, alerts, clicks, selections, window actions (~4MB, 44 files)
+sfx-ui = []         # doorbells, alerts, clicks, selections, window actions (~4MB, 43 files)
 sfx-cartoon = []    # cartoon accents (~8MB, 13 files)
 sfx-reactions = []  # laughs, cheers, trombone (~4MB, 6 files)
 sfx-scifi = []      # phase jumps, phasers (~3MB, 11 files)
