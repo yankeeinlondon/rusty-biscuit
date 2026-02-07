@@ -49,3 +49,5 @@ Rendering to HTML (aka, the Browser) is deploying to the most feature-rich platf
 |[Charting](./charting.md)                   | -       |      |    |      |
 |[Mermaid Rendering](./mermaid-rendering.md) | ✅      |  -   | -  |  ✅  |
 
+
+
