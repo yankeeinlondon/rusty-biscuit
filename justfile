@@ -160,7 +160,7 @@ install-release-plz:
 sniff *args="":
     @cargo run -p sniff-cli -- {{args}}
 
-lint *args="":
+lint:
   #!/usr/bin/env bash
     set -euo pipefail
     echo ""
@@ -188,7 +188,7 @@ lint *args="":
 commit:
     @echo "Committing staged changes in the Rusty Biscuit monorepo to git"
     @echo ""
-    @opencode run commit "-f" --model "openai/gpt-5.2"
+    @opencode run commit "-f" --model "openai/gpt-5.2-codex"
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
