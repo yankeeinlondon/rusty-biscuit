@@ -84,22 +84,36 @@ let headers = Headers::default()
 use schematic_define::Headers;
 use schematic_schema::OpenAI;
 
-// Create headers with programmatic credentials
-let custom_headers = Headers::default()
-    .use_bearer_token("sk-proj-custom-token")
-    .build()?;
-
-// Apply to client variant
-let client = OpenAI::default()
-    .variant_with_headers(custom_headers);
+// Create headers with programmatic credentials - no env vars needed!
+let client = OpenAI::new()
+    .variant()
+    .headers_builder(Headers::default().use_bearer_token("sk-proj-custom-token"))
+    .build();
 
 // Make authenticated requests
 let response = client.request::<ChatCompletionResponse>(req).await?;
 ```
 
+### Automatic Environment Auth Bypass
+
+When `Headers` has an authorization set via `use_bearer_token()` or `use_basic_auth()`, the generated code automatically skips the environment variable auth check. You don't need to also set `AuthStrategy::None`.
+
+The generated code checks `headers.has_authorization()` before attempting env-based auth:
+
+```rust
+// Simplified view of generated code
+if !self.headers.has_authorization() {
+    // Only check env vars if Headers doesn't have auth set
+    match &self.auth_strategy {
+        AuthStrategy::BearerToken { .. } => { /* check env vars */ }
+        // ...
+    }
+}
+```
+
 ### Default Environment Loading
 
-Generated clients automatically attempt to load credentials from environment variables using their configured `EnvMapping`. You can override this by using `variant_with_headers()`.
+Generated clients automatically attempt to load credentials from environment variables using their configured `EnvMapping`. You can override this by using the variant builder with `headers_builder()`.
 
 ## Environment Variable Resolution
 

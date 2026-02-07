@@ -465,46 +465,57 @@ fn to_snake_case(s: &str) -> String {
 ///
 /// This approach allows the `variant()` method to change auth configuration
 /// at runtime, rather than being locked in at code generation time.
+///
+/// ## Programmatic Auth Override
+///
+/// If the `Headers` builder already has an authorization header set (via
+/// `use_bearer_token()`, `use_basic_auth()`, etc.), the env-based auth check
+/// is skipped. This allows users to inject tokens programmatically without
+/// needing to also set `AuthStrategy::None`.
 fn generate_auth_setup(_api: &RestApi) -> TokenStream {
     // Generate runtime auth matching using struct fields
+    // Skip env-based auth if Headers already has authorization set programmatically
     quote! {
-        match &self.auth_strategy {
-            schematic_define::AuthStrategy::None => {}
-            schematic_define::AuthStrategy::BearerToken { header } => {
-                let header_name = header.as_deref().unwrap_or("Authorization");
-                let token = self.env_auth
-                    .iter()
-                    .find_map(|var| std::env::var(var).ok())
-                    .ok_or_else(|| SchematicError::MissingCredential {
-                        env_vars: self.env_auth.clone(),
-                    })?;
-                req_builder = req_builder.header(header_name, format!("Bearer {}", token));
+        // Skip env-based auth if Headers already has authorization set programmatically
+        if !self.headers.has_authorization() {
+            match &self.auth_strategy {
+                schematic_define::AuthStrategy::None => {}
+                schematic_define::AuthStrategy::BearerToken { header } => {
+                    let header_name = header.as_deref().unwrap_or("Authorization");
+                    let token = self.env_auth
+                        .iter()
+                        .find_map(|var| std::env::var(var).ok())
+                        .ok_or_else(|| SchematicError::MissingCredential {
+                            env_vars: self.env_auth.clone(),
+                        })?;
+                    req_builder = req_builder.header(header_name, format!("Bearer {}", token));
+                }
+                schematic_define::AuthStrategy::ApiKey { header } => {
+                    let key = self.env_auth
+                        .iter()
+                        .find_map(|var| std::env::var(var).ok())
+                        .ok_or_else(|| SchematicError::MissingCredential {
+                            env_vars: self.env_auth.clone(),
+                        })?;
+                    req_builder = req_builder.header(header.as_str(), key);
+                }
+                schematic_define::AuthStrategy::Basic => {
+                    // Username from env_username, password from env_auth[0]
+                    let username_env = self.env_username.as_deref().unwrap_or("USERNAME");
+                    let password_env = self.env_auth.first().map(String::as_str).unwrap_or("PASSWORD");
+                    let username = std::env::var(username_env)
+                        .map_err(|_| SchematicError::MissingCredential {
+                            env_vars: vec![username_env.to_string()],
+                        })?;
+                    let password = std::env::var(password_env)
+                        .map_err(|_| SchematicError::MissingCredential {
+                            env_vars: vec![password_env.to_string()],
+                        })?;
+                    req_builder = req_builder.basic_auth(username, Some(password));
+                }
+                // Handle future variants (non_exhaustive)
+                _ => {}
             }
-            schematic_define::AuthStrategy::ApiKey { header } => {
-                let key = self.env_auth
-                    .iter()
-                    .find_map(|var| std::env::var(var).ok())
-                    .ok_or_else(|| SchematicError::MissingCredential {
-                        env_vars: self.env_auth.clone(),
-                    })?;
-                req_builder = req_builder.header(header.as_str(), key);
-            }
-            schematic_define::AuthStrategy::Basic => {
-                // Username from env_username, password from env_auth[0]
-                let username_env = self.env_username.as_deref().unwrap_or("USERNAME");
-                let password_env = self.env_auth.first().map(String::as_str).unwrap_or("PASSWORD");
-                let username = std::env::var(username_env)
-                    .map_err(|_| SchematicError::MissingCredential {
-                        env_vars: vec![username_env.to_string()],
-                    })?;
-                let password = std::env::var(password_env)
-                    .map_err(|_| SchematicError::MissingCredential {
-                        env_vars: vec![password_env.to_string()],
-                    })?;
-                req_builder = req_builder.basic_auth(username, Some(password));
-            }
-            // Handle future variants (non_exhaustive)
-            _ => {}
         }
     }
 }
@@ -666,7 +677,8 @@ mod tests {
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Check that self.env_auth is used at runtime
-        assert!(code.contains("self.env_auth"));
+        // Note: rustfmt may split these across lines, so check for the field name
+        assert!(code.contains(".env_auth"));
         assert!(code.contains(r#"format!("Bearer {}", token)"#));
         assert!(code.contains("MissingCredential"));
     }
@@ -684,7 +696,8 @@ mod tests {
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Check that self.env_auth is used at runtime
-        assert!(code.contains("self.env_auth"));
+        // Note: rustfmt may split these across lines, so check for the field name
+        assert!(code.contains(".env_auth"));
         assert!(code.contains("header.as_str()"));
         assert!(code.contains("MissingCredential"));
     }
@@ -696,8 +709,12 @@ mod tests {
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
         // Check basic auth setup uses struct fields
-        assert!(code.contains("self.env_username"));
-        assert!(code.contains("self.env_auth"));
+        // Note: rustfmt may split these across lines, so check for the field name
+        assert!(
+            code.contains(".env_username"),
+            "Expected .env_username in code"
+        );
+        assert!(code.contains(".env_auth"));
         assert!(code.contains("basic_auth(username, Some(password))"));
         assert!(code.contains("MissingCredential"));
     }
@@ -754,6 +771,11 @@ mod tests {
         let tokens = generate_auth_setup(&api);
         let code = tokens.to_string();
 
+        // Should check for programmatic auth first
+        assert!(
+            code.contains("self . headers . has_authorization"),
+            "Should check has_authorization() before env-based auth"
+        );
         // Should produce runtime match code
         assert!(code.contains("match & self . auth_strategy"));
     }
@@ -1148,5 +1170,34 @@ mod tests {
         assert_eq!(to_snake_case("ListVoices"), "list_voices");
         assert_eq!(to_snake_case("A"), "a");
         assert_eq!(to_snake_case("ABC"), "a_b_c");
+    }
+
+    #[test]
+    fn generate_auth_setup_skips_env_check_when_programmatic_auth_set() {
+        // This tests that the generated code checks has_authorization() before
+        // attempting env-based auth, allowing programmatic token injection
+        let api = make_api(
+            "ProgrammaticAuth",
+            AuthStrategy::BearerToken { header: None },
+            vec!["API_TOKEN".to_string()],
+        );
+        let tokens = generate_auth_setup(&api);
+        // Use raw token string since this is a code fragment, not a complete item
+        let code = tokens.to_string();
+
+        // The guard should appear before the match statement
+        assert!(
+            code.contains("self . headers . has_authorization"),
+            "Should skip env-based auth when Headers has authorization set.\nGenerated code:\n{}",
+            code
+        );
+
+        // The match should be inside the if block
+        let if_pos = code.find("self . headers . has_authorization").unwrap();
+        let match_pos = code.find("match & self . auth_strategy").unwrap();
+        assert!(
+            match_pos > if_pos,
+            "match statement should come after has_authorization() check"
+        );
     }
 }

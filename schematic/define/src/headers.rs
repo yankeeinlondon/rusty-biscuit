@@ -831,6 +831,30 @@ impl Headers {
         Ok(self)
     }
 
+    /// Returns `true` if an authorization header has been set programmatically.
+    ///
+    /// This includes headers set via [`use_bearer_token`](Self::use_bearer_token),
+    /// [`use_basic_auth`](Self::use_basic_auth), or loaded from environment variables.
+    ///
+    /// Use this to check whether authentication will be handled by the `Headers`
+    /// builder, allowing you to skip redundant environment-based auth checks.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_define::Headers;
+    ///
+    /// let headers = Headers::default();
+    /// assert!(!headers.has_authorization());
+    ///
+    /// let headers = Headers::default().use_bearer_token("token");
+    /// assert!(headers.has_authorization());
+    /// ```
+    #[must_use]
+    pub fn has_authorization(&self) -> bool {
+        self.authorization.is_some()
+    }
+
     /// Build the final header list.
     ///
     /// This validates all header names are ASCII and returns a vector of
@@ -1448,6 +1472,39 @@ mod tests {
 
         assert_eq!(ct_headers.len(), 1);
         assert_eq!(ct_headers[0].1, "application/json");
+    }
+
+    #[test]
+    fn headers_has_authorization_false_by_default() {
+        let headers = Headers::default();
+        assert!(!headers.has_authorization());
+    }
+
+    #[test]
+    fn headers_has_authorization_true_after_bearer_token() {
+        let headers = Headers::default().use_bearer_token("my-token");
+        assert!(headers.has_authorization());
+    }
+
+    #[test]
+    fn headers_has_authorization_true_after_basic_auth() {
+        let headers = Headers::default().use_basic_auth("user", "pass");
+        assert!(headers.has_authorization());
+    }
+
+    #[test]
+    fn headers_has_authorization_false_after_api_key() {
+        // API key uses custom header, not Authorization
+        let headers = Headers::default().use_api_key("key", "X-API-Key");
+        assert!(!headers.has_authorization());
+    }
+
+    #[test]
+    fn headers_has_authorization_false_after_remove() {
+        let headers = Headers::default()
+            .use_bearer_token("token")
+            .remove("Authorization");
+        assert!(!headers.has_authorization());
     }
 
     #[test]

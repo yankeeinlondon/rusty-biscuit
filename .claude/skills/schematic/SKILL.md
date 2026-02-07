@@ -1,6 +1,6 @@
 ---
 name: schematic
-description: Expert knowledge for Schematic REST and WebSocket API client code generation. Use when defining APIs, generating typed Rust clients, adding new endpoints, configuring authentication, or troubleshooting code generation issues.
+description: Expert knowledge for Schematic REST and WebSocket API client code generation. Use when defining APIs, generating typed Rust clients, importing OpenAPI specs, adding endpoints, configuring authentication, building headers programmatically, or troubleshooting code generation issues.
 ---
 
 # Schematic
@@ -11,24 +11,28 @@ Type-safe REST and WebSocket API client code generation for Rust. Define APIs de
 
 | Package | Purpose |
 |---------|---------|
-| `schematic-define` | Primitives: `RestApi`, `Endpoint`, `AuthStrategy`, `ApiRequest`, `ApiResponse`, `WebSocketApi` |
-| `schematic-definitions` | Pre-built APIs: Anthropic, OpenAI, ElevenLabs (REST + WebSocket), HuggingFace, Ollama, EMQX |
-| `schematic-gen` | Code generator CLI with `validate` and `generate` subcommands |
+| `schematic-define` | Primitives: `RestApi`, `Endpoint`, `AuthStrategy`, `Headers`, `ApiRequest`, `ApiResponse` |
+| `schematic-definitions` | Pre-built APIs: Anthropic, OpenAI, ElevenLabs, HuggingFace, Ollama, EMQX |
+| `schematic-gen` | Code generator CLI with `generate`, `validate`, and `import` commands |
 | `schematic-schema` | Generated clients (auto-generated, do not edit) |
 
-## CLI Usage
+## CLI Commands
 
 ```bash
-# Generate a specific API
+# Generate client code
 schematic-gen generate --api anthropic --output schematic/schema/src
 
 # Validate without generating
 schematic-gen validate --api openai
 
-# Generate all standard APIs (excludes Ollama/EMQX shared modules)
-schematic-gen generate --api all
+# Import from OpenAPI spec (feature-gated)
+schematic-gen import --input api.yaml --output schematic/schema/src
 
-# Available: anthropic, openai, elevenlabs, huggingface, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all
+# Generate with OpenAPI export
+schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
+
+# Available APIs: anthropic, openai, elevenlabs, huggingface, ollama-native,
+#                 ollama-openai, emqx-basic, emqx-bearer, all
 ```
 
 ## Critical Configuration
@@ -78,30 +82,38 @@ pub struct GenerateBody { ... }  // Generated: struct GenerateRequest { body: Ge
 ### Constructors
 
 ```rust
-let client = OpenAI::new();                                  // Default
+let client = OpenAI::new()?;                                 // Default (reads env vars)
 let client = OpenAI::with_base_url("http://localhost:8080"); // Custom URL
 let client = OpenAI::with_client(custom_reqwest_client);     // Custom HTTP client
-let client = OpenAI::with_client_and_base_url(client, url);  // Both
 ```
 
-### Accessors
+### Programmatic Authentication
+
+Inject tokens without environment variables using the `Headers` builder:
 
 ```rust
-client.http_client()    // &reqwest::Client - for custom requests
-client.api_base_url()   // &str - current base URL
-client.api_key_header() // Option<(String, String)> - auth header if ApiKey
+use schematic_define::Headers;
+
+let token = get_token_from_somewhere();
+
+let client = OpenAI::new()?
+    .variant()
+    .headers_builder(Headers::default().use_bearer_token(token))
+    .build();
 ```
 
-### Variants
+When `Headers` has authorization set via `use_bearer_token()` or `use_basic_auth()`, env-based auth is skipped.
+
+### Variants for Environment Switching
 
 ```rust
 use schematic_define::UpdateStrategy;
 
-let staging = client.variant(
-    "https://staging.api.com/v1",
-    vec!["STAGING_API_KEY".to_string()],
-    UpdateStrategy::NoChange,  // Or UpdateStrategy::ChangeTo(new_auth)
-);
+let staging = client.variant()
+    .base_url("https://staging.api.com/v1")
+    .env_auth(vec!["STAGING_API_KEY".to_string()])
+    .auth_update(UpdateStrategy::NoChange)
+    .build();
 ```
 
 ## Defining New APIs
@@ -120,10 +132,12 @@ pub fn define_my_api() -> RestApi {
         auth: AuthStrategy::BearerToken { header: None },
         env_auth: vec!["MY_API_KEY".to_string()],
         env_username: None,
-        headers: vec![],  // Default headers for all requests
-        endpoints: vec![...],
-        module_path: None,      // Auto-derived from name
-        request_suffix: None,   // Defaults to "Request"
+        headers: vec![],
+        endpoints: vec![/* ... */],
+        module_path: None,
+        request_suffix: None,
+        env_mapping: None,
+        params: None,
     }
 }
 ```
@@ -140,6 +154,7 @@ Endpoint {
     request: None,
     response: ApiResponse::json_type("User"),
     headers: vec![],
+    params: None,
 }
 
 // POST with JSON body
@@ -151,6 +166,7 @@ Endpoint {
     request: Some(ApiRequest::json_type("CreateUserBody")),
     response: ApiResponse::json_type("User"),
     headers: vec![],
+    params: None,
 }
 
 // File upload with multipart form
@@ -165,6 +181,7 @@ Endpoint {
     ])),
     response: ApiResponse::json_type("FileMetadata"),
     headers: vec![],
+    params: None,
 }
 ```
 
@@ -172,10 +189,11 @@ Endpoint {
 
 | Strategy | Configuration | Generated Header |
 |----------|---------------|------------------|
-| `AuthStrategy::BearerToken { header: None }` | `env_auth: vec!["API_KEY"]` | `Authorization: Bearer <token>` |
-| `AuthStrategy::ApiKey { header: "X-Api-Key" }` | `env_auth: vec!["API_KEY"]` | `X-Api-Key: <key>` |
-| `AuthStrategy::Basic` | `env_username`, `env_auth[0]` | `Authorization: Basic <base64>` |
-| `AuthStrategy::None` | (none) | (none) |
+| `BearerToken { header: None }` | `env_auth: vec!["KEY"]` | `Authorization: Bearer <token>` |
+| `ApiKey { header: "X-Key" }` | `env_auth: vec!["KEY"]` | `X-Key: <key>` |
+| `Basic` | `env_username`, `env_auth[0]` | `Authorization: Basic <base64>` |
+| `ApiKeyParam { location, name }` | Query or cookie | `?api_key=<key>` |
+| `None` | (none) | (none) |
 
 ## Testing & Verification
 
@@ -197,9 +215,11 @@ grep -n "request_bytes\|request_text\|request_empty" schematic/schema/src/*.rs
 
 ## Detailed Documentation
 
-- [Define Package](./define.md) - API definition primitives
+- [Define Package](./define.md) - API definition primitives, Headers builder
 - [Definitions Package](./definitions.md) - Pre-built API catalog
-- [Generator Package](./gen.md) - Code generation internals
+- [Generator Package](./gen.md) - Code generation, import command
+- [OpenAPI Support](./openapi.md) - Import/export OpenAPI specs
+- [Headers Builder](./headers.md) - Programmatic auth, env resolution
 
 ## Troubleshooting
 
@@ -209,3 +229,4 @@ grep -n "request_bytes\|request_text\|request_empty" schematic/schema/src/*.rs
 | Recursive struct definition | Body type name collision | Rename to `*Body` suffix |
 | Binary endpoint returns JSON error | Wrong `ApiResponse` | Use `ApiResponse::Binary` |
 | Missing credentials error | Env var not set | Check `env_auth` var names |
+| `MissingCredential` with token | `Headers` auth not set | Use `use_bearer_token()` |

@@ -17,6 +17,7 @@ use schematic_definitions::openai::define_openai_api;
 use schematic_definitions::registry::get_registry;
 use schematic_gen::cargo_gen::write_cargo_toml;
 use schematic_gen::errors::GeneratorError;
+use schematic_gen::import_pipeline::{self, ImportOptions};
 use schematic_gen::openapi_output::write_openapi;
 use schematic_gen::output::{generate_and_write, generate_and_write_all};
 use schematic_gen::validate_api;
@@ -102,6 +103,33 @@ enum Commands {
         /// API definition to validate (e.g., "openai")
         #[arg(short, long)]
         api: String,
+    },
+
+    /// Import an OpenAPI specification and generate Rust client code
+    Import {
+        /// Path to OpenAPI spec file (JSON or YAML)
+        #[arg(short, long)]
+        input: String,
+
+        /// Override API name (derived from spec title by default)
+        #[arg(long, value_name = "NAME")]
+        api_name: Option<String>,
+
+        /// Override module path for generated code
+        #[arg(long, value_name = "PATH")]
+        module_path: Option<String>,
+
+        /// Output directory for generated code
+        #[arg(short, long)]
+        output: String,
+
+        /// Print generated code without writing files
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Fail on any warning-level diagnostic
+        #[arg(long)]
+        strict: bool,
     },
 }
 
@@ -458,6 +486,89 @@ fn run_generate_all(
     Ok(())
 }
 
+/// Runs the import command.
+fn run_import_command(
+    input: &str,
+    api_name: Option<&str>,
+    module_path: Option<&str>,
+    output: &str,
+    dry_run: bool,
+    strict: bool,
+    verbose: u8,
+) -> Result<(), GeneratorError> {
+    if verbose > 0 {
+        eprintln!("Importing OpenAPI spec: {}", input);
+        eprintln!("Output directory: {}", output);
+        if dry_run {
+            eprintln!("Dry run mode - no files will be written");
+        }
+    }
+
+    println!("{}", "Importing OpenAPI specification...".dimmed());
+
+    let options = ImportOptions {
+        input: input.to_string(),
+        api_name: api_name.map(String::from),
+        module_path: module_path.map(String::from),
+        output: output.to_string(),
+        dry_run,
+        strict,
+        verbose: verbose > 0,
+    };
+
+    let result = import_pipeline::run_import(&options)?;
+
+    // Print summary
+    let warn_count = result
+        .diagnostics
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.severity,
+                schematic_define::openapi::import::DiagnosticSeverity::Warn
+            )
+        })
+        .count();
+    let error_count = result
+        .diagnostics
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.severity,
+                schematic_define::openapi::import::DiagnosticSeverity::Error
+            )
+        })
+        .count();
+
+    if !dry_run {
+        println!(
+            "{} Imported '{}': {} endpoints, {} models",
+            "[OK]".green().bold(),
+            result.api_name,
+            result.endpoint_count,
+            result.model_count,
+        );
+    } else {
+        println!(
+            "{} Dry run complete for '{}': {} endpoints, {} models",
+            "[OK]".green().bold(),
+            result.api_name,
+            result.endpoint_count,
+            result.model_count,
+        );
+    }
+
+    if warn_count > 0 || error_count > 0 {
+        println!(
+            "     {} warnings, {} errors in diagnostics",
+            warn_count.to_string().yellow(),
+            error_count.to_string().red(),
+        );
+    }
+
+    Ok(())
+}
+
 /// Runs the validate command.
 fn run_validate(api_name: &str, verbose: u8) -> Result<(), GeneratorError> {
     let api = resolve_api(api_name)?;
@@ -490,6 +601,23 @@ fn main() -> ExitCode {
         ),
         // Explicit subcommand: validate
         Some(Commands::Validate { api }) => run_validate(&api, cli.verbose),
+        // Explicit subcommand: import
+        Some(Commands::Import {
+            input,
+            api_name,
+            module_path,
+            output,
+            dry_run,
+            strict,
+        }) => run_import_command(
+            &input,
+            api_name.as_deref(),
+            module_path.as_deref(),
+            &output,
+            dry_run,
+            strict,
+            cli.verbose,
+        ),
         // No subcommand: backwards-compatible mode (acts like generate)
         None => {
             if let Some(api_name) = cli.api {

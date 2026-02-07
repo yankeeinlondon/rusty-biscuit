@@ -3243,48 +3243,53 @@ impl ElevenLabs {
             "OPTIONS" => self.client.request(reqwest::Method::OPTIONS, &url),
             _ => return Err(SchematicError::UnsupportedMethod(method.to_string())),
         };
-        match &self.auth_strategy {
-            schematic_define::AuthStrategy::None => {}
-            schematic_define::AuthStrategy::BearerToken { header } => {
-                let header_name = header.as_deref().unwrap_or("Authorization");
-                let token = self
-                    .env_auth
-                    .iter()
-                    .find_map(|var| std::env::var(var).ok())
-                    .ok_or_else(|| SchematicError::MissingCredential {
-                        env_vars: self.env_auth.clone(),
-                    })?;
-                req_builder = req_builder
-                    .header(header_name, format!("Bearer {}", token));
+        if !self.headers.has_authorization() {
+            match &self.auth_strategy {
+                schematic_define::AuthStrategy::None => {}
+                schematic_define::AuthStrategy::BearerToken { header } => {
+                    let header_name = header.as_deref().unwrap_or("Authorization");
+                    let token = self
+                        .env_auth
+                        .iter()
+                        .find_map(|var| std::env::var(var).ok())
+                        .ok_or_else(|| SchematicError::MissingCredential {
+                            env_vars: self.env_auth.clone(),
+                        })?;
+                    req_builder = req_builder
+                        .header(header_name, format!("Bearer {}", token));
+                }
+                schematic_define::AuthStrategy::ApiKey { header } => {
+                    let key = self
+                        .env_auth
+                        .iter()
+                        .find_map(|var| std::env::var(var).ok())
+                        .ok_or_else(|| SchematicError::MissingCredential {
+                            env_vars: self.env_auth.clone(),
+                        })?;
+                    req_builder = req_builder.header(header.as_str(), key);
+                }
+                schematic_define::AuthStrategy::Basic => {
+                    let username_env = self
+                        .env_username
+                        .as_deref()
+                        .unwrap_or("USERNAME");
+                    let password_env = self
+                        .env_auth
+                        .first()
+                        .map(String::as_str)
+                        .unwrap_or("PASSWORD");
+                    let username = std::env::var(username_env)
+                        .map_err(|_| SchematicError::MissingCredential {
+                            env_vars: vec![username_env.to_string()],
+                        })?;
+                    let password = std::env::var(password_env)
+                        .map_err(|_| SchematicError::MissingCredential {
+                            env_vars: vec![password_env.to_string()],
+                        })?;
+                    req_builder = req_builder.basic_auth(username, Some(password));
+                }
+                _ => {}
             }
-            schematic_define::AuthStrategy::ApiKey { header } => {
-                let key = self
-                    .env_auth
-                    .iter()
-                    .find_map(|var| std::env::var(var).ok())
-                    .ok_or_else(|| SchematicError::MissingCredential {
-                        env_vars: self.env_auth.clone(),
-                    })?;
-                req_builder = req_builder.header(header.as_str(), key);
-            }
-            schematic_define::AuthStrategy::Basic => {
-                let username_env = self.env_username.as_deref().unwrap_or("USERNAME");
-                let password_env = self
-                    .env_auth
-                    .first()
-                    .map(String::as_str)
-                    .unwrap_or("PASSWORD");
-                let username = std::env::var(username_env)
-                    .map_err(|_| SchematicError::MissingCredential {
-                        env_vars: vec![username_env.to_string()],
-                    })?;
-                let password = std::env::var(password_env)
-                    .map_err(|_| SchematicError::MissingCredential {
-                        env_vars: vec![password_env.to_string()],
-                    })?;
-                req_builder = req_builder.basic_auth(username, Some(password));
-            }
-            _ => {}
         }
         let api_headers = self.headers.clone().from_env().build()?;
         let merged_headers = Self::merge_headers(&api_headers, &endpoint_headers);

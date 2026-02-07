@@ -29,14 +29,22 @@ cargo build -p schematic-gen --release
 
 ## CLI Usage
 
-The CLI provides two subcommands: `generate` and `validate`.
+The CLI provides three subcommands: `generate`, `validate`, and `import`.
 
 ```bash
 # Generate code for the OpenAI API
 schematic-gen generate --api openai --output schematic/schema/src
 
+# Generate with OpenAPI spec export
+schematic-gen generate --api openai --output schematic/schema/src --openapi-out specs/
+schematic-gen generate --api openai --output schematic/schema/src --openapi-out specs/ --openapi-format yaml
+
 # Validate an API definition (without generating code)
 schematic-gen validate --api openai
+
+# Import from an OpenAPI 3.x spec
+schematic-gen import --input petstore.yaml --output generated/src
+schematic-gen import --input api.json --api-name MyApi --output src --strict
 
 # Dry run (print generated code without writing files)
 schematic-gen generate --api openai --dry-run
@@ -56,14 +64,29 @@ schematic-gen --api openai --output schematic/schema/src
 |------------|-------------|
 | `generate` | Generate API client code (runs validation first) |
 | `validate` | Validate API definition without generating code |
+| `import` | Import an OpenAPI 3.x spec and generate Rust client code |
 
-### Options
+### Generate Options
 
 | Flag | Description |
 |------|-------------|
-| `-a, --api <NAME>` | API definition to generate/validate (e.g., `openai`) |
+| `-a, --api <NAME>` | API definition to generate (e.g., `openai`) |
 | `-o, --output <DIR>` | Output directory for generated code (default: `schematic/schema/src`) |
 | `--dry-run` | Print generated code without writing files |
+| `--openapi-out <DIR>` | Output directory for OpenAPI spec export |
+| `--openapi-format <FORMAT>` | OpenAPI output format: `json` (default) or `yaml` |
+| `-v, --verbose` | Increase verbosity level |
+
+### Import Options
+
+| Flag | Description |
+|------|-------------|
+| `-i, --input <FILE>` | Path to OpenAPI spec file (JSON or YAML) |
+| `--api-name <NAME>` | Override API name (default: derived from spec title) |
+| `--module-path <PATH>` | Override module path for generated code |
+| `-o, --output <DIR>` | Output directory for generated code |
+| `--dry-run` | Print generated code without writing files |
+| `--strict` | Fail on any warning-level diagnostic |
 | `-v, --verbose` | Increase verbosity level |
 
 ### Validation
@@ -809,6 +832,98 @@ let req: CreateMessageRequest = body.into();
 - **Formatting**: Output is consistently formatted with `prettyplease`
 - **Atomic writes**: Uses temp file + rename to prevent partial writes
 - **No panics**: Production code paths use `Result` types, no `unwrap()`/`expect()`
+
+## OpenAPI Import Pipeline
+
+The `import` subcommand provides a full pipeline for converting OpenAPI 3.x specifications into type-safe Rust clients:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    OpenAPI Spec (YAML/JSON)                       │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Phase 1: Parse & Import                        │
+│  - Parse OpenAPI 3.x spec (openapiv3 crate)                      │
+│  - Map OpenAPI types → Schematic types                           │
+│  - Extract endpoints, models, auth strategies                    │
+│  - Generate diagnostics for unsupported features                 │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Phase 2: Model Generation                     │
+│  - Generate Rust structs/enums from OpenAPI schemas              │
+│  - Validate model names for collisions                           │
+│  - Write types module                                            │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Phase 3: Client Generation                    │
+│  - Generate client code (standalone, no schematic-definitions)   │
+│  - Validate, format, and write output                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Type Mappings
+
+| OpenAPI Type | Rust Type |
+|--------------|-----------|
+| `string` | `String` |
+| `string` + `format: date-time` | `String` |
+| `integer` | `i64` |
+| `integer` + `format: int32` | `i32` |
+| `number` | `f64` |
+| `boolean` | `bool` |
+| `array` | `Vec<T>` |
+| `object` | Named struct |
+| `object` + `additionalProperties` | `HashMap<String, T>` |
+| `oneOf`/`anyOf` | Enum (untagged) |
+| `$ref` | Named type reference |
+
+### Diagnostics
+
+Import produces diagnostics for potential issues:
+
+```rust
+pub enum DiagnosticSeverity {
+    Info,   // Informational messages
+    Warn,   // Non-blocking issues
+    Error,  // Blocking issues (fail in strict mode)
+}
+```
+
+Use `--strict` to fail on warnings, or `-v` to print all diagnostics.
+
+## OpenAPI Export
+
+The `generate` subcommand can optionally export OpenAPI 3.0.3 specs alongside Rust client generation:
+
+```bash
+# JSON export (default)
+schematic-gen generate --api openai --openapi-out specs/
+
+# YAML export
+schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
+```
+
+Exported specs include `x-schematic` extensions preserving Schematic-specific metadata (module path, request suffix, env mapping, per-endpoint type names) for round-trip fidelity.
+
+> **Note**: OpenAPI export requires a schema registry for the API. Currently only APIs with complete registries (e.g., `openai`) produce exports; others print a warning and skip.
+
+### Module Reference: `import_pipeline`
+
+| Function | Description |
+|----------|-------------|
+| `run_import(&options)` | Full pipeline: parse → import → generate models → generate client |
+
+### Module Reference: `openapi_output`
+
+| Function | Description |
+|----------|-------------|
+| `write_openapi(&api, &registry, &options, &dir)` | Export API definition to OpenAPI spec file |
 
 ## Critical Testing Requirements
 

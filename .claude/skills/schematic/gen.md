@@ -8,8 +8,15 @@ Code generator that transforms REST API definitions into strongly-typed Rust cli
 # Generate client code
 schematic-gen generate --api <NAME> [--output <DIR>] [--dry-run] [-v|-vv|-vvv]
 
+# Generate with OpenAPI export
+schematic-gen generate --api <NAME> --openapi-out <DIR> [--openapi-format json|yaml]
+
 # Validate definition (no generation)
 schematic-gen validate --api <NAME>
+
+# Import from OpenAPI spec (feature-gated)
+schematic-gen import --input <FILE> [--api-name <NAME>] [--module-path <PATH>] \
+                     --output <DIR> [--dry-run] [--strict]
 
 # Legacy syntax (backwards compatible)
 schematic-gen --api <NAME> --output <DIR>
@@ -18,6 +25,39 @@ schematic-gen --api <NAME> --output <DIR>
 **Available APIs**: `anthropic`, `openai`, `elevenlabs`, `huggingface`, `ollama-native`, `ollama-openai`, `emqx-basic`, `emqx-bearer`, `all`
 
 **Note**: `all` excludes Ollama and EMQX (shared module dependencies require individual generation).
+
+## OpenAPI Import
+
+Import any OpenAPI 3.x specification and generate Rust client code:
+
+```bash
+# Basic import
+schematic-gen import --input petstore.yaml --output generated/src
+
+# With custom API name
+schematic-gen import --input api.json --api-name MyApi --output generated/src
+
+# Strict mode (fail on warnings)
+schematic-gen import --input api.yaml --output generated/src --strict
+```
+
+### Import Options
+
+| Flag | Description |
+|------|-------------|
+| `--input` | Path to OpenAPI spec (JSON or YAML) |
+| `--api-name` | Override API name (derived from spec title by default) |
+| `--module-path` | Override module path for generated code |
+| `--output` | Output directory for generated code |
+| `--dry-run` | Print generated code without writing files |
+| `--strict` | Fail on any warning-level diagnostic |
+
+### What Gets Generated
+
+- `{api_name}.rs` - Client struct with request methods
+- `types.rs` - Model structs/enums from OpenAPI schemas
+- Proper Rust types from JSON Schema mappings
+- Serde derives for serialization
 
 ## Generation Pipeline
 
@@ -185,6 +225,8 @@ $ schematic-gen validate --api openai
 | `request_enum.rs` | `generate_request_enum()` | Unified request enum |
 | `request_structs.rs` | `generate_request_struct()` | Per-endpoint structs |
 | `module_docs.rs` | `ModuleDocBuilder` | Module documentation |
+| `import_pipeline.rs` | `run_import()` | OpenAPI import orchestration |
+| `model_gen.rs` | `generate_models()` | Generate types.rs from ModelCatalog |
 
 ## Library API
 
@@ -221,8 +263,19 @@ pub enum GeneratorError {
         suffix: String,
         reason: String,
     },
+    OpenApiError(OpenApiError),  // For import failures
 }
 ```
+
+## OpenAPI Export
+
+Generate OpenAPI 3.0.3 specification from existing API definitions:
+
+```bash
+schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
+```
+
+This exports the API definition for external tools (Swagger UI, code generators for other languages, etc.).
 
 ## Testing Gap Warning
 

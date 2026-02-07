@@ -162,6 +162,31 @@ let client = OpenAI::with_client_and_base_url(
 );
 ```
 
+### Programmatic Authentication
+
+Inject tokens programmatically without requiring environment variables:
+
+```rust
+use schematic_define::Headers;
+
+// Token from runtime source (Vault, OAuth, config file, etc.)
+let token = get_token_from_somewhere();
+
+// Create client with programmatic token - no env vars needed!
+let client = OpenAI::new()
+    .variant()
+    .headers_builder(Headers::default().use_bearer_token(token))
+    .build();
+
+// Or with basic auth
+let client = OpenAI::new()
+    .variant()
+    .headers_builder(Headers::default().use_basic_auth("user", "pass"))
+    .build();
+```
+
+When `Headers` has an authorization set via `use_bearer_token()` or `use_basic_auth()`, the env-based auth check is automatically skipped. No need to also set `AuthStrategy::None`.
+
 ### API Variants
 
 Create variants with different configurations:

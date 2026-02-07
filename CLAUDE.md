@@ -102,9 +102,9 @@ The research system uses a parallel two-phase approach:
 The `schematic` package provides type-safe REST API client generation:
 
 **Definition → Generation → Client:**
-- `schematic-define`: Primitives for describing APIs (`RestApi`, `Endpoint`, `AuthStrategy`)
+- `schematic-define`: Primitives for describing APIs (`RestApi`, `Endpoint`, `AuthStrategy`, `Headers`)
 - `schematic-definitions`: Pre-built API definitions (Anthropic, OpenAI, HuggingFace, Ollama, ElevenLabs, EMQX)
-- `schematic-gen`: Code generator CLI with `validate` and `generate` subcommands
+- `schematic-gen`: Code generator CLI with `validate`, `generate`, and `import` subcommands
 - `schematic-schema`: Generated API clients ready for consumption
 
 **Key CLI Commands:**
@@ -115,6 +115,12 @@ schematic-gen validate --api openai
 # Generate client code
 schematic-gen generate --api openai --output schematic/schema/src
 
+# Import from OpenAPI spec (feature-gated)
+schematic-gen import --input api.yaml --output schematic/schema/src
+
+# Generate with OpenAPI export
+schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
+
 # Regenerate all APIs
 just -f schematic/justfile generate
 ```
@@ -122,6 +128,7 @@ just -f schematic/justfile generate
 **Configuration Options:**
 - `module_path`: Override generated module name (for multi-API modules)
 - `request_suffix`: Customize wrapper struct suffix (default: "Request")
+- `env_mapping`: Alternative environment variable configuration for auth
 
 **Ergonomic Features:**
 - `DOCS_URL` constant on generated API structs (`Option<&'static str>`)
@@ -137,6 +144,13 @@ just -f schematic/justfile generate
 - `mutate_response::<RequestType>(hook)` for type-safe post-deserialization response mutation
 - `EndpointSpec` trait on generated request structs associates request → response types
 - `ResponseContext` provides hook callbacks with endpoint_id, method, path, url, status, headers
+
+**Headers Builder (Programmatic Auth):**
+- `Headers::default().use_bearer_token(token)` - Set bearer token programmatically
+- `Headers::default().use_basic_auth(user, pass)` - Set basic auth
+- `Headers::default().use_api_key(key, header)` - Set API key in custom header
+- `from_env()` / `try_from_env()` - Load credentials from environment variables
+- When `Headers` has auth set, env-based auth is automatically skipped
 
 **⚠️ CRITICAL - Response Type Selection:**
 
@@ -219,6 +233,7 @@ This repository has local Claude Code skills in `.claude/skills/`:
 - `darkmatter` - Markdown parsing/rendering (delegates terminal rendering to biscuit-terminal)
 - `playa` - Audio playback via host players, format detection, 53 embedded sound effects
 - `research` - AI-powered library research with two-phase LLM pipeline
+- `schematic` - REST API client code generation, OpenAPI import/export, Headers builder
 - `sniff` - System detection (OS, hardware, network, programs, services)
 - `so-you-say` - TTS CLI (`speak` binary) wrapping biscuit-speaks
 - `clap` - Command-line argument parsing

@@ -127,6 +127,8 @@ async fn main() -> Result<(), SchematicError> {
 - **Validation**: Pre-generation checks for naming collisions and configuration errors
 - **Doc examples**: Generated request structs include usage examples in doc comments
 - **Future-proof enums**: All public enums use `#[non_exhaustive]` for backward-compatible extension
+- **OpenAPI import**: Import any OpenAPI 3.x spec to generate a typed Rust client
+- **OpenAPI export**: Export existing API definitions to OpenAPI 3.0.3 specs (JSON or YAML)
 
 ## Variant Builder & Response Hooks
 
@@ -146,6 +148,25 @@ let staging = client.variant_with(
     UpdateStrategy::NoChange,
 );
 ```
+
+### Programmatic Authentication
+
+Inject tokens programmatically without requiring environment variables:
+
+```rust
+use schematic_define::Headers;
+
+// Token from runtime source (Vault, OAuth, config file, etc.)
+let token = get_token_from_somewhere();
+
+// Create client with programmatic token - no env vars needed!
+let client = OpenAI::new()
+    .variant()
+    .headers_builder(Headers::default().use_bearer_token(token))
+    .build();
+```
+
+When `Headers` has an authorization set via `use_bearer_token()` or `use_basic_auth()`, the env-based auth check is automatically skipped. No need to also set `AuthStrategy::None`.
 
 ### Builder Pattern with Hooks
 
@@ -181,6 +202,53 @@ let staging = client.variant()
 - **`ResponseContext`** provides: `endpoint_id`, `method`, `path`, `url`, `status`, `headers`
 - **`EndpointSpec`** trait on request structs enables type-safe `mutate_response` registration
 - Hooks are stored in `Arc` and the variant is `Clone`-able
+
+## OpenAPI Support
+
+Schematic supports bidirectional OpenAPI 3.x integration: import external specs to generate clients, or export existing definitions to OpenAPI format.
+
+### Importing OpenAPI Specs
+
+Transform any OpenAPI 3.x specification into a type-safe Rust client:
+
+```bash
+# Basic import
+schematic-gen import --input petstore.yaml --output generated/src
+
+# With custom API name and strict diagnostics
+schematic-gen import --input api.json --api-name MyPetStore --output src --strict
+
+# Dry run (preview without writing)
+schematic-gen import --input api.yaml --output src --dry-run
+```
+
+| Option | Description |
+|--------|-------------|
+| `--input` | Path to OpenAPI spec file (JSON or YAML) |
+| `--api-name` | Override API name (default: derived from spec title) |
+| `--module-path` | Override module path for generated code |
+| `--output` | Output directory for generated code |
+| `--dry-run` | Preview generated code without writing files |
+| `--strict` | Fail on any warning-level diagnostic |
+
+### Exporting to OpenAPI
+
+Generate OpenAPI 3.0.3 specs from existing Schematic API definitions:
+
+```bash
+# Export as JSON (default)
+schematic-gen generate --api openai --openapi-out specs/
+
+# Export as YAML
+schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
+
+# Generate all with OpenAPI export
+schematic-gen generate --api all --openapi-out specs/
+```
+
+Exported specs include `x-schematic` extensions for round-trip fidelity (module path, request suffix, env mapping, per-endpoint type names).
+
+> **Feature Gate**: OpenAPI functionality requires the `openapi` feature in `schematic-define`. The `schematic-gen` and `schematic-definitions` crates enable this feature by default.
 
 ## Critical Development Requirements
 
@@ -273,7 +341,7 @@ just -f schematic/justfile full
 
 ### CLI Subcommands
 
-The `schematic-gen` CLI supports two subcommands:
+The `schematic-gen` CLI supports three subcommands:
 
 ```bash
 # Validate an API definition
@@ -281,6 +349,15 @@ schematic-gen validate --api openai
 
 # Generate client code (validates first)
 schematic-gen generate --api openai --output ./output
+
+# Generate with OpenAPI spec export
+schematic-gen generate --api openai --output ./output --openapi-out specs/ --openapi-format yaml
+
+# Import from an OpenAPI 3.x spec
+schematic-gen import --input petstore.yaml --output ./output
+
+# Import with overrides
+schematic-gen import --input api.json --api-name MyApi --output ./output --strict
 ```
 
 ## License

@@ -217,8 +217,28 @@ impl OpenApiImport {
         let mut diagnostics = Vec::new();
 
         // Map the document to Schematic types
-        let api = self.map_to_rest_api(&doc, &resolver, &mut diagnostics)?;
-        let models = self.map_to_model_catalog(&doc, &resolver, &mut diagnostics);
+        let mut api = self.map_to_rest_api(&doc, &resolver, &mut diagnostics)?;
+
+        // Collect generated request struct names to avoid model naming collisions
+        // The code generator creates structs like "{EndpointId}Request" for each endpoint
+        let request_suffix = "Request"; // Default suffix used by schematic-gen
+        let reserved_names: std::collections::HashSet<String> = api
+            .endpoints
+            .iter()
+            .map(|ep| format!("{}{}", ep.id, request_suffix))
+            .collect();
+
+        let schema_result = self.map_to_model_catalog(&doc, &resolver, &mut diagnostics, &reserved_names);
+
+        // Apply name remapping to endpoint request types
+        // This updates any ApiRequest::Json schema type_name that was deconflicted
+        if !schema_result.name_mapping.is_empty() {
+            for endpoint in &mut api.endpoints {
+                if let Some(ref mut request) = endpoint.request {
+                    Self::remap_api_request_type_name(request, &schema_result.name_mapping);
+                }
+            }
+        }
 
         // Check strict mode
         if self.options.strict && !diagnostics.is_empty() {
@@ -233,9 +253,22 @@ impl OpenApiImport {
 
         Ok(OpenApiImportResult {
             api,
-            models,
+            models: schema_result.catalog,
             diagnostics,
         })
+    }
+
+    /// Remaps type names in an ApiRequest using the provided name mapping.
+    fn remap_api_request_type_name(
+        request: &mut crate::request::ApiRequest,
+        name_mapping: &std::collections::HashMap<String, String>,
+    ) {
+        use crate::request::ApiRequest;
+        if let ApiRequest::Json(schema) = request {
+            if let Some(new_name) = name_mapping.get(&schema.type_name) {
+                schema.type_name = new_name.clone();
+            }
+        }
     }
 
     /// Parses the OpenAPI document from the configured source.
@@ -446,13 +479,21 @@ impl OpenApiImport {
     }
 
     /// Maps component schemas to a ModelCatalog.
+    ///
+    /// ## Arguments
+    ///
+    /// * `doc` - The OpenAPI document
+    /// * `resolver` - Reference resolver for $ref resolution
+    /// * `diagnostics` - Collected import diagnostics
+    /// * `reserved_names` - Names reserved by generated request structs (avoid collisions)
     fn map_to_model_catalog(
         &self,
         doc: &openapiv3::OpenAPI,
         resolver: &RefResolver,
         diagnostics: &mut Vec<OpenApiDiagnostic>,
-    ) -> ModelCatalog {
-        mappings::map_all_schemas(doc, resolver, diagnostics, &self.options)
+        reserved_names: &std::collections::HashSet<String>,
+    ) -> mappings::SchemaMapResult {
+        mappings::map_all_schemas(doc, resolver, diagnostics, &self.options, reserved_names)
     }
 }
 

@@ -8,15 +8,48 @@ REST and WebSocket API definition primitives for the Schematic code generation s
 
 | Type | Purpose |
 |------|---------|
-| `RestApi` | Complete API definition with base URL, auth, endpoints, and codegen options |
+| `RestApi` | Complete API definition with base URL, auth, endpoints, codegen options |
 | `Endpoint` | Single endpoint with method, path, request/response schemas |
 | `RestMethod` | HTTP methods: `Get`, `Post`, `Put`, `Patch`, `Delete`, `Head`, `Options` |
-| `AuthStrategy` | Authentication: `BearerToken`, `ApiKey`, `Basic`, `None` |
+| `AuthStrategy` | Authentication: `BearerToken`, `ApiKey`, `ApiKeyParam`, `Basic`, `None` |
 | `ApiRequest` | Request body: `Json`, `FormData`, `UrlEncoded`, `Text`, `Binary` |
 | `ApiResponse` | Response type: `Json`, `Text`, `Binary`, `Empty` |
 | `FormField` | Form field definition for multipart/URL-encoded requests |
 | `FormFieldKind` | Field type: `Text`, `File`, `Files`, `Json` |
 | `Schema` | Type name and optional module path for code generation |
+
+### Header and Authentication Types
+
+| Type | Purpose |
+|------|---------|
+| `Headers` | Fluent builder for HTTP headers with auth support |
+| `SensitiveString` | Secure wrapper for passwords/tokens (redacts Debug output) |
+| `EnvList` | Environment variable fallback chain for credentials |
+| `ApiKeyEnv` | API key header configuration with env source |
+| `EnvMapping` | Complete env var mapping for auth credentials |
+| `HeaderError` | Errors from header validation and credential resolution |
+
+### Model Definition Types (for OpenAPI import)
+
+| Type | Purpose |
+|------|---------|
+| `ModelCatalog` | Collection of model definitions |
+| `ModelDef` | Union: struct, enum, or type alias |
+| `StructDef` | Structure definition with fields |
+| `EnumDef` | Enumeration definition with variants |
+| `TypeAlias` | Type alias definition |
+| `FieldDef` | Field definition for structs |
+| `EnumVariant` | Variant definition for enums |
+| `TypeRef` | Type reference (primitives, arrays, named types) |
+
+### Parameter Definition Types
+
+| Type | Purpose |
+|------|---------|
+| `EndpointParams` | Collection of endpoint parameters (query, header, cookie) |
+| `ParamDef` | Single parameter definition |
+| `QueryParamType` | Parameter value type |
+| `ParamStyle` | Parameter serialization style |
 
 ### WebSocket API Types
 
@@ -66,6 +99,12 @@ pub struct RestApi {
 
     /// Custom suffix for request structs (default: "Request")
     pub request_suffix: Option<String>,
+
+    /// Environment variable mapping for flexible auth (optional)
+    pub env_mapping: Option<EnvMapping>,
+
+    /// Global query/header/cookie parameters (optional)
+    pub params: Option<EndpointParams>,
 }
 ```
 
@@ -93,6 +132,9 @@ pub struct Endpoint {
 
     /// Endpoint-specific headers (merged with API headers)
     pub headers: Vec<(String, String)>,
+
+    /// Query/header/cookie parameters (optional)
+    pub params: Option<EndpointParams>,
 }
 ```
 
@@ -112,6 +154,14 @@ pub enum AuthStrategy {
 
     /// HTTP Basic authentication
     Basic,
+
+    /// API key in query parameter or cookie
+    ApiKeyParam { location: ApiKeyLocation, name: String },
+}
+
+pub enum ApiKeyLocation {
+    Query,
+    Cookie,
 }
 ```
 
@@ -224,6 +274,42 @@ let simple = Schema::new("User");                           // full_path() → "
 let qualified = Schema::with_path("User", "crate::models"); // full_path() → "crate::models::User"
 ```
 
+## Headers Builder
+
+See [Headers Builder](./headers.md) for complete documentation.
+
+```rust
+use schematic_define::Headers;
+
+// Bearer token auth
+let headers = Headers::default()
+    .use_bearer_token("my-token")
+    .accept_json()
+    .build()?;
+
+// Basic auth
+let headers = Headers::default()
+    .use_basic_auth("user", "pass")
+    .build()?;
+
+// API key in custom header
+let headers = Headers::default()
+    .use_api_key("my-key", "X-API-Key")
+    .content_type_json()
+    .build()?;
+
+// Load from environment
+let mapping = EnvMapping {
+    bearer_token: Some(EnvList::single("OPENAI_API_KEY")),
+    basic_user: None,
+    basic_pass: None,
+    api_key: None,
+};
+let headers = Headers::default()
+    .with_env_mapping(mapping)
+    .from_env();
+```
+
 ## Prelude
 
 ```rust
@@ -231,7 +317,9 @@ use schematic_define::prelude::*;
 
 // Exports all core types:
 // REST: RestApi, Endpoint, RestMethod, AuthStrategy, ApiRequest, ApiResponse,
-//       FormField, FormFieldKind, Schema
+//       FormField, FormFieldKind, Schema, Headers, EnvList, EnvMapping
 // WebSocket: WebSocketApi, WebSocketEndpoint, ConnectionParam, ParamType,
 //            ConnectionLifecycle, MessageSchema, MessageDirection
+// Models: ModelCatalog, ModelDef, StructDef, EnumDef, TypeRef
+// Params: EndpointParams, ParamDef, QueryParamType
 ```

@@ -571,31 +571,118 @@ fn map_schema_to_param_type_boxed(
     }
 }
 
+/// Result of mapping schemas, including the catalog and any name remapping.
+pub struct SchemaMapResult {
+    /// The generated model catalog.
+    pub catalog: ModelCatalog,
+    /// Mapping from original sanitized names to deconflicted names (only contains entries that changed).
+    pub name_mapping: std::collections::HashMap<String, String>,
+}
+
 /// Maps all component schemas to a ModelCatalog.
+///
+/// ## Arguments
+///
+/// * `doc` - The OpenAPI document
+/// * `resolver` - Reference resolver for $ref resolution
+/// * `diagnostics` - Collected import diagnostics
+/// * `options` - Import options
+/// * `reserved_names` - Names reserved by generated request structs (to avoid collisions)
+///
+/// ## Returns
+///
+/// A `SchemaMapResult` containing both the `ModelCatalog` and a name mapping
+/// for any schemas that were renamed due to collisions.
 pub fn map_all_schemas(
     doc: &openapiv3::OpenAPI,
     resolver: &RefResolver,
     diagnostics: &mut Vec<OpenApiDiagnostic>,
     options: &OpenApiImportOptions,
-) -> ModelCatalog {
+    reserved_names: &HashSet<String>,
+) -> SchemaMapResult {
     let mut types = Vec::new();
-    let mut used_names = HashSet::new();
+
+    // Build name mapping first to handle deconfliction consistently
+    // Maps sanitized schema name -> final Rust name (only entries that differ)
+    let mut name_mapping: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut used_names = reserved_names.clone();
 
     if let Some(ref components) = doc.components {
-        for (name, schema_ref) in &components.schemas {
+        // First pass: compute all final names and build rename mapping
+        for (name, _) in &components.schemas {
             let sanitized_name = sanitize_rust_ident(name);
             let final_name = deconflict_name(&sanitized_name, &used_names);
             used_names.insert(final_name.clone());
+            // Only store mapping if name was changed
+            if sanitized_name != final_name {
+                name_mapping.insert(sanitized_name, final_name);
+            }
+        }
 
-            if let Some(model) = map_schema_to_model(&final_name, name, schema_ref, resolver, diagnostics) {
+        // Second pass: process schemas and use final names
+        let mut processed_names = reserved_names.clone();
+        for (name, schema_ref) in &components.schemas {
+            let sanitized_name = sanitize_rust_ident(name);
+            let final_name = name_mapping
+                .get(&sanitized_name)
+                .cloned()
+                .unwrap_or(sanitized_name);
+            processed_names.insert(final_name.clone());
+
+            if let Some(mut model) = map_schema_to_model(&final_name, name, schema_ref, resolver, diagnostics) {
+                // Post-process TypeRefs to use renamed types
+                remap_type_refs_in_model(&mut model, &name_mapping);
                 types.push(model);
             }
         }
     }
 
-    ModelCatalog {
-        module_path: options.module_path.clone(),
-        types,
+    SchemaMapResult {
+        catalog: ModelCatalog {
+            module_path: options.module_path.clone(),
+            types,
+        },
+        name_mapping,
+    }
+}
+
+/// Remaps TypeRef::Named values in a ModelDef using the provided mapping.
+fn remap_type_refs_in_model(model: &mut ModelDef, mapping: &std::collections::HashMap<String, String>) {
+    match model {
+        ModelDef::Struct(s) => {
+            for field in &mut s.fields {
+                remap_type_ref(&mut field.field_type, mapping);
+            }
+            if let Some(ref mut ap) = s.additional_properties {
+                remap_type_ref(ap, mapping);
+            }
+        }
+        ModelDef::Alias(a) => {
+            remap_type_ref(&mut a.target, mapping);
+        }
+        ModelDef::Enum(_) => {
+            // Enums don't have TypeRef fields in their variants
+        }
+    }
+}
+
+/// Remaps a TypeRef using the provided name mapping.
+fn remap_type_ref(type_ref: &mut TypeRef, mapping: &std::collections::HashMap<String, String>) {
+    match type_ref {
+        TypeRef::Named(name) => {
+            if let Some(new_name) = mapping.get(name) {
+                *name = new_name.clone();
+            }
+        }
+        TypeRef::Array(inner) | TypeRef::Map(inner) | TypeRef::Optional(inner) => {
+            remap_type_ref(inner, mapping);
+        }
+        TypeRef::OneOf(refs) | TypeRef::AnyOf(refs) | TypeRef::AllOf(refs) => {
+            for r in refs {
+                remap_type_ref(r, mapping);
+            }
+        }
+        TypeRef::Primitive(_) | TypeRef::Unknown => {}
     }
 }
 

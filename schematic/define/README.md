@@ -140,6 +140,38 @@ Err(SchematicError::MissingCredential {
 })
 ```
 
+### Programmatic Authentication
+
+To inject tokens programmatically (without environment variables), use the `Headers` builder:
+
+```rust
+use schematic_define::Headers;
+
+// Token from runtime source (Vault, OAuth, config file, etc.)
+let token = get_token_from_somewhere();
+
+// Create client with programmatic token - no env vars needed!
+let client = OpenAI::new()
+    .variant()
+    .headers_builder(Headers::default().use_bearer_token(token))
+    .build();
+
+// Or with basic auth
+let client = SomeApi::new()
+    .variant()
+    .headers_builder(Headers::default().use_basic_auth("user", "pass"))
+    .build();
+```
+
+When `Headers` has an authorization set via `use_bearer_token()` or `use_basic_auth()`, the env-based auth check is automatically skipped. The generated code checks `headers.has_authorization()` and bypasses the environment variable lookup if authorization is already set programmatically.
+
+This is useful for:
+
+- **Multi-tenant applications**: Different credentials per tenant
+- **Token rotation**: Refresh tokens from a vault at runtime
+- **Testing**: Inject mock credentials without setting env vars
+- **OAuth flows**: Use tokens obtained from OAuth providers
+
 ## Code Generation Options
 
 `RestApi` includes optional fields to customize generated code:
@@ -157,6 +189,7 @@ let api = RestApi {
 ```
 
 This is useful when:
+
 - Multiple APIs share a definitions module (e.g., `OllamaNative` and `OllamaOpenAI` both in `ollama/`)
 - The API name doesn't match the desired module name
 
@@ -644,10 +677,12 @@ assert_eq!(qualified.full_path(), "crate::models::user::User");
 ### Usage Guide
 
 Use `Schema::new()` when:
+
 - The type is defined in the same generated module
 - The type will be re-exported via `pub use`
 
 Use `Schema::with_path()` when:
+
 - The type is defined in a different crate or module
 - You need explicit qualification to avoid naming conflicts
 
@@ -664,6 +699,7 @@ CreateMessageBody::new("claude-sonnet-4-5-20250514", messages, 1024)
 ```
 
 Recommended methods:
+
 - `new()` - Constructor requiring all mandatory fields
 - `with_*()` - Builder methods for optional fields
 - `Default` - Implement when all fields have sensible defaults
@@ -694,6 +730,50 @@ use schematic_define::{ApiRequest, Schema};
 let schema = Schema::new("MyRequest");
 let request: ApiRequest = schema.into(); // Converts to ApiRequest::Json(schema)
 ```
+
+## OpenAPI Support (Feature-Gated)
+
+The `openapi` feature enables bidirectional OpenAPI 3.x integration:
+
+```toml
+[dependencies]
+schematic-define = { path = "../define", features = ["openapi"] }
+```
+
+This feature provides:
+
+- **`openapi` module** with import and export functions
+- **OpenAPI 3.x parsing** via the `openapiv3` crate
+- **YAML support** via `serde_yaml`
+
+### Import
+
+```rust
+use schematic_define::openapi::{OpenApiImport, OpenApiSource};
+
+let source = OpenApiSource::path("api.yaml");
+let result = OpenApiImport::new(source)
+    .api_name("MyApi")
+    .prefer_json()
+    .strict()
+    .build()?;
+
+println!("Imported {} endpoints", result.api.endpoints.len());
+```
+
+### Export
+
+```rust
+use schematic_define::openapi::{export, ExportOptions, ExportFormat};
+
+let options = ExportOptions::new()
+    .with_version("1.0.0")
+    .with_format(ExportFormat::Yaml);
+
+let openapi_doc = export(&api, &registry, &options)?;
+```
+
+See the [schematic-gen README](../gen/README.md) for CLI usage and the full import/export pipeline.
 
 ## Dependencies
 

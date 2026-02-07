@@ -64,7 +64,9 @@
 pub mod cargo_gen;
 pub mod codegen;
 pub mod errors;
+pub mod import_pipeline;
 pub mod inference;
+pub mod model_gen;
 pub mod openapi_output;
 pub mod output;
 pub mod parser;

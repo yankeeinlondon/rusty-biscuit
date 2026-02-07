@@ -35,6 +35,20 @@ use crate::codegen::{
 use crate::errors::GeneratorError;
 use crate::inference::infer_module_path;
 
+/// Options for controlling code generation output.
+#[derive(Debug, Clone, Default)]
+pub struct OutputOptions {
+    /// If true, don't include `pub use schematic_definitions::...` in generated modules.
+    ///
+    /// This is used for imported APIs where types are generated locally in `types.rs`
+    /// instead of being imported from `schematic-definitions`.
+    pub standalone: bool,
+    /// If true, include a `pub mod types;` declaration in lib.rs.
+    ///
+    /// This is used when types are generated from imported OpenAPI specs.
+    pub include_types_module: bool,
+}
+
 /// Converts a PascalCase string to snake_case.
 fn to_snake_case(s: &str) -> String {
     let mut result = String::new();
@@ -158,6 +172,20 @@ pub fn assemble_shared_module() -> TokenStream {
 ///
 /// A TokenStream containing the API module code.
 pub fn assemble_api_module(api: &RestApi) -> TokenStream {
+    assemble_api_module_with_options(api, &OutputOptions::default())
+}
+
+/// Assembles an API module with configurable options.
+///
+/// ## Arguments
+///
+/// * `api` - The API definition to generate code for
+/// * `options` - Output generation options
+///
+/// ## Returns
+///
+/// A TokenStream containing the complete API module code.
+pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) -> TokenStream {
     let api_name_lower = get_module_path(api);
     let suffix = get_request_suffix(api);
 
@@ -180,8 +208,21 @@ pub fn assemble_api_module(api: &RestApi) -> TokenStream {
     // Generate rich module documentation
     let module_docs = ModuleDocBuilder::new(api).build();
 
-    // Build the re-export path dynamically
-    let definitions_module = format_ident!("{}", api_name_lower);
+    // Build the re-export line based on options
+    let definitions_import = if options.standalone {
+        // For standalone/imported APIs, import from local types module
+        quote! {
+            // Re-export model types from local types module
+            pub use crate::types::*;
+        }
+    } else {
+        // For native APIs, import from schematic_definitions
+        let definitions_module = format_ident!("{}", api_name_lower);
+        quote! {
+            // Re-export response types from definitions so consumers can import from one place
+            pub use schematic_definitions::#definitions_module::*;
+        }
+    };
 
     // Combine all pieces with necessary imports
     quote! {
@@ -189,8 +230,7 @@ pub fn assemble_api_module(api: &RestApi) -> TokenStream {
 
         use serde::{Deserialize, Serialize};
 
-        // Re-export response types from definitions so consumers can import from one place
-        pub use schematic_definitions::#definitions_module::*;
+        #definitions_import
 
         // Import shared types
         use crate::shared::{RequestParts, SchematicError};
@@ -695,6 +735,220 @@ pub fn generate_and_write_all(
         .next()
         .map(|(_, content)| content)
         .unwrap_or_default())
+}
+
+/// Assembles lib.rs content with configurable options.
+///
+/// This is similar to `assemble_lib_rs` but supports options like including
+/// a types module for imported APIs.
+///
+/// ## Arguments
+///
+/// * `apis` - Slice of API definitions to include
+/// * `options` - Output generation options
+///
+/// ## Returns
+///
+/// A TokenStream containing the lib.rs code.
+pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) -> TokenStream {
+    // Generate module declarations and re-exports
+    let module_decls: Vec<_> = apis
+        .iter()
+        .map(|api| {
+            let module_name = format_ident!("{}", get_module_path(api));
+            quote! {
+                pub mod #module_name;
+            }
+        })
+        .collect();
+
+    // Add types module if requested (for imported APIs)
+    let types_module = if options.include_types_module {
+        quote! {
+            pub mod types;
+        }
+    } else {
+        TokenStream::new()
+    };
+
+    // Build the API table rows for documentation
+    let api_rows: Vec<String> = apis
+        .iter()
+        .map(|api| {
+            let module = get_module_path(api);
+            let name = &api.name;
+            let desc = &api.description;
+            let auth_desc = match &api.auth {
+                AuthStrategy::None => "None".to_string(),
+                AuthStrategy::BearerToken { .. } => "Bearer".to_string(),
+                AuthStrategy::ApiKey { header } => format!("API Key (`{}`)", header),
+                AuthStrategy::Basic => "Basic".to_string(),
+                _ => "Custom".to_string(),
+            };
+            format!("//! | [`{module}`] | [`{name}`]({module}::{name}) | {desc} | {auth_desc} |")
+        })
+        .collect();
+    let api_table = api_rows.join("\n");
+
+    // Choose the first API with a GET endpoint for the quick start example
+    let example_api = apis
+        .iter()
+        .find(|api| api.endpoints.iter().any(|ep| ep.method == RestMethod::Get))
+        .or_else(|| apis.first());
+
+    let quick_start_example = if let Some(api) = example_api {
+        let api_name = &api.name;
+        let first_get = api.endpoints.iter().find(|ep| ep.method == RestMethod::Get);
+        if let Some(ep) = first_get {
+            let method_name = to_snake_case(&ep.id);
+            let has_path_params = ep.path.contains('{');
+            let call = if has_path_params {
+                format!("let response = client.{}(\"example\").await?;", method_name)
+            } else {
+                format!("let response = client.{}().await?;", method_name)
+            };
+            format!(
+                r#"//! ```ignore
+//! use schematic_schema::prelude::*;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), SchematicError> {{
+//!     let client = {api_name}::new();
+//!     {call}
+//!     println!("{{:?}}", response);
+//!     Ok(())
+//! }}
+//! ```"#
+            )
+        } else {
+            String::from(
+                r#"//! ```ignore
+//! use schematic_schema::prelude::*;
+//! ```"#,
+            )
+        }
+    } else {
+        String::from(
+            r#"//! ```ignore
+//! use schematic_schema::prelude::*;
+//! ```"#,
+        )
+    };
+
+    // Parse the dynamic sections into token streams
+    let api_table_tokens: TokenStream = api_table.parse().unwrap_or_default();
+    let quick_start_tokens: TokenStream = quick_start_example.parse().unwrap_or_default();
+
+    quote! {
+        //! Generated REST API clients.
+        //!
+        //! Each API is available as a separate module with its client struct,
+        //! request types, and response types.
+        //!
+        //! ## Available APIs
+        //!
+        //! | Module | Client | Description | Auth |
+        //! |--------|--------|-------------|------|
+        #api_table_tokens
+        //!
+        //! ## Quick Start
+        //!
+        //! Use the prelude for convenient imports:
+        //!
+        #quick_start_tokens
+        //!
+        //! ## Error Handling
+        //!
+        //! All request methods return `Result<T, SchematicError>`. See
+        //! [`shared::SchematicError`] for the full error enum and handling examples.
+
+        // Shared types and utilities
+        pub mod shared;
+
+        pub mod prelude;
+
+        #types_module
+
+        #(#module_decls)*
+    }
+}
+
+/// Generates and writes standalone API code (for imported OpenAPI specs).
+///
+/// Unlike `generate_and_write`, this function:
+/// - Does NOT include `pub use schematic_definitions::...` imports
+/// - Uses `pub use crate::types::*` to reference locally generated types
+/// - Adds `pub mod types;` to lib.rs if types were generated
+///
+/// ## Arguments
+///
+/// * `api` - The API definition to generate code for
+/// * `output_dir` - Directory to write generated files to
+/// * `dry_run` - If true, print code instead of writing files
+/// * `has_types` - If true, include `pub mod types;` in lib.rs
+///
+/// ## Returns
+///
+/// The formatted API module code.
+///
+/// ## Errors
+///
+/// Returns an error if:
+/// - Code generation produces invalid Rust
+/// - File writing fails
+pub fn generate_and_write_standalone(
+    api: &RestApi,
+    output_dir: &Path,
+    dry_run: bool,
+    has_types: bool,
+) -> Result<String, GeneratorError> {
+    let apis = [api];
+    let options = OutputOptions {
+        standalone: true,
+        include_types_module: has_types,
+    };
+
+    // Generate and validate lib.rs with options
+    let lib_tokens = assemble_lib_rs_with_options(&apis, &options);
+    let lib_file = validate_code(&lib_tokens)?;
+    let lib_formatted = format_code(&lib_file);
+
+    // Generate and validate shared.rs
+    let shared_tokens = assemble_shared_module();
+    let shared_file = validate_code(&shared_tokens)?;
+    let shared_formatted = format_code(&shared_file);
+
+    // Generate and validate prelude.rs
+    let prelude_tokens = assemble_prelude(&apis);
+    let prelude_file = validate_code(&prelude_tokens)?;
+    let prelude_formatted = format_code(&prelude_file);
+
+    // Generate and validate the API module with standalone options
+    let api_tokens = assemble_api_module_with_options(api, &options);
+    let api_file = validate_code(&api_tokens)?;
+    let api_formatted = format_code(&api_file);
+    let api_filename = format!("{}.rs", get_module_path(api));
+
+    if dry_run {
+        println!("=== lib.rs ===\n{}\n", lib_formatted);
+        println!("=== shared.rs ===\n{}\n", shared_formatted);
+        println!("=== prelude.rs ===\n{}\n", prelude_formatted);
+        println!("=== {} ===\n{}\n", api_filename, api_formatted);
+    } else {
+        // Write lib.rs
+        write_atomic(&output_dir.join("lib.rs"), &lib_formatted)?;
+
+        // Write shared.rs
+        write_atomic(&output_dir.join("shared.rs"), &shared_formatted)?;
+
+        // Write prelude.rs
+        write_atomic(&output_dir.join("prelude.rs"), &prelude_formatted)?;
+
+        // Write API module
+        write_atomic(&output_dir.join(&api_filename), &api_formatted)?;
+    }
+
+    Ok(api_formatted)
 }
 
 #[cfg(test)]
