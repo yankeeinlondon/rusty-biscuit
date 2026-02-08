@@ -17,6 +17,8 @@ use std::path::Path;
 
 use sniff::SniffResult;
 
+use crate::DocsFilter;
+
 pub use filesystem::print_git_section;
 pub use programs::{print_programs_json, print_programs_markdown};
 pub use services::{print_services_json, print_services_text};
@@ -179,10 +181,51 @@ pub(crate) fn format_uptime(seconds: u64) -> String {
 }
 
 // ============================================================================
+// Docs filtering
+// ============================================================================
+
+/// Apply docs filter flags to a list of markdown documents.
+///
+/// When multiple flags are combined, results are intersected (AND logic).
+/// When no flags are set, all documents are returned.
+fn filter_docs(docs: &[sniff::filesystem::docs::MarkdownMeta], filter: &DocsFilter) -> Vec<sniff::filesystem::docs::MarkdownMeta> {
+    if !filter.readme && !filter.plan && !filter.src && !filter.has_prompt && filter.filter.is_none() {
+        return docs.to_vec();
+    }
+
+    docs.iter()
+        .filter(|doc| {
+            let path_lower = doc.relative.to_lowercase();
+
+            if filter.readme && !path_lower.ends_with("/readme.md") && path_lower != "readme.md" {
+                return false;
+            }
+            if filter.plan && !path_lower.contains("plan") {
+                return false;
+            }
+            if filter.src && !path_lower.contains("/src/") {
+                return false;
+            }
+            if filter.has_prompt && doc.prompt.is_none() {
+                return false;
+            }
+            if let Some(ref substring) = filter.filter {
+                if !path_lower.contains(&substring.to_lowercase()) {
+                    return false;
+                }
+            }
+
+            true
+        })
+        .cloned()
+        .collect()
+}
+
+// ============================================================================
 // Main print functions
 // ============================================================================
 
-pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter, history_count: usize) {
+pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter, history_count: usize, docs_filter: &DocsFilter) {
     // Get repo root for relative paths
     let repo_root = result
         .filesystem
@@ -272,7 +315,8 @@ pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter, histo
             if let Some(ref filesystem) = result.filesystem
                 && let Some(ref docs) = filesystem.docs
             {
-                print_docs_section(docs);
+                let filtered = filter_docs(docs, docs_filter);
+                print_docs_section(&filtered);
             }
         }
         // Programs and Services filters are handled separately in main.rs
@@ -299,7 +343,7 @@ pub fn print_text(result: &SniffResult, verbose: u8, filter: OutputFilter, histo
 ///
 /// For subsection filters (--cpu, --gpu, --memory, --storage, --git, --repo, --language),
 /// the output is flattened to the top level without the parent container.
-fn apply_filter_to_json(result: &SniffResult, filter: OutputFilter) -> serde_json::Value {
+fn apply_filter_to_json(result: &SniffResult, filter: OutputFilter, docs_filter: &DocsFilter) -> serde_json::Value {
     use serde_json::{Value, json};
 
     match filter {
@@ -397,8 +441,11 @@ fn apply_filter_to_json(result: &SniffResult, filter: OutputFilter) -> serde_jso
         }
         OutputFilter::Docs => {
             // Flatten: return docs array at top level
-            if let Some(ref fs) = result.filesystem {
-                serde_json::to_value(&fs.docs).unwrap_or(json!([]))
+            if let Some(ref fs) = result.filesystem
+                && let Some(ref docs) = fs.docs
+            {
+                let filtered = filter_docs(docs, docs_filter);
+                serde_json::to_value(&filtered).unwrap_or(json!([]))
             } else {
                 json!([])
             }
@@ -419,8 +466,8 @@ fn apply_filter_to_json(result: &SniffResult, filter: OutputFilter) -> serde_jso
     }
 }
 
-pub fn print_json(result: &SniffResult, filter: OutputFilter) -> serde_json::Result<()> {
-    let filtered_json = apply_filter_to_json(result, filter);
+pub fn print_json(result: &SniffResult, filter: OutputFilter, docs_filter: &DocsFilter) -> serde_json::Result<()> {
+    let filtered_json = apply_filter_to_json(result, filter, docs_filter);
     println!("{}", serde_json::to_string_pretty(&filtered_json)?);
     Ok(())
 }
@@ -428,6 +475,138 @@ pub fn print_json(result: &SniffResult, filter: OutputFilter) -> serde_json::Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod docs_filter {
+        use super::*;
+        use chrono::Utc;
+        use sniff::filesystem::docs::MarkdownMeta;
+        use std::path::PathBuf;
+
+        fn make_doc(relative: &str) -> MarkdownMeta {
+            MarkdownMeta {
+                filepath: PathBuf::from(relative),
+                relative: relative.to_string(),
+                package: None,
+                title: String::new(),
+                model: None,
+                prompt: None,
+                last_updated: Utc::now(),
+                content_hash: String::new(),
+            }
+        }
+
+        fn make_doc_with_prompt(relative: &str, prompt: &str) -> MarkdownMeta {
+            let mut doc = make_doc(relative);
+            doc.prompt = Some(prompt.to_string());
+            doc
+        }
+
+        fn sample_docs() -> Vec<MarkdownMeta> {
+            vec![
+                make_doc("README.md"),
+                make_doc("sniff/README.md"),
+                make_doc("sniff/lib/src/notes.md"),
+                make_doc(".ai/plans/2026-02-07.plan-for-feature.md"),
+                make_doc("homelab/docs/planning.md"),
+                make_doc("darkmatter/lib/src/README.md"),
+                make_doc_with_prompt("research/docs/overview.md", "Summarize this library"),
+                make_doc_with_prompt("homelab/docs/setup.md", "How to configure"),
+            ]
+        }
+
+        #[test]
+        fn no_flags_returns_all() {
+            let docs = sample_docs();
+            let filter = DocsFilter::default();
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), docs.len());
+        }
+
+        #[test]
+        fn readme_flag_filters_readme_files() {
+            let docs = sample_docs();
+            let filter = DocsFilter { readme: true, ..Default::default() };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 3);
+            assert!(result.iter().all(|d| d.relative.to_lowercase().ends_with("/readme.md") || d.relative.to_lowercase() == "readme.md"));
+        }
+
+        #[test]
+        fn readme_flag_is_case_insensitive() {
+            let docs = vec![
+                make_doc("readme.md"),
+                make_doc("pkg/Readme.md"),
+                make_doc("other.md"),
+            ];
+            let filter = DocsFilter { readme: true, ..Default::default() };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 2);
+        }
+
+        #[test]
+        fn plan_flag_matches_filename_and_path() {
+            let docs = sample_docs();
+            let filter = DocsFilter { plan: true, ..Default::default() };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 2);
+            assert!(result.iter().all(|d| d.relative.to_lowercase().contains("plan")));
+        }
+
+        #[test]
+        fn src_flag_matches_src_in_path() {
+            let docs = sample_docs();
+            let filter = DocsFilter { src: true, ..Default::default() };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 2);
+            assert!(result.iter().all(|d| d.relative.contains("/src/")));
+        }
+
+        #[test]
+        fn has_prompt_flag_filters_to_prompted_docs() {
+            let docs = sample_docs();
+            let filter = DocsFilter { has_prompt: true, ..Default::default() };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 2);
+            assert!(result.iter().all(|d| d.prompt.is_some()));
+        }
+
+        #[test]
+        fn positional_filter_matches_substring() {
+            let docs = sample_docs();
+            let filter = DocsFilter { filter: Some("homelab".to_string()), ..Default::default() };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 2);
+            assert!(result.iter().all(|d| d.relative.to_lowercase().contains("homelab")));
+        }
+
+        #[test]
+        fn positional_filter_is_case_insensitive() {
+            let docs = sample_docs();
+            let filter = DocsFilter { filter: Some("HOMELAB".to_string()), ..Default::default() };
+            let result = filter_docs(&docs, &filter);
+            assert_eq!(result.len(), 2);
+        }
+
+        #[test]
+        fn has_prompt_with_positional_filter_intersects() {
+            let docs = sample_docs();
+            let filter = DocsFilter { has_prompt: true, filter: Some("homelab".to_string()), ..Default::default() };
+            let result = filter_docs(&docs, &filter);
+            // Only homelab/docs/setup.md has both a prompt and "homelab" in path
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].relative, "homelab/docs/setup.md");
+        }
+
+        #[test]
+        fn combined_flags_intersect() {
+            let docs = sample_docs();
+            let filter = DocsFilter { readme: true, src: true, ..Default::default() };
+            let result = filter_docs(&docs, &filter);
+            // Only darkmatter/lib/src/README.md matches both --readme and --src
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].relative, "darkmatter/lib/src/README.md");
+        }
+    }
 
     #[test]
     fn test_format_uptime_zero() {

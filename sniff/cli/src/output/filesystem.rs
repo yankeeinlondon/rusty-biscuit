@@ -2,9 +2,11 @@
 
 use std::path::Path;
 
+use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::utils::layout::Margin;
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{BehindStatus, ConventionalCommit, FileStatus, RefKind};
 
@@ -725,7 +727,6 @@ pub(crate) fn print_docs_section(docs: &[MarkdownMeta]) {
 
     for doc in docs {
         let pkg_display = doc.package.as_deref().unwrap_or("(root)");
-
         let date_str = doc.last_updated.format("%Y-%m-%d").to_string();
 
         let mut details = vec![
@@ -737,20 +738,40 @@ pub(crate) fn print_docs_section(docs: &[MarkdownMeta]) {
             details.insert(0, format!("<dim>Title:</dim> {}", doc.title));
         }
 
-        if doc.prompt.is_some() {
-            details.push("<dim>Prompt:</dim> <green>yes</green>".to_string());
-        }
         if let Some(ref model) = doc.model {
             details.push(format!("<dim>Model:</dim> {model}"));
         }
 
-        println!(
-            "  {}",
-            Prose::new(&format!("<cyan>{}</cyan>", doc.relative)).render(None)
-        );
+        // Filepath: dim path prefix, bold filename, wrapped in OSC8 link
+        let file_link = format_doc_filepath(&doc.relative, &doc.filepath.display().to_string());
+        println!("{}", Prose::new(&file_link).render(None));
+
         for detail in &details {
             println!("    {}", Prose::new(detail).render(None));
         }
+
+        // Render prompt label + block quote (word wrap handles width)
+        if let Some(ref prompt) = doc.prompt {
+            println!("    {}", Prose::new("<dim>Prompt:</dim>").render(None));
+            let mut quote = BlockQuote::from(prompt.as_str());
+            quote.layout_mut().left_margin = Margin::Chars(6);
+            println!("{}", quote.render(None));
+        }
+
         println!();
+    }
+}
+
+/// Format a document filepath with dim directory and bold filename,
+/// wrapped in an OSC8 hyperlink.
+fn format_doc_filepath(relative: &str, absolute: &str) -> String {
+    match relative.rsplit_once('/') {
+        Some((dir, file)) => {
+            format!("<a href=\"{absolute}\"><blue><dim>{dir}/</dim><b>{file}</b></blue></a>")
+        }
+        None => {
+            // No directory prefix, just the filename
+            format!("<a href=\"{absolute}\"><blue><b>{relative}</b></blue></a>")
+        }
     }
 }

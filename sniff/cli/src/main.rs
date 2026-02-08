@@ -99,7 +99,26 @@ pub enum Commands {
     Language,
 
     /// Show markdown documents in the repository
-    Docs,
+    Docs {
+        /// Show only README files
+        #[arg(long)]
+        readme: bool,
+
+        /// Show only documents with "plan" in the filename or path
+        #[arg(long)]
+        plan: bool,
+
+        /// Show only documents under a `src/` directory
+        #[arg(long)]
+        src: bool,
+
+        /// Show only documents with a prompt in frontmatter
+        #[arg(long)]
+        has_prompt: bool,
+
+        /// Filter documents by substring match on filepath/filename
+        filter: Option<String>,
+    },
 
     // === Programs sections ===
     /// Show all installed programs detection
@@ -196,7 +215,7 @@ impl Commands {
             Commands::Git { .. } => OutputFilter::Git,
             Commands::Repo => OutputFilter::Repo,
             Commands::Language => OutputFilter::Language,
-            Commands::Docs => OutputFilter::Docs,
+            Commands::Docs { .. } => OutputFilter::Docs,
 
             // Programs sections
             Commands::Programs { .. } => OutputFilter::Programs,
@@ -261,6 +280,41 @@ impl Commands {
             _ => 5, // default
         }
     }
+
+    /// Get docs filter flags if this is a docs command.
+    pub fn docs_filter(&self) -> DocsFilter {
+        match self {
+            Commands::Docs {
+                readme,
+                plan,
+                src,
+                has_prompt,
+                filter,
+            } => DocsFilter {
+                readme: *readme,
+                plan: *plan,
+                src: *src,
+                has_prompt: *has_prompt,
+                filter: filter.clone(),
+            },
+            _ => DocsFilter::default(),
+        }
+    }
+}
+
+/// Filter options for the docs subcommand.
+#[derive(Debug, Clone, Default)]
+pub struct DocsFilter {
+    /// Show only README files (case-insensitive).
+    pub readme: bool,
+    /// Show only documents with "plan" in the filename or path.
+    pub plan: bool,
+    /// Show only documents under a `src/` directory.
+    pub src: bool,
+    /// Show only documents with a prompt in frontmatter.
+    pub has_prompt: bool,
+    /// Substring filter on filepath/filename (case-insensitive).
+    pub filter: Option<String>,
 }
 
 /// Service state filter for services subcommand.
@@ -301,7 +355,12 @@ Commands:
     sniff git         Show only git repository information
     sniff repo        Show only repository/monorepo structure
     sniff language    Show only language detection results
-    sniff docs        Show markdown documents in the repository
+    sniff docs              Show markdown documents in the repository
+    sniff docs --readme     Show only README.md files
+    sniff docs --plan       Show only plan-related documents
+    sniff docs --src        Show only documents under src/ directories
+    sniff docs --has-prompt Show only documents with a prompt
+    sniff docs homelab      Filter documents matching \"homelab\"
 
   Programs:
     sniff programs                   Show all installed programs
@@ -497,12 +556,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Output logic:
     // - No subcommand: always JSON
     // - With subcommand: text by default, --json for JSON
+    let docs_filter = cli.command.as_ref().map_or(DocsFilter::default(), |c| c.docs_filter());
+
     let use_json = cli.command.is_none() || cli.json;
 
     if use_json {
-        output::print_json(&result, output_filter)?;
+        output::print_json(&result, output_filter, &docs_filter)?;
     } else {
-        output::print_text(&result, cli.verbose, output_filter, history_count);
+        output::print_text(&result, cli.verbose, output_filter, history_count, &docs_filter);
     }
 
     Ok(())
@@ -699,7 +760,102 @@ mod tests {
         #[test]
         fn docs_subcommand_parses() {
             let cli = parse_args(&["docs"]).unwrap();
-            assert!(matches!(cli.command, Some(Commands::Docs)));
+            assert!(matches!(cli.command, Some(Commands::Docs { .. })));
+        }
+
+        #[test]
+        fn docs_readme_flag_parses() {
+            let cli = parse_args(&["docs", "--readme"]).unwrap();
+            if let Some(Commands::Docs { readme, plan, src, has_prompt, filter }) = cli.command {
+                assert!(readme);
+                assert!(!plan);
+                assert!(!src);
+                assert!(!has_prompt);
+                assert!(filter.is_none());
+            } else {
+                panic!("Expected Docs command");
+            }
+        }
+
+        #[test]
+        fn docs_plan_flag_parses() {
+            let cli = parse_args(&["docs", "--plan"]).unwrap();
+            if let Some(Commands::Docs { readme, plan, src, has_prompt, filter }) = cli.command {
+                assert!(!readme);
+                assert!(plan);
+                assert!(!src);
+                assert!(!has_prompt);
+                assert!(filter.is_none());
+            } else {
+                panic!("Expected Docs command");
+            }
+        }
+
+        #[test]
+        fn docs_src_flag_parses() {
+            let cli = parse_args(&["docs", "--src"]).unwrap();
+            if let Some(Commands::Docs { readme, plan, src, has_prompt, filter }) = cli.command {
+                assert!(!readme);
+                assert!(!plan);
+                assert!(src);
+                assert!(!has_prompt);
+                assert!(filter.is_none());
+            } else {
+                panic!("Expected Docs command");
+            }
+        }
+
+        #[test]
+        fn docs_has_prompt_flag_parses() {
+            let cli = parse_args(&["docs", "--has-prompt"]).unwrap();
+            if let Some(Commands::Docs { readme, plan, src, has_prompt, filter }) = cli.command {
+                assert!(!readme);
+                assert!(!plan);
+                assert!(!src);
+                assert!(has_prompt);
+                assert!(filter.is_none());
+            } else {
+                panic!("Expected Docs command");
+            }
+        }
+
+        #[test]
+        fn docs_positional_filter_parses() {
+            let cli = parse_args(&["docs", "homelab"]).unwrap();
+            if let Some(Commands::Docs { readme, plan, src, has_prompt, filter }) = cli.command {
+                assert!(!readme);
+                assert!(!plan);
+                assert!(!src);
+                assert!(!has_prompt);
+                assert_eq!(filter, Some("homelab".to_string()));
+            } else {
+                panic!("Expected Docs command");
+            }
+        }
+
+        #[test]
+        fn docs_filter_with_flags_parse() {
+            let cli = parse_args(&["docs", "--has-prompt", "research"]).unwrap();
+            if let Some(Commands::Docs { has_prompt, filter, .. }) = cli.command {
+                assert!(has_prompt);
+                assert_eq!(filter, Some("research".to_string()));
+            } else {
+                panic!("Expected Docs command");
+            }
+        }
+
+        #[test]
+        fn docs_multiple_flags_parse() {
+            let cli = parse_args(&["docs", "--readme", "--src"]).unwrap();
+            if let Some(Commands::Docs { readme, plan, src, has_prompt, filter }) = cli.command {
+                assert!(readme);
+                assert!(!plan);
+                assert!(src);
+                assert!(!has_prompt);
+                assert!(filter.is_none());
+            } else {
+                panic!("Expected Docs command");
+            }
         }
 
         #[test]
@@ -828,7 +984,7 @@ mod tests {
 
         #[test]
         fn docs_maps_to_docs_filter() {
-            let cmd = Commands::Docs;
+            let cmd = Commands::Docs { readme: false, plan: false, src: false, has_prompt: false, filter: None };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Docs);
         }
 
