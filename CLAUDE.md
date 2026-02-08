@@ -502,10 +502,24 @@ For complete tracing architecture, see `docs/tracing.md`.
 - No `unwrap()` or `expect()` in production code paths (only in tests)
 - All public functions return `Result` types
 
+### Documentation Conventions
+
+**Package READMEs** follow a layered structure (see `docs/package-structure.md` for full details):
+- **Base README** (package root): Functional goals, links to sub-module READMEs
+- **Sub-module READMEs** (lib/, cli/): Technical approach, key crates, lessons learned section
+- **`docs/` folder**: `dependencies.md` plus research/design documents
+
+**Avoiding Drift**: When modifying code, update relevant documentation in the same change:
+- READMEs when changing public APIs or behavior
+- `docs/dependencies.md` when adding or removing crates
+- Skill files (`.claude/skills/`) when changing patterns or architecture
+- This `CLAUDE.md` when changing workflows or project conventions
+
 ## Additional Documentation
 
 For deeper architectural details, see:
 
+- **`docs/package-structure.md`**: README conventions, docs folder patterns, drift prevention
 - **`docs/dependencies.md`**: Complete dependency list with descriptions and links
 - **`docs/tracing.md`**: Comprehensive tracing architecture (665 lines) - libraries emit/apps configure, PromptHook implementation, OpenTelemetry integration
 - **`research/docs/architecture.md`**: Research pipeline internals - prompt templates, metadata schema, package manager detection, LLM provider rationale

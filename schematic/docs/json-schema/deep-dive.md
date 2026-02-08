@@ -31,7 +31,7 @@ The primary purposes of JSON Schema include:
 - **Hypermedia**: Describing links and relations between resources (Hyper-Schema)
 - **UI Generation**: Offering hints for user interfaces working with JSON data
 
-The Rust ecosystem has excellent support for JSON Schema through the `jsonschema` crate, which provides high-performance validation with support for multiple drafts and advanced features like custom keywords and format validators 【turn0search11】【turn0search15】.
+The Rust ecosystem has excellent support for JSON Schema through the `jsonschema` crate, which provides high-performance validation with support for multiple drafts and advanced features like custom keywords and format validators.
 
 ## 2 JSON Schema Types
 
