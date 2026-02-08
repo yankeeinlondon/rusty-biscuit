@@ -30,21 +30,21 @@ default:
     just --list | grep -v 'default'
     echo
 
-# build Homelab packages (define, definitions, gen)
+# build Homelab packages (lib, cli)
 build *args="":
     @echo ""
-    @echo "Build Homelab Packages"
-    @echo "------------------------"
+    @echo "Build Homelab Packages (Library and Homey CLI)"
+    @echo "----------------------------------------------"
     @echo ""
-    @cargo build -p homelab -p homelab-cli {{args}}
+    @cargo build -p homelab -p homey {{args}}
 
 # run tests for Homelab packages
 test *args="":
     @echo ""
-    @echo "Testing Homelab Packages"
-    @echo "--------------------------"
+    @echo "Testing {{BOLD}}Homelab{{RESET}} ({{ITALIC}}Library and Homey CLI{{RESET}})"
+    @echo "---------------------------------------"
     @echo ""
-    @cargo test -p homelab -p homelab-cli {{args}}
+    @cargo test -p homelab -p homey {{args}}
 
 # run clippy on Homelab packages
 lint:
@@ -53,14 +53,14 @@ lint:
     @echo "--------------------------"
     @echo ""
     @cargo clippy -p homelab -- -D warnings
-    @cargo clippy -p homelab-cli -- -D warnings
+    @cargo clippy -p homey -- -D warnings
 
 install:
     @echo ""
     @echo "{{BOLD}}Building Homelab Library{{RESET}}"
     @cargo build -p homelab --release
     @echo ""
-    @echo "{{BOLD}}{{YELLOW}}Installing Homelab CLI{{RESET}}"
+    @echo "{{BOLD}}{{YELLOW}}Installing Homelab CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{YELLOW}}){{RESET}}"
     @cargo install --path ./cli
     @echo ""
     @echo "{{BOLD}}{{BLUE}}Homelab CLI installed{{RESET}}"
@@ -68,9 +68,9 @@ install:
 
 check:
     @echo ""
-    @echo "Checking Homelab"
+    @echo "Checking Homelab Library and CLI"
     @echo ""
-    @cargo check -p homelab -p homelab-cli
+    @cargo check -p homelab -p homey
 
 # Open Opencode
 oc *args="":
