@@ -1,5 +1,5 @@
 ---
-prompt: >-
+prompt: |-
     Do a deep dive on the Llama.cpp application (both CLI and new GUI).
 
     - List out it's feature set, describe it's architecture, describe the licensing it is offered under.

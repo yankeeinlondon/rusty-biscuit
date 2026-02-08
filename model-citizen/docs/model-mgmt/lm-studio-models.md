@@ -1,5 +1,5 @@
 ---
-prompt: >-
+prompt: |-
     Do a deep dive on LM Studio's metadata and configurability for models.
 
     - where does LM Studio store it's information about default metadata to use with each model?

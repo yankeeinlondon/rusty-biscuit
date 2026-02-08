@@ -1,5 +1,5 @@
 ---
-prompt: >-
+prompt: |-
   Do a deep dive on JSON Schema:
 
   - what types does JSON Schema use?

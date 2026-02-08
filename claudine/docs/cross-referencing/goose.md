@@ -1,5 +1,5 @@
 ---
-prompt: >-
+prompt: |-
   Do a deep dive on Goose Agentic CLI's support for both "slash commands", "skills", and "agents/subagents" (if supported).
 
   - Describe the directory structure conventions for each standard (both User scope and Repo scope)

@@ -1,5 +1,5 @@
 ---
-prompt: >-
+prompt: |-
   - What PDF crates exist in Rust? For each:
       - what are their core features?
       - what feature flags are there and when should you use them?

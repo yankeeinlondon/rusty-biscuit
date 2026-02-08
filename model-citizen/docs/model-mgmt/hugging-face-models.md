@@ -1,5 +1,5 @@
 ---
-prompt: >-
+prompt: |-
     Do a deep dive on the hugging face service and it's API.
 
     - what is the organizational structure of the site? Of the API?

@@ -1,5 +1,5 @@
 ---
-prompt: >-
+prompt: |-
     Do online research on the hooks/event which can be leveraged when using the Goose Agentic CLI (https://block.github.io/goose/). Describe each hook, what data it returns, what kind of return type is expected and how that return type effects the agentic flow. in the end describe any known gotcha in working with this event/hook model and how people have gotten around these quirks or shortcomings.
 ---
 

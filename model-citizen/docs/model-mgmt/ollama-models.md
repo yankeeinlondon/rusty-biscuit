@@ -1,5 +1,5 @@
 ---
-prompt: >-
+prompt: |-
     Do a deep dive on Ollama's metadata and configurability for models.
 
     - where does Ollama store it's information about default metadata to use with each model?

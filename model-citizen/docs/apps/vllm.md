@@ -1,5 +1,5 @@
 ---
-prompt: >-
+prompt: |-
     - Do a deep dive on the vLLM application. List out it's feature set, describe it's architecture, describe the licensing it is offered under.
     - Then describe what ENV variables the program uses for API Keys, for Model discovery, or for anything else.
         - If the locations are driven more by configuration then ENV variables, where is the configuration file located and is a URL which describes it's format?
