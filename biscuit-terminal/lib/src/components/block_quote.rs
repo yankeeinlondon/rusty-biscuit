@@ -7,6 +7,7 @@ use crate::{
     },
     terminal::Terminal,
     utils::{
+        block_constraint::{split_lines, wrap_lines},
         color::{Color, Tailwind},
         layout::Layout,
     },
@@ -29,13 +30,17 @@ pub struct BlockQuote {
 
 impl Default for BlockQuote {
     fn default() -> Self {
+        use crate::utils::layout::WordWrap;
         BlockQuote {
             content: RenderableContent::String("".to_string()),
             attribution: None,
             text_color: None,
             bg_color: None,
             left_block_color: Some(Color::Tailwind(Tailwind::Gray500)),
-            layout: Layout::default(),
+            layout: Layout {
+                word_wrap: WordWrap::WrapProse(Some(8), None),
+                ..Layout::default()
+            },
         }
     }
 }
@@ -117,7 +122,12 @@ impl BlockQuote {
 
         // Render child content with constrained width
         let content: String = match &self.content {
-            RenderableContent::String(s) => s.clone(),
+            RenderableContent::String(s) => {
+                // Wrap plain strings to child_width using the layout's word wrap strategy
+                let lines = split_lines(s);
+                let wrapped = wrap_lines(lines, &self.layout.word_wrap, child_width);
+                wrapped.join("\n")
+            }
             RenderableContent::Component(component) => {
                 // Use render() with the constrained child width so nested
                 // components respect the block quote's border
@@ -528,5 +538,43 @@ mod tests {
         let result = quote.render(None);
         assert!(result.contains("│ Quote"));
         assert!(result.contains("│ — Author"));
+    }
+
+    // =========================================================================
+    // Word Wrap Tests
+    // =========================================================================
+
+    #[test]
+    fn test_long_string_wraps_at_width() {
+        // At width 40, child_width = 38 (minus "│ " border).
+        // A long string should be split across lines, each prefixed with "│ "
+        let long = "word ".repeat(20); // 100 chars
+        let quote = BlockQuote::from(long.trim());
+        let result = quote.render(Some(40));
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(lines.len() > 1, "Expected wrapping but got single line: {result}");
+        assert!(lines.iter().all(|l| l.starts_with("│ ")));
+    }
+
+    #[test]
+    fn test_embedded_newlines_preserved_with_wrapping() {
+        // Simulates a YAML >- prompt with paragraph breaks
+        let text = "Do a deep dive on JSON Schema:\n- what types? - how is validation done?\nFor any code examples always use Rust.";
+        let quote = BlockQuote::from(text);
+        let result = quote.render(Some(80));
+        let lines: Vec<&str> = result.lines().collect();
+        // Should have at least 3 border-prefixed lines (one per \n-separated segment)
+        assert!(lines.len() >= 3, "Expected >=3 lines but got {}: {result}", lines.len());
+        assert!(lines.iter().all(|l| l.starts_with("│ ") || l.starts_with("      │")),
+            "All lines should have border prefix: {result}");
+    }
+
+    #[test]
+    fn test_short_string_does_not_wrap() {
+        let quote = BlockQuote::from("short text");
+        let result = quote.render(Some(80));
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0], "│ short text");
     }
 }
