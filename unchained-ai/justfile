@@ -14,60 +14,96 @@ MAGENTA := '\033[35m'
 CYAN := '\033[36m'
 WHITE := '\033[37m'
 
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{YELLOW2}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} >/dev/null || true
+
 default:
-    @echo
-    @echo "Unchained AI"
-    @echo "-----------"
-    @echo ""
-    @just --list | grep -v 'default'
-    @echo
+    #!/usr/bin/env bash
+    set -euo pipefail
 
+    echo
+    if command -v md &> /dev/null; then
+        md just.md
+    else
+        echo "unchained-ai Library & CLI"
+        echo "====================="
+    fi
 
-# build Unchained AI library
+    echo ""
+    just --list | grep -v 'default'
+    echo
+
+# build unchained-ai packages (lib, cli, server)
 build *args="":
     @echo ""
-    @echo "Unchained AI Lib + Gen"
-    @echo "--------------------_"
+    @echo "Build unchained-ai Packages (Library, CLI)"
+    @echo "---------------------------------------------------"
     @echo ""
-    @cargo build -p unchained-ai {{args}}
-    @cargo build -p unchained-ai-gen {{args}}
+    @cargo build -p unchained-ai -p homey -p unchained-ai-server {{args}}
 
-# run tests across research modules
+# run tests for unchained-ai packages
 test *args="":
     @echo ""
-    @echo "Testing Unchained AI"
-    @echo "-------------------"
+    @echo "Testing {{BOLD}}unchained-ai{{RESET}} ({{ITALIC}}Library, CLI{{RESET}})"
+    @echo "-----------------------------------------------"
     @echo ""
-    @cargo test -p unchained-ai {{args}}
-    @cargo test -p unchained-ai-gen {{args}}
+    @cargo test -p unchained-ai -p homey -p unchained-ai-server {{args}}
 
-lint *args="":
+# run clippy on unchained-ai packages
+lint:
     @echo ""
-    @echo "Linting Unchained AI"
-    @echo "-------------------"
+    @echo "Linting unchained-ai Packages"
+    @echo "--------------------------"
     @echo ""
-    @cargo clippy -p unchained-ai -p unchained-ai-gen {{args}}
-
-
-
-# run the debug release of the Research CLI
-cli *args="":
-    @cargo run -p darkmatter -- {{args}}
-
-docs:
-  @cargo clean --doc && cargo doc --no-deps --lib
+    @cargo clippy -p unchained-ai -- -D warnings
+    @cargo clippy -p homey -- -D warnings
+    @cargo clippy -p unchained-ai-server -- -D warnings
 
 install:
     @echo ""
-    @echo "{{BOLD}}Building Unchained AI Library{{RESET}}"
-    @cargo build -p unchained-ai
+    @echo "{{BOLD}}Building unchained-ai Library{{RESET}}"
+    @cargo build -p unchained-ai --release
     @echo ""
-    @echo "{{BOLD}}{{RED}}Skipping Unchained AI CLI{{RESET}}"
+    @echo "{{BOLD}}{{YELLOW}}Installing unchained-ai CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{YELLOW}}){{RESET}}"
+    @cargo install --path ./cli
     @echo ""
-    # @cargo install --path cli
-    # @echo ""
-    # @echo ""
-    # @echo ""
+    @echo "{{BOLD}}{{BLUE}}unchained-ai CLI installed{{RESET}}"
+    @echo ""
+
+check:
+    @echo ""
+    @echo "Checking unchained-ai Library, CLI and Server"
+    @echo ""
+    @cargo check -p unchained-ai -p homey -p unchained-ai-server
+
+# run server in dev mode
+server *args="":
+    @echo ""
+    @echo "{{BOLD}}Running unchained-ai Server{{RESET}} ({{ITALIC}}development mode{{RESET}})"
+    @echo ""
+    cargo run -p unchained-ai-server {{args}}
+
+# run tests for server only
+test-server *args="":
+    @echo ""
+    @echo "Testing {{BOLD}}unchained-ai Server{{RESET}}"
+    @echo ""
+    @cargo test -p unchained-ai-server {{args}}
+
+
+# Open Opencode
+oc *args="":
+    @clear
+    @echo "Loading {{BOLD}}Opencode{{RESET}}"
+    @cd .. && opencode {{args}}
+
+# Open Claude Code in yolo mode
+cc *args="":
+    @clear
+    @echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @cd .. && claude --dangerously-skip-permissions {{args}}
 
 # Use GPT 5.2 to commit staged changes
 commit:
@@ -77,3 +113,8 @@ commit:
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
+
+refresh-skill:
+    @clear
+    @echo "Refreshing {{BOLD}}unchained-ai{{RESET}} skill"
+    @unset ANTHROPIC_API_KEY && cd .. && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-unchained-ai.md)"\'
