@@ -97,8 +97,8 @@ enum Commands {
 
     /// Search for models on Hugging Face
     Search {
-        /// Search query
-        query: String,
+        /// Search terms (omit to browse by sort order)
+        query: Vec<String>,
 
         /// Maximum results to show
         #[arg(short, long, default_value = "20")]
@@ -108,7 +108,7 @@ enum Commands {
         #[arg(short, long, default_value = "downloads", value_enum)]
         sort: SortOrder,
 
-        /// Show additional columns (created date)
+        /// Show additional columns (created date, modified date)
         #[arg(short, long)]
         verbose: bool,
     },
@@ -172,8 +172,13 @@ async fn main() -> Result<()> {
             sort,
             verbose,
         } => {
+            let query = if query.is_empty() {
+                None
+            } else {
+                Some(query.join(" "))
+            };
             commands::search::run(
-                &query,
+                query.as_deref(),
                 limit,
                 sort.into(),
                 cli.format == OutputFormat::Json,

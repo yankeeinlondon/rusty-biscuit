@@ -1,7 +1,7 @@
 //! HuggingFace Hub integration for model search and download.
 //!
-//! This module provides functionality to search for GGUF models on HuggingFace
-//! and download them with progress tracking.
+//! This module provides functionality to search for models on HuggingFace
+//! and download GGUF variants with progress tracking.
 
 use crate::gguf::quantization_from_filename;
 use crate::{ModelCitizenError, QuantizationType};
@@ -69,6 +69,8 @@ pub struct SearchResult {
     pub last_modified: Option<String>,
     /// Tags from the HuggingFace API (format indicators, task types, etc.).
     pub tags: Vec<String>,
+    /// Pipeline tag indicating the primary task (e.g., "text-generation", "image-text-to-text").
+    pub pipeline_tag: Option<String>,
 }
 
 impl SearchResult {
@@ -176,37 +178,28 @@ impl HuggingFaceClient {
         }
     }
 
-    /// Searches for GGUF models on HuggingFace.
+    /// Searches for models on HuggingFace.
     ///
-    /// ## Arguments
-    ///
-    /// * `query` - Search query (e.g., "llama 3 gguf")
-    /// * `limit` - Maximum number of results to return
-    /// * `sort` - Sort order for results
+    /// When `query` is `None`, returns models sorted by `sort` with no text filter.
+    /// When a query is provided, it is passed directly to the API as-is.
     ///
     /// ## Errors
     ///
     /// Returns an error if the API request fails.
     pub async fn search_models(
         &self,
-        query: &str,
+        query: Option<&str>,
         limit: usize,
         sort: SortOrder,
     ) -> Result<Vec<SearchResult>, ModelCitizenError> {
-        // Add "gguf" to query if not present
-        let search_query = if query.to_lowercase().contains("gguf") {
-            query.to_string()
-        } else {
-            format!("{} gguf", query)
-        };
-
-        let url = format!(
-            "{}/api/models?search={}&limit={}&sort={}&full=false",
-            self.base_url,
-            urlencoding::encode(&search_query),
-            limit,
-            sort.as_api_param()
+        let mut url = format!(
+            "{}/api/models?limit={}&sort={}&full=false",
+            self.base_url, limit, sort.as_api_param()
         );
+
+        if let Some(q) = query {
+            url.push_str(&format!("&search={}", urlencoding::encode(q)));
+        }
 
         let mut request = self.client.get(&url);
         if let Some(ref token) = self.token {
@@ -248,6 +241,10 @@ impl HuggingFaceClient {
                             .collect()
                     })
                     .unwrap_or_default();
+                let pipeline_tag = m
+                    .get("pipeline_tag")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
 
                 Some(SearchResult {
                     repo_id,
@@ -258,6 +255,7 @@ impl HuggingFaceClient {
                     created_at,
                     last_modified,
                     tags,
+                    pipeline_tag,
                 })
             })
             .collect();
@@ -474,6 +472,7 @@ mod tests {
             created_at: Some("2024-01-15T10:30:00.000Z".to_string()),
             last_modified: Some("2024-06-20T14:00:00.000Z".to_string()),
             tags: vec!["gguf".to_string(), "text-generation".to_string()],
+            pipeline_tag: Some("text-generation".to_string()),
         };
 
         assert_eq!(result.repo_id, "TheBloke/Llama-2-7B-GGUF");

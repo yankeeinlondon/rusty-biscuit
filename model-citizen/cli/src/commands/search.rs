@@ -3,6 +3,7 @@
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
+use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Alignment;
 use color_eyre::eyre::Result;
@@ -12,7 +13,7 @@ use model_citizen::SortOrder;
 const HF_BASE: &str = "https://huggingface.co";
 
 pub async fn run(
-    query: &str,
+    query: Option<&str>,
     limit: usize,
     sort: SortOrder,
     json_output: bool,
@@ -20,12 +21,18 @@ pub async fn run(
 ) -> Result<()> {
     let client = HuggingFaceClient::new();
 
-    println!("Searching for '{}'...", query);
+    match query {
+        Some(_) => println!(),
+        None => println!("Browsing top models by {}...", sort.display_label()),
+    }
 
     let results = client.search_models(query, limit, sort).await?;
 
     if results.is_empty() {
-        println!("No models found matching '{}'", query);
+        match query {
+            Some(q) => println!("No models found matching '{q}'"),
+            None => println!("No models found"),
+        }
         return Ok(());
     }
 
@@ -39,7 +46,9 @@ pub async fn run(
                     "downloads": r.downloads,
                     "likes": r.likes,
                     "created_at": r.created_at,
-                    "last_modified": r.last_modified
+                    "last_modified": r.last_modified,
+                    "tags": r.tags,
+                    "pipeline_tag": r.pipeline_tag
                 })
             })
             .collect();
@@ -57,6 +66,7 @@ pub async fn run(
         };
 
         let show_created = verbose || sort == SortOrder::Created;
+        let show_modified = verbose || sort == SortOrder::Modified;
 
         let mut columns = vec![
             TableColumn::new(Prose::new("Repository").fallback_render(&term)),
@@ -64,16 +74,17 @@ pub async fn run(
                 Prose::new(&sort_header("Downloads", sort == SortOrder::Downloads))
                     .fallback_render(&term),
             )
-            .with_alignment(Alignment::Right),
+            .with_type(ColumnType::Integer),
             TableColumn::new(
                 Prose::new(&sort_header("Likes", sort == SortOrder::Likes))
                     .fallback_render(&term),
             )
-            .with_alignment(Alignment::Right),
+            .with_type(ColumnType::Integer),
             TableColumn::new(Prose::new("G").fallback_render(&term))
                 .with_alignment(Alignment::Center),
             TableColumn::new(Prose::new("ST").fallback_render(&term))
                 .with_alignment(Alignment::Center),
+            TableColumn::new(Prose::new("Tags").fallback_render(&term)),
         ];
         if show_created {
             columns.push(
@@ -84,13 +95,15 @@ pub async fn run(
                 .with_alignment(Alignment::Center),
             );
         }
-        columns.push(
-            TableColumn::new(
-                Prose::new(&sort_header("Modified", sort == SortOrder::Modified))
-                    .fallback_render(&term),
-            )
-            .with_alignment(Alignment::Center),
-        );
+        if show_modified {
+            columns.push(
+                TableColumn::new(
+                    Prose::new(&sort_header("Modified", sort == SortOrder::Modified))
+                        .fallback_render(&term),
+                )
+                .with_alignment(Alignment::Center),
+            );
+        }
 
         let mut table = Table::new()
             .with_columns(columns)
@@ -100,18 +113,24 @@ pub async fn run(
             let repo_link = format_repo_link(&r.repo_id);
             let check = TableCellContent::Text("\u{2713}".to_string());
             let blank = TableCellContent::Text(String::new());
+            let tags_markup = format_tags(r);
+            let neither = !r.has_gguf() && !r.has_safetensors();
+            let dot = Prose::new("<red-500>\u{23fa}</red-500>").fallback_render(&term);
 
             let mut row = vec![
                 Prose::new(&repo_link).fallback_render(&term).into(),
-                format_count(r.downloads),
-                format_count(r.likes),
-                if r.has_gguf() { check.clone() } else { blank.clone() },
-                if r.has_safetensors() { check } else { blank },
+                TableCellContent::Integer(r.downloads as i64),
+                TableCellContent::Integer(r.likes as i64),
+                if r.has_gguf() { check.clone() } else if neither { dot.clone().into() } else { blank.clone() },
+                if r.has_safetensors() { check } else if neither { dot.into() } else { blank },
+                Prose::new(&tags_markup).fallback_render(&term).into(),
             ];
             if show_created {
                 row.push(format_date(&r.created_at));
             }
-            row.push(format_date(&r.last_modified));
+            if show_modified {
+                row.push(format_date(&r.last_modified));
+            }
 
             table.add_row(row);
         }
@@ -138,6 +157,46 @@ fn format_repo_link(repo_id: &str) -> String {
     }
 }
 
+/// Tag definitions: (api_tag, display_label, bg_color, fg_color).
+///
+/// Uses Tailwind block tags for both background (`<bg-*>`) and foreground (`<*>`).
+const TAG_RULES: &[(&str, &str, &str, &str)] = &[
+    ("image-text-to-text", "image input", "bg-blue-700", "white"),
+    ("image-to-text", "image input", "bg-blue-700", "white"),
+    ("text-to-image", "video output", "bg-violet-700", "white"),
+    ("text-to-video", "video output", "bg-violet-700", "white"),
+    ("mlx", "mlx", "bg-emerald-700", "white"),
+    ("text-to-speech", "tts", "bg-teal-700", "white"),
+    ("function-calling", "fn", "bg-amber-600", "white"),
+    ("tool-use", "tool", "bg-rose-700", "white"),
+];
+
+/// Builds a Prose markup string of colored tag badges for a search result.
+fn format_tags(result: &model_citizen::huggingface::SearchResult) -> String {
+    let mut seen = Vec::new();
+    let mut parts = Vec::new();
+
+    // Check both tags and pipeline_tag for matches.
+    let all_tags: Vec<&str> = result
+        .tags
+        .iter()
+        .map(String::as_str)
+        .chain(result.pipeline_tag.as_deref())
+        .collect();
+
+    for &(api_tag, label, bg, fg) in TAG_RULES {
+        if seen.contains(&label) {
+            continue;
+        }
+        if all_tags.iter().any(|t| t.eq_ignore_ascii_case(api_tag)) {
+            parts.push(format!("<{bg}><{fg}> {label} </{fg}></{bg}>"));
+            seen.push(label);
+        }
+    }
+
+    parts.join(" ")
+}
+
 /// Extracts the date portion (YYYY-MM-DD) from an ISO 8601 timestamp.
 fn format_date(iso: &Option<String>) -> TableCellContent {
     match iso {
@@ -146,24 +205,4 @@ fn format_date(iso: &Option<String>) -> TableCellContent {
     }
 }
 
-fn format_count(n: u64) -> TableCellContent {
-    let s = if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else {
-        format_with_commas(n)
-    };
-    TableCellContent::Text(s)
-}
 
-/// Formats a number with comma separators (e.g., 46633 -> "46,633").
-fn format_with_commas(n: u64) -> String {
-    let s = n.to_string();
-    let mut result = String::with_capacity(s.len() + s.len() / 3);
-    for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    result
-}
