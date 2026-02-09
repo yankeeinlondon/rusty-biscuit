@@ -151,7 +151,7 @@ The `Prose` struct allows for plain text to be parsed for two token types:
 1. Atomic Tokens (e.g., `{{red}}`, `{{bold}}`, `{{reset}}`, etc.)
 2. Block Tokens (e.g., `<i>italics</i>`, `<b>bold</b>`, etc.)
 
-These tokens are defined in the documentation for the struct but in a nutshell they are both ways to indicate styling (color, bold, dim, italics, etc.) within the body of the text. When the `Prose` **render** function is called it will replace these tokens with the appropriate escape codes to achieve the desired effect.
+These tokens are defined in the documentation for the struct but in a nutshell they are both ways to indicate styling (color, bold, dim, italics, etc.) within the body of the text. Both foreground and background colors are supported via web color names, Tailwind palette, and RGB values. When the `Prose` **render** function is called it will replace these tokens with the appropriate escape codes to achieve the desired effect.
 
 ### `TextBlock` struct
 

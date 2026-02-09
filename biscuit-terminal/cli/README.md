@@ -87,8 +87,8 @@ bt prose --no-wrap "Long line without wrapping"
 
 Token types:
 - **Atomic tokens**: `{{bold}}`, `{{italic}}`, `{{red}}`, `{{bg-blue}}`, `{{reset}}`
-- **Block tags**: `<b>`, `<i>`, `<u>`, `<uu>`, `<~>`, `<a href="...">`, `<red>`, `<rgb R,G,B>`
-- **Color support**: Basic colors, bright colors, web colors, Tailwind colors
+- **Block tags**: `<b>`, `<i>`, `<u>`, `<uu>`, `<~>`, `<a href="...">`, `<red>`, `<rgb R,G,B>`, `<bg-rgb R,G,B>`, `<bg-coral>`, `<bg-red-800>`
+- **Color support**: Basic colors, bright colors, web colors, Tailwind colors (foreground and background)
 
 Options:
 - `-l`/`--left-margin`: Left margin in characters

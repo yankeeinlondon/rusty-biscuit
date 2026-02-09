@@ -58,6 +58,9 @@ use crate::{
 /// - `<a href="...">content</a>` for an OSC8 link to a file or URL
 /// - `<rgb 125,67,45>content</rgb>` for RGB colored foreground text
 /// - `<red>content</red>` for named color foreground text
+/// - `<bg-rgb 125,67,45>content</bg-rgb>` for RGB colored background text
+/// - `<bg-coral>content</bg-coral>` for named color (web) background text
+/// - `<bg-red-800>content</bg-red-800>` for Tailwind color background text
 /// - `<clipboard>fallback</clipboard>` injects clipboard content or fallback
 ///
 #[derive(Debug, Clone)]
@@ -485,6 +488,24 @@ fn block_tag_to_escape(
             }
         }
 
+        // Background RGB colors
+        "bg-rgb" => {
+            let rgb_str = attrs
+                .iter()
+                .find(|(_, v)| v.is_empty())
+                .map(|(k, _)| k.as_str())
+                .unwrap_or("");
+
+            if let Some((r, g, b)) = parse_rgb(rgb_str) {
+                Some((
+                    format!("\x1b[48;2;{};{};{}m", r, g, b),
+                    "\x1b[49m".to_string(),
+                ))
+            } else {
+                None
+            }
+        }
+
         // Basic foreground colors
         "black" => Some(("\x1b[30m".to_string(), "\x1b[39m".to_string())),
         "red" => Some(("\x1b[31m".to_string(), "\x1b[39m".to_string())),
@@ -508,8 +529,27 @@ fn block_tag_to_escape(
         // Clipboard - returns empty escapes, actual clipboard handling would be done externally
         "clipboard" => Some((String::new(), String::new())),
 
-        // Try web colors, then Tailwind colors
+        // Try web colors, then Tailwind colors (foreground and background)
         _ => {
+            // Check for bg- prefix for background colors
+            if let Some(color_name) = tag_name.strip_prefix("bg-") {
+                // Try web color lookup for background
+                if let Some(rgb) = lookup_web_color(color_name) {
+                    return Some((
+                        format!("\x1b[48;2;{};{};{}m", rgb.red(), rgb.green(), rgb.blue()),
+                        "\x1b[49m".to_string(),
+                    ));
+                }
+
+                // Try Tailwind color lookup for background
+                if let Some(hdr) = lookup_tailwind_color(color_name) {
+                    return Some((
+                        format!("\x1b[48;2;{};{};{}m", hdr.0, hdr.1, hdr.2),
+                        "\x1b[49m".to_string(),
+                    ));
+                }
+            }
+
             // Try web color lookup (kebab-case like "alice-blue")
             if let Some(rgb) = lookup_web_color(tag_name) {
                 return Some((
@@ -1422,6 +1462,54 @@ mod tests {
         let result = resolve_href("src/main.rs");
         assert!(result.starts_with("file://"));
         assert!(result.contains("src/main.rs"));
+    }
+
+    #[test]
+    fn test_bg_rgb_tag() {
+        let prose = Prose::new("<bg-rgb 255,0,0>red bg</bg-rgb>");
+        let result = prose.render(None);
+        assert!(
+            result.contains("\x1b[48;2;255;0;0m"),
+            "Expected bg RGB escape code, got: {:?}",
+            result
+        );
+        assert!(result.contains("red bg"));
+        assert!(result.contains("\x1b[49m"));
+
+        let prose = Prose::new("<bg-rgb 125,67,45>brown bg</bg-rgb>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[48;2;125;67;45m"));
+        assert!(result.contains("brown bg"));
+    }
+
+    #[test]
+    fn test_bg_web_color_block() {
+        // coral is RGB(255, 127, 80)
+        let prose = Prose::new("<bg-coral>coral bg</bg-coral>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[48;2;255;127;80m"));
+        assert!(result.contains("coral bg"));
+        assert!(result.contains("\x1b[49m"));
+
+        // alice-blue (with hyphen) - RGB(240, 248, 255)
+        let prose = Prose::new("<bg-alice-blue>light blue bg</bg-alice-blue>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[48;2;240;248;255m"));
+        assert!(result.contains("light blue bg"));
+    }
+
+    #[test]
+    fn test_bg_tailwind_color_block() {
+        let prose = Prose::new("<bg-red-800>danger bg</bg-red-800>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[48;2;"));
+        assert!(result.contains("danger bg"));
+        assert!(result.contains("\x1b[49m"));
+
+        let prose = Prose::new("<bg-slate-500>muted bg</bg-slate-500>");
+        let result = prose.render(None);
+        assert!(result.contains("\x1b[48;2;"));
+        assert!(result.contains("muted bg"));
     }
 
     #[test]
