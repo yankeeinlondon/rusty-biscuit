@@ -37,6 +37,7 @@ use crate::markdown::{
 };
 use crate::render::link::Link;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
+use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage, parse_width_spec};
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::terminal::Terminal;
@@ -334,7 +335,6 @@ impl ImageRenderer {
             .max_file_size(MAX_IMAGE_FILE_SIZE)
             .allow_remote(false)
             .width(ImageWidth::Percent(0.5)) // Default to 50% width
-            .use_viuer(true)
             .build();
 
         tracing::debug!(
@@ -450,19 +450,21 @@ impl ImageRenderer {
             term_image = term_image.with_width(w);
         }
 
-        // Render using viuer via TerminalImageOptions
-        // render_with_options prints directly to stdout (viuer behavior)
-        match term_image.render_with_options(&self.options) {
-            Ok(()) => {
-                tracing::debug!(path = %image_path, "Image rendered successfully via biscuit-terminal");
-                // viuer positions cursor after image, no extra output needed
-                String::new()
+        // Check file size against configured limit
+        if let Ok(metadata) = std::fs::metadata(&full_path) {
+            if !self.options.is_size_allowed(metadata.len()) {
+                tracing::debug!(path = %image_path, size = metadata.len(), "Image file too large");
+                eprintln!("Warning: Image file too large: {}", full_path.display());
+                return format!("▉ IMAGE[{}]\n", alt_text);
             }
-            Err(e) => {
-                tracing::warn!(path = %image_path, error = %e, "Image render failed");
-                eprintln!("Warning: Failed to render image '{}': {}", image_path, e);
-                format!("▉ IMAGE[{}]\n", alt_text)
-            }
+        }
+
+        // Render via Renderable trait (string-based, protocol-aware)
+        let output = term_image.fallback_render(&self.terminal);
+        if output.is_empty() {
+            format!("▉ IMAGE[{}]\n", alt_text)
+        } else {
+            output
         }
     }
 }
