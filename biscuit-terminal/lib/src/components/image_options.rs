@@ -15,7 +15,6 @@
 //!     .max_file_size(5 * 1024 * 1024) // 5MB
 //!     .allow_remote(false)
 //!     .width(ImageWidth::Percent(0.75))
-//!     .use_viuer(true)
 //!     .build();
 //!
 //! // Using defaults
@@ -45,7 +44,6 @@ const DEFAULT_MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 /// ## Rendering
 ///
 /// - `width`: How the image should be sized (fill, percentage, or fixed characters)
-/// - `use_viuer`: Whether to use the viuer crate for rendering or raw protocols
 #[derive(Debug, Clone)]
 pub struct TerminalImageOptions {
     /// Base path for resolving relative paths (security boundary).
@@ -75,14 +73,6 @@ pub struct TerminalImageOptions {
     ///
     /// Default: `ImageWidth::Percent(0.5)` (50% of terminal width)
     pub width: ImageWidth,
-
-    /// Whether to use viuer for rendering.
-    ///
-    /// When `true`, the viuer crate handles protocol selection and rendering.
-    /// When `false`, raw Kitty/iTerm2 protocols are used directly.
-    ///
-    /// Default: `true`
-    pub use_viuer: bool,
 }
 
 impl Default for TerminalImageOptions {
@@ -92,7 +82,6 @@ impl Default for TerminalImageOptions {
             max_file_size: DEFAULT_MAX_FILE_SIZE,
             allow_remote: false,
             width: ImageWidth::default(),
-            use_viuer: true,
         }
     }
 }
@@ -175,7 +164,6 @@ pub struct TerminalImageOptionsBuilder {
     max_file_size: Option<u64>,
     allow_remote: Option<bool>,
     width: Option<ImageWidth>,
-    use_viuer: Option<bool>,
 }
 
 impl TerminalImageOptionsBuilder {
@@ -244,22 +232,6 @@ impl TerminalImageOptionsBuilder {
         self
     }
 
-    /// Set whether to use viuer for rendering.
-    ///
-    /// ## Examples
-    ///
-    /// ```rust
-    /// use biscuit_terminal::components::image_options::TerminalImageOptions;
-    ///
-    /// let options = TerminalImageOptions::builder()
-    ///     .use_viuer(false) // Use raw protocols
-    ///     .build();
-    /// ```
-    pub fn use_viuer(mut self, use_viuer: bool) -> Self {
-        self.use_viuer = Some(use_viuer);
-        self
-    }
-
     /// Build the `TerminalImageOptions` instance.
     ///
     /// Any unset fields will use their default values.
@@ -269,7 +241,6 @@ impl TerminalImageOptionsBuilder {
             max_file_size: self.max_file_size.unwrap_or(DEFAULT_MAX_FILE_SIZE),
             allow_remote: self.allow_remote.unwrap_or(false),
             width: self.width.unwrap_or_default(),
-            use_viuer: self.use_viuer.unwrap_or(true),
         }
     }
 }
@@ -286,7 +257,6 @@ mod tests {
         assert_eq!(options.max_file_size, 10 * 1024 * 1024);
         assert!(!options.allow_remote);
         assert!(matches!(options.width, ImageWidth::Percent(p) if (p - 0.5).abs() < 0.001));
-        assert!(options.use_viuer);
     }
 
     #[test]
@@ -297,14 +267,12 @@ mod tests {
             .max_file_size(5 * 1024 * 1024)
             .allow_remote(true)
             .width(ImageWidth::Characters(80))
-            .use_viuer(false)
             .build();
 
         assert_eq!(options.base_path, Some(base));
         assert_eq!(options.max_file_size, 5 * 1024 * 1024);
         assert!(options.allow_remote);
         assert!(matches!(options.width, ImageWidth::Characters(80)));
-        assert!(!options.use_viuer);
     }
 
     #[test]
@@ -318,7 +286,6 @@ mod tests {
         assert!(options.base_path.is_none());
         assert!(!options.allow_remote);
         assert!(matches!(options.width, ImageWidth::Percent(p) if (p - 0.5).abs() < 0.001));
-        assert!(options.use_viuer);
     }
 
     #[test]
@@ -405,7 +372,6 @@ mod tests {
             .max_file_size(4096)
             .allow_remote(true)
             .width(ImageWidth::Fill)
-            .use_viuer(false)
             .build();
 
         let cloned = options.clone();
@@ -413,7 +379,6 @@ mod tests {
         assert_eq!(options.base_path, cloned.base_path);
         assert_eq!(options.max_file_size, cloned.max_file_size);
         assert_eq!(options.allow_remote, cloned.allow_remote);
-        assert_eq!(options.use_viuer, cloned.use_viuer);
     }
 
     #[test]

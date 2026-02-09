@@ -129,6 +129,10 @@ assert!(matches!(result, Err(TerminalImageError::PathTraversalBlocked { .. })));
 let result = TerminalImage::new_with_max_size(Path::new("huge.png"), 1_000_000);
 ```
 
+### Image rendering architecture
+
+All image rendering is string-based: `render()`, `fallback_render()`, and `render_to_terminal()` all return escape sequences as strings. The Kitty graphics protocol is bidirectional — terminals respond with `\x1b_Gi=<id>;OK\x1b\\` after receiving image data. To prevent this response from appearing as garbage text, all Kitty sequences include `q=2` (quiet mode) which suppresses terminal responses entirely.
+
 ### Gotchas and notes
 
 - If `cell_size` cannot be detected, default 8×16 is used; images may appear slightly off if the terminal font has a very different aspect. Provide a width in columns (e.g., `|80`) to get predictable sizing.

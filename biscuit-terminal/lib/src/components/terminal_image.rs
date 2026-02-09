@@ -147,10 +147,10 @@ impl Renderable for TerminalImage {
         }
     }
 
-    /// Optimistic render assuming Kitty protocol support.
+    /// Render the image as a string of Kitty escape sequences.
     ///
-    /// Returns Kitty escape sequences for the image. If rendering fails,
-    /// returns the alt text as a fallback.
+    /// Uses `q=2` (quiet mode) to suppress the terminal's protocol response,
+    /// which would otherwise appear as garbage text when printed from a string.
     fn render(&self, term_width: Option<u32>) -> String {
         let width = term_width.unwrap_or(80);
         match self.render_as_kitty(width) {
@@ -361,11 +361,9 @@ impl TerminalImage {
 
     /// Render the image to a string appropriate for the given terminal.
     ///
-    /// This is the primary rendering method that handles protocol selection
-    /// based on terminal capabilities.
-    ///
-    /// When the terminal supports images, this method uses viuer for rendering,
-    /// which correctly preserves aspect ratio.
+    /// Returns escape sequences for the detected image protocol (Kitty or
+    /// iTerm2). Kitty sequences include `q=2` (quiet mode) so the terminal
+    /// does not send a response that would appear as garbage text.
     ///
     /// ## Arguments
     ///
@@ -373,9 +371,8 @@ impl TerminalImage {
     ///
     /// ## Returns
     ///
-    /// An empty string. viuer prints directly to the terminal, so the return
-    /// value is not used for display. Returns `Ok("")` on success regardless
-    /// of terminal capabilities.
+    /// A string of escape sequences ready to print, or an empty string
+    /// when the terminal does not support images.
     ///
     /// ## Errors
     ///
@@ -386,14 +383,11 @@ impl TerminalImage {
     ) -> Result<String, TerminalImageError> {
         use crate::discovery::detection::ImageSupport;
 
-        if term.is_tty && !matches!(term.image_support, ImageSupport::None) {
-            // viuer prints directly, so we render and return empty string
-            self.render_via_viuer(term)?;
-            return Ok(String::new());
+        match term.image_support {
+            ImageSupport::Kitty => self.render_as_kitty(term.width()),
+            ImageSupport::ITerm => self.render_as_iterm2(term.width()),
+            ImageSupport::None => Ok(String::new()),
         }
-
-        // Unsupported terminal: no alt-text fallback
-        Ok(String::new())
     }
 
     pub(crate) fn render_inline(
@@ -444,127 +438,9 @@ impl TerminalImage {
             String::new()
         };
 
-        let sequence = format!("{}{}", prefix, image);
+        let sequence = format!("\x1b[s{}{}\x1b[u", prefix, image);
 
         Ok((sequence, height_cells))
-    }
-
-    /// Render the image using viuer with the instance's width setting.
-    ///
-    /// This is a convenience method that creates options from the instance's
-    /// width field and renders using viuer.
-    fn render_via_viuer(&self, term: &crate::terminal::Terminal) -> Result<(), TerminalImageError> {
-        let dims = self.resolve_dimensions(term.width());
-
-        let config = viuer::Config {
-            width: Some(dims.image_width),
-            height: None, // Let viuer compute height to preserve aspect ratio
-            x: dims.x_offset as u16,
-            y: 0,
-            transparent: true,
-            truecolor: true,
-            absolute_offset: false,
-            restore_cursor: false,
-            ..Default::default()
-        };
-
-        viuer::print_from_file(&self.filename, &config).map_err(|e| {
-            TerminalImageError::ViuerError {
-                message: e.to_string(),
-            }
-        })?;
-
-        Ok(())
-    }
-
-    /// Render the image using options that may include viuer rendering.
-    ///
-    /// This method respects the `use_viuer` flag in options and applies
-    /// security guards (path traversal, file size, remote URL blocking).
-    ///
-    /// ## Arguments
-    ///
-    /// * `options` - Configuration options for rendering
-    ///
-    /// ## Errors
-    ///
-    /// Returns error if:
-    /// - Path traversal is detected (when `base_path` is set)
-    /// - File exceeds `max_file_size`
-    /// - Remote URL detected when `allow_remote` is false
-    /// - Image loading or rendering fails
-    pub fn render_with_options(
-        &self,
-        options: &crate::components::image_options::TerminalImageOptions,
-    ) -> Result<(), TerminalImageError> {
-        // Security check: remote URL blocking
-        self.validate_not_remote_url(options.allow_remote)?;
-
-        // Security check: path traversal
-        self.validate_path_traversal(&options.base_path)?;
-
-        // Security check: file size
-        self.validate_file_size(options.max_file_size)?;
-
-        let term = crate::terminal::Terminal::new();
-
-        // Render using viuer or fall back to protocol-based rendering
-        if options.use_viuer {
-            return self.render_with_viuer(&term);
-        }
-
-        // Fall back to protocol-based rendering (prints alt text for now)
-        // Protocol-based methods return strings; this method outputs directly
-        let output = self.render_to_terminal(&term)?;
-        print!("{}", output);
-        Ok(())
-    }
-
-    /// Render the image using the viuer crate.
-    ///
-    /// This method uses viuer's `print_from_file` function which handles
-    /// protocol auto-detection (Kitty, iTerm2, Sixel, half-block fallback).
-    /// Width and alignment are taken from the image's own fields (set via
-    /// `with_width()` and `with_alignment()`).
-    ///
-    /// ## Security
-    ///
-    /// This method does NOT perform security checks. Use `render_with_options`
-    /// for security-validated rendering.
-    ///
-    /// ## Errors
-    ///
-    /// Returns error if viuer rendering fails.
-    pub fn render_with_viuer(
-        &self,
-        term: &crate::terminal::Terminal,
-    ) -> Result<(), TerminalImageError> {
-        let config = self.build_viuer_config(term);
-
-        viuer::print_from_file(&self.filename, &config).map_err(|e| {
-            TerminalImageError::ViuerError {
-                message: e.to_string(),
-            }
-        })?;
-
-        Ok(())
-    }
-
-    /// Build a viuer Config from the image's own width and alignment settings.
-    fn build_viuer_config(&self, term: &crate::terminal::Terminal) -> viuer::Config {
-        let dims = self.resolve_dimensions(term.width());
-
-        viuer::Config {
-            width: Some(dims.image_width),
-            height: None, // Let viuer compute height to preserve aspect ratio
-            x: dims.x_offset as u16,
-            y: 0,
-            transparent: true,
-            truecolor: true,
-            absolute_offset: false,
-            restore_cursor: false,
-            ..Default::default()
-        }
     }
 
     /// Validate that the path is not a remote URL.
@@ -577,6 +453,7 @@ impl TerminalImage {
     ///
     /// Returns `TerminalImageError::RemoteUrlBlocked` if the filename looks like
     /// a URL and remote URLs are not allowed.
+    #[cfg(test)]
     fn validate_not_remote_url(&self, allow_remote: bool) -> Result<(), TerminalImageError> {
         if !allow_remote {
             let lower = self.filename.to_lowercase();
@@ -599,6 +476,7 @@ impl TerminalImage {
     ///
     /// Returns `TerminalImageError::PathTraversalBlocked` if the file path
     /// escapes the base path after canonicalization.
+    #[cfg(test)]
     fn validate_path_traversal(
         &self,
         base_path: &Option<std::path::PathBuf>,
@@ -636,6 +514,7 @@ impl TerminalImage {
     /// ## Errors
     ///
     /// Returns `TerminalImageError::FileTooLarge` if the file exceeds the limit.
+    #[cfg(test)]
     fn validate_file_size(&self, max_size: u64) -> Result<(), TerminalImageError> {
         let metadata = std::fs::metadata(&self.filename)?;
         let size = metadata.len();
@@ -678,8 +557,13 @@ impl TerminalImage {
 
         // Only specify columns (c=), let Kitty calculate rows to preserve aspect ratio
         let image = self.render_kitty_width_only(&png_data, target_cells);
+        let prefix = if dims.x_offset > 0 {
+            format!("\x1b[{}C", dims.x_offset)
+        } else {
+            String::new()
+        };
         let cursor_advance = format!("\x1b[{}B\r\n", display_cells_height.max(1));
-        Ok(format!("{}{}", image, cursor_advance))
+        Ok(format!("{}{}{}", prefix, image, cursor_advance))
     }
 
     /// Render the image using iTerm2 protocol.
@@ -735,13 +619,21 @@ impl TerminalImage {
             ((target_pixel_height as f32 / cell_pixel_height as f32).ceil() as u32).max(1);
 
         let image = self.render_iterm2(&png_data, &width_param, &filename);
-        Ok(format!("{}\x1b[{}B\r\n", image, display_cells_height))
+        let prefix = if dims.x_offset > 0 {
+            format!("\x1b[{}C", dims.x_offset)
+        } else {
+            String::new()
+        };
+        Ok(format!("{}{}\x1b[{}B\r\n", prefix, image, display_cells_height))
     }
 
     /// Render image using the Kitty graphics protocol.
     ///
     /// The Kitty protocol transmits images as base64-encoded PNG data using
     /// escape sequences. For large images, data is chunked into 4096-byte segments.
+    ///
+    /// Uses `q=2` (quiet mode) to suppress all terminal responses, preventing
+    /// garbage text when the output is printed from a string.
     ///
     /// ## Arguments
     ///
@@ -752,11 +644,12 @@ impl TerminalImage {
     /// ## Escape Sequence Format
     ///
     /// ```text
-    /// ESC_G f=100,a=T,t=d,m=1;{base64_chunk} ESC\  (intermediate chunks)
-    /// ESC_G f=100,a=T,t=d,m=0;{base64_chunk} ESC\  (final chunk)
+    /// ESC_G q=2,f=100,a=T,t=d,m=1;{base64_chunk} ESC\  (intermediate chunks)
+    /// ESC_G q=2,f=100,a=T,t=d,m=0;{base64_chunk} ESC\  (final chunk)
     /// ```
     ///
     /// Where:
+    /// - `q=2`: quiet mode (suppress all terminal responses)
     /// - `f=100`: format is PNG
     /// - `a=T`: action is transmit and display
     /// - `t=d`: transmission medium is direct (inline data)
@@ -785,7 +678,7 @@ impl TerminalImage {
             if i == 0 {
                 // First chunk includes all parameters; use cell-based sizing
                 result.push_str(&format!(
-                    "\x1b_Gf=100,a=T,t=d,c={},r={},m={};{}\x1b\\",
+                    "\x1b_Gq=2,f=100,a=T,t=d,c={},r={},m={};{}\x1b\\",
                     width_cells, height_cells, more, chunk
                 ));
             } else {
@@ -807,6 +700,8 @@ impl TerminalImage {
     /// By omitting the `r=` (rows) parameter, Kitty automatically calculates
     /// the number of rows needed to preserve the image's aspect ratio.
     /// This is the preferred method for aspect-ratio-correct rendering.
+    ///
+    /// Uses `q=2` (quiet mode) to suppress all terminal responses.
     ///
     /// ## Arguments
     ///
@@ -831,7 +726,7 @@ impl TerminalImage {
                 // First chunk: specify only c= (columns), omit r= (rows)
                 // Kitty will automatically calculate rows to preserve aspect ratio
                 result.push_str(&format!(
-                    "\x1b_Gf=100,a=T,t=d,c={},m={};{}\x1b\\",
+                    "\x1b_Gq=2,f=100,a=T,t=d,c={},m={};{}\x1b\\",
                     width_cells, more, chunk
                 ));
             } else {
@@ -1793,101 +1688,6 @@ mod tests {
             result,
             Err(TerminalImageError::FileTooLarge { .. })
         ));
-    }
-
-    // viuer config building tests
-    #[test]
-    fn test_build_viuer_config_fill_width() {
-        use crate::terminal::Terminal;
-
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("test.png");
-        std::fs::File::create(&file_path)
-            .unwrap()
-            .write_all(&create_test_png())
-            .unwrap();
-
-        let img = TerminalImage::new(&file_path)
-            .unwrap()
-            .with_width(ImageWidth::Fill);
-        let term = Terminal::builder().width(80).build();
-
-        let config = img.build_viuer_config(&term);
-
-        // Should have a width set (terminal width or default 80)
-        assert!(config.width.is_some());
-        assert!(config.transparent);
-        assert!(config.truecolor);
-    }
-
-    #[test]
-    fn test_build_viuer_config_percent_width() {
-        use crate::terminal::Terminal;
-
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("test.png");
-        std::fs::File::create(&file_path)
-            .unwrap()
-            .write_all(&create_test_png())
-            .unwrap();
-
-        let img = TerminalImage::new(&file_path)
-            .unwrap()
-            .with_width(ImageWidth::Percent(0.5));
-        let term = Terminal::builder().width(80).build();
-
-        let config = img.build_viuer_config(&term);
-
-        // 50% of available width
-        assert!(config.width.is_some());
-    }
-
-    #[test]
-    fn test_build_viuer_config_characters_width() {
-        use crate::terminal::Terminal;
-
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("test.png");
-        std::fs::File::create(&file_path)
-            .unwrap()
-            .write_all(&create_test_png())
-            .unwrap();
-
-        let img = TerminalImage::new(&file_path)
-            .unwrap()
-            .with_margins(0, 0)
-            .with_width(ImageWidth::Characters(40));
-        let term = Terminal::builder().width(80).build();
-
-        let config = img.build_viuer_config(&term);
-
-        // Should cap at available width or use 40
-        assert!(config.width.is_some());
-        // With margins of 0, and terminal width 80 >= 40, should be 40
-        assert_eq!(config.width.unwrap(), 40);
-    }
-
-    #[test]
-    fn test_build_viuer_config_respects_margins() {
-        use crate::terminal::Terminal;
-
-        let dir = tempfile::tempdir().unwrap();
-        let file_path = dir.path().join("test.png");
-        std::fs::File::create(&file_path)
-            .unwrap()
-            .write_all(&create_test_png())
-            .unwrap();
-
-        let img = TerminalImage::new(&file_path)
-            .unwrap()
-            .with_margins(10, 10)
-            .with_width(ImageWidth::Fill);
-        let term = Terminal::builder().width(80).build();
-
-        let config = img.build_viuer_config(&term);
-
-        // x offset should match left margin
-        assert_eq!(config.x, 10);
     }
 
     // resolve_dimensions tests

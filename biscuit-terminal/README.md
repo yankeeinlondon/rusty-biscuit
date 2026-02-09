@@ -110,6 +110,10 @@ term::split_horizontally(Focus::Left);
 
 
 
+## Image Rendering Architecture
+
+All `TerminalImage` rendering is string-based — `render()`, `fallback_render()`, and `render_to_terminal()` return escape sequences as composable strings. Kitty protocol sequences include `q=2` (quiet mode) to suppress terminal responses that would otherwise appear as garbage text.
+
 ## Rendering to the Terminal
 
 Beyond _discovery_ this crate plays an active role in helping callers to write to the terminal in a rich manner. This is achieved in part by the `Compose` struct and the `Renderable` trait:
