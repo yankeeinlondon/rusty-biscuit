@@ -1,3 +1,3 @@
 # Schematic
 
-![logo|15](../assets/schematic-2.png)
+![logo|20](../assets/schematic-2.png)
