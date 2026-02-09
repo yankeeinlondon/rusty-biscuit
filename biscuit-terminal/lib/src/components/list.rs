@@ -133,9 +133,7 @@ impl OrderedList {
                 }
             }
 
-            if i < self.items.len() - 1 {
-                result.push('\n');
-            }
+            result.push('\n');
         }
 
         result
@@ -311,7 +309,7 @@ impl UnorderedList {
         let bullet_width = crate::utils::block_constraint::visible_width(&self.bullet) as u32;
         let indent = self.indent_children.unwrap_or(bullet_width);
 
-        for (i, item) in self.items.iter().enumerate() {
+        for item in &self.items {
             match item {
                 RenderableContent::String(s) => {
                     result.push_str(&self.bullet);
@@ -346,9 +344,7 @@ impl UnorderedList {
                 }
             }
 
-            if i < self.items.len() - 1 {
-                result.push('\n');
-            }
+            result.push('\n');
         }
 
         result
@@ -396,21 +392,21 @@ mod tests {
     fn test_ordered_list_simple() {
         let list = OrderedList::new(vec!["First", "Second", "Third"]);
         let result = list.render(None);
-        assert_eq!(result, "1. First\n2. Second\n3. Third");
+        assert_eq!(result, "1. First\n2. Second\n3. Third\n");
     }
 
     #[test]
     fn test_unordered_list_simple() {
         let list = UnorderedList::new(vec!["Apple", "Banana", "Cherry"]);
         let result = list.render(None);
-        assert_eq!(result, "• Apple\n• Banana\n• Cherry");
+        assert_eq!(result, "• Apple\n• Banana\n• Cherry\n");
     }
 
     #[test]
     fn test_unordered_list_custom_bullet() {
         let list = UnorderedList::new(vec!["Item 1", "Item 2"]).with_bullet("- ");
         let result = list.render(None);
-        assert_eq!(result, "- Item 1\n- Item 2");
+        assert_eq!(result, "- Item 1\n- Item 2\n");
     }
 
     #[test]
@@ -442,7 +438,7 @@ mod tests {
         let result = list.render(Some(80));
         // "First" gets prefix "1. First"
         // The nested OrderedList is block-level, so it gets indented (4 spaces)
-        assert_eq!(result, "1. First\n    1. Nested A\n    2. Nested B");
+        assert_eq!(result, "1. First\n    1. Nested A\n    2. Nested B\n");
     }
 
     #[test]
@@ -456,7 +452,7 @@ mod tests {
 
         let result = outer.render(Some(80));
         // outer indents middle by 4, middle indents inner by 4 = 8 total
-        assert_eq!(result, "        1. Deep");
+        assert_eq!(result, "        1. Deep\n");
     }
 
     #[test]
@@ -494,7 +490,7 @@ mod tests {
 
         // "Top" gets bullet "• Top"
         // The nested UnorderedList is block-level, indented by bullet width (2 for "• ")
-        assert_eq!(result, "• Top\n  • Sub A\n  • Sub B");
+        assert_eq!(result, "• Top\n  • Sub A\n  • Sub B\n");
     }
 
     #[test]
@@ -506,7 +502,7 @@ mod tests {
         ];
         let list = OrderedList::from(items);
         let result = list.render(Some(80));
-        assert_eq!(result, "1. Fruits:\n    • Apple\n    • Banana");
+        assert_eq!(result, "1. Fruits:\n    • Apple\n    • Banana\n");
     }
 
     #[test]
@@ -521,7 +517,7 @@ mod tests {
         let result = list.render(Some(80));
         // Empty nested list renders as empty string with no lines to indent
         // The separator newlines still appear between items
-        assert_eq!(result, "1. Before\n\n3. After");
+        assert_eq!(result, "1. Before\n\n3. After\n");
     }
 
     #[test]

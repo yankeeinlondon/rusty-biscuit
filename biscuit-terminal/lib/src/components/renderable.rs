@@ -124,6 +124,55 @@ pub trait Renderable: std::fmt::Debug + Any {
     }
 
     fn as_any(&self) -> &dyn Any;
+
+    /// Render for direct terminal output.
+    ///
+    /// This is the method CLI programs should use when printing a
+    /// component directly to the terminal. It is a thin wrapper around
+    /// [`fallback_render()`](Renderable::fallback_render) that
+    /// guarantees the returned string ends with a newline.
+    ///
+    /// ## Why not `render()` or `fallback_render()`?
+    ///
+    /// Neither `render()` nor `fallback_render()` append a trailing
+    /// newline — their output is designed for **composition**, where
+    /// one component's output is embedded inside another. When that
+    /// output is sent directly to the terminal via `print!`, the
+    /// missing newline causes zsh to display an inverted `%` glyph
+    /// at the end of the line.
+    ///
+    /// `display()` solves this by delegating to `fallback_render()`
+    /// (so you get capability-aware rendering with graceful
+    /// degradation) and then ensuring the output is
+    /// newline-terminated.
+    ///
+    /// | Method             | Trailing `\n` | Terminal-aware | Use for                      |
+    /// |--------------------|---------------|---------------|------------------------------|
+    /// | `render()`         | No            | No            | Composition, embedding       |
+    /// | `fallback_render()`| No            | Yes           | Composition, embedding       |
+    /// | **`display()`**    | **Yes**       | **Yes**       | **Direct terminal output**   |
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::prelude::*;
+    ///
+    /// let table = Table::new()
+    ///     .with_columns(vec![TableColumn::new("Name")])
+    ///     .with_data(vec![vec!["Alice".into()]]);
+    ///
+    /// // Detect the real terminal (width, color depth, image support, …)
+    /// let term = Terminal::default();
+    /// print!("{}", table.display(&term));
+    /// ```
+    fn display(&self, term: &Terminal) -> String {
+        let rendered = self.fallback_render(term);
+        if rendered.ends_with('\n') {
+            rendered
+        } else {
+            format!("{rendered}\n")
+        }
+    }
 }
 
 #[derive(Debug)]

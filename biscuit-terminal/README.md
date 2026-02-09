@@ -128,10 +128,14 @@ The following renderable _components_ are provided in this library:
 
 - `Prose`
 - `TextBlock`
-- `Currency`, `Numeric`, `Metric`
+- `Section`
+- `BlockQuote`
+- `Compose`
 - `Table`
 - `UnorderedList`
 - `OrderedList`
+- `TwoColumn`
+- `Todo`
 - `TerminalImage`
 
 In the following sections we'll cover each in more detail but before we do let's quickly mention that you can write to the terminal either _via_ the `Terminal` crate or _via_ the `Compose` struct:
