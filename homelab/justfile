@@ -14,6 +14,11 @@ MAGENTA := '\033[35m'
 CYAN := '\033[36m'
 WHITE := '\033[37m'
 
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{YELLOW2}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} >/dev/null || true
+
 default:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -30,21 +35,21 @@ default:
     just --list | grep -v 'default'
     echo
 
-# build Homelab packages (lib, cli)
+# build Homelab packages (lib, cli, server)
 build *args="":
     @echo ""
-    @echo "Build Homelab Packages (Library and Homey CLI)"
-    @echo "----------------------------------------------"
+    @echo "Build Homelab Packages (Library, Homey CLI, Server)"
+    @echo "---------------------------------------------------"
     @echo ""
-    @cargo build -p homelab -p homey {{args}}
+    @cargo build -p homelab -p homey -p homelab-server {{args}}
 
 # run tests for Homelab packages
 test *args="":
     @echo ""
-    @echo "Testing {{BOLD}}Homelab{{RESET}} ({{ITALIC}}Library and Homey CLI{{RESET}})"
-    @echo "---------------------------------------"
+    @echo "Testing {{BOLD}}Homelab{{RESET}} ({{ITALIC}}Library, Homey CLI, Server{{RESET}})"
+    @echo "-----------------------------------------------"
     @echo ""
-    @cargo test -p homelab -p homey {{args}}
+    @cargo test -p homelab -p homey -p homelab-server {{args}}
 
 # run clippy on Homelab packages
 lint:
@@ -54,6 +59,7 @@ lint:
     @echo ""
     @cargo clippy -p homelab -- -D warnings
     @cargo clippy -p homey -- -D warnings
+    @cargo clippy -p homelab-server -- -D warnings
 
 install:
     @echo ""
@@ -68,9 +74,32 @@ install:
 
 check:
     @echo ""
-    @echo "Checking Homelab Library and CLI"
+    @echo "Checking Homelab Library, CLI and Server"
     @echo ""
-    @cargo check -p homelab -p homey
+    @cargo check -p homelab -p homey -p homelab-server
+
+# run server in dev mode
+server *args="":
+    @echo ""
+    @echo "{{BOLD}}Running Homelab Server{{RESET}} ({{ITALIC}}development mode{{RESET}})"
+    @echo ""
+    cargo run -p homelab-server {{args}}
+
+# run tests for server only
+test-server *args="":
+    @echo ""
+    @echo "Testing {{BOLD}}Homelab Server{{RESET}}"
+    @echo ""
+    @cargo test -p homelab-server {{args}}
+
+# install server binary
+install-server:
+    @echo ""
+    @echo "{{BOLD}}{{YELLOW}}Installing Homelab Server{{RESET}}"
+    @cargo install --path ./server
+    @echo ""
+    @echo "{{BOLD}}{{BLUE}}Homelab Server installed{{RESET}}"
+    @echo ""
 
 # Open Opencode
 oc *args="":

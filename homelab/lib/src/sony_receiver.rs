@@ -524,10 +524,10 @@ impl SonyReceiver {
         }
 
         // Normalize: getMethodTypes returns "results" (plural), all others use "result".
-        if let Some(results) = json_resp.get("results").cloned() {
-            if json_resp.get("result").is_none() {
-                json_resp["result"] = results;
-            }
+        if let Some(results) = json_resp.get("results").cloned()
+            && json_resp.get("result").is_none()
+        {
+            json_resp["result"] = results;
         }
 
         Ok(json_resp)
@@ -603,6 +603,25 @@ impl SonyReceiver {
         } else {
             Err(SonyError::NoContent)
         }
+    }
+
+    /// Retrieves the current volume information from the receiver.
+    ///
+    /// Returns volume level, mute status, and min/max volume bounds.
+    pub async fn get_volume(&self) -> Result<VolumeInfo, SonyError> {
+        let response = self
+            .send_command(
+                SonyReceiverEndpoints::Audio,
+                AudioAction::GetVolumeInformation,
+                json!([]),
+                "1.1",
+            )
+            .await?;
+
+        let info: Vec<VolumeInfo> =
+            serde_json::from_value(unwrap_sony_result(&response).clone())?;
+
+        info.into_iter().next().ok_or(SonyError::NoContent)
     }
 
     pub async fn set_mute(&self, mute: bool) -> Result<(), SonyError> {

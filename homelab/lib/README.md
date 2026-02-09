@@ -6,13 +6,11 @@ Core library for controlling home automation devices over the local network.
 
 | Module | Description |
 |--------|-------------|
-| `arcam` | Arcam AV receiver control |
-| `ha` | Home Assistant integration |
-| `mqtt` | MQTT messaging |
-| `network` | Host discovery and network utilities |
-| `node_red` | Node-RED flow automation |
-| `sony_receiver` | Sony ES receiver control (JSON-RPC) |
-| `ubiquiti` | UniFi network device control |
+| `arcam` | Arcam PA240/PA410/PA720 amplifier control (binary protocol over TCP) |
+| `network` | Host addressing (IPv4, IPv6, DNS) |
+| `sony_receiver` | Sony ES receiver control (JSON-RPC over HTTP) |
+
+> **Planned modules** (stub files exist but are not yet implemented): `ha`, `mqtt`, `node_red`, `ubiquiti`
 
 ## Lessons Learned
 
