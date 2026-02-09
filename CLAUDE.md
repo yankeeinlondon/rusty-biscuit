@@ -31,6 +31,10 @@ dockhand/
 │   └── lib/          # Event model, provider adapters, skill linking
 ├── darkmatter-cli/   # Binary: `md` (markdown terminal renderer)
 ├── darkmatter-lib/   # Markdown parsing, mermaid diagrams, syntax highlighting
+├── homelab/          # Home automation AV equipment control
+│   ├── cli/          # Binary: `homey` (AV device control CLI)
+│   ├── lib/          # Arcam amplifier + Sony ES receiver libraries
+│   └── server/       # Binary: `homelab-server` (Axum REST API)
 ├── model-citizen/    # Local LLM model management
 │   ├── cli/          # Binary: `model` (model inventory and management CLI)
 │   └── lib/          # Scanners, GGUF parsing, HuggingFace client, sharing
@@ -234,6 +238,7 @@ This repository has local Claude Code skills in `.claude/skills/`:
 - `biscuit-terminal` - **Terminal authority**: detection, image rendering (viuer), mermaid diagrams
 - `claudine` - Universal hook/event handler for agentic CLIs (Claude, Codex, Gemini, Goose, Kimi, OpenCode, Qwen)
 - `darkmatter` - Markdown parsing/rendering (delegates terminal rendering to biscuit-terminal)
+- `homelab` - Home automation AV control (Sony ES receivers, Arcam amplifiers) via CLI and REST API
 - `model-citizen` - Local LLM model management across Ollama, LM Studio, and Llama.cpp
 - `playa` - Audio playback via host players, format detection, 53 embedded sound effects
 - `research` - AI-powered library research with two-phase LLM pipeline
@@ -263,6 +268,7 @@ When working in this repository, you **must** follow these workflows:
    - Working in CLI modules (`research/cli`, etc.)? Use the `clap` skill
    - Working in `claudine/`? Use the `claudine` skill
    - Working in `darkmatter/`? Use the `darkmatter` skill
+   - Working in `homelab/`? Use the `homelab` skill
    - Working in `model-citizen/`? Use the `model-citizen` skill
    - Working in `biscuit-terminal/`? Use the `biscuit-terminal` skill
    - Working in `biscuit-speaks/`? Use the `biscuit-speaks` skill
