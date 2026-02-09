@@ -264,10 +264,10 @@ impl OpenApiImport {
         name_mapping: &std::collections::HashMap<String, String>,
     ) {
         use crate::request::ApiRequest;
-        if let ApiRequest::Json(schema) = request {
-            if let Some(new_name) = name_mapping.get(&schema.type_name) {
-                schema.type_name = new_name.clone();
-            }
+        if let ApiRequest::Json(schema) = request
+            && let Some(new_name) = name_mapping.get(&schema.type_name)
+        {
+            schema.type_name = new_name.clone();
         }
     }
 

@@ -300,20 +300,20 @@ fn convert_json_schema_to_openapi(value: &serde_json::Value) -> openapiv3::Schem
     };
 
     // Handle $ref (references to definitions)
-    if let Some(ref_value) = obj.get("$ref") {
-        if let Some(ref_str) = ref_value.as_str() {
-            // Convert schemars $ref format to OpenAPI $ref format
-            let openapi_ref = ref_str.replace("#/$defs/", "#/components/schemas/");
-            let openapi_ref = openapi_ref.replace("#/definitions/", "#/components/schemas/");
-            return Schema {
-                schema_data: data,
-                schema_kind: SchemaKind::AllOf {
-                    all_of: vec![openapiv3::ReferenceOr::Reference {
-                        reference: openapi_ref,
-                    }],
-                },
-            };
-        }
+    if let Some(ref_value) = obj.get("$ref")
+        && let Some(ref_str) = ref_value.as_str()
+    {
+        // Convert schemars $ref format to OpenAPI $ref format
+        let openapi_ref = ref_str.replace("#/$defs/", "#/components/schemas/");
+        let openapi_ref = openapi_ref.replace("#/definitions/", "#/components/schemas/");
+        return Schema {
+            schema_data: data,
+            schema_kind: SchemaKind::AllOf {
+                all_of: vec![openapiv3::ReferenceOr::Reference {
+                    reference: openapi_ref,
+                }],
+            },
+        };
     }
 
     // Determine the schema kind from type

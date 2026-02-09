@@ -78,7 +78,7 @@ fn generate_struct(def: &StructDef) -> TokenStream {
     let fields: Vec<TokenStream> = def
         .fields
         .iter()
-        .map(|f| generate_field(f))
+        .map(generate_field)
         .collect();
 
     // If the struct has additional_properties, add a flattened HashMap field
@@ -150,7 +150,7 @@ fn generate_enum(def: &EnumDef) -> TokenStream {
     let variants: Vec<TokenStream> = def
         .variants
         .iter()
-        .map(|v| generate_variant(v))
+        .map(generate_variant)
         .collect();
 
     quote! {
