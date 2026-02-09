@@ -345,12 +345,23 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
         return lines.into_iter().map(|_| String::new()).collect();
     }
 
-    let mut wrapped = Vec::new();
+    let mut wrapped: Vec<String> = Vec::new();
     for line in lines {
         let original_width = visible_width(&line);
         let mut remaining = line;
 
         loop {
+            // If only escape sequences remain (0 visible width but non-empty),
+            // append them to the previous line so they don't become a blank row.
+            // This happens when a word-wrap split lands just before closing
+            // sequences like \x1b[0m or \x1b]8;;\x1b\\.
+            if !remaining.is_empty() && visible_width(&remaining) == 0 {
+                if let Some(last) = wrapped.last_mut() {
+                    last.push_str(&remaining);
+                }
+                break;
+            }
+
             // Check if remaining text fits - apply hanging indent if applicable
             if visible_width(&remaining) <= width {
                 let final_text = match strategy {
@@ -516,6 +527,115 @@ pub fn wrap_lines(lines: Vec<String>, strategy: &WordWrap, width: u32) -> Vec<St
     wrapped
 }
 
+/// Ensures each line in a multi-line split is ANSI-self-contained.
+///
+/// When text containing ANSI escape sequences is word-wrapped, a color or
+/// hyperlink opened on one line may carry across the split boundary. This
+/// causes "color bleed" when lines are rendered side-by-side (e.g. in table
+/// cells sharing a row with other columns).
+///
+/// This function:
+/// 1. Appends `\x1b[0m` (and OSC8 close) at the end of each non-last line
+///    that has active styles
+/// 2. Re-opens those styles at the start of the next line
+pub fn sanitize_wrapped_lines(lines: Vec<String>) -> Vec<String> {
+    if lines.len() <= 1 {
+        return lines;
+    }
+
+    let last_idx = lines.len() - 1;
+    let mut result = Vec::with_capacity(lines.len());
+    let mut carry_fg: Option<String> = None;
+    let mut carry_osc8: Option<String> = None;
+
+    for (i, line) in lines.into_iter().enumerate() {
+        let mut current = String::new();
+
+        // Re-apply carried state from previous line
+        if let Some(ref osc8) = carry_osc8 {
+            current.push_str(osc8);
+        }
+        if let Some(ref fg) = carry_fg {
+            current.push_str(fg);
+        }
+        current.push_str(&line);
+
+        // Scan the full line (with carried prefixes) for active state
+        let (new_fg, new_osc8) = active_ansi_state(&current);
+
+        // Close active state at end of non-last lines
+        if i < last_idx && (new_fg.is_some() || new_osc8.is_some()) {
+            if new_osc8.is_some() {
+                current.push_str("\x1b]8;;\x1b\\");
+            }
+            current.push_str("\x1b[0m");
+        }
+
+        carry_fg = new_fg;
+        carry_osc8 = new_osc8;
+        result.push(current);
+    }
+
+    result
+}
+
+/// Scans content for active (unclosed) ANSI foreground color and OSC8 link state.
+///
+/// Returns `(active_foreground_sequence, active_osc8_open_sequence)`.
+fn active_ansi_state(content: &str) -> (Option<String>, Option<String>) {
+    let mut fg: Option<String> = None;
+    let mut osc8: Option<String> = None;
+    let bytes = content.as_bytes();
+    let mut idx = 0;
+
+    while idx < content.len() {
+        if bytes[idx] != 0x1b {
+            idx += 1;
+            continue;
+        }
+
+        let end = escape_sequence_end(content, idx);
+        let seq = &content[idx..end];
+
+        // Full SGR reset — clears foreground
+        if seq == "\x1b[0m" {
+            fg = None;
+        }
+        // Foreground reset
+        else if seq == "\x1b[39m" {
+            fg = None;
+        }
+        // CSI SGR sequence — check if it sets foreground
+        else if seq.starts_with("\x1b[") && seq.ends_with('m') {
+            let params = &seq[2..seq.len() - 1];
+            if let Some(first) = params.split(';').next() {
+                if let Ok(n) = first.parse::<u32>() {
+                    // 30-37: basic fg, 38: extended fg, 90-97: bright fg
+                    if (30..=37).contains(&n) || n == 38 || (90..=97).contains(&n) {
+                        fg = Some(seq.to_string());
+                    }
+                }
+            }
+        }
+        // OSC8 link
+        else if seq.starts_with("\x1b]8;;") {
+            // Check if URL is non-empty (open) or empty (close)
+            // Format: \x1b]8;;url\x1b\\ — the URL is between ";;" and the ST
+            let inner = &seq[5..];
+            let url_empty = inner == "\x1b\\" || inner == "\x07" || inner.is_empty();
+            if url_empty {
+                osc8 = None;
+            } else {
+                osc8 = Some(seq.to_string());
+            }
+        }
+
+        idx = end;
+    }
+
+    (fg, osc8)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -639,5 +759,122 @@ mod tests {
             4,
         );
         assert_eq!(lines, vec!["ab..".to_string()]);
+    }
+
+    #[test]
+    fn sanitize_single_line_unchanged() {
+        let lines = vec!["\x1b[31mred text\x1b[0m".to_string()];
+        let result = sanitize_wrapped_lines(lines.clone());
+        assert_eq!(result, lines);
+    }
+
+    #[test]
+    fn sanitize_no_escapes_unchanged() {
+        let lines = vec!["hello".to_string(), "world".to_string()];
+        let result = sanitize_wrapped_lines(lines.clone());
+        assert_eq!(result, lines);
+    }
+
+    #[test]
+    fn sanitize_resets_fg_at_line_break() {
+        // Simulate a colored string split mid-color
+        let lines = vec![
+            "\x1b[38;2;59;130;246mhello-wor".to_string(),
+            "ld\x1b[39m\x1b[0m".to_string(),
+        ];
+        let result = sanitize_wrapped_lines(lines);
+        // Line 1 should end with reset
+        assert!(result[0].ends_with("\x1b[0m"), "Line 1 should end with reset");
+        // Line 2 should re-open the color
+        assert!(
+            result[1].starts_with("\x1b[38;2;59;130;246m"),
+            "Line 2 should re-open foreground color"
+        );
+    }
+
+    #[test]
+    fn sanitize_resets_osc8_at_line_break() {
+        let lines = vec![
+            "\x1b]8;;https://example.com\x1b\\hello-wor".to_string(),
+            "ld\x1b]8;;\x1b\\".to_string(),
+        ];
+        let result = sanitize_wrapped_lines(lines);
+        // Line 1 should close OSC8 and reset
+        assert!(
+            result[0].contains("\x1b]8;;\x1b\\"),
+            "Line 1 should close OSC8"
+        );
+        assert!(result[0].ends_with("\x1b[0m"), "Line 1 should end with SGR reset");
+        // Line 2 should re-open OSC8
+        assert!(
+            result[1].starts_with("\x1b]8;;https://example.com\x1b\\"),
+            "Line 2 should re-open OSC8 link"
+        );
+    }
+
+    #[test]
+    fn sanitize_handles_osc8_plus_color() {
+        let lines = vec![
+            "\x1b]8;;https://hf.co/org/model\x1b\\\x1b[38;2;37;99;235morg/\x1b[39m\x1b[38;2;59;130;246mmodel-name-th".to_string(),
+            "at-is-long\x1b[39m\x1b[0m\x1b]8;;\x1b\\\x1b[0m".to_string(),
+        ];
+        let result = sanitize_wrapped_lines(lines);
+        // Line 1: should close both OSC8 and color
+        assert!(result[0].ends_with("\x1b[0m"));
+        assert!(result[0].contains("\x1b]8;;\x1b\\"));
+        // Line 2: should re-open OSC8 and the active blue-500 color
+        assert!(result[1].starts_with("\x1b]8;;https://hf.co/org/model\x1b\\\x1b[38;2;59;130;246m"));
+    }
+
+    #[test]
+    fn sanitize_no_action_when_styles_closed() {
+        // All styles properly closed within each line
+        let lines = vec![
+            "\x1b[31mred\x1b[39m\x1b[0m".to_string(),
+            "plain text".to_string(),
+        ];
+        let result = sanitize_wrapped_lines(lines.clone());
+        assert_eq!(result, lines);
+    }
+
+    #[test]
+    fn wrap_lines_no_trailing_blank_from_escape_sequences() {
+        // Simulates an OSC8 link with colored text that wraps.
+        // After the last visible char, only closing escapes remain.
+        // These must NOT become a separate (blank) line.
+        let osc_open = "\x1b]8;;https://example.com\x1b\\";
+        let osc_close = "\x1b]8;;\x1b\\";
+        let fg_open = "\x1b[38;2;59;130;246m";
+        let fg_reset = "\x1b[0m";
+
+        // "hello world" = 11 visible chars, wrapped at width 6
+        let content = format!("{osc_open}{fg_open}hello world{fg_reset}{osc_close}");
+        let lines = vec![content];
+        let result = wrap_lines(lines, &WordWrap::WrapProse(None, None), 6);
+
+        // Should be exactly 2 lines, not 3
+        assert_eq!(result.len(), 2, "got lines: {:?}", result);
+        // Both lines should have visible content
+        assert!(visible_width(&result[0]) > 0, "line 0 should have visible content");
+        assert!(visible_width(&result[1]) > 0, "line 1 should have visible content");
+    }
+
+    #[test]
+    fn wrap_lines_closing_escapes_appended_to_last_content_line() {
+        // When the break falls right before closing escapes, they should
+        // be appended to the previous line, not create a new one.
+        let fg = "\x1b[31m";
+        let reset = "\x1b[0m";
+
+        // "abcdef" = 6 visible chars, wrapped at width 3 → 3 lines
+        let content = format!("{fg}abcdef{reset}");
+        let lines = vec![content];
+        let result = wrap_lines(lines, &WordWrap::WrapProse(None, None), 3);
+
+        assert_eq!(result.len(), 3, "got lines: {:?}", result);
+        // The reset should be on the last content line, not a separate line
+        let last = result.last().unwrap();
+        assert!(last.contains(reset), "last line should contain the reset");
+        assert!(visible_width(last) > 0, "last line should have visible content");
     }
 }

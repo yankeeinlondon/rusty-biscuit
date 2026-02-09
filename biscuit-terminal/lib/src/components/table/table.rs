@@ -2,7 +2,7 @@ use crate::{
     components::renderable::Renderable,
     terminal::Terminal,
     utils::{
-        block_constraint::{split_lines, visible_width, wrap_lines},
+        block_constraint::{sanitize_wrapped_lines, split_lines, visible_width, wrap_lines},
         layout::{Alignment, Layout, RowFill, WordWrap},
     },
 };
@@ -1215,11 +1215,22 @@ fn render_row_with_cursor_positioning(
         }
 
         let content_col = cell_start.saturating_add(cursor_offset);
-        row.push_str(&format!("\x1b[{}G{}", content_col, content));
 
-        // Cell content may contain \x1b[0m (full SGR reset) which kills the
-        // stripe bg/fg.  Re-apply so separators and subsequent cells keep it.
-        if has_stripe {
+        // Skip output for padding-only content (all spaces from vertical
+        // padding).  With cursor positioning the separator jump handles
+        // the blank space; physically writing spaces at content_col would
+        // overshoot the cell boundary when cursor_offset > 0 (right/center
+        // alignment), making the terminal line wider than the table and
+        // causing a visual line wrap ("blank line").
+        let is_padding_only = content.bytes().all(|b| b == b' ');
+        if !is_padding_only {
+            row.push_str(&format!("\x1b[{}G{}\x1b[0m", content_col, content));
+        }
+
+        // The \x1b[0m above resets any active SGR from cell content (colors,
+        // bold, etc.) so they don't bleed into separators or adjacent cells.
+        // For striped rows, re-apply the stripe bg/fg that the reset killed.
+        if has_stripe && !is_padding_only {
             if let Some(bg) = stripe_bg {
                 row.push_str(bg);
             }
@@ -1277,7 +1288,6 @@ fn wrap_cell_content(content: &str, strategy: &WordWrap, width: usize) -> Vec<St
     // First split on explicit newlines
     let lines = split_lines(content);
 
-    // If no wrapping, return split lines as-is
     if matches!(strategy, WordWrap::None) {
         if lines.is_empty() {
             return vec![String::new()];
@@ -1285,8 +1295,9 @@ fn wrap_cell_content(content: &str, strategy: &WordWrap, width: usize) -> Vec<St
         return lines;
     }
 
-    // Apply word wrapping to each line
-    wrap_lines(lines, strategy, width as u32)
+    // Apply word wrapping to each line, then ensure each resulting line is
+    // ANSI-self-contained so colors/links don't bleed across table columns.
+    sanitize_wrapped_lines(wrap_lines(lines, strategy, width as u32))
 }
 
 /// Calculate the height (number of lines) needed for each row based on wrapped content.
@@ -3504,5 +3515,46 @@ mod tests {
             fg_restore > 0,
             "Text tint must follow the SGR reset"
         );
+    }
+
+    #[test]
+    fn test_cursor_positioned_padding_no_overshoot() {
+        // Regression test: padding lines (from apply_vertical_padding) must not
+        // extend past the cell boundary when alignment offset is non-zero.
+        // Previously, " ".repeat(cell_width) was output at content_col (which
+        // includes alignment offset), overshooting sep_col and making the
+        // terminal line wider than the table — causing visual line wraps.
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Repo"),
+                TableColumn::new("Author").with_alignment(Alignment::Center),
+                TableColumn::new("DL").with_alignment(Alignment::Right),
+                TableColumn::new("Likes").with_alignment(Alignment::Right),
+            ])
+            .prefer_cursor_alignment()
+            .with_data(vec![
+                // This row wraps in Author col, creating padding lines in
+                // Repo, DL, and Likes columns.
+                vec![
+                    "short-repo".into(),
+                    "lmstudio-community".into(),
+                    "13.1K".into(),
+                    "56".into(),
+                ],
+                vec!["other".into(), "short".into(), "1K".into(), "10".into()],
+            ]);
+
+        // Render at a width that forces Author wrapping
+        let output = table.render_with_cursor_positioning(50, None, None);
+        let border_width = output.lines().next().map(visible_width).unwrap_or(0);
+
+        for (i, line) in output.lines().enumerate() {
+            let vw = visible_width(line);
+            assert!(
+                vw <= border_width,
+                "Line {} visible width ({}) exceeds border width ({}): {:?}",
+                i, vw, border_width, line
+            );
+        }
     }
 }
