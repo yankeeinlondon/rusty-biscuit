@@ -39,6 +39,8 @@ Three scanners are provided:
 - `ModelMetadata` - Rich optional metadata (context length, parameters, capabilities, inference defaults, HuggingFace repo)
 - `QuantizationType` - 25+ variants (GGUF quants, float types, IQ series, MLX types)
 - `ModelArchitecture` - 9 families (Llama, Mistral, Qwen, Phi, Gemma, Command, Yi, DeepSeek, StarCoder)
+- `ModelFormat` - File format: Gguf, Safetensors, Unknown
+- `ModelSource` - Runner origin: Ollama, LmStudio, LlamaCpp
 
 ### GGUF Parsing (`gguf` module)
 

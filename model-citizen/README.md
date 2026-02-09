@@ -16,22 +16,23 @@ Model Citizen provides:
 
 | Command | Description |
 |---------|-------------|
-| `list` | List all models across all runners |
+| `list [filter]` | List all models across all runners |
 | `info <model>` | Show detailed metadata about a model |
-| `search <query>` | Search for GGUF models on HuggingFace |
-| `download <repo> [variant]` | Download model variants from HuggingFace |
+| `search [query...]` | Search for GGUF models on HuggingFace |
+| `download [query...]` | Search and download GGUF models interactively |
 | `remove <model>` | Remove a model (with confirmation) |
 | `completions` | Shell completion setup instructions |
 
-**Global options:** `--format table|json`
+**Global options:** `--json`
 
 ### Examples
 
 ```bash
 model list                          # List all models (table)
+model list llama                    # Filter by name substring
 model list --runner ollama          # Filter by runner
 model list --size                   # Sort by size (largest first)
-model list --format json            # JSON output
+model list --json                   # JSON output
 model info llama3                   # Detailed model info
 model search "qwen2 7b"            # Search HuggingFace
 model search "phi" --sort likes     # Sort by likes

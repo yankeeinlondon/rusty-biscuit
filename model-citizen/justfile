@@ -14,11 +14,6 @@ MAGENTA := '\033[35m'
 CYAN := '\033[36m'
 WHITE := '\033[37m'
 
-# No-op recipe: reference color vars so linters won't report them as unused.
-# Run `just _colors` if you want to exercise this (it does nothing).
-_colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{YELLOW2}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} >/dev/null || true
-
 default:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -108,3 +103,7 @@ refresh-skill:
     fi
 
 
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{YELLOW2}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} >/dev/null || true

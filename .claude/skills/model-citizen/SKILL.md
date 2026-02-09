@@ -47,19 +47,20 @@ pub trait ModelScanner: Send + Sync {
 | `ModelMetadata` | Optional rich data: context_length, parameters, capabilities, inference defaults, HF repo |
 | `QuantizationType` | 25+ variants: GGUF quants (Q4_K_M etc), float (F16/F32), IQ series, MLX (Bf16/Bit4/Bit8) |
 | `ModelArchitecture` | 9 families: Llama, Mistral, Qwen, Phi, Gemma, Command, Yi, DeepSeek, StarCoder |
+| `ModelFormat` | File format: Gguf, Safetensors, Unknown |
 | `ModelSource` | Ollama, LmStudio, LlamaCpp |
 | `Config` | Merged config: env vars > TOML file > defaults |
 
 ## CLI Commands
 
-Binary: `model` with global `--format table|json`
+Binary: `model` with global `--json` flag
 
 | Command | Description |
 |---------|-------------|
-| `list` | All models. Flags: `--runner`, `--verbose`, `--app`, `--size` |
+| `list [filter]` | All models. Optional name filter. Flags: `--runner`, `--verbose`, `--app`, `--size` |
 | `info <model>` | Detailed metadata with lazy enrichment. Interactive selection on ambiguous match |
-| `search <query>` | HuggingFace GGUF search. `--limit`, `--sort` (downloads/likes/trending/created/modified) |
-| `download <repo> [variant]` | Stream download with progress. Interactive multi-select if no variant |
+| `search [query...]` | HuggingFace GGUF search. `--limit`, `--sort`, `--verbose` |
+| `download [query...]` | Search and download interactively. Direct repo if query contains `/` |
 | `remove <model>` | Delete with confirmation. `--runner`, `--force`. Warns about dependent symlinks |
 | `completions` | Shell completion setup (Bash/Zsh/Fish) |
 

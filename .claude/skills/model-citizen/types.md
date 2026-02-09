@@ -20,12 +20,12 @@ pub struct UnifiedModel {
 
 ### ModelMetadata (`model.rs`)
 
-All fields are `Option` or `Vec` (may be empty):
+All fields are `Option` (may be absent):
 
 ```rust
 pub struct ModelMetadata {
     // Model info
-    pub parameters: Option<String>,     // e.g., "8B"
+    pub parameters: Option<String>,         // e.g., "8B"
     pub context_length: Option<u64>,
     pub embedding_length: Option<u64>,
     pub head_count: Option<u64>,
@@ -34,10 +34,10 @@ pub struct ModelMetadata {
     // Capabilities
     pub vision: Option<bool>,
     pub function_calling: Option<bool>,
-    pub capabilities: Vec<String>,      // e.g., ["vision", "tools"]
+    pub capabilities: Option<Vec<String>>,  // e.g., ["vision", "tools"]
 
     // Lineage
-    pub families: Vec<String>,
+    pub families: Option<Vec<String>>,
     pub parent_model: Option<String>,
     pub publisher: Option<String>,
     pub huggingface_repo: Option<String>,
@@ -47,7 +47,7 @@ pub struct ModelMetadata {
     pub top_k: Option<u64>,
     pub top_p: Option<f64>,
     pub repeat_penalty: Option<f64>,
-    pub stop: Vec<String>,
+    pub stop: Option<Vec<String>>,
 
     // Other
     pub license: Option<String>,
@@ -82,6 +82,14 @@ pub enum ModelArchitecture {
 ```
 
 `from_name(name)` detects from model name using keyword matching.
+
+### ModelFormat (`model.rs`)
+
+```rust
+pub enum ModelFormat { Gguf, Safetensors, Unknown }
+```
+
+`as_str()` returns display string.
 
 ### ModelSource (`model.rs`)
 
@@ -169,10 +177,14 @@ pub struct GgufVariant {
 
 pub struct SearchResult {
     pub repo_id: String,
-    pub author: String,
+    pub author: Option<String>,
     pub downloads: u64,
     pub likes: u64,
     pub variant_count: usize,
+    pub created_at: Option<String>,
+    pub last_modified: Option<String>,
+    pub tags: Vec<String>,
+    pub pipeline_tag: Option<String>,
 }
 
 pub enum SortOrder { Downloads, Likes, Trending, Created, Modified }
@@ -218,10 +230,10 @@ Methods: `load()`, `save()`, `add_share()`, `remove_share()`, `get_shares()`, `f
 
 - `parse_header(path)` -> `GgufHeader` (reads first 1KB, validates magic `GGUF`)
 - `is_gguf_file(path)` -> `bool` (magic byte check)
-- `quantization_from_filename(path)` -> `Option<QuantizationType>` (30+ case-insensitive patterns)
+- `quantization_from_filename(path)` -> `QuantizationType` (30+ case-insensitive patterns)
 - `detect_quantization(path)` -> `QuantizationType` (filename + header fallback)
-- `model_name_from_filename(path)` -> `String` (strips quant suffix)
-- `extract_metadata(path)` -> `ModelMetadata` (full `gguf-rs-lib` parse)
+- `model_name_from_filename(path)` -> `Option<String>` (strips quant suffix)
+- `extract_metadata(path)` -> `Option<ModelMetadata>` (full `gguf-rs-lib` parse)
 
 ### Metadata Keys
 
