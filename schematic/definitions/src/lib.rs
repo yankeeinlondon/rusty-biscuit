@@ -10,6 +10,7 @@
 //! - [`elevenlabs`] - ElevenLabs TTS and voice management API definition
 //! - [`huggingface`] - Hugging Face Hub API for model/dataset discovery
 //! - [`ollama`] - Ollama local LLM inference (native + OpenAI-compatible APIs)
+//! - [`lmstudio`] - LM Studio local LLM inference (v1 native API)
 //! - [`emqx`] - EMQX Broker REST API (Basic Auth + Bearer Token variants)
 //!
 //! ## Examples
@@ -62,6 +63,14 @@
 //! ```
 //!
 //! ```
+//! use schematic_definitions::lmstudio::define_lmstudio_api;
+//!
+//! let api = define_lmstudio_api();
+//! assert_eq!(api.name, "LmStudio");
+//! assert_eq!(api.endpoints.len(), 6);
+//! ```
+//!
+//! ```
 //! use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
 //!
 //! let basic_api = define_emqx_basic_api();
@@ -78,6 +87,7 @@ pub mod anthropic;
 pub mod elevenlabs;
 pub mod emqx;
 pub mod huggingface;
+pub mod lmstudio;
 pub mod ollama;
 pub mod openai;
 pub mod prelude;
@@ -88,5 +98,6 @@ pub use anthropic::define_anthropic_api;
 pub use elevenlabs::{define_elevenlabs_rest_api, define_elevenlabs_websocket_api};
 pub use emqx::{define_emqx_basic_api, define_emqx_bearer_api};
 pub use huggingface::define_huggingface_hub_api;
+pub use lmstudio::define_lmstudio_api;
 pub use ollama::{define_ollama_native_api, define_ollama_openai_api};
 pub use openai::define_openai_api;
