@@ -2570,11 +2570,13 @@ name = "homey"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "biscuit-terminal",
  "clap 4.5.57",
  "clap_complete",
  "color-eyre",
  "homelab",
  "predicates",
+ "serde_json",
  "tokio",
 ]
 

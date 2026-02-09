@@ -196,23 +196,47 @@ pub enum GuideAction {
 }
 
 // --- structs for System Information ---
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SystemInformation {
-    pub product: String,
-    pub region: String,
-    pub language: String,
     pub model: String,
-    pub serial: String,
-    #[serde(rename = "macAddr")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub serial: Option<String>,
     pub mac_addr: String,
-    pub name: String,
-    pub generation: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wireless_mac_addr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bd_addr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generation: Option<String>,
     pub version: String,
-    #[serde(rename = "deviceID")]
-    pub device_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl SystemInformation {
+    fn from_value(value: &Value) -> Self {
+        Self {
+            model: value_as_string(&value["model"]).unwrap_or_default(),
+            // API returns "serialNumber" not "serial"
+            serial: value_as_string(&value["serialNumber"])
+                .or_else(|| value_as_string(&value["serial"])),
+            mac_addr: value_as_string(&value["macAddr"]).unwrap_or_default(),
+            wireless_mac_addr: value_as_string(&value["wirelessMacAddr"]),
+            bd_addr: value_as_string(&value["bdAddr"]),
+            name: value_as_string(&value["name"]),
+            generation: value_as_string(&value["generation"]).filter(|s| !s.is_empty()),
+            version: value_as_string(&value["version"]).unwrap_or_default(),
+            region: value_as_string(&value["region"]),
+            product: value_as_string(&value["product"]),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SwUpdateInfo {
     #[serde(rename = "isUpdatable")]
     pub is_updatable: String, // "true" or "false" string
@@ -220,7 +244,7 @@ pub struct SwUpdateInfo {
     pub sw_info: Vec<SwInfoItem>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SwInfoItem {
     pub version: String,
     #[serde(rename = "releaseDate")]
@@ -228,14 +252,14 @@ pub struct SwInfoItem {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EciaInfo {
     #[serde(rename = "deviceId")]
     pub device_id: String,
 }
 
 // --- structs for Generic Settings (WuTang, Speaker, Playback Mode) ---
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenericSettingResult {
     pub target: String,
     #[serde(rename = "currentValue")]
@@ -247,22 +271,53 @@ pub struct GenericSettingResult {
     pub candidate: Option<Vec<SettingCandidate>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingCandidate {
     pub value: String,
     pub title: String,
 }
 
 // --- structs for AV Content ---
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SchemeInfo {
     pub scheme: String, // e.g., "extInput", "storage"
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceInfo {
+    pub source: String, // e.g., "extInput:hdmi"
+}
+
+/// A browsable content item returned by `getContentList`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentItem {
+    pub uri: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub index: Option<u32>,
+    #[serde(default, rename = "displayNum")]
+    pub display_num: Option<String>,
+    #[serde(default, rename = "isPlayable")]
+    pub is_playable: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaybackFunction {
     pub output: Option<String>,
     pub functions: Vec<String>, // e.g. ["Play", "Stop", "Pause"]
+}
+
+/// Per-URI playback function support returned by `getSupportedPlaybackFunction`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupportedPlaybackFunction {
+    pub uri: String,
+    pub functions: Vec<SupportedFunction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupportedFunction {
+    pub function: String,
 }
 
 // ============================================================================
@@ -311,7 +366,7 @@ impl<'de> Deserialize<'de> for MethodSignature {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InputSource {
     pub title: String,
     pub uri: String,
@@ -322,7 +377,73 @@ pub struct InputSource {
     pub active: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+/// Response from `getPlayingContentInfo`. The Sony API returns a
+/// double-nested array with one entry per zone, where fields may be
+/// strings or objects depending on the content source.
+///
+/// ## Notes
+///
+/// The `state` field reflects the receiver's own transport state, not the
+/// connected device's. External inputs (`extInput:*`) always report
+/// `STOPPED` because the receiver is passthrough-only — it has no
+/// transport control over the source device. Sources the receiver controls
+/// directly (e.g. `radio:fm`, `storage:usb1`, `dlna:music`) will report
+/// `PLAYING`, `PAUSED`, etc.
+#[derive(Debug, Clone, Serialize)]
+pub struct PlayingContentInfo {
+    pub uri: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_kind: Option<String>,
+}
+
+impl PlayingContentInfo {
+    fn from_value(value: &Value) -> Self {
+        Self {
+            uri: value_as_string(&value["uri"]).unwrap_or_default(),
+            source: value_as_string(&value["source"]),
+            title: value_as_string(&value["title"]),
+            state: value["stateInfo"]["state"].as_str().map(String::from),
+            content_kind: value_as_string(&value["contentKind"]),
+        }
+    }
+}
+
+/// Extract a string from a JSON value that may be a string, object, or null.
+fn value_as_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => Some(s.clone()),
+        Value::Null => None,
+        other => Some(other.to_string()),
+    }
+}
+
+/// Unwrap the Sony JSON-RPC `result` field.
+///
+/// Sony responses use three nesting patterns:
+/// - `result: [[{...}, ...]]` — double-nested (e.g. `getPlayingContentInfo` with zones)
+/// - `result: [{...}]` — single-nested (e.g. `getSystemInformation`)
+/// - `result: [["name", [...], ...], ...]` — flat array of tuples (e.g. `getMethodTypes`)
+///
+/// This helper unwraps one level when `result[0]` is an array whose first
+/// element is an object (double-nested data). Otherwise returns `result` as-is.
+fn unwrap_sony_result(response: &Value) -> &Value {
+    let result = &response["result"];
+    let first = &result[0];
+    // Double-nested: result[0] is an array and its first element is an object
+    if first.is_array() && first[0].is_object() {
+        first
+    } else {
+        result
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VolumeInfo {
     pub volume: u32,
     pub mute: String,
@@ -330,6 +451,14 @@ pub struct VolumeInfo {
     pub min_volume: u32,
     #[serde(rename = "maxVolume")]
     pub max_volume: u32,
+}
+
+/// Result of probing a single Sony API endpoint.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProbeResult {
+    pub path: String,
+    pub active: bool,
+    pub detail: String,
 }
 
 #[derive(Serialize)]
@@ -379,10 +508,26 @@ impl SonyReceiver {
         };
 
         let response = self.client.post(&url).json(&payload).send().await?;
-        let json_resp: Value = response.json().await?;
+        let mut json_resp: Value = response.json().await?;
 
         if let Some(err) = json_resp.get("error") {
-            return Err(SonyError::Api(format!("{:?}", err)));
+            // Sony errors are typically [code, "message"]
+            let msg = if let Some(arr) = err.as_array() {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .next()
+                    .unwrap_or_else(|| format!("{err}"))
+            } else {
+                format!("{err}")
+            };
+            return Err(SonyError::Api(msg));
+        }
+
+        // Normalize: getMethodTypes returns "results" (plural), all others use "result".
+        if let Some(results) = json_resp.get("results").cloned() {
+            if json_resp.get("result").is_none() {
+                json_resp["result"] = results;
+            }
         }
 
         Ok(json_resp)
@@ -399,7 +544,9 @@ impl SonyReceiver {
             )
             .await?;
 
-        let status = response["result"][0]["status"]
+        let result = unwrap_sony_result(&response);
+        let entry = if result[0].is_object() { &result[0] } else { result };
+        let status = entry["status"]
             .as_str()
             .unwrap_or("unknown")
             .to_string();
@@ -448,7 +595,8 @@ impl SonyReceiver {
             )
             .await?;
 
-        let info: Vec<VolumeInfo> = serde_json::from_value(response["result"][0].clone())?;
+        let info: Vec<VolumeInfo> =
+            serde_json::from_value(unwrap_sony_result(&response).clone())?;
 
         if let Some(first) = info.first() {
             Ok(first.mute == "on")
@@ -482,31 +630,27 @@ impl SonyReceiver {
             )
             .await?;
 
-        let inputs: Vec<InputSource> = serde_json::from_value(response["result"][0].clone())?;
+        let inputs: Vec<InputSource> =
+            serde_json::from_value(unwrap_sony_result(&response).clone())?;
         Ok(inputs)
     }
 
-    pub async fn get_current_input(&self) -> Result<InputSource, SonyError> {
+    pub async fn get_current_input(&self) -> Result<PlayingContentInfo, SonyError> {
         let response = self
             .send_command(
                 SonyReceiverEndpoints::AvContent,
                 AvContentAction::GetPlayingContentInfo,
-                json!([]),
+                json!([{ "output": "" }]),
                 "1.2",
             )
             .await?;
 
-        let result_array = &response["result"];
-        if result_array
-            .as_array()
-            .map(|v| v.is_empty())
-            .unwrap_or(true)
-        {
+        let zones = unwrap_sony_result(&response);
+        if zones.as_array().map(|v| v.is_empty()).unwrap_or(true) {
             return Err(SonyError::NoContent);
         }
 
-        let input: InputSource = serde_json::from_value(result_array[0].clone())?;
-        Ok(input)
+        Ok(PlayingContentInfo::from_value(&zones[0]))
     }
 
     pub async fn set_input(&self, uri: &str) -> Result<(), SonyError> {
@@ -535,7 +679,8 @@ impl SonyReceiver {
             .send_command(endpoint, "getMethodTypes", json!([""]), "1.0")
             .await?;
 
-        let results_array = response["result"]
+        let results = unwrap_sony_result(&response);
+        let results_array = results
             .as_array()
             .ok_or_else(|| SonyError::InvalidResponse("expected array".to_string()))?;
 
@@ -558,9 +703,9 @@ impl SonyReceiver {
             )
             .await?;
 
-        // Sony returns [ {object} ]
-        let info: SystemInformation = serde_json::from_value(response["result"][0].clone())?;
-        Ok(info)
+        let result = unwrap_sony_result(&response);
+        let entry = if result[0].is_object() { &result[0] } else { result };
+        Ok(SystemInformation::from_value(entry))
     }
 
     /// Checks if a firmware update is available.
@@ -577,7 +722,9 @@ impl SonyReceiver {
             )
             .await?;
 
-        let info: SwUpdateInfo = serde_json::from_value(response["result"][0].clone())?;
+        let result = unwrap_sony_result(&response);
+        let entry = if result[0].is_object() { &result[0] } else { result };
+        let info: SwUpdateInfo = serde_json::from_value(entry.clone())?;
         Ok(info)
     }
 
@@ -610,9 +757,8 @@ impl SonyReceiver {
             )
             .await?;
 
-        // Returns an array of setting objects
         let results: Vec<GenericSettingResult> =
-            serde_json::from_value(response["result"][0].clone())?;
+            serde_json::from_value(unwrap_sony_result(&response).clone())?;
         Ok(results)
     }
 
@@ -626,7 +772,9 @@ impl SonyReceiver {
             )
             .await?;
 
-        let info: EciaInfo = serde_json::from_value(response["result"][0].clone())?;
+        let result = unwrap_sony_result(&response);
+        let entry = if result[0].is_object() { &result[0] } else { result };
+        let info: EciaInfo = serde_json::from_value(entry.clone())?;
         Ok(info)
     }
 
@@ -642,7 +790,9 @@ impl SonyReceiver {
             )
             .await?;
 
-        let status = response["result"][0]["status"]
+        let result = unwrap_sony_result(&response);
+        let entry = if result[0].is_object() { &result[0] } else { result };
+        let status = entry["status"]
             .as_str()
             .unwrap_or("unknown")
             .to_string();
@@ -652,7 +802,8 @@ impl SonyReceiver {
     // --- AUDIO ENDPOINT -----------------------------------------------------
 
     /// Gets configuration for speakers.
-    /// `target` examples: "level", "distance", "size", "pattern".
+    /// Pass a target like `"level"`, `"distance"`, `"size"`, `"pattern"`,
+    /// or an empty string to attempt querying all settings.
     pub async fn get_speaker_settings(
         &self,
         target: &str,
@@ -669,7 +820,7 @@ impl SonyReceiver {
             .await?;
 
         let settings: Vec<GenericSettingResult> =
-            serde_json::from_value(response["result"][0].clone())?;
+            serde_json::from_value(unwrap_sony_result(&response).clone())?;
         Ok(settings)
     }
 
@@ -686,8 +837,8 @@ impl SonyReceiver {
             )
             .await?;
 
-        // Response format: [[ {"scheme":"extInput"}, {"scheme":"storage"} ]]
-        let raw_list: Vec<SchemeInfo> = serde_json::from_value(response["result"][0].clone())?;
+        let raw_list: Vec<SchemeInfo> =
+            serde_json::from_value(unwrap_sony_result(&response).clone())?;
 
         // Flatten to simple string vector
         Ok(raw_list.into_iter().map(|s| s.scheme).collect())
@@ -703,14 +854,14 @@ impl SonyReceiver {
             .send_command(
                 SonyReceiverEndpoints::AvContent,
                 AvContentAction::GetAvailablePlaybackFunction,
-                json!([]), // Empty params implies current active output
+                json!([{ "output": "" }]),
                 "1.0",
             )
             .await?;
 
-        // Note: Sometimes returns array of functions, sometimes single object.
-        // Assuming single object in array based on dump.
-        let func: PlaybackFunction = serde_json::from_value(response["result"][0].clone())?;
+        let result = unwrap_sony_result(&response);
+        let entry = if result[0].is_object() { &result[0] } else { result };
+        let func: PlaybackFunction = serde_json::from_value(entry.clone())?;
         Ok(func)
     }
 
@@ -729,8 +880,126 @@ impl SonyReceiver {
             .await?;
 
         let settings: Vec<GenericSettingResult> =
-            serde_json::from_value(response["result"][0].clone())?;
+            serde_json::from_value(unwrap_sony_result(&response).clone())?;
         Ok(settings)
+    }
+
+    /// Returns available sources for a given URI scheme (e.g. "extInput").
+    pub async fn get_source_list(&self, scheme: &str) -> Result<Vec<SourceInfo>, SonyError> {
+        let params = json!([{ "scheme": scheme }]);
+        let response = self
+            .send_command(
+                SonyReceiverEndpoints::AvContent,
+                AvContentAction::GetSourceList,
+                params,
+                "1.0",
+            )
+            .await?;
+
+        let sources: Vec<SourceInfo> =
+            serde_json::from_value(unwrap_sony_result(&response).clone())?;
+        Ok(sources)
+    }
+
+    /// Returns the number of content items for a given source.
+    pub async fn get_content_count(&self, source: &str) -> Result<u32, SonyError> {
+        let params = json!([{ "source": source }]);
+        let response = self
+            .send_command(
+                SonyReceiverEndpoints::AvContent,
+                AvContentAction::GetContentCount,
+                params,
+                "1.0",
+            )
+            .await?;
+
+        let result = unwrap_sony_result(&response);
+        let entry = if result[0].is_object() { &result[0] } else { result };
+        let count = entry["count"].as_u64().unwrap_or(0) as u32;
+        Ok(count)
+    }
+
+    /// Returns a page of content items for a given source.
+    pub async fn get_content_list(
+        &self,
+        source: &str,
+        start: u32,
+        count: u32,
+    ) -> Result<Vec<ContentItem>, SonyError> {
+        let params = json!([{ "source": source, "stIdx": start, "cnt": count }]);
+        let response = self
+            .send_command(
+                SonyReceiverEndpoints::AvContent,
+                AvContentAction::GetContentList,
+                params,
+                "1.2",
+            )
+            .await?;
+
+        let items: Vec<ContentItem> =
+            serde_json::from_value(unwrap_sony_result(&response).clone())?;
+        Ok(items)
+    }
+
+    /// Initiates content browsing for a given source URI.
+    pub async fn start_content_browsing(&self, source: &str) -> Result<(), SonyError> {
+        let params = json!([{ "source": source }]);
+        self.send_command(
+            SonyReceiverEndpoints::AvContent,
+            AvContentAction::StartContentBrowsing,
+            params,
+            "1.0",
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Sets the active output terminal (e.g. zone).
+    pub async fn set_active_terminal(&self, uri: &str) -> Result<(), SonyError> {
+        let params = json!([{ "uri": uri }]);
+        self.send_command(
+            SonyReceiverEndpoints::AvContent,
+            AvContentAction::SetActiveTerminal,
+            params,
+            "1.0",
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Gets Bluetooth settings from the avContent endpoint.
+    pub async fn get_bluetooth_settings(
+        &self,
+        target: &str,
+    ) -> Result<Value, SonyError> {
+        let params = json!([{ "target": target }]);
+        let response = self
+            .send_command(
+                SonyReceiverEndpoints::AvContent,
+                AvContentAction::GetBluetoothSettings,
+                params,
+                "1.0",
+            )
+            .await?;
+
+        Ok(unwrap_sony_result(&response).clone())
+    }
+
+    /// Sets a Bluetooth setting on the avContent endpoint.
+    pub async fn set_bluetooth_settings(
+        &self,
+        target: &str,
+        value: &str,
+    ) -> Result<(), SonyError> {
+        let params = json!([{ "settings": [{ "target": target, "value": value }] }]);
+        self.send_command(
+            SonyReceiverEndpoints::AvContent,
+            AvContentAction::SetBluetoothSettings,
+            params,
+            "1.0",
+        )
+        .await?;
+        Ok(())
     }
 
     // --- PLAYBACK CONTROLS ---
@@ -768,7 +1037,77 @@ impl SonyReceiver {
         Ok(())
     }
 
-    pub async fn get_playing_content_info(&self) -> Result<InputSource, SonyError> {
+    pub async fn set_play_previous_content(&self) -> Result<(), SonyError> {
+        self.send_command(
+            SonyReceiverEndpoints::AvContent,
+            AvContentAction::SetPlayPreviousContent,
+            json!([{}]),
+            "1.0",
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Returns per-URI playback function support.
+    pub async fn get_supported_playback_function(
+        &self,
+    ) -> Result<Vec<SupportedPlaybackFunction>, SonyError> {
+        let response = self
+            .send_command(
+                SonyReceiverEndpoints::AvContent,
+                AvContentAction::GetSupportedPlaybackFunction,
+                json!([{ "output": "" }]),
+                "1.0",
+            )
+            .await?;
+
+        let items: Vec<SupportedPlaybackFunction> =
+            serde_json::from_value(unwrap_sony_result(&response).clone())?;
+        Ok(items)
+    }
+
+    /// Presets (saves) a broadcast station by URI.
+    pub async fn preset_broadcast_station(&self, uri: &str) -> Result<(), SonyError> {
+        let params = json!([{ "uri": uri }]);
+        self.send_command(
+            SonyReceiverEndpoints::AvContent,
+            AvContentAction::PresetBroadcastStation,
+            params,
+            "1.0",
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Seeks to the next or previous broadcast station.
+    pub async fn seek_broadcast_station(&self, forward: bool) -> Result<(), SonyError> {
+        let direction = if forward { "fwd" } else { "bwd" };
+        let params = json!([{ "direction": direction }]);
+        self.send_command(
+            SonyReceiverEndpoints::AvContent,
+            AvContentAction::SeekBroadcastStation,
+            params,
+            "1.0",
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Scans playing content forward or backward.
+    pub async fn scan_playing_content(&self, forward: bool) -> Result<(), SonyError> {
+        let direction = if forward { "fwd" } else { "bwd" };
+        let params = json!([{ "direction": direction, "output": "" }]);
+        self.send_command(
+            SonyReceiverEndpoints::AvContent,
+            AvContentAction::ScanPlayingContent,
+            params,
+            "1.0",
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_playing_content_info(&self) -> Result<PlayingContentInfo, SonyError> {
         // We must specify which output we are querying.
         // An empty string "" usually targets the current/main zone.
         let params = json!([{ "output": "" }]);
@@ -782,24 +1121,28 @@ impl SonyReceiver {
             )
             .await?;
 
-        let result_array = &response["result"];
-
-        // Check if result is empty or null
-        if result_array
-            .as_array()
-            .map(|v| v.is_empty())
-            .unwrap_or(true)
-        {
+        let zones = unwrap_sony_result(&response);
+        if zones.as_array().map(|v| v.is_empty()).unwrap_or(true) {
             return Err(SonyError::NoContent);
         }
 
-        let input: InputSource = serde_json::from_value(result_array[0].clone())?;
-        Ok(input)
+        Ok(PlayingContentInfo::from_value(&zones[0]))
     }
 
     // --- DISCOVERY ---
-    pub async fn probe_endpoints(&self) -> Result<(), SonyError> {
-        println!("\n--- Probing Endpoints on {}:{} ---", self.host, self.port);
+
+    /// Returns the host string used by this receiver.
+    pub fn host(&self) -> &Host {
+        &self.host
+    }
+
+    /// Returns the port used by this receiver.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub async fn probe_endpoints(&self) -> Result<Vec<ProbeResult>, SonyError> {
+        let mut results = Vec::new();
 
         for endpoint in SonyReceiverEndpoints::all() {
             let path = endpoint.as_path();
@@ -818,20 +1161,25 @@ impl SonyReceiver {
 
             let resp = client.post(&url).json(&payload).send().await;
 
-            match resp {
+            let (active, detail) = match resp {
                 Ok(response) => {
                     if response.status().is_success() {
-                        println!("✅ {:<20} [Active]", path);
+                        (true, "Active".to_string())
                     } else {
-                        println!("❌ {:<20} [HTTP {}]", path, response.status());
+                        (false, format!("HTTP {}", response.status()))
                     }
                 }
-                Err(_) => {
-                    println!("❌ {:<20} [Unreachable]", path);
-                }
-            }
+                Err(_) => (false, "Unreachable".to_string()),
+            };
+
+            results.push(ProbeResult {
+                path: path.to_string(),
+                active,
+                detail,
+            });
         }
-        Ok(())
+
+        Ok(results)
     }
 }
 
@@ -869,6 +1217,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&SystemAction::GetEciaDeviceInfo).unwrap(),
             "\"getEciaDeviceInfo\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SystemAction::GetAlexaRegistrationStatus).unwrap(),
+            "\"getAlexaRegistrationStatus\""
         );
     }
 
