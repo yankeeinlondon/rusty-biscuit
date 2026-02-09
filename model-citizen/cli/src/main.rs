@@ -109,11 +109,20 @@ enum Commands {
 
     /// Download a model from Hugging Face
     Download {
-        /// Repository ID (e.g., TheBloke/Llama-2-7B-GGUF)
-        repo: String,
+        /// Search terms or exact repo ID (e.g., "llama gguf" or "TheBloke/Llama-2-7B-GGUF")
+        query: Vec<String>,
 
-        /// Specific variant to download (optional, interactive if not provided)
-        variant: Option<String>,
+        /// Maximum search results to show
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+
+        /// Sort search results by
+        #[arg(short, long, default_value = "downloads", value_enum)]
+        sort: SortOrder,
+
+        /// Show additional columns (created date, modified date)
+        #[arg(short, long)]
+        verbose: bool,
 
         /// Destination directory
         #[arg(short, long)]
@@ -181,11 +190,25 @@ async fn main() -> Result<()> {
             .await?;
         }
         Commands::Download {
-            repo,
-            variant,
+            query,
+            limit,
+            sort,
+            verbose,
             output,
         } => {
-            commands::download::run(&repo, variant.as_deref(), output.as_deref()).await?;
+            let query = if query.is_empty() {
+                None
+            } else {
+                Some(query.join(" "))
+            };
+            commands::download::run(
+                query.as_deref(),
+                limit,
+                sort.into(),
+                verbose,
+                output.as_deref(),
+            )
+            .await?;
         }
         Commands::Remove {
             model,
