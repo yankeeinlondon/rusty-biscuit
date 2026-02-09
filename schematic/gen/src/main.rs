@@ -166,6 +166,7 @@ fn resolve_all_apis() -> Vec<schematic_define::RestApi> {
         define_openai_api(),
         define_elevenlabs_rest_api(),
         define_huggingface_hub_api(),
+        define_lmstudio_api(),
         // Note: Ollama APIs excluded from "all" - generate individually
         // define_ollama_native_api(),
         // define_ollama_openai_api(),
