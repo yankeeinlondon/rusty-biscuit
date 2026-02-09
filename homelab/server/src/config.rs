@@ -164,33 +164,27 @@ impl HomeyConfig {
         let mut modified = false;
 
         // Migrate SONY_RECEIVER if present and no receivers configured
-        if self.sony_receivers.is_empty() {
-            if let Ok(host) = std::env::var("SONY_RECEIVER") {
-                if !host.is_empty() {
-                    let name = generate_petname();
-                    let (host, port) = parse_host_port(&host, 10000);
-                    self.sony_receivers.insert(
-                        name,
-                        SonyReceiverService { host, port },
-                    );
-                    modified = true;
-                }
-            }
+        if self.sony_receivers.is_empty()
+            && let Ok(host) = std::env::var("SONY_RECEIVER")
+            && !host.is_empty()
+        {
+            let name = generate_petname();
+            let (host, port) = parse_host_port(&host, 10000);
+            self.sony_receivers
+                .insert(name, SonyReceiverService { host, port });
+            modified = true;
         }
 
         // Migrate ARCAM_AMP if present and no amps configured
-        if self.arcam_amps.is_empty() {
-            if let Ok(host) = std::env::var("ARCAM_AMP") {
-                if !host.is_empty() {
-                    let name = generate_petname();
-                    let (host, port) = parse_host_port(&host, 50000);
-                    self.arcam_amps.insert(
-                        name,
-                        ArcamAmpService { host, port },
-                    );
-                    modified = true;
-                }
-            }
+        if self.arcam_amps.is_empty()
+            && let Ok(host) = std::env::var("ARCAM_AMP")
+            && !host.is_empty()
+        {
+            let name = generate_petname();
+            let (host, port) = parse_host_port(&host, 50000);
+            self.arcam_amps
+                .insert(name, ArcamAmpService { host, port });
+            modified = true;
         }
 
         modified
@@ -445,10 +439,12 @@ mod tests {
     #[serial_test::serial]
     fn test_migrate_from_env_sony() {
         // Clear any existing env vars
-        std::env::remove_var("SONY_RECEIVER");
-        std::env::remove_var("ARCAM_AMP");
-
-        std::env::set_var("SONY_RECEIVER", "192.168.1.100:10000");
+        // SAFETY: Tests run serially via serial_test
+        unsafe {
+            std::env::remove_var("SONY_RECEIVER");
+            std::env::remove_var("ARCAM_AMP");
+            std::env::set_var("SONY_RECEIVER", "192.168.1.100:10000");
+        }
 
         let mut config = HomeyConfig::new();
         let modified = config.migrate_from_env();
@@ -463,16 +459,18 @@ mod tests {
         assert_eq!(service.host, "192.168.1.100");
         assert_eq!(service.port, 10000);
 
-        std::env::remove_var("SONY_RECEIVER");
+        unsafe { std::env::remove_var("SONY_RECEIVER"); }
     }
 
     #[test]
     #[serial_test::serial]
     fn test_migrate_from_env_arcam() {
-        std::env::remove_var("SONY_RECEIVER");
-        std::env::remove_var("ARCAM_AMP");
-
-        std::env::set_var("ARCAM_AMP", "192.168.1.101");
+        // SAFETY: Tests run serially via serial_test
+        unsafe {
+            std::env::remove_var("SONY_RECEIVER");
+            std::env::remove_var("ARCAM_AMP");
+            std::env::set_var("ARCAM_AMP", "192.168.1.101");
+        }
 
         let mut config = HomeyConfig::new();
         let modified = config.migrate_from_env();
@@ -486,16 +484,18 @@ mod tests {
         assert_eq!(service.host, "192.168.1.101");
         assert_eq!(service.port, 50000);
 
-        std::env::remove_var("ARCAM_AMP");
+        unsafe { std::env::remove_var("ARCAM_AMP"); }
     }
 
     #[test]
     #[serial_test::serial]
     fn test_migrate_skips_if_already_configured() {
-        std::env::remove_var("SONY_RECEIVER");
-        std::env::remove_var("ARCAM_AMP");
-
-        std::env::set_var("SONY_RECEIVER", "192.168.1.100");
+        // SAFETY: Tests run serially via serial_test
+        unsafe {
+            std::env::remove_var("SONY_RECEIVER");
+            std::env::remove_var("ARCAM_AMP");
+            std::env::set_var("SONY_RECEIVER", "192.168.1.100");
+        }
 
         let mut config = HomeyConfig::new();
         config.sony_receivers.insert(
@@ -512,16 +512,18 @@ mod tests {
         assert_eq!(config.sony_receivers.len(), 1);
         assert!(config.sony_receivers.contains_key("existing"));
 
-        std::env::remove_var("SONY_RECEIVER");
+        unsafe { std::env::remove_var("SONY_RECEIVER"); }
     }
 
     #[test]
     #[serial_test::serial]
     fn test_migrate_skips_empty_env_var() {
-        std::env::remove_var("SONY_RECEIVER");
-        std::env::remove_var("ARCAM_AMP");
-
-        std::env::set_var("SONY_RECEIVER", "");
+        // SAFETY: Tests run serially via serial_test
+        unsafe {
+            std::env::remove_var("SONY_RECEIVER");
+            std::env::remove_var("ARCAM_AMP");
+            std::env::set_var("SONY_RECEIVER", "");
+        }
 
         let mut config = HomeyConfig::new();
         let modified = config.migrate_from_env();
@@ -529,6 +531,6 @@ mod tests {
         assert!(!modified);
         assert!(config.sony_receivers.is_empty());
 
-        std::env::remove_var("SONY_RECEIVER");
+        unsafe { std::env::remove_var("SONY_RECEIVER"); }
     }
 }

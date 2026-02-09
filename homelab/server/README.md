@@ -11,6 +11,37 @@ This server exposes REST endpoints for:
 
 Designed for internal homelab networks (no authentication).
 
+## Configuration
+
+### Configuration File (Recommended)
+
+The server uses `~/homey.json` for device configuration. This file is created automatically on first run.
+
+```json
+{
+  "sony_receivers": {
+    "living-room": { "host": "192.168.1.100", "port": 10000 },
+    "bedroom": { "host": "192.168.1.101", "port": 10000 }
+  },
+  "arcam_amps": {
+    "office": { "host": "192.168.1.102", "port": 50000 }
+  }
+}
+```
+
+### Environment Variables (Legacy)
+
+For backward compatibility, you can still use environment variables. These are automatically migrated to the config file on first run.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SONY_RECEIVER` | Sony receiver host (format: `host` or `host:port`) | None |
+| `ARCAM_AMP` | Arcam amplifier hostname or IP | None |
+| `REQUEST_TIMEOUT_MS` | Request timeout in milliseconds | 5000 |
+| `PORT` | Server listen port | 3000 |
+
+> **Note:** The legacy `/sony/*` and `/arcam/*` routes are deprecated. Use the new `/sony_receiver/{name}/*` and `/arcam_amp/{name}/*` routes instead.
+
 ## Installation
 
 ```bash
@@ -23,31 +54,6 @@ Or via justfile:
 just -f homelab/justfile install-server
 ```
 
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `SONY_RECEIVER` | Sony receiver host (format: `host` or `host:port`) | None |
-| `ARCAM_AMP` | Arcam amplifier hostname or IP | None |
-| `REQUEST_TIMEOUT_MS` | Request timeout in milliseconds | 5000 |
-| `PORT` | Server listen port | 3000 |
-
-### Host Format Examples
-
-```bash
-# IPv4
-SONY_RECEIVER=192.168.1.100
-
-# IPv4 with custom port
-SONY_RECEIVER=192.168.1.100:8080
-
-# DNS name
-SONY_RECEIVER=receiver.local
-
-# IPv6
-SONY_RECEIVER=[::1]
-```
-
 ## API Endpoints
 
 ### Health
@@ -57,60 +63,95 @@ SONY_RECEIVER=[::1]
 | GET | `/health` | Basic health check |
 | GET | `/health/devices` | Device configuration status |
 
-### Sony Receiver
+### Sony Receiver Management
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/sony/power` | Get power status |
-| POST | `/sony/power` | Set power (`{"active": bool}`) |
-| GET | `/sony/volume` | Get volume info |
-| POST | `/sony/volume` | Set volume (`{"level": 0-100}`) |
-| GET | `/sony/mute` | Get mute status |
-| POST | `/sony/mute` | Set mute (`{"mute": bool}`) |
-| GET | `/sony/inputs` | List available inputs |
-| GET | `/sony/input/current` | Get current input |
-| POST | `/sony/input` | Set input (`{"uri": "..."}`) |
-| GET | `/sony/system/info` | Get system information |
+| GET | `/sony_receiver` | List all configured receivers |
+| POST | `/sony_receiver` | Create a new receiver |
+| PUT | `/sony_receiver/{name}` | Update a receiver |
+| DELETE | `/sony_receiver/{name}` | Delete a receiver |
 
-### Arcam Amplifier
+### Sony Receiver Control
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/arcam/power` | Get power state |
-| POST | `/arcam/power/on` | Power on |
-| POST | `/arcam/power/off` | Power off |
-| GET | `/arcam/mute` | Get mute status |
-| POST | `/arcam/mute/on` | Mute on |
-| POST | `/arcam/mute/off` | Mute off |
-| GET | `/arcam/mode` | Get amplifier mode |
+| GET | `/sony_receiver/{name}/power` | Get power status |
+| POST | `/sony_receiver/{name}/power` | Set power (`{"active": bool}`) |
+| GET | `/sony_receiver/{name}/volume` | Get volume info |
+| POST | `/sony_receiver/{name}/volume` | Set volume (`{"level": 0-100}`) |
+| GET | `/sony_receiver/{name}/mute` | Get mute status |
+| POST | `/sony_receiver/{name}/mute` | Set mute (`{"mute": bool}`) |
+| GET | `/sony_receiver/{name}/inputs` | List available inputs |
+| GET | `/sony_receiver/{name}/input/current` | Get current input |
+| POST | `/sony_receiver/{name}/input` | Set input (`{"uri": "..."}`) |
+| GET | `/sony_receiver/{name}/system/info` | Get system information |
+
+### Arcam Amplifier Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/arcam_amp` | List all configured amplifiers |
+| POST | `/arcam_amp` | Create a new amplifier |
+| PUT | `/arcam_amp/{name}` | Update an amplifier |
+| DELETE | `/arcam_amp/{name}` | Delete an amplifier |
+
+### Arcam Amplifier Control
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/arcam_amp/{name}/power` | Get power state |
+| POST | `/arcam_amp/{name}/power/on` | Power on |
+| POST | `/arcam_amp/{name}/power/off` | Power off |
+| GET | `/arcam_amp/{name}/mute` | Get mute status |
+| POST | `/arcam_amp/{name}/mute/on` | Mute on |
+| POST | `/arcam_amp/{name}/mute/off` | Mute off |
+| GET | `/arcam_amp/{name}/mode` | Get amplifier mode |
+
+### Legacy Routes (Deprecated)
+
+These routes work when the corresponding environment variable is set:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| * | `/sony/*` | Legacy Sony routes (uses `SONY_RECEIVER` env) |
+| * | `/arcam/*` | Legacy Arcam routes (uses `ARCAM_AMP` env) |
 
 ## Usage Examples
 
 ```bash
 # Start the server
-SONY_RECEIVER=192.168.1.100 homelab-server
+homelab-server
 
 # Health check
 curl http://localhost:3000/health
 
-# Check device configuration
-curl http://localhost:3000/health/devices
+# List Sony receivers
+curl http://localhost:3000/sony_receiver
 
-# Get Sony power status
-curl http://localhost:3000/sony/power
+# Add a Sony receiver
+curl -X POST http://localhost:3000/sony_receiver \
+  -H "Content-Type: application/json" \
+  -d '{"name": "living-room", "host": "192.168.1.100"}'
+
+# Get power status
+curl http://localhost:3000/sony_receiver/living-room/power
 
 # Set volume to 30
-curl -X POST http://localhost:3000/sony/volume \
+curl -X POST http://localhost:3000/sony_receiver/living-room/volume \
   -H "Content-Type: application/json" \
   -d '{"level": 30}'
 
-# Mute Sony receiver
-curl -X POST http://localhost:3000/sony/mute \
+# Mute receiver
+curl -X POST http://localhost:3000/sony_receiver/living-room/mute \
   -H "Content-Type: application/json" \
   -d '{"mute": true}'
 
 # Power on Arcam
-curl -X POST http://localhost:3000/arcam/power/on
+curl -X POST http://localhost:3000/arcam_amp/office/power/on
+
+# Delete a device
+curl -X DELETE http://localhost:3000/sony_receiver/living-room
 ```
 
 ## Error Responses
@@ -119,8 +160,8 @@ All errors return JSON with `error` and `code` fields:
 
 ```json
 {
-  "error": "Sony Receiver not configured",
-  "code": "DEVICE_NOT_CONFIGURED"
+  "error": "Device not found: living-room",
+  "code": "DEVICE_NOT_FOUND"
 }
 ```
 
@@ -128,11 +169,29 @@ All errors return JSON with `error` and `code` fields:
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `DEVICE_NOT_CONFIGURED` | 404 | Device env var not set |
+| `DEVICE_NOT_FOUND` | 404 | Device name not in config |
+| `DEVICE_EXISTS` | 409 | Device name already exists |
+| `INVALID_DEVICE_NAME` | 400 | Invalid device name format |
+| `INVALID_HOST` | 400 | Invalid or empty host |
 | `SONY_ERROR` | 502 | Sony receiver communication error |
 | `ARCAM_ERROR` | 502 | Arcam amplifier communication error |
 | `INVALID_VOLUME` | 400 | Volume level out of range (0-100) |
 | `TIMEOUT` | 504 | Device request timed out |
+| `CONFIG_IO_ERROR` | 500 | Error reading/writing config file |
+| `CONFIG_PARSE_ERROR` | 500 | Error parsing config file |
+
+### Device Name Rules
+
+Device names must be:
+- Lowercase letters (a-z)
+- Numbers (0-9)
+- Underscores and hyphens only
+
+Examples: `living-room`, `office_1`, `bedroom`
+
+## API Documentation
+
+Visit `/explore` when the server is running to access the Swagger UI.
 
 ## Development
 

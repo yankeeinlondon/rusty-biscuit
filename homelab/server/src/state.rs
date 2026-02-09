@@ -1,8 +1,15 @@
+//! Application state management for homelab server.
+//!
+//! Provides both single-device (legacy ENV-based) and multi-device (config-based)
+//! state management.
+
+use crate::config::{ArcamAmpService, HomeyConfig, SonyReceiverService};
 use homelab::{network::Host, sony_receiver::SonyReceiver};
-use std::{net::Ipv4Addr, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::Ipv4Addr, sync::Arc, time::Duration};
+use tokio::sync::RwLock;
 
 /// Default port for Sony receivers
-const SONY_DEFAULT_PORT: u16 = 10000;
+pub const SONY_DEFAULT_PORT: u16 = 10000;
 
 /// Default port for Arcam amplifiers
 pub const ARCAM_DEFAULT_PORT: u16 = 50000;
@@ -10,19 +17,38 @@ pub const ARCAM_DEFAULT_PORT: u16 = 50000;
 /// Default request timeout in milliseconds
 const DEFAULT_TIMEOUT_MS: u64 = 5000;
 
-/// Application state shared across handlers
+/// Application state shared across handlers.
+///
+/// Supports both single-device (legacy) and multi-device (config-based) modes.
+/// The multi-device state is protected by `tokio::sync::RwLock` for concurrent access.
 #[derive(Clone)]
 pub struct AppState {
-    /// Sony receiver client (pre-configured, reusable)
+    /// Legacy: Sony receiver client (pre-configured, reusable)
     pub sony: Option<Arc<SonyReceiver>>,
-    /// Arcam host (we create connections per-request)
+    /// Legacy: Arcam host (we create connections per-request)
     pub arcam_host: Option<String>,
     /// Request timeout for device operations
     pub request_timeout: Duration,
+
+    /// Multi-device: Sony receivers keyed by name
+    pub sony_receivers: Arc<RwLock<HashMap<String, Arc<SonyReceiver>>>>,
+    /// Multi-device: Arcam hosts keyed by name
+    pub arcam_hosts: Arc<RwLock<HashMap<String, ArcamAmpService>>>,
+    /// Configuration state (for CRUD operations)
+    pub config: Arc<RwLock<HomeyConfig>>,
+    /// Path to config file (for saving changes)
+    pub config_path: Option<std::path::PathBuf>,
+}
+
+/// Configuration errors
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("Invalid host format: {0}")]
+    InvalidHost(String),
 }
 
 impl AppState {
-    /// Creates application state from environment variables.
+    /// Creates application state from environment variables (legacy mode).
     ///
     /// ## Environment Variables
     ///
@@ -51,15 +77,189 @@ impl AppState {
             sony,
             arcam_host,
             request_timeout,
+            sony_receivers: Arc::new(RwLock::new(HashMap::new())),
+            arcam_hosts: Arc::new(RwLock::new(HashMap::new())),
+            config: Arc::new(RwLock::new(HomeyConfig::new())),
+            config_path: None,
         })
+    }
+
+    /// Creates application state from a `HomeyConfig`.
+    ///
+    /// Initializes multi-device state from the configuration.
+    /// The config is stored for CRUD operations and auto-save.
+    pub fn from_config(config: HomeyConfig, config_path: Option<std::path::PathBuf>) -> Self {
+        let mut sony_receivers = HashMap::new();
+        let mut arcam_hosts = HashMap::new();
+
+        // Build Sony receiver clients from config
+        for (name, service) in &config.sony_receivers {
+            if let Ok(receiver) = create_sony_receiver(service) {
+                sony_receivers.insert(name.clone(), Arc::new(receiver));
+            }
+        }
+
+        // Store Arcam configs (connections created per-request)
+        for (name, service) in &config.arcam_amps {
+            arcam_hosts.insert(name.clone(), service.clone());
+        }
+
+        // Legacy fields: use first device if available
+        let sony = sony_receivers.values().next().cloned();
+        let arcam_host = arcam_hosts
+            .values()
+            .next()
+            .map(|s| format!("{}:{}", s.host, s.port));
+
+        let request_timeout = std::env::var("REQUEST_TIMEOUT_MS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .map(Duration::from_millis)
+            .unwrap_or(Duration::from_millis(DEFAULT_TIMEOUT_MS));
+
+        Self {
+            sony,
+            arcam_host,
+            request_timeout,
+            sony_receivers: Arc::new(RwLock::new(sony_receivers)),
+            arcam_hosts: Arc::new(RwLock::new(arcam_hosts)),
+            config: Arc::new(RwLock::new(config)),
+            config_path,
+        }
+    }
+
+    /// Gets a Sony receiver by name.
+    ///
+    /// ## Returns
+    ///
+    /// `Some(Arc<SonyReceiver>)` if found, `None` if not configured.
+    pub async fn get_sony(&self, name: &str) -> Option<Arc<SonyReceiver>> {
+        let receivers = self.sony_receivers.read().await;
+        receivers.get(name).cloned()
+    }
+
+    /// Gets an Arcam host by name.
+    ///
+    /// ## Returns
+    ///
+    /// `Some((host, port))` if found, `None` if not configured.
+    pub async fn get_arcam_host(&self, name: &str) -> Option<(String, u16)> {
+        let hosts = self.arcam_hosts.read().await;
+        hosts.get(name).map(|s| (s.host.clone(), s.port))
+    }
+
+    /// Adds or updates a Sony receiver and saves config.
+    ///
+    /// Uses clone-mutate-save pattern to minimize lock duration.
+    pub async fn add_sony(
+        &self,
+        name: String,
+        service: SonyReceiverService,
+    ) -> Result<(), crate::config::ConfigError> {
+        let receiver = create_sony_receiver(&service)
+            .map_err(|e| crate::config::ConfigError::InvalidHost(e.to_string()))?;
+
+        // Clone-mutate-save pattern
+        let mut config = self.config.read().await.clone();
+        config.sony_receivers.insert(name.clone(), service);
+        if let Some(path) = &self.config_path {
+            config.save_to(path)?;
+        }
+
+        // Update runtime state
+        {
+            let mut receivers = self.sony_receivers.write().await;
+            receivers.insert(name, Arc::new(receiver));
+        }
+        {
+            let mut cfg = self.config.write().await;
+            *cfg = config;
+        }
+
+        Ok(())
+    }
+
+    /// Removes a Sony receiver and saves config.
+    pub async fn remove_sony(&self, name: &str) -> Result<bool, crate::config::ConfigError> {
+        let mut config = self.config.read().await.clone();
+        let removed = config.sony_receivers.remove(name).is_some();
+
+        if removed {
+            if let Some(path) = &self.config_path {
+                config.save_to(path)?;
+            }
+            {
+                let mut receivers = self.sony_receivers.write().await;
+                receivers.remove(name);
+            }
+            {
+                let mut cfg = self.config.write().await;
+                *cfg = config;
+            }
+        }
+
+        Ok(removed)
+    }
+
+    /// Adds or updates an Arcam amplifier and saves config.
+    pub async fn add_arcam(
+        &self,
+        name: String,
+        service: ArcamAmpService,
+    ) -> Result<(), crate::config::ConfigError> {
+        if service.host.is_empty() {
+            return Err(crate::config::ConfigError::InvalidHost(
+                "empty host".to_string(),
+            ));
+        }
+
+        // Clone-mutate-save pattern
+        let mut config = self.config.read().await.clone();
+        config.arcam_amps.insert(name.clone(), service.clone());
+        if let Some(path) = &self.config_path {
+            config.save_to(path)?;
+        }
+
+        // Update runtime state
+        {
+            let mut hosts = self.arcam_hosts.write().await;
+            hosts.insert(name, service);
+        }
+        {
+            let mut cfg = self.config.write().await;
+            *cfg = config;
+        }
+
+        Ok(())
+    }
+
+    /// Removes an Arcam amplifier and saves config.
+    pub async fn remove_arcam(&self, name: &str) -> Result<bool, crate::config::ConfigError> {
+        let mut config = self.config.read().await.clone();
+        let removed = config.arcam_amps.remove(name).is_some();
+
+        if removed {
+            if let Some(path) = &self.config_path {
+                config.save_to(path)?;
+            }
+            {
+                let mut hosts = self.arcam_hosts.write().await;
+                hosts.remove(name);
+            }
+            {
+                let mut cfg = self.config.write().await;
+                *cfg = config;
+            }
+        }
+
+        Ok(removed)
     }
 }
 
-/// Configuration errors
-#[derive(Debug, thiserror::Error)]
-pub enum ConfigError {
-    #[error("Invalid host format: {0}")]
-    InvalidHost(String),
+/// Creates a SonyReceiver from a service config.
+fn create_sony_receiver(service: &SonyReceiverService) -> Result<SonyReceiver, ConfigError> {
+    let host = parse_host(&service.host)?;
+    Ok(SonyReceiver::new(host, service.port))
 }
 
 /// Parse a Sony receiver host string (host or host:port)
@@ -76,7 +276,7 @@ fn parse_sony_host(host_str: &str) -> Result<SonyReceiver, ConfigError> {
                 let port_str = &host_str[bracket_idx + 2..];
                 let port = port_str
                     .parse()
-                    .map_err(|_| ConfigError::InvalidHost(format!("invalid port: {}", port_str)))?;
+                    .map_err(|_| ConfigError::InvalidHost(format!("invalid port: {port_str}")))?;
                 (ip_part, port)
             } else {
                 // Just [::1] without port
@@ -88,7 +288,7 @@ fn parse_sony_host(host_str: &str) -> Result<SonyReceiver, ConfigError> {
             let port_str = &host_str[idx + 1..];
             let port = port_str
                 .parse()
-                .map_err(|_| ConfigError::InvalidHost(format!("invalid port: {}", port_str)))?;
+                .map_err(|_| ConfigError::InvalidHost(format!("invalid port: {port_str}")))?;
             (&host_str[..idx], port)
         }
     } else {
@@ -172,9 +372,10 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_app_state_defaults() {
         // Clear env vars for this test
-        // SAFETY: This is a single-threaded test
+        // SAFETY: Tests run serially
         unsafe {
             std::env::remove_var("SONY_RECEIVER");
             std::env::remove_var("ARCAM_AMP");
@@ -185,5 +386,44 @@ mod tests {
         assert!(state.sony.is_none());
         assert!(state.arcam_host.is_none());
         assert_eq!(state.request_timeout, Duration::from_millis(5000));
+    }
+
+    #[tokio::test]
+    async fn test_from_config_creates_receivers() {
+        let mut config = HomeyConfig::new();
+        config.sony_receivers.insert(
+            "living-room".to_string(),
+            SonyReceiverService {
+                host: "192.168.1.100".to_string(),
+                port: 10000,
+            },
+        );
+        config.arcam_amps.insert(
+            "office".to_string(),
+            ArcamAmpService {
+                host: "192.168.1.101".to_string(),
+                port: 50000,
+            },
+        );
+
+        let state = AppState::from_config(config, None);
+
+        // Check multi-device state
+        let sony = state.get_sony("living-room").await;
+        assert!(sony.is_some());
+
+        let arcam = state.get_arcam_host("office").await;
+        assert!(arcam.is_some());
+        let (host, port) = arcam.unwrap();
+        assert_eq!(host, "192.168.1.101");
+        assert_eq!(port, 50000);
+    }
+
+    #[tokio::test]
+    async fn test_get_nonexistent_device() {
+        let state = AppState::from_config(HomeyConfig::new(), None);
+
+        assert!(state.get_sony("nonexistent").await.is_none());
+        assert!(state.get_arcam_host("nonexistent").await.is_none());
     }
 }

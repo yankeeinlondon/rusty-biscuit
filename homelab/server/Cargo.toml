@@ -24,7 +24,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-axum = "0.2"
-utoipa-swagger-ui = { version = "9", features = ["axum"] }
+utoipa-scalar = { version = "0.3", features = ["axum"] }
 petname = "2.0"
 dirs = "6.0"
 

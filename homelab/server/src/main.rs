@@ -1,4 +1,8 @@
-use homelab_server::{build_router, state::AppState};
+use homelab_server::{
+    build_router,
+    config::HomeyConfig,
+    state::AppState,
+};
 use std::time::Duration;
 use tokio::{net::TcpListener, signal};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -20,17 +24,9 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // Load configuration from environment
-    let app_state = match AppState::from_env() {
-        Ok(state) => {
-            tracing::info!(
-                sony_configured = state.sony.is_some(),
-                arcam_configured = state.arcam_host.is_some(),
-                timeout_ms = state.request_timeout.as_millis() as u64,
-                "Configuration loaded"
-            );
-            state
-        }
+    // Load configuration: try config file first, fall back to ENV vars
+    let app_state = match load_config() {
+        Ok(state) => state,
         Err(e) => {
             tracing::error!(error = %e, "Failed to load configuration");
             std::process::exit(1);
@@ -47,7 +43,7 @@ async fn main() {
         .unwrap_or(DEFAULT_PORT);
 
     // Bind to address
-    let addr = format!("0.0.0.0:{}", port);
+    let addr = format!("0.0.0.0:{port}");
     let listener = TcpListener::bind(&addr).await.unwrap();
     tracing::info!(address = %addr, "Server listening");
 
@@ -58,6 +54,80 @@ async fn main() {
         .unwrap();
 
     tracing::info!("Server shutdown complete");
+}
+
+/// Loads configuration from file or environment.
+///
+/// Priority:
+/// 1. Load from ~/homey.json (creates if missing)
+/// 2. If config is empty, migrate from ENV vars (SONY_RECEIVER, ARCAM_AMP)
+/// 3. Save migrated config back to file
+fn load_config() -> Result<AppState, Box<dyn std::error::Error>> {
+    let config_path = HomeyConfig::default_path();
+
+    // Load or create config file
+    let mut config = match &config_path {
+        Some(path) => {
+            tracing::info!(path = %path.display(), "Loading configuration");
+            HomeyConfig::load_from(path)?
+        }
+        None => {
+            tracing::warn!("Home directory not found, using empty config");
+            HomeyConfig::new()
+        }
+    };
+
+    // Migrate from ENV if config is empty
+    if config.migrate_from_env() {
+        tracing::info!("Migrated devices from environment variables");
+
+        // Log what was migrated
+        for (name, service) in &config.sony_receivers {
+            tracing::info!(
+                name = %name,
+                host = %service.host,
+                port = service.port,
+                "Migrated Sony receiver from SONY_RECEIVER env"
+            );
+        }
+        for (name, service) in &config.arcam_amps {
+            tracing::info!(
+                name = %name,
+                host = %service.host,
+                port = service.port,
+                "Migrated Arcam amplifier from ARCAM_AMP env"
+            );
+        }
+
+        // Save migrated config
+        if let Some(path) = &config_path {
+            config.save_to(path)?;
+            tracing::info!(path = %path.display(), "Saved migrated configuration");
+        }
+    }
+
+    // Log device counts
+    tracing::info!(
+        sony_receivers = config.sony_receivers.len(),
+        arcam_amps = config.arcam_amps.len(),
+        "Configuration loaded"
+    );
+
+    // Warn about legacy route deprecation if ENV vars are set
+    if std::env::var("SONY_RECEIVER").is_ok() {
+        tracing::warn!(
+            "SONY_RECEIVER env var detected. Legacy /sony/* routes are deprecated. \
+             Use /sony_receiver/{{name}}/* instead."
+        );
+    }
+    if std::env::var("ARCAM_AMP").is_ok() {
+        tracing::warn!(
+            "ARCAM_AMP env var detected. Legacy /arcam/* routes are deprecated. \
+             Use /arcam_amp/{{name}}/* instead."
+        );
+    }
+
+    Ok(AppState::from_config(config, config_path))
 }
 
 // --- Shutdown Signal ---

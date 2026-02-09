@@ -19,7 +19,7 @@ use tokio::time::timeout;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use utoipa::{OpenApi, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
-use utoipa_swagger_ui::SwaggerUi;
+use utoipa_scalar::{Scalar, Servable};
 
 use state::AppState;
 
@@ -28,8 +28,10 @@ use state::AppState;
 #[openapi(
     tags(
         (name = "health", description = "Health check endpoints"),
-        (name = "sony", description = "Sony ES receiver control"),
-        (name = "arcam", description = "Arcam amplifier control"),
+        (name = "sony", description = "Sony ES receiver control (legacy)"),
+        (name = "arcam", description = "Arcam amplifier control (legacy)"),
+        (name = "sony_receiver", description = "Sony ES receiver management and control"),
+        (name = "arcam_amp", description = "Arcam amplifier management and control"),
     )
 )]
 struct ApiDoc;
@@ -41,13 +43,25 @@ pub fn build_router(state: AppState) -> Router {
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(utoipa_axum::routes!(health))
         .routes(utoipa_axum::routes!(health_devices))
+        // Legacy routes (single device via ENV)
         .nest("/sony", handlers::sony::routes())
         .nest("/arcam", handlers::arcam::routes())
+        // New routes (multi-device via config)
+        .nest(
+            "/sony_receiver",
+            handlers::crud::sony_receiver_crud_routes()
+                .merge(handlers::sony::routes_with_name()),
+        )
+        .nest(
+            "/arcam_amp",
+            handlers::crud::arcam_amp_crud_routes()
+                .merge(handlers::arcam::routes_with_name()),
+        )
         .split_for_parts();
 
     router
         .route("/", get(index))
-        .merge(SwaggerUi::new("/explore").url("/api-docs/openapi.json", api))
+        .merge(Scalar::with_url("/explore", api))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state)
