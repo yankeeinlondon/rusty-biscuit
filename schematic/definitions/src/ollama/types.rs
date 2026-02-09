@@ -370,6 +370,10 @@ pub struct ShowModelResponse {
     /// License information.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
+
+    /// Model capabilities (e.g., "completion", "vision", "tools", "thinking").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<Vec<String>>,
 }
 
 /// Request body for the `/api/pull` endpoint.

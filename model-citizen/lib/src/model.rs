@@ -6,6 +6,74 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Extended metadata available from provider APIs and GGUF file headers.
+///
+/// All fields are optional since different providers supply different metadata.
+/// Populated during scan (LM Studio, llama.cpp) or lazy enrichment (Ollama).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ModelMetadata {
+    /// Parameter count (e.g., "8B", "70B").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<String>,
+    /// Maximum context window length in tokens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_length: Option<u64>,
+    /// Embedding vector dimension.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_length: Option<u64>,
+    /// Number of attention heads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head_count: Option<u64>,
+    /// Number of transformer layers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer_count: Option<u64>,
+    /// Model family tags (e.g., \["llama"\]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub families: Option<Vec<String>>,
+    /// Whether the model supports vision/multimodal input.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vision: Option<bool>,
+    /// Whether the model supports function calling.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_calling: Option<bool>,
+    /// License text (first line or truncated).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    /// Base model this was derived from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_model: Option<String>,
+    /// Chat/prompt template.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_template: Option<String>,
+    /// Model publisher or organization.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    /// Last modification timestamp.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at: Option<String>,
+    /// Default sampling temperature.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    /// Default top-K sampling parameter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u64>,
+    /// Default top-P (nucleus) sampling parameter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f64>,
+    /// Default repetition penalty.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repeat_penalty: Option<f64>,
+    /// Stop sequences.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop: Option<Vec<String>>,
+    /// Supported capabilities (e.g., "completion", "vision", "tools", "thinking").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<Vec<String>>,
+    /// HuggingFace repository ID (e.g., "meta-llama/Llama-3-8B-GGUF").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub huggingface_repo: Option<String>,
+}
+
 /// A unified representation of a model across different runners.
 ///
 /// This struct normalizes model metadata from Ollama, LM Studio, and Llama.cpp
@@ -30,8 +98,15 @@ pub struct UnifiedModel {
     /// Which runner this model came from.
     pub source: ModelSource,
 
+    /// Model file format (GGUF, Safetensors, etc.).
+    pub format: ModelFormat,
+
     /// Filesystem path to the model file.
     pub path: PathBuf,
+
+    /// Extended metadata from provider APIs or file headers.
+    #[serde(default)]
+    pub metadata: ModelMetadata,
 }
 
 impl UnifiedModel {
@@ -44,6 +119,7 @@ impl UnifiedModel {
         quantization: QuantizationType,
         architecture: ModelArchitecture,
         source: ModelSource,
+        format: ModelFormat,
         path: impl Into<PathBuf>,
     ) -> Self {
         let name = name.into();
@@ -55,8 +131,17 @@ impl UnifiedModel {
             quantization,
             architecture,
             source,
+            format,
             path: path.into(),
+            metadata: ModelMetadata::default(),
         }
+    }
+
+    /// Sets the metadata on this model, returning self for chaining.
+    #[must_use]
+    pub fn with_metadata(mut self, metadata: ModelMetadata) -> Self {
+        self.metadata = metadata;
+        self
     }
 
     /// Returns the size formatted as a human-readable string (e.g., "4.2 GB").
@@ -302,6 +387,31 @@ impl ModelArchitecture {
     }
 }
 
+/// Model file format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelFormat {
+    /// GGUF quantized format (used by Ollama, LM Studio, Llama.cpp).
+    Gguf,
+    /// Safetensors format (used by MLX models in LM Studio).
+    Safetensors,
+    /// Unknown or undetected format.
+    #[default]
+    Unknown,
+}
+
+impl ModelFormat {
+    /// Returns the display string for this format.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Gguf => "GGUF",
+            Self::Safetensors => "Safetensors",
+            Self::Unknown => "Unknown",
+        }
+    }
+}
+
 /// Source runner for a model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -324,6 +434,35 @@ impl ModelSource {
             Self::LlamaCpp => "llamacpp",
         }
     }
+
+    /// Returns the human-readable display name for this source.
+    #[must_use]
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Ollama => "Ollama",
+            Self::LmStudio => "LM Studio",
+            Self::LlamaCpp => "Llama.cpp",
+        }
+    }
+}
+
+/// Extracts a HuggingFace repo ID from a URL.
+///
+/// Parses URLs like `https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct`
+/// into `meta-llama/Llama-3.3-70B-Instruct`.
+///
+/// Returns `None` if the URL is not a HuggingFace model URL or cannot be parsed.
+#[must_use]
+pub fn huggingface_repo_from_url(url: &str) -> Option<String> {
+    let url = url.trim().trim_end_matches('/');
+    // Match https://huggingface.co/<owner>/<repo> (with optional trailing path segments)
+    let rest = url
+        .strip_prefix("https://huggingface.co/")
+        .or_else(|| url.strip_prefix("http://huggingface.co/"))?;
+    let mut parts = rest.splitn(3, '/');
+    let owner = parts.next().filter(|s| !s.is_empty())?;
+    let repo = parts.next().filter(|s| !s.is_empty())?;
+    Some(format!("{owner}/{repo}"))
 }
 
 #[cfg(test)]
@@ -338,6 +477,7 @@ mod tests {
             QuantizationType::Q4Km,
             ModelArchitecture::Llama,
             ModelSource::Ollama,
+            ModelFormat::Gguf,
             "/models/llama3.gguf",
         );
         assert_eq!(model.id, "ollama:llama3:Q4_K_M");
@@ -353,6 +493,7 @@ mod tests {
                 QuantizationType::Q4_0,
                 ModelArchitecture::Unknown,
                 ModelSource::LlamaCpp,
+                ModelFormat::Gguf,
                 "/test.gguf",
             )
         };
@@ -392,6 +533,13 @@ mod tests {
     }
 
     #[test]
+    fn model_source_display_name() {
+        assert_eq!(ModelSource::Ollama.display_name(), "Ollama");
+        assert_eq!(ModelSource::LmStudio.display_name(), "LM Studio");
+        assert_eq!(ModelSource::LlamaCpp.display_name(), "Llama.cpp");
+    }
+
+    #[test]
     fn unified_model_serializes_to_json() {
         let model = UnifiedModel::new(
             "test",
@@ -399,12 +547,14 @@ mod tests {
             QuantizationType::Q8_0,
             ModelArchitecture::Llama,
             ModelSource::Ollama,
+            ModelFormat::Gguf,
             "/test.gguf",
         );
         let json = serde_json::to_string(&model).unwrap();
         assert!(json.contains("\"quantization\":\"Q8_0\""));
         assert!(json.contains("\"architecture\":\"llama\""));
         assert!(json.contains("\"source\":\"ollama\""));
+        assert!(json.contains("\"format\":\"gguf\""));
     }
 
     #[test]
@@ -446,10 +596,46 @@ mod tests {
             "quantization": "Q8_0",
             "architecture": "llama",
             "source": "ollama",
+            "format": "gguf",
             "path": "/test.gguf"
         }"#;
         let model: UnifiedModel = serde_json::from_str(json).unwrap();
         assert_eq!(model.name, "test");
         assert_eq!(model.quantization, QuantizationType::Q8_0);
+        assert_eq!(model.format, ModelFormat::Gguf);
+    }
+
+    #[test]
+    fn huggingface_repo_from_url_parses_standard_url() {
+        assert_eq!(
+            huggingface_repo_from_url("https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct"),
+            Some("meta-llama/Llama-3.3-70B-Instruct".to_string()),
+        );
+    }
+
+    #[test]
+    fn huggingface_repo_from_url_strips_trailing_path() {
+        assert_eq!(
+            huggingface_repo_from_url("https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct/tree/main"),
+            Some("meta-llama/Llama-3.3-70B-Instruct".to_string()),
+        );
+    }
+
+    #[test]
+    fn huggingface_repo_from_url_handles_trailing_slash() {
+        assert_eq!(
+            huggingface_repo_from_url("https://huggingface.co/TheBloke/Llama-2-7B-GGUF/"),
+            Some("TheBloke/Llama-2-7B-GGUF".to_string()),
+        );
+    }
+
+    #[test]
+    fn huggingface_repo_from_url_returns_none_for_non_hf_url() {
+        assert!(huggingface_repo_from_url("https://github.com/meta-llama/llama").is_none());
+    }
+
+    #[test]
+    fn huggingface_repo_from_url_returns_none_for_owner_only() {
+        assert!(huggingface_repo_from_url("https://huggingface.co/meta-llama").is_none());
     }
 }

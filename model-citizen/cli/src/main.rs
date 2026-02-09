@@ -4,8 +4,28 @@
 
 mod commands;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::CompleteEnv;
 use color_eyre::eyre::Result;
+
+const COMPLETIONS_HELP: &str = r#"
+SHELL COMPLETIONS
+
+Enable dynamic shell completions for model.
+
+Examples:
+  # Bash - add to ~/.bashrc or ~/.bash_profile
+  echo 'source <(COMPLETE=bash model)' >> ~/.bashrc
+
+  # Zsh - add to ~/.zshrc
+  echo 'source <(COMPLETE=zsh model)' >> ~/.zshrc
+
+  # Fish - add to config
+  echo 'COMPLETE=fish model | source' >> ~/.config/fish/config.fish
+
+  # Disable completions
+  COMPLETE=0
+"#;
 
 /// Model Citizen - Local LLM model management across multiple runners.
 #[derive(Parser)]
@@ -26,6 +46,28 @@ enum OutputFormat {
     Json,
 }
 
+/// Sort order for HuggingFace search results.
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum SortOrder {
+    Downloads,
+    Likes,
+    Trending,
+    Created,
+    Modified,
+}
+
+impl From<SortOrder> for model_citizen::SortOrder {
+    fn from(s: SortOrder) -> Self {
+        match s {
+            SortOrder::Downloads => Self::Downloads,
+            SortOrder::Likes => Self::Likes,
+            SortOrder::Trending => Self::Trending,
+            SortOrder::Created => Self::Created,
+            SortOrder::Modified => Self::Modified,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// List all models across all runners
@@ -37,6 +79,14 @@ enum Commands {
         /// Show additional columns (format)
         #[arg(short, long)]
         verbose: bool,
+
+        /// Sort by source app, then by name
+        #[arg(long)]
+        app: bool,
+
+        /// Sort by file size (largest first)
+        #[arg(long)]
+        size: bool,
     },
 
     /// Show detailed information about a model
@@ -51,8 +101,16 @@ enum Commands {
         query: String,
 
         /// Maximum results to show
-        #[arg(short, long, default_value = "10")]
+        #[arg(short, long, default_value = "20")]
         limit: usize,
+
+        /// Sort results by
+        #[arg(short, long, default_value = "downloads", value_enum)]
+        sort: SortOrder,
+
+        /// Show additional columns (created date)
+        #[arg(short, long)]
+        verbose: bool,
     },
 
     /// Download a model from Hugging Face
@@ -81,23 +139,47 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+
+    /// Show shell completions setup instructions
+    #[command(after_help = COMPLETIONS_HELP)]
+    Completions,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    CompleteEnv::with_factory(Cli::command).complete();
+
     color_eyre::install()?;
 
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::List { runner, verbose } => {
-            commands::list::run(runner, cli.format == OutputFormat::Json, verbose).await?;
+        Commands::List {
+            runner,
+            verbose,
+            app,
+            size,
+        } => {
+            commands::list::run(runner, cli.format == OutputFormat::Json, verbose, app, size)
+                .await?;
         }
         Commands::Info { model } => {
             commands::info::run(&model, cli.format == OutputFormat::Json).await?;
         }
-        Commands::Search { query, limit } => {
-            commands::search::run(&query, limit, cli.format == OutputFormat::Json).await?;
+        Commands::Search {
+            query,
+            limit,
+            sort,
+            verbose,
+        } => {
+            commands::search::run(
+                &query,
+                limit,
+                sort.into(),
+                cli.format == OutputFormat::Json,
+                verbose,
+            )
+            .await?;
         }
         Commands::Download {
             repo,
@@ -112,6 +194,9 @@ async fn main() -> Result<()> {
             force,
         } => {
             commands::remove::run(&model, runner.as_deref(), force).await?;
+        }
+        Commands::Completions => {
+            print!("{}", COMPLETIONS_HELP.trim_start());
         }
     }
 

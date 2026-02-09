@@ -5,8 +5,6 @@
 
 use crate::scanner::ModelScanner;
 use crate::UnifiedModel;
-#[cfg(test)]
-use crate::ModelCitizenError;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -193,6 +191,21 @@ impl ModelRegistry {
         Self::deduplicate(results.into_iter().flat_map(|r| r.models()).collect())
     }
 
+    /// Enriches a model with additional metadata from its source scanner.
+    ///
+    /// Dispatches to the matching scanner's `enrich()` method based on
+    /// `model.source`. Errors are silently ignored since enrichment is
+    /// best-effort.
+    pub async fn enrich(&self, model: &mut UnifiedModel) {
+        let source_name = model.source.as_str();
+        for scanner in &self.scanners {
+            if scanner.name() == source_name {
+                let _ = scanner.enrich(model).await;
+                return;
+            }
+        }
+    }
+
     /// Scans a single scanner with timeout.
     async fn scan_one(scanner: Arc<dyn ModelScanner>, timeout_duration: Duration) -> ScanResult {
         let name = scanner.name();
@@ -249,7 +262,7 @@ impl ModelRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ModelArchitecture, ModelSource, QuantizationType};
+    use crate::{ModelArchitecture, ModelCitizenError, ModelFormat, ModelSource, QuantizationType};
     use async_trait::async_trait;
 
     /// Mock scanner for testing.
@@ -324,6 +337,7 @@ mod tests {
             QuantizationType::Q4Km,
             ModelArchitecture::Llama,
             ModelSource::LlamaCpp,
+            ModelFormat::Gguf,
             path,
         )
     }

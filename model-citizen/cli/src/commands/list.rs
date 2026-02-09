@@ -5,16 +5,19 @@ use model_citizen::{
     scanner::{LlamaCppScanner, LmStudioScanner, OllamaScanner},
     Config, ModelRegistry, UnifiedModel,
 };
-use tabled::{settings::Style, Table, Tabled};
+use tabled::{
+    settings::{object::Columns, Alignment, Modify, Style},
+    Table, Tabled,
+};
 
 #[derive(Tabled)]
 struct ModelRow {
     #[tabled(rename = "Name")]
     name: String,
-    #[tabled(rename = "Size")]
-    size: String,
     #[tabled(rename = "Quant")]
     quantization: String,
+    #[tabled(rename = "Size")]
+    size: String,
     #[tabled(rename = "Arch")]
     architecture: String,
     #[tabled(rename = "Source")]
@@ -25,10 +28,10 @@ impl From<&UnifiedModel> for ModelRow {
     fn from(model: &UnifiedModel) -> Self {
         Self {
             name: model.name.clone(),
-            size: model.size_display(),
             quantization: model.quantization.as_str().to_string(),
+            size: model.size_display(),
             architecture: model.architecture.as_str().to_string(),
-            source: model.source.as_str().to_string(),
+            source: model.source.display_name().to_string(),
         }
     }
 }
@@ -37,6 +40,8 @@ impl From<&UnifiedModel> for ModelRow {
 struct VerboseModelRow {
     #[tabled(rename = "Name")]
     name: String,
+    #[tabled(rename = "Params")]
+    params: String,
     #[tabled(rename = "Size")]
     size: String,
     #[tabled(rename = "Quant")]
@@ -51,30 +56,30 @@ struct VerboseModelRow {
 
 impl From<&UnifiedModel> for VerboseModelRow {
     fn from(model: &UnifiedModel) -> Self {
-        let format = if model
-            .path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"))
-        {
-            "GGUF"
-        } else if model.path.is_dir() {
-            "Safetensors"
-        } else {
-            "Unknown"
-        };
-
         Self {
             name: model.name.clone(),
+            params: model
+                .metadata
+                .parameters
+                .as_deref()
+                .unwrap_or("-")
+                .to_string(),
             size: model.size_display(),
             quantization: model.quantization.as_str().to_string(),
             architecture: model.architecture.as_str().to_string(),
-            format: format.to_string(),
-            source: model.source.as_str().to_string(),
+            format: model.format.as_str().to_string(),
+            source: model.source.display_name().to_string(),
         }
     }
 }
 
-pub async fn run(runner_filter: Option<String>, json_output: bool, verbose: bool) -> Result<()> {
+pub async fn run(
+    runner_filter: Option<String>,
+    json_output: bool,
+    verbose: bool,
+    sort_by_app: bool,
+    sort_by_size: bool,
+) -> Result<()> {
     let config = Config::load()?;
     let mut registry = ModelRegistry::new();
 
@@ -99,7 +104,20 @@ pub async fn run(runner_filter: Option<String>, json_output: bool, verbose: bool
         }
     }
 
-    let models = registry.scan_all().await;
+    let mut models = registry.scan_all().await;
+
+    if sort_by_size {
+        models.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+    } else if sort_by_app {
+        models.sort_by(|a, b| {
+            a.source
+                .as_str()
+                .cmp(b.source.as_str())
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+    } else {
+        models.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    }
 
     if json_output {
         let json = serde_json::to_string_pretty(&models)?;
@@ -118,7 +136,12 @@ pub async fn run(runner_filter: Option<String>, json_output: bool, verbose: bool
     } else {
         let rows: Vec<ModelRow> = models.iter().map(ModelRow::from).collect();
         let mut table = Table::new(rows);
-        table.with(Style::rounded());
+        table
+            .with(Style::rounded())
+            .with(Modify::new(Columns::single(1)).with(Alignment::center()))
+            .with(Modify::new(Columns::single(2)).with(Alignment::right()))
+            .with(Modify::new(Columns::single(3)).with(Alignment::center()))
+            .with(Modify::new(Columns::single(4)).with(Alignment::center()));
         println!("{table}");
         println!("\nTotal: {} models", models.len());
     }

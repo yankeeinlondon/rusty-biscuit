@@ -3,11 +3,11 @@
 //! Scans for models in the LM Studio models directory by recursively
 //! searching for `.gguf` files and MLX model directories (safetensors).
 
-use crate::gguf::{detect_quantization, model_name_from_filename};
+use crate::gguf::{detect_quantization, extract_metadata, model_name_from_filename};
 use crate::scanner::ModelScanner;
-use crate::{Config, ModelArchitecture, ModelCitizenError, ModelSource, QuantizationType, UnifiedModel};
+use crate::{Config, ModelArchitecture, ModelCitizenError, ModelFormat, ModelSource, QuantizationType, UnifiedModel};
 use async_trait::async_trait;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Scanner for LM Studio models.
 ///
@@ -235,14 +235,49 @@ impl LmStudioScanner {
             .map(Self::architecture_from_model_type)
             .unwrap_or_else(|| ModelArchitecture::from_name(&name));
 
-        Some(UnifiedModel::new(
-            name,
-            size_bytes,
-            quantization,
-            architecture,
-            ModelSource::LmStudio,
-            dir,
-        ))
+        let metadata = Self::metadata_from_mlx_config(&config_json);
+
+        Some(
+            UnifiedModel::new(
+                name,
+                size_bytes,
+                quantization,
+                architecture,
+                ModelSource::LmStudio,
+                ModelFormat::Safetensors,
+                dir,
+            )
+            .with_metadata(metadata),
+        )
+    }
+
+    /// Extracts `ModelMetadata` from an MLX model's `config.json`.
+    ///
+    /// Maps common HuggingFace/MLX config keys to metadata fields:
+    /// - `max_position_embeddings` / `max_seq_len` / `max_sequence_length` → context_length
+    /// - `hidden_size` → embedding_length
+    /// - `num_attention_heads` → head_count
+    /// - `num_hidden_layers` → layer_count
+    fn metadata_from_mlx_config(config: &serde_json::Value) -> crate::ModelMetadata {
+        let mut meta = crate::ModelMetadata::default();
+
+        meta.context_length = config
+            .get("max_position_embeddings")
+            .or_else(|| config.get("max_seq_len"))
+            .or_else(|| config.get("max_sequence_length"))
+            .and_then(|v| v.as_u64());
+
+        meta.embedding_length = config.get("hidden_size").and_then(|v| v.as_u64());
+
+        meta.head_count = config
+            .get("num_attention_heads")
+            .and_then(|v| v.as_u64());
+
+        meta.layer_count = config
+            .get("num_hidden_layers")
+            .and_then(|v| v.as_u64());
+
+        meta
     }
 
     /// Maps an MLX `model_type` string to a `ModelArchitecture`.
@@ -272,8 +307,8 @@ impl LmStudioScanner {
     /// Parses a GGUF file to create a UnifiedModel.
     fn parse_gguf_file(path: &std::path::Path) -> Option<UnifiedModel> {
         // Get file size
-        let metadata = std::fs::metadata(path).ok()?;
-        let size_bytes = metadata.len();
+        let file_meta = std::fs::metadata(path).ok()?;
+        let size_bytes = file_meta.len();
 
         // Extract model name from filename
         let name = model_name_from_filename(path).or_else(|| {
@@ -288,14 +323,22 @@ impl LmStudioScanner {
         // Detect architecture from name
         let architecture = ModelArchitecture::from_name(&name);
 
-        Some(UnifiedModel::new(
+        let mut model = UnifiedModel::new(
             name,
             size_bytes,
             quantization,
             architecture,
             ModelSource::LmStudio,
+            ModelFormat::Gguf,
             path,
-        ))
+        );
+
+        // Extract rich metadata from GGUF file headers
+        if let Some(meta) = extract_metadata(path) {
+            model.metadata = meta;
+        }
+
+        Some(model)
     }
 
     /// Checks if LM Studio API is reachable.
@@ -311,6 +354,77 @@ impl LmStudioScanner {
         };
 
         client.get(&url).send().await.is_ok()
+    }
+
+    /// Fetches model list from LM Studio API and enriches filesystem models.
+    ///
+    /// Single API call returns all models. Matches API results to filesystem
+    /// models by ID and populates parameters, capabilities, and publisher.
+    async fn enrich_from_api(&self, models: &mut [UnifiedModel]) {
+        let url = format!("{}/v1/models", self.api_host);
+
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(self.timeout_secs))
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        let response = match client.get(&url).send().await {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+
+        let api_response: schematic_definitions::lmstudio::ListModelsResponse =
+            match response.json().await {
+                Ok(r) => r,
+                Err(_) => return,
+            };
+
+        for model in models.iter_mut() {
+            // Match by checking if the API model id is contained in the model name or path
+            if let Some(api_model) = api_response.data.iter().find(|am| {
+                model.name.contains(&am.id) || model.path.to_string_lossy().contains(&am.id)
+            }) {
+                Self::apply_api_metadata(model, api_model);
+            }
+        }
+    }
+
+    /// Extracts a HuggingFace repo ID from a model path relative to the models directory.
+    ///
+    /// LM Studio stores models as `models_dir/publisher/repo-name/...`, which maps
+    /// directly to HuggingFace repo IDs like `publisher/repo-name`.
+    fn huggingface_repo_from_path(models_dir: &Path, model_path: &Path) -> Option<String> {
+        let relative = model_path.strip_prefix(models_dir).ok()?;
+        let mut components = relative.components();
+        let publisher = components.next()?.as_os_str().to_str()?;
+        let repo_name = components.next()?.as_os_str().to_str()?;
+        Some(format!("{publisher}/{repo_name}"))
+    }
+
+    /// Applies metadata from an LM Studio API model to a `UnifiedModel`.
+    fn apply_api_metadata(
+        model: &mut UnifiedModel,
+        api_model: &schematic_definitions::lmstudio::ModelInfo,
+    ) {
+        let meta = &mut model.metadata;
+
+        if let Some(stats) = &api_model.stats
+            && meta.parameters.is_none()
+        {
+            meta.parameters = stats.parameters.clone();
+        }
+
+        if let Some(caps) = &api_model.capabilities {
+            meta.vision = caps.vision;
+            meta.function_calling = caps.function_calling;
+        }
+
+        if meta.publisher.is_none() {
+            meta.publisher = api_model.publisher.clone();
+        }
     }
 }
 
@@ -330,7 +444,20 @@ impl ModelScanner for LmStudioScanner {
             return Ok(Vec::new());
         }
 
-        Ok(self.scan_directory(&self.models_dir))
+        let mut models = self.scan_directory(&self.models_dir);
+
+        // Try to enrich with API metadata (single call for all models)
+        self.enrich_from_api(&mut models).await;
+
+        // Extract HuggingFace repo IDs from directory paths (where not already set from GGUF headers)
+        for model in &mut models {
+            if model.metadata.huggingface_repo.is_none() {
+                model.metadata.huggingface_repo =
+                    Self::huggingface_repo_from_path(&self.models_dir, &model.path);
+            }
+        }
+
+        Ok(models)
     }
 }
 
@@ -554,6 +681,50 @@ mod tests {
     }
 
     #[test]
+    fn parse_mlx_directory_extracts_rich_metadata() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = r#"{
+            "model_type": "qwen3",
+            "quantization": {"bits": 6},
+            "max_position_embeddings": 40960,
+            "hidden_size": 3584,
+            "num_attention_heads": 28,
+            "num_hidden_layers": 36
+        }"#;
+        let mlx_dir = create_test_mlx_dir(temp_dir.path(), "Qwen3-30B-6bit", config, &[1_000_000]);
+
+        let model = LmStudioScanner::parse_mlx_directory(&mlx_dir).unwrap();
+        assert_eq!(model.metadata.context_length, Some(40960));
+        assert_eq!(model.metadata.embedding_length, Some(3584));
+        assert_eq!(model.metadata.head_count, Some(28));
+        assert_eq!(model.metadata.layer_count, Some(36));
+    }
+
+    #[test]
+    fn metadata_from_mlx_config_handles_alternate_keys() {
+        // Some models use max_seq_len instead of max_position_embeddings
+        let config: serde_json::Value = serde_json::from_str(
+            r#"{"max_seq_len": 8192, "hidden_size": 4096}"#,
+        )
+        .unwrap();
+
+        let meta = LmStudioScanner::metadata_from_mlx_config(&config);
+        assert_eq!(meta.context_length, Some(8192));
+        assert_eq!(meta.embedding_length, Some(4096));
+        assert!(meta.head_count.is_none());
+    }
+
+    #[test]
+    fn metadata_from_mlx_config_handles_empty_config() {
+        let config: serde_json::Value = serde_json::from_str("{}").unwrap();
+        let meta = LmStudioScanner::metadata_from_mlx_config(&config);
+        assert!(meta.context_length.is_none());
+        assert!(meta.embedding_length.is_none());
+        assert!(meta.head_count.is_none());
+        assert!(meta.layer_count.is_none());
+    }
+
+    #[test]
     fn parse_mlx_directory_uses_quantization_config() {
         let temp_dir = tempfile::tempdir().unwrap();
         let mlx_dir = create_test_mlx_dir(
@@ -641,6 +812,46 @@ mod tests {
         // We can't guarantee this on all machines, but we can verify
         // the function doesn't panic.
         let _ = LmStudioScanner::read_lmstudio_settings_dir();
+    }
+
+    #[test]
+    fn huggingface_repo_from_gguf_path() {
+        let models_dir = PathBuf::from("/models");
+        let model_path = PathBuf::from("/models/lmstudio-community/gemma-2-2b-it-GGUF/gemma-2-2b-it-Q4_K_M.gguf");
+        assert_eq!(
+            LmStudioScanner::huggingface_repo_from_path(&models_dir, &model_path),
+            Some("lmstudio-community/gemma-2-2b-it-GGUF".to_string()),
+        );
+    }
+
+    #[test]
+    fn huggingface_repo_from_mlx_path() {
+        let models_dir = PathBuf::from("/models");
+        let model_path = PathBuf::from("/models/mlx-community/Qwen3-6bit");
+        assert_eq!(
+            LmStudioScanner::huggingface_repo_from_path(&models_dir, &model_path),
+            Some("mlx-community/Qwen3-6bit".to_string()),
+        );
+    }
+
+    #[test]
+    fn huggingface_repo_returns_none_for_unrelated_path() {
+        let models_dir = PathBuf::from("/models");
+        let model_path = PathBuf::from("/other/dir/model.gguf");
+        assert_eq!(
+            LmStudioScanner::huggingface_repo_from_path(&models_dir, &model_path),
+            None,
+        );
+    }
+
+    #[test]
+    fn huggingface_repo_returns_none_for_shallow_path() {
+        let models_dir = PathBuf::from("/models");
+        let model_path = PathBuf::from("/models/model.gguf");
+        assert_eq!(
+            LmStudioScanner::huggingface_repo_from_path(&models_dir, &model_path),
+            None,
+        );
     }
 
     #[test]

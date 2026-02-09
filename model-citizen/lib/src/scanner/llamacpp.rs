@@ -4,9 +4,9 @@
 //! LM Studio which have fixed locations, Llama.cpp users typically have
 //! models in custom directories.
 
-use crate::gguf::{detect_quantization, model_name_from_filename};
+use crate::gguf::{detect_quantization, extract_metadata, model_name_from_filename};
 use crate::scanner::ModelScanner;
-use crate::{Config, ModelArchitecture, ModelCitizenError, ModelSource, UnifiedModel};
+use crate::{Config, ModelArchitecture, ModelCitizenError, ModelFormat, ModelSource, UnifiedModel};
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -91,14 +91,22 @@ impl LlamaCppScanner {
         // Detect architecture from name
         let architecture = ModelArchitecture::from_name(&name);
 
-        Some(UnifiedModel::new(
+        let mut model = UnifiedModel::new(
             name,
             size_bytes,
             quantization,
             architecture,
             ModelSource::LlamaCpp,
+            ModelFormat::Gguf,
             path,
-        ))
+        );
+
+        // Extract rich metadata from GGUF file headers
+        if let Some(meta) = extract_metadata(path) {
+            model.metadata = meta;
+        }
+
+        Some(model)
     }
 }
 

@@ -4,7 +4,7 @@
 //! and the REST API for enrichment.
 
 use crate::scanner::ModelScanner;
-use crate::{Config, ModelArchitecture, ModelCitizenError, ModelSource, QuantizationType, UnifiedModel};
+use crate::{Config, ModelArchitecture, ModelCitizenError, ModelFormat, ModelMetadata, ModelSource, QuantizationType, UnifiedModel};
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -164,11 +164,15 @@ impl OllamaScanner {
             .into_iter()
             .map(|m| {
                 // Look for API match
-                let (quantization, size) = api_models
-                    .iter()
-                    .find(|am| am.name == m.name)
+                let api_match = api_models.iter().find(|am| am.name == m.name);
+                let (quantization, size) = api_match
                     .map(|am| (am.quantization, am.size_bytes))
                     .unwrap_or((m.quantization, m.size_bytes));
+
+                let metadata = ModelMetadata {
+                    modified_at: api_match.and_then(|am| am.modified_at.clone()),
+                    ..ModelMetadata::default()
+                };
 
                 UnifiedModel::new(
                     m.name,
@@ -176,8 +180,10 @@ impl OllamaScanner {
                     quantization,
                     m.architecture,
                     ModelSource::Ollama,
+                    ModelFormat::Gguf,
                     m.manifest_path,
                 )
+                .with_metadata(metadata)
             })
             .collect()
     }
@@ -223,10 +229,16 @@ impl OllamaScanner {
                     .map(QuantizationType::from_str_loose)
                     .unwrap_or(QuantizationType::Unknown);
 
+                let modified_at = model
+                    .get("modified_at")
+                    .and_then(|m| m.as_str())
+                    .map(|s| s.to_string());
+
                 models.push(ApiModel {
                     name,
                     size_bytes,
                     quantization,
+                    modified_at,
                 });
             }
         }
@@ -248,6 +260,149 @@ impl OllamaScanner {
 
         client.get(&url).send().await.is_ok()
     }
+
+    /// Fetches detailed model info via `POST /api/show`.
+    ///
+    /// Called lazily during `model info` to avoid N API calls during listing.
+    async fn fetch_show(&self, model_name: &str) -> Option<schematic_definitions::ollama::ShowModelResponse> {
+        let url = format!("{}/api/show", self.api_host);
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(self.timeout_secs))
+            .build()
+            .ok()?;
+
+        let body = schematic_definitions::ollama::ShowModelBody {
+            name: model_name.to_string(),
+            verbose: Some(true),
+        };
+
+        let response = client.post(&url).json(&body).send().await.ok()?;
+        response.json().await.ok()
+    }
+
+    /// Extracts `ModelMetadata` from a `ShowModelResponse`.
+    fn metadata_from_show(show: &schematic_definitions::ollama::ShowModelResponse, existing: &ModelMetadata) -> ModelMetadata {
+        let mut meta = existing.clone();
+
+        if let Some(details) = &show.details {
+            if meta.parameters.is_none() {
+                meta.parameters = details.parameter_size.clone();
+            }
+            meta.families = details.families.clone();
+            meta.parent_model = details.parent_model.clone();
+        }
+
+        // License: take first line only
+        if let Some(license) = &show.license {
+            meta.license = license.lines().next().map(|l| {
+                if l.len() > 80 {
+                    format!("{}...", &l[..77])
+                } else {
+                    l.to_string()
+                }
+            });
+        }
+
+        meta.chat_template = show.template.clone();
+
+        // Extract arch-prefixed metadata from model_info JSON
+        if let Some(info) = &show.model_info {
+            let arch = info
+                .get("general.architecture")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+
+            if !arch.is_empty() {
+                if meta.context_length.is_none() {
+                    meta.context_length = info
+                        .get(format!("{arch}.context_length"))
+                        .and_then(|v| v.as_u64());
+                }
+                if meta.embedding_length.is_none() {
+                    meta.embedding_length = info
+                        .get(format!("{arch}.embedding_length"))
+                        .and_then(|v| v.as_u64());
+                }
+                if meta.head_count.is_none() {
+                    meta.head_count = info
+                        .get(format!("{arch}.attention.head_count"))
+                        .and_then(|v| v.as_u64());
+                }
+                if meta.layer_count.is_none() {
+                    meta.layer_count = info
+                        .get(format!("{arch}.block_count"))
+                        .and_then(|v| v.as_u64());
+                }
+            }
+        }
+
+        // Extract HuggingFace repo from model_info
+        if meta.huggingface_repo.is_none() {
+            if let Some(info) = &show.model_info {
+                meta.huggingface_repo = info
+                    .get("general.source.huggingface.repository")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| {
+                        info.get("general.source.url")
+                            .and_then(|v| v.as_str())
+                            .and_then(crate::huggingface_repo_from_url)
+                    });
+            }
+        }
+
+        // Parse inference defaults from parameters string
+        if let Some(params_str) = &show.parameters {
+            Self::parse_parameters(params_str, &mut meta);
+        }
+
+        // Extract capabilities array
+        meta.capabilities = show.capabilities.clone();
+
+        // Derive vision/function_calling from capabilities
+        if let Some(caps) = &meta.capabilities {
+            if meta.vision.is_none() {
+                meta.vision = Some(caps.iter().any(|c| c == "vision"));
+            }
+            if meta.function_calling.is_none() {
+                meta.function_calling = Some(caps.iter().any(|c| c == "tools"));
+            }
+        }
+
+        meta
+    }
+
+    /// Parses the newline-separated key-value `parameters` string from Ollama's
+    /// `/api/show` response into typed metadata fields.
+    fn parse_parameters(params_str: &str, meta: &mut ModelMetadata) {
+        for line in params_str.lines() {
+            let mut parts = line.split_whitespace();
+            let key = match parts.next() {
+                Some(k) => k,
+                None => continue,
+            };
+            let value = match parts.next() {
+                Some(v) => v,
+                None => continue,
+            };
+
+            match key {
+                "temperature" => meta.temperature = value.parse().ok(),
+                "top_k" => meta.top_k = value.parse().ok(),
+                "top_p" => meta.top_p = value.parse().ok(),
+                "repeat_penalty" => meta.repeat_penalty = value.parse().ok(),
+                "stop" => {
+                    let cleaned = value.trim_matches('"');
+                    meta.stop
+                        .get_or_insert_with(Vec::new)
+                        .push(cleaned.to_string());
+                }
+                _ => {} // Ignore unknown keys
+            }
+        }
+    }
 }
 
 /// Internal representation of an Ollama model from filesystem.
@@ -264,6 +419,7 @@ struct ApiModel {
     name: String,
     size_bytes: u64,
     quantization: QuantizationType,
+    modified_at: Option<String>,
 }
 
 #[async_trait]
@@ -275,6 +431,13 @@ impl ModelScanner for OllamaScanner {
     async fn is_available(&self) -> bool {
         // Check filesystem OR API
         self.models_dir.exists() || self.check_api_available().await
+    }
+
+    async fn enrich(&self, model: &mut UnifiedModel) -> Result<(), ModelCitizenError> {
+        if let Some(show) = self.fetch_show(&model.name).await {
+            model.metadata = Self::metadata_from_show(&show, &model.metadata);
+        }
+        Ok(())
     }
 
     async fn scan(&self) -> Result<Vec<UnifiedModel>, ModelCitizenError> {
@@ -293,6 +456,7 @@ impl ModelScanner for OllamaScanner {
                         m.quantization,
                         ModelArchitecture::from_name(&m.name),
                         ModelSource::Ollama,
+                        ModelFormat::Gguf,
                         PathBuf::new(), // No path for API-only
                     )
                 })
@@ -410,6 +574,122 @@ mod tests {
         );
 
         assert!(!scanner.is_available().await);
+    }
+
+    #[test]
+    fn parse_parameters_extracts_temperature_and_top_p() {
+        let params = "temperature 0.6\ntop_p 0.95\n";
+        let mut meta = ModelMetadata::default();
+        OllamaScanner::parse_parameters(params, &mut meta);
+        assert_eq!(meta.temperature, Some(0.6));
+        assert_eq!(meta.top_p, Some(0.95));
+        assert!(meta.top_k.is_none());
+        assert!(meta.repeat_penalty.is_none());
+    }
+
+    #[test]
+    fn parse_parameters_extracts_all_fields() {
+        let params = "temperature 0.6\ntop_p 0.95\ntop_k 20\nrepeat_penalty 1\n";
+        let mut meta = ModelMetadata::default();
+        OllamaScanner::parse_parameters(params, &mut meta);
+        assert_eq!(meta.temperature, Some(0.6));
+        assert_eq!(meta.top_p, Some(0.95));
+        assert_eq!(meta.top_k, Some(20));
+        assert_eq!(meta.repeat_penalty, Some(1.0));
+    }
+
+    #[test]
+    fn parse_parameters_accumulates_stop_tokens() {
+        let params = "stop \"<|start_header_id|>\"\nstop \"<|end_header_id|>\"\nstop \"<|eot_id|>\"\n";
+        let mut meta = ModelMetadata::default();
+        OllamaScanner::parse_parameters(params, &mut meta);
+        let stops = meta.stop.unwrap();
+        assert_eq!(stops.len(), 3);
+        assert_eq!(stops[0], "<|start_header_id|>");
+        assert_eq!(stops[1], "<|end_header_id|>");
+        assert_eq!(stops[2], "<|eot_id|>");
+    }
+
+    #[test]
+    fn parse_parameters_handles_empty_string() {
+        let mut meta = ModelMetadata::default();
+        OllamaScanner::parse_parameters("", &mut meta);
+        assert!(meta.temperature.is_none());
+        assert!(meta.stop.is_none());
+    }
+
+    #[test]
+    fn parse_parameters_ignores_unknown_keys() {
+        let params = "num_ctx 4096\ntemperature 0.7\n";
+        let mut meta = ModelMetadata::default();
+        OllamaScanner::parse_parameters(params, &mut meta);
+        assert_eq!(meta.temperature, Some(0.7));
+    }
+
+    fn empty_show_response() -> schematic_definitions::ollama::ShowModelResponse {
+        schematic_definitions::ollama::ShowModelResponse {
+            modelfile: None,
+            parameters: None,
+            template: None,
+            system: None,
+            details: None,
+            model_info: None,
+            license: None,
+            capabilities: None,
+        }
+    }
+
+    #[test]
+    fn metadata_from_show_extracts_huggingface_repo() {
+        let mut show = empty_show_response();
+        show.model_info = Some(serde_json::json!({
+            "general.architecture": "llama",
+            "general.source.huggingface.repository": "meta-llama/Llama-3-8B-GGUF",
+            "llama.context_length": 8192
+        }));
+
+        let meta = OllamaScanner::metadata_from_show(&show, &ModelMetadata::default());
+        assert_eq!(
+            meta.huggingface_repo,
+            Some("meta-llama/Llama-3-8B-GGUF".to_string()),
+        );
+    }
+
+    #[test]
+    fn metadata_from_show_extracts_huggingface_repo_from_source_url() {
+        let mut show = empty_show_response();
+        show.model_info = Some(serde_json::json!({
+            "general.architecture": "llama",
+            "general.source.url": "https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct",
+            "llama.context_length": 131072
+        }));
+
+        let meta = OllamaScanner::metadata_from_show(&show, &ModelMetadata::default());
+        assert_eq!(
+            meta.huggingface_repo,
+            Some("meta-llama/Llama-3.3-70B-Instruct".to_string()),
+        );
+    }
+
+    #[test]
+    fn metadata_from_show_no_huggingface_repo() {
+        let mut show = empty_show_response();
+        show.model_info = Some(serde_json::json!({
+            "general.architecture": "llama",
+            "llama.context_length": 8192
+        }));
+
+        let meta = OllamaScanner::metadata_from_show(&show, &ModelMetadata::default());
+        assert!(meta.huggingface_repo.is_none());
+    }
+
+    #[test]
+    fn parse_parameters_skips_lines_without_value() {
+        let params = "temperature\ntop_p 0.9\n";
+        let mut meta = ModelMetadata::default();
+        OllamaScanner::parse_parameters(params, &mut meta);
+        assert!(meta.temperature.is_none());
+        assert_eq!(meta.top_p, Some(0.9));
     }
 
     #[tokio::test]

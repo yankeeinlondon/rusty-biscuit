@@ -17,7 +17,7 @@
 //! For simplicity and robustness, we primarily use filename-based detection
 //! with header parsing as a fallback for validation.
 
-use crate::{ModelCitizenError, QuantizationType};
+use crate::{ModelCitizenError, ModelMetadata, QuantizationType};
 use std::path::Path;
 
 /// Magic bytes at the start of a GGUF file.
@@ -298,6 +298,53 @@ pub fn model_name_from_filename(path: &Path) -> Option<String> {
     } else {
         Some(name)
     }
+}
+
+/// Extracts extended metadata from a GGUF file's key-value store.
+///
+/// Reads architecture-prefixed keys (e.g., `llama.context_length`) by first
+/// determining the architecture from `general.architecture`, then extracting
+/// context length, embedding length, head count, layer count, and other fields.
+///
+/// Returns `None` if the file cannot be parsed.
+#[must_use]
+pub fn extract_metadata(path: &Path) -> Option<ModelMetadata> {
+    use std::io::{BufReader, Seek, SeekFrom};
+
+    let file = std::fs::File::open(path).ok()?;
+    let mut reader = BufReader::new(file);
+
+    // Ensure we start from beginning
+    reader.seek(SeekFrom::Start(0)).ok()?;
+
+    let gguf_reader = gguf_rs_lib::reader::file_reader::GGUFFileReader::new(reader).ok()?;
+    let md = gguf_reader.metadata();
+
+    let arch = md.get_string("general.architecture").unwrap_or_default();
+
+    let mut meta = ModelMetadata::default();
+
+    // Architecture-prefixed keys (e.g., llama.context_length)
+    if !arch.is_empty() {
+        meta.context_length = md.get_u64(&format!("{arch}.context_length"));
+        meta.embedding_length = md.get_u64(&format!("{arch}.embedding_length"));
+        meta.head_count = md.get_u64(&format!("{arch}.attention.head_count"));
+        meta.layer_count = md.get_u64(&format!("{arch}.block_count"));
+    }
+
+    // General metadata
+    meta.license = md.get_string("general.license").map(|s| s.to_string());
+    meta.publisher = md.get_string("general.author").map(|s| s.to_string());
+    meta.parameters = md.get_string("general.size_label").map(|s| s.to_string());
+    meta.huggingface_repo = md
+        .get_string("general.source.huggingface.repository")
+        .map(|s| s.to_string())
+        .or_else(|| {
+            md.get_string("general.source.url")
+                .and_then(crate::huggingface_repo_from_url)
+        });
+
+    Some(meta)
 }
 
 #[cfg(test)]

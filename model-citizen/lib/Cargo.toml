@@ -29,6 +29,12 @@ dirs = "6.0"
 # OS detection (workspace dependency)
 sniff = { path = "../../sniff/lib" }
 
+# GGUF file parsing for metadata extraction
+gguf-rs-lib = "0.2"
+
+# API type definitions (Ollama, LM Studio)
+schematic-definitions = { path = "../../schematic/definitions" }
+
 # HuggingFace API client
 schematic-schema = { path = "../../schematic/schema" }
 

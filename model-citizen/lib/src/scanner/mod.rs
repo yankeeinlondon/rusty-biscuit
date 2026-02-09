@@ -61,6 +61,20 @@ pub trait ModelScanner: Send + Sync {
     ///
     /// Returns an error if the scan fails (e.g., I/O error, API error).
     async fn scan(&self) -> Result<Vec<UnifiedModel>, ModelCitizenError>;
+
+    /// Enriches a model with additional metadata from the provider.
+    ///
+    /// Called lazily (e.g., during `model info`) rather than during scan.
+    /// Default implementation is a no-op. Override for providers that
+    /// require an extra API call for detailed metadata (e.g., Ollama's
+    /// `/api/show`).
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if enrichment fails (e.g., API unreachable).
+    async fn enrich(&self, _model: &mut UnifiedModel) -> Result<(), ModelCitizenError> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

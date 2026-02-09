@@ -63,6 +63,68 @@ pub struct SearchResult {
     pub likes: u64,
     /// Available GGUF variant count.
     pub variant_count: usize,
+    /// ISO 8601 creation timestamp (e.g., "2024-01-15T10:30:00.000Z").
+    pub created_at: Option<String>,
+    /// ISO 8601 last-modified timestamp.
+    pub last_modified: Option<String>,
+    /// Tags from the HuggingFace API (format indicators, task types, etc.).
+    pub tags: Vec<String>,
+}
+
+impl SearchResult {
+    /// Whether the repo contains GGUF files (based on tags).
+    #[must_use]
+    pub fn has_gguf(&self) -> bool {
+        self.tags.iter().any(|t| t.eq_ignore_ascii_case("gguf"))
+    }
+
+    /// Whether the repo contains SafeTensors files (based on tags).
+    #[must_use]
+    pub fn has_safetensors(&self) -> bool {
+        self.tags.iter().any(|t| t == "safetensors")
+    }
+}
+
+/// Sort order for HuggingFace model search results.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum SortOrder {
+    /// Sort by download count (most downloaded first).
+    #[default]
+    Downloads,
+    /// Sort by like count (most liked first).
+    Likes,
+    /// Sort by trending score.
+    Trending,
+    /// Sort by creation date (newest first).
+    Created,
+    /// Sort by last modified date (most recently updated first).
+    Modified,
+}
+
+impl SortOrder {
+    /// Returns the API query parameter value for this sort order.
+    #[must_use]
+    pub fn as_api_param(self) -> &'static str {
+        match self {
+            Self::Downloads => "downloads",
+            Self::Likes => "likes",
+            Self::Trending => "trendingScore",
+            Self::Created => "createdAt",
+            Self::Modified => "lastModified",
+        }
+    }
+
+    /// Returns a human-readable label for display.
+    #[must_use]
+    pub fn display_label(self) -> &'static str {
+        match self {
+            Self::Downloads => "downloads",
+            Self::Likes => "likes",
+            Self::Trending => "trending score",
+            Self::Created => "creation date",
+            Self::Modified => "last modified",
+        }
+    }
 }
 
 /// Client for HuggingFace Hub operations.
@@ -120,6 +182,7 @@ impl HuggingFaceClient {
     ///
     /// * `query` - Search query (e.g., "llama 3 gguf")
     /// * `limit` - Maximum number of results to return
+    /// * `sort` - Sort order for results
     ///
     /// ## Errors
     ///
@@ -128,6 +191,7 @@ impl HuggingFaceClient {
         &self,
         query: &str,
         limit: usize,
+        sort: SortOrder,
     ) -> Result<Vec<SearchResult>, ModelCitizenError> {
         // Add "gguf" to query if not present
         let search_query = if query.to_lowercase().contains("gguf") {
@@ -137,10 +201,11 @@ impl HuggingFaceClient {
         };
 
         let url = format!(
-            "{}/api/models?search={}&limit={}&full=false",
+            "{}/api/models?search={}&limit={}&sort={}&full=false",
             self.base_url,
             urlencoding::encode(&search_query),
-            limit
+            limit,
+            sort.as_api_param()
         );
 
         let mut request = self.client.get(&url);
@@ -166,6 +231,23 @@ impl HuggingFaceClient {
                 let author = m.get("author").and_then(|a| a.as_str()).map(String::from);
                 let downloads = m.get("downloads").and_then(|d| d.as_u64()).unwrap_or(0);
                 let likes = m.get("likes").and_then(|l| l.as_u64()).unwrap_or(0);
+                let created_at = m
+                    .get("createdAt")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                let last_modified = m
+                    .get("lastModified")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                let tags = m
+                    .get("tags")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|t| t.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
                 Some(SearchResult {
                     repo_id,
@@ -173,6 +255,9 @@ impl HuggingFaceClient {
                     downloads,
                     likes,
                     variant_count: 0, // Will be populated when listing variants
+                    created_at,
+                    last_modified,
+                    tags,
                 })
             })
             .collect();
@@ -386,10 +471,38 @@ mod tests {
             downloads: 100_000,
             likes: 500,
             variant_count: 10,
+            created_at: Some("2024-01-15T10:30:00.000Z".to_string()),
+            last_modified: Some("2024-06-20T14:00:00.000Z".to_string()),
+            tags: vec!["gguf".to_string(), "text-generation".to_string()],
         };
 
         assert_eq!(result.repo_id, "TheBloke/Llama-2-7B-GGUF");
         assert_eq!(result.author, Some("TheBloke".to_string()));
+        assert!(result.has_gguf());
+        assert!(!result.has_safetensors());
+    }
+
+    #[test]
+    fn sort_order_default_is_downloads() {
+        assert_eq!(SortOrder::default(), SortOrder::Downloads);
+    }
+
+    #[test]
+    fn sort_order_api_params() {
+        assert_eq!(SortOrder::Downloads.as_api_param(), "downloads");
+        assert_eq!(SortOrder::Likes.as_api_param(), "likes");
+        assert_eq!(SortOrder::Trending.as_api_param(), "trendingScore");
+        assert_eq!(SortOrder::Created.as_api_param(), "createdAt");
+        assert_eq!(SortOrder::Modified.as_api_param(), "lastModified");
+    }
+
+    #[test]
+    fn sort_order_display_labels() {
+        assert_eq!(SortOrder::Downloads.display_label(), "downloads");
+        assert_eq!(SortOrder::Likes.display_label(), "likes");
+        assert_eq!(SortOrder::Trending.display_label(), "trending score");
+        assert_eq!(SortOrder::Created.display_label(), "creation date");
+        assert_eq!(SortOrder::Modified.display_label(), "last modified");
     }
 
     #[test]

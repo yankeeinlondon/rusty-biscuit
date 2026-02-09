@@ -15,6 +15,10 @@ model-citizen = { path = "../lib" }
 
 # CLI framework
 clap = { version = "4.5", features = ["derive"] }
+clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
+
+# Terminal rendering
+biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 
 # Error reporting
 color-eyre = "0.6"

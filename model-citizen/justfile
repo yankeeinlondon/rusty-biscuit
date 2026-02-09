@@ -30,27 +30,27 @@ default:
     just --list | grep -v 'default'
     echo
 
-# build schematic packages (define, definitions, gen)
+# build model-citizen packages (lib, cli)
 build *args="":
     @echo ""
-    @echo "Build Schematic Packages"
-    @echo "------------------------"
+    @echo "Build Model Citizen"
+    @echo "--------------------"
     @echo ""
     @cargo build -p model-citizen -p model-citizen-cli {{args}}
 
-# run tests for schematic packages
+# run tests for model-citizen packages
 test *args="":
     @echo ""
-    @echo "Testing Schematic Packages"
-    @echo "--------------------------"
+    @echo "Testing Model Citizen"
+    @echo "---------------------"
     @echo ""
     @cargo test -p model-citizen -p model-citizen-cli {{args}}
 
-# run clippy on schematic packages
+# run clippy on model-citizen packages
 lint:
     @echo ""
-    @echo "Linting Schematic Packages"
-    @echo "--------------------------"
+    @echo "Linting Model Citizen"
+    @echo "---------------------"
     @echo ""
     @cargo clippy -p model-citizen -- -D warnings
     @cargo clippy -p model-citizen-cli -- -D warnings
@@ -91,4 +91,13 @@ commit:
     @cd .. && opencode run "/commit -f ; remember you must use 'conventional commits' naming conventions and that unless all staged files are strongly related to the same thing be sure to make multiple commits by package or related activity." --model "openai/gpt-5.2-codex"
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
+    fi
+
+# adds/updates the "skill" for this package
+refresh-skill:
+    @clear
+    @echo "Refreshing {{BOLD}}model-citizen{{RESET}} skill"
+    @unset ANTHROPIC_API_KEY && cd .. && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-model-citizen.md)"\'
+    @if command -v so-you-say >/dev/null 2>&1; then \
+        so-you-say "the skill for the package model-citizen has been updated"; \
     fi
