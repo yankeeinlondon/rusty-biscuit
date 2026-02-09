@@ -33,7 +33,48 @@ impl From<&UnifiedModel> for ModelRow {
     }
 }
 
-pub async fn run(runner_filter: Option<String>, json_output: bool) -> Result<()> {
+#[derive(Tabled)]
+struct VerboseModelRow {
+    #[tabled(rename = "Name")]
+    name: String,
+    #[tabled(rename = "Size")]
+    size: String,
+    #[tabled(rename = "Quant")]
+    quantization: String,
+    #[tabled(rename = "Arch")]
+    architecture: String,
+    #[tabled(rename = "Format")]
+    format: String,
+    #[tabled(rename = "Source")]
+    source: String,
+}
+
+impl From<&UnifiedModel> for VerboseModelRow {
+    fn from(model: &UnifiedModel) -> Self {
+        let format = if model
+            .path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"))
+        {
+            "GGUF"
+        } else if model.path.is_dir() {
+            "Safetensors"
+        } else {
+            "Unknown"
+        };
+
+        Self {
+            name: model.name.clone(),
+            size: model.size_display(),
+            quantization: model.quantization.as_str().to_string(),
+            architecture: model.architecture.as_str().to_string(),
+            format: format.to_string(),
+            source: model.source.as_str().to_string(),
+        }
+    }
+}
+
+pub async fn run(runner_filter: Option<String>, json_output: bool, verbose: bool) -> Result<()> {
     let config = Config::load()?;
     let mut registry = ModelRegistry::new();
 
@@ -68,6 +109,12 @@ pub async fn run(runner_filter: Option<String>, json_output: bool) -> Result<()>
         if let Some(filter) = runner_filter {
             println!("Filtered by runner: {filter}");
         }
+    } else if verbose {
+        let rows: Vec<VerboseModelRow> = models.iter().map(VerboseModelRow::from).collect();
+        let mut table = Table::new(rows);
+        table.with(Style::rounded());
+        println!("{table}");
+        println!("\nTotal: {} models", models.len());
     } else {
         let rows: Vec<ModelRow> = models.iter().map(ModelRow::from).collect();
         let mut table = Table::new(rows);

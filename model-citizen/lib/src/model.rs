@@ -126,6 +126,16 @@ pub enum QuantizationType {
     Iq4Xs,
     /// IQ4 series (4-bit, non-linear).
     Iq4Nl,
+    /// 16-bit brain floating point (MLX).
+    Bf16,
+    /// 4-bit quantization (MLX).
+    Bit4,
+    /// 6-bit quantization (MLX).
+    Bit6,
+    /// 8-bit quantization (MLX).
+    Bit8,
+    /// Microsoft MXFP4 (MLX).
+    Mxfp4,
     /// Unknown or unsupported quantization.
     #[default]
     Unknown,
@@ -157,7 +167,27 @@ impl QuantizationType {
             Self::Iq3S => "IQ3_S",
             Self::Iq4Xs => "IQ4_XS",
             Self::Iq4Nl => "IQ4_NL",
+            Self::Bf16 => "BF16",
+            Self::Bit4 => "4bit",
+            Self::Bit6 => "6bit",
+            Self::Bit8 => "8bit",
+            Self::Mxfp4 => "MXFP4",
             Self::Unknown => "unknown",
+        }
+    }
+
+    /// Maps an MLX quantization bits value to a `QuantizationType`.
+    ///
+    /// MLX models store quantization precision as an integer `bits` field
+    /// in their `config.json`.
+    #[must_use]
+    pub fn from_mlx_bits(bits: u64) -> Self {
+        match bits {
+            4 => Self::Bit4,
+            6 => Self::Bit6,
+            8 => Self::Bit8,
+            16 => Self::Bf16,
+            _ => Self::Unknown,
         }
     }
 
@@ -189,6 +219,11 @@ impl QuantizationType {
             "IQ3S" => Self::Iq3S,
             "IQ4XS" => Self::Iq4Xs,
             "IQ4NL" => Self::Iq4Nl,
+            "BF16" => Self::Bf16,
+            "4BIT" => Self::Bit4,
+            "6BIT" => Self::Bit6,
+            "8BIT" => Self::Bit8,
+            "MXFP4" => Self::Mxfp4,
             _ => Self::Unknown,
         }
     }
@@ -370,6 +405,36 @@ mod tests {
         assert!(json.contains("\"quantization\":\"Q8_0\""));
         assert!(json.contains("\"architecture\":\"llama\""));
         assert!(json.contains("\"source\":\"ollama\""));
+    }
+
+    #[test]
+    fn quantization_from_str_loose_handles_mlx() {
+        assert_eq!(QuantizationType::from_str_loose("BF16"), QuantizationType::Bf16);
+        assert_eq!(QuantizationType::from_str_loose("bf16"), QuantizationType::Bf16);
+        assert_eq!(QuantizationType::from_str_loose("4bit"), QuantizationType::Bit4);
+        assert_eq!(QuantizationType::from_str_loose("6BIT"), QuantizationType::Bit6);
+        assert_eq!(QuantizationType::from_str_loose("8bit"), QuantizationType::Bit8);
+        assert_eq!(QuantizationType::from_str_loose("MXFP4"), QuantizationType::Mxfp4);
+        assert_eq!(QuantizationType::from_str_loose("mxfp4"), QuantizationType::Mxfp4);
+    }
+
+    #[test]
+    fn from_mlx_bits_maps_correctly() {
+        assert_eq!(QuantizationType::from_mlx_bits(4), QuantizationType::Bit4);
+        assert_eq!(QuantizationType::from_mlx_bits(6), QuantizationType::Bit6);
+        assert_eq!(QuantizationType::from_mlx_bits(8), QuantizationType::Bit8);
+        assert_eq!(QuantizationType::from_mlx_bits(16), QuantizationType::Bf16);
+        assert_eq!(QuantizationType::from_mlx_bits(3), QuantizationType::Unknown);
+        assert_eq!(QuantizationType::from_mlx_bits(0), QuantizationType::Unknown);
+    }
+
+    #[test]
+    fn mlx_quantization_as_str() {
+        assert_eq!(QuantizationType::Bf16.as_str(), "BF16");
+        assert_eq!(QuantizationType::Bit4.as_str(), "4bit");
+        assert_eq!(QuantizationType::Bit6.as_str(), "6bit");
+        assert_eq!(QuantizationType::Bit8.as_str(), "8bit");
+        assert_eq!(QuantizationType::Mxfp4.as_str(), "MXFP4");
     }
 
     #[test]

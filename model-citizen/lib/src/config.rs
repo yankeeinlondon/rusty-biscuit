@@ -122,7 +122,7 @@ impl Config {
     /// ## Environment Variables
     ///
     /// - `MODEL_CITIZEN_SHARED_DIR`: Directory for shared models
-    /// - `LLAMA_MODELS_DIR`: Comma-separated list of Llama.cpp model directories
+    /// - `LLAMA_CPP_MODELS`: Comma-separated list of Llama.cpp model directories
     /// - `OLLAMA_HOST`: Override Ollama API host
     /// - `LM_STUDIO_HOST`: Override LM Studio API host
     #[must_use]
@@ -133,7 +133,7 @@ impl Config {
             config.shared_models_dir = Some(PathBuf::from(shared_dir));
         }
 
-        if let Ok(llama_dirs) = std::env::var("LLAMA_MODELS_DIR") {
+        if let Ok(llama_dirs) = std::env::var("LLAMA_CPP_MODELS") {
             config.llamacpp_models_dirs = llama_dirs
                 .split(',')
                 .map(|s| PathBuf::from(s.trim()))
@@ -261,7 +261,7 @@ mod tests {
     unsafe fn clear_env_vars() {
         unsafe {
             std::env::remove_var("MODEL_CITIZEN_SHARED_DIR");
-            std::env::remove_var("LLAMA_MODELS_DIR");
+            std::env::remove_var("LLAMA_CPP_MODELS");
             std::env::remove_var("OLLAMA_HOST");
             std::env::remove_var("LM_STUDIO_HOST");
         }
@@ -311,7 +311,7 @@ mod tests {
         // SAFETY: Test runs serially via #[serial], no concurrent env access
         unsafe {
             clear_env_vars();
-            set_env("LLAMA_MODELS_DIR", "/models/a, /models/b");
+            set_env("LLAMA_CPP_MODELS", "/models/a, /models/b");
         }
         let config = Config::from_env();
         assert_eq!(

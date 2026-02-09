@@ -14,7 +14,7 @@ use std::path::PathBuf;
 ///
 /// Llama.cpp doesn't have a fixed models directory - users store GGUF files
 /// wherever they prefer. This scanner uses directories from:
-/// 1. `LLAMA_MODELS_DIR` environment variable (comma-separated)
+/// 1. `LLAMA_CPP_MODELS` environment variable (comma-separated)
 /// 2. Configuration file `llamacpp.models_dirs` array
 pub struct LlamaCppScanner {
     /// Directories to scan for models.

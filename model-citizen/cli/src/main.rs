@@ -33,6 +33,10 @@ enum Commands {
         /// Filter by runner (ollama, lmstudio, llamacpp)
         #[arg(short, long)]
         runner: Option<String>,
+
+        /// Show additional columns (format)
+        #[arg(short, long)]
+        verbose: bool,
     },
 
     /// Show detailed information about a model
@@ -86,8 +90,8 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::List { runner } => {
-            commands::list::run(runner, cli.format == OutputFormat::Json).await?;
+        Commands::List { runner, verbose } => {
+            commands::list::run(runner, cli.format == OutputFormat::Json, verbose).await?;
         }
         Commands::Info { model } => {
             commands::info::run(&model, cli.format == OutputFormat::Json).await?;
