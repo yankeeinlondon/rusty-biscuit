@@ -172,6 +172,57 @@ fn pad_cell(
     }
 }
 
+
+/// Controls whether a table column is visible based on terminal width.
+///
+/// Columns default to `Always` (unconditionally visible). Use the width
+/// variants to hide columns that don't fit in narrow terminals while
+/// keeping them visible in wider ones.
+///
+/// The width checked is the **renderable width** — the terminal width
+/// minus any layout margins.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_terminal::components::table::table::{Conditional, TableColumn};
+///
+/// // Always visible
+/// let name = TableColumn::new("Name");
+///
+/// // Only visible when terminal is wider than 80 columns
+/// let notes = TableColumn::new("Notes")
+///     .with_when(Conditional::WidthGreaterThan(80));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Conditional {
+    /// Column is always visible.
+    Always,
+    /// Column is visible when the renderable width is greater than the
+    /// specified value.
+    WidthGreaterThan(u32),
+    /// Column is visible when the renderable width is less than or equal
+    /// to the specified value.
+    LessThanOrEqual(u32),
+}
+
+impl Conditional {
+    /// Returns `true` when the condition is satisfied for the given width.
+    pub fn is_satisfied(&self, available_width: u32) -> bool {
+        match self {
+            Conditional::Always => true,
+            Conditional::WidthGreaterThan(threshold) => available_width > *threshold,
+            Conditional::LessThanOrEqual(threshold) => available_width <= *threshold,
+        }
+    }
+}
+
+impl Default for Conditional {
+    fn default() -> Self {
+        Conditional::Always
+    }
+}
+
 /// Column definition for a table.
 ///
 /// A `TableColumn` defines the header, data type, width constraints, alignment,
@@ -225,6 +276,11 @@ pub struct TableColumn {
     /// Default is false (traditional alignment where each cell is positioned
     /// based on its own content width).
     pub uniform_alignment: bool,
+    /// Controls whether this column is visible based on terminal width.
+    ///
+    /// Defaults to `Conditional::Always`. Use [`TableColumn::with_when`] to
+    /// make a column appear only when the terminal is wide enough.
+    pub when: Conditional,
 }
 
 impl TableColumn {
@@ -240,6 +296,7 @@ impl TableColumn {
             word_wrap: None,
             vertical_align: VerticalAlign::default(),
             uniform_alignment: false,
+            when: Conditional::default(),
         }
     }
 
@@ -343,6 +400,25 @@ impl TableColumn {
     /// ```
     pub fn with_uniform_alignment(mut self, uniform: bool) -> Self {
         self.uniform_alignment = uniform;
+        self
+    }
+
+    /// Set a visibility condition for this column.
+    ///
+    /// When the condition is not satisfied at render time, the column (and
+    /// its corresponding data cells) are excluded from the output.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::components::table::table::{Conditional, TableColumn};
+    ///
+    /// // Only show this column when terminal is wider than 60
+    /// let col = TableColumn::new("Details")
+    ///     .with_when(Conditional::WidthGreaterThan(60));
+    /// ```
+    pub fn with_when(mut self, when: Conditional) -> Self {
+        self.when = when;
         self
     }
 
@@ -468,6 +544,48 @@ impl Table {
     pub fn alternate_text_color(mut self) -> Self {
         self.alternate_text_color = true;
         self
+    }
+
+    /// Returns a new `Table` containing only the columns (and their
+    /// corresponding data cells) whose `when` condition is satisfied at
+    /// the given `available_width`.
+    ///
+    /// Returns `None` when all columns are already visible (no filtering
+    /// needed), avoiding an unnecessary clone.
+    fn with_visible_columns(&self, available_width: u32) -> Option<Table> {
+        let visible: Vec<usize> = self
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, col)| col.when.is_satisfied(available_width))
+            .map(|(i, _)| i)
+            .collect();
+
+        if visible.len() == self.columns.len() {
+            return None; // All columns visible — no filtering needed
+        }
+
+        Some(Table {
+            title: self.title.clone(),
+            columns: visible
+                .iter()
+                .filter_map(|&i| self.columns.get(i).cloned())
+                .collect(),
+            data: self
+                .data
+                .iter()
+                .map(|row| {
+                    visible
+                        .iter()
+                        .filter_map(|&i| row.get(i).cloned())
+                        .collect()
+                })
+                .collect(),
+            layout: self.layout.clone(),
+            prefer_cursor_alignment: self.prefer_cursor_alignment,
+            alternate_background_color: self.alternate_background_color,
+            alternate_text_color: self.alternate_text_color,
+        })
     }
 
     /// Calculate column widths based on content and available space.
@@ -625,6 +743,14 @@ impl Table {
         stripe_color_mode: Option<&ColorMode>,
         text_color_mode: Option<&ColorMode>,
     ) -> String {
+        // If any columns are conditionally hidden at this width, build a
+        // filtered table and delegate to it.
+        if let Some(aw) = available_width {
+            if let Some(filtered) = self.with_visible_columns(aw) {
+                return filtered.render_content(available_width, stripe_color_mode, text_color_mode);
+            }
+        }
+
         let mut result = String::new();
         let widths = self.calculate_column_widths(available_width);
 
@@ -845,6 +971,16 @@ impl Table {
         let left_margin = Layout::resolve_margin(&self.layout.left_margin, term_width);
         let right_margin = Layout::resolve_margin(&self.layout.right_margin, term_width);
         let available_width = term_width.saturating_sub(left_margin).saturating_sub(right_margin);
+
+        // If any columns are conditionally hidden at this width, build a
+        // filtered table and delegate to it.
+        if let Some(filtered) = self.with_visible_columns(available_width) {
+            return filtered.render_with_cursor_positioning(
+                term_width,
+                stripe_color_mode,
+                text_color_mode,
+            );
+        }
 
         let widths = self.calculate_column_widths(Some(available_width));
 
@@ -3571,5 +3707,223 @@ mod tests {
                 i, vw, border_width, line
             );
         }
+    }
+
+    // ── Conditional column visibility tests ──────────────────────────
+
+    #[test]
+    fn test_conditional_is_satisfied_always() {
+        assert!(Conditional::Always.is_satisfied(0));
+        assert!(Conditional::Always.is_satisfied(200));
+    }
+
+    #[test]
+    fn test_conditional_is_satisfied_width_greater_than() {
+        let cond = Conditional::WidthGreaterThan(80);
+        assert!(!cond.is_satisfied(60));
+        assert!(!cond.is_satisfied(80));
+        assert!(cond.is_satisfied(81));
+    }
+
+    #[test]
+    fn test_conditional_is_satisfied_less_than_or_equal() {
+        let cond = Conditional::LessThanOrEqual(40);
+        assert!(cond.is_satisfied(30));
+        assert!(cond.is_satisfied(40));
+        assert!(!cond.is_satisfied(41));
+    }
+
+    #[test]
+    fn test_conditional_default_is_always() {
+        assert_eq!(Conditional::default(), Conditional::Always);
+    }
+
+    #[test]
+    fn test_table_column_when_default_is_always() {
+        let col = TableColumn::new("Name");
+        assert_eq!(col.when, Conditional::Always);
+    }
+
+    #[test]
+    fn test_table_column_with_when_builder() {
+        let col = TableColumn::new("Details")
+            .with_when(Conditional::WidthGreaterThan(60));
+        assert_eq!(col.when, Conditional::WidthGreaterThan(60));
+    }
+
+    #[test]
+    fn test_with_visible_columns_none_when_all_visible() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("A"),
+                TableColumn::new("B"),
+            ])
+            .with_data(vec![vec!["x".into(), "y".into()]]);
+
+        assert!(
+            table.with_visible_columns(80).is_none(),
+            "Should return None when all columns are Always-visible"
+        );
+    }
+
+    #[test]
+    fn test_with_visible_columns_filters_hidden_column() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Name"),
+                TableColumn::new("Details")
+                    .with_when(Conditional::WidthGreaterThan(80)),
+            ])
+            .with_data(vec![vec!["Alice".into(), "Some details".into()]]);
+
+        // At width 60, Details should be hidden
+        let filtered = table.with_visible_columns(60);
+        assert!(filtered.is_some(), "Should filter when column is hidden");
+        let filtered = filtered.unwrap();
+        assert_eq!(filtered.columns.len(), 1);
+        assert_eq!(filtered.columns[0].header, "Name");
+        assert_eq!(filtered.data[0].len(), 1);
+
+        // At width 100, both should be visible
+        assert!(table.with_visible_columns(100).is_none());
+    }
+
+    #[test]
+    fn test_conditional_column_hidden_in_render_content() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Name"),
+                TableColumn::new("Extra")
+                    .with_when(Conditional::WidthGreaterThan(80)),
+            ])
+            .with_data(vec![
+                vec!["Alice".into(), "detail".into()],
+            ]);
+
+        // Narrow: Extra column should be hidden
+        let narrow = table.render_content(Some(50), None, None);
+        assert!(narrow.contains("Name"), "Should contain Name header");
+        assert!(!narrow.contains("Extra"), "Extra should be hidden at width 50");
+        assert!(!narrow.contains("detail"), "Extra data should be hidden");
+        assert!(narrow.contains("Alice"), "Name data should be present");
+
+        // Wide: both columns should appear
+        let wide = table.render_content(Some(100), None, None);
+        assert!(wide.contains("Name"));
+        assert!(wide.contains("Extra"));
+        assert!(wide.contains("Alice"));
+        assert!(wide.contains("detail"));
+    }
+
+    #[test]
+    fn test_conditional_column_hidden_in_cursor_mode() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Name"),
+                TableColumn::new("Extra")
+                    .with_when(Conditional::WidthGreaterThan(80)),
+            ])
+            .with_data(vec![
+                vec!["Alice".into(), "detail".into()],
+            ])
+            .prefer_cursor_alignment();
+
+        // Narrow: Extra column should be hidden
+        let narrow = table.render(Some(50));
+        assert!(narrow.contains("Name"));
+        assert!(!narrow.contains("Extra"));
+        assert!(!narrow.contains("detail"));
+        assert!(narrow.contains("Alice"));
+
+        // Wide: both visible
+        let wide = table.render(Some(100));
+        assert!(wide.contains("Extra"));
+        assert!(wide.contains("detail"));
+    }
+
+    #[test]
+    fn test_conditional_all_columns_hidden_no_header() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("A")
+                    .with_when(Conditional::WidthGreaterThan(200)),
+            ])
+            .with_data(vec![vec!["x".into()]]);
+
+        let result = table.render_content(Some(50), None, None);
+        // All columns filtered out → no header, no column data
+        assert!(!result.contains("A"), "Header should not appear");
+        assert!(!result.contains("x"), "Data should not appear");
+    }
+
+    #[test]
+    fn test_conditional_less_than_or_equal_hides_wide_terminal() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Name"),
+                TableColumn::new("Compact")
+                    .with_when(Conditional::LessThanOrEqual(40)),
+            ])
+            .with_data(vec![
+                vec!["Alice".into(), "short".into()],
+            ]);
+
+        // Narrow: both visible
+        let narrow = table.render_content(Some(40), None, None);
+        assert!(narrow.contains("Compact"));
+
+        // Wide: Compact hidden
+        let wide = table.render_content(Some(80), None, None);
+        assert!(!wide.contains("Compact"));
+        assert!(wide.contains("Name"));
+    }
+
+    #[test]
+    fn test_conditional_preserves_row_widths() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Name"),
+                TableColumn::new("Details")
+                    .with_when(Conditional::WidthGreaterThan(80)),
+            ])
+            .with_data(vec![
+                vec!["Alice".into(), "detail A".into()],
+                vec!["Bob".into(), "detail B".into()],
+            ]);
+
+        // At narrow width, table should still have consistent row widths
+        let result = table.render_content(Some(50), None, None);
+        let lines: Vec<&str> = result.lines().collect();
+        let content_lines: Vec<&str> = lines
+            .iter()
+            .filter(|l| l.starts_with('│') && !l.contains('─'))
+            .copied()
+            .collect();
+
+        if content_lines.len() >= 2 {
+            let first_width = visible_width(content_lines[0]);
+            for line in &content_lines {
+                assert_eq!(
+                    visible_width(line),
+                    first_width,
+                    "All content lines should have same width"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_conditional_no_available_width_shows_all() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Name"),
+                TableColumn::new("Details")
+                    .with_when(Conditional::WidthGreaterThan(80)),
+            ])
+            .with_data(vec![vec!["Alice".into(), "detail".into()]]);
+
+        // Without available_width, render_content does not filter
+        let result = table.render_content(None, None, None);
+        assert!(result.contains("Details"), "No width = no filtering");
     }
 }

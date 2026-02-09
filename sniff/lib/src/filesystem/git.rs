@@ -83,7 +83,7 @@ impl ConventionalCommit {
         let scope = if chars.peek() == Some(&'(') {
             chars.next(); // consume '('
             let mut scope_str = String::new();
-            while let Some(c) = chars.next() {
+            for c in chars.by_ref() {
                 if c == ')' {
                     break;
                 }
@@ -558,7 +558,7 @@ pub struct UntrackedFile {
 fn parse_org_repo(url: &str) -> (Option<String>, Option<String>) {
     let path = if url.contains('@') && url.contains(':') {
         // SSH: git@github.com:owner/repo.git
-        url.split(':').last().map(|s| s.trim_end_matches(".git").to_string())
+        url.split(':').next_back().map(|s| s.trim_end_matches(".git").to_string())
     } else if url.contains("://") {
         // HTTPS: https://github.com/owner/repo.git
         let parts: Vec<_> = url.split('/').skip(3).collect();

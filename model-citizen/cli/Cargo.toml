@@ -26,9 +26,6 @@ color-eyre = "0.6"
 # Interactive prompts
 inquire = "0.7"
 
-# Table formatting
-tabled = "0.18"
-
 # Progress bars
 indicatif = "0.17"
 

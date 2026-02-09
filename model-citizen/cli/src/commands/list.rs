@@ -1,77 +1,16 @@
 //! List command - shows all models across runners.
 
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
+use biscuit_terminal::components::table::types::ColumnType;
+use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::layout::Alignment;
 use color_eyre::eyre::Result;
 use model_citizen::{
     scanner::{LlamaCppScanner, LmStudioScanner, OllamaScanner},
-    Config, ModelRegistry, UnifiedModel,
+    Config, ModelRegistry,
 };
-use tabled::{
-    settings::{object::Columns, Alignment, Modify, Style},
-    Table, Tabled,
-};
-
-#[derive(Tabled)]
-struct ModelRow {
-    #[tabled(rename = "Name")]
-    name: String,
-    #[tabled(rename = "Quant")]
-    quantization: String,
-    #[tabled(rename = "Size")]
-    size: String,
-    #[tabled(rename = "Arch")]
-    architecture: String,
-    #[tabled(rename = "Source")]
-    source: String,
-}
-
-impl From<&UnifiedModel> for ModelRow {
-    fn from(model: &UnifiedModel) -> Self {
-        Self {
-            name: model.name.clone(),
-            quantization: model.quantization.as_str().to_string(),
-            size: model.size_display(),
-            architecture: model.architecture.as_str().to_string(),
-            source: model.source.display_name().to_string(),
-        }
-    }
-}
-
-#[derive(Tabled)]
-struct VerboseModelRow {
-    #[tabled(rename = "Name")]
-    name: String,
-    #[tabled(rename = "Params")]
-    params: String,
-    #[tabled(rename = "Size")]
-    size: String,
-    #[tabled(rename = "Quant")]
-    quantization: String,
-    #[tabled(rename = "Arch")]
-    architecture: String,
-    #[tabled(rename = "Format")]
-    format: String,
-    #[tabled(rename = "Source")]
-    source: String,
-}
-
-impl From<&UnifiedModel> for VerboseModelRow {
-    fn from(model: &UnifiedModel) -> Self {
-        Self {
-            name: model.name.clone(),
-            params: model
-                .metadata
-                .parameters
-                .as_deref()
-                .unwrap_or("-")
-                .to_string(),
-            size: model.size_display(),
-            quantization: model.quantization.as_str().to_string(),
-            architecture: model.architecture.as_str().to_string(),
-            format: model.format.as_str().to_string(),
-            source: model.source.display_name().to_string(),
-        }
-    }
-}
 
 pub async fn run(
     name_filter: Option<String>,
@@ -133,22 +72,67 @@ pub async fn run(
         if let Some(filter) = runner_filter {
             println!("Filtered by runner: {filter}");
         }
-    } else if verbose {
-        let rows: Vec<VerboseModelRow> = models.iter().map(VerboseModelRow::from).collect();
-        let mut table = Table::new(rows);
-        table.with(Style::rounded());
-        println!("{table}");
-        println!("\nTotal: {} models", models.len());
     } else {
-        let rows: Vec<ModelRow> = models.iter().map(ModelRow::from).collect();
-        let mut table = Table::new(rows);
-        table
-            .with(Style::rounded())
-            .with(Modify::new(Columns::single(1)).with(Alignment::center()))
-            .with(Modify::new(Columns::single(2)).with(Alignment::right()))
-            .with(Modify::new(Columns::single(3)).with(Alignment::center()))
-            .with(Modify::new(Columns::single(4)).with(Alignment::center()));
-        println!("{table}");
+        let term = Terminal::default();
+
+        let mut columns = vec![
+            TableColumn::new(Prose::new("Name").fallback_render(&term)),
+            TableColumn::new(Prose::new("Quant").fallback_render(&term))
+                .with_alignment(Alignment::Center),
+            TableColumn::new(Prose::new("Size").fallback_render(&term))
+                .with_type(ColumnType::String)
+                .with_alignment(Alignment::Right),
+            TableColumn::new(Prose::new("Arch").fallback_render(&term))
+                .with_alignment(Alignment::Center),
+            TableColumn::new(Prose::new("Source").fallback_render(&term))
+                .with_alignment(Alignment::Center),
+        ];
+
+        if verbose {
+            // Insert Params after Name and Format before Source
+            columns.insert(
+                1,
+                TableColumn::new(Prose::new("Params").fallback_render(&term))
+                    .with_alignment(Alignment::Center),
+            );
+            columns.insert(
+                5,
+                TableColumn::new(Prose::new("Format").fallback_render(&term))
+                    .with_alignment(Alignment::Center),
+            );
+        }
+
+        let mut table = Table::new()
+            .with_columns(columns)
+            .prefer_cursor_alignment();
+
+        for m in &models {
+            let mut row: Vec<TableCellContent> = vec![
+                TableCellContent::Text(m.name.clone()),
+                TableCellContent::Text(m.quantization.as_str().to_string()),
+                TableCellContent::Text(m.size_display()),
+                TableCellContent::Text(m.architecture.as_str().to_string()),
+                TableCellContent::Text(m.source.display_name().to_string()),
+            ];
+
+            if verbose {
+                row.insert(
+                    1,
+                    TableCellContent::Text(
+                        m.metadata
+                            .parameters
+                            .as_deref()
+                            .unwrap_or("-")
+                            .to_string(),
+                    ),
+                );
+                row.insert(5, TableCellContent::Text(m.format.as_str().to_string()));
+            }
+
+            table.add_row(row);
+        }
+
+        print!("{}", table.display(&term));
         println!("\nTotal: {} models", models.len());
     }
 

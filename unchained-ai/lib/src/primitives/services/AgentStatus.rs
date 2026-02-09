@@ -54,7 +54,7 @@ pub struct AgentStatus {
 impl Default for AgentStatus {
     fn default() -> Self {
         AgentStatus {
-            installed: AgenticStatusPlatform::default(),
+            installed: HashMap::new(),
             available: vec![],
             limits: HashMap::new()
         }
