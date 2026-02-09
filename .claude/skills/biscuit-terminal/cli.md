@@ -28,6 +28,7 @@ cargo install --path biscuit-terminal/cli
 | `bt timeline` | Timeline diagrams |
 | `bt state-diagram` | State machine diagrams |
 | `bt erd` | Entity relationship diagrams |
+| `bt columns` | Two-column text layout |
 
 All diagram commands support:
 - `--example` / `-e`: Render example with command shown
@@ -104,6 +105,22 @@ bt state-diagram "[*] --> Idle" "Idle --> Running" "Running --> [*]"
 # ERD
 bt erd "Customer ||--o{ Order : places"
 ```
+
+## Columns Command
+
+Render two columns of text with optional gap and width control:
+
+```bash
+bt columns "Left column" "Right column"
+bt columns --gap 6 "Left" "Right"
+bt columns --left 24 "Title" "Longer description on the right"
+bt columns --left 40% "Short" "Longer content that wraps"
+bt columns --margin-left 2 --margin-right 2 --alignment center "Left" "Right"
+```
+
+Options:
+- `--gap`: Gap between columns in characters (default: 3)
+- `--left`: Left column width (e.g., `20`, `20ch`, `40%`)
 
 ## Prose Command
 

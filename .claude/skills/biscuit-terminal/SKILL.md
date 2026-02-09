@@ -37,13 +37,14 @@ if term.supports_italic { println!("\x1b[3mItalic\x1b[0m"); }
 | Topic | Description |
 |-------|-------------|
 | [Terminal Struct](./terminal-struct.md) | Main struct, static vs dynamic properties, enums |
+| [Components](./components.md) | All renderable components: Compose, Section, BlockQuote, Todo, TwoColumn |
 | [Image Rendering](./image-rendering.md) | Kitty/iTerm2 protocols, width specs, security |
 | [Mermaid Diagrams](./mermaid-diagrams.md) | 10 diagram types via mmdc CLI |
 | [Detection Functions](./discovery.md) | App, color, underline, multiplex detection |
 | [OS & Environment](./os-environment.md) | OS, distro, CI, fonts, locale |
 | [Escape Codes](./escape-codes.md) | Strip, analyze, visual width calculation |
 | [Styling](./styling.md) | Terminal-aware styling, Prose component |
-| [bt Command](./cli.md) | CLI tool for inspection and diagrams |
+| [bt Command](./cli.md) | CLI tool for inspection, diagrams, and columns |
 
 ## Common Patterns
 
@@ -103,6 +104,10 @@ bt --json                       # JSON output for scripting
 bt prose "Hello {{bold}}world{{reset}}!"
 bt prose "<red>Error</red>: message"
 
+# Two-column layout
+bt columns "Left column" "Right column"
+bt columns --gap 6 --left 40% "Title" "Description"
+
 # Diagrams (10 types)
 bt flowchart "A --> B --> C"
 bt quadrant "Task: [0.5, 0.5]"
@@ -122,24 +127,40 @@ Diagram options: `--example`, `--width`, `--inverse`, `--title`, `--json`
 ```
 biscuit_terminal/
 ├── terminal.rs           # Terminal struct + TerminalBuilder
+├── prelude.rs            # Public re-exports
 ├── discovery/            # Detection
 │   ├── detection.rs      # App, color, image, multiplex
 │   ├── os_detection.rs   # OS, distro, CI
 │   ├── fonts.rs          # Font name, size, cell_size
 │   ├── osc_queries.rs    # bg/fg/cursor color queries
 │   ├── clipboard.rs      # OSC52 clipboard
+│   ├── locale.rs         # Locale, character encoding
+│   ├── mode_2027.rs      # Grapheme cluster support
 │   └── eval.rs           # Escape analysis
 ├── components/           # Rendering
+│   ├── renderable.rs     # Renderable trait + RenderableContent
+│   ├── compose.rs        # Compose (combine multiple renderables)
+│   ├── section.rs        # Section with heading levels (h1-h6)
+│   ├── block_quote.rs    # BlockQuote with attribution
+│   ├── prose.rs          # Styled text with tokens
+│   ├── text_block.rs     # Uniform block styling
+│   ├── list.rs           # OrderedList, UnorderedList
+│   ├── table/            # Table with box-drawing borders
+│   ├── two_column.rs     # TwoColumn side-by-side layout
+│   ├── todo.rs           # Todo with states (Open, InProgress, etc.)
 │   ├── terminal_image.rs # Image (Kitty/iTerm2 via viuer)
 │   ├── image_options.rs  # Security guards
 │   ├── mermaid.rs        # Diagram rendering
-│   ├── prose.rs          # Styled text with tokens
-│   ├── list.rs           # OrderedList, UnorderedList
-│   └── text_block.rs     # Uniform block styling
+│   └── mermaid_cache.rs  # Content-hashed diagram cache
 └── utils/
-    ├── escape_codes.rs   # Strip/analyze
-    ├── layout.rs         # Layout, Margin, WordWrap
-    └── styling.rs        # Terminal styles
+    ├── layout.rs         # Layout, Margin, WordWrap, Alignment
+    ├── color.rs          # Color, BasicColor, WebColor, Tailwind
+    ├── styling.rs        # Stylist trait, FontWeight, Style
+    ├── escape_codes.rs   # ANSI escape code generation
+    ├── block_constraint.rs # Visual width, line splitting
+    ├── word_wrap.rs      # Word wrapping strategies
+    ├── truncate.rs       # Text truncation
+    └── multiplex.rs      # Multiplexing detection
 ```
 
 ## Resources
