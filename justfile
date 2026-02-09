@@ -184,14 +184,15 @@ lint:
         fi
     done
 
-# commits all the staged changes using GPT 5.2 (via Opencode)
+# Use GPT 5.2 to commit staged changes
 commit:
-    @echo "Committing staged changes in the Rusty Biscuit monorepo to git"
-    @echo ""
-    @opencode run commit "-f" --model "openai/gpt-5.2-codex"
+    @echo "Using Opencode with {{BOLD}}gpt-5.2-codex{{RESET}} to {{BOLD}}commit{{RESET}} staged changes"
+    @echo
+    @opencode run "/commit -f ; remember you must use 'conventional commits' naming conventions and that unless all staged files are strongly related to the same thing be sure to make multiple commits by package or related activity." --model "openai/gpt-5.2-codex"
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
+
 
 # Update docs and then update the skill for the Schematic package
 skill-schematic:
