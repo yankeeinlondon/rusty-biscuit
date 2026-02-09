@@ -30,20 +30,14 @@ Examples:
 /// Model Citizen - Local LLM model management across multiple runners.
 #[derive(Parser)]
 #[command(name = "model")]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None, disable_help_subcommand = true)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    /// Output format (table or json)
-    #[arg(long, global = true, default_value = "table")]
-    format: OutputFormat,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-enum OutputFormat {
-    Table,
-    Json,
+    /// Output JSON instead of terminal tables
+    #[arg(long, global = true)]
+    json: bool,
 }
 
 /// Sort order for HuggingFace search results.
@@ -160,11 +154,11 @@ async fn main() -> Result<()> {
             app,
             size,
         } => {
-            commands::list::run(runner, cli.format == OutputFormat::Json, verbose, app, size)
+            commands::list::run(runner, cli.json, verbose, app, size)
                 .await?;
         }
         Commands::Info { model } => {
-            commands::info::run(&model, cli.format == OutputFormat::Json).await?;
+            commands::info::run(&model, cli.json).await?;
         }
         Commands::Search {
             query,
@@ -181,7 +175,7 @@ async fn main() -> Result<()> {
                 query.as_deref(),
                 limit,
                 sort.into(),
-                cli.format == OutputFormat::Json,
+                cli.json,
                 verbose,
             )
             .await?;
