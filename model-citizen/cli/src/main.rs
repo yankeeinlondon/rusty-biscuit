@@ -66,6 +66,9 @@ impl From<SortOrder> for model_citizen::SortOrder {
 enum Commands {
     /// List all models across all runners
     List {
+        /// Filter models by name (case-insensitive substring match)
+        filter: Option<String>,
+
         /// Filter by runner (ollama, lmstudio, llamacpp)
         #[arg(short, long)]
         runner: Option<String>,
@@ -158,12 +161,13 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::List {
+            filter,
             runner,
             verbose,
             app,
             size,
         } => {
-            commands::list::run(runner, cli.json, verbose, app, size)
+            commands::list::run(filter, runner, cli.json, verbose, app, size)
                 .await?;
         }
         Commands::Info { model } => {

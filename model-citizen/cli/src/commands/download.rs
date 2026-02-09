@@ -37,9 +37,10 @@ pub async fn run(
         return Ok(());
     }
 
-    // Determine output directory
+    // Determine output directory: --output flag > MODELS_DIR env > default shared dir > cwd
     let dest_dir = output_dir
         .map(|p| p.to_path_buf())
+        .or_else(|| std::env::var("MODELS_DIR").ok().map(std::path::PathBuf::from))
         .or_else(model_citizen::sharing::default_shared_dir)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
@@ -65,12 +66,19 @@ async fn search_and_select(
         None => println!("Browsing top models by {}...", sort.display_label()),
     }
 
-    let results = client.search_models(query, limit, sort).await?;
+    // Over-fetch then filter to GGUF-tagged repos, since not all results are downloadable.
+    let results: Vec<SearchResult> = client
+        .search_models(query, limit.max(100), sort)
+        .await?
+        .into_iter()
+        .filter(|r| r.has_gguf())
+        .take(limit)
+        .collect();
 
     if results.is_empty() {
         match query {
-            Some(q) => return Err(eyre!("No models found matching '{q}'")),
-            None => return Err(eyre!("No models found")),
+            Some(q) => return Err(eyre!("No GGUF models found matching '{q}'")),
+            None => return Err(eyre!("No GGUF models found")),
         }
     }
 

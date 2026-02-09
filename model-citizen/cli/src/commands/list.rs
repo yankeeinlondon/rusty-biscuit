@@ -74,6 +74,7 @@ impl From<&UnifiedModel> for VerboseModelRow {
 }
 
 pub async fn run(
+    name_filter: Option<String>,
     runner_filter: Option<String>,
     json_output: bool,
     verbose: bool,
@@ -105,6 +106,11 @@ pub async fn run(
     }
 
     let mut models = registry.scan_all().await;
+
+    if let Some(ref filter) = name_filter {
+        let filter_lower = filter.to_lowercase();
+        models.retain(|m| m.name.to_lowercase().contains(&filter_lower));
+    }
 
     if sort_by_size {
         models.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
