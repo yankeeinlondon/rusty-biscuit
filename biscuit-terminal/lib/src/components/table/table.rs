@@ -899,17 +899,29 @@ impl Table {
             })
             .collect();
 
-        // Calculate max content width per column for consistent alignment.
-        // Only consider data rows, not headers (headers are separated by border
-        // and don't need to align with data content).
-        let max_content_widths: Vec<u32> = (0..widths.len())
+        // Calculate max content width per column for uniform alignment.
+        // Only populated for columns with `uniform_alignment` enabled;
+        // other columns use per-cell visible width so that right/center
+        // alignment positions each cell individually.
+        let max_content_widths: Vec<Option<u32>> = (0..widths.len())
             .map(|col_idx| {
-                self.data
-                    .iter()
-                    .filter_map(|row| row.get(col_idx))
-                    .map(|cell| visible_width(&cell.to_string()))
-                    .max()
-                    .unwrap_or(0)
+                let is_uniform = self
+                    .columns
+                    .get(col_idx)
+                    .map(|c| c.uniform_alignment)
+                    .unwrap_or(false);
+                if is_uniform {
+                    Some(
+                        self.data
+                            .iter()
+                            .filter_map(|row| row.get(col_idx))
+                            .map(|cell| visible_width(&cell.to_string()))
+                            .max()
+                            .unwrap_or(0),
+                    )
+                } else {
+                    None
+                }
             })
             .collect();
 
@@ -1147,7 +1159,8 @@ impl Renderable for Table {
 ///
 /// If `fill_end_col` is Some, fills with spaces to that column for background color support.
 /// If `max_content_widths` is provided, alignment offsets use these widths instead of
-/// individual content widths, ensuring all rows in a column align at the same position.
+/// individual content widths for columns with `Some(width)`, ensuring uniform alignment.
+/// Columns with `None` use per-cell visible width for individual positioning.
 /// If `stripe_bg` is Some, the background escape is applied after the left border and
 /// reset before the right border so the outer `│` characters remain uncolored.
 /// If `stripe_fg` is Some, the foreground escape is applied similarly and reset at borders.
@@ -1157,7 +1170,7 @@ fn render_row_with_cursor_positioning(
     alignments: &[Alignment],
     table_start: u32,
     fill_end_col: Option<u32>,
-    max_content_widths: Option<&[u32]>,
+    max_content_widths: Option<&[Option<u32>]>,
     stripe_bg: Option<&str>,
     stripe_fg: Option<&str>,
 ) -> String {
@@ -1188,10 +1201,12 @@ fn render_row_with_cursor_positioning(
         let cell_width = *width as u32;
         let alignment = alignments.get(index).copied().unwrap_or(Alignment::Left);
 
-        // Use max_content_width if provided for consistent alignment across rows,
-        // otherwise fall back to individual content width
+        // Use max_content_width for uniform-aligned columns (consistent position
+        // across rows), otherwise fall back to individual content width (each
+        // cell positioned independently within the column).
         let width_for_alignment = max_content_widths
             .and_then(|mcw| mcw.get(index).copied())
+            .flatten()
             .unwrap_or_else(|| visible_width(content));
 
         // Calculate cursor offset within cell based on alignment
