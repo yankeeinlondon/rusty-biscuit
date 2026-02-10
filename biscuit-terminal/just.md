@@ -1,1 +1,1 @@
-![image](../assets/biscuit-terminal-512.png)
+![image|25](../assets/biscuit-terminal-512.png)
