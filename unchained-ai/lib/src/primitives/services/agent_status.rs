@@ -172,6 +172,9 @@ impl AgentStatus {
     /// - API requests to query limits fail
     /// - Response parsing fails
     pub async fn limits(&self, platform: Option<AgenticStatusPlatform>) -> Result<HashMap<String, AgenticCapLimit>, AgentStatusError> {
+        use std::time::Duration;
+        use super::pty_runner::{InteractiveStep, run_pty_interactive};
+
         let platforms: Vec<AgenticStatusPlatform> = match platform {
             Some(p) => {
                 // Check if the platform is available
@@ -188,12 +191,32 @@ impl AgentStatus {
         let mut limits = HashMap::new();
 
         for p in platforms {
-            let (program, args) = match p {
-                AgenticStatusPlatform::ClaudeCode => ("claude", vec!["/status"]),
-                AgenticStatusPlatform::Codex => ("codex", vec!["--status"]),
+            let (program, steps, timeout) = match p {
+                AgenticStatusPlatform::ClaudeCode => (
+                    "claude",
+                    vec![
+                        InteractiveStep::Wait(Duration::from_millis(1500)),
+                        InteractiveStep::Write("/status\n".to_string()),
+                        InteractiveStep::Wait(Duration::from_millis(1000)),
+                        InteractiveStep::Write("\x1b[C".to_string()), // right arrow
+                        InteractiveStep::Wait(Duration::from_millis(500)),
+                        InteractiveStep::Write("\x1b[C".to_string()), // right arrow
+                        InteractiveStep::Wait(Duration::from_millis(1000)),
+                    ],
+                    Some(Duration::from_secs(15)),
+                ),
+                AgenticStatusPlatform::Codex => (
+                    "codex",
+                    vec![
+                        InteractiveStep::Wait(Duration::from_millis(1500)),
+                        InteractiveStep::Write("/status\n".to_string()),
+                        InteractiveStep::Wait(Duration::from_millis(2000)),
+                    ],
+                    Some(Duration::from_secs(10)),
+                ),
             };
 
-            match super::pty_runner::run_pty_command(program, &args, None).await {
+            match run_pty_interactive(program, &steps, timeout).await {
                 Ok(output) => {
                     match super::parsers::parse_status_output(p, &output) {
                         Ok(cap_limit) => {

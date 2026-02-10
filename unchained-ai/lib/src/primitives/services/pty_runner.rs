@@ -166,7 +166,7 @@ fn run_pty_interactive_blocking(
         format!("Failed to open PTY: {}", e)
     ))?;
 
-    let mut cmd = CommandBuilder::new(program);
+    let cmd = CommandBuilder::new(program);
 
     let mut child = pair.slave.spawn_command(cmd)
         .map_err(|e| AgentStatusError::PtySpawnError(

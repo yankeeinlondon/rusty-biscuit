@@ -27,19 +27,19 @@ fn render_json(limits: &HashMap<String, AgenticCapLimit>) -> Result<()> {
     let json: HashMap<&str, serde_json::Value> = limits
         .iter()
         .map(|(name, limit)| {
-            let value = serde_json::json!({
-                "short_cap": {
-                    "usage": limit.short_cap_usage,
-                    "window": format!("{}", limit.short_cap_window_size),
-                    "resets": limit.short_cap_until.0,
-                },
-                "long_cap": {
-                    "usage": limit.long_cap_usage,
-                    "window": format!("{}", limit.long_cap_window_size),
-                    "resets": limit.long_cap_until.0,
-                }
-            });
-            (name.as_str(), value)
+            let caps: Vec<serde_json::Value> = limit
+                .caps
+                .iter()
+                .map(|cap| {
+                    serde_json::json!({
+                        "label": cap.label,
+                        "usage": cap.usage,
+                        "window": format!("{}", cap.window_size),
+                        "resets": cap.resets_at.0,
+                    })
+                })
+                .collect();
+            (name.as_str(), serde_json::json!(caps))
         })
         .collect();
 
@@ -73,19 +73,13 @@ fn render_progress_bars(
     for (name, limit) in limits {
         println!("  {}", name);
 
-        // Short-term cap
-        let short_label = format!("    {} cap", limit.short_cap_window_size);
-        let short_bar = Progress::new(limit.short_cap_usage)
-            .with_label(short_label)
-            .with_bar_width(30);
-        print!("{}", short_bar.display(&term));
-
-        // Long-term cap
-        let long_label = format!("    {} cap", limit.long_cap_window_size);
-        let long_bar = Progress::new(limit.long_cap_usage)
-            .with_label(long_label)
-            .with_bar_width(30);
-        print!("{}", long_bar.display(&term));
+        for cap in &limit.caps {
+            let label = format!("    {}", cap.label);
+            let bar = Progress::new(cap.usage)
+                .with_label(label)
+                .with_bar_width(30);
+            print!("{}", bar.display(&term));
+        }
 
         println!();
     }
