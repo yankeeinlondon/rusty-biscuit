@@ -4,6 +4,7 @@ pub mod image_options;
 pub mod list;
 pub mod mermaid;
 pub mod mermaid_cache;
+pub mod progress;
 pub mod prose;
 pub mod renderable;
 pub mod section;
