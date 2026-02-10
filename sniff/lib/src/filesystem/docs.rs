@@ -50,9 +50,8 @@ impl RepoDocuments {
     ///
     /// Returns `SniffError::NotARepository` if the path is not inside a git repo.
     pub fn new(path: &Path) -> Result<Self> {
-        let repo = git2::Repository::discover(path).map_err(|_| {
-            SniffError::NotARepository(path.to_path_buf())
-        })?;
+        let repo = git2::Repository::discover(path)
+            .map_err(|_| SniffError::NotARepository(path.to_path_buf()))?;
 
         let repo_root = repo
             .workdir()
@@ -68,11 +67,8 @@ impl RepoDocuments {
             .map(|pkgs| {
                 pkgs.into_iter()
                     .map(|p| {
-                        let rel_path = p
-                            .path
-                            .strip_prefix(&repo_root)
-                            .unwrap_or(&p.path)
-                            .to_path_buf();
+                        let rel_path =
+                            p.path.strip_prefix(&repo_root).unwrap_or(&p.path).to_path_buf();
                         (p.name, rel_path)
                     })
                     .collect::<Vec<_>>()
@@ -92,10 +88,7 @@ impl RepoDocuments {
 
     /// Returns metadata for markdown documents that have a "prompt" property set.
     pub fn prompt_docs(&self) -> Vec<MarkdownMeta> {
-        self.documents()
-            .into_iter()
-            .filter(|doc| doc.prompt.is_some())
-            .collect()
+        self.documents().into_iter().filter(|doc| doc.prompt.is_some()).collect()
     }
 }
 
@@ -114,10 +107,7 @@ pub fn detect_docs(root: &Path) -> Option<Vec<MarkdownMeta>> {
 }
 
 /// Collect all markdown files from repo root using .gitignore-aware walking.
-fn collect_markdown_files(
-    repo_root: &Path,
-    packages: &[(String, PathBuf)],
-) -> Vec<MarkdownMeta> {
+fn collect_markdown_files(repo_root: &Path, packages: &[(String, PathBuf)]) -> Vec<MarkdownMeta> {
     let walker = WalkBuilder::new(repo_root)
         .hidden(false)
         .git_ignore(true)
@@ -129,10 +119,7 @@ fn collect_markdown_files(
         .filter_map(|entry| entry.ok())
         .filter(|entry| {
             entry.file_type().is_some_and(|ft| ft.is_file())
-                && entry
-                    .path()
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+                && entry.path().extension().is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
         })
         .filter_map(|entry| parse_markdown_meta(entry.path(), repo_root, packages))
         .collect();
@@ -150,11 +137,7 @@ fn parse_markdown_meta(
     let content = fs::read_to_string(path).ok()?;
     let (frontmatter, body) = extract_frontmatter(&content);
 
-    let relative = path
-        .strip_prefix(repo_root)
-        .ok()?
-        .to_string_lossy()
-        .to_string();
+    let relative = path.strip_prefix(repo_root).ok()?.to_string_lossy().to_string();
 
     let relative_path = Path::new(&relative);
     let package = determine_package(relative_path, packages);
@@ -224,10 +207,7 @@ fn extract_frontmatter(content: &str) -> (HashMap<String, serde_yaml::Value>, &s
 }
 
 /// Extract a string field from the frontmatter map.
-fn get_string_field(
-    frontmatter: &HashMap<String, serde_yaml::Value>,
-    key: &str,
-) -> Option<String> {
+fn get_string_field(frontmatter: &HashMap<String, serde_yaml::Value>, key: &str) -> Option<String> {
     frontmatter.get(key).and_then(|v| match v {
         serde_yaml::Value::String(s) => Some(s.clone()),
         serde_yaml::Value::Bool(b) => Some(b.to_string()),
@@ -242,10 +222,7 @@ fn get_string_field(
 /// 3. First H2 heading (`## ...`)
 /// 4. First H3 heading (`### ...`)
 /// 5. Empty string
-fn extract_title(
-    frontmatter: &HashMap<String, serde_yaml::Value>,
-    body: &str,
-) -> String {
+fn extract_title(frontmatter: &HashMap<String, serde_yaml::Value>, body: &str) -> String {
     // 1. Frontmatter title
     if let Some(serde_yaml::Value::String(title)) = frontmatter.get("title")
         && !title.is_empty()
@@ -299,11 +276,11 @@ fn resolve_last_updated(
     path: &Path,
 ) -> DateTime<Utc> {
     // Try frontmatter fields in priority order
-    for key in &["last_updated", "updated_at"] {
-        if let Some(dt) = frontmatter
-            .get(*key)
-            .and_then(parse_datetime_value)
-        {
+    for key in &[
+        "last_updated",
+        "updated_at",
+    ] {
+        if let Some(dt) = frontmatter.get(*key).and_then(parse_datetime_value) {
             return dt;
         }
     }
@@ -337,12 +314,12 @@ fn parse_datetime_value(value: &serde_yaml::Value) -> Option<DateTime<Utc>> {
     }
 
     // Try date-only formats (midnight UTC)
-    let date_formats = ["%Y-%m-%d", "%Y/%m/%d"];
+    let date_formats = [
+        "%Y-%m-%d", "%Y/%m/%d",
+    ];
     for fmt in &date_formats {
         if let Ok(nd) = NaiveDate::parse_from_str(s, fmt) {
-            return nd
-                .and_hms_opt(0, 0, 0)
-                .map(|ndt| ndt.and_utc());
+            return nd.and_hms_opt(0, 0, 0).map(|ndt| ndt.and_utc());
         }
     }
 
@@ -362,10 +339,7 @@ fn file_mtime(path: &Path) -> DateTime<Utc> {
 ///
 /// Matches the file's relative path against known package directories.
 /// Returns `None` if the file is in the repo root or not in any package.
-fn determine_package(
-    relative_path: &Path,
-    packages: &[(String, PathBuf)],
-) -> Option<String> {
+fn determine_package(relative_path: &Path, packages: &[(String, PathBuf)]) -> Option<String> {
     for (name, pkg_path) in packages {
         if relative_path.starts_with(pkg_path) {
             return Some(name.clone());
@@ -385,14 +359,8 @@ mod tests {
         fn parses_valid_yaml_frontmatter() {
             let content = "---\ntitle: Hello\nmodel: gpt-4\n---\n# Body";
             let (fm, body) = extract_frontmatter(content);
-            assert_eq!(
-                fm.get("title").and_then(|v| v.as_str()),
-                Some("Hello")
-            );
-            assert_eq!(
-                fm.get("model").and_then(|v| v.as_str()),
-                Some("gpt-4")
-            );
+            assert_eq!(fm.get("title").and_then(|v| v.as_str()), Some("Hello"));
+            assert_eq!(fm.get("model").and_then(|v| v.as_str()), Some("gpt-4"));
             assert_eq!(body, "# Body");
         }
 
@@ -422,13 +390,9 @@ mod tests {
 
         #[test]
         fn handles_frontmatter_with_prompt() {
-            let content =
-                "---\ntitle: Test\nprompt: Generate a summary\n---\nBody text";
+            let content = "---\ntitle: Test\nprompt: Generate a summary\n---\nBody text";
             let (fm, body) = extract_frontmatter(content);
-            assert_eq!(
-                fm.get("prompt").and_then(|v| v.as_str()),
-                Some("Generate a summary")
-            );
+            assert_eq!(fm.get("prompt").and_then(|v| v.as_str()), Some("Generate a summary"));
             assert_eq!(body, "Body text");
         }
     }
@@ -439,38 +403,26 @@ mod tests {
         #[test]
         fn prefers_frontmatter_title() {
             let mut fm = HashMap::new();
-            fm.insert(
-                "title".to_string(),
-                serde_yaml::Value::String("FM Title".to_string()),
-            );
+            fm.insert("title".to_string(), serde_yaml::Value::String("FM Title".to_string()));
             assert_eq!(extract_title(&fm, "# Heading Title"), "FM Title");
         }
 
         #[test]
         fn falls_back_to_h1() {
             let fm = HashMap::new();
-            assert_eq!(
-                extract_title(&fm, "Some text\n# Main Title\n## Sub"),
-                "Main Title"
-            );
+            assert_eq!(extract_title(&fm, "Some text\n# Main Title\n## Sub"), "Main Title");
         }
 
         #[test]
         fn falls_back_to_h2_when_no_h1() {
             let fm = HashMap::new();
-            assert_eq!(
-                extract_title(&fm, "Some text\n## Section Title\n### Sub"),
-                "Section Title"
-            );
+            assert_eq!(extract_title(&fm, "Some text\n## Section Title\n### Sub"), "Section Title");
         }
 
         #[test]
         fn falls_back_to_h3_when_no_h1_or_h2() {
             let fm = HashMap::new();
-            assert_eq!(
-                extract_title(&fm, "Some text\n### Subsection"),
-                "Subsection"
-            );
+            assert_eq!(extract_title(&fm, "Some text\n### Subsection"), "Subsection");
         }
 
         #[test]
@@ -483,10 +435,7 @@ mod tests {
         fn h2_not_confused_with_h1() {
             let fm = HashMap::new();
             // "## Title" should not match as H1
-            assert_eq!(
-                extract_title(&fm, "## Only H2\n### And H3"),
-                "Only H2"
-            );
+            assert_eq!(extract_title(&fm, "## Only H2\n### And H3"), "Only H2");
         }
     }
 
@@ -502,16 +451,14 @@ mod tests {
 
         #[test]
         fn parses_iso_datetime() {
-            let val =
-                serde_yaml::Value::String("2025-06-15T10:30:00Z".to_string());
+            let val = serde_yaml::Value::String("2025-06-15T10:30:00Z".to_string());
             let dt = parse_datetime_value(&val).unwrap();
             assert_eq!(dt.date_naive(), NaiveDate::from_ymd_opt(2025, 6, 15).unwrap());
         }
 
         #[test]
         fn parses_datetime_without_timezone() {
-            let val =
-                serde_yaml::Value::String("2025-06-15 10:30:00".to_string());
+            let val = serde_yaml::Value::String("2025-06-15 10:30:00".to_string());
             let dt = parse_datetime_value(&val).unwrap();
             assert_eq!(dt.date_naive(), NaiveDate::from_ymd_opt(2025, 6, 15).unwrap());
         }
@@ -541,17 +488,12 @@ mod tests {
                 ("sniff".to_string(), PathBuf::from("sniff/lib")),
             ];
             let path = Path::new("research/lib/docs/architecture.md");
-            assert_eq!(
-                determine_package(path, &packages),
-                Some("research-lib".to_string())
-            );
+            assert_eq!(determine_package(path, &packages), Some("research-lib".to_string()));
         }
 
         #[test]
         fn returns_none_for_root_file() {
-            let packages = vec![
-                ("research-lib".to_string(), PathBuf::from("research/lib")),
-            ];
+            let packages = vec![("research-lib".to_string(), PathBuf::from("research/lib"))];
             let path = Path::new("README.md");
             assert_eq!(determine_package(path, &packages), None);
         }
@@ -563,10 +505,7 @@ mod tests {
                 ("sniff-cli".to_string(), PathBuf::from("sniff/cli")),
             ];
             let path = Path::new("sniff/lib/docs/design.md");
-            assert_eq!(
-                determine_package(path, &packages),
-                Some("sniff".to_string())
-            );
+            assert_eq!(determine_package(path, &packages), Some("sniff".to_string()));
         }
 
         #[test]
@@ -582,9 +521,7 @@ mod tests {
 
         #[test]
         fn hidden_dirs_not_matched() {
-            let packages = vec![
-                ("research-lib".to_string(), PathBuf::from("research/lib")),
-            ];
+            let packages = vec![("research-lib".to_string(), PathBuf::from("research/lib"))];
             let path = Path::new(".ai/plans/some-plan.md");
             assert_eq!(determine_package(path, &packages), None);
         }
@@ -627,10 +564,8 @@ mod tests {
             let docs = repo.documents();
 
             // Files inside a specific package member should be assigned
-            let sniff_lib_docs: Vec<_> = docs
-                .iter()
-                .filter(|d| d.relative.starts_with("sniff/lib/"))
-                .collect();
+            let sniff_lib_docs: Vec<_> =
+                docs.iter().filter(|d| d.relative.starts_with("sniff/lib/")).collect();
             for doc in &sniff_lib_docs {
                 assert!(
                     doc.package.is_some(),
@@ -641,10 +576,7 @@ mod tests {
 
             // Verify some docs are assigned to packages (not all root)
             let with_package = docs.iter().filter(|d| d.package.is_some()).count();
-            assert!(
-                with_package > 0,
-                "At least some documents should have package assignments"
-            );
+            assert!(with_package > 0, "At least some documents should have package assignments");
         }
 
         #[test]

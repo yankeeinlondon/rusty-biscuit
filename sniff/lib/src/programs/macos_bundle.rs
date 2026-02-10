@@ -25,7 +25,9 @@
 //! }
 //! ```
 
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::path::Path;
+use std::path::PathBuf;
 
 /// Maps common binary names to their macOS app bundle names.
 ///
