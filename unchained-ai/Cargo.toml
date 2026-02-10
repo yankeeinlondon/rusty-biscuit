@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["gen", "lib"]
+members = ["gen", "lib", "cli"]

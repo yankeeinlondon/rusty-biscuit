@@ -35,21 +35,21 @@ default:
     just --list | grep -v 'default'
     echo
 
-# build unchained-ai packages (lib, cli, server)
+# build unchained-ai packages (lib, cli, gen)
 build *args="":
     @echo ""
-    @echo "Build unchained-ai Packages (Library, CLI)"
+    @echo "Build unchained-ai Packages (Library, CLI, Gen)"
     @echo "---------------------------------------------------"
     @echo ""
-    @cargo build -p unchained-ai -p homey -p unchained-ai-server {{args}}
+    @cargo build -p unchained-ai -p unchained-ai-cli -p unchained-ai-gen {{args}}
 
 # run tests for unchained-ai packages
 test *args="":
     @echo ""
-    @echo "Testing {{BOLD}}unchained-ai{{RESET}} ({{ITALIC}}Library, CLI{{RESET}})"
+    @echo "Testing {{BOLD}}unchained-ai{{RESET}} ({{ITALIC}}Library, CLI, Gen{{RESET}})"
     @echo "-----------------------------------------------"
     @echo ""
-    @cargo test -p unchained-ai -p homey -p unchained-ai-server {{args}}
+    @cargo test -p unchained-ai -p unchained-ai-cli -p unchained-ai-gen {{args}}
 
 # run clippy on unchained-ai packages
 lint:
@@ -58,15 +58,15 @@ lint:
     @echo "--------------------------"
     @echo ""
     @cargo clippy -p unchained-ai -- -D warnings
-    @cargo clippy -p homey -- -D warnings
-    @cargo clippy -p unchained-ai-server -- -D warnings
+    @cargo clippy -p unchained-ai-cli -- -D warnings
+    @cargo clippy -p unchained-ai-gen -- -D warnings
 
 install:
     @echo ""
     @echo "{{BOLD}}Building unchained-ai Library{{RESET}}"
     @cargo build -p unchained-ai --release
     @echo ""
-    @echo "{{BOLD}}{{YELLOW}}Installing unchained-ai CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{YELLOW}}){{RESET}}"
+    @echo "{{BOLD}}{{YELLOW}}Installing unchained-ai CLI ({{ITALIC}}unchained{{RESET}}{{BOLD}}{{YELLOW}}){{RESET}}"
     @cargo install --path ./cli
     @echo ""
     @echo "{{BOLD}}{{BLUE}}unchained-ai CLI installed{{RESET}}"
@@ -74,24 +74,17 @@ install:
 
 check:
     @echo ""
-    @echo "Checking unchained-ai Library, CLI and Server"
+    @echo "Checking unchained-ai Library, CLI and Gen"
     @echo ""
-    @cargo check -p unchained-ai -p homey -p unchained-ai-server
+    @cargo check -p unchained-ai -p unchained-ai-cli -p unchained-ai-gen
 
-# run server in dev mode
-server *args="":
-    @echo ""
-    @echo "{{BOLD}}Running unchained-ai Server{{RESET}} ({{ITALIC}}development mode{{RESET}})"
-    @echo ""
-    cargo run -p unchained-ai-server {{args}}
+# run the unchained CLI in dev mode
+cli *args="":
+    @cargo run -p unchained-ai-cli -- {{args}}
 
-# run tests for server only
-test-server *args="":
-    @echo ""
-    @echo "Testing {{BOLD}}unchained-ai Server{{RESET}}"
-    @echo ""
-    @cargo test -p unchained-ai-server {{args}}
-
+# run model gen
+gen *args="":
+    @cargo run -p unchained-ai-gen -- {{args}}
 
 # Open Opencode
 oc *args="":

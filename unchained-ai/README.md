@@ -21,9 +21,9 @@ This library intends to provide strong AI/LLM pipelining capabilities to callers
 
     A set of TUI components which can be used in CLI programs to provide richer Human in the Loop experiences.
 
-4. Unchained AI CLI [`./cli`] - FUTURE
+4. Unchained AI CLI [`./cli`]
 
-     A really simple CLI interfaces which leverages the unchained-ai library as well as the TUI components for all the heavy lifting.
+     A CLI interface for monitoring agentic platform usage limits (Claude Code, Codex). Uses `sniff` for platform detection, `portable_pty` for PTY-based status queries, and `biscuit-terminal` for progress bar rendering.
 
 5. Unchained AI Service [`./server`] - FUTURE
 

@@ -131,6 +131,12 @@ Scaffold modules for future pipeline operators:
 - `concat.rs` - combining step outputs
 - `splinter.rs` - splitting/fanning out
 
+## Services (`services/`)
+
+Runtime agent platform monitoring. Detects installed agentic CLIs (Claude Code, Codex) and queries their usage limits via PTY-based command execution.
+
+See [Agent Services](./agent-services.md) for full reference.
+
 ## Foreign Agents (`foreign_agent/`)
 
 Incomplete trait skeleton for integrating external agentic systems (Claude Code, OpenCode, Firecrawl). Defines types:

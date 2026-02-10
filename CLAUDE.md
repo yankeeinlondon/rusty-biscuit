@@ -17,7 +17,7 @@ The repository is organized into the following packages:
 ```txt
 dockhand/
 ├── unchained-ai/     # AI pipeline primitives and provider integrations
-│   ├── cli/          # Binary: `unchained` (FUTURE)
+│   ├── cli/          # Binary: `unchained` (agent status monitoring CLI)
 │   ├── gen/          # Binary: `gen-models` (provider model enum generator)
 │   └── lib/          # Core AI pipeline library
 ├── biscuit-hash/     # Best-in-class hashing algorithms
@@ -252,7 +252,7 @@ This repository has local Claude Code skills in `.claude/skills/`:
 - `rig` - LLM agent framework
 - `syntect` - Syntax highlighting
 - `thiserror` - Error derive macros
-- `unchained-ai` - LLM pipeline primitives, provider registry, model catalogs, and rig-core integration
+- `unchained-ai` - LLM pipeline primitives, provider registry, model catalogs, rig-core integration, and agent status monitoring
 
 **Prefer using these local skills** as they contain project-specific research and are optimized for this codebase.
 

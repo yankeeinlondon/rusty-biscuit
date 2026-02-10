@@ -30,6 +30,7 @@ members = [
     "tree-hugger/cli",
     "tree-hugger/lib",
     "tui",
+    "unchained-ai/cli",
     "unchained-ai/gen",
     "unchained-ai/lib",
 ]

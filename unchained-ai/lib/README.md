@@ -59,6 +59,13 @@ Core pipeline machinery and the atomic steps used by the CLI and higher-level fl
 
 - `foreign_agent` contains a trait skeleton for integrating external agentic systems (e.g., Claude Code, Firecrawl). It is currently incomplete and not yet wired into the pipeline.
 
+**Services**
+
+- `services::AgentStatus` detects installed agentic CLI platforms (Claude Code, Codex) via `sniff::programs::InstalledAiClients` and queries their usage limits.
+- `services::pty_runner` executes CLI commands in a pseudo-terminal via `portable-pty`, strips ANSI escape codes, and returns clean text output.
+- `services::parsers` extracts short-term/long-term cap usage percentages from platform-specific status command output.
+- `services::error::AgentStatusError` provides error types for PTY spawn, read, parse, timeout, and platform-not-installed failures.
+
 ### `rigging/`
 
 Rig-core integration and provider/model plumbing.
@@ -145,6 +152,7 @@ The provider registry (see `rigging/providers/provider.rs`) defines how each pro
 ## Where to start
 
 - Pipeline mechanics: `src/primitives/state.rs`, `src/primitives/runnable.rs`, `src/primitives/grouping/pipeline.rs`
+- Agent services: `src/primitives/services/agent_status.rs`, `src/primitives/services/pty_runner.rs`
 - Provider registry + model catalogs: `src/rigging/providers/provider.rs`, `src/rigging/providers/models/mod.rs`
 - Rig tools: `src/rigging/tools/brave_search.rs`, `src/rigging/tools/screen_scrape.rs`
 - Model discovery: `src/api/openai_api.rs`

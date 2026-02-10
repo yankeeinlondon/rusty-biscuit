@@ -118,7 +118,7 @@ pub struct ModelMetadata {
     pub context_window: Option<u32>,
     pub max_output_tokens: Option<u32>,
     pub modalities: Option<ModelModalities>,
-    pub capabilities: Option<Vec<String>>,
+    pub capabilities: Vec<String>,
 }
 ```
 
