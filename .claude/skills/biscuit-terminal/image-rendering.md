@@ -13,7 +13,7 @@ let term = Terminal::new();
 let img = TerminalImage::new(Path::new("photo.jpg"))?;
 
 let output = img.render_to_terminal(&term)?;
-print!("{}", output);
+println!("{}", output);
 ```
 
 ## Secure Rendering with Options (Recommended)
@@ -116,53 +116,33 @@ image.png|fill      → Fill available width
 
 ## Protocol Selection
 
-The library automatically selects the best protocol:
+`render_to_terminal()` selects the protocol and applies terminal-aware cursor management:
 
-```rust
-match term.image_support {
-    // Kitty protocol for these terminals
-    ImageSupport::Kitty => {
-        // Kitty, WezTerm, Ghostty, Konsole, Warp
-        img.render_as_kitty(term_width)
-    }
-    // iTerm2 protocol (forced for iTerm2 even if Kitty advertised)
-    ImageSupport::ITerm => {
-        img.render_as_iterm2(term_width)
-    }
-    // Fallback to alt text
-    ImageSupport::None => {
-        Ok(img.generate_alt_text())
-    }
-}
-```
+| Terminal | Protocol | Escape Strategy | Cursor Handling |
+|----------|----------|-----------------|-----------------|
+| Kitty/Ghostty | Kitty (`c=` only) | Terminal calculates rows | Auto-advances; CUU(1) corrects overshoot |
+| Wezterm | Kitty (`c=` + `r=`) | Explicit row count | No auto-advance; explicit CUD + CR |
+| iTerm2 | iTerm2 | Native scaling | Auto-advances; CUU(1) corrects overshoot |
+| Others | None | Alt text | N/A |
 
-### iTerm2 Special Handling
+`render_to_terminal()` does **not** append a trailing newline — callers handle line termination (e.g., `println!`).
 
-iTerm2 advertises Kitty protocol support but can fail with it. The library forces the native iTerm2 protocol when `TERM_PROGRAM=iTerm.app`:
+### Direct Protocol Methods
 
-```rust
-// In render_to_terminal():
-match term.image_support {
-    ImageSupport::Kitty if matches!(term.app, TerminalApp::ITerm2) => {
-        self.render_as_iterm2(width)  // Force iTerm2 protocol
-    }
-    ImageSupport::Kitty => self.render_as_kitty(width),
-    // ...
-}
-```
+For backward compatibility or composition, the public `render_as_kitty()` and `render_as_iterm2()` methods still exist with their own cursor advancement. Prefer `render_to_terminal()` for direct terminal output.
 
 ## Direct Protocol Rendering
 
-For lower-level control:
+For lower-level control or composition (these include their own cursor advancement):
 
 ```rust
-// Kitty protocol with cell dimensions
+// Kitty protocol (includes cursor advance — not terminal-aware)
 let output = img.render_as_kitty(80)?;
 
-// iTerm2 protocol
+// iTerm2 protocol (includes cursor advance — not terminal-aware)
 let output = img.render_as_iterm2(80)?;
 
-// Raw protocol (with PNG data already loaded)
+// Raw escape sequences (no cursor handling)
 let png_data = img.encode_as_png(&loaded_image)?;
 let kitty_escape = img.render_kitty_cells(&png_data, width_cells, height_cells);
 let iterm_escape = img.render_iterm2(&png_data, "40", "filename.png");
@@ -262,7 +242,7 @@ fn display_image(path: &str, width_pct: f32) -> Result<(), Box<dyn std::error::E
         .with_alt_text(format!("Image: {}", path));
 
     match img.render_to_terminal(&term) {
-        Ok(output) => print!("{}", output),
+        Ok(output) => println!("{}", output),
         Err(e) => eprintln!("Failed to render image: {}", e),
     }
 

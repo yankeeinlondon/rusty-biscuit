@@ -123,6 +123,7 @@ let todo = Todo::new("Implement feature X", TodoState::InProgress);
 See [Table README](../../../biscuit-terminal/lib/src/components/table/README.md) for comprehensive documentation.
 
 Key features:
+
 - Box-drawing borders (`│`, `├─┼─┤`)
 - Auto-sized columns with min/max constraints
 - `TableColumn::new("Header").with_min_width(8).with_max_width(30)`

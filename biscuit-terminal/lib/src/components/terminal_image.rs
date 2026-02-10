@@ -359,6 +359,107 @@ impl TerminalImage {
         self
     }
 
+    /// Terminal-aware Kitty protocol rendering.
+    ///
+    /// Positions the cursor at column 0 of the row immediately after the
+    /// image. Does **not** append a trailing newline — callers (CLI, etc.)
+    /// are responsible for the final `\n`.
+    ///
+    /// - **Wezterm**: Uses `render_kitty_cells` (both `c=` and `r=`) for
+    ///   correct aspect ratio, plus explicit cursor advance (Wezterm does
+    ///   not auto-advance).
+    /// - **Kitty/Ghostty/others**: Uses `render_kitty_width_only` (`c=` only,
+    ///   terminal calculates rows). These terminals auto-advance the cursor
+    ///   to `(0, row_after_image)`, so no explicit movement is needed.
+    fn render_kitty_for_terminal(
+        &self,
+        term: &crate::terminal::Terminal,
+    ) -> Result<String, TerminalImageError> {
+        let term_width = term.width().max(1);
+        let dims = self.resolve_dimensions(term_width);
+        let img = self.load_image()?;
+        let target_cells = dims.image_width;
+
+        let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
+            .map(|cs| (cs.width.max(1), cs.height.max(1)))
+            .unwrap_or((8u32, 16u32));
+
+        let png_data = self.encode_as_png(&img)?;
+        let image_aspect = img.height() as f32 / img.width() as f32;
+        let cell_aspect = cell_pixel_width as f32 / cell_pixel_height as f32;
+        let height_cells =
+            ((target_cells as f32 * image_aspect * cell_aspect).ceil() as u32).max(1);
+
+        let is_wezterm = matches!(term.app, TerminalApp::Wezterm);
+
+        // Wezterm needs both c= and r= for correct aspect ratio
+        let image_seq = if is_wezterm {
+            self.render_kitty_cells(&png_data, target_cells, height_cells)
+        } else {
+            self.render_kitty_width_only(&png_data, target_cells)
+        };
+
+        let prefix = if dims.x_offset > 0 {
+            format!("\x1b[{}C", dims.x_offset)
+        } else {
+            String::new()
+        };
+
+        // Wezterm: no auto-advance → explicit cursor down + carriage return.
+        // Others: auto-advance overshoots by 1 row → pull back with CUU(1).
+        let suffix = if is_wezterm {
+            format!("\x1b[{}B\r", height_cells)
+        } else {
+            "\x1b[1A".to_string()
+        };
+
+        Ok(format!("{}{}{}", prefix, image_seq, suffix))
+    }
+
+    /// Terminal-aware iTerm2 protocol rendering.
+    ///
+    /// Positions the cursor at column 0 of the row immediately after the
+    /// image. Does **not** append a trailing newline — callers (CLI, etc.)
+    /// are responsible for the final `\n`.
+    ///
+    /// iTerm2 auto-advances the cursor past the rendered image. Sends the
+    /// original image and lets iTerm2 handle scaling via
+    /// `preserveAspectRatio=1` for better accuracy.
+    fn render_iterm2_for_terminal(
+        &self,
+        term: &crate::terminal::Terminal,
+    ) -> Result<String, TerminalImageError> {
+        let term_width = term.width().max(1);
+        let dims = self.resolve_dimensions(term_width);
+        let img = self.load_image()?;
+
+        // Send the original image — let iTerm2 handle scaling via
+        // preserveAspectRatio=1 and the width parameter for better accuracy.
+        let png_data = self.encode_as_png(&img)?;
+
+        let width_param = match &self.width {
+            ImageWidth::Fill => "100%".to_string(),
+            ImageWidth::Percent(pct) => format!("{:.0}%", pct * 100.0),
+            ImageWidth::Characters(chars) => chars.to_string(),
+        };
+
+        let filename = Path::new(&self.filename)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "image.png".to_string());
+
+        let image = self.render_iterm2(&png_data, &width_param, &filename);
+
+        let prefix = if dims.x_offset > 0 {
+            format!("\x1b[{}C", dims.x_offset)
+        } else {
+            String::new()
+        };
+
+        // iTerm2 auto-advances cursor but overshoots by 1 row → pull back.
+        Ok(format!("{}{}\x1b[1A", prefix, image))
+    }
+
     /// Render the image to a string appropriate for the given terminal.
     ///
     /// Returns escape sequences for the detected image protocol (Kitty or
@@ -384,8 +485,8 @@ impl TerminalImage {
         use crate::discovery::detection::ImageSupport;
 
         match term.image_support {
-            ImageSupport::Kitty => self.render_as_kitty(term.width()),
-            ImageSupport::ITerm => self.render_as_iterm2(term.width()),
+            ImageSupport::Kitty => self.render_kitty_for_terminal(term),
+            ImageSupport::ITerm => self.render_iterm2_for_terminal(term),
             ImageSupport::None => Ok(String::new()),
         }
     }

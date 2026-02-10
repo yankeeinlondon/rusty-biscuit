@@ -73,6 +73,7 @@ install:
     @echo ""
     @echo "{{BOLD}}bt{{RESET}} CLI installed"
     @echo ""
+    @playa effect drop-4 2>/dev/null || return 0
 
 # Uses `cargo check` to validate code with the compiler
 check:

@@ -1899,7 +1899,7 @@ fn render_image(
     for _ in 0..layout.margin_top.unwrap_or(0) {
         println!();
     }
-    print!("{}", output);
+    println!("{}", output);
     for _ in 0..layout.margin_bottom.unwrap_or(0) {
         println!();
     }
@@ -1984,7 +1984,7 @@ fn display_mermaid_diagram(
     }
 
     match term_image.render_to_terminal(&terminal) {
-        Ok(output) => print!("{}", output),
+        Ok(output) => println!("{}", output),
         Err(e) => {
             return Err(color_eyre::eyre::eyre!(
                 "Failed to display {}: {}",

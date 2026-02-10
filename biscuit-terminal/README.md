@@ -112,7 +112,7 @@ term::split_horizontally(Focus::Left);
 
 ## Image Rendering Architecture
 
-All `TerminalImage` rendering is string-based — `render()`, `fallback_render()`, and `render_to_terminal()` return escape sequences as composable strings. Kitty protocol sequences include `q=2` (quiet mode) to suppress terminal responses that would otherwise appear as garbage text.
+All `TerminalImage` rendering is string-based — `render()`, `fallback_render()`, and `render_to_terminal()` return escape sequences as composable strings. `render_to_terminal()` applies terminal-aware cursor management: it corrects for auto-advance overshoot in Kitty/Ghostty/iTerm2 and applies explicit cursor advancement for Wezterm. It does **not** append a trailing newline — callers are responsible for line termination. Kitty protocol sequences include `q=2` (quiet mode) to suppress terminal responses that would otherwise appear as garbage text.
 
 ## Rendering to the Terminal
 

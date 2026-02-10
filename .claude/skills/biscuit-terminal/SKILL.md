@@ -148,7 +148,7 @@ biscuit_terminal/
 │   ├── table/            # Table with box-drawing borders
 │   ├── two_column.rs     # TwoColumn side-by-side layout
 │   ├── todo.rs           # Todo with states (Open, InProgress, etc.)
-│   ├── terminal_image.rs # Image (Kitty/iTerm2 via viuer)
+│   ├── terminal_image.rs # Image (Kitty/iTerm2 protocols)
 │   ├── image_options.rs  # Security guards
 │   ├── mermaid.rs        # Diagram rendering
 │   └── mermaid_cache.rs  # Content-hashed diagram cache

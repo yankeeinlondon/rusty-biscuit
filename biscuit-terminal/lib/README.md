@@ -95,14 +95,15 @@ fn main() {
 ### Kitty specifics
 
 - Default behavior uses `c=` (columns only) so Kitty preserves aspect ratio.
-- WezTerm is a special case: it uses `c=` + `r=` in inline layouts to avoid vertical stretch.
-- Advances the cursor below the image after rendering so prompts don’t overlap.
+- WezTerm requires `c=` + `r=` (both columns and rows) for correct aspect ratio; Kitty/Ghostty use `c=` only.
+- `render_to_terminal()` handles cursor positioning per terminal: Kitty/Ghostty auto-advance and overshoot by 1 row (corrected with CUU), Wezterm doesn't auto-advance (explicit CUD + CR applied).
+- Does not append a trailing newline — callers are responsible for line termination.
 
 ### iTerm2 specifics
 
 - Forces iTerm path when `TERM_PROGRAM=iTerm.app`, even if Kitty is advertised.
 - Uses `inline=1;preserveAspectRatio=1;width=<user spec>;size=auto`.
-- Appends a cursor advance based on measured cell height to avoid prompt collisions; avoids extra escape clutter that previously caused ENOENT errors in iTerm.
+- `render_to_terminal()` sends the original image without pre-resizing, letting iTerm2 handle scaling natively for better accuracy. Corrects auto-advance overshoot with CUU(1).
 
 ### Inline layout notes (TwoColumn)
 
@@ -131,7 +132,7 @@ let result = TerminalImage::new_with_max_size(Path::new("huge.png"), 1_000_000);
 
 ### Image rendering architecture
 
-All image rendering is string-based: `render()`, `fallback_render()`, and `render_to_terminal()` all return escape sequences as strings. The Kitty graphics protocol is bidirectional — terminals respond with `\x1b_Gi=<id>;OK\x1b\\` after receiving image data. To prevent this response from appearing as garbage text, all Kitty sequences include `q=2` (quiet mode) which suppresses terminal responses entirely.
+All image rendering is string-based: `render()`, `fallback_render()`, and `render_to_terminal()` return escape sequences as strings. `render_to_terminal()` applies terminal-aware cursor management and does **not** append a trailing newline — callers handle line termination. The Kitty graphics protocol is bidirectional — terminals respond with `\x1b_Gi=<id>;OK\x1b\\` after receiving image data. To prevent this response from appearing as garbage text, all Kitty sequences include `q=2` (quiet mode) which suppresses terminal responses entirely.
 
 ### Gotchas and notes
 
@@ -298,12 +299,13 @@ Usage: `A[icon:fa7-brands:github]`
 
 ### Display Notes
 
-**Aspect Ratio Preservation**: When the `viuer` feature is enabled (default), `TerminalImage::render_to_terminal()` uses the [viuer](https://crates.io/crates/viuer) crate for rendering. Viuer correctly preserves aspect ratio by:
+**Aspect Ratio Preservation**: `render_to_terminal()` preserves aspect ratio using terminal-aware rendering:
 
-1. Specifying only the width (in terminal columns)
-2. Letting viuer calculate the correct height based on the image's pixel dimensions and terminal cell size
+- **Kitty/Ghostty**: Specifies only `c=` (columns), letting the terminal calculate rows from the image's native aspect ratio.
+- **Wezterm**: Specifies both `c=` and `r=` (columns and rows) since Wezterm requires explicit row count for correct proportions. Height is calculated from `cell_size()` (falls back to 8×16 px).
+- **iTerm2**: Sends the original image with `preserveAspectRatio=1`, letting iTerm2 handle scaling natively.
 
-This ensures images display at correct proportions regardless of the specified width.
+This ensures correct proportions in all supported terminals.
 
 ```rust
 use biscuit_terminal::components::terminal_image::{TerminalImage, ImageWidth};
