@@ -226,9 +226,15 @@ schema/src/
 ├── openai.rs        # OpenAI API client
 ├── elevenlabs.rs    # ElevenLabs API client
 ├── huggingface.rs   # HuggingFace Hub API client
-├── ollama.rs        # Ollama Native API client (generated separately)
-└── ollamaopenai.rs  # Ollama OpenAI API client (generated separately)
+├── lmstudio.rs      # LM Studio API client
+├── ollama.rs        # OllamaNative + OllamaOpenAI (combined, shared module)
+└── emqx.rs          # EmqxBasic + EmqxBearer (combined, shared module)
 ```
+
+APIs sharing a `module_path` are automatically combined into a single output file.
+Each API in the combined file gets its own client struct, request enum, and request
+suffix to avoid naming collisions. Stale `.rs` files from previous generations are
+automatically cleaned up.
 
 ## Generator Conventions & Assumptions
 
@@ -237,18 +243,18 @@ schema/src/
 The CLI supports these API names:
 
 ```
-anthropic, openai, elevenlabs, huggingface, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all
+anthropic, openai, elevenlabs, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all
 ```
-
-**Note**: `all` excludes Ollama and EMQX APIs (must generate individually due to shared modules).
 
 ### Module Naming
 
-The generator assumes **1 API = 1 module** with matching names (lowercased):
+The generator uses **1 module path = 1 output file**. APIs sharing a `module_path` are combined:
 
 ```
-API Name: "OpenAI"     → Module: openai.rs    → Import: schematic_definitions::openai::*
-API Name: "ElevenLabs" → Module: elevenlabs.rs → Import: schematic_definitions::elevenlabs::*
+API Name: "OpenAI"       → Module: openai.rs    → Import: schematic_definitions::openai::*
+API Name: "ElevenLabs"   → Module: elevenlabs.rs → Import: schematic_definitions::elevenlabs::*
+API Name: "OllamaNative" ┐
+API Name: "OllamaOpenAI" ┘→ Module: ollama.rs   → Import: schematic_definitions::ollama::*
 ```
 
 #### Module Path Configuration
@@ -275,14 +281,15 @@ For API names with recognized suffixes, the generator can infer the module path:
 
 Explicit `module_path` always takes precedence over inference.
 
-**Multi-API modules require explicit configuration**. If you define multiple APIs in a single definitions module, set `module_path` explicitly:
+**Multi-API modules require explicit configuration**. When multiple APIs share a definitions module, set both `module_path` and `request_suffix` to avoid naming collisions:
 
 ```rust
 // definitions/src/ollama/mod.rs defines both:
 pub fn define_ollama_native_api() -> RestApi {
     RestApi {
         name: "OllamaNative".to_string(),
-        module_path: Some("ollama".to_string()),  // Explicit path
+        module_path: Some("ollama".to_string()),           // Shared module
+        request_suffix: Some("NativeRequest".to_string()), // Unique suffix
         // ...
     }
 }
@@ -290,11 +297,14 @@ pub fn define_ollama_native_api() -> RestApi {
 pub fn define_ollama_openai_api() -> RestApi {
     RestApi {
         name: "OllamaOpenAI".to_string(),
-        module_path: Some("ollama".to_string()),  // Same module
+        module_path: Some("ollama".to_string()),        // Same module
+        request_suffix: Some("OaiRequest".to_string()), // Different suffix
         // ...
     }
 }
 ```
+
+The generator groups APIs by `module_path` and combines them into a single output file with shared imports. Stale `.rs` files from previous generations are automatically cleaned up.
 
 ### Wrapper Struct Generation
 
@@ -734,6 +744,7 @@ Assembly, validation, and file writing:
 | Function | Description |
 |----------|-------------|
 | `assemble_api_code(&api)` | Combines all generators into one `TokenStream` |
+| `assemble_combined_api_module(&apis)` | Combines multiple APIs sharing a module path into one `TokenStream` |
 | `validate_code(&tokens)` | Validates generated code with `syn` |
 | `format_code(&file)` | Formats code with `prettyplease` |
 | `write_atomic(&path, &content)` | Atomic file write (temp + rename) |
@@ -952,7 +963,7 @@ The current test suite verifies:
 |----------|-----------------|-----------------|
 | Binary endpoint with JSON code | Runtime failure: JSON deserialize of binary data | `grep "request_bytes" generated_file.rs` |
 | Module path mismatch | Compile failure: unresolved import | `cargo check -p schematic-schema` |
-| Multiple APIs same module | Compile failure: duplicate module definitions | `cargo check -p schematic-schema` |
+| Shared module missing `request_suffix` | Compile failure: duplicate struct names | `cargo check -p schematic-schema` |
 
 ### Required Manual Verification
 

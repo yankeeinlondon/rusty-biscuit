@@ -86,13 +86,14 @@ Categories:
 
 **Base URL**: `http://localhost:11434`
 
-Two API variants in shared `ollama` module:
+Two API variants in shared `ollama` module with distinct request suffixes:
 
 ```rust
 use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
 
-let native = define_ollama_native_api();  // 11 endpoints
-let openai = define_ollama_openai_api();  // 4 endpoints (OpenAI-compatible)
+let native = define_ollama_native_api();  // 11 endpoints, suffix: "NativeRequest"
+let openai = define_ollama_openai_api();  // 4 endpoints, suffix: "OaiRequest"
+// Both share module_path: "ollama" → combined into ollama.rs
 ```
 
 **Native Endpoints**: Generate, Chat, Embed, ListModels, ShowModel, CreateModel, CopyModel, DeleteModel, PullModel, PushModel, ListRunning

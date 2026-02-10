@@ -157,9 +157,6 @@ fn resolve_api(name: &str) -> Result<schematic_define::RestApi, GeneratorError> 
 }
 
 /// Returns all available API definitions for batch generation.
-///
-/// Note: Ollama and EMQX APIs are excluded from "all" because they share definitions
-/// modules (types), which requires different handling. Generate them individually.
 fn resolve_all_apis() -> Vec<schematic_define::RestApi> {
     vec![
         define_anthropic_api(),
@@ -167,12 +164,10 @@ fn resolve_all_apis() -> Vec<schematic_define::RestApi> {
         define_elevenlabs_rest_api(),
         define_huggingface_hub_api(),
         define_lmstudio_api(),
-        // Note: Ollama APIs excluded from "all" - generate individually
-        // define_ollama_native_api(),
-        // define_ollama_openai_api(),
-        // Note: EMQX APIs excluded from "all" - generate individually
-        // define_emqx_basic_api(),
-        // define_emqx_bearer_api(),
+        define_ollama_native_api(),
+        define_ollama_openai_api(),
+        define_emqx_basic_api(),
+        define_emqx_bearer_api(),
     ]
 }
 
@@ -472,6 +467,11 @@ fn run_generate_all(
             ("OpenAI", "openai"),
             ("ElevenLabs", "elevenlabs"),
             ("HuggingFaceHub", "huggingface"),
+            ("LmStudio", "lmstudio"),
+            ("OllamaNative", "ollama-native"),
+            ("OllamaOpenAI", "ollama-openai"),
+            ("EmqxBasic", "emqx-basic"),
+            ("EmqxBearer", "emqx-bearer"),
         ];
 
         for api in &apis {

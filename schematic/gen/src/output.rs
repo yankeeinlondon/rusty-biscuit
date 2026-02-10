@@ -20,6 +20,7 @@
 //! - **Formatting**: Output is formatted with `prettyplease` for consistent style
 //! - **Atomic writes**: Uses temp file + rename pattern to prevent partial writes
 
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -30,7 +31,7 @@ use schematic_define::{AuthStrategy, RestApi, RestMethod};
 use crate::codegen::{
     ModuleDocBuilder, generate_api_struct, generate_error_type, generate_request_enum_with_suffix,
     generate_request_method_with_suffix, generate_request_parts_type,
-    generate_request_struct_with_options, generate_variant_types,
+    generate_request_struct_with_options, generate_variant_types, lines_to_doc_comments,
 };
 use crate::errors::GeneratorError;
 use crate::inference::infer_module_path;
@@ -245,6 +246,113 @@ pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) 
     }
 }
 
+/// Assembles a combined API module for multiple APIs sharing the same module path.
+///
+/// When two or more APIs share a `module_path` (e.g., `OllamaNative` and `OllamaOpenAI`
+/// both use `"ollama"`), this function generates a single `.rs` file containing all
+/// of their types. This avoids duplicate `pub mod` declarations and file overwrites.
+///
+/// The generated module contains:
+/// - Combined documentation (one section per API, separated by horizontal rules)
+/// - Shared imports emitted once
+/// - Per-API: request structs, request enum, API client struct, request method
+///
+/// ## Arguments
+///
+/// * `apis` - Slice of API definitions sharing the same module path
+///
+/// ## Returns
+///
+/// A TokenStream containing the combined module code.
+///
+/// ## Panics
+///
+/// Panics if `apis` is empty.
+pub fn assemble_combined_api_module(apis: &[&RestApi]) -> TokenStream {
+    assert!(!apis.is_empty(), "assemble_combined_api_module requires at least one API");
+
+    let module_path = get_module_path(apis[0]);
+
+    // Build combined module documentation
+    let combined_docs = build_combined_module_docs(apis);
+
+    // Build the definitions re-export (shared once — all APIs share the module)
+    let definitions_module = format_ident!("{}", module_path);
+    let definitions_import = quote! {
+        // Re-export response types from definitions so consumers can import from one place
+        pub use schematic_definitions::#definitions_module::*;
+    };
+
+    // Generate per-API code blocks
+    let per_api_code: Vec<TokenStream> = apis
+        .iter()
+        .map(|api| {
+            let suffix = get_request_suffix(api);
+
+            let request_structs: TokenStream = api
+                .endpoints
+                .iter()
+                .map(|ep| generate_request_struct_with_options(ep, &suffix, Some(&module_path)))
+                .collect();
+
+            let request_enum = generate_request_enum_with_suffix(api, &suffix);
+            let api_struct = generate_api_struct(api);
+            let request_method = generate_request_method_with_suffix(api, &suffix);
+
+            quote! {
+                #request_structs
+
+                #request_enum
+
+                #api_struct
+
+                #request_method
+            }
+        })
+        .collect();
+
+    quote! {
+        #combined_docs
+
+        use serde::{Deserialize, Serialize};
+
+        #definitions_import
+
+        // Import shared types
+        use crate::shared::{RequestParts, SchematicError};
+
+        #(#per_api_code)*
+    }
+}
+
+/// Builds combined module documentation for multiple APIs sharing a module.
+///
+/// Each API gets its own documentation section. Sections are separated by
+/// horizontal rules (`---`) for visual clarity.
+fn build_combined_module_docs(apis: &[&RestApi]) -> TokenStream {
+    let mut doc_parts: Vec<String> = Vec::new();
+
+    for (i, api) in apis.iter().enumerate() {
+        if i > 0 {
+            doc_parts.push("---".to_string());
+            doc_parts.push(String::new());
+        }
+
+        let name = &api.name;
+        let desc = &api.description;
+        let intro = if let Some(docs_url) = &api.docs_url {
+            format!("Generated API client for [{}]({}).\n\n{}", name, docs_url, desc)
+        } else {
+            format!("Generated API client for {}.\n\n{}", name, desc)
+        };
+
+        doc_parts.push(intro);
+    }
+
+    let full_doc = doc_parts.join("\n\n");
+    lines_to_doc_comments(&full_doc)
+}
+
 /// Assembles the lib.rs content for the schema crate.
 ///
 /// This generates the main library file that:
@@ -261,13 +369,19 @@ pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) 
 ///
 /// A TokenStream containing the lib.rs code.
 pub fn assemble_lib_rs(apis: &[&RestApi]) -> TokenStream {
-    // Generate module declarations and re-exports
+    // Generate module declarations, deduplicating shared module paths
+    let mut seen_modules = HashSet::new();
     let module_decls: Vec<_> = apis
         .iter()
-        .map(|api| {
-            let module_name = format_ident!("{}", get_module_path(api));
-            quote! {
-                pub mod #module_name;
+        .filter_map(|api| {
+            let path = get_module_path(api);
+            if seen_modules.insert(path.clone()) {
+                let module_name = format_ident!("{}", path);
+                Some(quote! {
+                    pub mod #module_name;
+                })
+            } else {
+                None
             }
         })
         .collect();
@@ -696,13 +810,24 @@ pub fn generate_and_write_all(
     let prelude_file = validate_code(&prelude_tokens)?;
     let prelude_formatted = format_code(&prelude_file);
 
-    // Generate and validate each API module
-    let mut api_modules: Vec<(String, String)> = Vec::new();
+    // Group APIs by module path so shared-module APIs get a single file
+    let mut module_groups: BTreeMap<String, Vec<&RestApi>> = BTreeMap::new();
     for api in apis {
-        let tokens = assemble_api_module(api);
+        let path = get_module_path(api);
+        module_groups.entry(path).or_default().push(api);
+    }
+
+    // Generate and validate each module (single or combined)
+    let mut api_modules: Vec<(String, String)> = Vec::new();
+    for (module_path, group) in &module_groups {
+        let tokens = if group.len() == 1 {
+            assemble_api_module(group[0])
+        } else {
+            assemble_combined_api_module(group)
+        };
         let file = validate_code(&tokens)?;
         let formatted = format_code(&file);
-        let filename = format!("{}.rs", get_module_path(api));
+        let filename = format!("{}.rs", module_path);
         api_modules.push((filename, formatted));
     }
 
@@ -726,6 +851,30 @@ pub fn generate_and_write_all(
         // Write each API module
         for (filename, content) in &api_modules {
             write_atomic(&output_dir.join(filename), content)?;
+        }
+
+        // Clean up stale .rs files that are no longer generated
+        let expected_files: HashSet<String> = {
+            let mut files = HashSet::new();
+            files.insert("lib.rs".to_string());
+            files.insert("shared.rs".to_string());
+            files.insert("prelude.rs".to_string());
+            for (filename, _) in &api_modules {
+                files.insert(filename.clone());
+            }
+            files
+        };
+
+        if let Ok(entries) = fs::read_dir(output_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "rs")
+                    && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                    && !expected_files.contains(name)
+                {
+                    let _ = fs::remove_file(&path);
+                }
+            }
         }
     }
 
@@ -751,13 +900,19 @@ pub fn generate_and_write_all(
 ///
 /// A TokenStream containing the lib.rs code.
 pub fn assemble_lib_rs_with_options(apis: &[&RestApi], options: &OutputOptions) -> TokenStream {
-    // Generate module declarations and re-exports
+    // Generate module declarations, deduplicating shared module paths
+    let mut seen_modules = HashSet::new();
     let module_decls: Vec<_> = apis
         .iter()
-        .map(|api| {
-            let module_name = format_ident!("{}", get_module_path(api));
-            quote! {
-                pub mod #module_name;
+        .filter_map(|api| {
+            let path = get_module_path(api);
+            if seen_modules.insert(path.clone()) {
+                let module_name = format_ident!("{}", path);
+                Some(quote! {
+                    pub mod #module_name;
+                })
+            } else {
+                None
             }
         })
         .collect();
@@ -1475,5 +1630,170 @@ mod tests {
         // Auto-generated notice should be a regular comment (not doc comment)
         assert!(code.starts_with("// This code was automatically generated"));
         assert!(code.contains("Do not edit manually"));
+    }
+
+    // === Shared module path helpers ===
+
+    /// Creates two APIs that share the same module_path, like Ollama Native/OpenAI.
+    fn make_shared_module_apis() -> (RestApi, RestApi) {
+        let api_a = RestApi {
+            name: "FooNative".to_string(),
+            description: "Foo native API".to_string(),
+            base_url: "http://localhost:8080".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::None,
+            env_auth: vec![],
+            env_username: None,
+            env_mapping: None,
+            headers: vec![],
+            endpoints: vec![Endpoint {
+                id: "ListItems".to_string(),
+                method: RestMethod::Get,
+                path: "/api/items".to_string(),
+                description: "List items".to_string(),
+                request: None,
+                response: ApiResponse::json_type("ListItemsResponse"),
+                headers: vec![],
+                params: None,
+            }],
+            module_path: Some("foo".to_string()),
+            request_suffix: Some("NativeRequest".to_string()),
+        };
+
+        let api_b = RestApi {
+            name: "FooCompat".to_string(),
+            description: "Foo compat API".to_string(),
+            base_url: "http://localhost:8080".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::None,
+            env_auth: vec![],
+            env_username: None,
+            env_mapping: None,
+            headers: vec![],
+            endpoints: vec![Endpoint {
+                id: "ListItems".to_string(),
+                method: RestMethod::Get,
+                path: "/v1/items".to_string(),
+                description: "List items (compat)".to_string(),
+                request: None,
+                response: ApiResponse::json_type("CompatListItemsResponse"),
+                headers: vec![],
+                params: None,
+            }],
+            module_path: Some("foo".to_string()),
+            request_suffix: Some("CompatRequest".to_string()),
+        };
+
+        (api_a, api_b)
+    }
+
+    // === Combined module tests ===
+
+    #[test]
+    fn assemble_lib_rs_deduplicates_modules() {
+        let (api_a, api_b) = make_shared_module_apis();
+        let apis: Vec<&RestApi> = vec![&api_a, &api_b];
+
+        let tokens = assemble_lib_rs(&apis);
+        let code = tokens.to_string();
+
+        // "pub mod foo" should appear exactly once
+        let count = code.matches("pub mod foo").count();
+        assert_eq!(count, 1, "Expected exactly 1 'pub mod foo', found {}", count);
+    }
+
+    #[test]
+    fn assemble_combined_module_includes_both_apis() {
+        let (api_a, api_b) = make_shared_module_apis();
+        let apis: Vec<&RestApi> = vec![&api_a, &api_b];
+
+        let tokens = assemble_combined_api_module(&apis);
+        let file = validate_code(&tokens).unwrap();
+        let code = format_code(&file);
+
+        // Should include both client structs
+        assert!(code.contains("pub struct FooNative"), "Missing FooNative struct");
+        assert!(code.contains("pub struct FooCompat"), "Missing FooCompat struct");
+
+        // Should include both request enums
+        assert!(code.contains("pub enum FooNativeRequest"), "Missing FooNativeRequest enum");
+        assert!(code.contains("pub enum FooCompatRequest"), "Missing FooCompatRequest enum");
+
+        // Should have definitions import only once
+        let import_count = code.matches("pub use schematic_definitions::foo::*").count();
+        assert_eq!(import_count, 1, "Expected exactly 1 definitions import, found {}", import_count);
+
+        // Should have shared import only once
+        let shared_count = code.matches("use crate::shared::{RequestParts, SchematicError}").count();
+        assert_eq!(shared_count, 1, "Expected exactly 1 shared import, found {}", shared_count);
+    }
+
+    #[test]
+    fn generate_and_write_all_groups_shared_modules() {
+        let (api_a, api_b) = make_shared_module_apis();
+        let standalone = make_simple_api();
+        let apis: Vec<&RestApi> = vec![&standalone, &api_a, &api_b];
+
+        let temp_dir = TempDir::new().unwrap();
+        let result = generate_and_write_all(&apis, temp_dir.path(), false);
+        assert!(result.is_ok());
+
+        // Should write a single foo.rs (not foonative.rs + foocompat.rs)
+        assert!(temp_dir.path().join("foo.rs").exists(), "Missing foo.rs");
+        assert!(!temp_dir.path().join("foonative.rs").exists(), "Unexpected foonative.rs");
+        assert!(!temp_dir.path().join("foocompat.rs").exists(), "Unexpected foocompat.rs");
+
+        // The combined file should contain both structs
+        let foo_content = fs::read_to_string(temp_dir.path().join("foo.rs")).unwrap();
+        assert!(foo_content.contains("pub struct FooNative"));
+        assert!(foo_content.contains("pub struct FooCompat"));
+
+        // The standalone API should still get its own file
+        assert!(temp_dir.path().join("test.rs").exists(), "Missing test.rs");
+    }
+
+    #[test]
+    fn generate_and_write_all_cleans_stale_files() {
+        let api = make_simple_api();
+        let apis: Vec<&RestApi> = vec![&api];
+
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create a stale file that should be cleaned up
+        fs::write(temp_dir.path().join("ollamaopenai.rs"), "// stale").unwrap();
+        fs::write(temp_dir.path().join("old_api.rs"), "// stale").unwrap();
+        // Non-.rs files should NOT be cleaned
+        fs::write(temp_dir.path().join("Cargo.toml"), "# keep").unwrap();
+
+        generate_and_write_all(&apis, temp_dir.path(), false).unwrap();
+
+        // Stale .rs files should be removed
+        assert!(!temp_dir.path().join("ollamaopenai.rs").exists(), "ollamaopenai.rs should be deleted");
+        assert!(!temp_dir.path().join("old_api.rs").exists(), "old_api.rs should be deleted");
+
+        // Non-.rs files should be preserved
+        assert!(temp_dir.path().join("Cargo.toml").exists(), "Cargo.toml should be preserved");
+
+        // Generated files should exist
+        assert!(temp_dir.path().join("lib.rs").exists());
+        assert!(temp_dir.path().join("shared.rs").exists());
+        assert!(temp_dir.path().join("prelude.rs").exists());
+        assert!(temp_dir.path().join("test.rs").exists());
+    }
+
+    #[test]
+    fn prelude_exports_all_apis_in_shared_module() {
+        let (api_a, api_b) = make_shared_module_apis();
+        let apis: Vec<&RestApi> = vec![&api_a, &api_b];
+
+        let tokens = assemble_prelude(&apis);
+        let file = validate_code(&tokens).unwrap();
+        let code = format_code(&file);
+
+        // Both API clients should be re-exported from the shared module
+        assert!(code.contains("FooNative"), "Missing FooNative in prelude");
+        assert!(code.contains("FooCompat"), "Missing FooCompat in prelude");
+        assert!(code.contains("FooNativeRequest"), "Missing FooNativeRequest in prelude");
+        assert!(code.contains("FooCompatRequest"), "Missing FooCompatRequest in prelude");
     }
 }

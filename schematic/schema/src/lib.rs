@@ -14,6 +14,10 @@
 //! | [`elevenlabs`] | [`ElevenLabs`](elevenlabs::ElevenLabs) | ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation | API Key (`xi-api-key`) |
 //! | [`huggingface`] | [`HuggingFaceHub`](huggingface::HuggingFaceHub) | Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations | Bearer |
 //! | [`lmstudio`] | [`LmStudio`](lmstudio::LmStudio) | LM Studio v1 native REST API for local LLM inference and model management | Bearer |
+//! | [`ollama`] | [`OllamaNative`](ollama::OllamaNative) | Ollama native REST API for local LLM inference and model management | None |
+//! | [`ollama`] | [`OllamaOpenAI`](ollama::OllamaOpenAI) | Ollama OpenAI-compatible REST API for drop-in replacement of OpenAI clients | None |
+//! | [`emqx`] | [`EmqxBasic`](emqx::EmqxBasic) | EMQX Broker REST API with Basic Authentication (API Key + Secret) | Basic |
+//! | [`emqx`] | [`EmqxBearer`](emqx::EmqxBearer) | EMQX Broker REST API with Bearer Token authentication (JWT) | Bearer |
 //!
 //! ## Quick Start
 //!
@@ -82,3 +86,5 @@ pub mod openai;
 pub mod elevenlabs;
 pub mod huggingface;
 pub mod lmstudio;
+pub mod ollama;
+pub mod emqx;

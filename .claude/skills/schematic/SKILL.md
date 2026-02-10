@@ -12,7 +12,7 @@ Type-safe REST and WebSocket API client code generation for Rust. Define APIs de
 | Package | Purpose |
 |---------|---------|
 | `schematic-define` | Primitives: `RestApi`, `Endpoint`, `AuthStrategy`, `Headers`, `ApiRequest`, `ApiResponse` |
-| `schematic-definitions` | Pre-built APIs: Anthropic, OpenAI, ElevenLabs, HuggingFace, Ollama, EMQX |
+| `schematic-definitions` | Pre-built APIs: Anthropic, OpenAI, ElevenLabs, HuggingFace, LM Studio, Ollama, EMQX |
 | `schematic-gen` | Code generator CLI with `generate`, `validate`, and `import` commands |
 | `schematic-schema` | Generated clients (auto-generated, do not edit) |
 
@@ -31,8 +31,8 @@ schematic-gen import --input api.yaml --output schematic/schema/src
 # Generate with OpenAPI export
 schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
 
-# Available APIs: anthropic, openai, elevenlabs, huggingface, ollama-native,
-#                 ollama-openai, emqx-basic, emqx-bearer, all
+# Available APIs: anthropic, openai, elevenlabs, huggingface, lmstudio,
+#                 ollama-native, ollama-openai, emqx-basic, emqx-bearer, all
 ```
 
 ## Critical Configuration
@@ -57,13 +57,17 @@ Endpoint { response: ApiResponse::Binary, ... }  // Returns bytes::Bytes
 
 ### Module Path for Multi-API Modules
 
-When multiple APIs share one definitions module, you MUST set `module_path`:
+When multiple APIs share one definitions module, you MUST set `module_path` and `request_suffix`:
 
 ```rust
-// Both APIs in definitions/src/ollama/mod.rs
-RestApi { name: "OllamaNative".to_string(), module_path: Some("ollama".to_string()), ... }
-RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string()), ... }
+// Both APIs in definitions/src/ollama/mod.rs → generates single ollama.rs
+RestApi { name: "OllamaNative".to_string(), module_path: Some("ollama".to_string()),
+          request_suffix: Some("NativeRequest".to_string()), ... }
+RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string()),
+          request_suffix: Some("OaiRequest".to_string()), ... }
 ```
+
+The `request_suffix` prevents naming collisions when APIs have overlapping endpoint IDs (e.g., both have `Embeddings` → `EmbeddingsNativeRequest` vs `EmbeddingsOaiRequest`). The generator automatically combines shared-module APIs into a single output file and cleans up stale files.
 
 ### Body Type Naming Convention
 
@@ -226,6 +230,7 @@ grep -n "request_bytes\|request_text\|request_empty" schematic/schema/src/*.rs
 | Issue | Cause | Fix |
 |-------|-------|-----|
 | `schematic_definitions::xyz not found` | Module path mismatch | Set `module_path` explicitly |
+| Duplicate struct definitions | Shared module missing `request_suffix` | Set distinct `request_suffix` on each API |
 | Recursive struct definition | Body type name collision | Rename to `*Body` suffix |
 | Binary endpoint returns JSON error | Wrong `ApiResponse` | Use `ApiResponse::Binary` |
 | Missing credentials error | Env var not set | Check `env_auth` var names |

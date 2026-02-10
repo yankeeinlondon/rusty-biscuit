@@ -40,6 +40,7 @@ pub use api_struct::generate_api_struct;
 pub use client::{generate_request_method, generate_request_method_with_suffix};
 pub use error::{generate_error_type, generate_request_parts_type};
 pub use module_docs::ModuleDocBuilder;
+pub(crate) use module_docs::lines_to_doc_comments;
 pub use request_enum::{generate_request_enum, generate_request_enum_with_suffix};
 pub use request_structs::{
     generate_request_struct, generate_request_struct_with_options,

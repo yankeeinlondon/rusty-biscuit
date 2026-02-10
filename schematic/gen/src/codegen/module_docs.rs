@@ -190,6 +190,8 @@ async fn main() -> Result<(), SchematicError> {{
 
 /// Converts a multi-line documentation string into `//!` style line comments.
 ///
+/// Exposed as `pub(crate)` for use by combined module assembly.
+///
 /// Each line of the input becomes a separate `#![doc = "..."]` attribute.
 /// When prettyplease formats these single-line doc attributes, they become
 /// `//! ` style comments rather than `/*! */` block comments.
@@ -198,7 +200,7 @@ async fn main() -> Result<(), SchematicError> {{
 /// `//! Content here` rather than `//!Content here`.
 ///
 /// Preserves indentation within lines (important for code blocks).
-fn lines_to_doc_comments(doc: &str) -> TokenStream {
+pub(crate) fn lines_to_doc_comments(doc: &str) -> TokenStream {
     let lines: Vec<TokenStream> = doc
         .lines()
         .map(|line| {

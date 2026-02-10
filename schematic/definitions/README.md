@@ -250,6 +250,7 @@ To add a new API definition:
 3. Add `types.rs` with response types
 4. **Choose correct `ApiResponse` for each endpoint** (see above)
 5. **Set `module_path` if API name differs from module name**
+5b. **Set `request_suffix` if sharing a module with another API** (to avoid naming collisions)
 6. Export from `src/lib.rs`
 7. Add to the prelude in `src/prelude.rs`
 8. **Run verification checklist above**

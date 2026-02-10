@@ -102,19 +102,20 @@ install:
     @echo "--------------------"
     @echo ""
     @echo "{{BOLD}}Building schematic packages (release){{RESET}}"
-    @cargo build --release -p schematic-define -p schematic-definitions -p schematic-gen
+    @cargo build --release -p schematic-define -p schematic-definitions -p schematic-gen  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo "{{BOLD}}Installing schematic-gen CLI{{RESET}}"
-    @cargo install --path gen --locked
+    @cargo install --path gen --locked  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo "{{BOLD}}Generating all API clients{{RESET}}"
-    @cargo run --release -p schematic-gen -- --api all --output schema/src -v
+    @cargo run --release -p schematic-gen -- --api all --output schema/src -v  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo "{{BOLD}}Verifying generated code compiles{{RESET}}"
-    @cargo check -p schematic-schema
+    @cargo check -p schematic-schema  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo "{{BLUE}}{{BOLD}}Schematic installed successfully!{{RESET}}"
     @echo ""
+    @playa effect drop-4 2>/dev/null || return 0
 
 # clean generated schema code
 clean-generated:

@@ -22,9 +22,7 @@ schematic-gen import --input <FILE> [--api-name <NAME>] [--module-path <PATH>] \
 schematic-gen --api <NAME> --output <DIR>
 ```
 
-**Available APIs**: `anthropic`, `openai`, `elevenlabs`, `huggingface`, `ollama-native`, `ollama-openai`, `emqx-basic`, `emqx-bearer`, `all`
-
-**Note**: `all` excludes Ollama and EMQX (shared module dependencies require individual generation).
+**Available APIs**: `anthropic`, `openai`, `elevenlabs`, `huggingface`, `lmstudio`, `ollama-native`, `ollama-openai`, `emqx-basic`, `emqx-bearer`, `all`
 
 ## OpenAPI Import
 
@@ -103,9 +101,15 @@ schema/src/
 ├── openai.rs        # OpenAI API client
 ├── elevenlabs.rs    # ElevenLabs API client
 ├── huggingface.rs   # HuggingFace Hub API client
-├── ollama.rs        # Ollama Native API client (generated separately)
-└── ollamaopenai.rs  # Ollama OpenAI API client (generated separately)
+├── lmstudio.rs      # LM Studio API client
+├── ollama.rs        # OllamaNative + OllamaOpenAI (combined, shared module)
+└── emqx.rs          # EmqxBasic + EmqxBearer (combined, shared module)
 ```
+
+APIs that share a `module_path` (e.g., Ollama Native + OpenAI, EMQX Basic + Bearer)
+are combined into a single module file. Each API gets its own client struct, request
+enum, and request suffix to avoid naming collisions. Stale `.rs` files from previous
+generations are automatically cleaned up.
 
 ## Generated Code Components
 
@@ -301,4 +305,4 @@ grep -n "request_bytes\|request_text\|request_empty" schematic/schema/src/*.rs
 |----------|--------------|-----------|
 | Binary endpoint with JSON code | Runtime JSON parse error | Manual grep |
 | Module path mismatch | Compile error: unresolved import | `cargo check` |
-| Multiple APIs same module | Compile error: duplicate module | `cargo check` |
+| Shared module missing `request_suffix` | Compile error: duplicate struct names | `cargo check` |

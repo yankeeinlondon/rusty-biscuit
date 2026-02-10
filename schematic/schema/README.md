@@ -74,22 +74,20 @@ async fn main() -> Result<(), schematic_schema::openai::SchematicError> {
 | OpenAI | `openai` | `OpenAI` | 3 | Bearer token (`OPENAI_API_KEY`) |
 | HuggingFace Hub | `huggingface` | `HuggingFaceHub` | 28+ | Bearer token (`HUGGINGFACE_API_KEY`) |
 | ElevenLabs | `elevenlabs` | `ElevenLabs` | 45+ | API Key (`ELEVEN_LABS_API_KEY`, header: `xi-api-key`) |
+| LM Studio | `lmstudio` | `LmStudio` | 6 | None (local) |
+| Ollama Native | `ollama` | `OllamaNative` | 11 | None (local) |
+| Ollama OpenAI | `ollama` | `OllamaOpenAI` | 4 | None (local) |
+| EMQX Basic | `emqx` | `EmqxBasic` | 36 | Basic (`EMQX_API_KEY`, `EMQX_SECRET_KEY`) |
+| EMQX Bearer | `emqx` | `EmqxBearer` | 38 | Bearer (`EMQX_API_KEY`) |
 
-**Note**: Ollama and EMQX APIs are defined but must be generated separately due to shared definition modules. Generate them with:
-
-```bash
-schematic-gen generate --api ollama-native
-schematic-gen generate --api ollama-openai
-schematic-gen generate --api emqx-basic
-schematic-gen generate --api emqx-bearer
-```
+APIs sharing a module (Ollama, EMQX) are combined into a single file with distinct request suffixes.
 
 ## Prelude Exports
 
 The prelude (`schematic_schema::prelude`) exports:
 
-- **Client structs**: `Anthropic`, `OpenAI`, `HuggingFaceHub`, `ElevenLabs`
-- **Request enums**: `AnthropicRequest`, `OpenAIRequest`, `HuggingFaceHubRequest`, `ElevenLabsRequest`
+- **Client structs**: `Anthropic`, `OpenAI`, `HuggingFaceHub`, `ElevenLabs`, `LmStudio`, `OllamaNative`, `OllamaOpenAI`, `EmqxBasic`, `EmqxBearer`
+- **Request enums**: `AnthropicRequest`, `OpenAIRequest`, `HuggingFaceHubRequest`, `ElevenLabsRequest`, `LmStudioRequest`, `OllamaNativeRequest`, `OllamaOpenAIRequest`, `EmqxBasicRequest`, `EmqxBearerRequest`
 - **Shared types**: `SchematicError`, `RequestParts`
 - **Constants**: Each client has `BASE_URL` and `DOCS_URL` constants
 
@@ -250,8 +248,9 @@ schema/
     ├── openai.rs     # OpenAI API client
     ├── elevenlabs.rs # ElevenLabs API client
     ├── huggingface.rs # HuggingFace Hub API client
-    ├── ollama.rs     # Ollama Native API client
-    └── ollamaopenai.rs # Ollama OpenAI API client
+    ├── lmstudio.rs   # LM Studio API client
+    ├── ollama.rs     # OllamaNative + OllamaOpenAI (combined)
+    └── emqx.rs       # EmqxBasic + EmqxBearer (combined)
 ```
 
 ## Dependencies

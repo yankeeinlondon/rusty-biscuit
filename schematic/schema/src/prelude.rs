@@ -20,6 +20,10 @@
 //! - [`ElevenLabs`] + [`ElevenLabsRequest`]
 //! - [`HuggingFaceHub`] + [`HuggingFaceHubRequest`]
 //! - [`LmStudio`] + [`LmStudioRequest`]
+//! - [`OllamaNative`] + [`OllamaNativeRequest`]
+//! - [`OllamaOpenAI`] + [`OllamaOpenAIRequest`]
+//! - [`EmqxBasic`] + [`EmqxBasicRequest`]
+//! - [`EmqxBearer`] + [`EmqxBearerRequest`]
 //!
 //! **Shared types:**
 //!
@@ -53,3 +57,7 @@ pub use crate::openai::{OpenAI, OpenAIRequest};
 pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};
 pub use crate::huggingface::{HuggingFaceHub, HuggingFaceHubRequest};
 pub use crate::lmstudio::{LmStudio, LmStudioRequest};
+pub use crate::ollama::{OllamaNative, OllamaNativeRequest};
+pub use crate::ollama::{OllamaOpenAI, OllamaOpenAIRequest};
+pub use crate::emqx::{EmqxBasic, EmqxBasicRequest};
+pub use crate::emqx::{EmqxBearer, EmqxBearerRequest};

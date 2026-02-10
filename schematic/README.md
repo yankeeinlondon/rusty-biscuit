@@ -100,16 +100,19 @@ async fn main() -> Result<(), SchematicError> {
 
 ## Available APIs
 
-| API | Endpoints | Auth | Description |
-|-----|-----------|------|-------------|
-| Anthropic | 4 | API Key (`X-Api-Key`) | Claude Messages API with tool use |
-| OpenAI | 3 | Bearer | Models API (list, retrieve, delete) |
-| HuggingFace Hub | 28+ | Bearer | Models, datasets, spaces, repos |
-| ElevenLabs | 45+ REST, 2 WebSocket | API Key (`xi-api-key`) | TTS, voices, audio generation |
-| Ollama Native | 11 | None | Local inference (generate, chat, embed) |
-| Ollama OpenAI | 4 | None | OpenAI-compatible subset |
-| EMQX Basic | 30+ | Basic | MQTT broker REST API |
-| EMQX Bearer | 32+ | Bearer | MQTT broker with token auth |
+| API | Module | Endpoints | Auth | Description |
+|-----|--------|-----------|------|-------------|
+| Anthropic | `anthropic` | 4 | API Key (`X-Api-Key`) | Claude Messages API with tool use |
+| OpenAI | `openai` | 3 | Bearer | Models API (list, retrieve, delete) |
+| HuggingFace Hub | `huggingface` | 28+ | Bearer | Models, datasets, spaces, repos |
+| ElevenLabs | `elevenlabs` | 45+ REST, 2 WebSocket | API Key (`xi-api-key`) | TTS, voices, audio generation |
+| LM Studio | `lmstudio` | 6 | None | Local inference (OpenAI-compatible) |
+| Ollama Native | `ollama` | 11 | None | Local inference (generate, chat, embed) |
+| Ollama OpenAI | `ollama` | 4 | None | OpenAI-compatible subset |
+| EMQX Basic | `emqx` | 36 | Basic | MQTT broker REST API |
+| EMQX Bearer | `emqx` | 38 | Bearer | MQTT broker with token auth |
+
+APIs sharing a module (`ollama`, `emqx`) are combined into a single generated file with distinct request suffixes.
 
 ## Key Features
 
@@ -273,23 +276,23 @@ The generator produces different methods based on `ApiResponse` types:
 
 ### 2. Module Path Configuration
 
-When defining APIs, the generator assumes: **1 API name → 1 module name → 1 definitions module**
+The generator groups APIs by `module_path` — APIs sharing a path are combined into a single output file.
 
 | Scenario | Configuration Required |
 |----------|------------------------|
 | Single API per module | `module_path: None` (auto-inferred) |
-| Multiple APIs sharing one definitions module | **REQUIRES explicit `module_path`** |
+| Multiple APIs sharing one definitions module | **REQUIRES explicit `module_path` and `request_suffix`** |
 | API name differs from definitions module | **REQUIRES explicit `module_path`** |
 
 **Example - Ollama has two APIs sharing one definitions module:**
 
 ```rust
-// ❌ WRONG - Will fail: generates "ollamanative.rs" looking for schematic_definitions::ollamanative
-RestApi { name: "OllamaNative".to_string(), module_path: None, ... }
-
-// ✅ CORRECT - Both use explicit path to shared module
-RestApi { name: "OllamaNative".to_string(), module_path: Some("ollama".to_string()), ... }
-RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string()), ... }
+// ✅ CORRECT - Both use explicit path and distinct suffixes
+RestApi { name: "OllamaNative".to_string(), module_path: Some("ollama".to_string()),
+          request_suffix: Some("NativeRequest".to_string()), ... }
+RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string()),
+          request_suffix: Some("OaiRequest".to_string()), ... }
+// → Generates single ollama.rs with both OllamaNative and OllamaOpenAI clients
 ```
 
 ### 3. Testing Requirements
@@ -302,7 +305,7 @@ RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string
 **Current tests DO NOT verify:**
 - ❌ Runtime behavior (binary responses actually call `.bytes()`)
 - ❌ Integration with real APIs
-- ❌ Module path resolution across multiple APIs
+- ❌ Runtime behavior of combined shared-module APIs
 
 **Before submitting changes:**
 

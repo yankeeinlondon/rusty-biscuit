@@ -189,8 +189,8 @@ pub fn define_ollama_native_api() -> RestApi {
                     params: None,
             },
         ],
-        module_path: None,
-        request_suffix: None,
+        module_path: Some("ollama".to_string()),
+        request_suffix: Some("NativeRequest".to_string()),
         env_mapping: Some(EnvMapping::default()),
     }
 }
@@ -271,8 +271,8 @@ pub fn define_ollama_openai_api() -> RestApi {
                     params: None,
             },
         ],
-        module_path: None,
-        request_suffix: None,
+        module_path: Some("ollama".to_string()),
+        request_suffix: Some("OaiRequest".to_string()),
         env_mapping: Some(EnvMapping::default()),
     }
 }
@@ -535,5 +535,45 @@ mod tests {
         let openai = define_ollama_openai_api();
 
         assert_ne!(native.name, openai.name);
+    }
+
+    #[test]
+    fn native_api_has_module_path() {
+        let api = define_ollama_native_api();
+        assert_eq!(api.module_path, Some("ollama".to_string()));
+    }
+
+    #[test]
+    fn native_api_has_request_suffix() {
+        let api = define_ollama_native_api();
+        assert_eq!(api.request_suffix, Some("NativeRequest".to_string()));
+    }
+
+    #[test]
+    fn openai_api_has_module_path() {
+        let api = define_ollama_openai_api();
+        assert_eq!(api.module_path, Some("ollama".to_string()));
+    }
+
+    #[test]
+    fn openai_api_has_request_suffix() {
+        let api = define_ollama_openai_api();
+        assert_eq!(api.request_suffix, Some("OaiRequest".to_string()));
+    }
+
+    #[test]
+    fn apis_have_different_request_suffixes() {
+        let native = define_ollama_native_api();
+        let openai = define_ollama_openai_api();
+
+        assert_ne!(native.request_suffix, openai.request_suffix);
+    }
+
+    #[test]
+    fn apis_share_module_path() {
+        let native = define_ollama_native_api();
+        let openai = define_ollama_openai_api();
+
+        assert_eq!(native.module_path, openai.module_path);
     }
 }
