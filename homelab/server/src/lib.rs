@@ -28,8 +28,6 @@ use state::AppState;
 #[openapi(
     tags(
         (name = "health", description = "Health check endpoints"),
-        (name = "sony", description = "Sony ES receiver control (legacy)"),
-        (name = "arcam", description = "Arcam amplifier control (legacy)"),
         (name = "sony_receiver", description = "Sony ES receiver management and control"),
         (name = "arcam_amp", description = "Arcam amplifier management and control"),
     )
@@ -43,9 +41,6 @@ pub fn build_router(state: AppState) -> Router {
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(utoipa_axum::routes!(health))
         .routes(utoipa_axum::routes!(health_devices))
-        // Legacy routes (single device via ENV)
-        .nest("/sony", handlers::sony::routes())
-        .nest("/arcam", handlers::arcam::routes())
         // New routes (multi-device via config)
         .nest(
             "/sony_receiver",
@@ -60,6 +55,9 @@ pub fn build_router(state: AppState) -> Router {
         .split_for_parts();
 
     router
+        // Legacy routes (not advertised in API docs)
+        .nest("/sony", handlers::sony::routes().split_for_parts().0)
+        .nest("/arcam", handlers::arcam::routes().split_for_parts().0)
         .route("/", get(index))
         .merge(Scalar::with_url("/explore", api))
         .layer(TraceLayer::new_for_http())
