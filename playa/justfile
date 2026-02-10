@@ -31,11 +31,6 @@ default:
     just --list | grep -v 'default'
     echo
 
-# No-op recipe: reference color vars so linters won't report them as unused.
-# Run `just _colors` if you want to exercise this (it does nothing).
-_colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{YELLOW2}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} >/dev/null || true
-
 
 # build the library and CLI
 build *args="":
@@ -80,3 +75,8 @@ commit:
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
 
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{YELLOW2}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} >/dev/null || true
