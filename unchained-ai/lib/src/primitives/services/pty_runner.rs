@@ -118,6 +118,140 @@ fn run_pty_blocking(
         ))
 }
 
+/// Runs an interactive PTY session: spawns a program, executes a series of
+/// write/wait steps, then kills the process and returns captured output.
+///
+/// Uses a wider terminal (120 cols) to avoid line wrapping in status output.
+///
+/// ## Errors
+///
+/// Returns `AgentStatusError::PtySpawnError` if the PTY or command fails to spawn.
+/// Returns `AgentStatusError::PtyWriteError` if writing to stdin fails.
+/// Returns `AgentStatusError::TimeoutError` if the overall session exceeds the timeout.
+pub async fn run_pty_interactive(
+    program: &str,
+    steps: &[InteractiveStep],
+    timeout_duration: Option<Duration>,
+) -> Result<String, AgentStatusError> {
+    let timeout_dur = timeout_duration.unwrap_or(Duration::from_secs(15));
+    let program = program.to_string();
+    let steps: Vec<InteractiveStep> = steps.to_vec();
+
+    tokio::task::spawn_blocking(move || {
+        run_pty_interactive_blocking(&program, &steps, timeout_dur)
+    })
+    .await
+    .map_err(|e| AgentStatusError::PtySpawnError(
+        format!("Task join error: {}", e)
+    ))?
+}
+
+fn run_pty_interactive_blocking(
+    program: &str,
+    steps: &[InteractiveStep],
+    timeout_dur: Duration,
+) -> Result<String, AgentStatusError> {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Instant;
+
+    let pty_system = native_pty_system();
+
+    let pair = pty_system.openpty(PtySize {
+        rows: 24,
+        cols: 120,
+        pixel_width: 0,
+        pixel_height: 0,
+    }).map_err(|e| AgentStatusError::PtySpawnError(
+        format!("Failed to open PTY: {}", e)
+    ))?;
+
+    let mut cmd = CommandBuilder::new(program);
+
+    let mut child = pair.slave.spawn_command(cmd)
+        .map_err(|e| AgentStatusError::PtySpawnError(
+            format!("Failed to spawn '{}': {}", program, e)
+        ))?;
+
+    let mut reader = pair.master.try_clone_reader()
+        .map_err(|e| AgentStatusError::PtyReadError(
+            format!("Failed to clone reader: {}", e)
+        ))?;
+
+    let mut writer = pair.master.take_writer()
+        .map_err(|e| AgentStatusError::PtyWriteError(
+            format!("Failed to get writer: {}", e)
+        ))?;
+
+    // CRITICAL: Drop slave so PTY gets EOF after child exits
+    drop(pair.slave);
+
+    // Start reader thread that accumulates output using chunked reads.
+    // Uses chunked read() instead of read_to_end() to handle EIO gracefully
+    // (EIO occurs after child is killed and is expected behavior).
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut output = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => output.extend_from_slice(&buf[..n]),
+                Err(_) => break, // EIO after kill is expected
+            }
+        }
+        tx.send(output).ok();
+    });
+
+    let start = Instant::now();
+
+    // Execute interactive steps
+    for step in steps {
+        if start.elapsed() >= timeout_dur {
+            let _ = child.kill();
+            return Err(AgentStatusError::TimeoutError(
+                format!("Interactive session timed out after {}s", timeout_dur.as_secs())
+            ));
+        }
+
+        match step {
+            InteractiveStep::Write(data) => {
+                writer.write_all(data.as_bytes()).map_err(|e| {
+                    AgentStatusError::PtyWriteError(format!("Write failed: {}", e))
+                })?;
+                writer.flush().map_err(|e| {
+                    AgentStatusError::PtyWriteError(format!("Flush failed: {}", e))
+                })?;
+            }
+            InteractiveStep::Wait(duration) => {
+                let remaining = timeout_dur.saturating_sub(start.elapsed());
+                thread::sleep((*duration).min(remaining));
+            }
+        }
+    }
+
+    // Drop writer so child sees EOF on stdin
+    drop(writer);
+
+    // Kill the child process to trigger reader EOF
+    let _ = child.kill();
+    let _ = child.wait();
+
+    // Collect output with remaining timeout
+    let remaining = timeout_dur.saturating_sub(start.elapsed());
+    let raw_output = rx.recv_timeout(remaining.max(Duration::from_secs(2)))
+        .map_err(|_| AgentStatusError::TimeoutError(
+            format!("Timed out waiting for output after {}s", timeout_dur.as_secs())
+        ))?;
+
+    let stripped = strip(&raw_output);
+
+    String::from_utf8(stripped)
+        .map_err(|e| AgentStatusError::ParseError(
+            format!("Output is not valid UTF-8: {}", e)
+        ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,6 +277,27 @@ mod tests {
     #[tokio::test]
     async fn test_nonexistent_command() {
         let result = run_pty_command("nonexistent_command_xyz", &[], None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_interactive_cat() {
+        // Use cat as an interactive program: write text, then collect output
+        let steps = vec![
+            InteractiveStep::Wait(Duration::from_millis(100)),
+            InteractiveStep::Write("hello interactive\n".to_string()),
+            InteractiveStep::Wait(Duration::from_millis(200)),
+        ];
+        let result = run_pty_interactive("cat", &steps, Some(Duration::from_secs(3))).await;
+        assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+        let output = result.unwrap();
+        assert!(output.contains("hello interactive"), "Output should contain written text, got: {}", output);
+    }
+
+    #[tokio::test]
+    async fn test_interactive_nonexistent() {
+        let steps = vec![InteractiveStep::Wait(Duration::from_millis(100))];
+        let result = run_pty_interactive("nonexistent_command_xyz", &steps, None).await;
         assert!(result.is_err());
     }
 }
