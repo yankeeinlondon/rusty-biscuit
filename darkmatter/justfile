@@ -78,9 +78,10 @@ codex *args="":
 # review this package using the Codex CLI
 review *args="":
     @clear
-    @echo "Performing a code review with the {{BOLD}}Darkmatter{{RESET}}"
-    @cd .. && codex review "review the code in the Darkmatter package; use the rust, darkmatter, biscuit-terminal, and clap skills during the review. Write your findings to the file 'darkmatter/docs/{YYYY}-{MM}. playa-review.md'" {{args}} || ( so-you-say "There was a problem running the code review in the Darkmatter package" >/dev/null 2>&1 && exit 1 )
-    @so-you-say "Review for Darkmatter package has completed." >/dev/null 2>&1 || exit 0
+    @echo "Performing a code review on the {{BOLD}}Darkmatter{{RESET}} package"
+    @echo ""
+    @cd .. && codex review "review the code in the Darkmatter package; use the rust, darkmatter, biscuit-terminal, and clap skills during the review. Write your findings to the file 'darkmatter/docs/{YYYY}-{MM}. playa-review.md'" {{args}} || ( so-you-say "There was a problem running the code review in the Playa package" >/dev/null 2>&1 && exit 1 )
+    @so-you-say "Review for Playa package has completed." >/dev/null 2>&1 || exit 0
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.
