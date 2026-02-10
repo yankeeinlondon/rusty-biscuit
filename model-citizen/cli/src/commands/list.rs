@@ -2,7 +2,12 @@
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
-use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
+use biscuit_terminal::components::table::table::{
+    Conditional,
+    Table,
+    TableCellContent,
+    TableColumn,
+};
 use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Alignment;
@@ -83,9 +88,11 @@ pub async fn run(
                 .with_type(ColumnType::String)
                 .with_alignment(Alignment::Right),
             TableColumn::new(Prose::new("Arch").fallback_render(&term))
-                .with_alignment(Alignment::Center),
+                .with_alignment(Alignment::Center)
+                .with_when(Conditional::WidthGreaterThan(89)),
             TableColumn::new(Prose::new("Source").fallback_render(&term))
-                .with_alignment(Alignment::Center),
+                .with_alignment(Alignment::Center)
+                .with_when(Conditional::WidthGreaterThan(69)),
         ];
 
         if verbose {
@@ -107,8 +114,14 @@ pub async fn run(
             .prefer_cursor_alignment();
 
         for m in &models {
+            let name_cell = if let Some(repo) = m.metadata.huggingface_repo.as_deref() {
+                let name_link = format!("<a href=\"https://huggingface.co/{repo}\">{}</a>", m.name);
+                TableCellContent::Text(Prose::new(name_link).fallback_render(&term))
+            } else {
+                TableCellContent::Text(m.name.clone())
+            };
             let mut row: Vec<TableCellContent> = vec![
-                TableCellContent::Text(m.name.clone()),
+                name_cell,
                 TableCellContent::Text(m.quantization.as_str().to_string()),
                 TableCellContent::Text(m.size_display()),
                 TableCellContent::Text(m.architecture.as_str().to_string()),
