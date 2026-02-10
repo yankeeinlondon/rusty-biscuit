@@ -12,7 +12,7 @@ capabilities.
 - Stateful `Audio` wrapper with pause position tracking
 - Builder API with fluent interface (`Playa`)
 - Optional async support via `async` feature
-- 53 embedded sound effects (feature-gated)
+- 85 embedded sound effects (feature-gated)
 
 ## Usage
 

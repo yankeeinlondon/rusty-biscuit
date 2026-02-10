@@ -11,10 +11,10 @@ playa/
 │   ├── playback.rs    # Sync/async playback functions
 │   ├── playa.rs       # Builder API (Playa struct)
 │   ├── types.rs       # Codec, AudioFileFormat, PlaybackOptions
-│   ├── effects.rs     # 53 embedded sound effects
+│   ├── effects.rs     # 85 embedded sound effects
 │   └── error.rs       # Error types
 ├── cli/           # Binary: `playa`
-└── effects/       # 53 embedded audio files (~30MB)
+└── effects/       # 85 embedded audio files (~31MB)
 ```
 
 ## TTS Integration (so-you-say)

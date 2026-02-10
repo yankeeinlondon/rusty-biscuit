@@ -16,11 +16,11 @@
 //! |---------|----------|---------|------|
 //! | `sfx-ui` | Doorbells, alerts, clicks, selections, window actions | 43 | ~4MB |
 //! | `sfx-cartoon` | Cartoon accents, cries | 13 | ~8MB |
-//! | `sfx-reactions` | Laughs, cheers, trombone | 6 | ~4MB |
+//! | `sfx-reactions` | Applause, laughs, cheers, trombone | 9 | ~4MB |
 //! | `sfx-scifi` | Phase jumps, phasers | 11 | ~3MB |
 //! | `sfx-atmosphere` | Music stings, transitions | 5 | ~7MB |
 //! | `sfx-motion` | Whooshes, air sounds | 7 | ~5MB |
-//! | **`sound-effects`** | **All categories** | **85** | **~31MB** |
+//! | **`sound-effects`** | **All categories** | **88** | **~31MB** |
 //!
 //! ## Usage
 //!
@@ -245,6 +245,15 @@ pub enum SoundEffect {
     CartoonCry,
 
     // === Reaction Sounds (sfx-reactions) ===
+    /// Crowd applause.
+    #[cfg(feature = "sfx-reactions")]
+    CrowdApplause,
+    /// Crowd applause (recital setting).
+    #[cfg(feature = "sfx-reactions")]
+    CrowdApplauseRecital,
+    /// Crowd applause (stadium setting).
+    #[cfg(feature = "sfx-reactions")]
+    CrowdApplauseStadium,
     /// Crowd laughter.
     #[cfg(feature = "sfx-reactions")]
     CrowdLaugh,
@@ -465,6 +474,14 @@ const CARTOON_CRY_BYTES: &[u8] = include_bytes!("../../effects/cartoon-cry.wav")
 
 // === Reaction Sounds (sfx-reactions) ===
 #[cfg(feature = "sfx-reactions")]
+const CROWD_APPLAUSE_BYTES: &[u8] = include_bytes!("../../effects/crowd-applause.wav");
+#[cfg(feature = "sfx-reactions")]
+const CROWD_APPLAUSE_RECITAL_BYTES: &[u8] =
+    include_bytes!("../../effects/crowd-applause-recital.wav");
+#[cfg(feature = "sfx-reactions")]
+const CROWD_APPLAUSE_STADIUM_BYTES: &[u8] =
+    include_bytes!("../../effects/crowd-applause-stadium.wav");
+#[cfg(feature = "sfx-reactions")]
 const CROWD_LAUGH_BYTES: &[u8] = include_bytes!("../../effects/crowd-laugh.wav");
 #[cfg(feature = "sfx-reactions")]
 const CROWD_LAUGH_APPLAUSE_BYTES: &[u8] = include_bytes!("../../effects/crowd-laugh-applause.wav");
@@ -668,6 +685,12 @@ impl SoundEffect {
 
             // === Reaction Sounds (sfx-reactions) ===
             #[cfg(feature = "sfx-reactions")]
+            Self::CrowdApplause => "crowd-applause",
+            #[cfg(feature = "sfx-reactions")]
+            Self::CrowdApplauseRecital => "crowd-applause-recital",
+            #[cfg(feature = "sfx-reactions")]
+            Self::CrowdApplauseStadium => "crowd-applause-stadium",
+            #[cfg(feature = "sfx-reactions")]
             Self::CrowdLaugh => "crowd-laugh",
             #[cfg(feature = "sfx-reactions")]
             Self::CrowdLaughApplause => "crowd-laugh-applause",
@@ -827,6 +850,9 @@ impl SoundEffect {
 
         #[cfg(feature = "sfx-reactions")]
         effects.extend_from_slice(&[
+            Self::CrowdApplause,
+            Self::CrowdApplauseRecital,
+            Self::CrowdApplauseStadium,
             Self::CrowdLaugh,
             Self::CrowdLaughApplause,
             Self::SadTrombone,
@@ -1017,6 +1043,12 @@ impl SoundEffect {
             "cartoon-cry" => Some(Self::CartoonCry),
 
             // === Reaction Sounds (sfx-reactions) ===
+            #[cfg(feature = "sfx-reactions")]
+            "crowd-applause" => Some(Self::CrowdApplause),
+            #[cfg(feature = "sfx-reactions")]
+            "crowd-applause-recital" => Some(Self::CrowdApplauseRecital),
+            #[cfg(feature = "sfx-reactions")]
+            "crowd-applause-stadium" => Some(Self::CrowdApplauseStadium),
             #[cfg(feature = "sfx-reactions")]
             "crowd-laugh" => Some(Self::CrowdLaugh),
             #[cfg(feature = "sfx-reactions")]
@@ -1221,6 +1253,12 @@ impl SoundEffect {
 
             // === Reaction Sounds (sfx-reactions) ===
             #[cfg(feature = "sfx-reactions")]
+            Self::CrowdApplause => CROWD_APPLAUSE_BYTES,
+            #[cfg(feature = "sfx-reactions")]
+            Self::CrowdApplauseRecital => CROWD_APPLAUSE_RECITAL_BYTES,
+            #[cfg(feature = "sfx-reactions")]
+            Self::CrowdApplauseStadium => CROWD_APPLAUSE_STADIUM_BYTES,
+            #[cfg(feature = "sfx-reactions")]
             Self::CrowdLaugh => CROWD_LAUGH_BYTES,
             #[cfg(feature = "sfx-reactions")]
             Self::CrowdLaughApplause => CROWD_LAUGH_APPLAUSE_BYTES,
@@ -1398,7 +1436,10 @@ impl SoundEffect {
             | Self::CartoonCry => "Cartoon",
 
             #[cfg(feature = "sfx-reactions")]
-            Self::CrowdLaugh
+            Self::CrowdApplause
+            | Self::CrowdApplauseRecital
+            | Self::CrowdApplauseStadium
+            | Self::CrowdLaugh
             | Self::CrowdLaughApplause
             | Self::SadTrombone
             | Self::SmallGroupCheer
@@ -1556,6 +1597,12 @@ impl SoundEffect {
             Self::CartoonCry => "exaggerated crying",
 
             // Reactions
+            #[cfg(feature = "sfx-reactions")]
+            Self::CrowdApplause => "crowd applause",
+            #[cfg(feature = "sfx-reactions")]
+            Self::CrowdApplauseRecital => "crowd applause (recital)",
+            #[cfg(feature = "sfx-reactions")]
+            Self::CrowdApplauseStadium => "crowd applause (stadium)",
             #[cfg(feature = "sfx-reactions")]
             Self::CrowdLaugh => "crowd laughter",
             #[cfg(feature = "sfx-reactions")]

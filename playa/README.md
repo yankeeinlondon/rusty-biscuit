@@ -11,7 +11,7 @@
     <li>small library and CLI binaries</li>
     <li>audio format detection from files, URLs, or bytes</li>
     <li>capability-ranked player matching with automatic failover</li>
-    <li>53 embedded sound effects across 6 categories</li>
+    <li>85 embedded sound effects across 6 categories</li>
 </ul>
 
 <p>

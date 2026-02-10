@@ -1,18 +1,18 @@
 # Sound Effects
 
-53 embedded sound effects across 6 categories, feature-gated to control binary size.
+85 embedded sound effects across 6 categories, feature-gated to control binary size.
 
 ## Feature Flags
 
 | Feature | Effects | Size |
 |---------|---------|------|
-| `sfx-ui` | 11 UI sounds | ~3MB |
+| `sfx-ui` | 43 UI sounds | ~4MB |
 | `sfx-cartoon` | 13 cartoon effects | ~8MB |
 | `sfx-reactions` | 6 reactions | ~4MB |
 | `sfx-scifi` | 11 sci-fi effects | ~3MB |
 | `sfx-atmosphere` | 5 atmosphere | ~7MB |
 | `sfx-motion` | 7 motion effects | ~5MB |
-| `sound-effects` | All 53 effects | ~30MB |
+| `sound-effects` | All 85 effects | ~31MB |
 
 ## Usage
 
@@ -39,6 +39,9 @@ for effect in SoundEffect::all() {
 ## CLI
 
 ```bash
-playa --effect sad-trombone    # Play effect
-playa --list-effects           # List all effects
+playa effect sad-trombone      # Play effect
+playa list-effects             # List all effects
+playa list-effects cartoon     # Filter by name, description, or category
 ```
+
+Effect names autocomplete in Bash, Zsh, and Fish shells.

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use clap::builder::PossibleValue;
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::CompleteEnv;
 use sniff::programs::InstalledHeadlessAudio;
@@ -67,7 +68,7 @@ enum Command {
     /// Play a built-in sound effect
     Effect {
         /// Name of the sound effect to play
-        #[arg(value_name = "NAME")]
+        #[arg(value_name = "NAME", value_parser = EffectNameParser)]
         name: String,
 
         #[command(flatten)]
@@ -87,6 +88,34 @@ enum Command {
     /// Show audio ducking backend info
     #[cfg(feature = "audio-ducking")]
     DuckInfo,
+}
+
+/// Value parser that provides sound effect names for shell completion
+/// while accepting any string (preserving fuzzy matching in the handler).
+#[derive(Clone)]
+struct EffectNameParser;
+
+impl clap::builder::TypedValueParser for EffectNameParser {
+    type Value = String;
+
+    fn parse_ref(
+        &self,
+        _cmd: &clap::Command,
+        _arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        value
+            .to_str()
+            .map(String::from)
+            .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        let values = SoundEffect::all()
+            .into_iter()
+            .map(|e| PossibleValue::new(e.name()).help(e.description()));
+        Some(Box::new(values))
+    }
 }
 
 /// Playback options shared between play and effect commands

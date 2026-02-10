@@ -133,13 +133,16 @@ fn cartoon_effects_count() {
 }
 
 // ============================================================================
-// Reaction Effects (sfx-reactions) - 6 effects, all WAV
+// Reaction Effects (sfx-reactions) - 9 effects, all WAV
 // ============================================================================
 
 #[test]
 fn reaction_effects_are_wav_format() {
     use SoundEffect::*;
     let effects = [
+        CrowdApplause,
+        CrowdApplauseRecital,
+        CrowdApplauseStadium,
         CrowdLaugh,
         CrowdLaughApplause,
         SadTrombone,
@@ -156,7 +159,10 @@ fn reaction_effects_are_wav_format() {
 #[test]
 fn reaction_effects_count() {
     use SoundEffect::*;
-    let effects: [SoundEffect; 6] = [
+    let effects: [SoundEffect; 9] = [
+        CrowdApplause,
+        CrowdApplauseRecital,
+        CrowdApplauseStadium,
         CrowdLaugh,
         CrowdLaughApplause,
         SadTrombone,
@@ -166,7 +172,7 @@ fn reaction_effects_count() {
     ];
 
     let set: HashSet<_> = effects.iter().collect();
-    assert_eq!(set.len(), 6, "All reaction effects should be distinct");
+    assert_eq!(set.len(), 9, "All reaction effects should be distinct");
 }
 
 // ============================================================================
@@ -331,7 +337,10 @@ fn all_effects_have_valid_bytes() {
         CartoonAccent11,
         CartoonAccent12,
         CartoonCry,
-        // Reactions (6)
+        // Reactions (9)
+        CrowdApplause,
+        CrowdApplauseRecital,
+        CrowdApplauseStadium,
         CrowdLaugh,
         CrowdLaughApplause,
         SadTrombone,
@@ -368,8 +377,8 @@ fn all_effects_have_valid_bytes() {
 
     assert_eq!(
         all_effects.len(),
-        53,
-        "Total effect count should be 53 (11+13+6+11+5+7)"
+        56,
+        "Total effect count should be 56 (11+13+9+11+5+7)"
     );
 
     for effect in &all_effects {
@@ -413,7 +422,10 @@ fn all_effects_are_distinct() {
         CartoonAccent11,
         CartoonAccent12,
         CartoonCry,
-        // Reactions (6)
+        // Reactions (9)
+        CrowdApplause,
+        CrowdApplauseRecital,
+        CrowdApplauseStadium,
         CrowdLaugh,
         CrowdLaughApplause,
         SadTrombone,
@@ -451,8 +463,8 @@ fn all_effects_are_distinct() {
     let set: HashSet<_> = all_effects.iter().collect();
     assert_eq!(
         set.len(),
-        53,
-        "All 53 effects should be distinct enum variants"
+        56,
+        "All 56 effects should be distinct enum variants"
     );
 }
 
@@ -460,7 +472,7 @@ fn all_effects_are_distinct() {
 fn format_distribution_matches_expectations() {
     use SoundEffect::*;
 
-    // WAV: 40 effects (UI=11, Cartoon=13, Reactions=6, Atmosphere=3, Motion=7)
+    // WAV: 43 effects (UI=11, Cartoon=13, Reactions=9, Atmosphere=3, Motion=7)
     let wav_effects: Vec<SoundEffect> = vec![
         // UI (11)
         Doorbell,
@@ -488,7 +500,10 @@ fn format_distribution_matches_expectations() {
         CartoonAccent11,
         CartoonAccent12,
         CartoonCry,
-        // Reactions (6)
+        // Reactions (9)
+        CrowdApplause,
+        CrowdApplauseRecital,
+        CrowdApplauseStadium,
         CrowdLaugh,
         CrowdLaughApplause,
         SadTrombone,
@@ -527,7 +542,7 @@ fn format_distribution_matches_expectations() {
     // MP3: 2 effects (Atmosphere)
     let mp3_effects: Vec<SoundEffect> = vec![CreepyDarkLogo, ElementalMagicSpellImpact];
 
-    assert_eq!(wav_effects.len(), 40, "Expected 40 WAV effects");
+    assert_eq!(wav_effects.len(), 43, "Expected 43 WAV effects");
     assert_eq!(ogg_effects.len(), 11, "Expected 11 OGG effects");
     assert_eq!(mp3_effects.len(), 2, "Expected 2 MP3 effects");
 
@@ -638,7 +653,10 @@ fn playa_format_matches_detection() {
         CartoonAccent11,
         CartoonAccent12,
         CartoonCry,
-        // Reactions (6)
+        // Reactions (9)
+        CrowdApplause,
+        CrowdApplauseRecital,
+        CrowdApplauseStadium,
         CrowdLaugh,
         CrowdLaughApplause,
         SadTrombone,
@@ -732,5 +750,5 @@ fn sound_effect_fuzzy_name_matching() {
 
 #[test]
 fn sound_effect_all_matches_total_count() {
-    assert_eq!(SoundEffect::all().len(), 85, "Expected 85 total effects");
+    assert_eq!(SoundEffect::all().len(), 88, "Expected 88 total effects");
 }

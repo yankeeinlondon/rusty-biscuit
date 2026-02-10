@@ -1,11 +1,11 @@
 ---
 name: playa
-description: Audio playback via host CLI players with format detection, capability-ranked player matching, and embedded sound effects. Use when working with audio playback, the playa package, so-you-say TTS CLI, or implementing sound effects.
+description: Audio playback via host CLI players with format detection, capability-ranked player matching, and 85 embedded sound effects. Use when working with audio playback, the playa package, so-you-say TTS CLI, or implementing sound effects.
 ---
 
 # playa
 
-Audio playback library that detects formats, matches the best available player, and provides 53 embedded sound effects.
+Audio playback library that detects formats, matches the best available player, and provides 85 embedded sound effects.
 
 ## Quick Start
 
@@ -43,16 +43,19 @@ effect.play()?;
 
 ```bash
 playa audio.wav                # Play file
-playa --fast audio.mp3         # 1.25x speed
-playa --effect sad-trombone    # Built-in effect
-playa --list-effects           # List all effects
-playa --players                # Show player table
+playa play --fast audio.mp3    # 1.25x speed
+playa effect sad-trombone      # Built-in effect
+playa list-effects             # List all effects
+playa list-effects cartoon     # Filter effects
+playa players                  # Show player table
 ```
+
+Shell completions are available for Bash, Zsh, and Fish. Effect names autocomplete at `playa effect <TAB>`.
 
 ## Detailed Topics
 
 - [Players](./players.md) - Capability scoring, 13 supported players
-- [Sound Effects](./effects.md) - 53 effects, feature flags
+- [Sound Effects](./effects.md) - 85 effects, feature flags
 - [Integration](./integration.md) - TTS, sniff-lib, patterns
 
 ## See Also
