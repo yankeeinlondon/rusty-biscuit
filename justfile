@@ -50,7 +50,7 @@ build *args="":
         if [ -f "$area/justfile" ]; then
             if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "build"; then
                 echo "Building $area..."
-                just -f "$area/justfile" build {{args}}
+                just -f "$area/justfile" build {{args}} || ( playa effect error-2 2>/dev/null && so-you-say "The ${area} package failed to build" 2>/dev/null && exit 1 )
             else
                 echo "- no BUILD command for the area **$area**" >&2
             fi
@@ -71,7 +71,7 @@ test *args="":
         if [ -f "$area/justfile" ]; then
             if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "test"; then
                 echo "Testing $area..."
-                just -f "$area/justfile" test {{args}}
+                just -f "$area/justfile" test {{args}}  || ( playa effect error-2 2>/dev/null && so-you-say "The ${area} package had failed tests" 2>/dev/null && exit 1 )
             else
                 echo "- no TEST command for the area **$area**" >&2
             fi
@@ -79,6 +79,7 @@ test *args="":
             echo "- no justfile for the area **$area**" >&2
         fi
     done
+    @playa crowd-applause-recital 2>/dev/null || exit 0
 
 # install binaries from all areas that have an install target
 install:
@@ -92,11 +93,11 @@ install:
         if [ -f "$area/justfile" ]; then
             if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "install"; then
                 echo "Installing from $area..."
-                just -f "$area/justfile" install
+                just -f "$area/justfile" install || ( so-you-say "The ${area} package failed during an attempt to install all packages!" && exit 1 )
             else
                 if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "build"; then
                     echo "No INSTALL command for $area, doing release build..."
-                    just -f "$area/justfile" build --release
+                    just -f "$area/justfile" build --release || ( so-you-say "The ${area} package failed to build while attempting a install on all packages." && exit 1 )
                 else
                     echo "- no INSTALL command for the area **$area**" >&2
                 fi
@@ -171,10 +172,11 @@ lint:
         if [ -f "$area/justfile" ]; then
             if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "lint"; then
                 echo "Linting $area..."
-                just -f "$area/justfile" lint
+                just -f "$area/justfile" lint || ( so-you-say "The ${area} package has lint errors." )
             else
                 if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "lint"; then
                     echo "No lint command for $area"
+                    so-you-say "The ${area} package does not define a lint command" 2>/dev/null || return 0
                 else
                     echo "- no lint command for the area **$area**" >&2
                 fi

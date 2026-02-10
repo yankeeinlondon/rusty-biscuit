@@ -32,9 +32,9 @@ lint *args="":
 install *args="":
     @echo ""
     @echo "{{BOLD}}Build Tree Hugger Library{{RESET}}"
-    @cargo build --release -p tree-hugger-cli
+    @cargo build --release -p tree-hugger-cli  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo "{{BOLD}}{{YELLOW}}Installing Tree Hugger CLI{{RESET}}"
-    @cargo install --path cli -- {{args}}
+    @cargo install --path cli -- {{args}}  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo "{{BOLD}}{{BLUE}}Tree Hugger CLI installed{{RESET}}"
     @echo ""

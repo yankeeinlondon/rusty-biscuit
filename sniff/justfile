@@ -42,14 +42,15 @@ lint *args="":
 install *args="":
     @echo ""
     @echo "{{BOLD}}Building Sniff Library{{RESET}}"
-    @cargo build --release -p sniff
+    @cargo build --release -p sniff  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo "{{BOLD}}{{YELLOW}}Installing Sniff CLI{{RESET}}"
-    @cargo build --release -p sniff-cli
-    @cargo install --path cli -- {{args}}
+    @cargo build --release -p sniff-cli  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @cargo install --path cli -- {{args}}  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo "{{BOLD}}{{BLUE}}Sniff CLI Installed{{RESET}}"
     @echo ""
+    @playa effect drop-4 2>/dev/null || return 0
 
 # build and show the docs for the library code
 docs:

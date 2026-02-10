@@ -48,10 +48,10 @@ install:
     @echo ""
     @echo -e "{{BOLD}}Building Claudine Library{{RESET}}"
     @echo ""
-    @cargo build -p claudine --release
+    @cargo build -p claudine --release  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo -e "{{BOLD}}{{YELLOW}}Installing Claudine CLI{{RESET}}"
-    @cargo install --path ./cli
+    @cargo install --path ./cli  || ( playa effect error-2 2>/dev/null && exit 1 )
 
 # Validate the source code without doing a full build
 check:

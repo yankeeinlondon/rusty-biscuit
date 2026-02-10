@@ -60,13 +60,14 @@ lint:
 install:
     @echo ""
     @echo "{{BOLD}}Building unchained-ai Library{{RESET}}"
-    @cargo build -p unchained-ai --release
+    @cargo build -p unchained-ai --release  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo "{{BOLD}}{{YELLOW}}Installing unchained-ai CLI ({{ITALIC}}unchained{{RESET}}{{BOLD}}{{YELLOW}}){{RESET}}"
-    @cargo install --path ./cli
+    @cargo install --path ./cli  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo "{{BOLD}}{{BLUE}}unchained-ai CLI installed{{RESET}}"
     @echo ""
+    @playa effect drop-4 2>/dev/null || return 0
 
 check:
     @echo ""

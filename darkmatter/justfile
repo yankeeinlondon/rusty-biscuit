@@ -29,7 +29,16 @@ lint *args="":
 
 # install latest release version of CLI
 install *args="":
-    @cargo install --path cli {{args}}
+    @echo "Building Darkmatter Library"
+    @echo
+    @cargo build -p darkmatter --release  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @echo
+    @echo "Installing Darkmatter CLI"
+    @cargo install --path cli {{args}}  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @echo
+    @echo "{{BOLD}}{{BLUE}}Installed Darkmatter CLI{{RESET}}"
+    @echo
+    @playa effect drop-4 2>/dev/null || return 0
 
 # build and show the docs for the library code
 docs:
@@ -47,3 +56,34 @@ commit:
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
+
+# Open Claude Code in yolo mode
+oc *args="":
+    @clear
+    @echo "Loading {{BOLD}}Opencode{{RESET}}"
+    @cd .. && opencode {{args}}
+
+# Open Opencode
+cc *args="":
+    @clear
+    @echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @cd .. && claude --dangerously-skip-permissions {{args}}
+
+# Open Codex CLI
+codex *args="":
+    @clear
+    @echo "Loading {{BOLD}}Codex CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @cd .. && codex --dangerously-bypass-approvals-and-sandbox {{args}}
+
+# review this package using the Codex CLI
+review *args="":
+    @clear
+    @echo "Performing a code review with the {{BOLD}}Darkmatter{{RESET}}"
+    @cd .. && codex review "review the code in the Darkmatter package; use the rust, darkmatter, biscuit-terminal, and clap skills during the review. Write your findings to the file 'darkmatter/docs/{YYYY}-{MM}. playa-review.md'" {{args}} || ( so-you-say "There was a problem running the code review in the Darkmatter package" >/dev/null 2>&1 && exit 1 )
+    @so-you-say "Review for Darkmatter package has completed." >/dev/null 2>&1 || exit 0
+
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} >/dev/null || true

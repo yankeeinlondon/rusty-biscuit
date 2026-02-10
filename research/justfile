@@ -43,11 +43,14 @@ install:
     @echo
     @echo "{{BOLD}}Building Research Library{{RESET}}"
     @echo ""
-    @cargo build --release -p research-cli
+    @cargo build --release -p research-cli || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo
     @echo "{{BOLD}}{{YELLOW}}Installing Research CLI{{RESET}}"
     @echo ""
-    @cargo install --path ./cli --locked
+    @cargo install --path ./cli --locked  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @echo ""
+    @echo "{{BOLD}}{{BLUE}}Installed Research CLI{{RESET}}"
+    @playa effect drop-4 2>/dev/null || return 0
 
 # run the debug release of the Research CLI
 cli *args="":
@@ -70,3 +73,20 @@ commit:
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
+
+# Open Claude Code in yolo mode
+oc *args="":
+    @clear
+    @echo "Loading {{BOLD}}Opencode{{RESET}}"
+    @cd .. && echo "Loading {{BOLD}}Opencode{{RESET}}" && opencode {{args}}
+
+# Open Opencode
+cc *args="":
+    @clear
+    @echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @cd .. && echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})" && claude --dangerously-skip-permissions {{args}}
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{YELLOW2}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} >/dev/null || true
