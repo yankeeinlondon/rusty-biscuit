@@ -201,13 +201,16 @@ review *args="":
 _refresh_docs *args="":
     @echo
     @echo -e "🏃 starting the refresh of the {{ITALIC}}documents{{RESET}} in {{BOLD}}{{PACKAGE}}{{RESET}}"
-    @PROMPT="$(cat ../.ai/prompt/refresh_documentation.md)\n\n## Task\n Your task is to orchestrate the update of all of the following documents: $(just readme_files) {{DOCS}} {{args}} based on changes you've discovered in the source code.\n\n" && just _claude "${PROMPT}"
+    @PROMPT="$(cat ../.ai/prompt/refresh_documentation.md)\n\n## Task\n Your task is to orchestrate the update of all of the following documents: $(just readme_files) {{DOCS}} {{args}} based on changes you've discovered in the source code. Your focus is exclusively on the the {{LIB_NAME}} package area but you SHOULD use the skills associated with any other packages from this monorepo which {{LIBRARY}} or {{CLI}} depend on; here are the dependencies: \n$(deps)\nOnce you have orchestrated the update of all files you should provide a summary of what was changed in each file. If nothing changed in a particular documentation file then explicitly state that too.\n" && just _claude "${PROMPT}"
 
-_refresh_skill:
+_refresh_skill SUMMARY *args:
     @echo
+    @just _speak "The documentation files for {{PACKAGE}} were updated and now we're starting the update of the skill files"
     @echo -e "🏃 starting the update of the {{ITALIC}}skill files{{RESET}} for {{BOLD}}{{PACKAGE}}{{RESET}}"
+    @echo
+    @PROMPT="$(cat ../.ai/prompts/agent-skills.md)## Task\nYour task is to update the {{LIBRARY}} skill located in @/.claude/skills/{{LIBRARY}}/ . To provide insight we've just finished updating the following documents in the {{LIB_NAME}} package area to be completely aligned with the source code: $(just readme_files) {{DOCS}} {{args}}. The summary description of what changed to these documents is as follows:\n{{SUMMARY}}\n\nThe latest information should inform a good deal of how you'll update the existing agent skill but you can also use git to detect how these documents have changed. Read the @/.claude/skills/{{LIBRARY}}/SKILL.md first to understand the current skill structure. Try to make sure you retain existing knowledge found in the skill; you are not just writing a new skill you're updating an an existing one." && just _claude "${PROMPT}"
 
-refresh_skill:
+refresh_skill *args="":
     @echo
     @echo -e "Refreshing the {{BOLD}}{{LIBRARY}}{{RESET}} {{BLUE}}skill{{RESET}}"
     @echo
@@ -216,8 +219,9 @@ refresh_skill:
     @echo -e "- once the {{ITALIC}}drift{{RESET}} of the documentation files has been eliminated we'll rework the {{BOLD}}skill{{RESET}} files"
     @echo -e "- as a final step, we'll look at whether the {{BOLD}}CLAUDE.md{{RESET}} file would benefit from being updated"
     @echo -e "  based on the changes made"
-    @just _refresh_docs
-    @just _refresh_skill
+    @export SUMMARY="$(just _refresh_docs {{args}})"
+    @export SKILL_SUMMARY="$(just _refresh_skill "${SUMMARY}" {{args}})"
+    @just _claude "The documentation for and the agent skill for the package {{LIBRARY}} have been updated. Your task is to determine if the @CLAUDE.md file should be updated as well. Here are the documentation updates which were performed:\n${SUMMARY}\n\nHere are the skill changes which were performed:\b${SKILL_SUMMARY}"
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.
