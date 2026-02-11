@@ -93,12 +93,6 @@ pub fn validate_structure(content: &str) -> StructureValidation {
     let mut validation = StructureValidation::new();
 
     if headings.is_empty() {
-        validation.add_issue(StructureIssue::new(
-            StructureIssueKind::NoHeadings,
-            String::new(),
-            0,
-            "Document has no headings".to_string(),
-        ));
         return validation;
     }
 
@@ -195,7 +189,9 @@ pub fn normalize(
     let headings = extract_headings(content);
 
     if headings.is_empty() {
-        return Err(NormalizationError::NoHeadings);
+        let target_level = target.unwrap_or(HeadingLevel::H1);
+        let report = NormalizationReport::new(None, target_level, 0);
+        return Ok((content.to_string(), report));
     }
 
     let root_level = headings[0].level;
@@ -335,9 +331,9 @@ mod tests {
         let content = "Just some text without headings.";
         let validation = validate_structure(content);
 
-        assert!(!validation.is_well_formed());
-        let issues = validation.issues_of_kind(StructureIssueKind::NoHeadings);
-        assert_eq!(issues.len(), 1);
+        assert!(validation.is_well_formed());
+        assert_eq!(validation.heading_count, 0);
+        assert!(validation.root_level.is_none());
     }
 
     #[test]
@@ -401,9 +397,10 @@ mod tests {
     #[test]
     fn test_normalize_no_headings() {
         let content = "No headings here";
-        let result = normalize(content, Some(HeadingLevel::H1));
+        let (result, report) = normalize(content, Some(HeadingLevel::H1)).unwrap();
 
-        assert!(matches!(result, Err(NormalizationError::NoHeadings)));
+        assert_eq!(result, content);
+        assert!(!report.has_changes());
     }
 
     #[test]

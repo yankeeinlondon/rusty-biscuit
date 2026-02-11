@@ -294,6 +294,17 @@ impl Markdown {
 
     /// Validates the document's heading structure.
     ///
+    /// A document with no headings is trivially well-formed (there is no
+    /// heading structure to violate). When headings are present, the document
+    /// is well-formed when all of the following hold:
+    ///
+    /// - **No hierarchy violations** — no heading appears shallower than the
+    ///   root level (the level of the first heading). For example, if the
+    ///   document starts with H3, a later H2 is a violation.
+    /// - **No skipped levels** — headings descend at most one level at a time.
+    ///   For example, H2 followed directly by H4 (skipping H3) is an issue.
+    /// - **At most one H1** — multiple H1 headings are flagged.
+    ///
     /// ## Examples
     ///
     /// ```

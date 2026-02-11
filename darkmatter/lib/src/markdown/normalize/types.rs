@@ -88,9 +88,6 @@ pub enum StructureIssueKind {
     /// Multiple H1 headings in a document that should have only one.
     MultipleH1,
 
-    /// The document has no headings at all.
-    NoHeadings,
-
     /// A heading would overflow H6 after re-leveling.
     /// Example: Re-leveling an H5 document to H3 would push H6 children to H8.
     LevelOverflow,
@@ -102,7 +99,6 @@ impl std::fmt::Display for StructureIssueKind {
             Self::HierarchyViolation => write!(f, "hierarchy violation"),
             Self::SkippedLevel => write!(f, "skipped level"),
             Self::MultipleH1 => write!(f, "multiple H1 headings"),
-            Self::NoHeadings => write!(f, "no headings"),
             Self::LevelOverflow => write!(f, "level overflow"),
         }
     }
@@ -400,10 +396,6 @@ impl NormalizationReport {
 /// Errors that can occur during document normalization.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum NormalizationError {
-    /// The document has no headings to normalize.
-    #[error("Document has no headings")]
-    NoHeadings,
-
     /// Re-leveling would push some headings beyond H6.
     #[error(
         "Cannot re-level to {target}: would push {affected_count} heading(s) beyond H6 \
@@ -517,10 +509,10 @@ mod tests {
     fn test_structure_validation_add_issue() {
         let mut validation = StructureValidation::new();
         validation.add_issue(StructureIssue::new(
-            StructureIssueKind::NoHeadings,
+            StructureIssueKind::MultipleH1,
             String::new(),
             0,
-            "No headings found".to_string(),
+            "Multiple H1 headings".to_string(),
         ));
 
         assert!(!validation.is_valid);
@@ -585,12 +577,6 @@ mod tests {
 
         assert_eq!(correction.children_adjusted, 2);
         assert!(correction.description.contains("Demoted"));
-    }
-
-    #[test]
-    fn test_normalization_error_no_headings() {
-        let err = NormalizationError::NoHeadings;
-        assert_eq!(format!("{}", err), "Document has no headings");
     }
 
     #[test]
