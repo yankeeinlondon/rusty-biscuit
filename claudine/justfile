@@ -18,7 +18,14 @@ LIBRARY := lowercase(PACKAGE)
 CLI := lowercase(PACKAGE) + "-cli"
 CLI_PATH := "./cli"
 DOCS := ""
+TODAY := `date +%F`
 
+# the temp file for the documents prompt
+DOCS_PROMPT := "../.ai/logs/" + TODAY + ". docs_prompt_for_" + LIBRARY + "_docs_prompt.md"
+# the temp file for the skills prompt
+SKILL_PROMPT := "../.ai/logs/" + TODAY + ". skill_prompt_for_" + LIBRARY + "_skill_prompt.md"
+# the captured summary from the docs refresh step
+DOCS_SUMMARY := "../.ai/logs/" + TODAY +  ". doc_update_summary_for_" + LIBRARY + "_docs_summary.md"
 
 default:
     #!/usr/bin/env bash
@@ -39,13 +46,67 @@ default:
 _speak *args:
     @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
 
-# Ask Claude Code in a non-interactive session
-_claude PROMPT:
-    @unset ANTHROPIC_API_KEY && cd .. && claude --dangerously-skip-permissions -p \'{{PROMPT}}\'
-
 # Ask Claude Code via a prompt file in a non-interactive session
+# NOTE: just hangs when large multi-line strings are passed via {{PROMPT}} parameters.
+# All callers should write their prompt to a temp file and call this recipe instead.
 _claude_file PROMPT_FILE:
-    @unset ANTHROPIC_API_KEY && cd .. && claude --dangerously-skip-permissions -p "$(cat {{PROMPT_FILE}})"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo -e "\033[2m⏳ claude is working (max 30 turns)...\033[0m" >&2
+    (while true; do sleep 30; printf "." >&2; done) &
+    DOTS_PID=$!
+    trap 'kill $DOTS_PID 2>/dev/null || true' EXIT
+    unset ANTHROPIC_API_KEY
+    PROMPT_CONTENT="$(cat "{{PROMPT_FILE}}")"
+    cd .. && claude --dangerously-skip-permissions --max-turns 30 -p "$PROMPT_CONTENT"
+    echo -e "\n\033[2m✓ claude finished\033[0m" >&2
+
+# Render the documentation refresh prompt template.
+#
+# Placeholder keys in the template: DOCS, ARGS, LIBRARY, CLI, LIB_NAME, DEPS
+_docs_prompt TEMPLATE DOCS ARGS LIBRARY CLI LIB_NAME DEPS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TEMPLATE_CONTENT="$(cat "{{TEMPLATE}}")"
+    DOCS_VALUE={{quote(DOCS)}}
+    ARGS_VALUE={{quote(ARGS)}}
+    LIBRARY_VALUE={{quote(LIBRARY)}}
+    CLI_VALUE={{quote(CLI)}}
+    LIB_NAME_VALUE={{quote(LIB_NAME)}}
+    DEPS_VALUE={{quote(DEPS)}}
+    OPEN=$'\x7b\x7b'
+    CLOSE=$'\x7d\x7d'
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DOCS${CLOSE}/${DOCS_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}ARGS${CLOSE}/${ARGS_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIBRARY${CLOSE}/${LIBRARY_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}CLI${CLOSE}/${CLI_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIB_NAME${CLOSE}/${LIB_NAME_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DEPS${CLOSE}/${DEPS_VALUE}}"
+    mkdir -p "$(dirname "{{DOCS_PROMPT}}")"
+    printf '%s\n' "$TEMPLATE_CONTENT" > "{{DOCS_PROMPT}}"
+
+# Render the skill refresh prompt template.
+#
+# Placeholder keys in the template: LIBRARY, LIB_NAME, DOCS, SUMMARY, ARGS
+_skill_prompt TEMPLATE LIBRARY LIB_NAME DOCS SUMMARY_FILE ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TEMPLATE_CONTENT="$(cat "{{TEMPLATE}}")"
+    LIBRARY_VALUE={{quote(LIBRARY)}}
+    LIB_NAME_VALUE={{quote(LIB_NAME)}}
+    DOCS_VALUE={{quote(DOCS)}}
+    ARGS_VALUE={{quote(ARGS)}}
+    SUMMARY_VALUE="$(cat "{{SUMMARY_FILE}}")"
+    OPEN=$'\x7b\x7b'
+    CLOSE=$'\x7d\x7d'
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIBRARY${CLOSE}/${LIBRARY_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIB_NAME${CLOSE}/${LIB_NAME_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DOCS${CLOSE}/${DOCS_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}SUMMARY${CLOSE}/${SUMMARY_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}ARGS${CLOSE}/${ARGS_VALUE}}"
+    mkdir -p "$(dirname "{{SKILL_PROMPT}}")"
+    printf '%s\n' "$TEMPLATE_CONTENT" > "{{SKILL_PROMPT}}"
+
 
 # Build the library and CLI
 build *args="":
@@ -199,18 +260,24 @@ review *args="":
     @just _speak "Review for {{LIB_NAME}} package has completed."
 
 _refresh_docs *args="":
-    @echo
-    @echo -e "🏃 starting the refresh of the {{ITALIC}}documents{{RESET}} in {{BOLD}}{{PACKAGE}}{{RESET}}"
-    @PROMPT="$(cat ../.ai/prompt/refresh_documentation.md)\n\n## Task\n Your task is to orchestrate the update of all of the following documents: $(just readme_files) {{DOCS}} {{args}} based on changes you've discovered in the source code. Your focus is exclusively on the the {{LIB_NAME}} package area but you SHOULD use the skills associated with any other packages from this monorepo which {{LIBRARY}} or {{CLI}} depend on; here are the dependencies: \n$(deps)\nOnce you have orchestrated the update of all files you should provide a summary of what was changed in each file. If nothing changed in a particular documentation file then explicitly state that too.\n" && just _claude "${PROMPT}"
+    @echo >&2
+    @echo -e "🏃 starting the refresh of the {{ITALIC}}documents{{RESET}} in {{BOLD}}{{PACKAGE}}{{RESET}}: {{DIM}}$(just readme_files) {{DOCS}} {{args}}{{RESET}}" >&2
+    @just _docs_prompt "../.ai/prompts/refresh_documentation.md" "$(just readme_files)" "{{args}}" "{{LIBRARY}}" "{{CLI}}" "{{LIB_NAME}}" "$(just deps)"
+    @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{DOCS_PROMPT}}{{RESET}}" >&2
+    @just _claude_file "{{DOCS_PROMPT}}"
 
-_refresh_skill SUMMARY *args:
-    @echo
+
+_refresh_skill SUMMARY_FILE *args:
     @just _speak "The documentation files for {{PACKAGE}} were updated and now we're starting the update of the skill files"
-    @echo -e "🏃 starting the update of the {{ITALIC}}skill files{{RESET}} for {{BOLD}}{{PACKAGE}}{{RESET}}"
-    @echo
-    @PROMPT="$(cat ../.ai/prompts/agent-skills.md)## Task\nYour task is to update the {{LIBRARY}} skill located in @/.claude/skills/{{LIBRARY}}/ . To provide insight we've just finished updating the following documents in the {{LIB_NAME}} package area to be completely aligned with the source code: $(just readme_files) {{DOCS}} {{args}}. The summary description of what changed to these documents is as follows:\n{{SUMMARY}}\n\nThe latest information should inform a good deal of how you'll update the existing agent skill but you can also use git to detect how these documents have changed. Read the @/.claude/skills/{{LIBRARY}}/SKILL.md first to understand the current skill structure. Try to make sure you retain existing knowledge found in the skill; you are not just writing a new skill you're updating an an existing one." && just _claude "${PROMPT}"
+    @echo >&2
+    @echo -e "🏃 starting the update of the {{ITALIC}}skill files{{RESET}} for {{BOLD}}{{PACKAGE}}{{RESET}}" >&2
+    @echo >&2
+    @just _skill_prompt "../.ai/prompts/agent-skills.md" "{{LIBRARY}}" "{{LIB_NAME}}" "$(just readme_files)" "{{SUMMARY_FILE}}" "{{args}}"
+    @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{SKILL_PROMPT}}{{RESET}}" >&2
+    @just _claude_file "{{SKILL_PROMPT}}"
 
-refresh_skill *args="":
+# fix documentation drift and update the skill
+drift *args="":
     @echo
     @echo -e "Refreshing the {{BOLD}}{{LIBRARY}}{{RESET}} {{BLUE}}skill{{RESET}}"
     @echo
@@ -218,10 +285,10 @@ refresh_skill *args="":
     @echo -e "  {{DIM}}{{ITALIC}}passed in by caller{{RESET}})"
     @echo -e "- once the {{ITALIC}}drift{{RESET}} of the documentation files has been eliminated we'll rework the {{BOLD}}skill{{RESET}} files"
     @echo -e "- as a final step, we'll look at whether the {{BOLD}}CLAUDE.md{{RESET}} file would benefit from being updated"
-    @echo -e "  based on the changes made"
-    @export SUMMARY="$(just _refresh_docs {{args}})"
-    @export SKILL_SUMMARY="$(just _refresh_skill "${SUMMARY}" {{args}})"
-    @just _claude "The documentation for and the agent skill for the package {{LIBRARY}} have been updated. Your task is to determine if the @CLAUDE.md file should be updated as well. Here are the documentation updates which were performed:\n${SUMMARY}\n\nHere are the skill changes which were performed:\b${SKILL_SUMMARY}"
+    @echo -e "  based on the changes made\n"
+
+    @DOC_SUMMARY_FILE="{{DOCS_SUMMARY}}" && mkdir -p "$(dirname "$DOC_SUMMARY_FILE")" && just _refresh_docs {{args}} > "$DOC_SUMMARY_FILE" && just _refresh_skill "$DOC_SUMMARY_FILE" "{{args}}"
+
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.

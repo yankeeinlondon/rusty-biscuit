@@ -84,3 +84,14 @@ my-skill/
   agents/
     openai.yaml            # optional in some ecosystems (UI + deps)
 ```
+
+
+## Task
+
+Your task is to update the {{LIBRARY}} skill located in @/.claude/skills/{{LIBRARY}}/ . To provide insight we've just finished updating the following documents in the {{LIB_NAME}} package area to be completely aligned with the source code: $(just readme_files) {{DOCS}} {{ARGS}}. The summary description of what changed to these documents is as follows:
+
+{{SUMMARY}}
+
+The latest information should inform a good deal of how you'll update the existing agent skill but you can also use git to detect how these documents have changed. Read the @/.claude/skills/{{LIBRARY}}/SKILL.md first to understand the current skill structure. Try to make sure you retain existing knowledge found in the skill; you are not just writing a new skill you're updating an an existing one.
+
+

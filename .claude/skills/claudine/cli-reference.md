@@ -18,7 +18,7 @@ Environment variables:
 
 ## `claudine about`
 
-Display rich help documentation using darkmatter markdown rendering.
+Display rich help documentation using darkmatter markdown rendering with biscuit-terminal fallback.
 
 ```bash
 claudine about
@@ -28,7 +28,13 @@ claudine about
 
 ## `claudine init`
 
-Interactive setup wizard for initial configuration.
+Interactive setup wizard for initial configuration. Walks through 5 phases:
+
+1. **Agent Discovery** — detects installed agentic CLIs on the system
+2. **Event Selection** — choose which events to subscribe to (filters to hook-supported events)
+3. **Action Configuration** — configure actions per event (sound effects, TTS, logging, etc.)
+4. **Global Settings** — TTS provider selection, default log targets
+5. **Write & Register** — saves `~/.hooker` config and registers hooks with each provider
 
 ```bash
 claudine init [OPTIONS]
@@ -39,14 +45,6 @@ claudine init [OPTIONS]
 | `--quick` | Use defaults without prompting |
 | `--repo` | Create project-scoped configuration |
 
-**Interactive Flow:**
-
-1. **Agent Discovery** - Scan for installed agents
-2. **Event Selection** - Choose which events to hook
-3. **Action Configuration** - Configure actions per event
-4. **Global Settings** - TTS voice, defaults
-5. **Write & Register** - Save config and register with agents
-
 **Quick Mode:**
 
 ```bash
@@ -55,16 +53,18 @@ claudine init --quick
 
 Creates configuration with sensible defaults:
 - All detected agents enabled
+- `session_start` → SoundEffect (power-up)
 - `turn_complete` → SoundEffect (success)
 - `tool_error` → SoundEffect (error)
 - `permission_request` → SoundEffect (notification)
-- `session_start` → SoundEffect (power-up)
+
+`--repo` creates `.hooker` in the current directory (project-scoped) and adds it to `.gitignore`.
 
 ---
 
 ## `claudine hooks`
 
-Show registered hooks for all detected agents.
+Inspect hook registrations and provider capabilities.
 
 ```bash
 claudine hooks [OPTIONS] [PROVIDER]
@@ -72,11 +72,18 @@ claudine hooks [OPTIONS] [PROVIDER]
 
 | Option | Description |
 |--------|-------------|
-| `--support` | Show provider event support matrix (✓/○/-) |
-| `--mapping` | Show native event name mappings |
-| `--describe` | Show event descriptions and schemas |
-| `--fix` | Auto-fix invalid sound effect names |
-| `-v` | Verbose mode with per-event action counts |
+| *(none)* | Table of providers with install status and subscribed hooks |
+| `-v` | Adds action count indicators per event |
+| `<provider>` | Detailed event/action view for one provider (fuzzy matching) |
+| `--support` | Event support matrix across all providers (✅ hook / ⛔️ non-hook / ❌ none) |
+| `--mapping` | Native event name mappings per provider |
+| `--describe` | Event descriptions, payload schemas, and return schemas |
+| `--variables` | All 29 template variables with current detected values |
+| `--fix` | Validate sound effect names and auto-fix with suggestions |
+
+**Provider fuzzy matching**: commands that accept a provider name use a 3-tier resolution: exact match → prefix match → contains match. This lets users type `cl` instead of `claude`.
+
+**Sound effect validation**: `hooks --fix` uses a 5-tier fuzzy matching algorithm (exact, normalized, prefix, contains, Levenshtein-like) to suggest replacements for invalid effect names.
 
 **Basic output:**
 
@@ -111,17 +118,18 @@ Shows which events each provider supports:
 
 ## `claudine link`
 
-Synchronize skills across all detected providers.
+Synchronize skills, commands, and agents across providers via symlinks.
 
 ```bash
-claudine link [OPTIONS]
+claudine link [OPTIONS] [PROVIDER]
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--dry-run` | Preview changes without creating symlinks |
-| `--provider <name>` | Only link to/from specific provider |
-| `--replace-duplicates` | Replace duplicate skills with symlinks |
+| `--support` | Provider resource support matrix (Skill/Command/Agent/Script) |
+| `<provider>` | Detailed capability view for one provider (fuzzy matching) |
+| `--dry-run` | Preview what would be linked without creating symlinks |
+| `--filter <name>` | Link only a specific skill by name |
 | `-v, --verbose` | Show detailed hash values and paths |
 
 **Behavior:**
@@ -150,7 +158,7 @@ Conflicts:
 
 ## `claudine sync`
 
-Re-apply hook registrations based on current `~/.hooker` configuration.
+Re-apply hook registrations to match the current config.
 
 ```bash
 claudine sync [OPTIONS]
@@ -184,8 +192,6 @@ Use `--fix` to automatically remove them:
 claudine sync --fix
 ```
 
-This removes unsupported events from `~/.hooker` and saves the cleaned config.
-
 Preview what would be removed:
 
 ```bash
@@ -196,7 +202,7 @@ claudine sync --fix --dry-run
 
 ## `claudine handle <event>`
 
-Process an event (used by provider hooks, not typically called directly).
+Process an incoming event from a provider hook. Reads JSON payload from stdin, auto-detects the provider from payload structure (or accepts `--provider` override), resolves environment context, and dispatches through the event pipeline.
 
 ```bash
 claudine handle <EVENT> [OPTIONS]
@@ -212,6 +218,8 @@ claudine handle <EVENT> [OPTIONS]
 
 **Exit codes:** `0` = success, `2` = block (if supported)
 
+**Stdin auto-detection**: provider is detected from JSON payload structure (`hook_event_name` → Claude, `type` + `thread_id` → Codex, etc.) so hooks don't need to pass `--provider` explicitly.
+
 ```bash
 echo '{"hook_event_name": "PreToolUse", "tool_name": "Bash"}' | claudine handle before_tool
 ```
@@ -220,11 +228,13 @@ echo '{"hook_event_name": "PreToolUse", "tool_name": "Bash"}' | claudine handle 
 
 ## `claudine dry-run <event>`
 
-Test event handling without executing actions.
+Test what would happen for an event without side effects.
 
 ```bash
-claudine dry-run <EVENT>
+claudine dry-run <EVENT> [--provider <name>]
 ```
+
+Accepts event names in multiple formats: canonical (`turn_complete`), native (`Stop`), PascalCase (`TurnComplete`), kebab-case (`turn-complete`) — all case-insensitive. When no stdin is provided, generates realistic mock payloads for the selected provider.
 
 Shows:
 - Which actions would fire
@@ -259,7 +269,7 @@ claudine completions fish > ~/.config/fish/completions/claudine.fish
 
 ## `claudine uninstall`
 
-Remove all Claudine hooks from agent configs.
+Remove hook registrations from all detected agents.
 
 ```bash
 claudine uninstall [OPTIONS]
@@ -273,6 +283,44 @@ claudine uninstall [OPTIONS]
 1. Deregisters hooks from all agent configs
 2. Removes backup directory (`~/.claudine/backups/`)
 3. Optionally removes `~/.hooker`
+
+---
+
+## CLI Module Structure
+
+```
+cli/src/
+├── main.rs              → Entry point, clap parser, command dispatch
+├── log.rs               → Output formatting (message/data/info/warn/error)
+└── commands/
+    ├── about.rs         → Rich help rendering
+    ├── completions.rs   → Shell completion generation
+    ├── dry_run.rs       → Event simulation with mock payloads
+    ├── handle.rs        → Event processing from stdin
+    ├── hooks.rs         → Hook inspection and validation
+    ├── link.rs          → Skill synchronization management
+    ├── sync.rs          → Hook re-registration
+    ├── uninstall.rs     → Hook removal
+    └── init/
+        ├── mod.rs       → Wizard orchestration (interactive + quick modes)
+        ├── prompts.rs   → inquire-based interactive prompts
+        └── defaults.rs  → Default configs and event-to-action mappings
+```
+
+## Output System
+
+All user-facing output goes through `log.rs`:
+
+| Function | Target | Purpose |
+|----------|--------|---------|
+| `message()` | stderr | Always visible (status messages) |
+| `data()` | stdout | Pipeable data output |
+| `output()` | stdout | Inline output (no trailing newline) |
+| `info()` | stderr | Only when verbosity enabled |
+| `warn()` | stderr | Yellow "warning:" prefix |
+| `error()` | stderr | Red "error:" prefix |
+
+Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` / `{{cyan}}` / `{{dim}}` markup, UnorderedList, OSC8 hyperlinks).
 
 ---
 

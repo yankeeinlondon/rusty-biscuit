@@ -5,11 +5,11 @@ description: Universal event handler and skill linker for agentic CLIs (Claude, 
 
 ## Purpose
 
-Claudine provides:
+Claudine normalizes 16 lifecycle events across 7 agentic CLI providers into a single configuration, then executes actions (TTS, sound effects, logging, shell commands) when those events fire. Also synchronizes skills, commands, and agents between providers via symlinks.
 
 1. **Universal event handling** - React to agent lifecycle events across 7 CLI providers
-2. **Skill linking** - Synchronize skills across provider directories using symlinks
-3. **Non-destructive integration** - Registers hooks without clobbering existing configs
+2. **Skill linking** - Synchronize skills, commands, agents, and scripts across provider directories
+3. **Non-destructive integration** - Atomic config writes, backup utilities, registers hooks without clobbering
 
 ## Quick Start
 
@@ -29,42 +29,53 @@ claudine link
 
 ## Supported Providers
 
-| Provider | Hook Support | Skills | Config Method |
-|----------|:------------:|:------:|---------------|
-| Claude | ✓ Hook | ✓ | `settings.json` hooks |
-| Codex | Partial* | ✓ | `config.toml` notify + JSONL |
-| Gemini | ✓ Hook | ✓ | `settings.json` hooks |
-| Goose | NonHook | - | Stream-json + env var |
-| Kimi Code | NonHook | - | Wire mode JSON-RPC |
-| OpenCode | ✓ Hook | ✓ | `opencode.json` plugins |
-| Qwen Code | NonHook | ✓ | Stream-json output |
+| Provider | Hook | NonHook | Skills | Config Method |
+|----------|:----:|:-------:|:------:|---------------|
+| Claude Code | ✓ | - | ✓ | `settings.json` hooks |
+| Codex CLI | partial | ✓ | ✓ | `config.toml` notify + JSONL stream |
+| Gemini CLI | ✓ | - | ✓ | `settings.json` hooks |
+| Goose | - | ✓ | - | Stream-json + env var |
+| Kimi Code | - | ✓ | - | Wire mode JSON-RPC |
+| OpenCode | ✓ | - | ✓ | `opencode.json` plugins |
+| Qwen Code | - | ✓ | ✓ | Stream-json output |
 
-*Codex: `turn_complete` via hook; other events via JSONL stream
-**NonHook**: Requires wrapper/proxy (not yet implemented)
+**Hook** = native hook/plugin system (config-driven).
+**NonHook** = requires wrapper or stream parsing (not yet implemented for Goose/Kimi/Qwen).
 
 ## Event Model
 
-15 normalized events across providers:
+16 normalized lifecycle events across 7 providers:
 
 | Category | Events |
 |----------|--------|
 | Session | `session_start`, `session_end` |
+| Prompt | `before_prompt` |
 | Tool | `before_tool`, `after_tool`, `tool_error` |
-| Turn | `before_prompt`, `turn_complete`, `turn_error` |
-| Other | `permission_request`, `subagent_start/stop`, `before/after_model`, `before_compact`, `notification` |
+| Turn | `turn_complete`, `turn_error` |
+| Permission | `permission_request`, `human_in_the_loop` |
+| Subagent | `subagent_start`, `subagent_stop` |
+| Model | `before_model`, `after_model` |
+| Other | `before_compact`, `notification` |
 
 ## CLI Commands
 
 | Command | Purpose |
 |---------|---------|
-| `claudine init [--quick] [--repo]` | Setup wizard |
-| `claudine hooks [provider]` | Show hook status |
+| `claudine init [--quick] [--repo]` | Setup wizard (interactive or quick defaults) |
+| `claudine hooks [provider]` | Show hook status for all or one provider |
 | `claudine hooks --support` | Event support matrix |
 | `claudine hooks --mapping` | Native event mappings |
-| `claudine link [--dry-run]` | Sync skills |
-| `claudine sync [--dry-run]` | Re-apply registrations |
-| `claudine handle <event>` | Process event (hook target) |
-| `claudine uninstall` | Remove all hooks |
+| `claudine hooks --describe` | Event descriptions and payload schemas |
+| `claudine hooks --variables` | Template variables with current values |
+| `claudine hooks --fix` | Auto-fix invalid sound effect names |
+| `claudine link [--dry-run] [--filter]` | Sync skills across providers |
+| `claudine link --support` | Provider resource support matrix |
+| `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply registrations |
+| `claudine handle <event> [--provider]` | Process event from stdin (hook target) |
+| `claudine dry-run <event> [--provider]` | Test event handling without side effects |
+| `claudine about` | Rich help documentation |
+| `claudine completions <shell>` | Generate shell completions |
+| `claudine uninstall [--keep-config]` | Remove hooks from all agents |
 
 ## Configuration (`~/.hooker`)
 
@@ -85,36 +96,39 @@ claudine link
 }
 ```
 
+**Merge strategy**: repo-level (`.hooker`) provider configs completely replace user-level (`~/.hooker`); global settings merge field-by-field with repo taking precedence.
+
 ## Actions
 
-| Type | Description |
-|------|-------------|
-| `speak` | TTS with template interpolation |
-| `sound_effect` | 53 embedded effects |
-| `log` | JSONL file or HTTP POST |
-| `report` | Output to agent stdout |
-| `run` | Execute shell command |
+| Type | Behavior | Blocking |
+|------|----------|----------|
+| `speak` | TTS via biscuit-speaks with template interpolation | Fire-and-forget |
+| `sound_effect` | 53 embedded effects via playa with volume/speed | Fire-and-forget |
+| `log` | JSONL file append or HTTP POST (10s timeout) | Synchronous |
+| `report` | Output to stdout with optional template/format | Synchronous |
+| `run` | Execute shell command | Configurable |
 
-## Template Placeholders
+## Template Variables (29)
 
-**Event fields:** `{provider}`, `{event}`, `{tool_name}`, `{error}`, `{prompt}`, `{session_id}`, `{timestamp}`
+**Event:** `{provider}`, `{event}`, `{timestamp}`, `{session_id}`, `{cwd}`, `{tool_name}`, `{error}`, `{prompt}`, `{agent_type}`, `{notification_type}`
 
-**Context fields** (auto-detected):
-- `{os.*}` - `{os.name}`, `{os.type}`, `{os.hostname}`
+**Context** (auto-detected via sniff):
+- `{os.*}` - `{os.name}`, `{os.type}`, `{os.version}`, `{os.hostname}`
 - `{hardware.*}` - `{hardware.arch}`, `{hardware.cpu}`, `{hardware.cores}`
-- `{git.*}` - `{git.branch}`, `{git.repo_name}`, `{git.repo_org}`, `{git.hosting}`
-- `{project.*}` - `{project.language}`, `{project.is_monorepo}`
+- `{git.*}` - `{git.branch}`, `{git.is_dirty}`, `{git.head_sha}`, `{git.head_message}`, `{git.remote}`, `{git.hosting}`, `{git.repo_name}`, `{git.repo_org}`
+- `{project.*}` - `{project.language}`, `{project.is_monorepo}`, `{project.monorepo_tool}`
 
-Run `claudine hooks --variables` for the complete list.
+Unknown placeholders are left as-is. `None` values render as empty strings.
 
 ## Troubleshooting
 
 - **Hooks not firing?** Check `claudine hooks`, verify PATH, restart agent
 - **Skills not linking?** Use `claudine link --dry-run` to preview
 - **OpenCode shows no links?** OpenCode reads `.claude/skills/` directly
+- **Invalid sound effects?** Use `claudine hooks --fix` for 5-tier fuzzy matching suggestions
 
 ## Additional Resources
 
-- [architecture.md](architecture.md) - Event model, provider adapters, support matrix
-- [cli-reference.md](cli-reference.md) - Full command documentation
+- [architecture.md](architecture.md) - Event model, dispatch pipeline, provider adapters, linking algorithm
+- [cli-reference.md](cli-reference.md) - Full command documentation with examples
 - `claudine/docs/hooks/` - Per-provider hook specifications

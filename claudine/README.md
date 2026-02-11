@@ -2,19 +2,22 @@
 
 > Claude Code's ex-girlfriend who knows Claude's inner secrets but is now dating other Agents
 
-Universal event handler and skill linker for agentic CLIs. Provides consistent hook/event responses across 7 providers while synchronizing skills between those that support them.
+Universal event handler and skill linker for agentic CLIs. Normalizes 16 lifecycle events across 7 providers into a single configuration, then executes actions (TTS, sound effects, logging, shell commands) when those events fire. Also synchronizes skills, commands, and agents between providers via symlinks.
 
 ## Supported Providers
 
-| Provider | Events | Skills | Config Method |
-|----------|:------:|:------:|---------------|
-| Claude Code | ✓ | ✓ | `settings.json` hooks |
-| Codex CLI | ✓ | ✓ | `config.toml` notify + JSONL stream |
-| Gemini CLI | ✓ | ✓ | `settings.json` hooks |
-| Goose | ✓ | - | Stream-json + env var |
-| Kimi Code | ✓ | - | Wire mode JSON-RPC |
-| OpenCode | ✓ | ✓ | `opencode.json` plugins |
-| Qwen Code | ✓ | ✓ | Stream-json output |
+| Provider | Hook | NonHook | Skills | Config Method |
+|----------|:----:|:-------:|:------:|---------------|
+| Claude Code | ✓ | - | ✓ | `settings.json` hooks |
+| Codex CLI | partial | ✓ | ✓ | `config.toml` notify + JSONL stream |
+| Gemini CLI | ✓ | - | ✓ | `settings.json` hooks |
+| Goose | - | ✓ | - | Stream-json + env var |
+| Kimi Code | - | ✓ | - | Wire mode JSON-RPC |
+| OpenCode | ✓ | - | ✓ | `opencode.json` plugins |
+| Qwen Code | - | ✓ | ✓ | Stream-json output |
+
+**Hook** = native hook/plugin system (config-driven).
+**NonHook** = requires wrapper or stream parsing (not yet implemented for Goose/Kimi/Qwen).
 
 ## Quick Start
 
@@ -36,30 +39,36 @@ claudine link
 
 | Command | Description |
 |---------|-------------|
-| `claudine init` | Interactive setup wizard |
-| `claudine init --quick` | Quick setup with sensible defaults |
-| `claudine init --repo` | Project-scoped configuration |
-| `claudine hooks` | Show registered hooks for all providers |
-| `claudine hooks <provider>` | Detailed view for specific provider |
+| `claudine init [--quick] [--repo]` | Interactive setup wizard (or quick defaults) |
+| `claudine hooks [provider]` | Show registered hooks for all or one provider |
 | `claudine hooks --support` | Provider event support matrix |
 | `claudine hooks --mapping` | Native event name mappings |
-| `claudine link` | Sync skills across providers |
-| `claudine link --dry-run` | Preview skill linking |
-| `claudine sync` | Re-apply hook registrations |
-| `claudine sync --dry-run` | Preview sync changes |
-| `claudine handle <event>` | Process event (called by hooks) |
-| `claudine dry-run <event>` | Test event handling |
+| `claudine hooks --describe` | Event descriptions and payload schemas |
+| `claudine hooks --variables` | Template variables with current values |
+| `claudine hooks --fix` | Auto-fix invalid sound effect names |
+| `claudine link [--dry-run] [--filter]` | Sync skills across providers |
+| `claudine link --support` | Provider resource support matrix |
+| `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply hook registrations |
+| `claudine handle <event> [--provider]` | Process event from stdin (called by hooks) |
+| `claudine dry-run <event> [--provider]` | Test event handling without side effects |
 | `claudine about` | Rich help documentation |
 | `claudine completions <shell>` | Generate shell completions |
-| `claudine uninstall` | Remove hooks from all agents |
+| `claudine uninstall [--keep-config]` | Remove hooks from all agents |
 
 ## Configuration
 
 Configuration is stored in `~/.hooker` (user-scoped) or `<repo>/.hooker` (project-scoped) as JSON.
 
+## Packages
+
+| Package | Description |
+|---------|-------------|
+| [claudine (lib)](./lib/) | Event model, provider adapters, dispatch pipeline, skill linking |
+| [claudine-cli](./cli/) | Binary `claudine` — setup wizard, hook inspection, link management |
+
 ## Documentation
 
-- [Shared Event Model](./docs/shared-event-model.md) - Universal event abstraction
+- [Shared Event Model](./docs/shared-event-model.md) - Universal event abstraction (16 events)
 - [Agent Configuration](./docs/agent-configuration.md) - Per-provider setup details
 - [Skill Linking](./docs/skill-linking.md) - Cross-provider skill synchronization
 - [Provider Hooks](./docs/hooks/) - Per-provider hook specifications
@@ -68,9 +77,9 @@ Configuration is stored in `~/.hooker` (user-scoped) or `<repo>/.hooker` (projec
 
 Uses the following libraries from this monorepo:
 
-- `darkmatter` - Rich terminal markdown rendering
-- `biscuit-speaks` - Text-to-speech functionality
-- `biscuit-terminal` - Terminal detection and rendering
-- `playa` - Sound effect playback
-- `sniff` - System and environment detection
-- `biscuit-hash` - Content hashing for skill deduplication
+- `biscuit-hash` - xxHash content hashing for skill deduplication
+- `biscuit-speaks` - Text-to-speech for speak actions
+- `biscuit-terminal` - Terminal detection and rich output (tables, prose)
+- `darkmatter` - Markdown rendering for `about` command
+- `playa` - Sound effect playback (53 embedded effects)
+- `sniff` - System and environment detection (OS, hardware, git, repo context)

@@ -198,6 +198,7 @@ lint:
             fi
         else
             echo -e "- no {{ITALIC}}justfile{{RESET}} for the package {{BOLD}}$area{{RESET}}" >&2
+
         fi
     done
 

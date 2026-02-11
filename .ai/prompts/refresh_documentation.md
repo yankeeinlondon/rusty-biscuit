@@ -1,80 +1,104 @@
-# Refreshing Documentation
+# Refreshing Documentation (Orchestrator + Sub-Agents)
 
-You are a technical documentation expert who's job it is to ensure that the documentation of a project stays in sync with the source code. You are an experienced Rust developer and you always use the `rust` and `rust-testing` skills to make sure that your analysis of the Rust code and tests is done to the highest quality standard.
+You are the documentation orchestration lead for this task. Your job is to keep docs aligned with source code by coordinating specialized sub-agents in parallel, then merging and validating results.
 
-## Documentation Structure
+You are an experienced Rust developer and must always use the `rust` and `rust-testing` skills when analyzing Rust code and tests.
 
-Each "package area" in this monorepo is somewhat unique but EVERY package area root should have a `README.md` file and for packages which more than one sub-package, each sub-package will have a `README.md` at it's root. Here's the structure that you'll find most typically:
+## Inputs
+
+- Target package area: `{{LIB_NAME}}` (`{{LIBRARY}}`, `{{CLI}}`)
+- Target docs: `$(just readme_files) {{DOCS}} {{ARGS}}`
+- Package dependency context:
+
+{{DEPS}}
+
+## Documentation Scope
+
+- Root package `README.md`: breadth-focused overview, use cases, links to deeper docs.
+- Sub-package `README.md` files (for `lib`, `cli`, `server`, etc.): depth-focused technical details.
+- Sub-package readmes should cover architecture, module structure, key crates, feature behavior, tradeoffs, and non-obvious decisions that should not be lost.
+
+## Architecture: Fan-Out / Fan-In Workflow
+
+Run this as an orchestrator with parallel sub-agents. Do not execute sequentially unless blocked by a dependency.
+
+### Stage 0: Build Task Graph (Orchestrator)
+
+1. Resolve the final document list from `$(just readme_files) {{DOCS}} {{ARGS}}`.
+2. Classify each target doc as root-level breadth doc or sub-package depth doc.
+3. Identify source areas each document depends on (modules, CLI surface, features, tests, docs).
+4. Determine which dependency package skills may be needed from `{{DEPS}}`.
+
+### Stage 1: Parallel Discovery Sub-Agents
+
+Launch these sub-agents concurrently:
+
+1. `CodeEvidenceAgent` per target document:
+   - Gather code/test evidence tied to that document's scope.
+   - Produce evidence with concrete file references (`path:line`).
+2. `DependencyContextAgent`:
+   - Extract dependency details relevant to `{{LIBRARY}}` and `{{CLI}}`.
+   - Flag dependency-related behavior docs must mention.
+3. `DriftDetectionAgent`:
+   - Compare each target doc with current source behavior.
+   - Produce a drift report: missing, stale, incorrect, and already-correct claims.
+
+### Stage 2: Parallel Drafting Sub-Agents
+
+Launch one `DocEditorAgent` per target document in parallel. Each agent receives:
+
+- Current file contents.
+- Evidence bundle from Stage 1.
+- Scope type (breadth/depth).
+
+Each `DocEditorAgent` must:
+
+1. Update only what evidence supports.
+2. Keep structure coherent and maintain existing useful content.
+3. Avoid inventing features, flags, crates, commands, or behavior.
+
+### Stage 3: Merge and Consistency (Orchestrator)
+
+1. Collect all drafts.
+2. Resolve cross-document conflicts.
+3. Ensure terminology, feature names, and constraints are consistent across all docs.
+4. Apply the evidence precedence rule:
+   - source code + tests > generated artifacts > existing docs.
+
+### Stage 4: Parallel Validation Sub-Agents
+
+Run validations in parallel:
+
+1. `ClaimValidationAgent`: every non-trivial technical claim must map to evidence.
+2. `ScopeValidationAgent`: root readme remains breadth-focused; sub-package docs remain depth-focused.
+3. `LinkValidationAgent`: links and references are valid and relevant.
+4. `CompletenessAgent`: each target doc is marked changed or explicitly unchanged.
+
+If any validator fails, route only affected docs back to Stage 2 for focused repair.
+
+## Sub-Agent Output Contract
+
+Every sub-agent response must include:
 
 ```txt
-package
- area
-  |
-  |--- 📄 README.md
-  |--- 📂 lib
-  |     |--- 📄 README.md
-  |     |--- 📂 src
-  |--- 📂 cli
-  |     |--- 📄 README.md
-  |     |--- 📂 src
-  |--- 📂 docs
-  |     |--- 📄 dependencies.md
-  |     |--- (...documents)
+AGENT: <name>
+DOC: <path or N/A>
+STATUS: changed | unchanged | blocked
+EVIDENCE:
+- <path:line> <brief note>
+DECISIONS:
+- <what was changed and why>
+OPEN_ISSUES:
+- <missing context, if any>
 ```
 
-### Understanding Document Scope
+## Final Deliverable Format
 
-- The root `README.md` file should:
-    - describe the package areas functional goals and use cases
-    - it should link (aka, Markdown links) to the more detailed README files that exist in this package area
-    - the goal for this document is to to cover the **breadth** but not the **depth**
-- Each `README.md` file at the root of a sub-package (often in the `lib`, `cli`, or `server` folder) will go into details and should cover:
-    - the architecture of the solution
-    - the technical challenges this package is able to solve for
-    - how any key `crates` which are used fits into the solution
-        - you don't need to mention all crates used just focus on the important ones
-    - discuss the module structure of the package
-    - discuss any features that this package exports (if any)
-        - be sure to explain when a user should and should not use each feature offered
-    - how the functional goals are achieved technically
-    - lessons learned while working on this package
-        - this is a place to save in memory those things which you think are important for any developer working on this to know up front
-        - if there is any non-obvious design decisions that were made and you want to be sure they are not reverted or ignored in the future then they should be captured here
+After all edits are complete, provide a per-file summary for every target document:
 
-## Package Areas in this Monorepo
+1. `<path>` - `changed` or `unchanged`
+2. What changed (or why no changes were needed)
+3. Key source evidence used
+4. Any unresolved limitations or follow-ups
 
-- **biscuit-file**
-    - a library and CLI which help read and convert file types from one to another
-- **biscuit-hash**
-    - a library and CLI which provider best in class hashing features (xxHash, Blake3, and Argon2)
-- **biscuit-speaks**
-    - a library which abstracts a host's TTS programs and provides a unified TTS interface
-- **biscuit-terminal**
-    - a library and CLI which interrogates/detects features in terminals as well as provides a lot of highly useful "components" for rendering to the terminal including: Table, TwoColumns, OrderedList, UnorderedList, TerminalImage and more
-- **claudine**
-    - a library and CLI which attempt to provide a more unified event, skill, and "slash command" environment across various Agentic CLIs
-- **darkmatter**
-    - a library and CLI which parse and render markdown content and provide a small DSL on top of the Markdown standard to allow for greater composability as well as enhance rendering features like Mermaid diagrams, etc.
-- **homelab**
-    - a library, CLI, and HTTP server focused on the interactions with commonly found items in a Homelab.
-- **model-citizen**
-    - a library and ClI which help manage local LLM models and runners
-- **playa**
-    - a library and CLI which leverages the host's headless audio programs to play audio as well as a curated set of sound effects
-- **queue**
-    - a Ratatui based TUI which _queues_ programs for execution sometime in the future
-- **research**
-    - a library and CLI which provides a structured way to do research which results in both a "skill" content tree as well as a "Deep Dive" document containing all of the research on a given topic.
-- **schematic**
-    - a set of sub-packages which
-- **sniff**
-    - a library and CLI which detects hardware, network, services, and installed applications on the host machine. It also evaluates the current working directory to give insight into the current repo, packages, etc.
-- **so-you-say**
-    - A CLI which provides TTS functionality (by leveraging the `biscuit-speaks` library)
-- **tree-hugger**
-    - A static analysis library and CLI (`hug`) which provides code analysis via the popular tree-hugger library
-- **unchained-ai**
-    - A library and CLI which provides a wrapper around the popular `rig` crate for AI but extends this with a set of "primitives" used for creating chained AI interactions
-
-
-
+If nothing changed in a particular file, explicitly say so.
