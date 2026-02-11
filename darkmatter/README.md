@@ -14,22 +14,35 @@ just -f darkmatter/justfile cli README.md
 
 ## Packages
 
-| Package | Description |
-|---------|-------------|
-| [`cli/`](cli/) | The `md` command-line tool for rendering markdown |
-| [`lib/`](lib/) | Core library for markdown parsing, rendering, and manipulation |
+| Package | Crate | Description |
+|---------|-------|-------------|
+| [`cli/`](cli/) | `darkmatter-cli` | The `md` command-line tool for rendering markdown |
+| [`lib/`](lib/) | `darkmatter` | Core library for markdown parsing, rendering, and manipulation |
 
 ## Features
 
 - **Terminal rendering**: ANSI escape codes with automatic color depth detection
 - **HTML output**: Standalone HTML with embedded styles
-- **Syntax highlighting**: Language-aware code block highlighting via syntect
-- **Image rendering**: Inline images in supported terminals (iTerm2, Kitty, etc.)
-- **Mermaid diagrams**: Render mermaid diagrams to terminal or HTML
-- **Theme support**: Multiple prose and code themes with light/dark detection
-- **Markdown cleanup**: Normalize markdown formatting
-- **Document comparison**: Structural diff between markdown documents
+- **Syntax highlighting**: Language-aware code block highlighting via syntect with two-face themes
+- **Image rendering**: Inline images in supported terminals (Kitty, iTerm2, sixel)
+- **Mermaid diagrams**: Terminal rendering via biscuit-terminal, HTML rendering via mermaid.js
+- **Theme support**: 9 theme pairs with automatic light/dark detection
+- **Hyperlink rendering**: Clickable links in supported terminals via OSC 8
+- **Markdown cleanup**: Normalize formatting and heading levels
+- **Frontmatter operations**: Parse, extract, and manipulate YAML frontmatter
+- **Visual diff**: Colored inline diffs for strings and files
 - **Table of contents**: Extract document structure as tree or JSON
+
+## Library Modules
+
+| Module | Purpose |
+|--------|---------|
+| `markdown` | Core `Markdown` type with frontmatter, rendering, and manipulation |
+| `diff` | Visual diff utilities for strings and files |
+| `mermaid` | Mermaid diagram theming |
+| `render` | Hyperlink rendering (OSC 8 terminal links) |
+| `terminal` | ANSI color depth detection utilities |
+| `testing` | Test utilities for terminal output verification |
 
 ## Common Commands
 

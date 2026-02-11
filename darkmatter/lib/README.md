@@ -32,7 +32,7 @@ Darkmatter focuses on **markdown parsing and transformation**. Visual diff rende
 ## Quick Start
 
 ```rust
-use darkmatter_lib::markdown::{Markdown, output::{TerminalOptions, write_terminal}};
+use darkmatter::markdown::{Markdown, output::{TerminalOptions, write_terminal}};
 
 let md: Markdown = "# Hello\n\nWorld".into();
 let mut stdout = std::io::stdout();
@@ -46,7 +46,7 @@ write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 | `markdown` | Core `Markdown` type with frontmatter, rendering, and manipulation |
 | `diff` | Visual diff utilities for strings and files |
 | `mermaid` | Mermaid diagram theming (terminal rendering via biscuit-terminal) |
-| `render` | Hyperlink rendering utilities |
+| `render` | Hyperlink rendering utilities (OSC 8 terminal hyperlinks) |
 | `terminal` | ANSI code generation and color depth constants |
 | `testing` | Test utilities for terminal output verification |
 
@@ -55,7 +55,7 @@ write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 ### The Markdown Type
 
 ```rust
-use darkmatter_lib::markdown::Markdown;
+use darkmatter::markdown::Markdown;
 
 // Create from string
 let md: Markdown = "# Title\n\nContent".into();
@@ -96,7 +96,7 @@ md.fm_set_defaults(json!({"draft": false}))?;
 #### Terminal Output
 
 ```rust
-use darkmatter_lib::markdown::output::{TerminalOptions, write_terminal, for_terminal};
+use darkmatter::markdown::output::{TerminalOptions, write_terminal, for_terminal};
 
 let options = TerminalOptions {
     include_line_numbers: true,
@@ -114,7 +114,7 @@ let output = for_terminal(&md, options)?;
 #### HTML Output
 
 ```rust
-use darkmatter_lib::markdown::output::{HtmlOptions, as_html};
+use darkmatter::markdown::output::{HtmlOptions, as_html};
 
 let options = HtmlOptions::default();
 let html = md.as_html(options)?;
@@ -168,7 +168,7 @@ if !delta.is_unchanged() {
 Darkmatter uses this visual diff renderer in the Markdown CLI for frontmatter and body comparisons, but the module itself is Markdown-agnostic and works directly with any strings or files.
 
 ```rust
-use darkmatter_lib::diff::visual::{render_visual_diff_str, VisualDiffOptions};
+use darkmatter::diff::visual::{render_visual_diff_str, VisualDiffOptions};
 
 let original = "Hello\nWorld";
 let updated = "Hello\nUniverse";
@@ -180,7 +180,7 @@ println!("{}", output);
 ### Heading Normalization
 
 ```rust
-use darkmatter_lib::markdown::HeadingLevel;
+use darkmatter::markdown::HeadingLevel;
 
 // Validate structure
 let validation = md.validate_structure();
@@ -200,7 +200,7 @@ let (releveled, adjustment) = md.relevel(HeadingLevel::H2)?;
 For HTML output, use darkmatter's theming:
 
 ```rust
-use darkmatter_lib::mermaid::{Mermaid, MermaidTheme};
+use darkmatter::mermaid::{Mermaid, MermaidTheme};
 
 let diagram = Mermaid::new("flowchart LR\n    A --> B")
     .with_title("My Flowchart")
@@ -265,6 +265,7 @@ pub struct TerminalOptions {
     pub italic_mode: ItalicMode,      // Auto, Always, Never
     pub max_width: Option<u16>,       // Text wrapping width
     pub mermaid_mode: MermaidMode,    // Off, Image, Text
+    pub hyperlink_mode: HyperlinkMode, // Auto, Always, Never
 }
 ```
 

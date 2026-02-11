@@ -2,9 +2,9 @@
 
 | **Stage 1**: Preparation  | **Stage 2**: Early Composition | Stage 3: AI Mut & Gen |  Stage 4: Optimization |
 | -------------             | -------------                  | -------               | ---------------        |
-| Cleaning                  | Transclusion                   | Summarization         | Table Rendering        |
-| FM Interpolation          |                                | Consolidation         | YouTube Embedding      |
-|           |                                | Normalization         | Popover                |
+| Cleaning                  | Block Transclusion             | Summarization         | Table Rendering        |
+| FM Interpolation          | Frontmatter Transclusion       | Consolidation         | YouTube Embedding      |
+|                           |                                | Normalization         | Popover                |
 | Text Replacement          |                                |                       | List Expansion         |
 |                           |                                |                       | Smart Image            |
 |                           |                                |                       | Image Rendering        |

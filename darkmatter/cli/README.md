@@ -225,7 +225,7 @@ Or let the tool use `npx` to install temporarily (slower first run).
 For programmatic access, see the [darkmatter-lib](../lib/) library.
 
 ```rust
-use darkmatter_lib::markdown::{Markdown, output::{TerminalOptions, write_terminal}};
+use darkmatter::markdown::{Markdown, output::{TerminalOptions, write_terminal}};
 
 let md: Markdown = "# Hello\n\nWorld".into();
 write_terminal(&mut std::io::stdout(), &md, TerminalOptions::default())?;

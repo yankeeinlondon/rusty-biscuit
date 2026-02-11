@@ -5,15 +5,16 @@ Extract hierarchical table of contents from markdown documents.
 ## Features
 
 - **Heading Hierarchy**: Nested structure matching document outline
-- **Content Hashing**: XXH64 hash of each section's content
+- **Content Hashing**: xxHash fingerprints at title, prelude, subtree, and page levels
 - **Code Block Tracking**: Language, content, and location of code blocks
-- **Internal Link Detection**: Track internal anchor links
-- **Preamble Extraction**: Content before first heading
+- **Internal Link Detection**: Track internal anchor links and detect broken references
+- **Preamble Extraction**: Content before the first heading
+- **Prelude Extraction**: Content between a heading and its first child heading
 
 ## Usage
 
 ```rust
-use darkmatter_lib::markdown::Markdown;
+use darkmatter::markdown::Markdown;
 
 let content = "# Introduction\n\nWelcome.\n\n## Getting Started\n\nFirst steps.";
 let md: Markdown = content.into();
@@ -28,25 +29,42 @@ assert_eq!(toc.title, Some("Introduction".to_string()));
 
 | Type | Description |
 |------|-------------|
-| `MarkdownToc` | Complete TOC structure |
-| `MarkdownTocNode` | Single heading with children |
-| `CodeBlockInfo` | Code block metadata |
-| `InternalLinkInfo` | Internal link target info |
-| `PreludeNode` | Content before first heading |
+| `MarkdownToc` | Complete TOC with structure, code blocks, links, and hashes |
+| `MarkdownTocNode` | Single heading with location, hashes, prelude, and children |
+| `CodeBlockInfo` | Code block metadata (language, content, hashes, location) |
+| `InternalLinkInfo` | Internal anchor link target and location |
+
+Note: `PreludeNode` is used internally within `MarkdownTocNode` but is not re-exported from the `markdown` module.
 
 ## Node Structure
 
 ```rust
 pub struct MarkdownTocNode {
-    pub level: u8,           // Heading level (1-6)
-    pub title: String,       // Heading text
-    pub slug: String,        // URL-safe anchor
-    pub hash: u64,           // Content hash
-    pub start_byte: usize,   // Position in source
-    pub start_line: usize,   // Line number
-    pub children: Vec<MarkdownTocNode>,
+    pub level: u8,                       // Heading level (1-6)
+    pub title: String,                   // Heading text
+    pub title_hash: u64,                 // xxHash of title
+    pub title_hash_trimmed: u64,         // xxHash of title after trimming
+    pub slug: String,                    // URL-safe anchor
+    pub source_span: (usize, usize),     // Byte offset range [start, end)
+    pub line_range: (usize, usize),      // Line number range [start, end), 1-indexed
+    pub prelude: Option<PreludeNode>,    // Content before first child heading
+    pub subtree_hash: u64,               // xxHash of this node + all descendants
+    pub subtree_hash_trimmed: u64,       // xxHash of subtree after trimming
+    pub children: Vec<MarkdownTocNode>,  // Child headings
 }
 ```
+
+## MarkdownToc Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `heading_count()` | `usize` | Total headings in the document |
+| `root_level()` | `Option<u8>` | Level of the first heading |
+| `max_level()` | `Option<u8>` | Deepest heading level |
+| `find_by_slug(slug)` | `Option<&MarkdownTocNode>` | Find a heading by its slug |
+| `all_headings()` | `Vec<&MarkdownTocNode>` | Flat depth-first list of all headings |
+| `has_broken_links()` | `bool` | Whether any internal links have no target |
+| `broken_links()` | `Vec<&InternalLinkInfo>` | Internal links with no matching slug |
 
 ## Traversal
 
