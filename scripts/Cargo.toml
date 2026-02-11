@@ -1,0 +1,15 @@
+[workspace]
+
+[package]
+name = "repo-deps"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "repo-deps"
+path = "repo-deps.rs"
+
+[dependencies]
+cargo_metadata = "0.18"
+anyhow = "1.0"

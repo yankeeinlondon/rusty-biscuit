@@ -161,6 +161,10 @@ install-release-plz:
 sniff *args="":
     @cargo run -p sniff-cli -- {{args}}
 
+# show workspace package dependencies
+repo-deps:
+    @cargo run --manifest-path scripts/Cargo.toml --bin repo-deps
+
 lint:
   #!/usr/bin/env bash
     set -euo pipefail
