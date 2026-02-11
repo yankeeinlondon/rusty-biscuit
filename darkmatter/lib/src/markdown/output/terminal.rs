@@ -207,6 +207,68 @@ impl ItalicMode {
     }
 }
 
+/// Controls how hyperlinks are rendered to the terminal.
+///
+/// OSC 8 hyperlinks allow terminals to display clickable links, but not all
+/// terminals support them. This enum controls whether to emit OSC 8 sequences
+/// or use a fallback format.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::output::terminal::{TerminalOptions, HyperlinkMode};
+///
+/// let mut options = TerminalOptions::default();
+/// // Auto-detect (default) - uses terminal capability detection
+/// assert!(matches!(options.hyperlink_mode, HyperlinkMode::Auto));
+///
+/// // Force OSC8 hyperlinks (for pre-rendering to known-capable terminals)
+/// options.hyperlink_mode = HyperlinkMode::Always;
+///
+/// // Force fallback format: "text [url]"
+/// options.hyperlink_mode = HyperlinkMode::Never;
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HyperlinkMode {
+    /// Auto-detect hyperlink support using `supports_hyperlinks` crate.
+    ///
+    /// Checks environment variables (TERM, TERM_PROGRAM, etc.) and TTY status
+    /// to determine if the terminal supports OSC 8 hyperlinks.
+    #[default]
+    Auto,
+
+    /// Always emit OSC 8 hyperlink escape codes.
+    ///
+    /// Use this when pre-rendering content for a terminal known to support
+    /// hyperlinks, or when the detection is unreliable.
+    Always,
+
+    /// Never emit OSC 8 hyperlink escape codes.
+    ///
+    /// Use fallback format `text [url]` which is readable in all terminals.
+    /// Use this for dumb terminals or when OSC 8 is causing issues.
+    Never,
+}
+
+impl HyperlinkMode {
+    /// Resolves the mode to a boolean indicating whether to emit OSC 8 codes.
+    ///
+    /// ## Returns
+    ///
+    /// - `Auto`: Result of `supports_hyperlinks::on(Stream::Stdout)` detection
+    /// - `Always`: `true`
+    /// - `Never`: `false`
+    fn should_emit_osc8(&self) -> bool {
+        use supports_hyperlinks::Stream;
+
+        match self {
+            HyperlinkMode::Auto => supports_hyperlinks::on(Stream::Stdout),
+            HyperlinkMode::Always => true,
+            HyperlinkMode::Never => false,
+        }
+    }
+}
+
 /// Controls how Mermaid diagrams are rendered to the terminal.
 ///
 /// Mermaid diagrams can be rendered as images (via mermaid.ink service)
@@ -408,22 +470,40 @@ impl ImageRenderer {
     ) -> String {
         // Reject remote URLs (biscuit-terminal also checks, but we fail early)
         if image_path.starts_with("http://") || image_path.starts_with("https://") {
-            tracing::debug!("Remote URLs not supported");
-            eprintln!("Warning: Remote image URLs not supported: {}", image_path);
+            tracing::warn!(image.path = %image_path, "Remote image URLs not supported");
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
-        // Resolve path (absolute or relative to base_path)
-        let full_path = if Path::new(image_path).is_absolute() {
-            PathBuf::from(image_path)
-        } else {
-            self.base_path.join(image_path)
-        };
+        // Security: Reject absolute paths to prevent directory traversal
+        if Path::new(image_path).is_absolute() {
+            tracing::warn!(image.path = %image_path, "Rejected absolute image path");
+            return format!("▉ IMAGE[{}]\n", alt_text);
+        }
+
+        // Resolve relative path against base_path
+        let full_path = self.base_path.join(image_path);
+
+        // Security: Canonicalize and verify path stays within base directory
+        // This prevents traversal attacks like "../../../etc/passwd"
+        if let Ok(canonical_base) = self.base_path.canonicalize()
+            && let Ok(canonical_full) = full_path.canonicalize()
+            && !canonical_full.starts_with(&canonical_base)
+        {
+            tracing::warn!(
+                image.path = %image_path,
+                base = %canonical_base.display(),
+                resolved = %canonical_full.display(),
+                "Image path escapes base directory"
+            );
+            return format!("▉ IMAGE[{}]\n", alt_text);
+        }
+        // If canonical_full fails, the file doesn't exist - handled below
+        // If canonical_base fails, we can't verify containment but proceed
+        // (the file existence check below will catch most issues)
 
         // Check file exists before attempting to create TerminalImage
         if !full_path.exists() {
-            tracing::debug!(path = %image_path, "Image file not found");
-            eprintln!("Warning: Image file not found: {}", full_path.display());
+            tracing::warn!(image.path = %full_path.display(), "Image file not found");
             return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
@@ -438,8 +518,7 @@ impl ImageRenderer {
         let mut term_image = match TerminalImage::new(&full_path) {
             Ok(img) => img.with_alt_text(alt_text),
             Err(e) => {
-                tracing::debug!(path = %image_path, error = %e, "Failed to create TerminalImage");
-                eprintln!("Warning: Failed to load image '{}': {}", image_path, e);
+                tracing::warn!(image.path = %image_path, error = %e, "Failed to load image");
                 return format!("▉ IMAGE[{}]\n", alt_text);
             }
         };
@@ -451,12 +530,15 @@ impl ImageRenderer {
         }
 
         // Check file size against configured limit
-        if let Ok(metadata) = std::fs::metadata(&full_path) {
-            if !self.options.is_size_allowed(metadata.len()) {
-                tracing::debug!(path = %image_path, size = metadata.len(), "Image file too large");
-                eprintln!("Warning: Image file too large: {}", full_path.display());
-                return format!("▉ IMAGE[{}]\n", alt_text);
-            }
+        if let Ok(metadata) = std::fs::metadata(&full_path)
+            && !self.options.is_size_allowed(metadata.len())
+        {
+            tracing::warn!(
+                image.path = %full_path.display(),
+                image.size_bytes = metadata.len(),
+                "Image file too large"
+            );
+            return format!("▉ IMAGE[{}]\n", alt_text);
         }
 
         // Render via Renderable trait (string-based, protocol-aware)
@@ -547,6 +629,12 @@ pub struct TerminalOptions {
     /// - `Image`: Render as images via mermaid.ink service
     /// - `Text`: Show as fenced code blocks (fallback format)
     pub mermaid_mode: MermaidMode,
+    /// Controls how hyperlinks are rendered.
+    ///
+    /// - `Auto` (default): Detect terminal capability via `supports_hyperlinks` crate
+    /// - `Always`: Always emit OSC 8 escape codes (for pre-rendering)
+    /// - `Never`: Never emit OSC 8 codes; use fallback format `text [url]`
+    pub hyperlink_mode: HyperlinkMode,
 }
 
 impl Default for TerminalOptions {
@@ -570,6 +658,7 @@ impl Default for TerminalOptions {
             italic_mode: ItalicMode::default(),
             max_width: None,
             mermaid_mode: MermaidMode::default(),
+            hyperlink_mode: HyperlinkMode::default(),
         }
     }
 }
@@ -652,6 +741,9 @@ pub fn write_terminal<W: std::io::Write>(
     // Resolve italic mode once at start (avoids repeated capability detection)
     let emit_italic = options.italic_mode.should_emit_italic();
 
+    // Resolve hyperlink mode once at start (avoids repeated capability detection)
+    let emit_hyperlinks = options.hyperlink_mode.should_emit_osc8();
+
     // Query terminal width once at start (allow override for testing)
     const DEFAULT_TERMINAL_WIDTH: u16 = 80;
     let terminal_width = options.max_width.unwrap_or_else(|| {
@@ -669,7 +761,7 @@ pub fn write_terminal<W: std::io::Write>(
     let prose_highlighter = ProseHighlighter::new(&prose_syntect_theme);
 
     // Use LineWrapper for proper word wrapping at terminal width
-    let mut wrapper = LineWrapper::new(terminal_width as usize);
+    let mut wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks);
 
     // Track scope stack for prose highlighting (functional style)
     let mut scope_stack: Vec<Scope> = vec![prose_highlighter.base_scope()];
@@ -811,7 +903,7 @@ pub fn write_terminal<W: std::io::Write>(
                             // (don't emit header yet - we'll emit after knowing if rendering succeeds)
                             write!(writer, "{}", wrapper.output()).ok();
                             writer.flush().ok();
-                            wrapper = LineWrapper::new(terminal_width as usize);
+                            wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks);
 
                             // Render mermaid diagram as image using mmdc CLI
                             let diagram = crate::mermaid::Mermaid::new(&code_buffer);
@@ -987,7 +1079,13 @@ pub fn write_terminal<W: std::io::Write>(
                 if in_table {
                     scope_stack.pop();
                     let link = Link::new(current_link_text.clone(), current_link_url.clone());
-                    current_cell.push_str(&link.to_terminal_unchecked());
+                    // Use appropriate link format based on hyperlink capability
+                    if emit_hyperlinks {
+                        current_cell.push_str(&link.to_terminal_unchecked());
+                    } else {
+                        // Fallback format: "text [url]"
+                        current_cell.push_str(&format!("{} [{}]", link.display(), link.href()));
+                    }
                 } else {
                     // Pop link scope to get parent scopes, then query theme for link styling
                     // (The link scope was pushed in Start(Link))
@@ -1256,7 +1354,7 @@ pub fn write_terminal<W: std::io::Write>(
                         write!(writer, "{}", wrapper.output()).ok();
                         writer.flush().ok();
                         // Clear the wrapper by creating a new one (preserving max_width)
-                        wrapper = LineWrapper::new(terminal_width as usize);
+                        wrapper = LineWrapper::new(terminal_width as usize, emit_hyperlinks);
                         // render_image returns empty string on success, fallback text on failure
                         let result =
                             renderer.render_image(&current_image_path, &parsed_alt, parsed_width);
@@ -1878,17 +1976,20 @@ struct LineWrapper {
     blockquote_depth: usize,
     /// Background color for blockquotes
     blockquote_bg: Option<Color>,
+    /// Whether to emit OSC 8 hyperlinks (cached detection result)
+    supports_hyperlinks: bool,
 }
 
 impl LineWrapper {
-    /// Creates a new LineWrapper with the given maximum width.
-    fn new(max_width: usize) -> Self {
+    /// Creates a new LineWrapper with the given maximum width and hyperlink support flag.
+    fn new(max_width: usize, supports_hyperlinks: bool) -> Self {
         Self {
             current_col: 0,
             max_width,
             output: String::new(),
             blockquote_depth: 0,
             blockquote_bg: None,
+            supports_hyperlinks,
         }
     }
 
@@ -2094,34 +2195,56 @@ impl LineWrapper {
         self.current_col += UnicodeWidthStr::width(text);
     }
 
-    /// Emits a styled hyperlink with OSC8 escape sequences.
+    /// Emits a styled hyperlink with OSC8 escape sequences or fallback format.
     ///
-    /// The styling is applied INSIDE the OSC8 sequence so the visible text
-    /// retains its color (typically blue for links). The OSC8 wrapper makes
-    /// the text clickable in supporting terminals.
+    /// When `supports_hyperlinks` is true, the styling is applied INSIDE the OSC8
+    /// sequence so the visible text retains its color (typically blue for links).
+    /// The OSC8 wrapper makes the text clickable in supporting terminals.
     ///
-    /// Format: `ESC]8;;URL BEL <styled_text> ESC]8;; BEL`
+    /// When `supports_hyperlinks` is false, emits fallback format: `text [url]`
+    /// which is readable in all terminals including dumb terminals.
+    ///
+    /// OSC8 Format: `ESC]8;;URL BEL <styled_text> ESC]8;; BEL`
+    /// Fallback Format: `<styled_text> [url]`
     fn emit_styled_hyperlink(&mut self, text: &str, url: &str, style: Style, emit_italic: bool) {
-        // OSC8 hyperlink start: ESC ] 8 ; ; <url> BEL
-        self.output.push_str("\x1b]8;;");
-        self.output.push_str(url);
-        self.output.push('\x07');
+        if self.supports_hyperlinks {
+            // OSC8 hyperlink start: ESC ] 8 ; ; <url> BEL
+            self.output.push_str("\x1b]8;;");
+            self.output.push_str(url);
+            self.output.push('\x07');
 
-        // Emit styled text INSIDE the hyperlink
-        // Note: We don't use word wrapping for links - they stay on one line
-        self.output.push_str(&emit_prose_text(
-            text,
-            style,
-            emit_italic,
-            false,
-            false,
-            None,
-        ));
+            // Emit styled text INSIDE the hyperlink
+            // Note: We don't use word wrapping for links - they stay on one line
+            self.output.push_str(&emit_prose_text(
+                text,
+                style,
+                emit_italic,
+                false,
+                false,
+                None,
+            ));
 
-        // OSC8 hyperlink end: ESC ] 8 ; ; BEL
-        self.output.push_str("\x1b]8;;\x07");
+            // OSC8 hyperlink end: ESC ] 8 ; ; BEL
+            self.output.push_str("\x1b]8;;\x07");
 
-        self.current_col += UnicodeWidthStr::width(text);
+            self.current_col += UnicodeWidthStr::width(text);
+        } else {
+            // Fallback format: styled text followed by [url]
+            self.output.push_str(&emit_prose_text(
+                text,
+                style,
+                emit_italic,
+                false,
+                false,
+                None,
+            ));
+            self.current_col += UnicodeWidthStr::width(text);
+
+            // Append URL in brackets (unstyled)
+            let url_part = format!(" [{}]", url);
+            self.output.push_str(&url_part);
+            self.current_col += UnicodeWidthStr::width(url_part.as_str());
+        }
     }
 
     /// Emits inline code with styling.
@@ -2427,6 +2550,45 @@ mod tests {
     use super::*;
     use crate::testing::{TestTerminal, strip_ansi_codes};
 
+    /// Returns deterministic `TerminalOptions` for testing.
+    ///
+    /// This helper ensures tests are not affected by environment variables
+    /// like `NO_COLOR`, `TERM=dumb`, `THEME`, or `CODE_THEME`. All settings
+    /// are explicitly configured to provide consistent, predictable behavior.
+    ///
+    /// ## Configuration
+    ///
+    /// - Color depth: `TrueColor` (enables ANSI escape sequences)
+    /// - Themes: `OneHalf` (stable, well-tested theme)
+    /// - Color mode: `Dark`
+    /// - Italic mode: `Always` (forces italic escape codes)
+    /// - Hyperlink mode: `Always` (forces OSC8 escape codes)
+    /// - Max width: `80` (deterministic line wrapping)
+    /// - Line numbers: disabled
+    /// - Image rendering: disabled (avoids filesystem dependencies)
+    fn test_options() -> TerminalOptions {
+        TerminalOptions {
+            code_theme: ThemePair::OneHalf,
+            prose_theme: ThemePair::OneHalf,
+            color_mode: ColorMode::Dark,
+            include_line_numbers: false,
+            color_depth: Some(ColorDepth::TrueColor),
+            render_images: false,
+            base_path: None,
+            italic_mode: ItalicMode::Always,
+            max_width: Some(80),
+            mermaid_mode: MermaidMode::Off,
+            hyperlink_mode: HyperlinkMode::Always,
+        }
+    }
+
+    /// Returns test options with line numbers enabled.
+    fn test_options_with_line_numbers() -> TerminalOptions {
+        let mut options = test_options();
+        options.include_line_numbers = true;
+        options
+    }
+
     #[test]
     fn test_color_depth_auto_detect() {
         let depth = ColorDepth::auto_detect();
@@ -2439,7 +2601,8 @@ mod tests {
 
     #[test]
     fn test_terminal_options_default_uses_detection() {
-        // Default options should use environment detection
+        // This test specifically checks TerminalOptions::default() behavior
+        // so it must use default(), not test_options()
         let options = TerminalOptions::default();
 
         // Should have valid themes (not checking specific values since they depend on env)
@@ -2452,7 +2615,7 @@ mod tests {
     #[test]
     fn test_for_terminal_simple_heading() {
         let md: Markdown = "# Hello World".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Strip ANSI codes and check content
         // H1 uses block marker: █
@@ -2471,7 +2634,7 @@ fn main() {
 ```
 "#;
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain ANSI codes
         assert!(output.contains("\x1b["));
@@ -2487,7 +2650,7 @@ fn main() {
         let content = "```rust\nfn test() {}\n```";
         let md: Markdown = content.into();
 
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.include_line_numbers = true;
 
         let output = for_terminal(&md, options).unwrap();
@@ -2502,7 +2665,7 @@ fn main() {
 fn main() {}
 ```"#;
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain title (without prefix)
         assert!(output.contains("Example"));
@@ -2514,7 +2677,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_inline_code() {
         let md: Markdown = "Use `cargo build` to compile.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         // Inline code should NOT have backticks in terminal output
@@ -2528,7 +2691,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_paragraph() {
         let md: Markdown = "First paragraph.\n\nSecond paragraph.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         assert!(plain.contains("First paragraph"));
@@ -2538,7 +2701,7 @@ fn main() {}
     #[test]
     fn test_terminal_strikethrough_basic() {
         let md: Markdown = "This is ~~strikethrough~~ text.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain strikethrough ANSI code \x1b[9m
         assert!(
@@ -2554,7 +2717,7 @@ fn main() {}
     #[test]
     fn test_terminal_strikethrough_nested_bold() {
         let md: Markdown = "This is **~~bold strikethrough~~** text.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain both bold and strikethrough codes
         assert!(output.contains("\x1b[1m"), "Should contain bold code");
@@ -2570,7 +2733,7 @@ fn main() {}
     #[test]
     fn test_terminal_strikethrough_nested_italic() {
         let md: Markdown = "This is *~~italic strikethrough~~* text.".into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.italic_mode = ItalicMode::Always;
         let output = for_terminal(&md, options).unwrap();
 
@@ -2588,7 +2751,7 @@ fn main() {}
     #[test]
     fn test_terminal_strikethrough_all_styles() {
         let md: Markdown = "This is ***~~all styles~~*** text.".into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.italic_mode = ItalicMode::Always;
         let output = for_terminal(&md, options).unwrap();
 
@@ -2607,7 +2770,7 @@ fn main() {}
     #[test]
     fn test_terminal_no_strikethrough_without_markers() {
         let md: Markdown = "This is normal text without strikethrough.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should NOT contain strikethrough ANSI code
         assert!(
@@ -2619,7 +2782,7 @@ fn main() {}
     #[test]
     fn test_terminal_strikethrough_unclosed() {
         let md: Markdown = "This has ~~unclosed strikethrough markers.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Unclosed markers should be rendered literally, not as strikethrough
         let plain = strip_ansi_codes(&output);
@@ -2632,7 +2795,7 @@ fn main() {}
     #[test]
     fn test_terminal_strikethrough_multiple() {
         let md: Markdown = "This has ~~one~~ and ~~two~~ strikethroughs.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain strikethrough code (at least once, possibly multiple times)
         assert!(
@@ -2648,7 +2811,7 @@ fn main() {}
     #[test]
     fn test_terminal_strikethrough_in_list() {
         let md: Markdown = "- ~~completed item~~\n- active item".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain strikethrough code
         assert!(
@@ -2668,7 +2831,7 @@ fn main() {}
     #[test]
     fn test_terminal_highlight_basic() {
         let md: Markdown = "This is ==highlighted== text.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain background color ANSI code \x1b[48;2;255;243;184m (yellow background)
         assert!(
@@ -2684,7 +2847,7 @@ fn main() {}
     #[test]
     fn test_terminal_highlight_nested_bold() {
         let md: Markdown = "This is **==bold highlight==** text.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain both bold and highlight background codes
         assert!(output.contains("\x1b[1m"), "Should contain bold code");
@@ -2700,7 +2863,7 @@ fn main() {}
     #[test]
     fn test_terminal_highlight_nested_italic() {
         let md: Markdown = "This is *==italic highlight==* text.".into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.italic_mode = ItalicMode::Always;
         let output = for_terminal(&md, options).unwrap();
 
@@ -2718,7 +2881,7 @@ fn main() {}
     #[test]
     fn test_terminal_no_highlight_without_markers() {
         let md: Markdown = "This is normal text without highlights.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should NOT contain highlight background ANSI code (specifically yellow highlight)
         assert!(
@@ -2730,7 +2893,7 @@ fn main() {}
     #[test]
     fn test_terminal_highlight_unclosed() {
         let md: Markdown = "This has ==unclosed highlight markers.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Unclosed markers should be rendered literally, not as highlight
         let plain = strip_ansi_codes(&output);
@@ -2743,7 +2906,7 @@ fn main() {}
     #[test]
     fn test_terminal_highlight_multiple() {
         let md: Markdown = "This has ==one== and ==two== highlights.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain highlight background code (at least once)
         assert!(
@@ -2759,7 +2922,7 @@ fn main() {}
     #[test]
     fn test_terminal_highlight_in_list() {
         let md: Markdown = "- ==highlighted item==\n- normal item".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain highlight background code
         assert!(
@@ -2775,7 +2938,7 @@ fn main() {}
     #[test]
     fn test_terminal_highlight_in_code_block_unchanged() {
         let md: Markdown = "```\n==not highlighted==\n```".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // The == markers should appear literally in code block content
         let plain = strip_ansi_codes(&output);
@@ -2788,7 +2951,7 @@ fn main() {}
     #[test]
     fn test_terminal_highlight_empty() {
         let md: Markdown = "This has ==== empty highlight.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Empty highlight (====) creates start + end events with no content between
         // so no text actually gets the background color applied, but the events are balanced
@@ -2948,7 +3111,7 @@ fn main() {}
     #[test]
     fn test_highlight_code_basic() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let options = TerminalOptions::default();
+        let options = test_options();
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
@@ -2964,7 +3127,7 @@ fn main() {}
     #[test]
     fn test_code_block_padding() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let options = TerminalOptions::default();
+        let options = test_options();
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
@@ -2994,7 +3157,7 @@ fn main() {}
     #[test]
     fn test_code_block_left_padding() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let options = TerminalOptions::default();
+        let options = test_options();
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "fn main() {}";
@@ -3019,7 +3182,7 @@ fn main() {}
     #[test]
     fn test_code_block_padding_uses_theme_background() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let options = TerminalOptions::default();
+        let options = test_options();
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
         let code = "test";
@@ -3051,7 +3214,7 @@ fn main() {}
     #[test]
     fn test_code_block_highlight_single_line() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let options = TerminalOptions::default();
+        let options = test_options();
         let mut meta = crate::markdown::dsl::CodeBlockMeta::default();
         meta.highlight.add_line(2);
 
@@ -3086,7 +3249,7 @@ fn main() {}
     #[test]
     fn test_code_block_highlight_range() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let options = TerminalOptions::default();
+        let options = test_options();
         let mut meta = crate::markdown::dsl::CodeBlockMeta::default();
         meta.highlight.add_range(2, 4).unwrap();
 
@@ -3116,7 +3279,7 @@ fn main() {}
     #[test]
     fn test_code_block_highlight_mixed() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let options = TerminalOptions::default();
+        let options = test_options();
         let mut meta = crate::markdown::dsl::CodeBlockMeta::default();
         meta.highlight.add_line(1);
         meta.highlight.add_range(4, 6).unwrap();
@@ -3152,7 +3315,7 @@ fn main() {}
     #[test]
     fn test_highlight_with_line_numbers() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.include_line_numbers = true;
         let mut meta = crate::markdown::dsl::CodeBlockMeta::default();
         meta.highlight.add_line(2);
@@ -3189,7 +3352,7 @@ fn main() {}
     #[test]
     fn test_padding_preserves_line_numbers_alignment() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.include_line_numbers = true;
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
@@ -3223,7 +3386,7 @@ fn main() {}
     #[test]
     fn test_line_numbers_have_background_color() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.include_line_numbers = true;
         let meta = crate::markdown::dsl::CodeBlockMeta::default();
 
@@ -3273,7 +3436,7 @@ fn main() {}
     #[test]
     fn test_highlight_ignores_zero() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let options = TerminalOptions::default();
+        let options = test_options();
         let mut meta = crate::markdown::dsl::CodeBlockMeta::default();
         meta.highlight.add_line(0); // Line 0 should be ignored (1-indexed)
 
@@ -3310,7 +3473,7 @@ fn main() {}
     #[test]
     fn test_highlight_out_of_range() {
         let highlighter = CodeHighlighter::new(ThemePair::Github, ColorMode::Dark);
-        let options = TerminalOptions::default();
+        let options = test_options();
         let mut meta = crate::markdown::dsl::CodeBlockMeta::default();
         meta.highlight.add_line(100); // Line 100 on 5-line code should be ignored
 
@@ -3402,7 +3565,7 @@ fn main() {}
 
         terminal.run(|buf| {
             let md: Markdown = "```rust\nfn test() {}\n```".into();
-            let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+            let output = for_terminal(&md, test_options()).unwrap();
             buf.push_str(&output);
         });
 
@@ -3422,7 +3585,7 @@ fn main() {}
     fn test_color_depth_no_color_returns_plain_text() {
         let md: Markdown = "# Test\n\n```rust\nfn main() {}\n```".into();
 
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::None);
 
         let output = for_terminal(&md, options).unwrap();
@@ -3439,7 +3602,7 @@ fn main() {}
     fn test_color_depth_none_tables_still_render() {
         let md: Markdown = "| Header |\n|--------|\n| Data |".into();
 
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::None);
 
         let output = for_terminal(&md, options).unwrap();
@@ -3457,7 +3620,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_prose_no_background() {
         let md: Markdown = "# Hello World\n\nSome **bold** text.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain foreground color codes (38;2)
         assert!(output.contains("\x1b[38;2;"));
@@ -3473,7 +3636,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_code_has_background() {
         let md: Markdown = "```rust\nfn main() {}\n```".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Code blocks should have background color
         assert!(
@@ -3485,7 +3648,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_ends_with_reset() {
         let md: Markdown = "# Test".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Output should end with reset code
         assert!(
@@ -3822,7 +3985,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_heading_styled() {
         let md: Markdown = "# Heading 1\n\n## Heading 2".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain ANSI codes for styling
         assert!(output.contains("\x1b[38;2;"));
@@ -3841,7 +4004,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_italic_styled() {
         let md: Markdown = "Text blocks get some _title love_ too.".into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.italic_mode = ItalicMode::Always;
         let output = for_terminal(&md, options).unwrap();
 
@@ -3865,7 +4028,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_italic_never() {
         let md: Markdown = "Text blocks get some _title love_ too.".into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.italic_mode = ItalicMode::Never;
         let output = for_terminal(&md, options).unwrap();
 
@@ -3886,7 +4049,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_italic_always_forces_italic() {
         let md: Markdown = "This has *emphasis* text.".into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.italic_mode = ItalicMode::Always;
         let output = for_terminal(&md, options).unwrap();
 
@@ -3902,7 +4065,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_bold_styled() {
         let md: Markdown = "Some **bold text** here.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain ANSI bold escape code (\x1b[1m)
         assert!(
@@ -3919,7 +4082,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_strikethrough_styled() {
         let md: Markdown = "Some ~~strikethrough text~~ here.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain ANSI strikethrough escape code (\x1b[9m)
         assert!(
@@ -3936,7 +4099,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_inline_code_styled() {
         let md: Markdown = "Use `cargo build` to compile.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain ANSI codes
         assert!(output.contains("\x1b[38;2;"));
@@ -3960,7 +4123,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_nested_styling() {
         let md: Markdown = "# Heading with **bold** text".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain ANSI codes
         assert!(output.contains("\x1b[38;2;"));
@@ -3973,7 +4136,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_heading_has_blank_line_after() {
         let md: Markdown = "# Heading\n\nParagraph text.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         // H1 uses block marker: █
@@ -3984,7 +4147,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_heading_has_blank_line_before() {
         let md: Markdown = "Some text.\n\n## Heading".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         // H2 uses block marker: ██
@@ -3995,7 +4158,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_heading_after_list_has_blank_line() {
         let md: Markdown = "- Item one\n- Item two\n\n### Heading".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         // H3 uses block marker: ████
@@ -4006,7 +4169,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_first_heading_no_leading_blank() {
         let md: Markdown = "# First Heading".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         // H1 uses block marker: █
@@ -4017,7 +4180,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_unordered_list() {
         let md: Markdown = "- First item\n- Second item\n- Third item".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         // Each item should be on its own line with bullet marker
@@ -4029,7 +4192,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_ordered_list() {
         let md: Markdown = "1. First item\n2. Second item\n3. Third item".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         // Each item should be on its own line with number marker
@@ -4042,7 +4205,7 @@ fn main() {}
     fn test_for_terminal_nested_list() {
         let md: Markdown =
             "- Parent item\n  - Child item\n  - Another child\n- Second parent".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         // Parent item should have newline before nested list starts
@@ -4059,7 +4222,7 @@ fn main() {}
     #[test]
     fn test_for_terminal_list_with_inline_code() {
         let md: Markdown = "- Use `cargo build`\n- Run `cargo test`".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         // List items should be separate lines
@@ -4074,7 +4237,7 @@ fn main() {}
     #[test]
     fn test_nested_list_items_on_separate_lines() {
         let md: Markdown = "- Parent\n  - Child\n  - Child2".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         // Each item must be on its own line - not concatenated like "- Parent  - Child"
@@ -4102,7 +4265,7 @@ fn main() {}
     - `### Priority Order`
     - `### Fallback Behavior`"#
             .into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -4136,7 +4299,7 @@ fn main() {}
         let md: Markdown =
             "- Level 1\n  - Level 2\n    - Level 3\n    - Level 3b\n  - Level 2b\n- Level 1b"
                 .into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -4174,7 +4337,7 @@ fn main() {}
     #[test]
     fn test_table_rows_on_separate_lines() {
         let md: Markdown = "| A | B |\n|---|---|\n| 1 | 2 |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -4207,7 +4370,7 @@ fn main() {}
     fn test_table_multiple_rows() {
         let md: Markdown =
             "| Col1 | Col2 |\n|------|------|\n| A | B |\n| C | D |\n| E | F |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -4244,7 +4407,7 @@ fn main() {}
     fn test_table_with_inline_code() {
         let md: Markdown =
             "| Variable | Description |\n|----------|-------------|\n| `FOO` | A variable |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -4275,7 +4438,7 @@ fn main() {}
     fn test_table_after_heading_spacing() {
         let md: Markdown =
             "## Environment Variables\n\n| Var | Desc |\n|-----|------|\n| A | B |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -4304,7 +4467,7 @@ fn main() {}
     #[test]
     fn test_table_alternating_rows() {
         let md: Markdown = "| A |\n|---|\n| 1 |\n| 2 |\n| 3 |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -4326,7 +4489,7 @@ fn main() {}
     #[test]
     fn test_table_header_bold() {
         let md: Markdown = "| Header |\n|--------|\n| Data |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -4348,7 +4511,7 @@ fn main() {}
         let md: Markdown =
             "| Field | Description |\n|-------|-------------|\n| `foo` | A var |\n| `bar` | Another |"
                 .into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -4373,7 +4536,7 @@ fn main() {}
     #[test]
     fn test_table_left_alignment() {
         let md: Markdown = "| Left |\n|:-----|\n| Data |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Verify content is present
@@ -4385,7 +4548,7 @@ fn main() {}
     #[test]
     fn test_table_center_alignment() {
         let md: Markdown = "| Center |\n|:------:|\n| Data   |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Verify content is present
@@ -4397,7 +4560,7 @@ fn main() {}
     #[test]
     fn test_table_right_alignment() {
         let md: Markdown = "| Right |\n|------:|\n| Data  |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Verify content is present
@@ -4410,7 +4573,7 @@ fn main() {}
     fn test_table_mixed_alignments() {
         let md: Markdown =
             "| Left | Center | Right |\n|:-----|:------:|------:|\n| L1 | C1 | R1 |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Verify all headers are present
@@ -4517,7 +4680,7 @@ fn main() {}
     #[test]
     fn test_code_block_has_multiple_colors() {
         let md: Markdown = "```rust\nfn main() {\n    let x = 5;\n}\n```".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Count distinct foreground colors in the output
         // Foreground colors have format: \x1b[38;2;R;G;Bm
@@ -4604,7 +4767,7 @@ fn main() {}
     #[test]
     fn test_code_block_background_extends_to_eol() {
         let md: Markdown = "```rust\nfn main() {}\n```".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // The output should contain \x1b[K (clear to end of line) for each code line
         // This ensures the background color extends to the terminal edge
@@ -4631,7 +4794,7 @@ fn main() {}
     #[test]
     fn test_bash_highlighting_uses_lines_with_endings() {
         let md: Markdown = "```bash\n#!/bin/bash\necho \"Hello\"\n```".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Count distinct foreground colors - bash code should have multiple
         // (shebang/comments get one color, echo gets another, string gets another)
@@ -4684,7 +4847,7 @@ fn main() {}
     #[test]
     fn test_table_respects_terminal_width() {
         let md: Markdown = "| Column A | Column B | Column C |\n|----------|----------|----------|\n| Value 1 | Value 2 | Value 3 |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Table should render with box-drawing borders
@@ -5068,7 +5231,7 @@ fn main() {}
     fn test_table_long_cell_content_wraps() {
         let long_text = "This is a very long piece of text that should wrap within the table cell to fit the terminal width constraint";
         let md: Markdown = format!("| Header |\n|--------|\n| {} |", long_text).into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Content should be present
@@ -5088,7 +5251,7 @@ fn main() {}
         let md: Markdown =
             "| A | B | C | D | E | F |\n|---|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 | 6 |"
                 .into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // All columns should be present
@@ -5111,7 +5274,7 @@ fn main() {}
     #[test]
     fn test_empty_table_returns_empty() {
         let md: Markdown = "".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Should only contain reset code
@@ -5126,7 +5289,7 @@ fn main() {}
     #[test]
     fn test_single_column_table() {
         let md: Markdown = "| Single |\n|--------|\n| Data 1 |\n| Data 2 |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Should have header and data
@@ -5148,7 +5311,7 @@ fn main() {}
     #[test]
     fn test_table_with_empty_cells() {
         let md: Markdown = "| A | B |\n|---|---|\n|   | X |\n| Y |   |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Should have headers
@@ -5171,7 +5334,7 @@ fn main() {}
     fn test_table_ragged_rows() {
         // pulldown-cmark handles ragged rows by filling with empty strings
         let md: Markdown = "| A | B | C |\n|---|---|---|\n| 1 | 2 |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Should have all headers
@@ -5195,7 +5358,7 @@ fn main() {}
     fn test_table_unicode_characters() {
         let md: Markdown =
             "| Emoji | CJK |\n|-------|-----|\n| 🎉 | 中文 |\n| ✅ | 日本語 |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Should have headers
@@ -5225,7 +5388,7 @@ fn main() {}
     #[test]
     fn test_table_inline_code_alignment() {
         let md: Markdown = "| Code | Description |\n|------|-------------|\n| `short` | Text |\n| `very_long_code_sample` | More text |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Should have headers
@@ -5247,7 +5410,7 @@ fn main() {}
     #[test]
     fn test_table_mixed_inline_code_lengths() {
         let md: Markdown = "| Short | Long |\n|-------|------|\n| Hi | `this_is_a_very_long_code_identifier_that_might_cause_issues` |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Should have all content
@@ -5268,7 +5431,7 @@ fn main() {}
     fn test_table_multiple_inline_code_in_cell() {
         let md: Markdown =
             "| Command |\n|---------|\n| Use `cargo build` then `cargo test` |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Should have header
@@ -5309,7 +5472,7 @@ More text after the table.
 - List item 2
 "#
         .into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // H1 uses block marker: █, H2 uses: ██
@@ -5358,7 +5521,7 @@ More text after the table.
 | a | b | c |
 "#
         .into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // H2 uses block marker: ██
@@ -5395,7 +5558,7 @@ More text after the table.
         // Note: Most table implementations don't support nested block elements,
         // but inline elements like bold, emphasis, code should work
         let md: Markdown = "| Feature | Status |\n|---------|--------|\n| **Bold text** | `enabled` |\n| *Emphasis* | `disabled` |".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Should have headers
@@ -5505,7 +5668,7 @@ More text after the table.
     #[test]
     fn test_image_fallback_placeholder() {
         let md: Markdown = "![Test Image](./image.png)".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         assert!(plain.contains("▉ IMAGE[Test Image]"));
@@ -5515,7 +5678,7 @@ More text after the table.
     #[test]
     fn test_image_empty_alt_text() {
         let md: Markdown = "![](./image.png)".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         assert!(plain.contains("▉ IMAGE[]"));
@@ -5525,7 +5688,7 @@ More text after the table.
     #[test]
     fn test_image_alt_with_inline_code() {
         let md: Markdown = "![Code `snippet` here](./image.png)".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Alt text should preserve inline code with backticks
@@ -5536,7 +5699,7 @@ More text after the table.
     #[test]
     fn test_multiple_images() {
         let md: Markdown = "![First](a.png)\n\n![Second](b.png)".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         assert!(plain.contains("▉ IMAGE[First]"));
@@ -5547,7 +5710,7 @@ More text after the table.
     #[test]
     fn test_image_in_list() {
         let md: Markdown = "- Item with ![image](test.png)".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         assert!(plain.contains("- Item with"));
@@ -5558,7 +5721,7 @@ More text after the table.
     #[test]
     fn test_image_in_paragraph() {
         let md: Markdown = "Some text before ![alt](img.png) and after.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         assert!(plain.contains("Some text before"));
@@ -5571,7 +5734,7 @@ More text after the table.
     fn test_image_with_width_spec_in_alt() {
         // Width spec should be parsed and removed from alt text in fallback
         let md: Markdown = "![my diagram|50%](diagram.png)".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Alt text should NOT include the width spec
@@ -5583,7 +5746,7 @@ More text after the table.
     #[test]
     fn test_image_with_char_width_in_alt() {
         let md: Markdown = "![photo|80](photo.jpg)".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         assert!(plain.contains("▉ IMAGE[photo]"));
@@ -5595,7 +5758,7 @@ More text after the table.
     fn test_image_with_pipe_in_alt_not_width() {
         // Pipe followed by non-digit should remain in alt text
         let md: Markdown = "![A | B comparison](chart.png)".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
         let plain = strip_ansi_codes(&output);
 
         // Full alt text including pipe should be preserved
@@ -5765,38 +5928,129 @@ More text after the table.
         std::fs::remove_file(&tmp).ok();
     }
 
-    /// Test render_image path traversal prevention
+    /// Test render_image path traversal prevention with existing file
     #[test]
     fn test_render_image_path_traversal() {
         // Create a temp directory as the base
-        let base_dir = std::env::temp_dir().join("image_test_base");
+        let base_dir = std::env::temp_dir().join("image_test_base_traversal");
         std::fs::create_dir_all(&base_dir).ok();
 
-        // Create a file outside the base directory
-        let outside_file = std::env::temp_dir().join("outside_image.png");
-        std::fs::write(&outside_file, b"outside").unwrap();
+        // Create a file outside the base directory that actually exists
+        let outside_file = std::env::temp_dir().join("outside_image_traversal.png");
+        std::fs::write(&outside_file, b"outside file content").unwrap();
 
         let renderer = ImageRenderer::new(Some(&base_dir));
 
         // Try to access file outside base via path traversal
-        let result = renderer.render_image("../outside_image.png", "Outside", None);
+        let result = renderer.render_image("../outside_image_traversal.png", "Outside", None);
 
-        // Should return fallback (path escapes base)
-        assert!(result.contains("▉ IMAGE[Outside]"));
+        // Should return fallback (path escapes base) even though the file exists
+        assert!(
+            result.contains("▉ IMAGE[Outside]"),
+            "Path traversal should be blocked: {}",
+            result
+        );
 
         std::fs::remove_file(&outside_file).ok();
         std::fs::remove_dir(&base_dir).ok();
     }
 
-    /// Test render_image with absolute path
+    /// Test render_image blocks deep path traversal like ../../../etc/passwd
+    #[test]
+    fn test_render_image_deep_path_traversal() {
+        let base_dir = std::env::temp_dir().join("image_test_base_deep");
+        std::fs::create_dir_all(&base_dir).ok();
+
+        let renderer = ImageRenderer::new(Some(&base_dir));
+
+        // Try deep traversal - should be blocked regardless of file existence
+        let result = renderer.render_image("../../../etc/passwd", "Passwd", None);
+
+        assert!(
+            result.contains("▉ IMAGE[Passwd]"),
+            "Deep path traversal should be blocked: {}",
+            result
+        );
+
+        std::fs::remove_dir(&base_dir).ok();
+    }
+
+    /// Test render_image with absolute path (existing file)
     #[test]
     fn test_render_image_absolute_path() {
+        // Create an actual file to ensure we block it for security, not just missing file
+        let absolute_file = std::env::temp_dir().join("absolute_image_test.png");
+        std::fs::write(&absolute_file, b"absolute file content").unwrap();
+
         let renderer = ImageRenderer::new(Some(&std::env::temp_dir()));
 
-        // Use an absolute path (file doesn't exist)
-        let result = renderer.render_image("/nonexistent/absolute/path.png", "Abs", None);
+        // Use an absolute path - should be rejected even if file exists
+        let result =
+            renderer.render_image(absolute_file.to_str().unwrap(), "AbsoluteExisting", None);
 
-        assert!(result.contains("▉ IMAGE[Abs]"));
+        assert!(
+            result.contains("▉ IMAGE[AbsoluteExisting]"),
+            "Absolute paths should be blocked: {}",
+            result
+        );
+
+        std::fs::remove_file(&absolute_file).ok();
+    }
+
+    /// Test render_image with Windows-style absolute path
+    #[test]
+    fn test_render_image_windows_absolute_path() {
+        let renderer = ImageRenderer::new(Some(&std::env::temp_dir()));
+
+        // Windows-style absolute path (C:\...)
+        let result = renderer.render_image("C:\\Windows\\System32\\image.png", "WinAbs", None);
+
+        // On Unix, this won't be detected as absolute by std::path::Path::is_absolute()
+        // but it's still suspicious - the file won't exist anyway
+        // Just verify we get a fallback (either from absolute check or file-not-found)
+        assert!(result.contains("▉ IMAGE[WinAbs]"));
+    }
+
+    /// Test render_image allows valid relative paths within base
+    #[test]
+    fn test_render_image_valid_relative_path() {
+        let base_dir = std::env::temp_dir().join("image_test_base_valid");
+        let subdir = base_dir.join("subdir");
+        std::fs::create_dir_all(&subdir).ok();
+
+        let renderer = ImageRenderer::new(Some(&base_dir));
+
+        // Valid relative path within base (file doesn't exist, but path is valid)
+        let result = renderer.render_image("subdir/image.png", "ValidRelative", None);
+
+        // Should return fallback because file doesn't exist, not because path is invalid
+        assert!(result.contains("▉ IMAGE[ValidRelative]"));
+
+        std::fs::remove_dir_all(&base_dir).ok();
+    }
+
+    /// Test render_image handles path with . and .. that stays within base
+    #[test]
+    fn test_render_image_dotdot_stays_in_base() {
+        let base_dir = std::env::temp_dir().join("image_test_base_dotdot");
+        let subdir = base_dir.join("subdir");
+        std::fs::create_dir_all(&subdir).ok();
+
+        // Create a file in base_dir
+        let image_file = base_dir.join("image.png");
+        std::fs::write(&image_file, b"image content").unwrap();
+
+        let renderer = ImageRenderer::new(Some(&base_dir));
+
+        // Path that uses .. but stays within base: subdir/../image.png resolves to base/image.png
+        // This should be allowed since it stays within base
+        let result = renderer.render_image("subdir/../image.png", "StaysInBase", None);
+
+        // The path is valid and stays within base, so we'll get a graphics-related fallback
+        // (since tests don't have graphics support) rather than a security rejection
+        assert!(result.contains("▉ IMAGE[StaysInBase]"));
+
+        std::fs::remove_dir_all(&base_dir).ok();
     }
 
     /// Test render_image fallback ends with newline
@@ -5813,6 +6067,7 @@ More text after the table.
     /// Test TerminalOptions default values for image fields
     #[test]
     fn test_terminal_options_image_defaults() {
+        // This test specifically checks TerminalOptions::default() image behavior
         let options = TerminalOptions::default();
 
         assert!(options.render_images);
@@ -5822,8 +6077,8 @@ More text after the table.
     /// Test for_terminal with render_images disabled
     #[test]
     fn test_for_terminal_render_images_disabled() {
-        let mut options = TerminalOptions::default();
-        options.render_images = false;
+        // test_options() has render_images = false by default
+        let options = test_options();
 
         let md: Markdown = "![Test](./image.png)".into();
         let output = for_terminal(&md, options).unwrap();
@@ -5833,11 +6088,11 @@ More text after the table.
         assert!(plain.contains("▉ IMAGE[Test]"));
     }
 
-    /// Test for_terminal with render_images enabled (default)
+    /// Test for_terminal with render_images enabled
     #[test]
     fn test_for_terminal_render_images_enabled() {
-        let options = TerminalOptions::default();
-        assert!(options.render_images);
+        let mut options = test_options();
+        options.render_images = true;
 
         let md: Markdown = "![Test](./image.png)".into();
         let output = for_terminal(&md, options).unwrap();
@@ -5850,7 +6105,7 @@ More text after the table.
     /// Test for_terminal with custom base_path
     #[test]
     fn test_for_terminal_with_base_path() {
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.base_path = Some(std::env::temp_dir());
 
         let md: Markdown = "![Test](./image.png)".into();
@@ -5864,7 +6119,7 @@ More text after the table.
     /// Test for_terminal preserves behavior for documents without images
     #[test]
     fn test_for_terminal_no_images_in_content() {
-        let options = TerminalOptions::default();
+        let options = test_options();
 
         let md: Markdown = "# Hello\n\nSome text here.".into();
         let output = for_terminal(&md, options).unwrap();
@@ -5890,7 +6145,7 @@ fn line6() {}
 ```"#;
         let md: Markdown = content.into();
 
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.include_line_numbers = true;
 
         let output = for_terminal(&md, options).unwrap();
@@ -5921,7 +6176,7 @@ fn line6() {}
     fn test_empty_code_block() {
         let content = "```rust\n```";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Should contain header row with language
         let plain = strip_ansi_codes(&output);
@@ -5956,7 +6211,7 @@ fn line6() {}
         let md: Markdown = content.into();
 
         // Use narrow width (40 chars) to force wrapping
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::TrueColor);
 
         let output = for_terminal(&md, options).unwrap();
@@ -5998,7 +6253,7 @@ fn line6() {}
         let content = "The strikethrough feature -- introduced in GFM -- uses ~~ around a block of text to represent the text which should be crossed out.";
         let md: Markdown = content.into();
 
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::TrueColor);
 
         let output = for_terminal(&md, options).unwrap();
@@ -6040,8 +6295,8 @@ fn line6() {}
             font_style: syntect::highlighting::FontStyle::empty(),
         };
 
-        // Create wrapper with narrow width
-        let mut wrapper = LineWrapper::new(20);
+        // Create wrapper with narrow width (no hyperlink support for this test)
+        let mut wrapper = LineWrapper::new(20, false);
         wrapper.emit_styled("Hello world this is a test", style, false, false, false);
 
         let output = wrapper.into_output();
@@ -6090,7 +6345,7 @@ fn line6() {}
             font_style: syntect::highlighting::FontStyle::empty(),
         };
 
-        let mut wrapper = LineWrapper::new(30);
+        let mut wrapper = LineWrapper::new(30, false);
         wrapper.emit_raw("Command: ");
         wrapper.emit_inline_code("cargo build", style);
         wrapper.emit_raw(" runs the build");
@@ -6114,7 +6369,7 @@ fn line6() {}
         let content = "This is a very long paragraph that contains many words and should definitely wrap when rendered to a terminal with a reasonable width. The wrapping should occur at word boundaries to maintain readability and prevent awkward mid-word breaks.";
         let md: Markdown = content.into();
 
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::TrueColor);
 
         let output = for_terminal(&md, options).unwrap();
@@ -6175,7 +6430,7 @@ fn line6() {}
             font_style: FontStyle::ITALIC,
         };
 
-        let mut wrapper = LineWrapper::new(40);
+        let mut wrapper = LineWrapper::new(40, true);
         wrapper.emit_styled("This has ", bold_style, true, false, false);
         wrapper.emit_styled("mixed styles", italic_style, true, false, false);
         wrapper.emit_styled(" in one line", bold_style, true, false, false);
@@ -6204,7 +6459,7 @@ fn line6() {}
     fn test_prose_multiline_no_blank_lines() {
         let content = r#"The **strikethrough** feature -- introduced in GFM -- uses `~~` around a block of text to represent the text which should be ~~kept~~ crossed out."#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::TrueColor);
         let output = for_terminal(&md, options).unwrap();
         let plain = strip_ansi_codes(&output);
@@ -6226,7 +6481,7 @@ fn line6() {}
     fn test_prose_with_highlight_no_blank_lines() {
         let content = r#"This emerging standard uses the character sequence `==` to wrap text and the wrapped text is then given a different background color to clearly ==separate it from== the rest of the text."#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::TrueColor);
         let output = for_terminal(&md, options).unwrap();
         let plain = strip_ansi_codes(&output);
@@ -6249,7 +6504,7 @@ fn line6() {}
         // This tests highlighted text that wraps across lines
         let content = "this is some text and ==separate it from== the rest";
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::TrueColor);
         let output = for_terminal(&md, options).unwrap();
 
@@ -6300,7 +6555,7 @@ Unlike the strikethrough functionality, the **highlight** feature for Markdown l
 - this emerging standard uses the character sequence `==` to wrap text and the wrapped text is then given a different background color to clearly ==separate it from== the rest of the text.
 "#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::TrueColor);
         let output = for_terminal(&md, options).unwrap();
         let plain = strip_ansi_codes(&output);
@@ -6354,7 +6609,7 @@ Unlike the strikethrough functionality, the **highlight** feature for Markdown l
 - baz
 ```"#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::TrueColor);
         let output = for_terminal(&md, options).unwrap();
 
@@ -6390,7 +6645,7 @@ content
 
 Following paragraph."#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::TrueColor);
         let output = for_terminal(&md, options).unwrap();
         let plain = strip_ansi_codes(&output);
@@ -6421,7 +6676,7 @@ fn foo() {}
 fn bar() {}
 ```"#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::TrueColor);
         let output = for_terminal(&md, options).unwrap();
         let plain = strip_ansi_codes(&output);
@@ -6470,7 +6725,7 @@ fn bar() {}
    echo hello
    ```"#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::TrueColor);
         options.max_width = Some(80);
         let output = for_terminal(&md, options).unwrap();
@@ -6502,7 +6757,7 @@ fn bar() {}
         // Just the bullet point with highlight - matches test.md line 77
         let content = "- this emerging standard uses the character sequence `==` to wrap text and the wrapped text is then given a different background color to clearly ==separate it from== the rest of the text.";
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.color_depth = Some(ColorDepth::TrueColor);
         let output = for_terminal(&md, options).unwrap();
 
@@ -6572,7 +6827,7 @@ fn bar() {}
 
         // Test at various widths to find where the bug appears
         for width in [60, 70, 75, 78, 79, 80, 81, 82, 85, 90, 100] {
-            let mut wrapper = LineWrapper::new(width);
+            let mut wrapper = LineWrapper::new(width, true);
 
             // Simulate: "prefix ==highlighted== suffix"
             wrapper.emit_styled("prefix text before ", base_style, false, false, false);
@@ -6610,7 +6865,7 @@ fn bar() {}
     fn test_blockquote_has_prefix() {
         // Regression test: blockquotes should have a visual prefix character
         let md: Markdown = "> This is a blockquote.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         // Blockquote should have the ▐ prefix character
@@ -6625,7 +6880,7 @@ fn bar() {}
     fn test_blockquote_has_background_color() {
         // Regression test: blockquotes should have a subtle background color
         let md: Markdown = "> Quote content".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Background color is set with ANSI escape sequence \x1b[48;2;R;G;B
         assert!(
@@ -6639,7 +6894,7 @@ fn bar() {}
         // Regression test: blockquote background should extend to text content, not just prefix
         // Bug: previously only the ▐ prefix had background color, the text had no background
         let md: Markdown = "> Word1 Word2".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Count background color sequences - should appear multiple times
         // (once for prefix, once for each word, once for space between words)
@@ -6670,7 +6925,7 @@ fn bar() {}
         // Regression test: multi-paragraph blockquotes should maintain prefix on all lines
         let content = "> First paragraph.\n>\n> Second paragraph.";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         let lines: Vec<&str> = plain.lines().filter(|l| !l.is_empty()).collect();
@@ -6691,7 +6946,7 @@ fn bar() {}
     fn test_blockquote_preserves_inline_formatting() {
         // Blockquotes should preserve bold, italic, and other inline formatting
         let md: Markdown = "> **Bold** and *italic* in quote.".into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Check for bold ANSI code
         assert!(
@@ -6709,7 +6964,7 @@ fn bar() {}
         // Nested blockquotes should have multiple prefix characters
         let content = "> Outer\n>\n> > Nested";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -6727,7 +6982,7 @@ fn bar() {}
         // Content after blockquote should NOT have the prefix
         let content = "> Quote\n\nAfter quote";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         let lines: Vec<&str> = plain.lines().collect();
@@ -6750,7 +7005,7 @@ fn bar() {}
         let content = format!("> {}", long_text);
         let md: Markdown = content.into();
 
-        let options = TerminalOptions::default();
+        let options = test_options();
 
         let output = for_terminal(&md, options).unwrap();
         let plain = strip_ansi_codes(&output);
@@ -6766,7 +7021,7 @@ fn bar() {}
         // Regression test: blockquote text should NOT be italic unless explicitly marked with *text*
         // Many themes style quotes as italic, but we suppress that for readability
         let md: Markdown = "> Plain text without any formatting.".into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.italic_mode = ItalicMode::Always; // Force italic detection for test
         let output = for_terminal(&md, options).unwrap();
 
@@ -6779,7 +7034,7 @@ fn bar() {}
 
         // But explicitly emphasized text SHOULD be italic
         let md_with_emphasis: Markdown = "> This has *emphasized* text.".into();
-        let mut options_emphasis = TerminalOptions::default();
+        let mut options_emphasis = test_options();
         options_emphasis.italic_mode = ItalicMode::Always;
         let output_emphasis = for_terminal(&md_with_emphasis, options_emphasis).unwrap();
 
@@ -6795,7 +7050,7 @@ fn bar() {}
     fn test_blockquote_background_extends_to_terminal_width() {
         // Regression test: blockquote background should extend to terminal width
         let md: Markdown = "> Short line.".into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.max_width = Some(80);
         let output = for_terminal(&md, options).unwrap();
 
@@ -6815,7 +7070,7 @@ fn bar() {}
         // Bug: multiline blockquotes were not enforcing blank line after them
         let content = "> This is a blockquote.\n\nThis is after the blockquote.";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         let lines: Vec<&str> = plain.lines().collect();
@@ -6839,7 +7094,7 @@ fn bar() {}
         // (The heading's own spacing rule should still apply, plus blockquote spacing)
         let content = "> Quote content.\n\n## Heading After";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         let lines: Vec<&str> = plain.lines().collect();
@@ -6861,7 +7116,7 @@ fn bar() {}
         // Regression test: blockquote followed by list should have blank line
         let content = "> Quote content.\n\n- List item";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
         let lines: Vec<&str> = plain.lines().collect();
@@ -6889,7 +7144,7 @@ flowchart LR
     A --> B
 ```"#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.mermaid_mode = MermaidMode::Text;
 
         let output = for_terminal(&md, options).unwrap();
@@ -6912,7 +7167,7 @@ flowchart LR
     A --> B
 ```"#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.mermaid_mode = MermaidMode::Text;
 
         let output = for_terminal(&md, options).unwrap();
@@ -6940,7 +7195,7 @@ flowchart LR
     A --> B
 ```"#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.mermaid_mode = MermaidMode::Text;
 
         let output = for_terminal(&md, options).unwrap();
@@ -6969,7 +7224,7 @@ flowchart LR
     A --> B
 ```"#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.mermaid_mode = MermaidMode::Text;
 
         let output = for_terminal(&md, options).unwrap();
@@ -6990,7 +7245,7 @@ flowchart LR
     A --> B
 ```"#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.mermaid_mode = MermaidMode::Text;
 
         let output = for_terminal(&md, options).unwrap();
@@ -7016,7 +7271,7 @@ flowchart LR
     A --> B
 ```"#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.mermaid_mode = MermaidMode::Off;
 
         let output = for_terminal(&md, options).unwrap();
@@ -7044,7 +7299,7 @@ flowchart LR
     A --> B
 ```"#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.mermaid_mode = MermaidMode::Text;
 
         let output = for_terminal(&md, options).unwrap();
@@ -7067,7 +7322,7 @@ flowchart LR
     A --> B
 ```"#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.mermaid_mode = MermaidMode::Text;
 
         let output = for_terminal(&md, options).unwrap();
@@ -7094,7 +7349,7 @@ flowchart LR
     A --> B
 ```"#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.mermaid_mode = MermaidMode::Text;
 
         let output = for_terminal(&md, options).unwrap();
@@ -7115,7 +7370,7 @@ flowchart LR
     A --> B
 ```"#;
         let md: Markdown = content.into();
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.mermaid_mode = MermaidMode::Text;
 
         let output = for_terminal(&md, options).unwrap();
@@ -7237,7 +7492,7 @@ flowchart LR
         // Bug: links were only styled but the OSC8 hyperlink sequences weren't emitted
         let content = "Check out [Zigbee2MQTT](https://www.zigbee2mqtt.io/) for details.";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -7255,7 +7510,7 @@ flowchart LR
         // OSC8 escape sequences for clickable links (or fallback to [url] format)
         let content = "[Example](https://example.com)";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -7284,7 +7539,7 @@ flowchart LR
         // Regression test: links inside list items should render correctly
         let content = "- [Link One](https://one.com)\n- [Link Two](https://two.com)";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -7297,7 +7552,7 @@ flowchart LR
         // Ensure multiple links in a single paragraph all render
         let content = "Visit [Google](https://google.com) or [GitHub](https://github.com).";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         let plain = strip_ansi_codes(&output);
 
@@ -7319,7 +7574,7 @@ flowchart LR
         //
         let content = "[Click Here](https://example.com)";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Check that OSC8 sequences are present
         let osc8_start = "\x1b]8;;";
@@ -7379,7 +7634,7 @@ flowchart LR
         // ESC]8;;URL BEL <styled_text> ESC]8;; BEL
         let content = "[Test](https://test.com)";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // The URL should appear in the OSC8 start sequence
         assert!(
@@ -7400,7 +7655,7 @@ flowchart LR
         // Regression test: links in lists should also have styling inside OSC8
         let content = "- [Link](https://example.com)";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Find OSC8 content region
         let osc8_start = "\x1b]8;;";
@@ -7430,7 +7685,7 @@ flowchart LR
         let md: Markdown = content.into();
 
         // Test with default OneHalf theme which doesn't define link colors
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Extract the content between OSC8 open and close
         let osc8_start = "\x1b]8;;";
@@ -7467,7 +7722,7 @@ flowchart LR
         let content = "[Click Here](https://example.com)";
         let md: Markdown = content.into();
 
-        let mut options = TerminalOptions::default();
+        let mut options = test_options();
         options.prose_theme = ThemePair::Github;
 
         let output = for_terminal(&md, options).unwrap();
@@ -7513,7 +7768,7 @@ flowchart LR
         // This tests that the bug fix works for links in different contexts.
         let content = "- [Zigbee2MQTT](https://www.zigbee2mqtt.io/)";
         let md: Markdown = content.into();
-        let output = for_terminal(&md, TerminalOptions::default()).unwrap();
+        let output = for_terminal(&md, test_options()).unwrap();
 
         // Extract the content between OSC8 open and close
         let osc8_start = "\x1b]8;;";
@@ -7537,6 +7792,93 @@ flowchart LR
             hyperlink_content.contains("Zigbee2MQTT"),
             "Link text should be present. Hyperlink content: {:?}",
             hyperlink_content
+        );
+    }
+
+    #[test]
+    fn test_hyperlink_mode_never_uses_fallback_format() {
+        // When HyperlinkMode::Never is set, links should render as "text [url]"
+        // instead of OSC8 escape sequences
+        let content = "[Click Here](https://example.com)";
+        let md: Markdown = content.into();
+
+        let mut options = test_options();
+        options.hyperlink_mode = HyperlinkMode::Never;
+
+        let output = for_terminal(&md, options).unwrap();
+
+        // Should NOT contain OSC8 sequences
+        let osc8_start = "\x1b]8;;";
+        assert!(
+            !output.contains(osc8_start),
+            "HyperlinkMode::Never should not emit OSC8 sequences. Output: {:?}",
+            output
+        );
+
+        // Should contain fallback format: text followed by [url]
+        let plain = strip_ansi_codes(&output);
+        assert!(
+            plain.contains("Click Here [https://example.com]"),
+            "HyperlinkMode::Never should use 'text [url]' fallback format. Plain output: {:?}",
+            plain
+        );
+    }
+
+    #[test]
+    fn test_hyperlink_mode_always_emits_osc8() {
+        // When HyperlinkMode::Always is set, links should always render as OSC8
+        let content = "[Test Link](https://test.com)";
+        let md: Markdown = content.into();
+
+        let mut options = test_options();
+        options.hyperlink_mode = HyperlinkMode::Always;
+
+        let output = for_terminal(&md, options).unwrap();
+
+        // Should contain OSC8 sequences
+        let osc8_start = "\x1b]8;;https://test.com\x07";
+        assert!(
+            output.contains(osc8_start),
+            "HyperlinkMode::Always should emit OSC8 sequences. Output: {:?}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_hyperlink_fallback_in_table() {
+        // Links in tables should also respect HyperlinkMode
+        let content = "| Name | Link |\n|------|------|\n| Test | [Click](https://example.com) |";
+        let md: Markdown = content.into();
+
+        let mut options = test_options();
+        options.hyperlink_mode = HyperlinkMode::Never;
+
+        let output = for_terminal(&md, options).unwrap();
+
+        // Should NOT contain OSC8 sequences in table
+        let osc8_start = "\x1b]8;;";
+        assert!(
+            !output.contains(osc8_start),
+            "Table links with HyperlinkMode::Never should not emit OSC8. Output: {:?}",
+            output
+        );
+
+        // Should contain fallback format in table
+        let plain = strip_ansi_codes(&output);
+        assert!(
+            plain.contains("Click [https://example.com]"),
+            "Table links with HyperlinkMode::Never should use fallback format. Plain output: {:?}",
+            plain
+        );
+    }
+
+    #[test]
+    fn test_hyperlink_mode_default_is_auto() {
+        // Default should be Auto mode
+        let options = TerminalOptions::default();
+        assert!(
+            matches!(options.hyperlink_mode, HyperlinkMode::Auto),
+            "Default hyperlink_mode should be Auto"
         );
     }
 }

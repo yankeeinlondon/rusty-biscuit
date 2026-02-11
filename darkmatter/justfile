@@ -75,13 +75,19 @@ codex *args="":
     @echo "Loading {{BOLD}}Codex CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
     @cd .. && codex --dangerously-bypass-approvals-and-sandbox {{args}}
 
+# Show the dependencies for this package
+deps:
+    @echo "Dependencies:"
+    @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "darkmatter:"
+
 # review this package using the Codex CLI
 review *args="":
     @clear
-    @echo "Performing a code review on the {{BOLD}}Darkmatter{{RESET}} package"
+    @echo -e "Performing a code review on the {{BOLD}}Claudine{{RESET}} package"
     @echo ""
-    @cd .. && codex review "review the code in the Darkmatter package; use the rust, darkmatter, biscuit-terminal, and clap skills during the review. Write your findings to the file 'darkmatter/docs/{YYYY}-{MM}. playa-review.md'" {{args}} || ( so-you-say "There was a problem running the code review in the Playa package" >/dev/null 2>&1 && exit 1 )
-    @so-you-say "Review for Playa package has completed." >/dev/null 2>&1 || exit 0
+    @cd .. && codex exec "/code-review the code in the darkmatter package; use the rust, darkmatter, biscuit-terminal, and clap skills during the review. Write your findings to the file '@darkmatter/docs/{YYYY}-{MM}. darkmatter-review.md' (where YYYY is the current year, and MM is the current month). $(just -f darkmatter/justfile deps)\n\n{{args}}" || ( so-you-say "There was a problem running the code review in the darkmatter package" >/dev/null 2>&1 && echo -e "{RED}ERROR:{RESET}: problems with the darkmatter review."  && exit 1 )
+    @so-you-say "Review for darkmatter package has completed." >/dev/null 2>&1 || exit 0
+
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.

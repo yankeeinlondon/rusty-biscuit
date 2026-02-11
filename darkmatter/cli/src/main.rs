@@ -5,7 +5,7 @@ use darkmatter::markdown::highlighting::{
     ColorMode, ThemePair, detect_code_theme, detect_color_mode, detect_prose_theme,
 };
 use darkmatter::markdown::output::{HtmlOptions, MermaidMode, TerminalOptions, write_terminal};
-use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
+use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode, MergeStrategy};
 use darkmatter_cli::Cli;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
@@ -82,16 +82,18 @@ fn main() -> Result<()> {
     if let Some(ref json) = cli.fm_merge_with {
         let data: serde_json::Value =
             serde_json::from_str(json).wrap_err("Invalid JSON in --fm-merge-with argument")?;
-        // TODO: Implement fm_merge_with when Markdown API is available
-        eprintln!("Frontmatter merge: {:?}", data);
+        md.fm_merge_with(&data, MergeStrategy::PreferExternal)
+            .wrap_err("Failed to merge frontmatter")?;
+        println!("{}", md.as_string());
         return Ok(());
     }
 
     if let Some(ref json) = cli.fm_defaults {
         let data: serde_json::Value =
             serde_json::from_str(json).wrap_err("Invalid JSON in --fm-defaults argument")?;
-        // TODO: Implement fm_defaults when Markdown API is available
-        eprintln!("Frontmatter defaults: {:?}", data);
+        md.fm_set_defaults(&data)
+            .wrap_err("Failed to set frontmatter defaults")?;
+        println!("{}", md.as_string());
         return Ok(());
     }
 
@@ -106,6 +108,14 @@ fn main() -> Result<()> {
         let path = cli
             .input
             .ok_or_else(|| eyre!("--clean-save requires a file path, not stdin"))?;
+
+        // Reject stdin marker "-" - can't save back to stdin
+        if path.to_str() == Some("-") {
+            return Err(eyre!(
+                "Cannot use --clean-save with stdin input. Use --clean to output to stdout instead."
+            ));
+        }
+
         md.cleanup();
         std::fs::write(&path, md.as_string())
             .wrap_err_with(|| format!("Failed to write to {:?}", path))?;

@@ -31,8 +31,8 @@ pub use ast::as_ast;
 pub use html::{HtmlOptions, as_html};
 pub use string::as_string;
 pub use terminal::{
-    ColorDepth, ImageRenderer, ItalicMode, MermaidMode, TerminalOptions, for_terminal,
-    write_terminal,
+    ColorDepth, HyperlinkMode, ImageRenderer, ItalicMode, MermaidMode, TerminalOptions,
+    for_terminal, write_terminal,
 };
 
 #[cfg(test)]

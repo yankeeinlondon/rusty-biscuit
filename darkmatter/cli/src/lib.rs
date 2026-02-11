@@ -150,25 +150,6 @@ mod cli {
     #[command(group = ArgGroup::new("output-mode")
         .args(["html", "show_html", "ast", "clean", "clean_save", "toc", "toc_filename", "delta"])
         .multiple(false))]
-    #[command(after_help = "\
-SHELL COMPLETIONS:
-  Enable tab completions with --completions <SHELL>
-
-  Bash (add to ~/.bashrc):
-    source <(COMPLETE=bash md)
-
-  Zsh (add to ~/.zshrc):
-    source <(COMPLETE=zsh md)
-
-  Fish (add to ~/.config/fish/config.fish):
-    COMPLETE=fish md | source
-
-  PowerShell (add to $PROFILE):
-    $env:COMPLETE = \"powershell\"; md | Out-String | Invoke-Expression; Remove-Item Env:\\COMPLETE
-
-  Run 'md --completions <SHELL>' to see the setup command for your shell.
-  Completions filter to .md and .dm files, including one directory level deep.
-")]
     pub struct Cli {
         /// Input file path (reads from stdin if not provided, use "-" for explicit stdin)
         #[arg(add = ArgValueCompleter::new(complete_markdown_files))]
