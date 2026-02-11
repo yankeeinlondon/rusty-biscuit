@@ -1,7 +1,7 @@
 use axum::{
+    Json,
     extract::{Path, State},
     response::IntoResponse,
-    Json,
 };
 use homelab::{arcam::Arcam, network::Host};
 use serde::Serialize;

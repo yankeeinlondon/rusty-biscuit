@@ -1,7 +1,7 @@
 use axum::{
+    Json,
     extract::{Path, State},
     response::IntoResponse,
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use std::time::Duration;

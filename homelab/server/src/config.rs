@@ -182,8 +182,7 @@ impl HomeyConfig {
         {
             let name = generate_petname();
             let (host, port) = parse_host_port(&host, 50000);
-            self.arcam_amps
-                .insert(name, ArcamAmpService { host, port });
+            self.arcam_amps.insert(name, ArcamAmpService { host, port });
             modified = true;
         }
 
@@ -204,9 +203,7 @@ fn parse_host_port(input: &str, default_port: u16) -> (String, u16) {
     if input.starts_with('[') {
         if let Some(bracket_idx) = input.find("]:") {
             let host = input[1..bracket_idx].to_string();
-            let port = input[bracket_idx + 2..]
-                .parse()
-                .unwrap_or(default_port);
+            let port = input[bracket_idx + 2..].parse().unwrap_or(default_port);
             return (host, port);
         }
         // Just [::1] without port
@@ -383,8 +380,16 @@ mod tests {
     fn test_generate_petname_format() {
         let name = generate_petname();
         // Should be two words separated by hyphen
-        assert!(name.contains('-'), "petname should contain hyphen: {}", name);
-        assert!(is_valid_device_name(&name), "petname should be valid: {}", name);
+        assert!(
+            name.contains('-'),
+            "petname should contain hyphen: {}",
+            name
+        );
+        assert!(
+            is_valid_device_name(&name),
+            "petname should be valid: {}",
+            name
+        );
     }
 
     #[test]
@@ -393,7 +398,11 @@ mod tests {
         let names: Vec<_> = (0..5).map(|_| generate_petname()).collect();
         let unique_count = names.iter().collect::<std::collections::HashSet<_>>().len();
         // With 5 random names, we should have at least 3 unique (very high probability)
-        assert!(unique_count >= 3, "expected at least 3 unique names, got {}", unique_count);
+        assert!(
+            unique_count >= 3,
+            "expected at least 3 unique names, got {}",
+            unique_count
+        );
     }
 
     // --- Parse Host Port Tests ---
@@ -459,7 +468,9 @@ mod tests {
         assert_eq!(service.host, "192.168.1.100");
         assert_eq!(service.port, 10000);
 
-        unsafe { std::env::remove_var("SONY_RECEIVER"); }
+        unsafe {
+            std::env::remove_var("SONY_RECEIVER");
+        }
     }
 
     #[test]
@@ -484,7 +495,9 @@ mod tests {
         assert_eq!(service.host, "192.168.1.101");
         assert_eq!(service.port, 50000);
 
-        unsafe { std::env::remove_var("ARCAM_AMP"); }
+        unsafe {
+            std::env::remove_var("ARCAM_AMP");
+        }
     }
 
     #[test]
@@ -512,7 +525,9 @@ mod tests {
         assert_eq!(config.sony_receivers.len(), 1);
         assert!(config.sony_receivers.contains_key("existing"));
 
-        unsafe { std::env::remove_var("SONY_RECEIVER"); }
+        unsafe {
+            std::env::remove_var("SONY_RECEIVER");
+        }
     }
 
     #[test]
@@ -531,6 +546,8 @@ mod tests {
         assert!(!modified);
         assert!(config.sony_receivers.is_empty());
 
-        unsafe { std::env::remove_var("SONY_RECEIVER"); }
+        unsafe {
+            std::env::remove_var("SONY_RECEIVER");
+        }
     }
 }

@@ -27,6 +27,7 @@ utoipa-axum = "0.2"
 utoipa-scalar = { version = "0.3", features = ["axum"] }
 petname = "2.0"
 dirs = "6.0"
+get_if_addrs = "0.5"
 
 [dev-dependencies]
 axum-test = "17"

@@ -7,12 +7,7 @@ pub mod error;
 pub mod handlers;
 pub mod state;
 
-use axum::{
-    extract::State,
-    response::Html,
-    routing::get,
-    Json, Router,
-};
+use axum::{Json, Router, extract::State, response::Html, routing::get};
 use homelab::arcam::Arcam;
 use serde::Serialize;
 use tokio::time::timeout;
@@ -44,13 +39,11 @@ pub fn build_router(state: AppState) -> Router {
         // New routes (multi-device via config)
         .nest(
             "/sony_receiver",
-            handlers::crud::sony_receiver_crud_routes()
-                .merge(handlers::sony::routes_with_name()),
+            handlers::crud::sony_receiver_crud_routes().merge(handlers::sony::routes_with_name()),
         )
         .nest(
             "/arcam_amp",
-            handlers::crud::arcam_amp_crud_routes()
-                .merge(handlers::arcam::routes_with_name()),
+            handlers::crud::arcam_amp_crud_routes().merge(handlers::arcam::routes_with_name()),
         )
         .split_for_parts();
 
@@ -128,6 +121,9 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   .device-name {{ font-weight: 600; }}
   .device-detail {{ color: #999; font-size: 0.85em; }}
   .host {{ color: #666; font-size: 0.8em; }}
+  .explore {{ margin-top: 24px; color: #b5b5b5; }}
+  .explore a {{ color: #7cc4ff; text-decoration: none; }}
+  .explore a:hover {{ text-decoration: underline; }}
 </style>
 </head>
 <body>
@@ -151,6 +147,8 @@ async fn index(State(state): State<AppState>) -> Html<String> {
     <div class="host">{}</div>
   </div>
 </div>
+
+<p class="explore">Try interacting with the API by using the <a href="./explore">explore</a> UI.</p>
 
 </body>
 </html>"#,
@@ -232,13 +230,14 @@ async fn health() -> Json<HealthResponse> {
         (status = 200, description = "Device configuration status", body = DevicesHealthResponse),
     )
 )]
-async fn health_devices(
-    State(state): State<AppState>,
-) -> Json<DevicesHealthResponse> {
+async fn health_devices(State(state): State<AppState>) -> Json<DevicesHealthResponse> {
     Json(DevicesHealthResponse {
         sony: DeviceHealth {
             configured: state.sony.is_some(),
-            host: state.sony.as_ref().map(|s| format!("{}:{}", s.host(), s.port())),
+            host: state
+                .sony
+                .as_ref()
+                .map(|s| format!("{}:{}", s.host(), s.port())),
         },
         arcam: DeviceHealth {
             configured: state.arcam_host.is_some(),

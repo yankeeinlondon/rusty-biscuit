@@ -1,7 +1,7 @@
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use homelab::{arcam::ArcamError, sony_receiver::SonyError};
 use serde::Serialize;
@@ -116,7 +116,9 @@ impl IntoResponse for ServerError {
             ServerError::InvalidVolume(_) => (StatusCode::BAD_REQUEST, "INVALID_VOLUME"),
             ServerError::Timeout => (StatusCode::GATEWAY_TIMEOUT, "TIMEOUT"),
             ServerError::ConfigIo(_) => (StatusCode::INTERNAL_SERVER_ERROR, "CONFIG_IO_ERROR"),
-            ServerError::ConfigParse(_) => (StatusCode::INTERNAL_SERVER_ERROR, "CONFIG_PARSE_ERROR"),
+            ServerError::ConfigParse(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "CONFIG_PARSE_ERROR")
+            }
         };
 
         let body = ErrorResponse {
@@ -180,7 +182,10 @@ mod tests {
     #[test]
     fn test_config_io_display() {
         let err = ServerError::ConfigIo("permission denied".to_string());
-        assert_eq!(err.to_string(), "Configuration I/O error: permission denied");
+        assert_eq!(
+            err.to_string(),
+            "Configuration I/O error: permission denied"
+        );
     }
 
     #[test]

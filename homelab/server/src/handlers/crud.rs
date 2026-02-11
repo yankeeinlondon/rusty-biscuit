@@ -4,16 +4,17 @@
 //! Sony receiver and Arcam amplifier configurations via REST.
 
 use axum::{
+    Json,
+    body::Bytes,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use crate::config::{is_valid_device_name, ArcamAmpService, SonyReceiverService};
+use crate::config::{ArcamAmpService, SonyReceiverService, is_valid_device_name};
 use crate::error::{ErrorResponse, ServerError};
 use crate::state::AppState;
 
@@ -22,6 +23,7 @@ pub fn sony_receiver_crud_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list_sony_receivers, create_sony_receiver))
         .routes(routes!(update_sony_receiver, delete_sony_receiver))
+        .routes(routes!(rename_sony_receiver))
 }
 
 /// Create all Arcam amplifier CRUD routes
@@ -29,6 +31,7 @@ pub fn arcam_amp_crud_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(list_arcam_amps, create_arcam_amp))
         .routes(routes!(update_arcam_amp, delete_arcam_amp))
+        .routes(routes!(rename_arcam_amp))
 }
 
 // --- Request/Response DTOs ---
@@ -93,9 +96,7 @@ pub struct ArcamAmpResponse {
         (status = 200, description = "List of Sony receivers", body = Vec<SonyReceiverResponse>),
     )
 )]
-pub(crate) async fn list_sony_receivers(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+pub(crate) async fn list_sony_receivers(State(state): State<AppState>) -> impl IntoResponse {
     let config = state.config.read().await;
     let receivers: Vec<SonyReceiverResponse> = config
         .sony_receivers
@@ -228,6 +229,62 @@ pub(crate) async fn delete_sony_receiver(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/{name}",
+    tag = "sony_receiver",
+    params(
+        ("name" = String, Path, description = "Current device name")
+    ),
+    request_body(content = String, description = "New device name (plain text)", content_type = "text/plain"),
+    responses(
+        (status = 200, description = "Sony receiver renamed", body = SonyReceiverResponse),
+        (status = 400, description = "Invalid new device name", body = ErrorResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 409, description = "New device name already exists", body = ErrorResponse),
+        (status = 500, description = "Configuration error", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn rename_sony_receiver(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Result<impl IntoResponse, ServerError> {
+    // Parse new name from plain text body
+    let new_name = String::from_utf8_lossy(&body).trim().to_string();
+
+    // Validate new device name
+    if !crate::config::is_valid_device_name(&new_name) {
+        return Err(ServerError::InvalidDeviceName(new_name));
+    }
+
+    // Check if new name already exists
+    {
+        let config = state.config.read().await;
+        if config.sony_receivers.contains_key(&new_name) {
+            return Err(ServerError::DeviceExists(new_name));
+        }
+    }
+
+    // Check if old device exists
+    let service = {
+        let config = state.config.read().await;
+        match config.sony_receivers.get(&name) {
+            Some(s) => s.clone(),
+            None => return Err(ServerError::DeviceNotFound(name)),
+        }
+    };
+
+    // Rename in state (this also saves to disk)
+    state.rename_sony(&name, new_name.clone()).await?;
+
+    Ok(Json(SonyReceiverResponse {
+        name: new_name,
+        host: service.host,
+        port: service.port,
+    }))
+}
+
 // --- Arcam Amplifier CRUD ---
 
 #[utoipa::path(
@@ -238,9 +295,7 @@ pub(crate) async fn delete_sony_receiver(
         (status = 200, description = "List of Arcam amplifiers", body = Vec<ArcamAmpResponse>),
     )
 )]
-pub(crate) async fn list_arcam_amps(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+pub(crate) async fn list_arcam_amps(State(state): State<AppState>) -> impl IntoResponse {
     let config = state.config.read().await;
     let amps: Vec<ArcamAmpResponse> = config
         .arcam_amps
@@ -381,6 +436,62 @@ pub(crate) async fn delete_arcam_amp(
     } else {
         Err(ServerError::DeviceNotFound(name))
     }
+}
+
+#[utoipa::path(
+    patch,
+    path = "/{name}",
+    tag = "arcam_amp",
+    params(
+        ("name" = String, Path, description = "Current device name")
+    ),
+    request_body(content = String, description = "New device name (plain text)", content_type = "text/plain"),
+    responses(
+        (status = 200, description = "Arcam amplifier renamed", body = ArcamAmpResponse),
+        (status = 400, description = "Invalid new device name", body = ErrorResponse),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 409, description = "New device name already exists", body = ErrorResponse),
+        (status = 500, description = "Configuration error", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn rename_arcam_amp(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> Result<impl IntoResponse, ServerError> {
+    // Parse new name from plain text body
+    let new_name = String::from_utf8_lossy(&body).trim().to_string();
+
+    // Validate new device name
+    if !crate::config::is_valid_device_name(&new_name) {
+        return Err(ServerError::InvalidDeviceName(new_name));
+    }
+
+    // Check if new name already exists
+    {
+        let config = state.config.read().await;
+        if config.arcam_amps.contains_key(&new_name) {
+            return Err(ServerError::DeviceExists(new_name));
+        }
+    }
+
+    // Check if old device exists
+    let service = {
+        let config = state.config.read().await;
+        match config.arcam_amps.get(&name) {
+            Some(s) => s.clone(),
+            None => return Err(ServerError::DeviceNotFound(name)),
+        }
+    };
+
+    // Rename in state (this also saves to disk)
+    state.rename_arcam(&name, new_name.clone()).await?;
+
+    Ok(Json(ArcamAmpResponse {
+        name: new_name,
+        host: service.host,
+        port: service.port,
+    }))
 }
 
 /// Request body for creating a new device

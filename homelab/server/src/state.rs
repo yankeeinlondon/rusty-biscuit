@@ -254,6 +254,82 @@ impl AppState {
 
         Ok(removed)
     }
+
+    /// Renames a Sony receiver and saves config.
+    pub async fn rename_sony(
+        &self,
+        old_name: &str,
+        new_name: String,
+    ) -> Result<bool, crate::config::ConfigError> {
+        let mut config = self.config.read().await.clone();
+
+        // Check if old device exists
+        let service = match config.sony_receivers.remove(old_name) {
+            Some(s) => s,
+            None => return Ok(false),
+        };
+
+        // Insert with new name
+        config
+            .sony_receivers
+            .insert(new_name.clone(), service.clone());
+
+        // Save config
+        if let Some(path) = &self.config_path {
+            config.save_to(path)?;
+        }
+
+        // Update runtime state
+        {
+            let mut receivers = self.sony_receivers.write().await;
+            receivers.remove(old_name);
+            let receiver = create_sony_receiver(&service)
+                .map_err(|e| crate::config::ConfigError::InvalidHost(e.to_string()))?;
+            receivers.insert(new_name, Arc::new(receiver));
+        }
+        {
+            let mut cfg = self.config.write().await;
+            *cfg = config;
+        }
+
+        Ok(true)
+    }
+
+    /// Renames an Arcam amplifier and saves config.
+    pub async fn rename_arcam(
+        &self,
+        old_name: &str,
+        new_name: String,
+    ) -> Result<bool, crate::config::ConfigError> {
+        let mut config = self.config.read().await.clone();
+
+        // Check if old device exists
+        let service = match config.arcam_amps.remove(old_name) {
+            Some(s) => s,
+            None => return Ok(false),
+        };
+
+        // Insert with new name
+        config.arcam_amps.insert(new_name.clone(), service.clone());
+
+        // Save config
+        if let Some(path) = &self.config_path {
+            config.save_to(path)?;
+        }
+
+        // Update runtime state
+        {
+            let mut hosts = self.arcam_hosts.write().await;
+            hosts.remove(old_name);
+            hosts.insert(new_name, service);
+        }
+        {
+            let mut cfg = self.config.write().await;
+            *cfg = config;
+        }
+
+        Ok(true)
+    }
 }
 
 /// Creates a SonyReceiver from a service config.

@@ -1,8 +1,5 @@
-use homelab_server::{
-    build_router,
-    config::HomeyConfig,
-    state::AppState,
-};
+use get_if_addrs::get_if_addrs;
+use homelab_server::{build_router, config::HomeyConfig, state::AppState};
 use std::time::Duration;
 use tokio::{net::TcpListener, signal};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -10,8 +7,10 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 /// Default server port
 const DEFAULT_PORT: u16 = 3000;
 
-/// Graceful shutdown timeout
+/// Graceful shutdown timeout for SIGTERM
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+/// Graceful shutdown timeout for Ctrl+C (shorter, user-initiated)
+const CTRL_C_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[tokio::main]
 async fn main() {
@@ -41,6 +40,21 @@ async fn main() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_PORT);
+
+    // Log server startup with styled output - show actual IPs, not 0.0.0.0
+    let local_ips = get_local_ip_addresses();
+    if local_ips.is_empty() {
+        println!(
+            "\x1b[1mStarting Homelab\x1b[0m server at localhost:{}\n",
+            port
+        );
+    } else {
+        println!("\x1b[1mStarting Homelab\x1b[0m server at:");
+        for ip in local_ips {
+            println!("  http://{}:{}", ip, port);
+        }
+        println!();
+    }
 
     // Bind to address
     let addr = format!("0.0.0.0:{port}");
@@ -150,16 +164,34 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
-    tokio::select! {
+    let timeout = tokio::select! {
         _ = ctrl_c => {
             tracing::info!("Ctrl+C received, starting graceful shutdown");
+            CTRL_C_TIMEOUT
         }
         _ = terminate => {
             tracing::info!("SIGTERM received, starting graceful shutdown");
+            SHUTDOWN_TIMEOUT
         }
-    }
+    };
 
     // Give in-flight requests time to complete
-    tracing::info!(timeout_secs = SHUTDOWN_TIMEOUT.as_secs(), "Waiting for in-flight requests");
-    tokio::time::sleep(SHUTDOWN_TIMEOUT).await;
+    tracing::info!(
+        timeout_secs = timeout.as_secs(),
+        "Waiting for in-flight requests"
+    );
+    tokio::time::sleep(timeout).await;
+}
+
+/// Get local IP addresses (excluding loopback) for display purposes.
+fn get_local_ip_addresses() -> Vec<String> {
+    get_if_addrs()
+        .map(|ifaces| {
+            ifaces
+                .into_iter()
+                .filter(|iface| !iface.is_loopback())
+                .map(|iface| format!("{}", iface.ip()))
+                .collect()
+        })
+        .unwrap_or_default()
 }
