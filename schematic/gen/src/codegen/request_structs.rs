@@ -594,7 +594,7 @@ mod tests {
             request,
             response: ApiResponse::json_type("TestResponse"),
             headers: vec![],
-                params: None,
+            params: None,
         }
     }
 

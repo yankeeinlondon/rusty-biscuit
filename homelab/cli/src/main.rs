@@ -8,7 +8,9 @@ use clap_complete::CompleteEnv;
 use color_eyre::Result;
 use homelab::arcam::Arcam;
 use homelab::network::Host;
-use homelab::sony_receiver::{GenericSettingResult, SonyError, SonyReceiver, SonyReceiverEndpoints};
+use homelab::sony_receiver::{
+    GenericSettingResult, SonyError, SonyReceiver, SonyReceiverEndpoints,
+};
 use serde_json::json;
 
 const COMPLETIONS_HELP: &str = r#"
@@ -424,7 +426,10 @@ async fn handle_arcam(host: Option<String>, action: ArcamAction, json: bool) -> 
         ArcamAction::On => {
             arcam.power_on().await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"status": "ON"}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"status": "ON"}))?
+                );
             } else {
                 println!("ON");
             }
@@ -432,7 +437,10 @@ async fn handle_arcam(host: Option<String>, action: ArcamAction, json: bool) -> 
         ArcamAction::Off => {
             arcam.power_off().await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"status": "OFF"}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"status": "OFF"}))?
+                );
             } else {
                 println!("OFF");
             }
@@ -441,7 +449,10 @@ async fn handle_arcam(host: Option<String>, action: ArcamAction, json: bool) -> 
             let is_on = arcam.request_power_state().await?;
             let status = if is_on { "ON" } else { "OFF" };
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"status": status}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"status": status}))?
+                );
             } else {
                 println!("{status}");
             }
@@ -450,7 +461,10 @@ async fn handle_arcam(host: Option<String>, action: ArcamAction, json: bool) -> 
             let is_muted = arcam.get_mute_status().await?;
             let status = if is_muted { "MUTED" } else { "UNMUTED" };
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"muted": is_muted}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"muted": is_muted}))?
+                );
             } else {
                 println!("{status}");
             }
@@ -460,7 +474,10 @@ async fn handle_arcam(host: Option<String>, action: ArcamAction, json: bool) -> 
             if is_muted {
                 arcam.mute_off().await?;
                 if json {
-                    println!("{}", serde_json::to_string_pretty(&json!({"muted": false}))?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json!({"muted": false}))?
+                    );
                 } else {
                     println!("UNMUTED");
                 }
@@ -529,7 +546,10 @@ async fn handle_sony_system(
         SonySystemAction::PowerStatus => {
             let status = receiver.get_power_status().await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"status": status}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"status": status}))?
+                );
             } else {
                 println!("{status}");
             }
@@ -537,7 +557,10 @@ async fn handle_sony_system(
         SonySystemAction::On => {
             receiver.set_power(true).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"status": "ON"}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"status": "ON"}))?
+                );
             } else {
                 println!("ON");
             }
@@ -545,7 +568,10 @@ async fn handle_sony_system(
         SonySystemAction::Off => {
             receiver.set_power(false).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"status": "OFF"}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"status": "OFF"}))?
+                );
             } else {
                 println!("OFF");
             }
@@ -555,10 +581,8 @@ async fn handle_sony_system(
             if json {
                 println!("{}", serde_json::to_string_pretty(&info)?);
             } else {
-                let mut table = Table::new().with_columns(vec![
-                    TableColumn::new(""),
-                    TableColumn::new(""),
-                ]);
+                let mut table =
+                    Table::new().with_columns(vec![TableColumn::new(""), TableColumn::new("")]);
                 table.add_row(vec!["Model".into(), info.model.as_str().into()]);
                 if let Some(serial) = &info.serial {
                     table.add_row(vec!["Serial".into(), serial.as_str().into()]);
@@ -590,7 +614,10 @@ async fn handle_sony_system(
                 } else {
                     "<dim>No</dim>"
                 };
-                println!("\n{}", Prose::new(format!("Updatable: {status}")).render(None));
+                println!(
+                    "\n{}",
+                    Prose::new(format!("Updatable: {status}")).render(None)
+                );
                 if !update.sw_info.is_empty() {
                     let mut table = Table::new().with_columns(vec![
                         TableColumn::new("Version"),
@@ -619,36 +646,32 @@ async fn handle_sony_system(
                 println!("Update initiated - receiver will reboot");
             }
         }
-        SonySystemAction::AlexaStatus => {
-            match receiver.get_alexa_registration_status().await {
-                Ok(status) => {
-                    if json {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&json!({"status": status}))?
-                        );
-                    } else {
-                        println!("{status}");
-                    }
+        SonySystemAction::AlexaStatus => match receiver.get_alexa_registration_status().await {
+            Ok(status) => {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&json!({"status": status}))?
+                    );
+                } else {
+                    println!("{status}");
                 }
-                Err(SonyError::Api(msg)) if msg.contains("No Such Method") => {
-                    if json {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(
-                                &json!({"status": "not_configured", "message": "Alexa is not configured on this receiver"})
-                            )?
-                        );
-                    } else {
-                        println!("Alexa is not configured on this receiver");
-                        println!(
-                            "Enable Alexa via the receiver's Settings > Amazon Alexa menu"
-                        );
-                    }
-                }
-                Err(e) => return Err(e.into()),
             }
-        }
+            Err(SonyError::Api(msg)) if msg.contains("No Such Method") => {
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(
+                            &json!({"status": "not_configured", "message": "Alexa is not configured on this receiver"})
+                        )?
+                    );
+                } else {
+                    println!("Alexa is not configured on this receiver");
+                    println!("Enable Alexa via the receiver's Settings > Amazon Alexa menu");
+                }
+            }
+            Err(e) => return Err(e.into()),
+        },
         SonySystemAction::EciaInfo => {
             let info = receiver.get_ecia_device_info().await?;
             if json {
@@ -679,7 +702,10 @@ async fn handle_sony_audio(
         SonyAudioAction::Volume => {
             let muted = receiver.get_mute_status().await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"muted": muted}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"muted": muted}))?
+                );
             } else {
                 println!("Muted: {}", if muted { "yes" } else { "no" });
             }
@@ -687,7 +713,10 @@ async fn handle_sony_audio(
         SonyAudioAction::SetVolume { level } => {
             receiver.set_volume(level).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"volume": level}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"volume": level}))?
+                );
             } else {
                 println!("Volume set to {level}");
             }
@@ -695,7 +724,10 @@ async fn handle_sony_audio(
         SonyAudioAction::MuteStatus => {
             let muted = receiver.get_mute_status().await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"muted": muted}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"muted": muted}))?
+                );
             } else {
                 println!("{}", if muted { "MUTED" } else { "UNMUTED" });
             }
@@ -711,7 +743,10 @@ async fn handle_sony_audio(
         SonyAudioAction::Unmute => {
             receiver.set_mute(false).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"muted": false}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"muted": false}))?
+                );
             } else {
                 println!("UNMUTED");
             }
@@ -799,7 +834,10 @@ async fn handle_sony_input(
         SonyInputAction::ContentCount { source } => {
             let count = receiver.get_content_count(&source).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"count": count}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"count": count}))?
+                );
             } else {
                 println!("{count}");
             }
@@ -813,10 +851,8 @@ async fn handle_sony_input(
             if json {
                 println!("{}", serde_json::to_string_pretty(&items)?);
             } else {
-                let mut table = Table::new().with_columns(vec![
-                    TableColumn::new("Title"),
-                    TableColumn::new("URI"),
-                ]);
+                let mut table = Table::new()
+                    .with_columns(vec![TableColumn::new("Title"), TableColumn::new("URI")]);
                 for item in items {
                     let title = item.title.as_deref().unwrap_or("");
                     table.add_row(vec![title.into(), item.uri.as_str().into()]);
@@ -861,11 +897,7 @@ async fn handle_sony_input(
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
                         let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                        table.add_row(vec![
-                            target.into(),
-                            value.into(),
-                            title.into(),
-                        ]);
+                        table.add_row(vec![target.into(), value.into(), title.into()]);
                     }
                 }
                 print!("\n{}", table.display(&Terminal::default()));
@@ -876,16 +908,16 @@ async fn handle_sony_input(
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(
-                        &json!({"target": target, "value": value})
-                    )?
+                    serde_json::to_string_pretty(&json!({"target": target, "value": value}))?
                 );
             } else {
                 println!("{target} set to {value}");
             }
         }
         SonyInputAction::PlaybackMode { target } => {
-            let settings = receiver.get_playback_mode_settings(target.as_api_str()).await?;
+            let settings = receiver
+                .get_playback_mode_settings(target.as_api_str())
+                .await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&settings)?);
             } else {
@@ -907,10 +939,8 @@ async fn handle_sony_playback(
             if json {
                 println!("{}", serde_json::to_string_pretty(&content)?);
             } else {
-                let mut table = Table::new().with_columns(vec![
-                    TableColumn::new(""),
-                    TableColumn::new(""),
-                ]);
+                let mut table =
+                    Table::new().with_columns(vec![TableColumn::new(""), TableColumn::new("")]);
                 if let Some(title) = &content.title {
                     table.add_row(vec!["Title".into(), title.as_str().into()]);
                 }
@@ -1064,7 +1094,8 @@ async fn handle_sony_debug(
             } else {
                 let mut list = UnorderedList::empty();
                 for method in methods {
-                    let mut parts = format!("<b>{}</b> <dim>(v{})</dim>", method.name, method.version);
+                    let mut parts =
+                        format!("<b>{}</b> <dim>(v{})</dim>", method.name, method.version);
                     if !method.params.is_empty() {
                         let params = method.params.join(", ");
                         parts.push_str(&format!("\n  <dim>params:</dim> {params}"));

@@ -10,7 +10,7 @@ pub fn content_length(content: &str) -> Vec<u32> {
             // This pattern matches CSI sequences: ESC followed by [ and any characters until a letter
             let stripped = regex::Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]")
                 .unwrap()
-                .replace_all(&line, "");
+                .replace_all(line, "");
             // Also strip OSC sequences (e.g., \x1b]0;title\x07)
             let stripped = regex::Regex::new(r"\x1b\].*?\x07")
                 .unwrap()

@@ -194,7 +194,9 @@ impl HuggingFaceClient {
     ) -> Result<Vec<SearchResult>, ModelCitizenError> {
         let mut url = format!(
             "{}/api/models?limit={}&sort={}&full=false",
-            self.base_url, limit, sort.as_api_param()
+            self.base_url,
+            limit,
+            sort.as_api_param()
         );
 
         if let Some(q) = query {
@@ -272,7 +274,10 @@ impl HuggingFaceClient {
     /// ## Errors
     ///
     /// Returns an error if the API request fails.
-    pub async fn list_variants(&self, repo_id: &str) -> Result<Vec<GgufVariant>, ModelCitizenError> {
+    pub async fn list_variants(
+        &self,
+        repo_id: &str,
+    ) -> Result<Vec<GgufVariant>, ModelCitizenError> {
         let url = format!("{}/api/models/{}/tree/main", self.base_url, repo_id);
 
         let mut request = self.client.get(&url);
@@ -375,8 +380,8 @@ impl HuggingFaceClient {
         let mut file = std::fs::File::create(&tmp_path)?;
         let mut downloaded: u64 = 0;
 
-        use std::io::Write;
         use futures::StreamExt;
+        use std::io::Write;
 
         let mut stream = response.bytes_stream();
 

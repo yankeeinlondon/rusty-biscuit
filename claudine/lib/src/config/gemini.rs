@@ -220,10 +220,7 @@ impl GeminiConfigurator {
     fn is_in_sync(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<bool> {
         use std::collections::HashSet;
 
-        let registered: HashSet<String> = self
-            .registered_events(config_dir)?
-            .into_iter()
-            .collect();
+        let registered: HashSet<String> = self.registered_events(config_dir)?.into_iter().collect();
 
         let expected: HashSet<String> = config
             .providers
@@ -231,9 +228,7 @@ impl GeminiConfigurator {
             .map(|p| {
                 p.events
                     .iter()
-                    .filter(|(event, binding)| {
-                        binding.enabled && to_gemini_native(event).is_some()
-                    })
+                    .filter(|(event, binding)| binding.enabled && to_gemini_native(event).is_some())
                     .map(|(event, _)| event.to_string())
                     .collect()
             })
@@ -523,7 +518,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let configurator = GeminiConfigurator;
 
-        configurator.create_minimal_config(Some(tmp.path())).unwrap();
+        configurator
+            .create_minimal_config(Some(tmp.path()))
+            .unwrap();
 
         let settings_path = tmp.path().join("settings.json");
         assert!(settings_path.exists());

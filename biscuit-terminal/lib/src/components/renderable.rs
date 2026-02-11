@@ -114,7 +114,7 @@ pub trait Renderable: std::fmt::Debug + Any {
     /// Adds `left_offset` characters to the parent's left margin and
     /// `right_offset` characters to the parent's right margin, using
     /// lazy `Margin::Offset` composition so percentages resolve later.
-    fn as_child_of(mut self, parent: &Layout, left_offset: u32, right_offset: u32) -> Self
+    fn with_parent_layout(mut self, parent: &Layout, left_offset: u32, right_offset: u32) -> Self
     where
         Self: Sized,
     {

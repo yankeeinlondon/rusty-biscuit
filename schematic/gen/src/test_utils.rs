@@ -76,7 +76,7 @@ pub fn make_endpoint(
         request,
         response: ApiResponse::json_type("TestResponse"),
         headers: vec![],
-                params: None,
+        params: None,
     }
 }
 
@@ -100,7 +100,7 @@ pub fn make_simple_api() -> RestApi {
             request: None,
             response: ApiResponse::json_type("ListItemsResponse"),
             headers: vec![],
-                params: None,
+            params: None,
         }],
         module_path: None,
         request_suffix: None,

@@ -1,10 +1,11 @@
 //! Remove command - removes a model from one or all runners.
 
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{Result, eyre};
 use inquire::Confirm;
 use model_citizen::{
+    Config, ModelRegistry, ModelSource, UnifiedModel,
     scanner::{LlamaCppScanner, LmStudioScanner, OllamaScanner},
-    sharing, Config, ModelRegistry, ModelSource, UnifiedModel,
+    sharing,
 };
 
 pub async fn run(model_name: &str, runner_filter: Option<&str>, force: bool) -> Result<()> {

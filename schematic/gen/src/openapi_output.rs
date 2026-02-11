@@ -6,8 +6,10 @@
 use std::fs;
 use std::path::Path;
 
-use schematic_define::openapi::{export, serialize, ExportFormat, ExportOptions, SchemaRegistryLike};
 use schematic_define::RestApi;
+use schematic_define::openapi::{
+    ExportFormat, ExportOptions, SchemaRegistryLike, export, serialize,
+};
 
 use crate::errors::GeneratorError;
 
@@ -56,20 +58,16 @@ pub fn write_openapi<R: SchemaRegistryLike>(
 ) -> Result<std::path::PathBuf, GeneratorError> {
     // Validate directory exists
     if !dir.exists() {
-        return Err(GeneratorError::OutputDirNotFound(
-            dir.display().to_string(),
-        ));
+        return Err(GeneratorError::OutputDirNotFound(dir.display().to_string()));
     }
 
     // Export to OpenAPI document
-    let doc = export(api, registry, options).map_err(|e| {
-        GeneratorError::ConfigError(format!("OpenAPI export failed: {}", e))
-    })?;
+    let doc = export(api, registry, options)
+        .map_err(|e| GeneratorError::ConfigError(format!("OpenAPI export failed: {}", e)))?;
 
     // Serialize to string
-    let content = serialize(&doc, options.format).map_err(|e| {
-        GeneratorError::ConfigError(format!("OpenAPI serialization failed: {}", e))
-    })?;
+    let content = serialize(&doc, options.format)
+        .map_err(|e| GeneratorError::ConfigError(format!("OpenAPI serialization failed: {}", e)))?;
 
     // Determine file extension
     let extension = match options.format {

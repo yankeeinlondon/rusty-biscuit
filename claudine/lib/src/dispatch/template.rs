@@ -209,9 +209,9 @@ impl TemplateVariable {
             | TemplateVariable::EnvOsVersion
             | TemplateVariable::EnvHostname => VariableCategory::ContextOs,
 
-            TemplateVariable::EnvArch
-            | TemplateVariable::EnvCpu
-            | TemplateVariable::EnvCores => VariableCategory::ContextHardware,
+            TemplateVariable::EnvArch | TemplateVariable::EnvCpu | TemplateVariable::EnvCores => {
+                VariableCategory::ContextHardware
+            }
 
             TemplateVariable::EnvBranch
             | TemplateVariable::EnvIsDirty

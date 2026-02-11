@@ -41,8 +41,9 @@ pub fn arcam_amp_crud_routes() -> OpenApiRouter<AppState> {
 pub struct SonyReceiverRequest {
     /// Hostname or IP address
     pub host: String,
-    /// Port number (default: 10000)
+    /// Port number
     #[serde(default = "default_sony_port")]
+    #[schema(default = 10000)]
     pub port: u16,
 }
 
@@ -55,8 +56,9 @@ fn default_sony_port() -> u16 {
 pub struct ArcamAmpRequest {
     /// Hostname or IP address
     pub host: String,
-    /// Port number (default: 50000)
+    /// Port number
     #[serde(default = "default_arcam_port")]
+    #[schema(default = 50000)]
     pub port: u16,
 }
 

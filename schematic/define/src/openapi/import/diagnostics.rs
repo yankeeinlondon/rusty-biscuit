@@ -176,10 +176,7 @@ mod tests {
 
     #[test]
     fn diagnostic_info() {
-        let diag = OpenApiDiagnostic::info(
-            "#/test".to_string(),
-            "Info message".to_string(),
-        );
+        let diag = OpenApiDiagnostic::info("#/test".to_string(), "Info message".to_string());
 
         assert_eq!(diag.severity, DiagnosticSeverity::Info);
         assert_eq!(diag.location, "#/test");
@@ -191,10 +188,7 @@ mod tests {
 
     #[test]
     fn diagnostic_warn() {
-        let diag = OpenApiDiagnostic::warn(
-            "#/test".to_string(),
-            "Warning message".to_string(),
-        );
+        let diag = OpenApiDiagnostic::warn("#/test".to_string(), "Warning message".to_string());
 
         assert_eq!(diag.severity, DiagnosticSeverity::Warn);
         assert!(diag.is_warn());
@@ -202,10 +196,7 @@ mod tests {
 
     #[test]
     fn diagnostic_error() {
-        let diag = OpenApiDiagnostic::error(
-            "#/test".to_string(),
-            "Error message".to_string(),
-        );
+        let diag = OpenApiDiagnostic::error("#/test".to_string(), "Error message".to_string());
 
         assert_eq!(diag.severity, DiagnosticSeverity::Error);
         assert!(diag.is_error());
@@ -226,20 +217,14 @@ mod tests {
 
     #[test]
     fn diagnostic_clone_eq() {
-        let diag = OpenApiDiagnostic::error(
-            "#/test".to_string(),
-            "Test".to_string(),
-        );
+        let diag = OpenApiDiagnostic::error("#/test".to_string(), "Test".to_string());
         let cloned = diag.clone();
         assert_eq!(diag, cloned);
     }
 
     #[test]
     fn diagnostic_debug() {
-        let diag = OpenApiDiagnostic::info(
-            "#/test".to_string(),
-            "Test".to_string(),
-        );
+        let diag = OpenApiDiagnostic::info("#/test".to_string(), "Test".to_string());
         let debug = format!("{:?}", diag);
         assert!(debug.contains("OpenApiDiagnostic"));
         assert!(debug.contains("Info"));

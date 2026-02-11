@@ -2,8 +2,8 @@ pub mod atomic;
 pub mod functional_grouping;
 pub mod grouping;
 pub mod runnable;
-pub mod state;
 pub mod services;
+pub mod state;
 
 // Re-export key types for convenience
 pub use runnable::{AgentDelegation, Runnable, RunnableExt};

@@ -81,10 +81,7 @@ fn prose_no_support() -> Prose {
 
 /// Format a prose for wrapper-only providers.
 fn prose_wrapper_only(guidance: &str) -> Prose {
-    Prose::new(format!(
-        "<dim>requires wrapper: <i>{}</i></dim>",
-        guidance
-    ))
+    Prose::new(format!("<dim>requires wrapper: <i>{}</i></dim>", guidance))
 }
 
 /// Format a prose for not detected providers.
@@ -193,10 +190,10 @@ pub async fn run(args: SyncArgs) -> Result<()> {
     let mut provider_actions: HashMap<Provider, Vec<SyncAction>> = HashMap::new();
 
     for provider in providers_to_sync {
-        if let Some(ref filter) = filter_provider {
-            if provider != *filter {
-                continue;
-            }
+        if let Some(ref filter) = filter_provider
+            && provider != *filter
+        {
+            continue;
         }
 
         let configurator = get_configurator(provider);
@@ -228,7 +225,8 @@ pub async fn run(args: SyncArgs) -> Result<()> {
             Some(cfg) => {
                 if args.dry_run {
                     // For dry run, show what would happen
-                    let registered_events = configurator.registered_events(None).unwrap_or_default();
+                    let registered_events =
+                        configurator.registered_events(None).unwrap_or_default();
                     let expected_events: Vec<String> = cfg
                         .providers
                         .get(&provider)
@@ -263,7 +261,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                     let before_events = configurator.registered_events(None).unwrap_or_default();
 
                     match configurator.register(cfg, None) {
-                        Ok(RegistrationResult::Registered { event_count }) => {
+                        Ok(RegistrationResult::Registered { event_count: _ }) => {
                             // Get events after sync
                             let after_events =
                                 configurator.registered_events(None).unwrap_or_default();
@@ -284,11 +282,7 @@ pub async fn run(args: SyncArgs) -> Result<()> {
 
                             // If no changes detected but event_count > 0, show up-to-date
                             if actions.is_empty() {
-                                if event_count > 0 {
-                                    actions.push(SyncAction::UpToDate);
-                                } else {
-                                    actions.push(SyncAction::UpToDate);
-                                }
+                                actions.push(SyncAction::UpToDate);
                             }
                         }
                         Ok(RegistrationResult::Skipped(reason)) => match reason {
@@ -373,16 +367,16 @@ pub async fn run(args: SyncArgs) -> Result<()> {
                         }
 
                         log::data("");
-                        let saved_msg = Prose::new(format!(
-                            "<dim>Config saved to {}</dim>",
-                            path.display()
-                        ));
+                        let saved_msg =
+                            Prose::new(format!("<dim>Config saved to {}</dim>", path.display()));
                         log::data(&saved_msg.fallback_render(&term));
                         log::data("");
                     }
                     Err(e) => {
-                        let error_msg =
-                            Prose::new(format!("<red><b>Error:</b></red> Failed to save config: {}", e));
+                        let error_msg = Prose::new(format!(
+                            "<red><b>Error:</b></red> Failed to save config: {}",
+                            e
+                        ));
                         log::data(&error_msg.fallback_render(&term));
                         log::data("");
                     }

@@ -31,8 +31,8 @@ impl ShareRegistry {
         }
 
         let content = std::fs::read_to_string(path)?;
-        let registry: Self = serde_json::from_str(&content)
-            .map_err(|e| ModelCitizenError::parse(e.to_string()))?;
+        let registry: Self =
+            serde_json::from_str(&content).map_err(|e| ModelCitizenError::parse(e.to_string()))?;
         Ok(registry)
     }
 
@@ -196,10 +196,7 @@ pub fn resolve_original(path: &Path) -> Result<PathBuf, ModelCitizenError> {
 
         // Handle relative symlinks
         current = if target.is_relative() {
-            current
-                .parent()
-                .map(|p| p.join(&target))
-                .unwrap_or(target)
+            current.parent().map(|p| p.join(&target)).unwrap_or(target)
         } else {
             target
         };
@@ -303,10 +300,7 @@ mod tests {
         registry.add_share(&original, &symlink);
 
         assert_eq!(registry.find_original(&symlink), Some(original));
-        assert_eq!(
-            registry.find_original(&PathBuf::from("/unknown")),
-            None
-        );
+        assert_eq!(registry.find_original(&PathBuf::from("/unknown")), None);
     }
 
     #[test]

@@ -444,10 +444,7 @@ timeout_secs = 10
 
         let merged = file_config.merge(env_config);
         // shared_models_dir from env (was Some)
-        assert_eq!(
-            merged.shared_models_dir,
-            Some(PathBuf::from("/env/shared"))
-        );
+        assert_eq!(merged.shared_models_dir, Some(PathBuf::from("/env/shared")));
         // llamacpp_models_dirs from file (env was empty)
         assert_eq!(
             merged.llamacpp_models_dirs,

@@ -4,7 +4,10 @@
 //! and the REST API for enrichment.
 
 use crate::scanner::ModelScanner;
-use crate::{Config, ModelArchitecture, ModelCitizenError, ModelFormat, ModelMetadata, ModelSource, QuantizationType, UnifiedModel};
+use crate::{
+    Config, ModelArchitecture, ModelCitizenError, ModelFormat, ModelMetadata, ModelSource,
+    QuantizationType, UnifiedModel,
+};
 use async_trait::async_trait;
 use std::path::PathBuf;
 
@@ -92,7 +95,10 @@ impl OllamaScanner {
     }
 
     /// Recursively walks manifest directories.
-    fn walk_manifests(dir: &std::path::Path, models: &mut Vec<OllamaModel>) -> Result<(), ModelCitizenError> {
+    fn walk_manifests(
+        dir: &std::path::Path,
+        models: &mut Vec<OllamaModel>,
+    ) -> Result<(), ModelCitizenError> {
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(_) => return Ok(()),
@@ -264,7 +270,10 @@ impl OllamaScanner {
     /// Fetches detailed model info via `POST /api/show`.
     ///
     /// Called lazily during `model info` to avoid N API calls during listing.
-    async fn fetch_show(&self, model_name: &str) -> Option<schematic_definitions::ollama::ShowModelResponse> {
+    async fn fetch_show(
+        &self,
+        model_name: &str,
+    ) -> Option<schematic_definitions::ollama::ShowModelResponse> {
         let url = format!("{}/api/show", self.api_host);
 
         let client = reqwest::Client::builder()
@@ -282,7 +291,10 @@ impl OllamaScanner {
     }
 
     /// Extracts `ModelMetadata` from a `ShowModelResponse`.
-    fn metadata_from_show(show: &schematic_definitions::ollama::ShowModelResponse, existing: &ModelMetadata) -> ModelMetadata {
+    fn metadata_from_show(
+        show: &schematic_definitions::ollama::ShowModelResponse,
+        existing: &ModelMetadata,
+    ) -> ModelMetadata {
         let mut meta = existing.clone();
 
         if let Some(details) = &show.details {
@@ -600,7 +612,8 @@ mod tests {
 
     #[test]
     fn parse_parameters_accumulates_stop_tokens() {
-        let params = "stop \"<|start_header_id|>\"\nstop \"<|end_header_id|>\"\nstop \"<|eot_id|>\"\n";
+        let params =
+            "stop \"<|start_header_id|>\"\nstop \"<|end_header_id|>\"\nstop \"<|eot_id|>\"\n";
         let mut meta = ModelMetadata::default();
         OllamaScanner::parse_parameters(params, &mut meta);
         let stops = meta.stop.unwrap();

@@ -15,7 +15,8 @@ use super::trait_def::{AgentConfigurator, RegistrationResult, SkipReason};
 ///
 /// An empty TOML file (or one with just a comment) is valid for Codex.
 /// Note: TOML requires root keys to appear before tables.
-const MINIMAL_CONFIG: &str = "# Codex CLI configuration\n# Created by claudine for hook registration\n";
+const MINIMAL_CONFIG: &str =
+    "# Codex CLI configuration\n# Created by claudine for hook registration\n";
 
 pub(crate) struct CodexConfigurator;
 
@@ -496,7 +497,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let configurator = CodexConfigurator;
 
-        configurator.create_minimal_config(Some(tmp.path())).unwrap();
+        configurator
+            .create_minimal_config(Some(tmp.path()))
+            .unwrap();
 
         let config_path = tmp.path().join("config.toml");
         assert!(config_path.exists());

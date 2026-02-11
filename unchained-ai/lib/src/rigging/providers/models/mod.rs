@@ -149,7 +149,7 @@ impl ProviderModel {
             });
         }
 
-        let parsed = match provider {
+        match provider {
             Provider::Anthropic => ProviderModelAnthropic::from_str(model_id)
                 .map(Self::Anthropic)
                 .map_err(|_| ProviderModelParseError::UnknownModel {
@@ -220,9 +220,7 @@ impl ProviderModel {
                 provider: provider_raw.trim().to_string(),
                 input: trimmed.to_string(),
             }),
-        };
-
-        parsed
+        }
     }
     /// Returns the canonical wire-format model ID.
     ///

@@ -36,9 +36,10 @@ pub enum VerticalAlign {
 
 /// The data type of a table column, which drives default alignment
 /// and formatting behavior.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum ColumnType {
     /// Free-form text. Default alignment: Left.
+    #[default]
     String,
     /// Signed integer with thousands separators. Default alignment: Right.
     Integer,
@@ -78,12 +79,6 @@ impl ColumnType {
             ColumnType::String => true,
             ColumnType::Integer | ColumnType::Float | ColumnType::Currency(_) => false,
         }
-    }
-}
-
-impl Default for ColumnType {
-    fn default() -> Self {
-        ColumnType::String
     }
 }
 

@@ -1,6 +1,6 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::network::Host;
@@ -545,11 +545,12 @@ impl SonyReceiver {
             .await?;
 
         let result = unwrap_sony_result(&response);
-        let entry = if result[0].is_object() { &result[0] } else { result };
-        let status = entry["status"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string();
+        let entry = if result[0].is_object() {
+            &result[0]
+        } else {
+            result
+        };
+        let status = entry["status"].as_str().unwrap_or("unknown").to_string();
 
         Ok(status)
     }
@@ -595,8 +596,7 @@ impl SonyReceiver {
             )
             .await?;
 
-        let info: Vec<VolumeInfo> =
-            serde_json::from_value(unwrap_sony_result(&response).clone())?;
+        let info: Vec<VolumeInfo> = serde_json::from_value(unwrap_sony_result(&response).clone())?;
 
         if let Some(first) = info.first() {
             Ok(first.mute == "on")
@@ -618,8 +618,7 @@ impl SonyReceiver {
             )
             .await?;
 
-        let info: Vec<VolumeInfo> =
-            serde_json::from_value(unwrap_sony_result(&response).clone())?;
+        let info: Vec<VolumeInfo> = serde_json::from_value(unwrap_sony_result(&response).clone())?;
 
         info.into_iter().next().ok_or(SonyError::NoContent)
     }
@@ -723,7 +722,11 @@ impl SonyReceiver {
             .await?;
 
         let result = unwrap_sony_result(&response);
-        let entry = if result[0].is_object() { &result[0] } else { result };
+        let entry = if result[0].is_object() {
+            &result[0]
+        } else {
+            result
+        };
         Ok(SystemInformation::from_value(entry))
     }
 
@@ -742,7 +745,11 @@ impl SonyReceiver {
             .await?;
 
         let result = unwrap_sony_result(&response);
-        let entry = if result[0].is_object() { &result[0] } else { result };
+        let entry = if result[0].is_object() {
+            &result[0]
+        } else {
+            result
+        };
         let info: SwUpdateInfo = serde_json::from_value(entry.clone())?;
         Ok(info)
     }
@@ -792,7 +799,11 @@ impl SonyReceiver {
             .await?;
 
         let result = unwrap_sony_result(&response);
-        let entry = if result[0].is_object() { &result[0] } else { result };
+        let entry = if result[0].is_object() {
+            &result[0]
+        } else {
+            result
+        };
         let info: EciaInfo = serde_json::from_value(entry.clone())?;
         Ok(info)
     }
@@ -810,11 +821,12 @@ impl SonyReceiver {
             .await?;
 
         let result = unwrap_sony_result(&response);
-        let entry = if result[0].is_object() { &result[0] } else { result };
-        let status = entry["status"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string();
+        let entry = if result[0].is_object() {
+            &result[0]
+        } else {
+            result
+        };
+        let status = entry["status"].as_str().unwrap_or("unknown").to_string();
         Ok(status)
     }
 
@@ -865,9 +877,7 @@ impl SonyReceiver {
 
     /// Checks what playback functions (Play, Pause, Stop) are available
     /// for the current input.
-    pub async fn get_available_playback_function(
-        &self,
-    ) -> Result<PlaybackFunction, SonyError> {
+    pub async fn get_available_playback_function(&self) -> Result<PlaybackFunction, SonyError> {
         // "output" is optional, usually defaults to main zone if omitted
         let response = self
             .send_command(
@@ -879,7 +889,11 @@ impl SonyReceiver {
             .await?;
 
         let result = unwrap_sony_result(&response);
-        let entry = if result[0].is_object() { &result[0] } else { result };
+        let entry = if result[0].is_object() {
+            &result[0]
+        } else {
+            result
+        };
         let func: PlaybackFunction = serde_json::from_value(entry.clone())?;
         Ok(func)
     }
@@ -933,7 +947,11 @@ impl SonyReceiver {
             .await?;
 
         let result = unwrap_sony_result(&response);
-        let entry = if result[0].is_object() { &result[0] } else { result };
+        let entry = if result[0].is_object() {
+            &result[0]
+        } else {
+            result
+        };
         let count = entry["count"].as_u64().unwrap_or(0) as u32;
         Ok(count)
     }
@@ -987,10 +1005,7 @@ impl SonyReceiver {
     }
 
     /// Gets Bluetooth settings from the avContent endpoint.
-    pub async fn get_bluetooth_settings(
-        &self,
-        target: &str,
-    ) -> Result<Value, SonyError> {
+    pub async fn get_bluetooth_settings(&self, target: &str) -> Result<Value, SonyError> {
         let params = json!([{ "target": target }]);
         let response = self
             .send_command(
@@ -1005,11 +1020,7 @@ impl SonyReceiver {
     }
 
     /// Sets a Bluetooth setting on the avContent endpoint.
-    pub async fn set_bluetooth_settings(
-        &self,
-        target: &str,
-        value: &str,
-    ) -> Result<(), SonyError> {
+    pub async fn set_bluetooth_settings(&self, target: &str, value: &str) -> Result<(), SonyError> {
         let params = json!([{ "settings": [{ "target": target, "value": value }] }]);
         self.send_command(
             SonyReceiverEndpoints::AvContent,

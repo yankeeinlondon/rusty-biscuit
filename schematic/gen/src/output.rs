@@ -269,7 +269,10 @@ pub fn assemble_api_module_with_options(api: &RestApi, options: &OutputOptions) 
 ///
 /// Panics if `apis` is empty.
 pub fn assemble_combined_api_module(apis: &[&RestApi]) -> TokenStream {
-    assert!(!apis.is_empty(), "assemble_combined_api_module requires at least one API");
+    assert!(
+        !apis.is_empty(),
+        "assemble_combined_api_module requires at least one API"
+    );
 
     let module_path = get_module_path(apis[0]);
 
@@ -341,7 +344,10 @@ fn build_combined_module_docs(apis: &[&RestApi]) -> TokenStream {
         let name = &api.name;
         let desc = &api.description;
         let intro = if let Some(docs_url) = &api.docs_url {
-            format!("Generated API client for [{}]({}).\n\n{}", name, docs_url, desc)
+            format!(
+                "Generated API client for [{}]({}).\n\n{}",
+                name, docs_url, desc
+            )
         } else {
             format!("Generated API client for {}.\n\n{}", name, desc)
         };
@@ -1159,7 +1165,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::json_type("ListModelsResponse"),
                     headers: vec![],
-                params: None,
+                    params: None,
                 },
                 Endpoint {
                     id: "RetrieveModel".to_string(),
@@ -1169,7 +1175,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::json_type("Model"),
                     headers: vec![],
-                params: None,
+                    params: None,
                 },
                 Endpoint {
                     id: "CreateCompletion".to_string(),
@@ -1179,7 +1185,7 @@ mod tests {
                     request: Some(ApiRequest::json_type("CreateCompletionRequest")),
                     response: ApiResponse::json_type("Completion"),
                     headers: vec![],
-                params: None,
+                    params: None,
                 },
             ],
             module_path: None,
@@ -1524,7 +1530,7 @@ mod tests {
                     request: None,
                     response: ApiResponse::json_type("TestResponse"),
                     headers: vec![],
-                params: None,
+                    params: None,
                 }],
                 module_path: None,
                 request_suffix: None,
@@ -1699,7 +1705,11 @@ mod tests {
 
         // "pub mod foo" should appear exactly once
         let count = code.matches("pub mod foo").count();
-        assert_eq!(count, 1, "Expected exactly 1 'pub mod foo', found {}", count);
+        assert_eq!(
+            count, 1,
+            "Expected exactly 1 'pub mod foo', found {}",
+            count
+        );
     }
 
     #[test]
@@ -1712,20 +1722,44 @@ mod tests {
         let code = format_code(&file);
 
         // Should include both client structs
-        assert!(code.contains("pub struct FooNative"), "Missing FooNative struct");
-        assert!(code.contains("pub struct FooCompat"), "Missing FooCompat struct");
+        assert!(
+            code.contains("pub struct FooNative"),
+            "Missing FooNative struct"
+        );
+        assert!(
+            code.contains("pub struct FooCompat"),
+            "Missing FooCompat struct"
+        );
 
         // Should include both request enums
-        assert!(code.contains("pub enum FooNativeRequest"), "Missing FooNativeRequest enum");
-        assert!(code.contains("pub enum FooCompatRequest"), "Missing FooCompatRequest enum");
+        assert!(
+            code.contains("pub enum FooNativeRequest"),
+            "Missing FooNativeRequest enum"
+        );
+        assert!(
+            code.contains("pub enum FooCompatRequest"),
+            "Missing FooCompatRequest enum"
+        );
 
         // Should have definitions import only once
-        let import_count = code.matches("pub use schematic_definitions::foo::*").count();
-        assert_eq!(import_count, 1, "Expected exactly 1 definitions import, found {}", import_count);
+        let import_count = code
+            .matches("pub use schematic_definitions::foo::*")
+            .count();
+        assert_eq!(
+            import_count, 1,
+            "Expected exactly 1 definitions import, found {}",
+            import_count
+        );
 
         // Should have shared import only once
-        let shared_count = code.matches("use crate::shared::{RequestParts, SchematicError}").count();
-        assert_eq!(shared_count, 1, "Expected exactly 1 shared import, found {}", shared_count);
+        let shared_count = code
+            .matches("use crate::shared::{RequestParts, SchematicError}")
+            .count();
+        assert_eq!(
+            shared_count, 1,
+            "Expected exactly 1 shared import, found {}",
+            shared_count
+        );
     }
 
     #[test]
@@ -1740,8 +1774,14 @@ mod tests {
 
         // Should write a single foo.rs (not foonative.rs + foocompat.rs)
         assert!(temp_dir.path().join("foo.rs").exists(), "Missing foo.rs");
-        assert!(!temp_dir.path().join("foonative.rs").exists(), "Unexpected foonative.rs");
-        assert!(!temp_dir.path().join("foocompat.rs").exists(), "Unexpected foocompat.rs");
+        assert!(
+            !temp_dir.path().join("foonative.rs").exists(),
+            "Unexpected foonative.rs"
+        );
+        assert!(
+            !temp_dir.path().join("foocompat.rs").exists(),
+            "Unexpected foocompat.rs"
+        );
 
         // The combined file should contain both structs
         let foo_content = fs::read_to_string(temp_dir.path().join("foo.rs")).unwrap();
@@ -1768,11 +1808,20 @@ mod tests {
         generate_and_write_all(&apis, temp_dir.path(), false).unwrap();
 
         // Stale .rs files should be removed
-        assert!(!temp_dir.path().join("ollamaopenai.rs").exists(), "ollamaopenai.rs should be deleted");
-        assert!(!temp_dir.path().join("old_api.rs").exists(), "old_api.rs should be deleted");
+        assert!(
+            !temp_dir.path().join("ollamaopenai.rs").exists(),
+            "ollamaopenai.rs should be deleted"
+        );
+        assert!(
+            !temp_dir.path().join("old_api.rs").exists(),
+            "old_api.rs should be deleted"
+        );
 
         // Non-.rs files should be preserved
-        assert!(temp_dir.path().join("Cargo.toml").exists(), "Cargo.toml should be preserved");
+        assert!(
+            temp_dir.path().join("Cargo.toml").exists(),
+            "Cargo.toml should be preserved"
+        );
 
         // Generated files should exist
         assert!(temp_dir.path().join("lib.rs").exists());
@@ -1793,7 +1842,13 @@ mod tests {
         // Both API clients should be re-exported from the shared module
         assert!(code.contains("FooNative"), "Missing FooNative in prelude");
         assert!(code.contains("FooCompat"), "Missing FooCompat in prelude");
-        assert!(code.contains("FooNativeRequest"), "Missing FooNativeRequest in prelude");
-        assert!(code.contains("FooCompatRequest"), "Missing FooCompatRequest in prelude");
+        assert!(
+            code.contains("FooNativeRequest"),
+            "Missing FooNativeRequest in prelude"
+        );
+        assert!(
+            code.contains("FooCompatRequest"),
+            "Missing FooCompatRequest in prelude"
+        );
     }
 }

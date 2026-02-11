@@ -507,3 +507,104 @@ fn test_cli_help_shows_speed_options() {
         "Help should document --slow flag"
     );
 }
+
+#[test]
+fn test_cli_background_flag() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "so-you-say",
+            "--",
+            "--background",
+            "background test",
+        ])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(
+        output.status.success(),
+        "CLI should exit with code 0 when using --background"
+    );
+
+    // In background mode, stdout/stderr are redirected to null on the child process,
+    // so the parent should produce no output.
+    assert!(
+        output.stdout.is_empty(),
+        "Background mode should produce no stdout"
+    );
+}
+
+#[test]
+fn test_cli_help_shows_background_option() {
+    let output = Command::new("cargo")
+        .args(["run", "-p", "so-you-say", "--", "--help"])
+        .output()
+        .expect("Failed to execute");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("--background"),
+        "Help should document --background flag"
+    );
+}
+
+#[test]
+fn test_cli_background_conflicts_with_list_providers() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "so-you-say",
+            "--",
+            "--background",
+            "--list-providers",
+        ])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(
+        !output.status.success(),
+        "CLI should reject --background with --list-providers"
+    );
+}
+
+#[test]
+fn test_cli_background_conflicts_with_list_voices() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "so-you-say",
+            "--",
+            "--background",
+            "--list-voices",
+        ])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(
+        !output.status.success(),
+        "CLI should reject --background with --list-voices"
+    );
+}
+
+#[test]
+fn test_cli_background_conflicts_with_refresh_cache() {
+    let output = Command::new("cargo")
+        .args([
+            "run",
+            "-p",
+            "so-you-say",
+            "--",
+            "--background",
+            "--refresh-cache",
+        ])
+        .output()
+        .expect("Failed to execute");
+
+    assert!(
+        !output.status.success(),
+        "CLI should reject --background with --refresh-cache"
+    );
+}

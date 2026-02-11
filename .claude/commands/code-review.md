@@ -33,10 +33,13 @@ You are a highly skilled and experienced software architect with deep expertise 
 - **schematic**
     - a set of sub-packages which
 - **sniff**
-    - a library
+    - a library and CLI which detects hardware, network, services, and installed applications on the host machine. It also evaluates the current working directory to give insight into the current repo, packages, etc.
 - **so-you-say**
+    - A CLI which provides TTS functionality (by leveraging the `biscuit-speaks` library)
 - **tree-hugger**
+    - A static analysis library and CLI (`hug`) which provides code analysis via the popular tree-hugger library
 - **unchained-ai**
+    - A library and CLI which provides a wrapper around the popular `rig` crate for AI but extends this with a set of "primitives" used for creating chained AI interactions
 
 **YOU MUST FOLLOW THESE STEPS:**
 
@@ -61,7 +64,6 @@ You are a highly skilled and experienced software architect with deep expertise 
     If you're reviewing the "biscuit-hash" package then this refers to both the "biscuit-hash" library but also the "biscuit-hash-cli" packages and there should be a **skill** for each dependency who's name is the library's package name (e.g., in this example the skill "biscuit-hash" exists and covers both the "biscuit-hash" library as well as the CLI).
 
     When running this code review you should always use the skills of the dependent packages as well as the package being reviewed!
-
 
 3. All of the packages in this package have a "skill" file and a code review MUST use the skill associated with the package being reviewed as well as any packages which are dependencies of that package
 

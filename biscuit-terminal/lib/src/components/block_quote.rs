@@ -85,11 +85,8 @@ impl BlockQuote {
     /// Create a block quote by passing in the content and _optionally_ an attribution.
     pub fn new<U: Into<String>>(content: RenderableContent, attribution: Option<U>) -> Self {
         Self {
-            content: RenderableContent::from(content),
-            attribution: match attribution {
-                Some(attribution) => Some(attribution.into()),
-                _ => None,
-            },
+            content,
+            attribution: attribution.map(|attribution| attribution.into()),
             ..BlockQuote::default()
         }
     }
@@ -552,7 +549,10 @@ mod tests {
         let quote = BlockQuote::from(long.trim());
         let result = quote.render(Some(40));
         let lines: Vec<&str> = result.lines().collect();
-        assert!(lines.len() > 1, "Expected wrapping but got single line: {result}");
+        assert!(
+            lines.len() > 1,
+            "Expected wrapping but got single line: {result}"
+        );
         assert!(lines.iter().all(|l| l.starts_with("│ ")));
     }
 
@@ -564,9 +564,17 @@ mod tests {
         let result = quote.render(Some(80));
         let lines: Vec<&str> = result.lines().collect();
         // Should have at least 3 border-prefixed lines (one per \n-separated segment)
-        assert!(lines.len() >= 3, "Expected >=3 lines but got {}: {result}", lines.len());
-        assert!(lines.iter().all(|l| l.starts_with("│ ") || l.starts_with("      │")),
-            "All lines should have border prefix: {result}");
+        assert!(
+            lines.len() >= 3,
+            "Expected >=3 lines but got {}: {result}",
+            lines.len()
+        );
+        assert!(
+            lines
+                .iter()
+                .all(|l| l.starts_with("│ ") || l.starts_with("      │")),
+            "All lines should have border prefix: {result}"
+        );
     }
 
     #[test]

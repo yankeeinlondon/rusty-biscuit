@@ -48,9 +48,7 @@ async fn main() -> Result<()> {
         Ok(_) => tracing_subscriber::EnvFilter::from_default_env(),
         Err(_) => tracing_subscriber::EnvFilter::new("warn"),
     };
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .init();
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let cli = Cli::parse();
 

@@ -2744,6 +2744,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "homelab-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "biscuit-terminal",
+ "clap 4.5.57",
+ "clap_complete",
+ "color-eyre",
+ "homelab",
+ "predicates",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "homelab-server"
 version = "0.1.0"
 dependencies = [
@@ -2766,21 +2781,6 @@ dependencies = [
  "utoipa",
  "utoipa-axum",
  "utoipa-scalar",
-]
-
-[[package]]
-name = "homey"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "biscuit-terminal",
- "clap 4.5.57",
- "clap_complete",
- "color-eyre",
- "homelab",
- "predicates",
- "serde_json",
- "tokio",
 ]
 
 [[package]]

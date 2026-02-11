@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 
 use claudine::config::AgentInfo;
-use claudine::events::{AgenticEvent, EventAction, EventSupportLevel, GlobalSettings, LogTarget, Provider, TtsSettings};
+use claudine::events::{
+    AgenticEvent, EventAction, EventSupportLevel, GlobalSettings, LogTarget, Provider, TtsSettings,
+};
 use color_eyre::eyre::Result;
 use inquire::{Confirm, MultiSelect, Select, Text};
 
@@ -102,7 +104,9 @@ pub fn prompt_event_selection(selected_providers: &[Provider]) -> Result<Vec<Age
 
     if hookable_events.is_empty() {
         eprintln!("\nNo events with hook support for the selected providers.");
-        eprintln!("Selected providers only support non-hook methods (wrapper/proxy) which are not yet implemented.");
+        eprintln!(
+            "Selected providers only support non-hook methods (wrapper/proxy) which are not yet implemented."
+        );
         return Ok(vec![]);
     }
 
@@ -179,7 +183,7 @@ impl std::fmt::Display for ActionType {
 
 /// Prompt user to select action types for an event.
 pub fn prompt_action_types(event: &AgenticEvent) -> Result<Vec<ActionType>> {
-    let options = vec![
+    let options = [
         ActionType::SoundEffect,
         ActionType::Speak,
         ActionType::Log,

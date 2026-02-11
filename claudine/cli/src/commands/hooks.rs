@@ -8,15 +8,15 @@ use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Alignment, Margin};
-use claudine::config::{detect_agents, AgentConfigurator};
+use claudine::config::{AgentConfigurator, detect_agents};
 use claudine::dispatch::loader::load_config;
 use claudine::dispatch::template::{TemplateVariable, VariableCategory};
 use claudine::events::{
-    detect_environment, AgenticEvent, EventAction, EventBinding, EventMeta, EventSupportLevel,
-    HookerConfig, LogTarget, Provider, ReportFormat,
+    AgenticEvent, EventAction, EventBinding, EventMeta, EventSupportLevel, HookerConfig, LogTarget,
+    Provider, ReportFormat, detect_environment,
 };
 use playa::SoundEffect;
-use sniff::programs::{enums::AiCli, InstalledAiClients};
+use sniff::programs::{InstalledAiClients, enums::AiCli};
 
 use crate::log;
 
@@ -92,10 +92,10 @@ fn expected_events_for_provider(
     configurator: Option<&dyn claudine::config::AgentConfigurator>,
 ) -> HashSet<String> {
     // If configurator exists and doesn't support config registration, return empty
-    if let Some(cfg) = configurator {
-        if !cfg.supports_config_registration() {
-            return HashSet::new();
-        }
+    if let Some(cfg) = configurator
+        && !cfg.supports_config_registration()
+    {
+        return HashSet::new();
     }
 
     config
@@ -110,10 +110,10 @@ fn expected_events_for_provider(
                     }
 
                     // Check if configurator has specific registerable events
-                    if let Some(cfg) = configurator {
-                        if let Some(registerable) = cfg.registerable_events() {
-                            return registerable.contains(event);
-                        }
+                    if let Some(cfg) = configurator
+                        && let Some(registerable) = cfg.registerable_events()
+                    {
+                        return registerable.contains(event);
                     }
 
                     // Default: filter by provider's hook-based event support only
@@ -206,17 +206,18 @@ fn find_invalid_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut invalid_effects: Vec<InvalidEffect> = Vec::new();
 
-    for (_provider, provider_config) in &config.providers {
-        for (_event_name, binding) in &provider_config.events {
+    for provider_config in config.providers.values() {
+        for binding in provider_config.events.values() {
             for action in &binding.actions {
-                if let EventAction::SoundEffect { name, .. } = action {
-                    if SoundEffect::from_name(name).is_none() && !seen.contains(name) {
-                        seen.insert(name.clone());
-                        invalid_effects.push(InvalidEffect {
-                            invalid_name: name.clone(),
-                            suggestion: find_similar_effect(name),
-                        });
-                    }
+                if let EventAction::SoundEffect { name, .. } = action
+                    && SoundEffect::from_name(name).is_none()
+                    && !seen.contains(name)
+                {
+                    seen.insert(name.clone());
+                    invalid_effects.push(InvalidEffect {
+                        invalid_name: name.clone(),
+                        suggestion: find_similar_effect(name),
+                    });
                 }
             }
         }
@@ -259,10 +260,14 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
 
     log::data("");
     if has_fixable {
-        let hint = Prose::new("{{dim}}Use {{blue}}--fix{{reset}}{{dim}} to automatically apply suggested fixes{{reset}}");
+        let hint = Prose::new(
+            "{{dim}}Use {{blue}}--fix{{reset}}{{dim}} to automatically apply suggested fixes{{reset}}",
+        );
         log::data(&format!(" {}", hint.render(Some(100))));
     }
-    let hint = Prose::new("{{dim}}Run {{blue}}playa list-effects{{reset}}{{dim}} to see available effects{{reset}}");
+    let hint = Prose::new(
+        "{{dim}}Run {{blue}}playa list-effects{{reset}}{{dim}} to see available effects{{reset}}",
+    );
     log::data(&format!(" {}", hint.render(Some(100))));
 
     invalid_effects
@@ -273,9 +278,8 @@ fn validate_sound_effects(config: &HookerConfig) -> Vec<InvalidEffect> {
 /// Replaces invalid names with their suggested alternatives directly in the JSON file.
 fn fix_sound_effects(invalid_effects: &[InvalidEffect]) -> Result<usize> {
     // Find the user config file
-    let home = dirs::home_dir().ok_or_else(|| {
-        color_eyre::eyre::eyre!("Could not determine home directory")
-    })?;
+    let home = dirs::home_dir()
+        .ok_or_else(|| color_eyre::eyre::eyre!("Could not determine home directory"))?;
 
     let config_names = [".hooker", ".hook-config"];
     let config_path = config_names
@@ -433,9 +437,16 @@ fn fuzzy_match_provider(input: &str) -> Option<Provider> {
 fn format_action(action: &EventAction) -> String {
     match action {
         EventAction::Speak { message } => {
-            format!("{{{{cyan}}}}speak{{{{reset}}}} \"{}\"", truncate_string(message, 40))
+            format!(
+                "{{{{cyan}}}}speak{{{{reset}}}} \"{}\"",
+                truncate_string(message, 40)
+            )
         }
-        EventAction::SoundEffect { name, volume, speed } => {
+        EventAction::SoundEffect {
+            name,
+            volume,
+            speed,
+        } => {
             let mut parts = vec![format!("{{{{magenta}}}}sound{{{{reset}}}} {}", name)];
             if *volume != 1.0 {
                 parts.push(format!("vol={:.1}", volume));
@@ -620,11 +631,14 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
     // Summary stats
     let configured_count = event_rows
         .iter()
-        .filter(|row| row.1.map_or(false, |eb| eb.enabled))
+        .filter(|row| row.1.is_some_and(|eb| eb.enabled))
         .count();
     let total_actions: usize = event_rows
         .iter()
-        .filter_map(|row| row.1.map(|eb| if eb.enabled { eb.actions.len() } else { 0 }))
+        .filter_map(|row| {
+            row.1
+                .map(|eb| if eb.enabled { eb.actions.len() } else { 0 })
+        })
         .sum();
 
     log::data("");
@@ -637,7 +651,7 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
     // Show enabled events table with descriptions
     let enabled_events: Vec<&AgenticEvent> = event_rows
         .iter()
-        .filter(|(_, binding)| binding.map_or(false, |b| b.enabled))
+        .filter(|(_, binding)| binding.is_some_and(|b| b.enabled))
         .map(|(event, _)| event)
         .collect();
 
@@ -659,11 +673,10 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
         };
         log::data(&format!(" {}", enabled_header.fallback_render(&term)));
 
-        let desc_columns = vec![
-            TableColumn::new("Event"),
-            TableColumn::new("Description"),
-        ];
-        let mut desc_table = Table::new().with_columns(desc_columns).prefer_cursor_alignment();
+        let desc_columns = vec![TableColumn::new("Event"), TableColumn::new("Description")];
+        let mut desc_table = Table::new()
+            .with_columns(desc_columns)
+            .prefer_cursor_alignment();
         desc_table.layout_mut().left_margin = Margin::Chars(1);
 
         for event in enabled_events {
@@ -679,12 +692,9 @@ fn run_provider_detail(provider: Provider, config: Option<&HookerConfig>) -> Res
                 event.to_string().into()
             };
             let desc_cell: TableCellContent = if is_unsupported {
-                Prose::new(format!(
-                    "{{{{dim}}}}{}{{{{reset}}}}",
-                    event.description()
-                ))
-                .fallback_render(&term)
-                .into()
+                Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", event.description()))
+                    .fallback_render(&term)
+                    .into()
             } else {
                 event.description().into()
             };
@@ -735,8 +745,7 @@ pub fn run(args: HooksArgs, verbose: bool) -> Result<()> {
                 return result;
             }
             None => {
-                let available: Vec<String> =
-                    ALL_PROVIDERS.iter().map(|p| p.to_string()).collect();
+                let available: Vec<String> = ALL_PROVIDERS.iter().map(|p| p.to_string()).collect();
                 log::error(&format!(
                     "Unknown provider '{}'. Available: {}",
                     provider_input,
@@ -865,7 +874,9 @@ fn run_simple(
         log::data("");
         let mut legend_parts = Vec::new();
         if has_unsupported_issues {
-            legend_parts.push("{{red}}{{strikethrough}}strikethrough{{reset}}{{dim}} = unsupported (won't fire)");
+            legend_parts.push(
+                "{{red}}{{strikethrough}}strikethrough{{reset}}{{dim}} = unsupported (won't fire)",
+            );
         }
         if has_sync_issues {
             legend_parts.push("{{red}}red{{reset}}{{dim}} = stale (remove with sync)");
@@ -894,8 +905,8 @@ fn run_simple(
     Ok(())
 }
 
-const NOT_INSTALLED: &'static str = "-";
-const NOT_ALLOWED: &'static str = "⚠️";
+const NOT_INSTALLED: &str = "-";
+const NOT_ALLOWED: &str = "⚠️";
 
 /// Verbose table view showing per-event action counts in a matrix.
 fn run_verbose(

@@ -374,7 +374,10 @@ mod tests {
             ctx.git.as_ref().unwrap().repo_name.as_deref(),
             Some("my-project")
         );
-        assert_eq!(ctx.git.as_ref().unwrap().repo_org.as_deref(), Some("my-org"));
+        assert_eq!(
+            ctx.git.as_ref().unwrap().repo_org.as_deref(),
+            Some("my-org")
+        );
         assert!(ctx.repo.as_ref().unwrap().is_monorepo);
         assert_eq!(ctx.repo.as_ref().unwrap().packages.len(), 2);
         assert_eq!(ctx.primary_language.as_deref(), Some("Rust"));

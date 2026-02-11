@@ -26,7 +26,9 @@ mod types;
 
 pub use types::*;
 
-use schematic_define::{ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod};
+use schematic_define::{
+    ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvMapping, RestApi, RestMethod,
+};
 
 /// Creates the LM Studio v1 native API definition.
 ///
@@ -165,7 +167,10 @@ mod tests {
     fn api_uses_bearer_token_auth() {
         let api = define_lmstudio_api();
 
-        assert!(matches!(api.auth, AuthStrategy::BearerToken { header: None }));
+        assert!(matches!(
+            api.auth,
+            AuthStrategy::BearerToken { header: None }
+        ));
         assert_eq!(api.env_auth, vec!["LM_API_TOKEN"]);
     }
 
@@ -212,7 +217,11 @@ mod tests {
     #[test]
     fn unload_model_endpoint() {
         let api = define_lmstudio_api();
-        let endpoint = api.endpoints.iter().find(|e| e.id == "UnloadModel").unwrap();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "UnloadModel")
+            .unwrap();
 
         assert_eq!(endpoint.method, RestMethod::Post);
         assert_eq!(endpoint.path, "/api/v1/models/unload");

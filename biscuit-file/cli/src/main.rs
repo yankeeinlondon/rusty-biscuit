@@ -3,9 +3,9 @@
 //! Convert between TOML, YAML, JSON, and extract text/markdown from PDFs.
 //! For Markdown files, extracts and converts the frontmatter block.
 
-use biscuit_file::{detect_file_type, FileType, Pdf, Toml, Yaml};
+use biscuit_file::{FileType, Pdf, Toml, Yaml, detect_file_type};
 use clap::{ArgGroup, Parser, ValueEnum};
-use color_eyre::eyre::{bail, Result, WrapErr};
+use color_eyre::eyre::{Result, WrapErr, bail};
 use std::io::Read;
 use std::path::PathBuf;
 
@@ -178,7 +178,9 @@ fn extract_frontmatter(input: &str) -> Result<(&str, FrontmatterFormat)> {
     } else if trimmed.starts_with("+++") {
         ("+++", FrontmatterFormat::Toml)
     } else {
-        bail!("No frontmatter found. Expected `---` (YAML) or `+++` (TOML) at the start of the document");
+        bail!(
+            "No frontmatter found. Expected `---` (YAML) or `+++` (TOML) at the start of the document"
+        );
     };
 
     // Find the closing delimiter (skip the opening line)
@@ -189,9 +191,7 @@ fn extract_frontmatter(input: &str) -> Result<(&str, FrontmatterFormat)> {
 
     let rest = &trimmed[after_open..];
     let close_pos = rest.find(delimiter).ok_or_else(|| {
-        color_eyre::eyre::eyre!(
-            "Unclosed frontmatter. Expected closing `{delimiter}` delimiter"
-        )
+        color_eyre::eyre::eyre!("Unclosed frontmatter. Expected closing `{delimiter}` delimiter")
     })?;
 
     let frontmatter = &rest[..close_pos];

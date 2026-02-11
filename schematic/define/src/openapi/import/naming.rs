@@ -7,11 +7,11 @@ use std::collections::HashSet;
 
 /// Rust reserved keywords that cannot be used as identifiers.
 const RUST_KEYWORDS: &[&str] = &[
-    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum",
-    "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move",
-    "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true",
-    "type", "unsafe", "use", "where", "while", "abstract", "become", "box", "do", "final",
-    "macro", "override", "priv", "try", "typeof", "unsized", "virtual", "yield",
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
+    "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
+    "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
+    "unsafe", "use", "where", "while", "abstract", "become", "box", "do", "final", "macro",
+    "override", "priv", "try", "typeof", "unsized", "virtual", "yield",
 ];
 
 /// Converts a string to PascalCase.
@@ -135,10 +135,7 @@ pub fn sanitize_rust_ident(s: &str) -> String {
     let pascal = to_pascal_case(s);
 
     // Remove leading digits
-    let trimmed: String = pascal
-        .chars()
-        .skip_while(|c| c.is_ascii_digit())
-        .collect();
+    let trimmed: String = pascal.chars().skip_while(|c| c.is_ascii_digit()).collect();
 
     // If empty after trimming, use fallback
     // Also ensure first char is uppercase after removing digits

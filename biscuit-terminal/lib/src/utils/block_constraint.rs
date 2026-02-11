@@ -597,31 +597,26 @@ fn active_ansi_state(content: &str) -> (Option<String>, Option<String>) {
         let end = escape_sequence_end(content, idx);
         let seq = &content[idx..end];
 
-        // Full SGR reset — clears foreground
-        if seq == "\x1b[0m" {
-            fg = None;
-        }
-        // Foreground reset
-        else if seq == "\x1b[39m" {
+        // Full SGR reset or foreground reset — clears foreground
+        if seq == "\x1b[0m" || seq == "\x1b[39m" {
             fg = None;
         }
         // CSI SGR sequence — check if it sets foreground
         else if seq.starts_with("\x1b[") && seq.ends_with('m') {
             let params = &seq[2..seq.len() - 1];
-            if let Some(first) = params.split(';').next() {
-                if let Ok(n) = first.parse::<u32>() {
-                    // 30-37: basic fg, 38: extended fg, 90-97: bright fg
-                    if (30..=37).contains(&n) || n == 38 || (90..=97).contains(&n) {
-                        fg = Some(seq.to_string());
-                    }
+            if let Some(first) = params.split(';').next()
+                && let Ok(n) = first.parse::<u32>()
+            {
+                // 30-37: basic fg, 38: extended fg, 90-97: bright fg
+                if (30..=37).contains(&n) || n == 38 || (90..=97).contains(&n) {
+                    fg = Some(seq.to_string());
                 }
             }
         }
         // OSC8 link
-        else if seq.starts_with("\x1b]8;;") {
+        else if let Some(inner) = seq.strip_prefix("\x1b]8;;") {
             // Check if URL is non-empty (open) or empty (close)
             // Format: \x1b]8;;url\x1b\\ — the URL is between ";;" and the ST
-            let inner = &seq[5..];
             let url_empty = inner == "\x1b\\" || inner == "\x07" || inner.is_empty();
             if url_empty {
                 osc8 = None;
@@ -784,7 +779,10 @@ mod tests {
         ];
         let result = sanitize_wrapped_lines(lines);
         // Line 1 should end with reset
-        assert!(result[0].ends_with("\x1b[0m"), "Line 1 should end with reset");
+        assert!(
+            result[0].ends_with("\x1b[0m"),
+            "Line 1 should end with reset"
+        );
         // Line 2 should re-open the color
         assert!(
             result[1].starts_with("\x1b[38;2;59;130;246m"),
@@ -804,7 +802,10 @@ mod tests {
             result[0].contains("\x1b]8;;\x1b\\"),
             "Line 1 should close OSC8"
         );
-        assert!(result[0].ends_with("\x1b[0m"), "Line 1 should end with SGR reset");
+        assert!(
+            result[0].ends_with("\x1b[0m"),
+            "Line 1 should end with SGR reset"
+        );
         // Line 2 should re-open OSC8
         assert!(
             result[1].starts_with("\x1b]8;;https://example.com\x1b\\"),
@@ -823,7 +824,9 @@ mod tests {
         assert!(result[0].ends_with("\x1b[0m"));
         assert!(result[0].contains("\x1b]8;;\x1b\\"));
         // Line 2: should re-open OSC8 and the active blue-500 color
-        assert!(result[1].starts_with("\x1b]8;;https://hf.co/org/model\x1b\\\x1b[38;2;59;130;246m"));
+        assert!(
+            result[1].starts_with("\x1b]8;;https://hf.co/org/model\x1b\\\x1b[38;2;59;130;246m")
+        );
     }
 
     #[test]
@@ -855,8 +858,14 @@ mod tests {
         // Should be exactly 2 lines, not 3
         assert_eq!(result.len(), 2, "got lines: {:?}", result);
         // Both lines should have visible content
-        assert!(visible_width(&result[0]) > 0, "line 0 should have visible content");
-        assert!(visible_width(&result[1]) > 0, "line 1 should have visible content");
+        assert!(
+            visible_width(&result[0]) > 0,
+            "line 0 should have visible content"
+        );
+        assert!(
+            visible_width(&result[1]) > 0,
+            "line 1 should have visible content"
+        );
     }
 
     #[test]
@@ -875,6 +884,9 @@ mod tests {
         // The reset should be on the last content line, not a separate line
         let last = result.last().unwrap();
         assert!(last.contains(reset), "last line should contain the reset");
-        assert!(visible_width(last) > 0, "last line should have visible content");
+        assert!(
+            visible_width(last) > 0,
+            "last line should have visible content"
+        );
     }
 }

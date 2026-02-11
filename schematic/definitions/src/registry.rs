@@ -285,7 +285,7 @@ fn convert_json_schema_to_openapi(value: &serde_json::Value) -> openapiv3::Schem
             return Schema {
                 schema_data: SchemaData::default(),
                 schema_kind: SchemaKind::Any(openapiv3::AnySchema::default()),
-            }
+            };
         }
     };
 
@@ -328,7 +328,10 @@ fn convert_json_schema_to_openapi(value: &serde_json::Value) -> openapiv3::Schem
                             .iter()
                             .map(|(k, v)| {
                                 let prop_schema = convert_json_schema_to_openapi(v);
-                                (k.clone(), openapiv3::ReferenceOr::Item(Box::new(prop_schema)))
+                                (
+                                    k.clone(),
+                                    openapiv3::ReferenceOr::Item(Box::new(prop_schema)),
+                                )
                             })
                             .collect()
                     })
@@ -408,7 +411,10 @@ fn convert_json_schema_to_openapi(value: &serde_json::Value) -> openapiv3::Schem
                     .iter()
                     .map(|(k, v)| {
                         let prop_schema = convert_json_schema_to_openapi(v);
-                        (k.clone(), openapiv3::ReferenceOr::Item(Box::new(prop_schema)))
+                        (
+                            k.clone(),
+                            openapiv3::ReferenceOr::Item(Box::new(prop_schema)),
+                        )
                     })
                     .collect()
             })
@@ -442,7 +448,7 @@ fn convert_json_schema_to_openapi(value: &serde_json::Value) -> openapiv3::Schem
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::openai::{define_openai_api, DeleteModelResponse, ListModelsResponse, Model};
+    use crate::openai::{DeleteModelResponse, ListModelsResponse, Model, define_openai_api};
 
     // =============================================
     // SchemaRegistry::new() tests

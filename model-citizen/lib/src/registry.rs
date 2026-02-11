@@ -3,8 +3,8 @@
 //! The `ModelRegistry` holds references to multiple `ModelScanner` implementations
 //! and can scan all of them concurrently, deduplicating results.
 
-use crate::scanner::ModelScanner;
 use crate::UnifiedModel;
+use crate::scanner::ModelScanner;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -386,10 +386,12 @@ mod tests {
 
         // Both scanners find the same file
         registry.add_scanner(
-            MockScanner::new("scanner1").with_models(vec![make_model("model1", "/shared/model.gguf")]),
+            MockScanner::new("scanner1")
+                .with_models(vec![make_model("model1", "/shared/model.gguf")]),
         );
         registry.add_scanner(
-            MockScanner::new("scanner2").with_models(vec![make_model("model1", "/shared/model.gguf")]),
+            MockScanner::new("scanner2")
+                .with_models(vec![make_model("model1", "/shared/model.gguf")]),
         );
 
         let models = registry.scan_all().await;
@@ -455,9 +457,21 @@ mod tests {
         let results = registry.scan_all_with_details().await;
         assert_eq!(results.len(), 3);
 
-        assert!(results.iter().any(|r| r.name() == "success" && r.is_success()));
-        assert!(results.iter().any(|r| matches!(r, ScanResult::Error { name: "error", .. })));
-        assert!(results.iter().any(|r| matches!(r, ScanResult::Timeout { name: "timeout" })));
+        assert!(
+            results
+                .iter()
+                .any(|r| r.name() == "success" && r.is_success())
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, ScanResult::Error { name: "error", .. }))
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| matches!(r, ScanResult::Timeout { name: "timeout" }))
+        );
     }
 
     #[test]

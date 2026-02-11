@@ -8,7 +8,9 @@ fn test_help() {
     cmd.arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("AI pipeline tools and agent status monitoring"))
+        .stdout(predicate::str::contains(
+            "AI pipeline tools and agent status monitoring",
+        ))
         .stdout(predicate::str::contains("limits"));
 }
 

@@ -2024,6 +2024,7 @@ fn display_mermaid_diagram(
 /// Creates a Mermaid flowchart with the given content and renders it
 /// using the MermaidRenderer. Default direction is left-right (LR),
 /// use `vertical` for top-down (TD).
+#[allow(clippy::too_many_arguments)]
 fn render_flowchart(
     vertical: bool,
     inverse: bool,
@@ -2475,6 +2476,7 @@ const PIE_CHART_EXAMPLE_CMD: &str =
 ///
 /// Creates a Mermaid pie chart with the given data and renders it
 /// using the MermaidRenderer.
+#[allow(clippy::too_many_arguments)]
 fn render_pie_chart(
     inverse: bool,
     title: Option<&str>,
@@ -2595,6 +2597,7 @@ const GIT_GRAPH_EXAMPLE_CMD: &str = r#"bt git-graph "commit" "commit" "branch fe
 ///
 /// Creates a Mermaid gitGraph with the given commands and renders it
 /// using the MermaidRenderer.
+#[allow(clippy::too_many_arguments)]
 fn render_git_graph(
     inverse: bool,
     title: Option<&str>,
@@ -2930,6 +2933,7 @@ const TIMELINE_EXAMPLE: &[&str] = &[
 const TIMELINE_EXAMPLE_CMD: &str = "bt timeline --title \"Social Media History\" \"2002: LinkedIn\" \"2004: Facebook\" \"2005: YouTube\" \"2006: Twitter\" \"2010: Instagram\" \"2011: Snapchat\"";
 
 /// Render a timeline diagram to the terminal.
+#[allow(clippy::too_many_arguments)]
 fn render_timeline(
     title: Option<&str>,
     width: Option<&str>,
@@ -3047,6 +3051,7 @@ const STATE_DIAGRAM_EXAMPLE: &[&str] = &[
 const STATE_DIAGRAM_EXAMPLE_CMD: &str = "bt state-diagram --title \"Process States\" \"[*] --> Idle\" \"Idle --> Running: start\" \"Running --> Idle: stop\" \"Running --> Error: failure\" \"Error --> Idle: reset\" \"Idle --> [*]: shutdown\"";
 
 /// Render a state diagram to the terminal.
+#[allow(clippy::too_many_arguments)]
 fn render_state_diagram(
     title: Option<&str>,
     width: Option<&str>,
@@ -3149,6 +3154,7 @@ const ERD_EXAMPLE_RELATIONSHIPS: &[&str] = &[
 const ERD_EXAMPLE_CMD: &str = "bt erd --title \"E-Commerce Schema\" \\\n  --entity \"Customer { int id PK }\" \\\n  --entity \"Order { int id PK }\" \\\n  \"Customer ||--o{ Order : places\"";
 
 /// Render an ERD to the terminal.
+#[allow(clippy::too_many_arguments)]
 fn render_erd(
     title: Option<&str>,
     width: Option<&str>,

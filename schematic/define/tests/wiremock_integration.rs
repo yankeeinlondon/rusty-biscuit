@@ -9,8 +9,8 @@
 use schematic_define::{ApiKeyEnv, EnvList, EnvMapping, Headers};
 use std::env;
 use wiremock::{
-    matchers::{header, method, path},
     Mock, MockServer, ResponseTemplate,
+    matchers::{header, method, path},
 };
 
 // Helper function to make HTTP requests with headers
@@ -55,7 +55,9 @@ async fn test_bearer_auth_with_env_fallback() {
     let mock_server = MockServer::start().await;
 
     // Set ENV variable
-    unsafe { env::set_var("TEST_BEARER_TOKEN", "env-token-456"); }
+    unsafe {
+        env::set_var("TEST_BEARER_TOKEN", "env-token-456");
+    }
 
     // Expect Authorization: Bearer env-token-456
     Mock::given(method("GET"))
@@ -81,7 +83,9 @@ async fn test_bearer_auth_with_env_fallback() {
     assert_eq!(response.status(), 200);
 
     // Clean up
-    unsafe { env::remove_var("TEST_BEARER_TOKEN"); }
+    unsafe {
+        env::remove_var("TEST_BEARER_TOKEN");
+    }
 }
 
 #[tokio::test]
@@ -90,7 +94,9 @@ async fn test_bearer_auth_direct_overrides_env() {
     let mock_server = MockServer::start().await;
 
     // Set ENV variable (should be ignored because direct token takes precedence)
-    unsafe { env::set_var("TEST_BEARER_TOKEN", "env-token-ignored"); }
+    unsafe {
+        env::set_var("TEST_BEARER_TOKEN", "env-token-ignored");
+    }
 
     // Expect Authorization: Bearer direct-token-wins
     Mock::given(method("GET"))
@@ -119,7 +125,9 @@ async fn test_bearer_auth_direct_overrides_env() {
     assert_eq!(response.status(), 200);
 
     // Clean up
-    unsafe { env::remove_var("TEST_BEARER_TOKEN"); }
+    unsafe {
+        env::remove_var("TEST_BEARER_TOKEN");
+    }
 }
 
 #[tokio::test]
@@ -149,7 +157,9 @@ async fn test_api_key_header_with_env_fallback() {
     let mock_server = MockServer::start().await;
 
     // Set ENV variable
-    unsafe { env::set_var("TEST_API_KEY", "env-api-key-789"); }
+    unsafe {
+        env::set_var("TEST_API_KEY", "env-api-key-789");
+    }
 
     // Expect X-API-Key: env-api-key-789
     Mock::given(method("GET"))
@@ -178,7 +188,9 @@ async fn test_api_key_header_with_env_fallback() {
     assert_eq!(response.status(), 200);
 
     // Clean up
-    unsafe { env::remove_var("TEST_API_KEY"); }
+    unsafe {
+        env::remove_var("TEST_API_KEY");
+    }
 }
 
 #[tokio::test]
@@ -279,7 +291,9 @@ async fn test_env_mapping_with_primary_and_fallback() {
     let mock_server = MockServer::start().await;
 
     // Set fallback ENV variable only (primary is missing)
-    unsafe { env::set_var("FALLBACK_TOKEN", "fallback-value"); }
+    unsafe {
+        env::set_var("FALLBACK_TOKEN", "fallback-value");
+    }
 
     // Expect Authorization: Bearer fallback-value
     Mock::given(method("GET"))
@@ -307,7 +321,9 @@ async fn test_env_mapping_with_primary_and_fallback() {
     assert_eq!(response.status(), 200);
 
     // Clean up
-    unsafe { env::remove_var("FALLBACK_TOKEN"); }
+    unsafe {
+        env::remove_var("FALLBACK_TOKEN");
+    }
 }
 
 #[tokio::test]
@@ -347,8 +363,12 @@ async fn test_env_mapping_primary_wins_over_fallback() {
     assert_eq!(response.status(), 200);
 
     // Clean up
-    unsafe { env::remove_var("PRIMARY_TOKEN"); }
-    unsafe { env::remove_var("FALLBACK_TOKEN"); }
+    unsafe {
+        env::remove_var("PRIMARY_TOKEN");
+    }
+    unsafe {
+        env::remove_var("FALLBACK_TOKEN");
+    }
 }
 
 #[tokio::test]
@@ -385,7 +405,9 @@ async fn test_api_key_env_with_env_mapping() {
     let mock_server = MockServer::start().await;
 
     // Set ENV variable
-    unsafe { env::set_var("TEST_API_KEY_PRIMARY", "mapped-key-value"); }
+    unsafe {
+        env::set_var("TEST_API_KEY_PRIMARY", "mapped-key-value");
+    }
 
     // Expect X-API-Key: mapped-key-value
     Mock::given(method("GET"))
@@ -414,7 +436,9 @@ async fn test_api_key_env_with_env_mapping() {
     assert_eq!(response.status(), 200);
 
     // Clean up
-    unsafe { env::remove_var("TEST_API_KEY_PRIMARY"); }
+    unsafe {
+        env::remove_var("TEST_API_KEY_PRIMARY");
+    }
 }
 
 #[tokio::test]
@@ -456,8 +480,12 @@ async fn test_complex_scenario_with_env_mapping() {
     let mock_server = MockServer::start().await;
 
     // Set up complex ENV scenario
-    unsafe { env::set_var("OPENAI_API_KEY", "openai-key-123"); }
-    unsafe { env::set_var("CLIENT_ID", "client-456"); }
+    unsafe {
+        env::set_var("OPENAI_API_KEY", "openai-key-123");
+    }
+    unsafe {
+        env::set_var("CLIENT_ID", "client-456");
+    }
 
     // Expect both headers
     Mock::given(method("GET"))
@@ -487,6 +515,10 @@ async fn test_complex_scenario_with_env_mapping() {
     assert_eq!(response.status(), 200);
 
     // Clean up
-    unsafe { env::remove_var("OPENAI_API_KEY"); }
-    unsafe { env::remove_var("CLIENT_ID"); }
+    unsafe {
+        env::remove_var("OPENAI_API_KEY");
+    }
+    unsafe {
+        env::remove_var("CLIENT_ID");
+    }
 }

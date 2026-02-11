@@ -31,9 +31,9 @@
 //!     Ok(())
 //! }
 //! ```
-use serde::{Deserialize, Serialize};
-pub use schematic_definitions::anthropic::*;
 use crate::shared::{RequestParts, SchematicError};
+pub use schematic_definitions::anthropic::*;
+use serde::{Deserialize, Serialize};
 /// Request for `CreateMessage` endpoint.
 ///
 /// ## Example
@@ -78,7 +78,7 @@ impl CreateMessageRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -137,7 +137,7 @@ impl CountTokensRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
+                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
             ),
             vec![],
         ))
@@ -204,7 +204,9 @@ pub struct RetrieveModelRequest {
 impl RetrieveModelRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(model_id: impl Into<String>) -> Self {
-        Self { model_id: model_id.into() }
+        Self {
+            model_id: model_id.into(),
+        }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -283,9 +285,7 @@ impl AnthropicRequest {
             Self::CountTokens(_) => {
                 <CountTokensRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListModels(_) => {
-                <ListModelsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
-            }
+            Self::ListModels(_) => <ListModelsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
             Self::RetrieveModel(_) => {
                 <RetrieveModelRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -331,9 +331,7 @@ impl Anthropic {
     /// Base URL for the API.
     pub const BASE_URL: &'static str = "https://api.anthropic.com/v1";
     /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> = Some(
-        "https://docs.anthropic.com/en/api/messages",
-    );
+    pub const DOCS_URL: Option<&'static str> = Some("https://docs.anthropic.com/en/api/messages");
     /// Creates a new API client with the default base URL.
     pub fn new() -> Self {
         Self {
@@ -350,9 +348,9 @@ impl Anthropic {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec!["ANTHROPIC_API_KEY".to_string()],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "ANTHROPIC_API_KEY".to_string(),
+                        ]),
                         header: "X-Api-Key".to_string(),
                     }),
                 })
@@ -382,9 +380,9 @@ impl Anthropic {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec!["ANTHROPIC_API_KEY".to_string()],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "ANTHROPIC_API_KEY".to_string(),
+                        ]),
                         header: "X-Api-Key".to_string(),
                     }),
                 })
@@ -420,9 +418,9 @@ impl Anthropic {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec!["ANTHROPIC_API_KEY".to_string()],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "ANTHROPIC_API_KEY".to_string(),
+                        ]),
                         header: "X-Api-Key".to_string(),
                     }),
                 })
@@ -441,10 +439,7 @@ impl Anthropic {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(
-        client: reqwest::Client,
-        base_url: impl Into<String>,
-    ) -> Self {
+    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
         Self {
             client,
             base_url: base_url.into(),
@@ -459,9 +454,9 @@ impl Anthropic {
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(
-                            vec!["ANTHROPIC_API_KEY".to_string()],
-                        ),
+                        names: schematic_define::EnvList::new(vec![
+                            "ANTHROPIC_API_KEY".to_string(),
+                        ]),
                         header: "X-Api-Key".to_string(),
                     }),
                 })
@@ -691,7 +686,9 @@ impl<'a> AnthropicVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError>
+            + Send
+            + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -719,13 +716,15 @@ impl<'a> AnthropicVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
+            ) -> Result<(), crate::shared::SchematicError>
+            + Send
+            + Sync
+            + 'static,
     {
-        self.response_mutators
-            .insert(
-                R::ENDPOINT_ID,
-                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-            );
+        self.response_mutators.insert(
+            R::ENDPOINT_ID,
+            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+        );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -787,8 +786,7 @@ impl Anthropic {
                         .ok_or_else(|| SchematicError::MissingCredential {
                             env_vars: self.env_auth.clone(),
                         })?;
-                    req_builder = req_builder
-                        .header(header_name, format!("Bearer {}", token));
+                    req_builder = req_builder.header(header_name, format!("Bearer {}", token));
                 }
                 schematic_define::AuthStrategy::ApiKey { header } => {
                     let key = self
@@ -801,23 +799,22 @@ impl Anthropic {
                     req_builder = req_builder.header(header.as_str(), key);
                 }
                 schematic_define::AuthStrategy::Basic => {
-                    let username_env = self
-                        .env_username
-                        .as_deref()
-                        .unwrap_or("USERNAME");
+                    let username_env = self.env_username.as_deref().unwrap_or("USERNAME");
                     let password_env = self
                         .env_auth
                         .first()
                         .map(String::as_str)
                         .unwrap_or("PASSWORD");
-                    let username = std::env::var(username_env)
-                        .map_err(|_| SchematicError::MissingCredential {
+                    let username = std::env::var(username_env).map_err(|_| {
+                        SchematicError::MissingCredential {
                             env_vars: vec![username_env.to_string()],
-                        })?;
-                    let password = std::env::var(password_env)
-                        .map_err(|_| SchematicError::MissingCredential {
+                        }
+                    })?;
+                    let password = std::env::var(password_env).map_err(|_| {
+                        SchematicError::MissingCredential {
                             env_vars: vec![password_env.to_string()],
-                        })?;
+                        }
+                    })?;
                     req_builder = req_builder.basic_auth(username, Some(password));
                 }
                 _ => {}
@@ -917,11 +914,7 @@ impl Anthropic {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self
-                .variant_hooks
-                .response_mutators
-                .get(ctx.endpoint_id)
-            {
+            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)

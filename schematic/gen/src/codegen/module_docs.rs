@@ -376,7 +376,7 @@ mod tests {
             request: None,
             response: ApiResponse::json_type("CreateItemResponse"),
             headers: vec![],
-                params: None,
+            params: None,
         });
         api.endpoints.push(Endpoint {
             id: "GetItem".to_string(),
@@ -386,7 +386,7 @@ mod tests {
             request: None,
             response: ApiResponse::json_type("Item"),
             headers: vec![],
-                params: None,
+            params: None,
         });
 
         let builder = ModuleDocBuilder::new(&api);
@@ -444,7 +444,7 @@ mod tests {
             request: None,
             response: ApiResponse::json_type("CreateItemResponse"),
             headers: vec![],
-                params: None,
+            params: None,
         }];
 
         let builder = ModuleDocBuilder::new(&api);

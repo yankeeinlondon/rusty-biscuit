@@ -458,7 +458,10 @@ mod tests {
     #[test]
     fn type_ref_primitive() {
         let type_ref = TypeRef::Primitive(PrimitiveType::Boolean);
-        assert!(matches!(type_ref, TypeRef::Primitive(PrimitiveType::Boolean)));
+        assert!(matches!(
+            type_ref,
+            TypeRef::Primitive(PrimitiveType::Boolean)
+        ));
     }
 
     #[test]

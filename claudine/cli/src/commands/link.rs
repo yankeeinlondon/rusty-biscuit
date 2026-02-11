@@ -8,10 +8,10 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Alignment, Margin};
 use claudine::events::Provider;
 use claudine::linking::{
-    self, all_capabilities, capabilities_for, LinkScope, LinkableResource, ResourceFormat,
-    SupportLevel, ALL_PROVIDERS,
+    self, ALL_PROVIDERS, LinkScope, LinkableResource, ResourceFormat, SupportLevel,
+    all_capabilities, capabilities_for,
 };
-use sniff::programs::{enums::AiCli, InstalledAiClients};
+use sniff::programs::{InstalledAiClients, enums::AiCli};
 
 use crate::log;
 
@@ -126,8 +126,7 @@ pub fn run(args: LinkArgs) -> Result<()> {
         match fuzzy_match_provider(provider_input) {
             Some(provider) => return run_provider_detail(provider),
             None => {
-                let available: Vec<String> =
-                    ALL_PROVIDERS.iter().map(|p| p.to_string()).collect();
+                let available: Vec<String> = ALL_PROVIDERS.iter().map(|p| p.to_string()).collect();
                 log::error(&format!(
                     "Unknown provider '{}'. Available: {}",
                     provider_input,
@@ -289,10 +288,7 @@ fn run_provider_detail(provider: Provider) -> Result<()> {
 
         let notes_cell: TableCellContent = support
             .notes
-            .map(|n| {
-                Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", n))
-                    .fallback_render(&term)
-            })
+            .map(|n| Prose::new(format!("{{{{dim}}}}{}{{{{reset}}}}", n)).fallback_render(&term))
             .unwrap_or_else(|| "-".to_string())
             .into();
 
@@ -309,9 +305,9 @@ fn run_provider_detail(provider: Provider) -> Result<()> {
     log::data(&rendered);
 
     // Show "also reads from" info if applicable
-    let has_also_reads = LinkableResource::ALL.iter().any(|r| {
-        !caps.support_for(*r).also_reads_from.is_empty()
-    });
+    let has_also_reads = LinkableResource::ALL
+        .iter()
+        .any(|r| !caps.support_for(*r).also_reads_from.is_empty());
 
     if has_also_reads {
         log::data("");
@@ -354,14 +350,46 @@ fn run_provider_detail(provider: Provider) -> Result<()> {
     fm_table.layout_mut().left_margin = Margin::Chars(1);
 
     let fm_fields: [(&str, bool, &str); 8] = [
-        ("name", fm.name, "Skill identifier used for activation and display"),
-        ("description", fm.description, "Triggers automatic activation based on context"),
-        ("license", fm.license, "SPDX license identifier (e.g., MIT, Apache-2.0)"),
-        ("compatibility", fm.compatibility, "Environment requirements (OS, runtime, tools)"),
-        ("metadata", fm.metadata, "Custom key-value pairs for categorization"),
-        ("allowed-tools", fm.allowed_tools, "Restricts which tools the skill can invoke"),
-        ("user-invocable", fm.user_invocable, "Enables manual activation via slash command"),
-        ("disable-model-invocation", fm.disable_model_invocation, "Prevents automatic activation by the model"),
+        (
+            "name",
+            fm.name,
+            "Skill identifier used for activation and display",
+        ),
+        (
+            "description",
+            fm.description,
+            "Triggers automatic activation based on context",
+        ),
+        (
+            "license",
+            fm.license,
+            "SPDX license identifier (e.g., MIT, Apache-2.0)",
+        ),
+        (
+            "compatibility",
+            fm.compatibility,
+            "Environment requirements (OS, runtime, tools)",
+        ),
+        (
+            "metadata",
+            fm.metadata,
+            "Custom key-value pairs for categorization",
+        ),
+        (
+            "allowed-tools",
+            fm.allowed_tools,
+            "Restricts which tools the skill can invoke",
+        ),
+        (
+            "user-invocable",
+            fm.user_invocable,
+            "Enables manual activation via slash command",
+        ),
+        (
+            "disable-model-invocation",
+            fm.disable_model_invocation,
+            "Prevents automatic activation by the model",
+        ),
     ];
 
     for (field, supported, usage) in fm_fields {

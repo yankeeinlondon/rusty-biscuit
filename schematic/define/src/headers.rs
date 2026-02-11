@@ -776,9 +776,7 @@ impl Headers {
                 if let Some(token) = resolve_env_list(env_list) {
                     self = self.use_bearer_token(token);
                 } else if strict {
-                    return Err(HeaderError::MissingCredential(
-                        env_list.names().to_vec(),
-                    ));
+                    return Err(HeaderError::MissingCredential(env_list.names().to_vec()));
                 }
             }
 
@@ -795,14 +793,10 @@ impl Headers {
                         self = self.use_basic_auth(u, p);
                     }
                     (None, _) if strict => {
-                        return Err(HeaderError::MissingCredential(
-                            user_list.names().to_vec(),
-                        ));
+                        return Err(HeaderError::MissingCredential(user_list.names().to_vec()));
                     }
                     (_, None) if strict => {
-                        return Err(HeaderError::MissingCredential(
-                            pass_list.names().to_vec(),
-                        ));
+                        return Err(HeaderError::MissingCredential(pass_list.names().to_vec()));
                     }
                     _ => {}
                 }
@@ -1465,10 +1459,7 @@ mod tests {
 
         let result = headers.build().unwrap();
 
-        let ct_headers: Vec<_> = result
-            .iter()
-            .filter(|(k, _)| k == "Content-Type")
-            .collect();
+        let ct_headers: Vec<_> = result.iter().filter(|(k, _)| k == "Content-Type").collect();
 
         assert_eq!(ct_headers.len(), 1);
         assert_eq!(ct_headers[0].1, "application/json");
@@ -1520,9 +1511,7 @@ mod tests {
 
     #[test]
     fn headers_empty_values_allowed() {
-        let headers = Headers::default()
-            .header("X-Empty", "")
-            .content_type("");
+        let headers = Headers::default().header("X-Empty", "").content_type("");
 
         let result = headers.build();
         assert!(result.is_ok());

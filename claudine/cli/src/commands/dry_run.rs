@@ -109,7 +109,11 @@ pub async fn run(args: DryRunArgs) -> Result<()> {
                                         "  [{i}] Run ({mode}): {command} {args_str}"
                                     ));
                                 }
-                                EventAction::SoundEffect { name, volume, speed } => {
+                                EventAction::SoundEffect {
+                                    name,
+                                    volume,
+                                    speed,
+                                } => {
                                     log::data(&format!(
                                         "  [{i}] SoundEffect: {name} (vol={volume}, speed={speed})"
                                     ));
@@ -316,10 +320,19 @@ mod tests {
 
     #[test]
     fn parse_event_canonical_names() {
-        assert_eq!(parse_event("turn_complete").unwrap(), AgenticEvent::TurnComplete);
-        assert_eq!(parse_event("permission_request").unwrap(), AgenticEvent::PermissionRequest);
+        assert_eq!(
+            parse_event("turn_complete").unwrap(),
+            AgenticEvent::TurnComplete
+        );
+        assert_eq!(
+            parse_event("permission_request").unwrap(),
+            AgenticEvent::PermissionRequest
+        );
         assert_eq!(parse_event("tool_error").unwrap(), AgenticEvent::ToolError);
-        assert_eq!(parse_event("session_start").unwrap(), AgenticEvent::SessionStart);
+        assert_eq!(
+            parse_event("session_start").unwrap(),
+            AgenticEvent::SessionStart
+        );
     }
 
     #[test]
@@ -327,19 +340,34 @@ mod tests {
         // Claude native names
         assert_eq!(parse_event("Stop").unwrap(), AgenticEvent::TurnComplete);
         assert_eq!(parse_event("PreToolUse").unwrap(), AgenticEvent::BeforeTool);
-        assert_eq!(parse_event("PostToolUseFailure").unwrap(), AgenticEvent::ToolError);
+        assert_eq!(
+            parse_event("PostToolUseFailure").unwrap(),
+            AgenticEvent::ToolError
+        );
     }
 
     #[test]
     fn parse_event_case_insensitive() {
-        assert_eq!(parse_event("TURN_COMPLETE").unwrap(), AgenticEvent::TurnComplete);
-        assert_eq!(parse_event("Turn_Complete").unwrap(), AgenticEvent::TurnComplete);
+        assert_eq!(
+            parse_event("TURN_COMPLETE").unwrap(),
+            AgenticEvent::TurnComplete
+        );
+        assert_eq!(
+            parse_event("Turn_Complete").unwrap(),
+            AgenticEvent::TurnComplete
+        );
     }
 
     #[test]
     fn parse_event_hyphen_or_underscore() {
-        assert_eq!(parse_event("turn-complete").unwrap(), AgenticEvent::TurnComplete);
-        assert_eq!(parse_event("before-tool").unwrap(), AgenticEvent::BeforeTool);
+        assert_eq!(
+            parse_event("turn-complete").unwrap(),
+            AgenticEvent::TurnComplete
+        );
+        assert_eq!(
+            parse_event("before-tool").unwrap(),
+            AgenticEvent::BeforeTool
+        );
     }
 
     #[test]

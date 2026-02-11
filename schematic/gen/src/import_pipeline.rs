@@ -76,9 +76,9 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
     builder = builder.prefer_json();
 
     // Run the import
-    let import_result = builder.build().map_err(|e| {
-        GeneratorError::ParseError(format!("OpenAPI import failed: {}", e))
-    })?;
+    let import_result = builder
+        .build()
+        .map_err(|e| GeneratorError::ParseError(format!("OpenAPI import failed: {}", e)))?;
 
     // Print diagnostics if verbose
     if options.verbose {

@@ -469,10 +469,7 @@ mod tests {
                     name: "sort".to_string(),
                     required: false,
                     description: Some("Sort order".to_string()),
-                    param_type: QueryParamType::Enum(vec![
-                        "asc".to_string(),
-                        "desc".to_string(),
-                    ]),
+                    param_type: QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
                     explode: false,
                     style: ParamStyle::Form,
                 },

@@ -37,7 +37,7 @@ build *args="":
     @echo "Build Homelab Packages (Library, Homey CLI, Server)"
     @echo "---------------------------------------------------"
     @echo ""
-    @cargo build -p homelab -p homey -p homelab-server {{args}}
+    @cargo build -p homelab -p homelab-cli -p homelab-server {{args}}
 
 # run tests for Homelab packages
 test *args="":
@@ -45,7 +45,7 @@ test *args="":
     @echo "Testing {{BOLD}}Homelab{{RESET}} ({{ITALIC}}Library, Homey CLI, Server{{RESET}})"
     @echo "-----------------------------------------------"
     @echo ""
-    @cargo test -p homelab -p homey -p homelab-server {{args}}
+    @cargo test -p homelab -p homelab-cli -p homelab-server {{args}}
 
 # run clippy on Homelab packages
 lint:
@@ -54,16 +54,17 @@ lint:
     @echo "--------------------------"
     @echo ""
     @cargo clippy -p homelab -- -D warnings
-    @cargo clippy -p homey -- -D warnings
+    @cargo clippy -p homelab-cli -- -D warnings
     @cargo clippy -p homelab-server -- -D warnings
 
-install:
+install *args="":
     @echo ""
     @echo "{{BOLD}}Building Homelab Library{{RESET}}"
     @cargo build -p homelab --release  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo "{{BOLD}}{{YELLOW}}Installing Homelab CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{YELLOW}}){{RESET}}"
-    @cargo install --path ./cli  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @echo
+    @cargo install --path ./cli {{args}}  || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo ""
     @echo "{{BOLD}}{{BLUE}}Homelab CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{BLUE}}) installed{{RESET}}"
     @echo ""
@@ -73,7 +74,7 @@ check:
     @echo ""
     @echo "Checking Homelab Library, CLI and Server"
     @echo ""
-    @cargo check -p homelab -p homey -p homelab-server
+    @cargo check -p homelab -p homelab-cli -p homelab-server
 
 # run server in dev mode
 server *args="":

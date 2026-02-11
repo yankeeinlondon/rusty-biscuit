@@ -228,7 +228,8 @@ impl OpenApiImport {
             .map(|ep| format!("{}{}", ep.id, request_suffix))
             .collect();
 
-        let schema_result = self.map_to_model_catalog(&doc, &resolver, &mut diagnostics, &reserved_names);
+        let schema_result =
+            self.map_to_model_catalog(&doc, &resolver, &mut diagnostics, &reserved_names);
 
         // Apply name remapping to endpoint request types
         // This updates any ApiRequest::Json schema type_name that was deconflicted
@@ -244,10 +245,7 @@ impl OpenApiImport {
         if self.options.strict && !diagnostics.is_empty() {
             return Err(OpenApiError::Validation {
                 path: "".to_string(),
-                message: format!(
-                    "Strict mode: {} diagnostics encountered",
-                    diagnostics.len()
-                ),
+                message: format!("Strict mode: {} diagnostics encountered", diagnostics.len()),
             });
         }
 
@@ -393,10 +391,7 @@ impl OpenApiImport {
             name,
             description,
             base_url,
-            docs_url: doc
-                .external_docs
-                .as_ref()
-                .map(|ext| ext.url.clone()),
+            docs_url: doc.external_docs.as_ref().map(|ext| ext.url.clone()),
             auth,
             env_auth: vec![],
             env_username: None,
@@ -561,7 +556,9 @@ mod tests {
 
     #[test]
     fn new_creates_builder_with_default_options() {
-        let source = OpenApiSource::yaml("openapi: '3.0.0'\ninfo:\n  title: Test\n  version: '1.0'\npaths: {}");
+        let source = OpenApiSource::yaml(
+            "openapi: '3.0.0'\ninfo:\n  title: Test\n  version: '1.0'\npaths: {}",
+        );
         let import = OpenApiImport::new(source);
 
         assert!(import.options.api_name.is_none());
@@ -609,7 +606,10 @@ mod tests {
         let source = OpenApiSource::yaml("");
         let import = OpenApiImport::new(source).prefer_json();
 
-        assert_eq!(import.options.content_preference, ContentPreference::PreferJson);
+        assert_eq!(
+            import.options.content_preference,
+            ContentPreference::PreferJson
+        );
     }
 
     #[test]
@@ -872,7 +872,10 @@ paths: {}
         let source = OpenApiSource::yaml(yaml);
         let result = OpenApiImport::new(source).build().unwrap();
 
-        assert_eq!(result.api.docs_url, Some("https://docs.example.com".to_string()));
+        assert_eq!(
+            result.api.docs_url,
+            Some("https://docs.example.com".to_string())
+        );
     }
 
     #[test]

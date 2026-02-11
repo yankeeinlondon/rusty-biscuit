@@ -186,30 +186,30 @@ impl TwoColumn {
         _right_width: u32,
         term: Option<&Terminal>,
     ) -> String {
-        if let Some(app) = term.map(|t| &t.app) {
-            if matches!(
+        if let Some(app) = term.map(|t| &t.app)
+            && matches!(
                 app,
                 TerminalApp::Wezterm
                     | TerminalApp::Ghostty
                     | TerminalApp::ITerm2
                     | TerminalApp::Kitty
-            ) {
-                let move_up_by = match app {
-                    TerminalApp::Wezterm | TerminalApp::Ghostty => {
-                        left_render.lines.len().saturating_sub(1) as u32
-                    }
-                    TerminalApp::ITerm2 | TerminalApp::Kitty => {
-                        left_render.lines.len().saturating_sub(1) as u32
-                    }
-                    _ => left_render.lines.len() as u32,
-                };
-                return self.render_overlay_with_cursor_reset(
-                    left_render,
-                    right_render,
-                    left_width,
-                    move_up_by,
-                );
-            }
+            )
+        {
+            let move_up_by = match app {
+                TerminalApp::Wezterm | TerminalApp::Ghostty => {
+                    left_render.lines.len().saturating_sub(1) as u32
+                }
+                TerminalApp::ITerm2 | TerminalApp::Kitty => {
+                    left_render.lines.len().saturating_sub(1) as u32
+                }
+                _ => left_render.lines.len() as u32,
+            };
+            return self.render_overlay_with_cursor_reset(
+                left_render,
+                right_render,
+                left_width,
+                move_up_by,
+            );
         }
 
         let right_offset = left_width + self.gap;
@@ -293,32 +293,32 @@ impl TwoColumn {
                 uses_cursor_padding: false,
             },
             RenderableContent::Component(component) => {
-                if let Some(t) = term {
-                    if let Some(image) = component.as_any().downcast_ref::<TerminalImage>() {
-                        let mut column_term = Terminal::from(t);
-                        column_term.fixed_width = Some(width);
-                        if let Ok((sequence, height)) = image.render_inline(&column_term) {
-                            let mut lines = Vec::with_capacity(height as usize);
-                            lines.push(sequence);
-                            for _ in 1..height {
-                                lines.push(String::new());
-                            }
-                            return RenderedColumn {
-                                lines,
-                                uses_cursor_padding: true,
-                            };
+                if let Some(t) = term
+                    && let Some(image) = component.as_any().downcast_ref::<TerminalImage>()
+                {
+                    let mut column_term = Terminal::from(t);
+                    column_term.fixed_width = Some(width);
+                    if let Ok((sequence, height)) = image.render_inline(&column_term) {
+                        let mut lines = Vec::with_capacity(height as usize);
+                        lines.push(sequence);
+                        for _ in 1..height {
+                            lines.push(String::new());
                         }
-
-                        let fallback = image.generate_alt_text();
                         return RenderedColumn {
-                            lines: wrap_lines(
-                                split_lines(fallback),
-                                &WordWrap::WrapProse(None, None),
-                                width,
-                            ),
-                            uses_cursor_padding: false,
+                            lines,
+                            uses_cursor_padding: true,
                         };
                     }
+
+                    let fallback = image.generate_alt_text();
+                    return RenderedColumn {
+                        lines: wrap_lines(
+                            split_lines(fallback),
+                            &WordWrap::WrapProse(None, None),
+                            width,
+                        ),
+                        uses_cursor_padding: false,
+                    };
                 }
 
                 let rendered = if let Some(t) = term {
@@ -356,7 +356,7 @@ impl Renderable for TwoColumn {
         self
     }
 
-    fn as_child_of(mut self, parent: &Layout, left_offset: u32, right_offset: u32) -> Self
+    fn with_parent_layout(mut self, parent: &Layout, left_offset: u32, right_offset: u32) -> Self
     where
         Self: Sized,
     {

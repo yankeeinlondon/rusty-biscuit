@@ -59,7 +59,11 @@ fn render_progress_bars(
 
     // Show installed platforms
     for (platform, is_installed) in installed {
-        let status = if *is_installed { "installed" } else { "not found" };
+        let status = if *is_installed {
+            "installed"
+        } else {
+            "not found"
+        };
         println!("  {} {}", platform, status);
     }
     println!();

@@ -272,27 +272,26 @@ impl RestApi {
         // Otherwise, build from legacy fields for backward compatibility
         // If env_username is set, this is basic auth (env_auth contains password)
         // Otherwise, env_auth contains bearer token
-        let (bearer_token, basic_user, basic_pass) = if let Some(ref username_env) =
-            self.env_username
-        {
-            // Basic auth mode
-            let user = Some(EnvList::single(username_env.clone()));
-            let pass = if !self.env_auth.is_empty() {
-                // For basic auth, password comes from first element of env_auth
-                Some(EnvList::single(self.env_auth[0].clone()))
+        let (bearer_token, basic_user, basic_pass) =
+            if let Some(ref username_env) = self.env_username {
+                // Basic auth mode
+                let user = Some(EnvList::single(username_env.clone()));
+                let pass = if !self.env_auth.is_empty() {
+                    // For basic auth, password comes from first element of env_auth
+                    Some(EnvList::single(self.env_auth[0].clone()))
+                } else {
+                    None
+                };
+                (None, user, pass)
             } else {
-                None
+                // Bearer token mode (or no auth)
+                let bearer = if !self.env_auth.is_empty() {
+                    Some(EnvList::new(self.env_auth.clone()))
+                } else {
+                    None
+                };
+                (bearer, None, None)
             };
-            (None, user, pass)
-        } else {
-            // Bearer token mode (or no auth)
-            let bearer = if !self.env_auth.is_empty() {
-                Some(EnvList::new(self.env_auth.clone()))
-            } else {
-                None
-            };
-            (bearer, None, None)
-        };
 
         EnvMapping {
             bearer_token,

@@ -32,7 +32,9 @@ pub async fn run(args: HandleArgs) -> Result<()> {
 fn read_stdin_json() -> Result<Value> {
     let mut stdin = std::io::stdin();
     if stdin.is_terminal() {
-        bail!("No input provided. Pipe JSON event data to stdin.\n\nExample:\n  echo '{{\"hook_event_name\": \"...\", ...}}' | claudine handle <event>");
+        bail!(
+            "No input provided. Pipe JSON event data to stdin.\n\nExample:\n  echo '{{\"hook_event_name\": \"...\", ...}}' | claudine handle <event>"
+        );
     }
     let mut buf = String::new();
     stdin.read_to_string(&mut buf)?;

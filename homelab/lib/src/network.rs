@@ -21,5 +21,3 @@ impl fmt::Display for Host {
         }
     }
 }
-
-

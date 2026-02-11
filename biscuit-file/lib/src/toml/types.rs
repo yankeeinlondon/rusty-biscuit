@@ -79,7 +79,10 @@ impl ValidationReport {
     /// Returns true if validation passed with no errors.
     #[must_use]
     pub fn is_valid(&self) -> bool {
-        !self.issues.iter().any(|i| i.level == ValidationLevel::Error)
+        !self
+            .issues
+            .iter()
+            .any(|i| i.level == ValidationLevel::Error)
     }
 
     /// Returns only the error-level issues.
@@ -288,16 +291,12 @@ fn toml_to_json(value: &toml::Value) -> serde_json::Value {
     match value {
         toml::Value::String(s) => serde_json::Value::String(s.clone()),
         toml::Value::Integer(i) => serde_json::Value::Number((*i).into()),
-        toml::Value::Float(f) => {
-            serde_json::Number::from_f64(*f)
-                .map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null)
-        }
+        toml::Value::Float(f) => serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
         toml::Value::Boolean(b) => serde_json::Value::Bool(*b),
         toml::Value::Datetime(dt) => serde_json::Value::String(dt.to_string()),
-        toml::Value::Array(arr) => {
-            serde_json::Value::Array(arr.iter().map(toml_to_json).collect())
-        }
+        toml::Value::Array(arr) => serde_json::Value::Array(arr.iter().map(toml_to_json).collect()),
         toml::Value::Table(table) => {
             let obj = table
                 .iter()

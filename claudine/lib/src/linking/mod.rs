@@ -7,8 +7,8 @@ mod report;
 mod symlink;
 
 pub use capabilities::{
-    all_capabilities, capabilities_for, LinkableResource, ProviderCapabilities, ResourceFormat,
-    ResourceSupport, SkillFrontmatter, SupportLevel, ALL_PROVIDERS,
+    ALL_PROVIDERS, LinkableResource, ProviderCapabilities, ResourceFormat, ResourceSupport,
+    SkillFrontmatter, SupportLevel, all_capabilities, capabilities_for,
 };
 pub use conflict::SkillSyncStatus;
 pub use discovery::DiscoveredSkill;

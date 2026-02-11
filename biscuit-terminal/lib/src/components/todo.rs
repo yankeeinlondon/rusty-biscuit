@@ -14,15 +14,15 @@ use crate::utils::{
 };
 
 /// box outline shape for an _open_ **TODO**
-const NERD_CHECKBOX_OPEN: &'static str = "\u{f0131}";
+const NERD_CHECKBOX_OPEN: &str = "\u{f0131}";
 
-const NERD_CHECKBOX_COMPLETED: &'static str = "\u{f4a7}";
+const NERD_CHECKBOX_COMPLETED: &str = "\u{f4a7}";
 /// a badged checkbox nerd icon representing a _blocked_ **TODO**
-const NERD_CHECKBOX_BLOCKED: &'static str = "\u{f0117}";
+const NERD_CHECKBOX_BLOCKED: &str = "\u{f0117}";
 /// intermediate nerd icon representing a _in progress_ **TODO**
-const NERD_CHECKBOX_IN_PROGRESS: &'static str = "\u{f0856}";
+const NERD_CHECKBOX_IN_PROGRESS: &str = "\u{f0856}";
 /// an box off nerd icon representing a _cancelled_ **TODO**
-const NERD_CHECKBOX_CANCELLED: &'static str = "\u{f12ed}";
+const NERD_CHECKBOX_CANCELLED: &str = "\u{f12ed}";
 
 // const NERD_CHECKBOX_FILLED: &'static str = "\u{f012e}";
 

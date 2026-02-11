@@ -556,14 +556,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Output logic:
     // - No subcommand: always JSON
     // - With subcommand: text by default, --json for JSON
-    let docs_filter = cli.command.as_ref().map_or(DocsFilter::default(), |c| c.docs_filter());
+    let docs_filter = cli
+        .command
+        .as_ref()
+        .map_or(DocsFilter::default(), |c| c.docs_filter());
 
     let use_json = cli.command.is_none() || cli.json;
 
     if use_json {
         output::print_json(&result, output_filter, &docs_filter)?;
     } else {
-        output::print_text(&result, cli.verbose, output_filter, history_count, &docs_filter);
+        output::print_text(
+            &result,
+            cli.verbose,
+            output_filter,
+            history_count,
+            &docs_filter,
+        );
     }
 
     Ok(())
@@ -766,7 +775,14 @@ mod tests {
         #[test]
         fn docs_readme_flag_parses() {
             let cli = parse_args(&["docs", "--readme"]).unwrap();
-            if let Some(Commands::Docs { readme, plan, src, has_prompt, filter }) = cli.command {
+            if let Some(Commands::Docs {
+                readme,
+                plan,
+                src,
+                has_prompt,
+                filter,
+            }) = cli.command
+            {
                 assert!(readme);
                 assert!(!plan);
                 assert!(!src);
@@ -780,7 +796,14 @@ mod tests {
         #[test]
         fn docs_plan_flag_parses() {
             let cli = parse_args(&["docs", "--plan"]).unwrap();
-            if let Some(Commands::Docs { readme, plan, src, has_prompt, filter }) = cli.command {
+            if let Some(Commands::Docs {
+                readme,
+                plan,
+                src,
+                has_prompt,
+                filter,
+            }) = cli.command
+            {
                 assert!(!readme);
                 assert!(plan);
                 assert!(!src);
@@ -794,7 +817,14 @@ mod tests {
         #[test]
         fn docs_src_flag_parses() {
             let cli = parse_args(&["docs", "--src"]).unwrap();
-            if let Some(Commands::Docs { readme, plan, src, has_prompt, filter }) = cli.command {
+            if let Some(Commands::Docs {
+                readme,
+                plan,
+                src,
+                has_prompt,
+                filter,
+            }) = cli.command
+            {
                 assert!(!readme);
                 assert!(!plan);
                 assert!(src);
@@ -808,7 +838,14 @@ mod tests {
         #[test]
         fn docs_has_prompt_flag_parses() {
             let cli = parse_args(&["docs", "--has-prompt"]).unwrap();
-            if let Some(Commands::Docs { readme, plan, src, has_prompt, filter }) = cli.command {
+            if let Some(Commands::Docs {
+                readme,
+                plan,
+                src,
+                has_prompt,
+                filter,
+            }) = cli.command
+            {
                 assert!(!readme);
                 assert!(!plan);
                 assert!(!src);
@@ -822,7 +859,14 @@ mod tests {
         #[test]
         fn docs_positional_filter_parses() {
             let cli = parse_args(&["docs", "homelab"]).unwrap();
-            if let Some(Commands::Docs { readme, plan, src, has_prompt, filter }) = cli.command {
+            if let Some(Commands::Docs {
+                readme,
+                plan,
+                src,
+                has_prompt,
+                filter,
+            }) = cli.command
+            {
                 assert!(!readme);
                 assert!(!plan);
                 assert!(!src);
@@ -836,7 +880,10 @@ mod tests {
         #[test]
         fn docs_filter_with_flags_parse() {
             let cli = parse_args(&["docs", "--has-prompt", "research"]).unwrap();
-            if let Some(Commands::Docs { has_prompt, filter, .. }) = cli.command {
+            if let Some(Commands::Docs {
+                has_prompt, filter, ..
+            }) = cli.command
+            {
                 assert!(has_prompt);
                 assert_eq!(filter, Some("research".to_string()));
             } else {
@@ -847,7 +894,14 @@ mod tests {
         #[test]
         fn docs_multiple_flags_parse() {
             let cli = parse_args(&["docs", "--readme", "--src"]).unwrap();
-            if let Some(Commands::Docs { readme, plan, src, has_prompt, filter }) = cli.command {
+            if let Some(Commands::Docs {
+                readme,
+                plan,
+                src,
+                has_prompt,
+                filter,
+            }) = cli.command
+            {
                 assert!(readme);
                 assert!(!plan);
                 assert!(src);
@@ -984,7 +1038,13 @@ mod tests {
 
         #[test]
         fn docs_maps_to_docs_filter() {
-            let cmd = Commands::Docs { readme: false, plan: false, src: false, has_prompt: false, filter: None };
+            let cmd = Commands::Docs {
+                readme: false,
+                plan: false,
+                src: false,
+                has_prompt: false,
+                filter: None,
+            };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Docs);
         }
 

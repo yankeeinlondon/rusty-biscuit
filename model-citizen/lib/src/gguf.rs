@@ -88,7 +88,9 @@ pub fn parse_header(path: &Path) -> Result<GgufHeader, ModelCitizenError> {
     let bytes_read = file.read(&mut buffer)?;
 
     if bytes_read < 24 {
-        return Err(ModelCitizenError::parse("File too small to be a valid GGUF"));
+        return Err(ModelCitizenError::parse(
+            "File too small to be a valid GGUF",
+        ));
     }
 
     GgufHeader::from_bytes(&buffer[..bytes_read])
@@ -272,17 +274,11 @@ pub fn model_name_from_filename(path: &Path) -> Option<String> {
 
     // Common quantization patterns to strip
     let patterns = [
-        "-Q4_K_M", "-Q4_K_S", "-Q5_K_M", "-Q5_K_S", "-Q6_K",
-        "-Q4_0", "-Q4_1", "-Q5_0", "-Q5_1", "-Q8_0",
-        "-F16", "-F32",
-        "-IQ1_S", "-IQ2_XXS", "-IQ2_XS", "-IQ2_S",
-        "-IQ3_XXS", "-IQ3_XS", "-IQ3_S", "-IQ4_XS", "-IQ4_NL",
-        ".Q4_K_M", ".Q4_K_S", ".Q5_K_M", ".Q5_K_S", ".Q6_K",
-        ".Q4_0", ".Q4_1", ".Q5_0", ".Q5_1", ".Q8_0",
-        ".F16", ".F32",
-        "_Q4_K_M", "_Q4_K_S", "_Q5_K_M", "_Q5_K_S", "_Q6_K",
-        "_Q4_0", "_Q4_1", "_Q5_0", "_Q5_1", "_Q8_0",
-        "_F16", "_F32",
+        "-Q4_K_M", "-Q4_K_S", "-Q5_K_M", "-Q5_K_S", "-Q6_K", "-Q4_0", "-Q4_1", "-Q5_0", "-Q5_1",
+        "-Q8_0", "-F16", "-F32", "-IQ1_S", "-IQ2_XXS", "-IQ2_XS", "-IQ2_S", "-IQ3_XXS", "-IQ3_XS",
+        "-IQ3_S", "-IQ4_XS", "-IQ4_NL", ".Q4_K_M", ".Q4_K_S", ".Q5_K_M", ".Q5_K_S", ".Q6_K",
+        ".Q4_0", ".Q4_1", ".Q5_0", ".Q5_1", ".Q8_0", ".F16", ".F32", "_Q4_K_M", "_Q4_K_S",
+        "_Q5_K_M", "_Q5_K_S", "_Q6_K", "_Q4_0", "_Q4_1", "_Q5_0", "_Q5_1", "_Q8_0", "_F16", "_F32",
     ];
 
     let mut name = filename.to_string();
@@ -293,11 +289,7 @@ pub fn model_name_from_filename(path: &Path) -> Option<String> {
         }
     }
 
-    if name.is_empty() {
-        None
-    } else {
-        Some(name)
-    }
+    if name.is_empty() { None } else { Some(name) }
 }
 
 /// Extracts extended metadata from a GGUF file's key-value store.

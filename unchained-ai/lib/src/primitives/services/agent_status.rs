@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::models::metadata::Datetime;
 use super::error::AgentStatusError;
+use crate::models::metadata::Datetime;
 
 /// Platform types for agentic CLI tools.
 ///
@@ -95,24 +95,13 @@ impl AgenticCapLimit {
     }
 }
 
-
 /// The **AgentStatus** struct provides status information about
 /// Agentic CLI platforms it has access to.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AgentStatus {
     pub installed: HashMap<AgenticStatusPlatform, bool>,
     pub available: Vec<AgenticStatusPlatform>,
     pub limits: HashMap<String, AgenticCapLimit>,
-}
-
-impl Default for AgentStatus {
-    fn default() -> Self {
-        AgentStatus {
-            installed: HashMap::new(),
-            available: vec![],
-            limits: HashMap::new()
-        }
-    }
 }
 
 impl AgentStatus {
@@ -158,7 +147,6 @@ impl AgentStatus {
         })
     }
 
-
     /// Provides the cap limits for the providers we have access to.
     ///
     /// - provides as a vector of `AgentLimit` by default but
@@ -171,17 +159,21 @@ impl AgentStatus {
     /// - The requested platform is not installed or has no valid API key
     /// - API requests to query limits fail
     /// - Response parsing fails
-    pub async fn limits(&self, platform: Option<AgenticStatusPlatform>) -> Result<HashMap<String, AgenticCapLimit>, AgentStatusError> {
-        use std::time::Duration;
+    pub async fn limits(
+        &self,
+        platform: Option<AgenticStatusPlatform>,
+    ) -> Result<HashMap<String, AgenticCapLimit>, AgentStatusError> {
         use super::pty_runner::{InteractiveStep, run_pty_interactive};
+        use std::time::Duration;
 
         let platforms: Vec<AgenticStatusPlatform> = match platform {
             Some(p) => {
                 // Check if the platform is available
                 if !self.available.contains(&p) {
-                    return Err(AgentStatusError::PlatformNotInstalled(
-                        format!("{} is not installed or not available", p)
-                    ));
+                    return Err(AgentStatusError::PlatformNotInstalled(format!(
+                        "{} is not installed or not available",
+                        p
+                    )));
                 }
                 vec![p]
             }
@@ -217,16 +209,14 @@ impl AgentStatus {
             };
 
             match run_pty_interactive(program, &steps, timeout).await {
-                Ok(output) => {
-                    match super::parsers::parse_status_output(p, &output) {
-                        Ok(cap_limit) => {
-                            limits.insert(p.to_string(), cap_limit);
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to parse status for {}: {}", p, e);
-                        }
+                Ok(output) => match super::parsers::parse_status_output(p, &output) {
+                    Ok(cap_limit) => {
+                        limits.insert(p.to_string(), cap_limit);
                     }
-                }
+                    Err(e) => {
+                        tracing::warn!("Failed to parse status for {}: {}", p, e);
+                    }
+                },
                 Err(e) => {
                     tracing::warn!("Failed to query status for {}: {}", p, e);
                 }
@@ -245,7 +235,10 @@ impl AgentStatus {
     /// - The requested platform is not installed or has no valid API key
     /// - API requests to query status fail
     /// - Response parsing fails
-    pub async fn status(&self, platform: Option<AgenticStatusPlatform>) -> Result<AgentStatus, AgentStatusError> {
+    pub async fn status(
+        &self,
+        platform: Option<AgenticStatusPlatform>,
+    ) -> Result<AgentStatus, AgentStatusError> {
         let limits = self.limits(platform).await?;
 
         Ok(AgentStatus {
@@ -270,7 +263,10 @@ mod tests {
 
     #[test]
     fn test_platform_display() {
-        assert_eq!(format!("{}", AgenticStatusPlatform::ClaudeCode), "ClaudeCode");
+        assert_eq!(
+            format!("{}", AgenticStatusPlatform::ClaudeCode),
+            "ClaudeCode"
+        );
         assert_eq!(format!("{}", AgenticStatusPlatform::Codex), "Codex");
     }
 

@@ -165,10 +165,8 @@ pub fn remove_unsupported_events(config: &mut HookerConfig) -> Vec<(Provider, Ve
             .collect();
 
         if !unsupported_events.is_empty() {
-            let event_names: Vec<String> = unsupported_events
-                .iter()
-                .map(|e| e.to_string())
-                .collect();
+            let event_names: Vec<String> =
+                unsupported_events.iter().map(|e| e.to_string()).collect();
 
             // Remove the unsupported events
             for event in &unsupported_events {
@@ -497,9 +495,10 @@ mod tests {
         opencode_config
             .events
             .insert(AgenticEvent::BeforeTool, speak_binding("opencode tool"));
-        opencode_config
-            .events
-            .insert(AgenticEvent::SubagentStop, speak_binding("opencode subagent"));
+        opencode_config.events.insert(
+            AgenticEvent::SubagentStop,
+            speak_binding("opencode subagent"),
+        );
         config.providers.insert(Provider::OpenCode, opencode_config);
 
         let removed = remove_unsupported_events(&mut config);

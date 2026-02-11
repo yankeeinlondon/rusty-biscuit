@@ -229,10 +229,7 @@ impl ClaudeConfigurator {
     fn is_in_sync(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<bool> {
         use std::collections::HashSet;
 
-        let registered: HashSet<String> = self
-            .registered_events(config_dir)?
-            .into_iter()
-            .collect();
+        let registered: HashSet<String> = self.registered_events(config_dir)?.into_iter().collect();
 
         // Get expected events from config for this provider
         let expected: HashSet<String> = config
@@ -443,7 +440,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let configurator = ClaudeConfigurator;
 
-        configurator.create_minimal_config(Some(tmp.path())).unwrap();
+        configurator
+            .create_minimal_config(Some(tmp.path()))
+            .unwrap();
 
         let settings_path = tmp.path().join("settings.json");
         assert!(settings_path.exists());
@@ -451,10 +450,11 @@ mod tests {
         // Verify it's valid JSON and has the schema
         let content = fs::read_to_string(&settings_path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert!(json
-            .get("$schema")
-            .and_then(|s| s.as_str())
-            .is_some_and(|s| s.contains("claude-code-settings")));
+        assert!(
+            json.get("$schema")
+                .and_then(|s| s.as_str())
+                .is_some_and(|s| s.contains("claude-code-settings"))
+        );
     }
 
     #[test]

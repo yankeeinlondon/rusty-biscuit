@@ -150,14 +150,38 @@ mod tests {
 
     #[test]
     fn test_extension_detection() {
-        assert_eq!(detect_from_extension(Path::new("config.toml")), FileType::Toml);
-        assert_eq!(detect_from_extension(Path::new("config.yaml")), FileType::Yaml);
-        assert_eq!(detect_from_extension(Path::new("config.yml")), FileType::Yaml);
-        assert_eq!(detect_from_extension(Path::new("data.json")), FileType::Json);
-        assert_eq!(detect_from_extension(Path::new("readme.md")), FileType::Markdown);
-        assert_eq!(detect_from_extension(Path::new("readme.markdown")), FileType::Markdown);
-        assert_eq!(detect_from_extension(Path::new("page.mdx")), FileType::Markdown);
+        assert_eq!(
+            detect_from_extension(Path::new("config.toml")),
+            FileType::Toml
+        );
+        assert_eq!(
+            detect_from_extension(Path::new("config.yaml")),
+            FileType::Yaml
+        );
+        assert_eq!(
+            detect_from_extension(Path::new("config.yml")),
+            FileType::Yaml
+        );
+        assert_eq!(
+            detect_from_extension(Path::new("data.json")),
+            FileType::Json
+        );
+        assert_eq!(
+            detect_from_extension(Path::new("readme.md")),
+            FileType::Markdown
+        );
+        assert_eq!(
+            detect_from_extension(Path::new("readme.markdown")),
+            FileType::Markdown
+        );
+        assert_eq!(
+            detect_from_extension(Path::new("page.mdx")),
+            FileType::Markdown
+        );
         assert_eq!(detect_from_extension(Path::new("doc.pdf")), FileType::Pdf);
-        assert_eq!(detect_from_extension(Path::new("file.txt")), FileType::Unknown);
+        assert_eq!(
+            detect_from_extension(Path::new("file.txt")),
+            FileType::Unknown
+        );
     }
 }

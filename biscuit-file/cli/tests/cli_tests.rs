@@ -1,5 +1,5 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 fn bf() -> Command {
@@ -7,10 +7,7 @@ fn bf() -> Command {
 }
 
 fn fixture(name: &str) -> String {
-    format!(
-        "{}/tests/fixtures/{name}",
-        env!("CARGO_MANIFEST_DIR")
-    )
+    format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))
 }
 
 // ── Format conversion (file input) ──────────────────────────────────
@@ -163,7 +160,9 @@ fn markdown_text_output_rejected() {
         .arg("--text")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("--text and --md are only supported for PDF files"));
+        .stderr(predicate::str::contains(
+            "--text and --md are only supported for PDF files",
+        ));
 }
 
 // ── STDIN support ───────────────────────────────────────────────────

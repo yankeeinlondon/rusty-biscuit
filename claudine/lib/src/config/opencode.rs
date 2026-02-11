@@ -164,10 +164,7 @@ impl OpenCodeConfigurator {
     fn is_in_sync(&self, config: &HookerConfig, config_dir: Option<&Path>) -> Result<bool> {
         use std::collections::HashSet;
 
-        let registered: HashSet<String> = self
-            .registered_events(config_dir)?
-            .into_iter()
-            .collect();
+        let registered: HashSet<String> = self.registered_events(config_dir)?.into_iter().collect();
 
         let expected: HashSet<String> = config
             .providers
@@ -277,19 +274,18 @@ fn extract_events_from_bridge(source: &str) -> Vec<String> {
     for line in source.lines() {
         let trimmed = line.trim();
         // Match pattern: "key": "value" (with or without trailing comma)
-        if trimmed.contains('"') {
-            if let Some(mid) = trimmed.find("\": \"") {
-                if let Some(end) = trimmed[mid + 4..].find('"') {
-                    let event_name = &trimmed[mid + 4..mid + 4 + end];
-                    // Only add if it looks like a valid snake_case event name
-                    if event_name
-                        .chars()
-                        .all(|c| c.is_ascii_lowercase() || c == '_')
-                        && !event_name.is_empty()
-                    {
-                        events.push(event_name.to_string());
-                    }
-                }
+        if trimmed.contains('"')
+            && let Some(mid) = trimmed.find("\": \"")
+            && let Some(end) = trimmed[mid + 4..].find('"')
+        {
+            let event_name = &trimmed[mid + 4..mid + 4 + end];
+            // Only add if it looks like a valid snake_case event name
+            if event_name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c == '_')
+                && !event_name.is_empty()
+            {
+                events.push(event_name.to_string());
             }
         }
     }
@@ -333,11 +329,18 @@ mod tests {
     fn register_creates_plugin_file() {
         let tmp = TempDir::new().unwrap();
         let opencode = tmp.path().join("opencode.json");
-        fs::write(&opencode, r#"{"$schema": "https://opencode.ai/config.json"}"#).unwrap();
+        fs::write(
+            &opencode,
+            r#"{"$schema": "https://opencode.ai/config.json"}"#,
+        )
+        .unwrap();
 
         let configurator = OpenCodeConfigurator;
         // Use events that OpenCode supports via the event hook (not tool hooks)
-        let config = test_config(vec![AgenticEvent::TurnComplete, AgenticEvent::PermissionRequest]);
+        let config = test_config(vec![
+            AgenticEvent::TurnComplete,
+            AgenticEvent::PermissionRequest,
+        ]);
 
         let result = configurator.register(&config, Some(tmp.path())).unwrap();
         match result {
@@ -353,14 +356,21 @@ mod tests {
 
         // Check opencode.json was NOT modified (no "plugins" key added)
         let content = fs::read_to_string(&opencode).unwrap();
-        assert!(!content.contains("plugins"), "opencode.json should not have a plugins key");
+        assert!(
+            !content.contains("plugins"),
+            "opencode.json should not have a plugins key"
+        );
     }
 
     #[test]
     fn register_generates_valid_typescript_bridge() {
         let tmp = TempDir::new().unwrap();
         let opencode = tmp.path().join("opencode.json");
-        fs::write(&opencode, r#"{"$schema": "https://opencode.ai/config.json"}"#).unwrap();
+        fs::write(
+            &opencode,
+            r#"{"$schema": "https://opencode.ai/config.json"}"#,
+        )
+        .unwrap();
 
         let configurator = OpenCodeConfigurator;
         let config = test_config(vec![AgenticEvent::TurnComplete]);
@@ -450,7 +460,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let configurator = OpenCodeConfigurator;
 
-        configurator.create_minimal_config(Some(tmp.path())).unwrap();
+        configurator
+            .create_minimal_config(Some(tmp.path()))
+            .unwrap();
 
         let opencode_path = tmp.path().join("opencode.json");
         assert!(opencode_path.exists());
@@ -458,10 +470,11 @@ mod tests {
         // Verify it's valid JSON and has the schema
         let content = fs::read_to_string(&opencode_path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert!(json
-            .get("$schema")
-            .and_then(|s| s.as_str())
-            .is_some_and(|s| s.contains("opencode.ai")));
+        assert!(
+            json.get("$schema")
+                .and_then(|s| s.as_str())
+                .is_some_and(|s| s.contains("opencode.ai"))
+        );
     }
 
     #[test]

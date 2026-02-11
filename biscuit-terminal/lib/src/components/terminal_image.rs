@@ -141,10 +141,7 @@ impl Renderable for TerminalImage {
     ///
     /// Attempts inline rendering; if unsupported, returns an empty string (no alt text).
     fn fallback_render(&self, term: &Terminal) -> String {
-        match self.render_to_terminal(term) {
-            Ok(text) => text,
-            Err(_) => String::new(),
-        }
+        self.render_to_terminal(term).unwrap_or_default()
     }
 
     /// Render the image as a string of Kitty escape sequences.
@@ -725,7 +722,10 @@ impl TerminalImage {
         } else {
             String::new()
         };
-        Ok(format!("{}{}\x1b[{}B\r\n", prefix, image, display_cells_height))
+        Ok(format!(
+            "{}{}\x1b[{}B\r\n",
+            prefix, image, display_cells_height
+        ))
     }
 
     /// Render image using the Kitty graphics protocol.

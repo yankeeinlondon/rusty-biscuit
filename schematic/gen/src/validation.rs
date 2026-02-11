@@ -176,7 +176,7 @@ mod tests {
             request: Some(ApiRequest::json_type(body_type)),
             response: ApiResponse::json_type("Response"),
             headers: vec![],
-                params: None,
+            params: None,
         }
     }
 
@@ -190,7 +190,7 @@ mod tests {
             request: None,
             response: ApiResponse::json_type("Response"),
             headers: vec![],
-                params: None,
+            params: None,
         }
     }
 
@@ -392,7 +392,7 @@ mod tests {
             request: Some(ApiRequest::form_data(vec![FormField::file("document")])),
             response: ApiResponse::json_type("UploadResponse"),
             headers: vec![],
-                params: None,
+            params: None,
         }];
 
         // FormData doesn't have a body type name, so no collision possible

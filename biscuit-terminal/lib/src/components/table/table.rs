@@ -64,7 +64,7 @@ fn insert_thousands_separators(s: &str) -> String {
     let len = chars.len();
     let mut result = String::with_capacity(len + len / 3);
     for (i, ch) in chars.iter().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
+        if i > 0 && (len - i).is_multiple_of(3) {
             result.push(',');
         }
         result.push(*ch);
@@ -172,7 +172,6 @@ fn pad_cell(
     }
 }
 
-
 /// Controls whether a table column is visible based on terminal width.
 ///
 /// Columns default to `Always` (unconditionally visible). Use the width
@@ -194,9 +193,10 @@ fn pad_cell(
 /// let notes = TableColumn::new("Notes")
 ///     .with_when(Conditional::WidthGreaterThan(80));
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Conditional {
     /// Column is always visible.
+    #[default]
     Always,
     /// Column is visible when the renderable width is greater than the
     /// specified value.
@@ -214,12 +214,6 @@ impl Conditional {
             Conditional::WidthGreaterThan(threshold) => available_width > *threshold,
             Conditional::LessThanOrEqual(threshold) => available_width <= *threshold,
         }
-    }
-}
-
-impl Default for Conditional {
-    fn default() -> Self {
-        Conditional::Always
     }
 }
 
@@ -443,7 +437,7 @@ impl TableColumn {
 }
 
 /// A table component for rendering tabular data.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Table {
     title: Option<String>,
     columns: Vec<TableColumn>,
@@ -461,20 +455,6 @@ pub struct Table {
     /// so the second, fourth, etc. rows get the tint). Requires true color
     /// support; silently ignored otherwise.
     alternate_text_color: bool,
-}
-
-impl Default for Table {
-    fn default() -> Self {
-        Table {
-            title: None,
-            columns: Vec::new(),
-            data: Vec::new(),
-            layout: Layout::default(),
-            prefer_cursor_alignment: false,
-            alternate_background_color: false,
-            alternate_text_color: false,
-        }
-    }
 }
 
 impl Table {
@@ -639,10 +619,10 @@ impl Table {
             if fixed.get(i).copied().unwrap_or(false) {
                 continue;
             }
-            if let Some(max) = col.max_width {
-                if i < widths.len() {
-                    widths[i] = widths[i].min(max);
-                }
+            if let Some(max) = col.max_width
+                && i < widths.len()
+            {
+                widths[i] = widths[i].min(max);
             }
         }
 
@@ -709,7 +689,8 @@ impl Table {
         let mut remaining_excess = excess;
         for (idx, current_width) in reducible {
             // Proportional share of the reduction
-            let share = (current_width as f64 / total_reducible as f64 * excess as f64).ceil() as usize;
+            let share =
+                (current_width as f64 / total_reducible as f64 * excess as f64).ceil() as usize;
             let reduction = share.min(remaining_excess);
 
             // Get minimum width constraint
@@ -745,10 +726,10 @@ impl Table {
     ) -> String {
         // If any columns are conditionally hidden at this width, build a
         // filtered table and delegate to it.
-        if let Some(aw) = available_width {
-            if let Some(filtered) = self.with_visible_columns(aw) {
-                return filtered.render_content(available_width, stripe_color_mode, text_color_mode);
-            }
+        if let Some(aw) = available_width
+            && let Some(filtered) = self.with_visible_columns(aw)
+        {
+            return filtered.render_content(available_width, stripe_color_mode, text_color_mode);
         }
 
         let mut result = String::new();
@@ -793,7 +774,11 @@ impl Table {
                 })
                 .collect();
 
-            let header_height = header_lines.iter().map(|lines| lines.len()).max().unwrap_or(1);
+            let header_height = header_lines
+                .iter()
+                .map(|lines| lines.len())
+                .max()
+                .unwrap_or(1);
 
             // Apply vertical alignment (headers default to Top)
             let padded_headers: Vec<Vec<String>> = header_lines
@@ -850,8 +835,16 @@ impl Table {
         for (row_idx, row) in self.data.iter().enumerate() {
             let row_height = row_heights.get(row_idx).copied().unwrap_or(1);
             let is_striped = (stripe_bg.is_some() || stripe_fg.is_some()) && row_idx % 2 == 1;
-            let active_bg = if stripe_bg.is_some() && row_idx % 2 == 1 { stripe_bg } else { None };
-            let active_fg = if stripe_fg.is_some() && row_idx % 2 == 1 { stripe_fg } else { None };
+            let active_bg = if stripe_bg.is_some() && row_idx % 2 == 1 {
+                stripe_bg
+            } else {
+                None
+            };
+            let active_fg = if stripe_fg.is_some() && row_idx % 2 == 1 {
+                stripe_fg
+            } else {
+                None
+            };
 
             // Prepare wrapped and vertically-aligned content for each cell
             let mut cell_lines: Vec<Vec<String>> = Vec::with_capacity(row.len());
@@ -970,7 +963,9 @@ impl Table {
         // Calculate margins first to determine available width for column calculation
         let left_margin = Layout::resolve_margin(&self.layout.left_margin, term_width);
         let right_margin = Layout::resolve_margin(&self.layout.right_margin, term_width);
-        let available_width = term_width.saturating_sub(left_margin).saturating_sub(right_margin);
+        let available_width = term_width
+            .saturating_sub(left_margin)
+            .saturating_sub(right_margin);
 
         // If any columns are conditionally hidden at this width, build a
         // filtered table and delegate to it.
@@ -1020,7 +1015,11 @@ impl Table {
             RowFill::Exact => false,
         };
         let fill_end_col = if should_fill {
-            Some(left_margin.saturating_add(available_width).saturating_add(1))
+            Some(
+                left_margin
+                    .saturating_add(available_width)
+                    .saturating_add(1),
+            )
         } else {
             None
         };
@@ -1098,7 +1097,11 @@ impl Table {
                 })
                 .collect();
 
-            let header_height = header_lines.iter().map(|lines| lines.len()).max().unwrap_or(1);
+            let header_height = header_lines
+                .iter()
+                .map(|lines| lines.len())
+                .max()
+                .unwrap_or(1);
 
             // Apply vertical alignment
             let padded_headers: Vec<Vec<String>> = header_lines
@@ -1300,6 +1303,7 @@ impl Renderable for Table {
 /// If `stripe_bg` is Some, the background escape is applied after the left border and
 /// reset before the right border so the outer `│` characters remain uncolored.
 /// If `stripe_fg` is Some, the foreground escape is applied similarly and reset at borders.
+#[allow(clippy::too_many_arguments)]
 fn render_row_with_cursor_positioning(
     cells: &[String],
     widths: &[usize],
@@ -1418,10 +1422,10 @@ fn render_row_with_cursor_positioning(
     }
 
     // Fill to end column if requested (for background color support)
-    if let Some(end) = fill_end_col {
-        if end > last_col {
-            row.push_str(&" ".repeat((end - last_col) as usize));
-        }
+    if let Some(end) = fill_end_col
+        && end > last_col
+    {
+        row.push_str(&" ".repeat((end - last_col) as usize));
     }
 
     row
@@ -1734,7 +1738,10 @@ mod tests {
     #[test]
     fn test_pad_cell_content_wider_than_width() {
         // Content wider than target: no crash, no truncation
-        assert_eq!(pad_cell("hello world", 5, Alignment::Left, None), "hello world");
+        assert_eq!(
+            pad_cell("hello world", 5, Alignment::Left, None),
+            "hello world"
+        );
     }
 
     #[test]
@@ -1857,7 +1864,10 @@ mod tests {
         let data_line_2 = lines[4];
         // Both values should be present and aligned at the same column position
         assert!(data_line_1.contains("$9.99"), "Should contain $9.99");
-        assert!(data_line_2.contains("$1,234.56"), "Should contain $1,234.56");
+        assert!(
+            data_line_2.contains("$1,234.56"),
+            "Should contain $1,234.56"
+        );
     }
 
     #[test]
@@ -2157,11 +2167,7 @@ mod tests {
         for line in result.lines() {
             let width = visible_width(line);
             // Lines should have content (not be empty after stripping escapes)
-            assert!(
-                width > 0,
-                "Lines should have visible content: {:?}",
-                line
-            );
+            assert!(width > 0, "Lines should have visible content: {:?}", line);
         }
     }
 
@@ -2318,10 +2324,7 @@ mod tests {
                 TableColumn::new("Name"),
                 TableColumn::new("Description"),
             ])
-            .with_data(vec![vec![
-                "Alice".into(),
-                "A long description".into(),
-            ]]);
+            .with_data(vec![vec!["Alice".into(), "A long description".into()]]);
 
         // Without constraint: widths would be [5, 18]
         // Total content: 23, borders: 3 + 3 = 6, total: 29
@@ -2379,9 +2382,7 @@ mod tests {
     #[test]
     fn test_calculate_column_widths_respects_min_width() {
         let table = Table::new()
-            .with_columns(vec![
-                TableColumn::new("Description").with_min_width(15),
-            ])
+            .with_columns(vec![TableColumn::new("Description").with_min_width(15)])
             .with_data(vec![vec![
                 "A very long description that is quite wide".into(),
             ]]);
@@ -2434,10 +2435,7 @@ mod tests {
 
     #[test]
     fn test_calculate_row_heights_single_line() {
-        let columns = vec![
-            TableColumn::new("Name"),
-            TableColumn::new("Age"),
-        ];
+        let columns = vec![TableColumn::new("Name"), TableColumn::new("Age")];
         let data = vec![
             vec!["Alice".into(), "30".into()],
             vec!["Bob".into(), "25".into()],
@@ -2451,9 +2449,9 @@ mod tests {
     #[test]
     fn test_calculate_row_heights_with_explicit_newlines() {
         let columns = vec![TableColumn::new("Description")];
-        let data = vec![
-            vec![TableCellContent::Text("Line1\nLine2\nLine3".to_string())],
-        ];
+        let data = vec![vec![TableCellContent::Text(
+            "Line1\nLine2\nLine3".to_string(),
+        )]];
         let widths = vec![20];
 
         let heights = calculate_row_heights(&data, &columns, &widths);
@@ -2462,16 +2460,11 @@ mod tests {
 
     #[test]
     fn test_calculate_row_heights_max_across_cells() {
-        let columns = vec![
-            TableColumn::new("Short"),
-            TableColumn::new("Long"),
-        ];
-        let data = vec![
-            vec![
-                "A".into(),
-                TableCellContent::Text("Line1\nLine2".to_string()),
-            ],
-        ];
+        let columns = vec![TableColumn::new("Short"), TableColumn::new("Long")];
+        let data = vec![vec![
+            "A".into(),
+            TableCellContent::Text("Line1\nLine2".to_string()),
+        ]];
         let widths = vec![5, 10];
 
         let heights = calculate_row_heights(&data, &columns, &widths);
@@ -2561,7 +2554,10 @@ mod tests {
         );
 
         // First header line should contain "Name" and "GitHub"
-        assert!(lines[1].contains("Name"), "First header line should have 'Name'");
+        assert!(
+            lines[1].contains("Name"),
+            "First header line should have 'Name'"
+        );
         assert!(
             lines[1].contains("GitHub"),
             "First header line should have 'GitHub'"
@@ -2603,10 +2599,7 @@ mod tests {
     #[test]
     fn test_render_content_mixed_heights() {
         let table = Table::new()
-            .with_columns(vec![
-                TableColumn::new("Single"),
-                TableColumn::new("Multi"),
-            ])
+            .with_columns(vec![TableColumn::new("Single"), TableColumn::new("Multi")])
             .with_data(vec![vec![
                 "A".into(),
                 TableCellContent::Text("B\nC".to_string()),
@@ -2745,10 +2738,7 @@ mod tests {
     #[test]
     fn test_cursor_positioning_mixed_height_rows() {
         let table = Table::new()
-            .with_columns(vec![
-                TableColumn::new("Short"),
-                TableColumn::new("Long"),
-            ])
+            .with_columns(vec![TableColumn::new("Short"), TableColumn::new("Long")])
             .with_data(vec![vec![
                 "A".into(),
                 TableCellContent::Text("B\nC\nD".to_string()),
@@ -2833,10 +2823,7 @@ mod tests {
     #[test]
     fn test_empty_cells_with_multiline_neighbor() {
         let table = Table::new()
-            .with_columns(vec![
-                TableColumn::new("Empty"),
-                TableColumn::new("Multi"),
-            ])
+            .with_columns(vec![TableColumn::new("Empty"), TableColumn::new("Multi")])
             .with_data(vec![vec![
                 "".into(),
                 TableCellContent::Text("A\nB\nC".to_string()),
@@ -2872,7 +2859,10 @@ mod tests {
         let result = table.render_content(None, None, None);
 
         // ANSI codes should be preserved
-        assert!(result.contains("\x1b[31m"), "Red escape should be preserved");
+        assert!(
+            result.contains("\x1b[31m"),
+            "Red escape should be preserved"
+        );
         assert!(
             result.contains("\x1b[32m"),
             "Green escape should be preserved"
@@ -2992,7 +2982,10 @@ mod tests {
 
         // With only 15 chars available, table should still render
         let result = table.render(Some(15));
-        assert!(!result.is_empty(), "Should render even with narrow terminal");
+        assert!(
+            !result.is_empty(),
+            "Should render even with narrow terminal"
+        );
     }
 
     #[test]
@@ -3122,10 +3115,7 @@ mod tests {
     fn test_render_content_no_stripe_without_flag() {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
-            .with_data(vec![
-                vec!["A".into()],
-                vec!["B".into()],
-            ]);
+            .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
         let result = table.render_content(None, None, None);
         // No background escape codes should be present
@@ -3156,19 +3146,13 @@ mod tests {
         // Row 3 (line 6): stripe
 
         let bg_dark = stripe_bg_escape(&ColorMode::Dark);
-        assert!(
-            !lines[3].contains(bg_dark),
-            "Row 0 should not be striped"
-        );
+        assert!(!lines[3].contains(bg_dark), "Row 0 should not be striped");
         assert!(
             lines[4].contains(bg_dark),
             "Row 1 should be striped: {:?}",
             lines[4]
         );
-        assert!(
-            !lines[5].contains(bg_dark),
-            "Row 2 should not be striped"
-        );
+        assert!(!lines[5].contains(bg_dark), "Row 2 should not be striped");
         assert!(
             lines[6].contains(bg_dark),
             "Row 3 should be striped: {:?}",
@@ -3180,10 +3164,7 @@ mod tests {
     fn test_render_content_stripe_resets_background() {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
-            .with_data(vec![
-                vec!["A".into()],
-                vec!["B".into()],
-            ]);
+            .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
         let result = table.render_content(None, Some(&ColorMode::Dark), None);
         // Striped rows should have a background reset at the end
@@ -3206,10 +3187,7 @@ mod tests {
     fn test_render_content_stripe_light_mode_uses_light_color() {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
-            .with_data(vec![
-                vec!["A".into()],
-                vec!["B".into()],
-            ]);
+            .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
         let result = table.render_content(None, Some(&ColorMode::Light), None);
         let bg_light = stripe_bg_escape(&ColorMode::Light);
@@ -3237,10 +3215,7 @@ mod tests {
     fn test_cursor_alignment_with_stripe() {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
-            .with_data(vec![
-                vec!["A".into()],
-                vec!["B".into()],
-            ])
+            .with_data(vec![vec!["A".into()], vec!["B".into()]])
             .prefer_cursor_alignment();
 
         let result = table.render_with_cursor_positioning(80, Some(&ColorMode::Dark), None);
@@ -3260,10 +3235,7 @@ mod tests {
     fn test_stripe_outer_borders_uncolored_space_padded() {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
-            .with_data(vec![
-                vec!["A".into()],
-                vec!["B".into()],
-            ]);
+            .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
         let result = table.render_content(None, Some(&ColorMode::Dark), None);
         let bg = stripe_bg_escape(&ColorMode::Dark);
@@ -3293,10 +3265,7 @@ mod tests {
     fn test_stripe_outer_borders_uncolored_cursor_positioned() {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
-            .with_data(vec![
-                vec!["A".into()],
-                vec!["B".into()],
-            ])
+            .with_data(vec![vec!["A".into()], vec!["B".into()]])
             .prefer_cursor_alignment();
 
         let result = table.render_with_cursor_positioning(80, Some(&ColorMode::Dark), None);
@@ -3359,10 +3328,7 @@ mod tests {
         let bg_restore = striped_line[after_reset..]
             .find(bg)
             .expect("Stripe bg should be re-applied after SGR reset in cell");
-        assert!(
-            bg_restore > 0,
-            "Stripe bg must follow the SGR reset"
-        );
+        assert!(bg_restore > 0, "Stripe bg must follow the SGR reset");
     }
 
     #[test]
@@ -3397,10 +3363,7 @@ mod tests {
         let bg_restore = striped_line[after_reset..]
             .find(bg)
             .expect("Stripe bg should be re-applied after SGR reset in cell");
-        assert!(
-            bg_restore > 0,
-            "Stripe bg must follow the SGR reset"
-        );
+        assert!(bg_restore > 0, "Stripe bg must follow the SGR reset");
     }
 
     // ── Alternate text color tests ──────────────────────────────────
@@ -3441,10 +3404,7 @@ mod tests {
     fn test_render_content_no_text_tint_without_flag() {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
-            .with_data(vec![
-                vec!["A".into()],
-                vec!["B".into()],
-            ]);
+            .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
         let result = table.render_content(None, None, None);
         assert!(
@@ -3493,10 +3453,7 @@ mod tests {
     fn test_render_content_text_tint_resets_foreground() {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
-            .with_data(vec![
-                vec!["A".into()],
-                vec!["B".into()],
-            ]);
+            .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
         let result = table.render_content(None, None, Some(&ColorMode::Dark));
         let tinted_lines: Vec<&str> = result
@@ -3518,10 +3475,7 @@ mod tests {
     fn test_render_content_text_tint_light_mode_uses_light_color() {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
-            .with_data(vec![
-                vec!["A".into()],
-                vec!["B".into()],
-            ]);
+            .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
         let result = table.render_content(None, None, Some(&ColorMode::Light));
         let fg_light = stripe_fg_escape(&ColorMode::Light);
@@ -3548,10 +3502,7 @@ mod tests {
     fn test_text_tint_outer_borders_uncolored_space_padded() {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
-            .with_data(vec![
-                vec!["A".into()],
-                vec!["B".into()],
-            ]);
+            .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
         let result = table.render_content(None, None, Some(&ColorMode::Dark));
         let fg = stripe_fg_escape(&ColorMode::Dark);
@@ -3580,10 +3531,7 @@ mod tests {
     fn test_cursor_alignment_with_text_tint() {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
-            .with_data(vec![
-                vec!["A".into()],
-                vec!["B".into()],
-            ])
+            .with_data(vec![vec!["A".into()], vec!["B".into()]])
             .prefer_cursor_alignment();
 
         let result = table.render_with_cursor_positioning(80, None, Some(&ColorMode::Dark));
@@ -3602,16 +3550,9 @@ mod tests {
     fn test_combined_bg_and_fg_stripe() {
         let table = Table::new()
             .with_columns(vec![TableColumn::new("X")])
-            .with_data(vec![
-                vec!["A".into()],
-                vec!["B".into()],
-            ]);
+            .with_data(vec![vec!["A".into()], vec!["B".into()]]);
 
-        let result = table.render_content(
-            None,
-            Some(&ColorMode::Dark),
-            Some(&ColorMode::Dark),
-        );
+        let result = table.render_content(None, Some(&ColorMode::Dark), Some(&ColorMode::Dark));
         let bg = stripe_bg_escape(&ColorMode::Dark);
         let fg = stripe_fg_escape(&ColorMode::Dark);
 
@@ -3622,14 +3563,8 @@ mod tests {
             .expect("Should have a line with both bg and fg stripe");
 
         // Both resets should be present
-        assert!(
-            tinted_line.contains(BG_RESET),
-            "Should reset background"
-        );
-        assert!(
-            tinted_line.contains(FG_RESET),
-            "Should reset foreground"
-        );
+        assert!(tinted_line.contains(BG_RESET), "Should reset background");
+        assert!(tinted_line.contains(FG_RESET), "Should reset foreground");
     }
 
     #[test]
@@ -3662,10 +3597,7 @@ mod tests {
         let fg_restore = tinted_line[after_reset..]
             .find(fg)
             .expect("Text tint should be re-applied after SGR reset in cell");
-        assert!(
-            fg_restore > 0,
-            "Text tint must follow the SGR reset"
-        );
+        assert!(fg_restore > 0, "Text tint must follow the SGR reset");
     }
 
     #[test]
@@ -3704,7 +3636,10 @@ mod tests {
             assert!(
                 vw <= border_width,
                 "Line {} visible width ({}) exceeds border width ({}): {:?}",
-                i, vw, border_width, line
+                i,
+                vw,
+                border_width,
+                line
             );
         }
     }
@@ -3746,18 +3681,14 @@ mod tests {
 
     #[test]
     fn test_table_column_with_when_builder() {
-        let col = TableColumn::new("Details")
-            .with_when(Conditional::WidthGreaterThan(60));
+        let col = TableColumn::new("Details").with_when(Conditional::WidthGreaterThan(60));
         assert_eq!(col.when, Conditional::WidthGreaterThan(60));
     }
 
     #[test]
     fn test_with_visible_columns_none_when_all_visible() {
         let table = Table::new()
-            .with_columns(vec![
-                TableColumn::new("A"),
-                TableColumn::new("B"),
-            ])
+            .with_columns(vec![TableColumn::new("A"), TableColumn::new("B")])
             .with_data(vec![vec!["x".into(), "y".into()]]);
 
         assert!(
@@ -3771,8 +3702,7 @@ mod tests {
         let table = Table::new()
             .with_columns(vec![
                 TableColumn::new("Name"),
-                TableColumn::new("Details")
-                    .with_when(Conditional::WidthGreaterThan(80)),
+                TableColumn::new("Details").with_when(Conditional::WidthGreaterThan(80)),
             ])
             .with_data(vec![vec!["Alice".into(), "Some details".into()]]);
 
@@ -3793,17 +3723,17 @@ mod tests {
         let table = Table::new()
             .with_columns(vec![
                 TableColumn::new("Name"),
-                TableColumn::new("Extra")
-                    .with_when(Conditional::WidthGreaterThan(80)),
+                TableColumn::new("Extra").with_when(Conditional::WidthGreaterThan(80)),
             ])
-            .with_data(vec![
-                vec!["Alice".into(), "detail".into()],
-            ]);
+            .with_data(vec![vec!["Alice".into(), "detail".into()]]);
 
         // Narrow: Extra column should be hidden
         let narrow = table.render_content(Some(50), None, None);
         assert!(narrow.contains("Name"), "Should contain Name header");
-        assert!(!narrow.contains("Extra"), "Extra should be hidden at width 50");
+        assert!(
+            !narrow.contains("Extra"),
+            "Extra should be hidden at width 50"
+        );
         assert!(!narrow.contains("detail"), "Extra data should be hidden");
         assert!(narrow.contains("Alice"), "Name data should be present");
 
@@ -3820,12 +3750,9 @@ mod tests {
         let table = Table::new()
             .with_columns(vec![
                 TableColumn::new("Name"),
-                TableColumn::new("Extra")
-                    .with_when(Conditional::WidthGreaterThan(80)),
+                TableColumn::new("Extra").with_when(Conditional::WidthGreaterThan(80)),
             ])
-            .with_data(vec![
-                vec!["Alice".into(), "detail".into()],
-            ])
+            .with_data(vec![vec!["Alice".into(), "detail".into()]])
             .prefer_cursor_alignment();
 
         // Narrow: Extra column should be hidden
@@ -3845,8 +3772,7 @@ mod tests {
     fn test_conditional_all_columns_hidden_no_header() {
         let table = Table::new()
             .with_columns(vec![
-                TableColumn::new("A")
-                    .with_when(Conditional::WidthGreaterThan(200)),
+                TableColumn::new("A").with_when(Conditional::WidthGreaterThan(200)),
             ])
             .with_data(vec![vec!["x".into()]]);
 
@@ -3861,12 +3787,9 @@ mod tests {
         let table = Table::new()
             .with_columns(vec![
                 TableColumn::new("Name"),
-                TableColumn::new("Compact")
-                    .with_when(Conditional::LessThanOrEqual(40)),
+                TableColumn::new("Compact").with_when(Conditional::LessThanOrEqual(40)),
             ])
-            .with_data(vec![
-                vec!["Alice".into(), "short".into()],
-            ]);
+            .with_data(vec![vec!["Alice".into(), "short".into()]]);
 
         // Narrow: both visible
         let narrow = table.render_content(Some(40), None, None);
@@ -3883,8 +3806,7 @@ mod tests {
         let table = Table::new()
             .with_columns(vec![
                 TableColumn::new("Name"),
-                TableColumn::new("Details")
-                    .with_when(Conditional::WidthGreaterThan(80)),
+                TableColumn::new("Details").with_when(Conditional::WidthGreaterThan(80)),
             ])
             .with_data(vec![
                 vec!["Alice".into(), "detail A".into()],
@@ -3917,8 +3839,7 @@ mod tests {
         let table = Table::new()
             .with_columns(vec![
                 TableColumn::new("Name"),
-                TableColumn::new("Details")
-                    .with_when(Conditional::WidthGreaterThan(80)),
+                TableColumn::new("Details").with_when(Conditional::WidthGreaterThan(80)),
             ])
             .with_data(vec![vec!["Alice".into(), "detail".into()]]);
 

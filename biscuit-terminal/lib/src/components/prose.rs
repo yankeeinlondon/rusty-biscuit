@@ -71,8 +71,6 @@ pub struct Prose {
     layout: Layout,
 }
 
-
-
 impl Prose {
     /// Create a new Prose instance with the given content.
     pub fn new<T: Into<String>>(content: T) -> Self {
@@ -146,7 +144,7 @@ impl Prose {
                 let mut found_close = false;
 
                 // Collect until '>'
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     if c == '>' {
                         found_close = true;
                         break;
@@ -178,14 +176,17 @@ impl Prose {
                                     // Check for nested opening tag: <tag_name>
                                     if len >= opening_tag_full.len() {
                                         let start = len - opening_tag_full.len();
-                                        if inner_content[start..].eq_ignore_ascii_case(&opening_tag_full) {
+                                        if inner_content[start..]
+                                            .eq_ignore_ascii_case(&opening_tag_full)
+                                        {
                                             depth += 1;
                                         }
                                     }
                                     // Check for closing tag: </tag_name>
                                     if len >= closing_tag.len() {
                                         let start = len - closing_tag.len();
-                                        if inner_content[start..].eq_ignore_ascii_case(&closing_tag) {
+                                        if inner_content[start..].eq_ignore_ascii_case(&closing_tag)
+                                        {
                                             depth -= 1;
                                             if depth == 0 {
                                                 // Remove the closing tag from content
@@ -197,7 +198,9 @@ impl Prose {
                                     // Check for opening tag with attributes: <tag_name ...
                                     if len >= opening_tag_with_space.len() {
                                         let start = len - opening_tag_with_space.len();
-                                        if inner_content[start..].eq_ignore_ascii_case(&opening_tag_with_space) {
+                                        if inner_content[start..]
+                                            .eq_ignore_ascii_case(&opening_tag_with_space)
+                                        {
                                             depth += 1;
                                         }
                                     }
@@ -615,8 +618,7 @@ fn resolve_href(href: &str) -> String {
     }
 
     // Relative paths starting with ./ are relative to CWD
-    if href.starts_with("./") {
-        let relative_path = &href[2..]; // Strip the ./
+    if let Some(relative_path) = href.strip_prefix("./") {
         if let Ok(cwd) = std::env::current_dir() {
             let resolved = cwd.join(relative_path);
             if let Ok(canonical) = resolved.canonicalize() {
@@ -707,10 +709,10 @@ fn find_package_root(start: &Path, git_root: &Path) -> Option<PathBuf> {
         if cargo_toml.exists() {
             // Check if this is a package Cargo.toml (not just a workspace)
             // A simple heuristic: if it contains [package], it's a package
-            if let Ok(contents) = std::fs::read_to_string(&cargo_toml) {
-                if contents.contains("[package]") {
-                    return Some(current);
-                }
+            if let Ok(contents) = std::fs::read_to_string(&cargo_toml)
+                && contents.contains("[package]")
+            {
+                return Some(current);
             }
         }
 

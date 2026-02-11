@@ -1031,16 +1031,19 @@ impl MermaidRenderer {
         };
 
         // Add common arguments
-        let input_path_str = input_file.path().to_str().ok_or_else(|| {
-            MermaidRenderError::InvalidPath {
-                path: input_file.path().to_string_lossy().into_owned(),
-            }
-        })?;
-        let output_path_str = output_path.to_str().ok_or_else(|| {
-            MermaidRenderError::InvalidPath {
-                path: output_path.to_string_lossy().into_owned(),
-            }
-        })?;
+        let input_path_str =
+            input_file
+                .path()
+                .to_str()
+                .ok_or_else(|| MermaidRenderError::InvalidPath {
+                    path: input_file.path().to_string_lossy().into_owned(),
+                })?;
+        let output_path_str =
+            output_path
+                .to_str()
+                .ok_or_else(|| MermaidRenderError::InvalidPath {
+                    path: output_path.to_string_lossy().into_owned(),
+                })?;
         cmd.args(["-i", input_path_str])
             .args(["-o", output_path_str])
             .args(["--theme", self.theme.as_str()])
@@ -1053,11 +1056,12 @@ impl MermaidRenderer {
 
         // Add config file if we have one
         if let Some(ref cf) = config_file {
-            let config_path_str = cf.path().to_str().ok_or_else(|| {
-                MermaidRenderError::InvalidPath {
-                    path: cf.path().to_string_lossy().into_owned(),
-                }
-            })?;
+            let config_path_str =
+                cf.path()
+                    .to_str()
+                    .ok_or_else(|| MermaidRenderError::InvalidPath {
+                        path: cf.path().to_string_lossy().into_owned(),
+                    })?;
             cmd.args(["--configFile", config_path_str]);
         }
 
@@ -1165,16 +1169,19 @@ impl MermaidRenderer {
         };
 
         // Add common arguments
-        let input_path_str = input_file.path().to_str().ok_or_else(|| {
-            MermaidRenderError::InvalidPath {
-                path: input_file.path().to_string_lossy().into_owned(),
-            }
-        })?;
-        let output_path_str = output_path.to_str().ok_or_else(|| {
-            MermaidRenderError::InvalidPath {
-                path: output_path.to_string_lossy().into_owned(),
-            }
-        })?;
+        let input_path_str =
+            input_file
+                .path()
+                .to_str()
+                .ok_or_else(|| MermaidRenderError::InvalidPath {
+                    path: input_file.path().to_string_lossy().into_owned(),
+                })?;
+        let output_path_str =
+            output_path
+                .to_str()
+                .ok_or_else(|| MermaidRenderError::InvalidPath {
+                    path: output_path.to_string_lossy().into_owned(),
+                })?;
         cmd.args(["-i", input_path_str])
             .args(["-o", output_path_str])
             .args(["--theme", self.theme.as_str()])
@@ -1187,11 +1194,12 @@ impl MermaidRenderer {
 
         // Add config file if we have one
         if let Some(ref cf) = config_file {
-            let config_path_str = cf.path().to_str().ok_or_else(|| {
-                MermaidRenderError::InvalidPath {
-                    path: cf.path().to_string_lossy().into_owned(),
-                }
-            })?;
+            let config_path_str =
+                cf.path()
+                    .to_str()
+                    .ok_or_else(|| MermaidRenderError::InvalidPath {
+                        path: cf.path().to_string_lossy().into_owned(),
+                    })?;
             cmd.args(["--configFile", config_path_str]);
         }
 

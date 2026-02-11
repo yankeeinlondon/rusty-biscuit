@@ -86,12 +86,11 @@ fn parse_const_paths(source: &str) -> Result<HashMap<String, String>, Box<dyn st
             continue;
         }
 
-        if trimmed.contains("include_bytes!") {
-            if let Some(name) = pending_const.take() {
-                if let Some(path) = extract_include_path(trimmed) {
-                    map.insert(name, path);
-                }
-            }
+        if trimmed.contains("include_bytes!")
+            && let Some(name) = pending_const.take()
+            && let Some(path) = extract_include_path(trimmed)
+        {
+            map.insert(name, path);
         }
     }
 
@@ -115,12 +114,13 @@ fn parse_variant_names(source: &str) -> BTreeMap<String, String> {
             }
         }
 
-        if trimmed.contains("Self::") && trimmed.contains("=>") && trimmed.contains('"') {
-            if let (Some(variant), Some(name)) =
+        if trimmed.contains("Self::")
+            && trimmed.contains("=>")
+            && trimmed.contains('"')
+            && let (Some(variant), Some(name)) =
                 (extract_variant(trimmed), extract_string_literal(trimmed))
-            {
-                map.insert(variant, name);
-            }
+        {
+            map.insert(variant, name);
         }
 
         let opens = trimmed.chars().filter(|ch| *ch == '{').count() as i32;
@@ -169,9 +169,7 @@ fn extract_include_path(line: &str) -> Option<String> {
 fn extract_variant(line: &str) -> Option<String> {
     let start = line.find("Self::")? + "Self::".len();
     let rest = &line[start..];
-    let end = rest
-        .find(|ch: char| ch == ' ' || ch == '=' || ch == ',')
-        .unwrap_or(rest.len());
+    let end = rest.find([' ', '=', ',']).unwrap_or(rest.len());
     Some(rest[..end].to_string())
 }
 
@@ -184,9 +182,7 @@ fn extract_string_literal(line: &str) -> Option<String> {
 fn extract_const_name(line: &str) -> Option<String> {
     let arrow = line.find("=>")? + 2;
     let rest = line[arrow..].trim();
-    let end = rest
-        .find(|ch: char| ch == ',' || ch == ' ' || ch == '\t')
-        .unwrap_or(rest.len());
+    let end = rest.find([',', ' ', '\t']).unwrap_or(rest.len());
     let name = rest[..end].trim();
     if name.ends_with("_BYTES") {
         Some(name.to_string())
@@ -264,7 +260,7 @@ fn write_duration_manifest(
     writeln!(file, "    pub(crate) name: &'static str,")?;
     writeln!(file, "    pub(crate) duration_ms: u32,")?;
     writeln!(file, "}}")?;
-    writeln!(file, "")?;
+    writeln!(file)?;
     writeln!(
         file,
         "pub(crate) const EFFECT_DURATIONS: &[EffectDuration] = &["
@@ -277,7 +273,7 @@ fn write_duration_manifest(
         )?;
     }
     writeln!(file, "];")?;
-    writeln!(file, "")?;
+    writeln!(file)?;
     writeln!(
         file,
         "pub(crate) fn duration_ms_for_name(name: &str) -> Option<u32> {{"

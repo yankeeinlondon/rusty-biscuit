@@ -41,7 +41,10 @@ mod types;
 
 pub use types::*;
 
-use schematic_define::{ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod};
+use schematic_define::{
+    ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi,
+    RestMethod,
+};
 
 /// Creates the Anthropic API definition.
 ///
@@ -90,7 +93,7 @@ pub fn define_anthropic_api() -> RestApi {
                 request: Some(ApiRequest::json_type("CreateMessageBody")),
                 response: ApiResponse::json_type("MessageResponse"),
                 headers: vec![],
-                    params: None,
+                params: None,
             },
             // Token counting for cost estimation
             Endpoint {
@@ -101,7 +104,7 @@ pub fn define_anthropic_api() -> RestApi {
                 request: Some(ApiRequest::json_type("CountTokensBody")),
                 response: ApiResponse::json_type("CountTokensResponse"),
                 headers: vec![],
-                    params: None,
+                params: None,
             },
             // Model discovery
             Endpoint {
@@ -112,7 +115,7 @@ pub fn define_anthropic_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("ListModelsResponse"),
                 headers: vec![],
-                    params: None,
+                params: None,
             },
             Endpoint {
                 id: "RetrieveModel".to_string(),
@@ -122,7 +125,7 @@ pub fn define_anthropic_api() -> RestApi {
                 request: None,
                 response: ApiResponse::json_type("ModelInfo"),
                 headers: vec![],
-                    params: None,
+                params: None,
             },
         ],
         module_path: None,

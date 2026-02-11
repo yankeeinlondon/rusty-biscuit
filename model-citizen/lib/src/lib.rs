@@ -47,9 +47,12 @@ pub mod sharing;
 
 pub use config::{Config, LlamaCppConfig, LmStudioConfig, OllamaConfig, ScannersConfig};
 pub use error::ModelCitizenError;
-pub use model::{huggingface_repo_from_url, ModelArchitecture, ModelFormat, ModelMetadata, ModelSource, QuantizationType, UnifiedModel};
 pub use huggingface::SortOrder;
-pub use registry::{ModelRegistry, ScanResult, DEFAULT_SCANNER_TIMEOUT};
+pub use model::{
+    ModelArchitecture, ModelFormat, ModelMetadata, ModelSource, QuantizationType, UnifiedModel,
+    huggingface_repo_from_url,
+};
+pub use registry::{DEFAULT_SCANNER_TIMEOUT, ModelRegistry, ScanResult};
 
 /// Result type alias for model-citizen operations.
 pub type Result<T> = std::result::Result<T, ModelCitizenError>;

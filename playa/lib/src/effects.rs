@@ -1702,10 +1702,7 @@ impl SoundEffect {
 ///
 /// This keeps the structure (dashes) for exact matching in `from_name`.
 fn normalize_effect_name(name: &str) -> String {
-    name.trim()
-        .to_ascii_lowercase()
-        .replace('_', "-")
-        .replace(' ', "-")
+    name.trim().to_ascii_lowercase().replace(['_', ' '], "-")
 }
 
 /// Normalize an effect name by stripping all non-alphanumeric characters.

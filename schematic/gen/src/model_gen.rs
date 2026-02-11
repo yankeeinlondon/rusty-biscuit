@@ -30,7 +30,11 @@ use crate::output::{format_code, validate_code, write_atomic};
 /// Returns `GeneratorError` if:
 /// - Generated code fails syn validation
 /// - File writing fails (when not dry-run)
-pub fn generate_models(catalog: &ModelCatalog, output_dir: &Path, dry_run: bool) -> Result<String, GeneratorError> {
+pub fn generate_models(
+    catalog: &ModelCatalog,
+    output_dir: &Path,
+    dry_run: bool,
+) -> Result<String, GeneratorError> {
     let tokens = assemble_model_tokens(catalog);
     let file = validate_code(&tokens)?;
     let formatted = format_code(&file);
@@ -75,11 +79,7 @@ fn generate_struct(def: &StructDef) -> TokenStream {
     let name = format_ident!("{}", def.name);
     let doc = doc_comment(&def.description);
 
-    let fields: Vec<TokenStream> = def
-        .fields
-        .iter()
-        .map(generate_field)
-        .collect();
+    let fields: Vec<TokenStream> = def.fields.iter().map(generate_field).collect();
 
     // If the struct has additional_properties, add a flattened HashMap field
     let extra_field = def.additional_properties.as_ref().map(|type_ref| {
@@ -147,11 +147,7 @@ fn generate_enum(def: &EnumDef) -> TokenStream {
         None
     };
 
-    let variants: Vec<TokenStream> = def
-        .variants
-        .iter()
-        .map(generate_variant)
-        .collect();
+    let variants: Vec<TokenStream> = def.variants.iter().map(generate_variant).collect();
 
     quote! {
         #doc
@@ -348,7 +344,11 @@ mod tests {
         let catalog = make_simple_catalog();
         let tokens = assemble_model_tokens(&catalog);
         let result = validate_code(&tokens);
-        assert!(result.is_ok(), "Generated code is invalid: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Generated code is invalid: {:?}",
+            result.err()
+        );
     }
 
     #[test]

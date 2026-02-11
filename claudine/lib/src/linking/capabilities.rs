@@ -139,10 +139,10 @@ impl SupportLevel {
     /// Returns the indicator character for this support level.
     pub fn indicator(&self) -> &'static str {
         match self {
-            SupportLevel::Full => "\u{2705}",        // ✅
+            SupportLevel::Full => "\u{2705}",                 // ✅
             SupportLevel::CustomFormat => "\u{2699}\u{fe0f}", // ⚙️
-            SupportLevel::Limited => "\u{25cb}",     // ○
-            SupportLevel::None => "\u{274c}",        // ❌
+            SupportLevel::Limited => "\u{25cb}",              // ○
+            SupportLevel::None => "\u{274c}",                 // ❌
         }
     }
 
@@ -380,23 +380,14 @@ pub const ALL_PROVIDERS: [Provider; 7] = [
 fn claude_capabilities() -> ProviderCapabilities {
     ProviderCapabilities {
         provider: Provider::Claude,
-        skills: ResourceSupport::full(
-            ResourceFormat::Markdown,
-            ".claude/skills",
-            ".claude/skills",
-        ),
+        skills: ResourceSupport::full(ResourceFormat::Markdown, ".claude/skills", ".claude/skills"),
         commands: ResourceSupport::full(
             ResourceFormat::Markdown,
             ".claude/commands",
             ".claude/commands",
         ),
-        agents: ResourceSupport::full(
-            ResourceFormat::Markdown,
-            ".claude/agents",
-            ".claude/agents",
-        ),
-        scripts: ResourceSupport::none()
-            .with_note("Scripts are stored within skill directories"),
+        agents: ResourceSupport::full(ResourceFormat::Markdown, ".claude/agents", ".claude/agents"),
+        scripts: ResourceSupport::none().with_note("Scripts are stored within skill directories"),
         skill_frontmatter: SkillFrontmatter::full(),
     }
 }
@@ -404,22 +395,14 @@ fn claude_capabilities() -> ProviderCapabilities {
 fn codex_capabilities() -> ProviderCapabilities {
     ProviderCapabilities {
         provider: Provider::Codex,
-        skills: ResourceSupport::full(
-            ResourceFormat::Markdown,
-            ".codex/skills",
-            ".codex/skills",
-        )
-        .with_also_reads(vec![".claude/skills", ".agents/skills"]),
+        skills: ResourceSupport::full(ResourceFormat::Markdown, ".codex/skills", ".codex/skills")
+            .with_also_reads(vec![".claude/skills", ".agents/skills"]),
         commands: ResourceSupport::full(
             ResourceFormat::Markdown,
             ".codex/commands",
             ".codex/commands",
         ),
-        agents: ResourceSupport::full(
-            ResourceFormat::Markdown,
-            ".codex/agents",
-            ".codex/agents",
-        ),
+        agents: ResourceSupport::full(ResourceFormat::Markdown, ".codex/agents", ".codex/agents"),
         scripts: ResourceSupport::full(
             ResourceFormat::Executable,
             ".codex/scripts",
@@ -432,12 +415,8 @@ fn codex_capabilities() -> ProviderCapabilities {
 fn gemini_capabilities() -> ProviderCapabilities {
     ProviderCapabilities {
         provider: Provider::Gemini,
-        skills: ResourceSupport::full(
-            ResourceFormat::Markdown,
-            ".gemini/skills",
-            ".gemini/skills",
-        )
-        .with_note("Also supports .gemini/modules/ as context modules"),
+        skills: ResourceSupport::full(ResourceFormat::Markdown, ".gemini/skills", ".gemini/skills")
+            .with_note("Also supports .gemini/modules/ as context modules"),
         commands: ResourceSupport::custom_format(
             ResourceFormat::Toml,
             ".gemini/commands",
@@ -446,8 +425,7 @@ fn gemini_capabilities() -> ProviderCapabilities {
         .with_note("Uses TOML format with {{args}} placeholder"),
         agents: ResourceSupport::limited()
             .with_note("Tool delegation only, no dedicated agent files"),
-        scripts: ResourceSupport::none()
-            .with_note("Scripts stored within skill directories"),
+        scripts: ResourceSupport::none().with_note("Scripts stored within skill directories"),
         skill_frontmatter: SkillFrontmatter::standard(),
     }
 }
@@ -461,12 +439,8 @@ fn goose_capabilities() -> ProviderCapabilities {
             ".config/goose/skills",
         )
         .with_also_reads(vec![".claude/skills", ".agents/skills"]),
-        commands: ResourceSupport::custom_format(
-            ResourceFormat::Mcp,
-            "",
-            "",
-        )
-        .with_note("MCP-based commands, not file-based"),
+        commands: ResourceSupport::custom_format(ResourceFormat::Mcp, "", "")
+            .with_note("MCP-based commands, not file-based"),
         agents: ResourceSupport::custom_format(
             ResourceFormat::Yaml,
             ".goose/recipes",
@@ -491,16 +465,10 @@ fn kimicode_capabilities() -> ProviderCapabilities {
             ".config/agents/skills",
         )
         .with_also_reads(vec![".claude/skills", ".agents/skills", ".codex/skills"]),
-        commands: ResourceSupport::limited()
-            .with_note("Built-in slash commands only"),
-        agents: ResourceSupport::custom_format(
-            ResourceFormat::Yaml,
-            "",
-            "",
-        )
-        .with_note("YAML agent files loaded via --agent-file flag"),
-        scripts: ResourceSupport::none()
-            .with_note("Scripts stored within skill directories"),
+        commands: ResourceSupport::limited().with_note("Built-in slash commands only"),
+        agents: ResourceSupport::custom_format(ResourceFormat::Yaml, "", "")
+            .with_note("YAML agent files loaded via --agent-file flag"),
+        scripts: ResourceSupport::none().with_note("Scripts stored within skill directories"),
         skill_frontmatter: SkillFrontmatter::extended(),
     }
 }
@@ -536,19 +504,10 @@ fn opencode_capabilities() -> ProviderCapabilities {
 fn qwencode_capabilities() -> ProviderCapabilities {
     ProviderCapabilities {
         provider: Provider::QwenCode,
-        skills: ResourceSupport::full(
-            ResourceFormat::Markdown,
-            ".qwen/skills",
-            ".qwen/skills",
-        )
-        .with_note("Skills support is experimental"),
-        commands: ResourceSupport::limited()
-            .with_note("Built-in slash commands only"),
-        agents: ResourceSupport::full(
-            ResourceFormat::Markdown,
-            ".qwen/agents",
-            ".qwen/agents",
-        ),
+        skills: ResourceSupport::full(ResourceFormat::Markdown, ".qwen/skills", ".qwen/skills")
+            .with_note("Skills support is experimental"),
+        commands: ResourceSupport::limited().with_note("Built-in slash commands only"),
+        agents: ResourceSupport::full(ResourceFormat::Markdown, ".qwen/agents", ".qwen/agents"),
         scripts: ResourceSupport::full(
             ResourceFormat::Executable,
             ".qwen/scripts",
@@ -627,14 +586,26 @@ mod tests {
     #[test]
     fn opencode_reads_from_claude() {
         let caps = capabilities_for(Provider::OpenCode);
-        assert!(caps.skills.also_reads_from.contains(&PathBuf::from(".claude/skills")));
+        assert!(
+            caps.skills
+                .also_reads_from
+                .contains(&PathBuf::from(".claude/skills"))
+        );
     }
 
     #[test]
     fn goose_reads_from_multiple_sources() {
         let caps = capabilities_for(Provider::Goose);
-        assert!(caps.skills.also_reads_from.contains(&PathBuf::from(".claude/skills")));
-        assert!(caps.skills.also_reads_from.contains(&PathBuf::from(".agents/skills")));
+        assert!(
+            caps.skills
+                .also_reads_from
+                .contains(&PathBuf::from(".claude/skills"))
+        );
+        assert!(
+            caps.skills
+                .also_reads_from
+                .contains(&PathBuf::from(".agents/skills"))
+        );
     }
 
     #[test]

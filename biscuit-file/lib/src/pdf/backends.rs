@@ -1,8 +1,8 @@
 //! PDF backend implementations.
 
+use super::types::{PdfConfig, PdfError};
 #[cfg(feature = "lopdf")]
 use super::types::{PdfToc, PdfTocItem};
-use super::types::{PdfConfig, PdfError};
 
 /// Extract text from PDF bytes using pdf-extract.
 #[cfg(feature = "extract")]
@@ -127,10 +127,7 @@ fn extract_outline_items(doc: &lopdf::Document, item_id: lopdf::ObjectId) -> Vec
             });
 
             // Get next sibling
-            current_id = dict
-                .get(b"Next")
-                .ok()
-                .and_then(|n| n.as_reference().ok());
+            current_id = dict.get(b"Next").ok().and_then(|n| n.as_reference().ok());
         } else {
             break;
         }

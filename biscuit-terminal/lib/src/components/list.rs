@@ -1,5 +1,8 @@
 use crate::{
-    components::renderable::{Renderable, RenderableContent}, prelude::Prose, terminal::Terminal, utils::layout::Layout
+    components::renderable::{Renderable, RenderableContent},
+    prelude::Prose,
+    terminal::Terminal,
+    utils::layout::Layout,
 };
 
 /// An **OrderedList** contains a list of renderable items
@@ -306,7 +309,7 @@ impl UnorderedList {
     /// the normal bullet prefix.
     fn render_content(&self, term: Option<&Terminal>, term_width: u32) -> String {
         let mut result = String::new();
-        let bullet_width = crate::utils::block_constraint::visible_width(&self.bullet) as u32;
+        let bullet_width = crate::utils::block_constraint::visible_width(&self.bullet);
         let indent = self.indent_children.unwrap_or(bullet_width);
 
         for item in &self.items {

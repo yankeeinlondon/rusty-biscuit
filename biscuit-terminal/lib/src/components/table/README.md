@@ -170,4 +170,4 @@ The table delegates all spatial concerns to `Layout`:
 
 - **Margins** can be absolute (`Chars`), relative (`Percent`), or composed (`Offset`) for nesting inside parent layouts.
 - **Word wrapping** applies to the entire rendered table string, not individual cells.
-- **`as_child_of(parent, left, right)`** (from `Renderable`) lets the table inherit and extend a parent's margins for nested rendering contexts.
+- **`with_parent_layout(parent, left, right)`** (from `Renderable`) lets the table inherit and extend a parent's margins for nested rendering contexts.

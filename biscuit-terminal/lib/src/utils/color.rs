@@ -198,11 +198,11 @@ pub enum BasicColor {
     BrightWhite,
 }
 
-const ESC: &'static str = "\x1b[";
+const ESC: &str = "\x1b[";
 /// resets foreground color to the default
-const DEFAULT_FOREGROUND: &'static str = "\x1b[39";
+const DEFAULT_FOREGROUND: &str = "\x1b[39";
 /// resets background color to the default
-const DEFAULT_BACKGROUND: &'static str = "\x1b[49";
+const DEFAULT_BACKGROUND: &str = "\x1b[49";
 
 static BASIC_COLOR_LOOKUP: LazyLock<HashMap<BasicColor, (&'static str, &'static str)>> =
     LazyLock::new(|| {
@@ -248,8 +248,8 @@ impl BasicColor {
     /// returns the escape-code to END the color coding
     fn end(self, pos: FgBg) -> String {
         match pos {
-            FgBg::Foreground => format!("{}", DEFAULT_FOREGROUND),
-            FgBg::Background => format!("{}", DEFAULT_BACKGROUND),
+            FgBg::Foreground => DEFAULT_FOREGROUND.to_string(),
+            FgBg::Background => DEFAULT_BACKGROUND.to_string(),
         }
     }
 }

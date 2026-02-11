@@ -34,13 +34,9 @@ pub async fn run_pty_command(
     let program = program.to_string();
     let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
 
-    tokio::task::spawn_blocking(move || {
-        run_pty_blocking(&program, &args, timeout_dur)
-    })
-    .await
-    .map_err(|e| AgentStatusError::PtySpawnError(
-        format!("Task join error: {}", e)
-    ))?
+    tokio::task::spawn_blocking(move || run_pty_blocking(&program, &args, timeout_dur))
+        .await
+        .map_err(|e| AgentStatusError::PtySpawnError(format!("Task join error: {}", e)))?
 }
 
 fn run_pty_blocking(
@@ -53,30 +49,29 @@ fn run_pty_blocking(
 
     let pty_system = native_pty_system();
 
-    let pair = pty_system.openpty(PtySize {
-        rows: 24,
-        cols: 80,
-        pixel_width: 0,
-        pixel_height: 0,
-    }).map_err(|e| AgentStatusError::PtySpawnError(
-        format!("Failed to open PTY: {}", e)
-    ))?;
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| AgentStatusError::PtySpawnError(format!("Failed to open PTY: {}", e)))?;
 
     let mut cmd = CommandBuilder::new(program);
     for arg in args {
         cmd.arg(arg);
     }
 
-    let mut child = pair.slave.spawn_command(cmd)
-        .map_err(|e| AgentStatusError::PtySpawnError(
-            format!("Failed to spawn '{}': {}", program, e)
-        ))?;
+    let mut child = pair.slave.spawn_command(cmd).map_err(|e| {
+        AgentStatusError::PtySpawnError(format!("Failed to spawn '{}': {}", program, e))
+    })?;
 
     // Get reader before dropping slave
-    let mut reader = pair.master.try_clone_reader()
-        .map_err(|e| AgentStatusError::PtyReadError(
-            format!("Failed to clone reader: {}", e)
-        ))?;
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| AgentStatusError::PtyReadError(format!("Failed to clone reader: {}", e)))?;
 
     // CRITICAL: Drop slave so PTY gets EOF after child exits
     drop(pair.slave);
@@ -96,26 +91,24 @@ fn run_pty_blocking(
         Ok(result) => result,
         Err(_) => {
             let _ = child.kill();
-            return Err(AgentStatusError::TimeoutError(
-                format!("Command timed out after {}s", timeout_dur.as_secs())
-            ));
+            return Err(AgentStatusError::TimeoutError(format!(
+                "Command timed out after {}s",
+                timeout_dur.as_secs()
+            )));
         }
     };
 
     // Reap the child process
     let _ = child.wait();
 
-    read_result.map_err(|e| AgentStatusError::PtyReadError(
-        format!("Failed to read PTY output: {}", e)
-    ))?;
+    read_result
+        .map_err(|e| AgentStatusError::PtyReadError(format!("Failed to read PTY output: {}", e)))?;
 
     // Strip ANSI escape sequences
     let stripped = strip(&raw_output);
 
     String::from_utf8(stripped)
-        .map_err(|e| AgentStatusError::ParseError(
-            format!("Output is not valid UTF-8: {}", e)
-        ))
+        .map_err(|e| AgentStatusError::ParseError(format!("Output is not valid UTF-8: {}", e)))
 }
 
 /// Runs an interactive PTY session: spawns a program, executes a series of
@@ -137,13 +130,9 @@ pub async fn run_pty_interactive(
     let program = program.to_string();
     let steps: Vec<InteractiveStep> = steps.to_vec();
 
-    tokio::task::spawn_blocking(move || {
-        run_pty_interactive_blocking(&program, &steps, timeout_dur)
-    })
-    .await
-    .map_err(|e| AgentStatusError::PtySpawnError(
-        format!("Task join error: {}", e)
-    ))?
+    tokio::task::spawn_blocking(move || run_pty_interactive_blocking(&program, &steps, timeout_dur))
+        .await
+        .map_err(|e| AgentStatusError::PtySpawnError(format!("Task join error: {}", e)))?
 }
 
 fn run_pty_interactive_blocking(
@@ -157,31 +146,30 @@ fn run_pty_interactive_blocking(
 
     let pty_system = native_pty_system();
 
-    let pair = pty_system.openpty(PtySize {
-        rows: 24,
-        cols: 120,
-        pixel_width: 0,
-        pixel_height: 0,
-    }).map_err(|e| AgentStatusError::PtySpawnError(
-        format!("Failed to open PTY: {}", e)
-    ))?;
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 120,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| AgentStatusError::PtySpawnError(format!("Failed to open PTY: {}", e)))?;
 
     let cmd = CommandBuilder::new(program);
 
-    let mut child = pair.slave.spawn_command(cmd)
-        .map_err(|e| AgentStatusError::PtySpawnError(
-            format!("Failed to spawn '{}': {}", program, e)
-        ))?;
+    let mut child = pair.slave.spawn_command(cmd).map_err(|e| {
+        AgentStatusError::PtySpawnError(format!("Failed to spawn '{}': {}", program, e))
+    })?;
 
-    let mut reader = pair.master.try_clone_reader()
-        .map_err(|e| AgentStatusError::PtyReadError(
-            format!("Failed to clone reader: {}", e)
-        ))?;
+    let mut reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| AgentStatusError::PtyReadError(format!("Failed to clone reader: {}", e)))?;
 
-    let mut writer = pair.master.take_writer()
-        .map_err(|e| AgentStatusError::PtyWriteError(
-            format!("Failed to get writer: {}", e)
-        ))?;
+    let mut writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| AgentStatusError::PtyWriteError(format!("Failed to get writer: {}", e)))?;
 
     // CRITICAL: Drop slave so PTY gets EOF after child exits
     drop(pair.slave);
@@ -209,19 +197,20 @@ fn run_pty_interactive_blocking(
     for step in steps {
         if start.elapsed() >= timeout_dur {
             let _ = child.kill();
-            return Err(AgentStatusError::TimeoutError(
-                format!("Interactive session timed out after {}s", timeout_dur.as_secs())
-            ));
+            return Err(AgentStatusError::TimeoutError(format!(
+                "Interactive session timed out after {}s",
+                timeout_dur.as_secs()
+            )));
         }
 
         match step {
             InteractiveStep::Write(data) => {
-                writer.write_all(data.as_bytes()).map_err(|e| {
-                    AgentStatusError::PtyWriteError(format!("Write failed: {}", e))
-                })?;
-                writer.flush().map_err(|e| {
-                    AgentStatusError::PtyWriteError(format!("Flush failed: {}", e))
-                })?;
+                writer
+                    .write_all(data.as_bytes())
+                    .map_err(|e| AgentStatusError::PtyWriteError(format!("Write failed: {}", e)))?;
+                writer
+                    .flush()
+                    .map_err(|e| AgentStatusError::PtyWriteError(format!("Flush failed: {}", e)))?;
             }
             InteractiveStep::Wait(duration) => {
                 let remaining = timeout_dur.saturating_sub(start.elapsed());
@@ -239,17 +228,19 @@ fn run_pty_interactive_blocking(
 
     // Collect output with remaining timeout
     let remaining = timeout_dur.saturating_sub(start.elapsed());
-    let raw_output = rx.recv_timeout(remaining.max(Duration::from_secs(2)))
-        .map_err(|_| AgentStatusError::TimeoutError(
-            format!("Timed out waiting for output after {}s", timeout_dur.as_secs())
-        ))?;
+    let raw_output = rx
+        .recv_timeout(remaining.max(Duration::from_secs(2)))
+        .map_err(|_| {
+            AgentStatusError::TimeoutError(format!(
+                "Timed out waiting for output after {}s",
+                timeout_dur.as_secs()
+            ))
+        })?;
 
     let stripped = strip(&raw_output);
 
     String::from_utf8(stripped)
-        .map_err(|e| AgentStatusError::ParseError(
-            format!("Output is not valid UTF-8: {}", e)
-        ))
+        .map_err(|e| AgentStatusError::ParseError(format!("Output is not valid UTF-8: {}", e)))
 }
 
 #[cfg(test)]
@@ -291,7 +282,11 @@ mod tests {
         let result = run_pty_interactive("cat", &steps, Some(Duration::from_secs(3))).await;
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
         let output = result.unwrap();
-        assert!(output.contains("hello interactive"), "Output should contain written text, got: {}", output);
+        assert!(
+            output.contains("hello interactive"),
+            "Output should contain written text, got: {}",
+            output
+        );
     }
 
     #[tokio::test]

@@ -4,11 +4,7 @@ use schematic_gen::import_pipeline::{ImportOptions, run_import};
 
 /// Returns path to a test fixture file.
 fn fixture_path(name: &str) -> String {
-    format!(
-        "{}/tests/fixtures/{}",
-        env!("CARGO_MANIFEST_DIR"),
-        name
-    )
+    format!("{}/tests/fixtures/{}", env!("CARGO_MANIFEST_DIR"), name)
 }
 
 #[test]
@@ -61,7 +57,10 @@ fn import_petstore_generates_models_to_disk() {
 
     let types_content = std::fs::read_to_string(&types_path).unwrap();
     assert!(types_content.contains("Pet"), "Should contain Pet struct");
-    assert!(types_content.contains("PetStatus"), "Should contain PetStatus enum");
+    assert!(
+        types_content.contains("PetStatus"),
+        "Should contain PetStatus enum"
+    );
 }
 
 #[test]
@@ -86,7 +85,10 @@ fn import_complex_auth_json_succeeds() {
     let res = result.unwrap();
     assert_eq!(res.api_name, "MultiAuth");
     assert_eq!(res.endpoint_count, 3);
-    assert!(res.model_count > 0, "Expected models from complex auth spec");
+    assert!(
+        res.model_count > 0,
+        "Expected models from complex auth spec"
+    );
 }
 
 #[test]

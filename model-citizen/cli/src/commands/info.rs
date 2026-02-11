@@ -1,10 +1,11 @@
 //! Info command - shows detailed model information.
 
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{Result, eyre};
 use inquire::Select;
 use model_citizen::{
+    Config, ModelRegistry, UnifiedModel,
     scanner::{LlamaCppScanner, LmStudioScanner, OllamaScanner},
-    sharing, Config, ModelRegistry, UnifiedModel,
+    sharing,
 };
 
 pub async fn run(model_name: &str, json_output: bool) -> Result<()> {

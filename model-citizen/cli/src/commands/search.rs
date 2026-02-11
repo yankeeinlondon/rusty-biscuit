@@ -7,8 +7,8 @@ use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Alignment;
 use color_eyre::eyre::Result;
-use model_citizen::huggingface::HuggingFaceClient;
 use model_citizen::SortOrder;
+use model_citizen::huggingface::HuggingFaceClient;
 
 const HF_BASE: &str = "https://huggingface.co";
 
@@ -76,8 +76,7 @@ pub async fn run(
             )
             .with_type(ColumnType::Integer),
             TableColumn::new(
-                Prose::new(&sort_header("Likes", sort == SortOrder::Likes))
-                    .fallback_render(&term),
+                Prose::new(&sort_header("Likes", sort == SortOrder::Likes)).fallback_render(&term),
             )
             .with_type(ColumnType::Integer),
             TableColumn::new(Prose::new("G").fallback_render(&term))
@@ -105,9 +104,7 @@ pub async fn run(
             );
         }
 
-        let mut table = Table::new()
-            .with_columns(columns)
-            .prefer_cursor_alignment();
+        let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
 
         for r in &results {
             let repo_link = format_repo_link(&r.repo_id);
@@ -121,8 +118,20 @@ pub async fn run(
                 Prose::new(&repo_link).fallback_render(&term).into(),
                 TableCellContent::Integer(r.downloads as i64),
                 TableCellContent::Integer(r.likes as i64),
-                if r.has_gguf() { check.clone() } else if neither { dot.clone().into() } else { blank.clone() },
-                if r.has_safetensors() { check } else if neither { dot.into() } else { blank },
+                if r.has_gguf() {
+                    check.clone()
+                } else if neither {
+                    dot.clone().into()
+                } else {
+                    blank.clone()
+                },
+                if r.has_safetensors() {
+                    check
+                } else if neither {
+                    dot.into()
+                } else {
+                    blank
+                },
                 Prose::new(&tags_markup).fallback_render(&term).into(),
             ];
             if show_created {
@@ -204,5 +213,3 @@ fn format_date(iso: &Option<String>) -> TableCellContent {
         None => TableCellContent::Text("—".to_string()),
     }
 }
-
-

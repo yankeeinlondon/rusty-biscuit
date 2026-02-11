@@ -20,11 +20,11 @@ pub trait Stylist {
     fn reset_char(&self) -> String;
 }
 
-const ESC: &'static str = "\x1b[";
-const TERMINAL: &'static str = "m";
+const ESC: &str = "\x1b[";
+const TERMINAL: &str = "m";
 
-const ITALIC: &'static str = "3";
-const NOT_ITALIC: &'static str = "23";
+const ITALIC: &str = "3";
+const NOT_ITALIC: &str = "23";
 
 /// makes the text passed in italic
 pub fn italic<T: Into<String>>(content: T, terminal: Option<Terminal>) -> String {
@@ -127,22 +127,22 @@ pub enum UnderliningRequest {
     Dashed(Option<Color>),
 }
 
-const UNDERLINE: &'static str = "4";
-const DOUBLE_UNDERLINE: &'static str = "4:2";
-const CURLY_UNDERLINE: &'static str = "4:3";
-const DOTTED_UNDERLINE: &'static str = "4:4";
-const DASHED_UNDERLINE: &'static str = "4:5";
-const NOT_UNDERLINE: &'static str = "24";
+const UNDERLINE: &str = "4";
+const DOUBLE_UNDERLINE: &str = "4:2";
+const CURLY_UNDERLINE: &str = "4:3";
+const DOTTED_UNDERLINE: &str = "4:4";
+const DASHED_UNDERLINE: &str = "4:5";
+const NOT_UNDERLINE: &str = "24";
 
-const BLINK: &'static str = "5";
-const BLINK_FAST: &'static str = "6";
-const NOT_BLINK: &'static str = "25";
+const BLINK: &str = "5";
+const BLINK_FAST: &str = "6";
+const NOT_BLINK: &str = "25";
 
-const STRIKETHROUGH: &'static str = "9";
-const NOT_STRIKETHROUGH: &'static str = "29";
+const STRIKETHROUGH: &str = "9";
+const NOT_STRIKETHROUGH: &str = "29";
 
-const INVERSE: &'static str = "7";
-const NOT_INVERSE: &'static str = "27";
+const INVERSE: &str = "7";
+const NOT_INVERSE: &str = "27";
 
 /// **Style** struct
 ///
@@ -255,39 +255,39 @@ impl Stylist for Style {
     fn term_wrap<T: Into<String>>(&self, content: T, term: &Terminal) -> String {
         match term.is_tty {
             true => {
-                match self {
-                    &Style::Underline(_) => match term.underline_support.straight {
+                match *self {
+                    Style::Underline(_) => match term.underline_support.straight {
                         true => self.wrap(content),
                         false => content.into(),
                     },
-                    &Style::CurlyUnderline(_) => match term.underline_support.curly {
+                    Style::CurlyUnderline(_) => match term.underline_support.curly {
                         true => self.wrap(content),
                         false => content.into(),
                     },
-                    &Style::DoubleUnderline(_) => match term.underline_support.double {
+                    Style::DoubleUnderline(_) => match term.underline_support.double {
                         true => self.wrap(content),
                         false => content.into(),
                     },
-                    &Style::DashedUnderline(_) => match term.underline_support.dashed {
+                    Style::DashedUnderline(_) => match term.underline_support.dashed {
                         true => self.wrap(content),
                         false => content.into(),
                     },
-                    &Style::DottedUnderline(_) => match term.underline_support.dotted {
+                    Style::DottedUnderline(_) => match term.underline_support.dotted {
                         true => self.wrap(content),
                         false => content.into(),
                     },
-                    &Style::Italic => match term.supports_italic {
+                    Style::Italic => match term.supports_italic {
                         true => self.wrap(content),
                         false => content.into(),
                     },
                     // These styles are widely supported - apply when is_tty
-                    &Style::Blink => self.wrap(content),
-                    &Style::BlinkFast => self.wrap(content),
-                    &Style::Strikethrough => self.wrap(content),
-                    &Style::Inverse => self.wrap(content),
-                    &Style::Bold => self.wrap(content),
-                    &Style::Dim => self.wrap(content),
-                    &Style::NormalWeight => self.wrap(content),
+                    Style::Blink => self.wrap(content),
+                    Style::BlinkFast => self.wrap(content),
+                    Style::Strikethrough => self.wrap(content),
+                    Style::Inverse => self.wrap(content),
+                    Style::Bold => self.wrap(content),
+                    Style::Dim => self.wrap(content),
+                    Style::NormalWeight => self.wrap(content),
                 }
             }
             false => content.into(),
@@ -295,9 +295,9 @@ impl Stylist for Style {
     }
 }
 
-const BOLD: &'static str = "\x1b[1m";
-const DIM: &'static str = "\x1b[2m";
-const NORMAL: &'static str = "\x1b[22m";
+const BOLD: &str = "\x1b[1m";
+const DIM: &str = "\x1b[2m";
+const NORMAL: &str = "\x1b[22m";
 
 /// **FontWeight** struct
 ///

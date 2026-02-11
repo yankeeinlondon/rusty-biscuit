@@ -196,7 +196,6 @@ impl Arcam {
             Host::Dns(name) => name.clone(),
         }
     }
-
 }
 
 impl From<Host> for Arcam {

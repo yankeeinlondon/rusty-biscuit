@@ -3,18 +3,15 @@
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
 use biscuit_terminal::components::table::table::{
-    Conditional,
-    Table,
-    TableCellContent,
-    TableColumn,
+    Conditional, Table, TableCellContent, TableColumn,
 };
 use biscuit_terminal::components::table::types::ColumnType;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::Alignment;
 use color_eyre::eyre::Result;
 use model_citizen::{
-    scanner::{LlamaCppScanner, LmStudioScanner, OllamaScanner},
     Config, ModelRegistry,
+    scanner::{LlamaCppScanner, LmStudioScanner, OllamaScanner},
 };
 
 pub async fn run(
@@ -109,9 +106,7 @@ pub async fn run(
             );
         }
 
-        let mut table = Table::new()
-            .with_columns(columns)
-            .prefer_cursor_alignment();
+        let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
 
         for m in &models {
             let name_cell = if let Some(repo) = m.metadata.huggingface_repo.as_deref() {
@@ -132,11 +127,7 @@ pub async fn run(
                 row.insert(
                     1,
                     TableCellContent::Text(
-                        m.metadata
-                            .parameters
-                            .as_deref()
-                            .unwrap_or("-")
-                            .to_string(),
+                        m.metadata.parameters.as_deref().unwrap_or("-").to_string(),
                     ),
                 );
                 row.insert(5, TableCellContent::Text(m.format.as_str().to_string()));

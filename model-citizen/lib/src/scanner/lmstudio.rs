@@ -5,7 +5,10 @@
 
 use crate::gguf::{detect_quantization, extract_metadata, model_name_from_filename};
 use crate::scanner::ModelScanner;
-use crate::{Config, ModelArchitecture, ModelCitizenError, ModelFormat, ModelSource, QuantizationType, UnifiedModel};
+use crate::{
+    Config, ModelArchitecture, ModelCitizenError, ModelFormat, ModelSource, QuantizationType,
+    UnifiedModel,
+};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 
@@ -269,13 +272,9 @@ impl LmStudioScanner {
 
         meta.embedding_length = config.get("hidden_size").and_then(|v| v.as_u64());
 
-        meta.head_count = config
-            .get("num_attention_heads")
-            .and_then(|v| v.as_u64());
+        meta.head_count = config.get("num_attention_heads").and_then(|v| v.as_u64());
 
-        meta.layer_count = config
-            .get("num_hidden_layers")
-            .and_then(|v| v.as_u64());
+        meta.layer_count = config.get("num_hidden_layers").and_then(|v| v.as_u64());
 
         meta
     }
@@ -703,10 +702,8 @@ mod tests {
     #[test]
     fn metadata_from_mlx_config_handles_alternate_keys() {
         // Some models use max_seq_len instead of max_position_embeddings
-        let config: serde_json::Value = serde_json::from_str(
-            r#"{"max_seq_len": 8192, "hidden_size": 4096}"#,
-        )
-        .unwrap();
+        let config: serde_json::Value =
+            serde_json::from_str(r#"{"max_seq_len": 8192, "hidden_size": 4096}"#).unwrap();
 
         let meta = LmStudioScanner::metadata_from_mlx_config(&config);
         assert_eq!(meta.context_length, Some(8192));
@@ -817,7 +814,9 @@ mod tests {
     #[test]
     fn huggingface_repo_from_gguf_path() {
         let models_dir = PathBuf::from("/models");
-        let model_path = PathBuf::from("/models/lmstudio-community/gemma-2-2b-it-GGUF/gemma-2-2b-it-Q4_K_M.gguf");
+        let model_path = PathBuf::from(
+            "/models/lmstudio-community/gemma-2-2b-it-GGUF/gemma-2-2b-it-Q4_K_M.gguf",
+        );
         assert_eq!(
             LmStudioScanner::huggingface_repo_from_path(&models_dir, &model_path),
             Some("lmstudio-community/gemma-2-2b-it-GGUF".to_string()),

@@ -282,15 +282,27 @@ mod tests {
 
     #[test]
     fn test_parse_window_named() {
-        assert_eq!(parse_window_from_label("Current session"), CapWindowSize::Session);
-        assert_eq!(parse_window_from_label("Weekly limit"), CapWindowSize::Weekly);
-        assert_eq!(parse_window_from_label("Monthly cap"), CapWindowSize::Monthly);
+        assert_eq!(
+            parse_window_from_label("Current session"),
+            CapWindowSize::Session
+        );
+        assert_eq!(
+            parse_window_from_label("Weekly limit"),
+            CapWindowSize::Weekly
+        );
+        assert_eq!(
+            parse_window_from_label("Monthly cap"),
+            CapWindowSize::Monthly
+        );
         assert_eq!(parse_window_from_label("Daily limit"), CapWindowSize::Daily);
     }
 
     #[test]
     fn test_parse_window_fallback() {
-        assert_eq!(parse_window_from_label("unknown thing"), CapWindowSize::Session);
+        assert_eq!(
+            parse_window_from_label("unknown thing"),
+            CapWindowSize::Session
+        );
     }
 
     // --- Claude Code parser ---
@@ -429,9 +441,6 @@ mod tests {
             extract_resets_parenthetical("23% left (resets 14:03 on 11 Feb)"),
             "14:03 on 11 Feb"
         );
-        assert_eq!(
-            extract_resets_parenthetical("no resets here"),
-            "unknown"
-        );
+        assert_eq!(extract_resets_parenthetical("no resets here"), "unknown");
     }
 }

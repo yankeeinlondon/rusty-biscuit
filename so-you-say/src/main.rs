@@ -146,6 +146,10 @@ struct Cli {
     )]
     refresh_cache: bool,
 
+    /// Speak in the background, returning control to the terminal immediately
+    #[arg(long, conflicts_with_all = ["list_providers", "list_voices", "refresh_cache"])]
+    background: bool,
+
     /// Text to speak (reads from stdin if not provided)
     text: Vec<String>,
 }
@@ -817,6 +821,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     CompleteEnv::with_factory(Cli::command).complete();
 
     let cli = Cli::parse();
+
+    // Handle --background: re-spawn ourselves without --background as a detached process
+    if cli.background {
+        let args: Vec<String> = std::env::args().filter(|a| a != "--background").collect();
+        std::process::Command::new(&args[0])
+            .args(&args[1..])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+        return Ok(());
+    }
 
     // Handle --refresh-cache flag (does not exit early - continues with other operations)
     if cli.refresh_cache {

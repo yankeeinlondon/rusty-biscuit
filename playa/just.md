@@ -1,1 +1,1 @@
-![image](../assets/playa.png)
+![image|30](../assets/playa.png)

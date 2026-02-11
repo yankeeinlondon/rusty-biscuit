@@ -8,7 +8,9 @@ mod types;
 pub use types::{DeleteModelResponse, ListModelsResponse, Model};
 
 use crate::registry::SchemaRegistry;
-use schematic_define::{ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod};
+use schematic_define::{
+    ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
+};
 
 /// Creates a schema registry containing all OpenAI response types.
 ///
@@ -223,7 +225,7 @@ mod tests {
 
     #[test]
     fn export_openai_api_to_openapi() {
-        use schematic_define::openapi::{export, ExportOptions};
+        use schematic_define::openapi::{ExportOptions, export};
 
         let api = define_openai_api();
         let registry = openapi_registry();
@@ -258,7 +260,7 @@ mod tests {
 
     #[test]
     fn export_openai_api_to_json() {
-        use schematic_define::openapi::{export, serialize, ExportFormat, ExportOptions};
+        use schematic_define::openapi::{ExportFormat, ExportOptions, export, serialize};
 
         let api = define_openai_api();
         let registry = openapi_registry();
@@ -275,7 +277,7 @@ mod tests {
 
     #[test]
     fn export_openai_api_to_yaml() {
-        use schematic_define::openapi::{export, serialize, ExportFormat, ExportOptions};
+        use schematic_define::openapi::{ExportFormat, ExportOptions, export, serialize};
 
         let api = define_openai_api();
         let registry = openapi_registry();
@@ -291,7 +293,7 @@ mod tests {
 
     #[test]
     fn export_preserves_vendor_extensions() {
-        use schematic_define::openapi::{export, ExportOptions};
+        use schematic_define::openapi::{ExportOptions, export};
 
         let api = define_openai_api();
         let registry = openapi_registry();
@@ -305,7 +307,7 @@ mod tests {
 
     #[test]
     fn export_can_skip_vendor_extensions() {
-        use schematic_define::openapi::{export, ExportOptions};
+        use schematic_define::openapi::{ExportOptions, export};
 
         let api = define_openai_api();
         let registry = openapi_registry();
@@ -319,7 +321,7 @@ mod tests {
 
     #[test]
     fn export_includes_external_docs() {
-        use schematic_define::openapi::{export, ExportOptions};
+        use schematic_define::openapi::{ExportOptions, export};
 
         let api = define_openai_api();
         let registry = openapi_registry();

@@ -35,6 +35,18 @@ oc *args="":
   @echo
   @opencode {{args}}
 
+# Uses TTS if available but never error
+_speak *args:
+    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
+
+# Ask Claude Code in a non-interactive session
+_claude PROMPT:
+    @unset ANTHROPIC_API_KEY && cd .. && claude --dangerously-skip-permissions -p \'{{PROMPT}}\'
+
+# Ask Claude Code via a prompt file in a non-interactive session
+_claude_file PROMPT_FILE:
+    @unset ANTHROPIC_API_KEY && cd .. && claude --dangerously-skip-permissions -p "$(cat {{PROMPT_FILE}})"
+
 modules:
   @cargo modules structure
 
@@ -71,7 +83,7 @@ test *args="":
         if [ -f "$area/justfile" ]; then
             if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "test"; then
                 echo "Testing $area..."
-                just -f "$area/justfile" test {{args}}  || ( playa effect error-2 2>/dev/null && so-you-say "The ${area} package had failed tests" 2>/dev/null && exit 1 )
+                just -f "$area/justfile" test {{args}}  || ( playa effect error-2 2>/dev/null && just _speak "The ${area} package had failed tests" && exit 1 )
             else
                 echo "- no TEST command for the area **$area**" >&2
             fi
@@ -93,11 +105,11 @@ install:
         if [ -f "$area/justfile" ]; then
             if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "install"; then
                 echo "Installing from $area..."
-                just -f "$area/justfile" install || ( so-you-say "The ${area} package failed during an attempt to install all packages!" && exit 1 )
+                just -f "$area/justfile" install || ( just _speak "The ${area} package failed during an attempt to install all packages!" && exit 1 )
             else
                 if just -f "$area/justfile" --summary 2>/dev/null | grep -qw "build"; then
                     echo "No INSTALL command for $area, doing release build..."
-                    just -f "$area/justfile" build --release || ( so-you-say "The ${area} package failed to build while attempting a install on all packages." && exit 1 )
+                    just -f "$area/justfile" build --release || ( just _speak "The ${area} package failed to build while attempting a install on all packages." && exit 1 )
                 else
                     echo "- no INSTALL command for the area **$area**" >&2
                 fi
@@ -106,9 +118,8 @@ install:
             echo "- no justfile for the area **$area**" >&2
         fi
     done
-    if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "all apps in the monorepo have been rebuilt and installed"; \
-    fi
+    @just _speak "all apps in the monorepo have been rebuilt and installed"; \
+
 
 # executes the latest Darkmatter CLI code in debug mode
 md *args="":
@@ -186,7 +197,7 @@ lint:
                 fi
             fi
         else
-            echo "- no justfile for the area **$area**" >&2
+            echo -e "- no {{ITALIC}}justfile{{RESET}} for the package {{BOLD}}$area{{RESET}}" >&2
         fi
     done
 

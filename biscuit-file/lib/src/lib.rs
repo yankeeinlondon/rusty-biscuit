@@ -77,4 +77,4 @@ pub use self::toml::{Toml, TomlError, TomlSource};
 pub use self::yaml::{Yaml, YamlError, YamlSource};
 
 #[cfg(any(feature = "extract", feature = "lopdf", feature = "pdfium"))]
-pub use self::pdf::{Pdf, PdfError, PdfConfig, PdfMarkdown, PdfToc};
+pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};

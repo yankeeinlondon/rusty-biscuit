@@ -383,10 +383,7 @@ mod tests {
         let response: ListModelsResponse = serde_json::from_str(json).unwrap();
         assert_eq!(response.object, "list");
         assert_eq!(response.data.len(), 1);
-        assert_eq!(
-            response.data[0].id,
-            "lmstudio-community/gemma-2-2b-it-GGUF"
-        );
+        assert_eq!(response.data[0].id, "lmstudio-community/gemma-2-2b-it-GGUF");
     }
 
     #[test]

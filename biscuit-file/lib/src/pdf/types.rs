@@ -67,7 +67,10 @@ impl PageRange {
     /// Create a range for all pages.
     #[must_use]
     pub fn all() -> Self {
-        Self { start: 1, end: None }
+        Self {
+            start: 1,
+            end: None,
+        }
     }
 
     /// Create a range for a single page.
@@ -723,7 +726,8 @@ mod tests {
     #[test]
     fn test_pdf_markdown_with_warnings() {
         let mut md = PdfMarkdown::new("Content".to_string());
-        md.warnings.push("Could not extract image on page 3".to_string());
+        md.warnings
+            .push("Could not extract image on page 3".to_string());
 
         assert_eq!(md.warnings.len(), 1);
     }

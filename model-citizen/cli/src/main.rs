@@ -167,8 +167,7 @@ async fn main() -> Result<()> {
             app,
             size,
         } => {
-            commands::list::run(filter, runner, cli.json, verbose, app, size)
-                .await?;
+            commands::list::run(filter, runner, cli.json, verbose, app, size).await?;
         }
         Commands::Info { model } => {
             commands::info::run(&model, cli.json).await?;
@@ -184,14 +183,7 @@ async fn main() -> Result<()> {
             } else {
                 Some(query.join(" "))
             };
-            commands::search::run(
-                query.as_deref(),
-                limit,
-                sort.into(),
-                cli.json,
-                verbose,
-            )
-            .await?;
+            commands::search::run(query.as_deref(), limit, sort.into(), cli.json, verbose).await?;
         }
         Commands::Download {
             query,

@@ -22,9 +22,9 @@ use openapiv3::{
     SecurityRequirement, SecurityScheme, Server, StatusCode,
 };
 
+use super::OpenApiError;
 use super::extensions::{SchematicDocExtension, SchematicOpExtension};
 use super::options::ExportOptions;
-use super::OpenApiError;
 use crate::auth::AuthStrategy;
 use crate::request::{ApiRequest, FormField, FormFieldKind};
 use crate::response::ApiResponse;
@@ -83,11 +83,14 @@ pub fn export<R: SchemaRegistryLike>(
             Some(security)
         },
         tags: vec![],
-        external_docs: api.docs_url.as_ref().map(|url| openapiv3::ExternalDocumentation {
-            url: url.clone(),
-            description: Some("API Documentation".to_string()),
-            ..Default::default()
-        }),
+        external_docs: api
+            .docs_url
+            .as_ref()
+            .map(|url| openapiv3::ExternalDocumentation {
+                url: url.clone(),
+                description: Some("API Documentation".to_string()),
+                ..Default::default()
+            }),
         extensions,
     })
 }
@@ -375,7 +378,11 @@ fn map_form_fields_to_schema(fields: &[FormField]) -> openapiv3::Schema {
                     },
                 )),
             },
-            FormFieldKind::Files { accept: _, min: _, max: _ } => openapiv3::Schema {
+            FormFieldKind::Files {
+                accept: _,
+                min: _,
+                max: _,
+            } => openapiv3::Schema {
                 schema_data: openapiv3::SchemaData {
                     description: field.description.clone(),
                     ..Default::default()
@@ -488,7 +495,11 @@ fn map_responses(response: &ApiResponse) -> Responses {
             ApiResponse::Binary => "Successful binary response".to_string(),
             ApiResponse::Empty => "No content".to_string(),
         },
-        content: if content.is_empty() { IndexMap::new() } else { content },
+        content: if content.is_empty() {
+            IndexMap::new()
+        } else {
+            content
+        },
         ..Default::default()
     };
 
@@ -805,10 +816,8 @@ mod tests {
 
     #[test]
     fn map_request_body_form_data() {
-        let request = ApiRequest::form_data(vec![
-            FormField::file("document"),
-            FormField::text("name"),
-        ]);
+        let request =
+            ApiRequest::form_data(vec![FormField::file("document"), FormField::text("name")]);
         let body = map_request_body(&request);
 
         assert!(body.content.contains_key("multipart/form-data"));
@@ -822,7 +831,10 @@ mod tests {
         ]);
         let body = map_request_body(&request);
 
-        assert!(body.content.contains_key("application/x-www-form-urlencoded"));
+        assert!(
+            body.content
+                .contains_key("application/x-www-form-urlencoded")
+        );
     }
 
     #[test]
@@ -1032,10 +1044,7 @@ mod tests {
 
         let doc = export(&api, &registry, &options).unwrap();
         assert!(doc.external_docs.is_some());
-        assert_eq!(
-            doc.external_docs.unwrap().url,
-            "https://docs.test.com"
-        );
+        assert_eq!(doc.external_docs.unwrap().url, "https://docs.test.com");
     }
 
     #[test]

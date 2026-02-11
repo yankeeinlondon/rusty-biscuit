@@ -6,8 +6,8 @@
 use std::collections::HashSet;
 
 use openapiv3::{
-    AdditionalProperties, ObjectType, Operation, ReferenceOr, Schema, SchemaKind,
-    SecurityScheme, Server, Type,
+    AdditionalProperties, ObjectType, Operation, ReferenceOr, Schema, SchemaKind, SecurityScheme,
+    Server, Type,
 };
 
 use super::diagnostics::OpenApiDiagnostic;
@@ -62,7 +62,11 @@ pub fn map_operation(
         None => {
             let fallback = operation_id_fallback(&method.to_string(), path);
             diagnostics.push(OpenApiDiagnostic::info(
-                format!("#/paths{}/{}", path.replace('/', "~1"), method.to_string().to_lowercase()),
+                format!(
+                    "#/paths{}/{}",
+                    path.replace('/', "~1"),
+                    method.to_string().to_lowercase()
+                ),
                 format!("Missing operationId, using fallback: {}", fallback),
             ));
             fallback
@@ -99,7 +103,10 @@ pub fn map_operation(
             request,
             response,
             headers: vec![],
-            params: if params.query.is_empty() && params.header.is_empty() && params.cookie.is_empty() {
+            params: if params.query.is_empty()
+                && params.header.is_empty()
+                && params.cookie.is_empty()
+            {
                 None
             } else {
                 Some(params)
@@ -123,32 +130,24 @@ pub fn map_security_scheme(scheme: &SecurityScheme) -> Result<AuthStrategy, Stri
                 _ => Err(format!("Unsupported HTTP auth scheme: {}", auth_scheme)),
             }
         }
-        SecurityScheme::APIKey {
-            location,
-            name,
-            ..
-        } => {
-            match location {
-                openapiv3::APIKeyLocation::Header => Ok(AuthStrategy::ApiKey {
-                    header: name.clone(),
-                }),
-                openapiv3::APIKeyLocation::Query => Ok(AuthStrategy::ApiKeyParam {
-                    name: name.clone(),
-                    location: ApiKeyLocation::Query,
-                }),
-                openapiv3::APIKeyLocation::Cookie => Ok(AuthStrategy::ApiKeyParam {
-                    name: name.clone(),
-                    location: ApiKeyLocation::Cookie,
-                }),
-            }
-        }
+        SecurityScheme::APIKey { location, name, .. } => match location {
+            openapiv3::APIKeyLocation::Header => Ok(AuthStrategy::ApiKey {
+                header: name.clone(),
+            }),
+            openapiv3::APIKeyLocation::Query => Ok(AuthStrategy::ApiKeyParam {
+                name: name.clone(),
+                location: ApiKeyLocation::Query,
+            }),
+            openapiv3::APIKeyLocation::Cookie => Ok(AuthStrategy::ApiKeyParam {
+                name: name.clone(),
+                location: ApiKeyLocation::Cookie,
+            }),
+        },
         SecurityScheme::OAuth2 { .. } => {
             // OAuth2 is complex; default to bearer token behavior
             Err("OAuth2 not fully supported, consider using BearerToken with manual token management".to_string())
         }
-        SecurityScheme::OpenIDConnect { .. } => {
-            Err("OpenID Connect not supported".to_string())
-        }
+        SecurityScheme::OpenIDConnect { .. } => Err("OpenID Connect not supported".to_string()),
     }
 }
 
@@ -244,9 +243,10 @@ pub fn map_responses(
 
     // Try priority statuses first
     for status in &status_priority {
-        if let Some(resp) = responses.responses.get(&openapiv3::StatusCode::Code(
-            status.parse().unwrap(),
-        )) {
+        if let Some(resp) = responses
+            .responses
+            .get(&openapiv3::StatusCode::Code(status.parse().unwrap()))
+        {
             if *status == "204" {
                 return ApiResponse::Empty;
             }
@@ -293,18 +293,16 @@ fn map_response_ref(
 ) -> Option<ApiResponse> {
     let response = match resp {
         ReferenceOr::Item(r) => r,
-        ReferenceOr::Reference { reference } => {
-            match resolver.resolve_response(resp) {
-                Ok(r) => r,
-                Err(e) => {
-                    diagnostics.push(OpenApiDiagnostic::error(
-                        reference.clone(),
-                        format!("Failed to resolve response reference: {}", e),
-                    ));
-                    return None;
-                }
+        ReferenceOr::Reference { reference } => match resolver.resolve_response(resp) {
+            Ok(r) => r,
+            Err(e) => {
+                diagnostics.push(OpenApiDiagnostic::error(
+                    reference.clone(),
+                    format!("Failed to resolve response reference: {}", e),
+                ));
+                return None;
             }
-        }
+        },
     };
 
     // Check content types
@@ -506,10 +504,7 @@ fn map_schema_to_param_type(
         }
         ReferenceOr::Item(s) => match &s.schema_kind {
             SchemaKind::Type(Type::String(st)) => {
-                let values: Vec<String> = st.enumeration
-                    .iter()
-                    .filter_map(|v| v.clone())
-                    .collect();
+                let values: Vec<String> = st.enumeration.iter().filter_map(|v| v.clone()).collect();
                 if !values.is_empty() {
                     return QueryParamType::Enum(values);
                 }
@@ -546,10 +541,7 @@ fn map_schema_to_param_type_boxed(
         }
         ReferenceOr::Item(s) => match &s.schema_kind {
             SchemaKind::Type(Type::String(st)) => {
-                let values: Vec<String> = st.enumeration
-                    .iter()
-                    .filter_map(|v| v.clone())
-                    .collect();
+                let values: Vec<String> = st.enumeration.iter().filter_map(|v| v.clone()).collect();
                 if !values.is_empty() {
                     return QueryParamType::Enum(values);
                 }
@@ -604,7 +596,8 @@ pub fn map_all_schemas(
 
     // Build name mapping first to handle deconfliction consistently
     // Maps sanitized schema name -> final Rust name (only entries that differ)
-    let mut name_mapping: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut name_mapping: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     let mut used_names = reserved_names.clone();
 
     if let Some(ref components) = doc.components {
@@ -629,7 +622,9 @@ pub fn map_all_schemas(
                 .unwrap_or(sanitized_name);
             processed_names.insert(final_name.clone());
 
-            if let Some(mut model) = map_schema_to_model(&final_name, name, schema_ref, resolver, diagnostics) {
+            if let Some(mut model) =
+                map_schema_to_model(&final_name, name, schema_ref, resolver, diagnostics)
+            {
                 // Post-process TypeRefs to use renamed types
                 remap_type_refs_in_model(&mut model, &name_mapping);
                 types.push(model);
@@ -647,7 +642,10 @@ pub fn map_all_schemas(
 }
 
 /// Remaps TypeRef::Named values in a ModelDef using the provided mapping.
-fn remap_type_refs_in_model(model: &mut ModelDef, mapping: &std::collections::HashMap<String, String>) {
+fn remap_type_refs_in_model(
+    model: &mut ModelDef,
+    mapping: &std::collections::HashMap<String, String>,
+) {
     match model {
         ModelDef::Struct(s) => {
             for field in &mut s.fields {
@@ -717,7 +715,8 @@ fn map_schema_to_model(
 
     match &schema.schema_kind {
         SchemaKind::Type(Type::Object(obj)) => {
-            let struct_def = map_object_to_struct(rust_name, description, obj, resolver, diagnostics);
+            let struct_def =
+                map_object_to_struct(rust_name, description, obj, resolver, diagnostics);
             Some(ModelDef::Struct(struct_def))
         }
         SchemaKind::Type(Type::String(st)) if st.enumeration.iter().any(|v| v.is_some()) => {
@@ -733,34 +732,26 @@ fn map_schema_to_model(
                 target: TypeRef::Array(Box::new(item_type)),
             }))
         }
-        SchemaKind::Type(Type::String(_)) => {
-            Some(ModelDef::Alias(TypeAlias {
-                name: rust_name.to_string(),
-                description,
-                target: TypeRef::Primitive(PrimitiveType::String),
-            }))
-        }
-        SchemaKind::Type(Type::Integer(_)) => {
-            Some(ModelDef::Alias(TypeAlias {
-                name: rust_name.to_string(),
-                description,
-                target: TypeRef::Primitive(PrimitiveType::Integer),
-            }))
-        }
-        SchemaKind::Type(Type::Number(_)) => {
-            Some(ModelDef::Alias(TypeAlias {
-                name: rust_name.to_string(),
-                description,
-                target: TypeRef::Primitive(PrimitiveType::Number),
-            }))
-        }
-        SchemaKind::Type(Type::Boolean(_)) => {
-            Some(ModelDef::Alias(TypeAlias {
-                name: rust_name.to_string(),
-                description,
-                target: TypeRef::Primitive(PrimitiveType::Boolean),
-            }))
-        }
+        SchemaKind::Type(Type::String(_)) => Some(ModelDef::Alias(TypeAlias {
+            name: rust_name.to_string(),
+            description,
+            target: TypeRef::Primitive(PrimitiveType::String),
+        })),
+        SchemaKind::Type(Type::Integer(_)) => Some(ModelDef::Alias(TypeAlias {
+            name: rust_name.to_string(),
+            description,
+            target: TypeRef::Primitive(PrimitiveType::Integer),
+        })),
+        SchemaKind::Type(Type::Number(_)) => Some(ModelDef::Alias(TypeAlias {
+            name: rust_name.to_string(),
+            description,
+            target: TypeRef::Primitive(PrimitiveType::Number),
+        })),
+        SchemaKind::Type(Type::Boolean(_)) => Some(ModelDef::Alias(TypeAlias {
+            name: rust_name.to_string(),
+            description,
+            target: TypeRef::Primitive(PrimitiveType::Boolean),
+        })),
         SchemaKind::OneOf { one_of } => {
             let variants: Vec<TypeRef> = one_of
                 .iter()
@@ -794,13 +785,11 @@ fn map_schema_to_model(
                 target: TypeRef::AllOf(variants),
             }))
         }
-        SchemaKind::Any(_) => {
-            Some(ModelDef::Alias(TypeAlias {
-                name: rust_name.to_string(),
-                description,
-                target: TypeRef::Primitive(PrimitiveType::Json),
-            }))
-        }
+        SchemaKind::Any(_) => Some(ModelDef::Alias(TypeAlias {
+            name: rust_name.to_string(),
+            description,
+            target: TypeRef::Primitive(PrimitiveType::Json),
+        })),
         SchemaKind::Not { .. } => {
             diagnostics.push(OpenApiDiagnostic::warn(
                 format!("#/components/schemas/{}", original_name),
@@ -848,9 +837,7 @@ fn map_object_to_struct(
     }
 
     let additional_properties = match &obj.additional_properties {
-        Some(AdditionalProperties::Any(true)) => {
-            Some(TypeRef::Primitive(PrimitiveType::Json))
-        }
+        Some(AdditionalProperties::Any(true)) => Some(TypeRef::Primitive(PrimitiveType::Json)),
         Some(AdditionalProperties::Schema(schema)) => {
             Some(map_schema_ref_to_type_ref(schema, resolver, diagnostics))
         }

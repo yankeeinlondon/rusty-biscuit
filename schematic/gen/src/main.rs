@@ -315,7 +315,14 @@ fn run_generate(
 
     // Export OpenAPI spec if requested
     if let Some(openapi_dir) = openapi_out {
-        run_openapi_export(api_name, &api, openapi_dir, openapi_format, dry_run, verbose)?;
+        run_openapi_export(
+            api_name,
+            &api,
+            openapi_dir,
+            openapi_format,
+            dry_run,
+            verbose,
+        )?;
     }
 
     Ok(())

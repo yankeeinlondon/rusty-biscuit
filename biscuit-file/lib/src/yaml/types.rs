@@ -376,11 +376,9 @@ fn yaml_to_json(
                         })
                 } else {
                     match options.float_policy {
-                        NonFiniteFloatPolicy::Error => {
-                            Err(YamlError::JsonConversion(format!(
-                                "Non-finite float at {path}"
-                            )))
-                        }
+                        NonFiniteFloatPolicy::Error => Err(YamlError::JsonConversion(format!(
+                            "Non-finite float at {path}"
+                        ))),
                         NonFiniteFloatPolicy::Null => {
                             warnings.push(ConversionWarning::NonFiniteFloat {
                                 path: path.to_string(),
@@ -473,9 +471,7 @@ fn yaml_to_toml(
 
     match value {
         serde_yaml_ng::Value::Null => match options.null_policy {
-            NullPolicy::Error => {
-                Err(YamlError::TomlConversion(format!("Null value at {path}")))
-            }
+            NullPolicy::Error => Err(YamlError::TomlConversion(format!("Null value at {path}"))),
             NullPolicy::Drop => {
                 warnings.push(ConversionWarning::NullDropped {
                     path: path.to_string(),
@@ -1032,7 +1028,12 @@ mod tests {
 
         let result = yaml.as_toml_with(options).unwrap();
         assert!(!result.is_clean());
-        assert!(result.warnings.iter().any(|w| matches!(w, ConversionWarning::NullDropped { .. })));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| matches!(w, ConversionWarning::NullDropped { .. }))
+        );
         let table = result.value.as_table().unwrap();
         assert!(table.contains_key("name"));
         assert!(!table.contains_key("value"));
@@ -1128,7 +1129,12 @@ mod tests {
 
         let result = yaml.as_toml_with(options).unwrap();
         assert!(!result.is_clean());
-        assert!(result.warnings.iter().any(|w| matches!(w, ConversionWarning::HeteroArrayCoerced { .. })));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| matches!(w, ConversionWarning::HeteroArrayCoerced { .. }))
+        );
         let arr = result.value["items"].as_array().unwrap();
         // All elements should be strings now
         assert!(arr.iter().all(|v| v.is_str()));
@@ -1217,7 +1223,10 @@ mod tests {
     fn test_from_serde_value() {
         use serde_yaml_ng::Value;
         let mut map = serde_yaml_ng::Mapping::new();
-        map.insert(Value::String("key".to_string()), Value::String("value".to_string()));
+        map.insert(
+            Value::String("key".to_string()),
+            Value::String("value".to_string()),
+        );
         let value = Value::Mapping(map);
 
         let yaml = Yaml::from(value);
@@ -1452,10 +1461,12 @@ mod tests {
         let result = yaml.as_json_with(options).unwrap();
         // Should have 3 warnings for 3 non-string keys
         assert_eq!(result.warnings.len(), 3);
-        assert!(result
-            .warnings
-            .iter()
-            .all(|w| matches!(w, ConversionWarning::NonStringKey { .. })));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .all(|w| matches!(w, ConversionWarning::NonStringKey { .. }))
+        );
     }
 
     #[cfg(feature = "toml")]
@@ -1477,9 +1488,11 @@ mod tests {
 
         let result = yaml.as_toml_with(options).unwrap();
         assert_eq!(result.warnings.len(), 2);
-        assert!(result
-            .warnings
-            .iter()
-            .all(|w| matches!(w, ConversionWarning::NullDropped { .. })));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .all(|w| matches!(w, ConversionWarning::NullDropped { .. }))
+        );
     }
 }

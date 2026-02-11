@@ -217,8 +217,14 @@ mod tests {
 
         let json: serde_json::Value = ext.into();
         assert!(json.is_object());
-        assert_eq!(json.get("module_path").and_then(|v| v.as_str()), Some("test"));
-        assert_eq!(json.get("request_suffix").and_then(|v| v.as_str()), Some("Params"));
+        assert_eq!(
+            json.get("module_path").and_then(|v| v.as_str()),
+            Some("test")
+        );
+        assert_eq!(
+            json.get("request_suffix").and_then(|v| v.as_str()),
+            Some("Params")
+        );
     }
 
     #[test]
@@ -354,7 +360,10 @@ mod tests {
         };
 
         let json: serde_json::Value = ext.into();
-        assert_eq!(json.get("rust_type").and_then(|v| v.as_str()), Some("MyType"));
+        assert_eq!(
+            json.get("rust_type").and_then(|v| v.as_str()),
+            Some("MyType")
+        );
     }
 
     #[test]

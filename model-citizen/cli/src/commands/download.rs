@@ -1,10 +1,10 @@
 //! Download command - search and download GGUF models from HuggingFace.
 
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{Result, eyre};
 use indicatif::{ProgressBar, ProgressStyle};
 use inquire::{MultiSelect, Select};
-use model_citizen::huggingface::{GgufVariant, HuggingFaceClient, SearchResult};
 use model_citizen::SortOrder;
+use model_citizen::huggingface::{GgufVariant, HuggingFaceClient, SearchResult};
 use std::path::Path;
 
 pub async fn run(
@@ -40,7 +40,11 @@ pub async fn run(
     // Determine output directory: --output flag > MODELS_DIR env > default shared dir > cwd
     let dest_dir = output_dir
         .map(|p| p.to_path_buf())
-        .or_else(|| std::env::var("MODELS_DIR").ok().map(std::path::PathBuf::from))
+        .or_else(|| {
+            std::env::var("MODELS_DIR")
+                .ok()
+                .map(std::path::PathBuf::from)
+        })
         .or_else(model_citizen::sharing::default_shared_dir)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
@@ -82,10 +86,7 @@ async fn search_and_select(
         }
     }
 
-    let options: Vec<String> = results
-        .iter()
-        .map(format_result_option)
-        .collect();
+    let options: Vec<String> = results.iter().map(format_result_option).collect();
 
     let selection = Select::new("Select a model to download:", options.clone())
         .with_help_message("Use arrow keys to navigate, enter to select")
@@ -103,7 +104,9 @@ async fn search_and_select(
 fn format_result_option(r: &SearchResult) -> String {
     format!(
         "{} ({} downloads, {} likes)",
-        r.repo_id, format_count(r.downloads), format_count(r.likes)
+        r.repo_id,
+        format_count(r.downloads),
+        format_count(r.likes)
     )
 }
 

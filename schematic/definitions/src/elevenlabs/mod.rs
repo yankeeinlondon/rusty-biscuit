@@ -33,7 +33,8 @@ mod types;
 pub use types::*;
 
 use schematic_define::{
-    ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, FormField, RestApi, RestMethod, Schema,
+    ApiKeyEnv, ApiRequest, ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, FormField,
+    RestApi, RestMethod, Schema,
 };
 
 /// Creates the ElevenLabs REST API definition.

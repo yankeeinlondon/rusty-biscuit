@@ -76,7 +76,7 @@ fn make_basic_auth_api(name: &str, username_env: &str, password_env: &str) -> Re
             request: None,
             response: ApiResponse::json_type("ItemsResponse"),
             headers: vec![],
-                params: None,
+            params: None,
         }],
         module_path: None,
         request_suffix: None,

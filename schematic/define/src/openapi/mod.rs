@@ -83,7 +83,7 @@ mod options;
 mod source;
 
 pub use error::OpenApiError;
-pub use export::{export, extract_path_params, map_security, SchemaRegistryLike};
+pub use export::{SchemaRegistryLike, export, extract_path_params, map_security};
 pub use extensions::{
     AuthExtension, SchematicDocExtension, SchematicOpExtension, SchematicSchemaExtension,
 };
@@ -91,5 +91,5 @@ pub use import::{
     BaseUrlPolicy, ContentPreference, DiagnosticSeverity, OpenApiDiagnostic, OpenApiImport,
     OpenApiImportOptions, OpenApiImportResult, RefResolver,
 };
-pub use options::{serialize, ExportFormat, ExportOptions};
+pub use options::{ExportFormat, ExportOptions, serialize};
 pub use source::OpenApiSource;

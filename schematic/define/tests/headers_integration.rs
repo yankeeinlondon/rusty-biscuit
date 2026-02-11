@@ -222,9 +222,21 @@ fn headers_custom_headers_realistic_workflow() {
     assert_eq!(headers.len(), 7);
 
     // Verify we can find all custom headers
-    assert!(headers.iter().any(|(k, v)| k == "X-Request-ID" && v == "req-12345"));
-    assert!(headers.iter().any(|(k, v)| k == "X-Correlation-ID" && v == "corr-67890"));
-    assert!(headers.iter().any(|(k, v)| k == "X-Client-Version" && v == "2.5.1"));
+    assert!(
+        headers
+            .iter()
+            .any(|(k, v)| k == "X-Request-ID" && v == "req-12345")
+    );
+    assert!(
+        headers
+            .iter()
+            .any(|(k, v)| k == "X-Correlation-ID" && v == "corr-67890")
+    );
+    assert!(
+        headers
+            .iter()
+            .any(|(k, v)| k == "X-Client-Version" && v == "2.5.1")
+    );
 }
 
 #[test]
@@ -288,19 +300,29 @@ fn headers_empty_builder_produces_empty_result() {
 #[test]
 fn headers_builder_is_reusable() {
     // Verify that we can create a base builder and reuse it
-    let base = Headers::default()
-        .user_agent("MyApp/1.0")
-        .accept_json();
+    let base = Headers::default().user_agent("MyApp/1.0").accept_json();
 
     // Create variant with bearer token
     let with_bearer = base.clone().use_bearer_token("token1").build().unwrap();
 
     // Create variant with API key
-    let with_api_key = base.clone().use_api_key("key1", "X-API-Key").build().unwrap();
+    let with_api_key = base
+        .clone()
+        .use_api_key("key1", "X-API-Key")
+        .build()
+        .unwrap();
 
     // Both should have common headers
-    assert!(with_bearer.iter().any(|(k, v)| k == "User-Agent" && v == "MyApp/1.0"));
-    assert!(with_api_key.iter().any(|(k, v)| k == "User-Agent" && v == "MyApp/1.0"));
+    assert!(
+        with_bearer
+            .iter()
+            .any(|(k, v)| k == "User-Agent" && v == "MyApp/1.0")
+    );
+    assert!(
+        with_api_key
+            .iter()
+            .any(|(k, v)| k == "User-Agent" && v == "MyApp/1.0")
+    );
 
     // But different auth
     assert!(with_bearer.iter().any(|(k, _)| k == "Authorization"));

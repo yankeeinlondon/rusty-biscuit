@@ -506,23 +506,62 @@ mod tests {
 
     #[test]
     fn quantization_from_str_loose_handles_variations() {
-        assert_eq!(QuantizationType::from_str_loose("Q4_K_M"), QuantizationType::Q4Km);
-        assert_eq!(QuantizationType::from_str_loose("q4km"), QuantizationType::Q4Km);
-        assert_eq!(QuantizationType::from_str_loose("Q4-K-M"), QuantizationType::Q4Km);
-        assert_eq!(QuantizationType::from_str_loose("Q5_0"), QuantizationType::Q5_0);
-        assert_eq!(QuantizationType::from_str_loose("f16"), QuantizationType::F16);
-        assert_eq!(QuantizationType::from_str_loose("garbage"), QuantizationType::Unknown);
+        assert_eq!(
+            QuantizationType::from_str_loose("Q4_K_M"),
+            QuantizationType::Q4Km
+        );
+        assert_eq!(
+            QuantizationType::from_str_loose("q4km"),
+            QuantizationType::Q4Km
+        );
+        assert_eq!(
+            QuantizationType::from_str_loose("Q4-K-M"),
+            QuantizationType::Q4Km
+        );
+        assert_eq!(
+            QuantizationType::from_str_loose("Q5_0"),
+            QuantizationType::Q5_0
+        );
+        assert_eq!(
+            QuantizationType::from_str_loose("f16"),
+            QuantizationType::F16
+        );
+        assert_eq!(
+            QuantizationType::from_str_loose("garbage"),
+            QuantizationType::Unknown
+        );
     }
 
     #[test]
     fn architecture_from_name_detects_families() {
-        assert_eq!(ModelArchitecture::from_name("llama-3-8b"), ModelArchitecture::Llama);
-        assert_eq!(ModelArchitecture::from_name("codellama-7b"), ModelArchitecture::Llama);
-        assert_eq!(ModelArchitecture::from_name("mistral-7b-v0.1"), ModelArchitecture::Mistral);
-        assert_eq!(ModelArchitecture::from_name("qwen2-7b"), ModelArchitecture::Qwen);
-        assert_eq!(ModelArchitecture::from_name("phi-3-mini"), ModelArchitecture::Phi);
-        assert_eq!(ModelArchitecture::from_name("gemma-2b"), ModelArchitecture::Gemma);
-        assert_eq!(ModelArchitecture::from_name("some-random-model"), ModelArchitecture::Unknown);
+        assert_eq!(
+            ModelArchitecture::from_name("llama-3-8b"),
+            ModelArchitecture::Llama
+        );
+        assert_eq!(
+            ModelArchitecture::from_name("codellama-7b"),
+            ModelArchitecture::Llama
+        );
+        assert_eq!(
+            ModelArchitecture::from_name("mistral-7b-v0.1"),
+            ModelArchitecture::Mistral
+        );
+        assert_eq!(
+            ModelArchitecture::from_name("qwen2-7b"),
+            ModelArchitecture::Qwen
+        );
+        assert_eq!(
+            ModelArchitecture::from_name("phi-3-mini"),
+            ModelArchitecture::Phi
+        );
+        assert_eq!(
+            ModelArchitecture::from_name("gemma-2b"),
+            ModelArchitecture::Gemma
+        );
+        assert_eq!(
+            ModelArchitecture::from_name("some-random-model"),
+            ModelArchitecture::Unknown
+        );
     }
 
     #[test]
@@ -559,13 +598,34 @@ mod tests {
 
     #[test]
     fn quantization_from_str_loose_handles_mlx() {
-        assert_eq!(QuantizationType::from_str_loose("BF16"), QuantizationType::Bf16);
-        assert_eq!(QuantizationType::from_str_loose("bf16"), QuantizationType::Bf16);
-        assert_eq!(QuantizationType::from_str_loose("4bit"), QuantizationType::Bit4);
-        assert_eq!(QuantizationType::from_str_loose("6BIT"), QuantizationType::Bit6);
-        assert_eq!(QuantizationType::from_str_loose("8bit"), QuantizationType::Bit8);
-        assert_eq!(QuantizationType::from_str_loose("MXFP4"), QuantizationType::Mxfp4);
-        assert_eq!(QuantizationType::from_str_loose("mxfp4"), QuantizationType::Mxfp4);
+        assert_eq!(
+            QuantizationType::from_str_loose("BF16"),
+            QuantizationType::Bf16
+        );
+        assert_eq!(
+            QuantizationType::from_str_loose("bf16"),
+            QuantizationType::Bf16
+        );
+        assert_eq!(
+            QuantizationType::from_str_loose("4bit"),
+            QuantizationType::Bit4
+        );
+        assert_eq!(
+            QuantizationType::from_str_loose("6BIT"),
+            QuantizationType::Bit6
+        );
+        assert_eq!(
+            QuantizationType::from_str_loose("8bit"),
+            QuantizationType::Bit8
+        );
+        assert_eq!(
+            QuantizationType::from_str_loose("MXFP4"),
+            QuantizationType::Mxfp4
+        );
+        assert_eq!(
+            QuantizationType::from_str_loose("mxfp4"),
+            QuantizationType::Mxfp4
+        );
     }
 
     #[test]
@@ -574,8 +634,14 @@ mod tests {
         assert_eq!(QuantizationType::from_mlx_bits(6), QuantizationType::Bit6);
         assert_eq!(QuantizationType::from_mlx_bits(8), QuantizationType::Bit8);
         assert_eq!(QuantizationType::from_mlx_bits(16), QuantizationType::Bf16);
-        assert_eq!(QuantizationType::from_mlx_bits(3), QuantizationType::Unknown);
-        assert_eq!(QuantizationType::from_mlx_bits(0), QuantizationType::Unknown);
+        assert_eq!(
+            QuantizationType::from_mlx_bits(3),
+            QuantizationType::Unknown
+        );
+        assert_eq!(
+            QuantizationType::from_mlx_bits(0),
+            QuantizationType::Unknown
+        );
     }
 
     #[test]
@@ -616,7 +682,9 @@ mod tests {
     #[test]
     fn huggingface_repo_from_url_strips_trailing_path() {
         assert_eq!(
-            huggingface_repo_from_url("https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct/tree/main"),
+            huggingface_repo_from_url(
+                "https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct/tree/main"
+            ),
             Some("meta-llama/Llama-3.3-70B-Instruct".to_string()),
         );
     }

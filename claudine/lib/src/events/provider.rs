@@ -595,8 +595,8 @@ mod tests {
 
     #[test]
     fn event_support_level_claude_all_hook() {
-        use crate::events::AgenticEvent::*;
         use super::EventSupportLevel::*;
+        use crate::events::AgenticEvent::*;
         // Claude: all supported events are via hooks
         assert_eq!(Provider::Claude.event_support_level(&TurnComplete), Hook);
         assert_eq!(Provider::Claude.event_support_level(&BeforeTool), Hook);
@@ -608,8 +608,8 @@ mod tests {
 
     #[test]
     fn event_support_level_codex_mixed() {
-        use crate::events::AgenticEvent::*;
         use super::EventSupportLevel::*;
+        use crate::events::AgenticEvent::*;
         // Codex: turn_complete via hook, others via JSONL stream
         assert_eq!(Provider::Codex.event_support_level(&TurnComplete), Hook);
         assert_eq!(Provider::Codex.event_support_level(&BeforeTool), NonHook);
@@ -623,8 +623,8 @@ mod tests {
 
     #[test]
     fn event_support_level_goose_all_non_hook() {
-        use crate::events::AgenticEvent::*;
         use super::EventSupportLevel::*;
+        use crate::events::AgenticEvent::*;
         // Goose: all supported events via stream-json/env var
         assert_eq!(Provider::Goose.event_support_level(&TurnComplete), NonHook);
         assert_eq!(Provider::Goose.event_support_level(&Notification), NonHook);
@@ -640,8 +640,8 @@ mod tests {
 
     #[test]
     fn event_support_level_kimicode_all_non_hook() {
-        use crate::events::AgenticEvent::*;
         use super::EventSupportLevel::*;
+        use crate::events::AgenticEvent::*;
         // Kimi Code: all supported events via wire mode
         assert_eq!(
             Provider::KimiCode.event_support_level(&TurnComplete),
@@ -660,8 +660,8 @@ mod tests {
 
     #[test]
     fn event_support_level_qwencode_all_non_hook() {
-        use crate::events::AgenticEvent::*;
         use super::EventSupportLevel::*;
+        use crate::events::AgenticEvent::*;
         // Qwen Code: limited events via stream-json
         assert_eq!(
             Provider::QwenCode.event_support_level(&TurnComplete),

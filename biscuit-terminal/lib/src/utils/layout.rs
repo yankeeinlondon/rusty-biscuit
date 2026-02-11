@@ -29,24 +29,20 @@ pub trait RenderableWrapper {
 ///   it still needs to know that the `left_margin` is.
 /// - both `TextAlignment::Right` and `TextAlignment::Center`
 ///   are only able to be expressed
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Alignment {
+    #[default]
     Left,
     Center,
     Right,
 }
 
-impl Default for Alignment {
-    fn default() -> Self {
-        Alignment::Left
-    }
-}
-
 /// The **Margin** allows for a fixed or percentage based margins to be
 /// added to the renderable component.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum Margin {
+    #[default]
     None,
     Chars(u32),
     Percent(f32),
@@ -55,12 +51,6 @@ pub enum Margin {
     /// Used when nesting components to accumulate margin without
     /// resolving percentages prematurely.
     Offset(Box<Margin>, u32),
-}
-
-impl Default for Margin {
-    fn default() -> Self {
-        Margin::None
-    }
 }
 
 impl Margin {
@@ -88,11 +78,13 @@ impl Margin {
 ///
 /// This can be useful when you set a background color to be something
 /// other than the default color.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum RowFill {
     /// if the background color _is **not**_ the default background color
-    /// then each row's width will be extended to the max width for the
-    /// text block. Otherwise, no additional padding is provided.
+    ///
+    /// > then each row's width will be extended to the max width for the
+    /// > text block. Otherwise, no additional padding is provided.
+    #[default]
     Auto,
     /// pad each line to be precisely the length of the max width of the
     /// block's constraint
@@ -100,12 +92,6 @@ pub enum RowFill {
     /// do not add any padding to force the width to match the max width
     /// of the text constraint
     Exact,
-}
-
-impl Default for RowFill {
-    fn default() -> Self {
-        RowFill::Auto
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -207,9 +193,9 @@ pub struct Layout {
     /// to "fill".
     ///
     /// > Note: setting this property to `Some<Color::DefaultBackgroundColor>` WILL make a change
-    /// because instead of rendering text on top of a transparent background, you are now explicitly
-    /// rendering it onto an opaque background color and masking anything the terminal may have been
-    /// rendering underneath it.
+    /// > because instead of rendering text on top of a transparent background, you are now explicitly
+    /// > rendering it onto an opaque background color and masking anything the terminal may have been
+    /// > rendering underneath it.
     pub page_bg_color: Option<Color>,
 }
 

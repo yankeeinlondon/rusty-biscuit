@@ -8,8 +8,8 @@ use std::collections::HashSet;
 
 use openapiv3::{OpenAPI, Parameter, ReferenceOr, Response, Schema};
 
-use super::diagnostics::OpenApiDiagnostic;
 use super::MAX_NESTING_DEPTH;
+use super::diagnostics::OpenApiDiagnostic;
 use crate::models::TypeRef;
 
 /// Resolver for OpenAPI `$ref` references.
@@ -327,11 +327,7 @@ impl std::fmt::Display for ResolveError {
                 reference,
                 max_depth,
             } => {
-                write!(
-                    f,
-                    "Nesting depth exceeded {} at: {}",
-                    max_depth, reference
-                )
+                write!(f, "Nesting depth exceeded {} at: {}", max_depth, reference)
             }
             ResolveError::InvalidFormat {
                 reference,
