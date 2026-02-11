@@ -60,3 +60,36 @@ check:
 # Run the latest debug build of the Claudine CLI
 cli *args="":
     @cargo run -p claudine-cli {{args}}
+
+# Open Claude Code in yolo mode
+oc *args="":
+    @clear
+    @echo "Loading {{BOLD}}Opencode{{RESET}}"
+    @cd .. && opencode {{args}}
+
+# Open Opencode
+cc *args="":
+    @clear
+    @echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @cd .. && claude --dangerously-skip-permissions {{args}}
+
+# Open Codex CLI
+codex *args="":
+    @clear
+    @echo "Loading {{BOLD}}Codex CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @cd .. && codex --dangerously-bypass-approvals-and-sandbox {{args}}
+
+# Show the dependencies for this package
+deps:
+    @echo "Dependencies:"
+    @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "claudine"
+
+# review this package using the Codex CLI
+review *args="":
+    @clear
+    @echo -e "Performing a code review on the {{BOLD}}Claudine{{RESET}} package"
+    @echo ""
+    @cd .. && codex exec "/code-review the code in the Claudine package; use the rust, claudine, biscuit-terminal, and clap skills during the review. Write your findings to the file '@claudine/docs/{YYYY}-{MM}. claudine-review.md' (where YYYY is the current year, and MM is the current month)." "$(just deps)" {{args}} || ( so-you-say "There was a problem running the code review in the claudine package" >/dev/null 2>&1 && echo -e "{RED}ERROR:{RESET}: problems with the claudine review."  && exit 1 )
+    @so-you-say "Review for claudine package has completed." >/dev/null 2>&1 || exit 0
+
+
