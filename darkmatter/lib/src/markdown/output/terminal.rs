@@ -676,10 +676,8 @@ fn convert_alignment(align: &pulldown_cmark::Alignment) -> comfy_table::CellAlig
 /// Exports markdown to terminal with ANSI escape codes.
 ///
 /// This function renders markdown content with syntax-highlighted code blocks
-/// using ANSI escape sequences for terminal display.
-///
-/// **Note:** For documents with images, use [`write_terminal`] instead, which
-/// properly handles image rendering by writing directly to a writer.
+/// using ANSI escape sequences for terminal display. Inline images are rendered
+/// via biscuit-terminal's protocol-aware `Renderable` trait (Kitty/iTerm2).
 ///
 /// ## Examples
 ///
@@ -694,11 +692,7 @@ fn convert_alignment(align: &pulldown_cmark::Alignment) -> comfy_table::CellAlig
 /// ## Errors
 ///
 /// Returns an error if theme loading fails or syntax highlighting encounters issues.
-pub fn for_terminal(md: &Markdown, mut options: TerminalOptions) -> Result<String, MarkdownError> {
-    // Disable graphics rendering when returning a String, since viuer
-    // writes directly to stdout which would be out of order.
-    // Use write_terminal() with stdout for proper image rendering.
-    options.render_images = false;
+pub fn for_terminal(md: &Markdown, options: TerminalOptions) -> Result<String, MarkdownError> {
     let mut output = Vec::new();
     write_terminal(&mut output, md, options)?;
     Ok(String::from_utf8_lossy(&output).into_owned())

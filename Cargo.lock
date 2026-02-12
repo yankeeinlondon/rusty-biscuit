@@ -1563,6 +1563,7 @@ version = "0.1.0"
 dependencies = [
  "biscuit-hash",
  "biscuit-terminal",
+ "chrono",
  "comfy-table",
  "html-escape",
  "insta",

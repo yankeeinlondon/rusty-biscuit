@@ -36,6 +36,7 @@ pub mod inline;
 pub mod normalize;
 pub mod output;
 pub mod toc;
+pub mod transform;
 mod types;
 
 pub use delta::{
@@ -236,6 +237,31 @@ impl Markdown {
     /// Returns an error if theme loading fails or highlighting encounters issues.
     pub fn as_html(&self, options: output::HtmlOptions) -> MarkdownResult<String> {
         output::as_html(self, options)
+    }
+
+    /// Renders the markdown document as ANSI-styled terminal output.
+    ///
+    /// Returns a string containing ANSI escape codes for syntax highlighting,
+    /// styled headings, and formatted block elements including inline images
+    /// (via Kitty/iTerm2 protocols through biscuit-terminal).
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::Markdown;
+    /// use darkmatter::markdown::output::TerminalOptions;
+    ///
+    /// let md = Markdown::new("# Hello\n\nWorld".to_string());
+    /// let rendered = md.as_terminal(TerminalOptions::default()).unwrap();
+    /// assert!(rendered.contains("Hello"));
+    /// assert!(rendered.contains("World"));
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if terminal rendering fails (e.g. theme loading issues).
+    pub fn as_terminal(&self, options: output::TerminalOptions) -> MarkdownResult<String> {
+        output::for_terminal(self, options)
     }
 
     /// Extracts a Table of Contents from the markdown document.

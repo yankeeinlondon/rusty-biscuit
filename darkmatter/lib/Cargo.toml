@@ -29,6 +29,7 @@ thiserror = "2.0"
 lazy_static = "1.5"
 regex = "1.11"
 tempfile = "3.8"
+chrono = "0.4"
 
 # HTTP and URLs
 reqwest = { version = "0.12", features = ["json", "gzip"] }

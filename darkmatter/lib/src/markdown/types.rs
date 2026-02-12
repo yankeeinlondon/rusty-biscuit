@@ -40,6 +40,10 @@ pub enum MarkdownError {
     /// Serialization error.
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
+
+    /// Transform pipeline error.
+    #[error("Transform error: {0}")]
+    Transform(String),
 }
 
 /// Result type for markdown operations.
