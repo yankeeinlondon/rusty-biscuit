@@ -1,18 +1,18 @@
 # Darkmatter Processing Pipeline
 
-| **Stage 1**: Preparation  | **Stage 2**: Early Composition | Stage 3: AI Mut & Gen |  Stage 4: Optimization |
-| -------------             | -------------                  | -------               | ---------------        |
-| Cleaning                  | Block Transclusion             | Summarization         | Table Rendering        |
-| FM Interpolation          | Frontmatter Transclusion       | Consolidation         | YouTube Embedding      |
-|                           |                                | Normalization         | Popover                |
-| Text Replacement          |                                |                       | List Expansion         |
-|                           |                                |                       | Smart Image            |
-|                           |                                |                       | Image Rendering        |
-|                           |                                |                       | Disclosure Blocks      |
-|                           |                                |                       | Block Columns          |
-|                           |                                |                       | Audio Content          |
-|                           |                                |                       | Charting               |
-|                           |                                |                       | Mermaid Rendering      |
+| **Stage 1**: Preparation  | **Stage 2**: Transclusion |  **Stage 3**: Rendering    |
+| -------------             | -------------             |  ---------------           |
+| Text Replacement          | Block Transclusion        |  Table Rendering           |
+| FM Interpolation          | Frontmatter Transclusion  |  YouTube Embedding         |
+| Cleaning                  | Code Block Transclusion   |  Popover                   |
+| Normalization             |                           |  List Expansion            |
+|                           | ▎AI: Prompt Expansion     |  Smart Image               |
+|                           | ▎AI: Summarization        |  Image Rendering           |
+|                           | ▎AI: Consolidation        |  Disclosure Blocks         |
+|                           | ▎AI: Normalization        |  Block Columns             |
+|                           |                           |  Audio Content             |
+|                           |                           |  Charting                  |
+|                           |                           |  Mermaid Rendering         |
 
 
 ## Variance by Output Target
