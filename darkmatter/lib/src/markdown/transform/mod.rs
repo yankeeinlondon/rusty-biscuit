@@ -31,16 +31,22 @@ mod types;
 
 pub mod interpolation;
 pub mod replacement;
+pub mod transclusion;
 
 pub use state::{EffectiveState, EffectiveStateBuilder};
+pub use transclusion::TransclusionError;
 pub use types::{
-    Stage1Stages, TransformContext, TransformOptions, TransformReport, TransformWarning,
+    Stage1Stages, Stage2Stages, TransclusionOptions, TransformContext, TransformOptions,
+    TransformReport, TransformSource, TransformWarning,
 };
 
+use super::Markdown;
 use super::cleanup;
 use super::normalize::{self, NormalizationError};
 use super::types::{MarkdownError, MarkdownResult};
-use super::Markdown;
+use serde_json::{Map, Value};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 // Re-export HeadingLevel for tests
 #[cfg(test)]
@@ -119,66 +125,129 @@ impl Markdown {
         &mut self,
         options: TransformOptions,
     ) -> MarkdownResult<TransformReport> {
-        let mut report = TransformReport::new();
+        let mut runtime = transclusion::TransclusionRuntime::new(options.transclusion.max_depth);
+        self.run_transform_pipeline_internal(options, &mut runtime)
+    }
 
-        // Build effective state for replacement and interpolation
-        let _effective_state = EffectiveStateBuilder::new()
-            .with_frontmatter(self.frontmatter().as_map().clone())
-            .with_external_state(options.external_state.clone().unwrap_or_default())
-            .with_context(options.context().clone())
-            .build();
+    /// Internal recursive pipeline runner shared by root and child documents.
+    pub(crate) fn run_transform_pipeline_internal(
+        &mut self,
+        options: TransformOptions,
+        runtime: &mut transclusion::TransclusionRuntime,
+    ) -> MarkdownResult<TransformReport> {
+        let source_id = match &options.transclusion.source {
+            TransformSource::Unknown => None,
+            TransformSource::File(path) => Some(
+                std::fs::canonicalize(path)
+                    .unwrap_or_else(|_| path.clone())
+                    .to_string_lossy()
+                    .to_string(),
+            ),
+            TransformSource::Url(url) => Some(url.to_string()),
+        };
 
-        // Stage 1: Text Replacement
-        if options.stages.replacement {
-            let replacements = self.run_replacement_stage(&_effective_state, &options);
-            report.replacements_applied = replacements;
+        if let Some(id) = source_id.clone() {
+            runtime.enter(id)?;
         }
 
-        // Stage 2: Interpolation
-        if options.stages.interpolation {
-            let interpolations = self.run_interpolation_stage(&_effective_state, &options);
-            report.interpolations_applied = interpolations;
-        }
+        let result = (|| {
+            let mut report = TransformReport::new();
 
-        // Stage 3: Cleanup
-        if options.stages.cleanup {
-            let original_content = self.content.clone();
-            self.content = cleanup::cleanup_content(&self.content);
-            report.cleanup_changed = self.content != original_content;
-        }
+            // Build effective state for replacement/interpolation and condition checks.
+            let effective_state = EffectiveStateBuilder::new()
+                .with_frontmatter(self.frontmatter().as_map().clone())
+                .with_external_state(
+                    options
+                        .external_state
+                        .clone()
+                        .unwrap_or(Value::Object(Map::new())),
+                )
+                .with_merge_strategy(super::MergeStrategy::PreferDocument)
+                .with_context(options.context().clone())
+                .build();
 
-        // Stage 4: Normalization
-        if options.stages.normalization {
-            match self.run_normalization_stage() {
-                Ok(norm_report) => {
-                    if norm_report.has_changes() {
-                        report.normalization_report = Some(norm_report);
+            // Stage 1: Text Replacement
+            if options.stages.replacement {
+                let replacements = self.run_replacement_stage(&effective_state, &options);
+                report.replacements_applied = replacements;
+            }
+
+            // Stage 1: Interpolation
+            if options.stages.interpolation {
+                let interpolations = self.run_interpolation_stage(&effective_state, &options);
+                report.interpolations_applied = interpolations;
+            }
+
+            // Stage 1: Cleanup
+            if options.stages.cleanup {
+                let original_content = self.content.clone();
+                self.content = cleanup::cleanup_content(&self.content);
+                report.cleanup_changed = self.content != original_content;
+            }
+
+            // Stage 1: Normalization
+            if options.stages.normalization {
+                match self.run_normalization_stage() {
+                    Ok(norm_report) => {
+                        if norm_report.has_changes() {
+                            report.normalization_report = Some(norm_report);
+                        }
+                    }
+                    Err(NormalizationError::LevelOverflow { .. }) if !options.fail_fast => {
+                        report.add_warning(TransformWarning::new(
+                            "normalization",
+                            "Skipped normalization: would overflow H6",
+                        ));
+                    }
+                    Err(e) => {
+                        return Err(MarkdownError::Transform(format!(
+                            "Normalization failed: {}",
+                            e
+                        )));
                     }
                 }
-                Err(NormalizationError::LevelOverflow { .. }) if !options.fail_fast => {
-                    // Add warning instead of failing
-                    report.add_warning(TransformWarning::new(
-                        "normalization",
-                        "Skipped normalization: would overflow H6",
-                    ));
-                }
-                Err(e) => {
-                    return Err(MarkdownError::Transform(format!(
-                        "Normalization failed: {}",
-                        e
-                    )));
-                }
             }
+
+            // Stage 2: block transclusion directives.
+            if options.stage2.block_transclusion {
+                self.run_block_transclusion_stage(
+                    &effective_state,
+                    &options,
+                    runtime,
+                    &mut report,
+                )?;
+            }
+
+            // Stage 2: frontmatter prologue/epilogue transclusion.
+            if options.stage2.fm_transclusion {
+                self.run_frontmatter_transclusion_stage(
+                    &effective_state,
+                    &options,
+                    runtime,
+                    &mut report,
+                )?;
+            }
+
+            report.max_transclusion_depth = runtime.deepest_seen;
+            Ok(report)
+        })();
+
+        if source_id.is_some() {
+            runtime.exit();
         }
 
-        Ok(report)
+        result
     }
 
     /// Runs the text replacement stage.
     ///
     /// Applies text replacements from the `replace` map in effective state.
     /// See [`replacement::apply_replacements`] for algorithm details.
-    fn run_replacement_stage(&mut self, state: &EffectiveState, _options: &TransformOptions) -> usize {
+    fn run_replacement_stage(
+        &mut self,
+        state: &EffectiveState,
+        _options: &TransformOptions,
+    ) -> usize {
         let (new_content, count) = replacement::apply_replacements(&self.content, state);
         if count > 0 {
             self.content = new_content;
@@ -195,7 +264,7 @@ impl Markdown {
         state: &EffectiveState,
         options: &TransformOptions,
     ) -> usize {
-        use interpolation::{parse, EvalResult, Evaluator, ExpressionFinder};
+        use interpolation::{EvalResult, Evaluator, ExpressionFinder, parse};
 
         let finder = ExpressionFinder::new(&self.content);
         let locations = finder.find_all();
@@ -257,13 +326,445 @@ impl Markdown {
         self.content = new_content;
         Ok(report)
     }
+
+    /// Runs Stage 2 block transclusion directives.
+    fn run_block_transclusion_stage(
+        &mut self,
+        state: &EffectiveState,
+        options: &TransformOptions,
+        runtime: &mut transclusion::TransclusionRuntime,
+        report: &mut TransformReport,
+    ) -> MarkdownResult<()> {
+        let directives = transclusion::parse_directives(&self.content)?;
+        if directives.is_empty() {
+            return Ok(());
+        }
+
+        let ignore_invalid = self.resolve_ignore_invalid(options);
+        let mut replacements: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+
+        for directive in directives {
+            for unknown in &directive.options.unknown_options {
+                report.add_warning(
+                    TransformWarning::new(
+                        "transclusion",
+                        format!(
+                            "Unknown option '{}' on ::{} directive; ignoring",
+                            unknown,
+                            directive.kind.as_str()
+                        ),
+                    )
+                    .at_line(directive.line),
+                );
+            }
+
+            if let Some(expr) = &directive.options.when_expr {
+                let should_include = transclusion::evaluate_condition(expr, state, directive.line)?;
+                if !should_include {
+                    report.transclusions_skipped += 1;
+                    replacements.push((directive.span.clone(), String::new()));
+                    continue;
+                }
+            }
+
+            let target = transclusion::normalize_reference_token(&directive.raw_target);
+            let resolved = match transclusion::resolve_target(
+                directive.kind,
+                &target,
+                &options.transclusion,
+                &options.transclusion.source,
+                directive.line,
+            ) {
+                Ok(resolved) => resolved,
+                Err(err) if ignore_invalid => {
+                    report.transclusions_skipped += 1;
+                    report.add_warning(
+                        TransformWarning::new("transclusion", err.to_string())
+                            .at_line(directive.line),
+                    );
+                    replacements.push((directive.span.clone(), String::new()));
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            };
+
+            let replacement = match (directive.kind, resolved) {
+                (
+                    transclusion::DirectiveKind::File,
+                    transclusion::ResolvedTarget::File { path, .. },
+                ) => self.render_markdown_transclusion(
+                    &path,
+                    Some((directive.span.start, directive.line)),
+                    &directive.options,
+                    state,
+                    options,
+                    runtime,
+                    report,
+                )?,
+                (
+                    transclusion::DirectiveKind::Code,
+                    transclusion::ResolvedTarget::File { path, .. },
+                ) => self.render_code_transclusion(&path, &directive.options, state, options)?,
+                (
+                    transclusion::DirectiveKind::Url,
+                    transclusion::ResolvedTarget::Url { url, .. },
+                ) => {
+                    if ignore_invalid {
+                        report.transclusions_skipped += 1;
+                        report.add_warning(
+                            TransformWarning::new(
+                                "transclusion",
+                                format!(
+                                    "Skipping URL transclusion '{}': remote execution disabled",
+                                    url
+                                ),
+                            )
+                            .at_line(directive.line),
+                        );
+                        String::new()
+                    } else {
+                        return Err(transclusion::TransclusionError::UrlExecutionDisabled {
+                            url: url.to_string(),
+                        }
+                        .into());
+                    }
+                }
+                (_, target) => {
+                    return Err(transclusion::TransclusionError::UnsupportedReferenceType {
+                        reference: target.id().to_string(),
+                    }
+                    .into());
+                }
+            };
+
+            report.transclusions_applied += 1;
+            replacements.push((directive.span.clone(), replacement));
+        }
+
+        if replacements.is_empty() {
+            return Ok(());
+        }
+
+        replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
+        let mut next = self.content.clone();
+        for (span, replacement) in replacements {
+            next.replace_range(span, &replacement);
+        }
+        self.content = next;
+        Ok(())
+    }
+
+    /// Runs Stage 2 frontmatter transclusion (`prologue`, `epilogue`).
+    fn run_frontmatter_transclusion_stage(
+        &mut self,
+        state: &EffectiveState,
+        options: &TransformOptions,
+        runtime: &mut transclusion::TransclusionRuntime,
+        report: &mut TransformReport,
+    ) -> MarkdownResult<()> {
+        let refs = transclusion::parse_frontmatter_refs(self.frontmatter().as_map())?;
+        if refs.prologue.is_empty() && refs.epilogue.is_empty() {
+            return Ok(());
+        }
+
+        let ignore_invalid = self.resolve_ignore_invalid(options);
+        let mut prologue_blocks = Vec::new();
+        let mut epilogue_blocks = Vec::new();
+
+        for reference in refs.prologue {
+            match self.render_frontmatter_reference(
+                &reference,
+                state,
+                options,
+                runtime,
+                report,
+                ignore_invalid,
+            )? {
+                Some(content) => {
+                    report.transclusions_applied += 1;
+                    prologue_blocks.push(content);
+                }
+                None => {
+                    report.transclusions_skipped += 1;
+                }
+            }
+        }
+
+        for reference in refs.epilogue {
+            match self.render_frontmatter_reference(
+                &reference,
+                state,
+                options,
+                runtime,
+                report,
+                ignore_invalid,
+            )? {
+                Some(content) => {
+                    report.transclusions_applied += 1;
+                    epilogue_blocks.push(content);
+                }
+                None => {
+                    report.transclusions_skipped += 1;
+                }
+            }
+        }
+
+        let mut sections = Vec::new();
+        sections.extend(prologue_blocks);
+        sections.push(self.content.clone());
+        sections.extend(epilogue_blocks);
+        self.content = sections
+            .into_iter()
+            .filter(|part| !part.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        Ok(())
+    }
+
+    fn render_frontmatter_reference(
+        &self,
+        reference: &str,
+        state: &EffectiveState,
+        options: &TransformOptions,
+        runtime: &mut transclusion::TransclusionRuntime,
+        report: &mut TransformReport,
+        ignore_invalid: bool,
+    ) -> MarkdownResult<Option<String>> {
+        let kind = if transclusion::is_url_like(reference) {
+            transclusion::DirectiveKind::Url
+        } else {
+            transclusion::DirectiveKind::File
+        };
+
+        let resolved = match transclusion::resolve_target(
+            kind,
+            reference,
+            &options.transclusion,
+            &options.transclusion.source,
+            0,
+        ) {
+            Ok(resolved) => resolved,
+            Err(err) if ignore_invalid => {
+                report.add_warning(TransformWarning::new("transclusion", err.to_string()));
+                return Ok(None);
+            }
+            Err(err) => return Err(err.into()),
+        };
+
+        match resolved {
+            transclusion::ResolvedTarget::File { path, .. } => self
+                .render_markdown_transclusion(
+                    &path,
+                    None,
+                    &transclusion::BlockOptions::default(),
+                    state,
+                    options,
+                    runtime,
+                    report,
+                )
+                .map(Some),
+            transclusion::ResolvedTarget::Url { url, .. } => {
+                if ignore_invalid {
+                    report.add_warning(TransformWarning::new(
+                        "transclusion",
+                        format!(
+                            "Skipping URL transclusion '{}': remote execution disabled",
+                            url
+                        ),
+                    ));
+                    Ok(None)
+                } else {
+                    Err(transclusion::TransclusionError::UrlExecutionDisabled {
+                        url: url.to_string(),
+                    }
+                    .into())
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_markdown_transclusion(
+        &self,
+        path: &Path,
+        insertion_context: Option<(usize, usize)>,
+        directive_options: &transclusion::BlockOptions,
+        state: &EffectiveState,
+        options: &TransformOptions,
+        runtime: &mut transclusion::TransclusionRuntime,
+        report: &mut TransformReport,
+    ) -> MarkdownResult<String> {
+        let inherited = self.build_child_external_state(state, directive_options);
+        let mut child_options = options.clone();
+        child_options.external_state = Some(inherited);
+        child_options.transclusion.source = TransformSource::File(path.to_path_buf());
+
+        let mut child = Markdown::try_from(path)?;
+        let child_report = child.run_transform_pipeline_internal(child_options, runtime)?;
+
+        report.transclusions_applied += child_report.transclusions_applied;
+        report.transclusions_skipped += child_report.transclusions_skipped;
+        for warning in child_report.warnings {
+            report.add_warning(warning);
+        }
+
+        let mut content = child.content().to_string();
+
+        match &directive_options.replace {
+            transclusion::ReplaceOption::ParentWins => {
+                if let Some(parent_map) = state.get_replace_map() {
+                    content = self.apply_replace_map(&content, parent_map, options);
+                }
+            }
+            transclusion::ReplaceOption::OneOff(one_off) => {
+                content = self.apply_replace_map(&content, one_off, options);
+            }
+            transclusion::ReplaceOption::InheritDefault => {}
+        }
+
+        if let Some((offset, line)) = insertion_context
+            && let Some(parent_level) =
+                transclusion::find_preceding_heading_level(&self.content, offset)
+        {
+            let target_level =
+                super::normalize::HeadingLevel::new((parent_level.as_u8() + 1).min(6))
+                    .unwrap_or(super::normalize::HeadingLevel::H6);
+            let (releveled, warnings) = transclusion::relevel_with_overflow(&content, target_level);
+            content = releveled;
+            for warning in warnings {
+                report.add_warning(warning.at_line(line));
+            }
+        }
+
+        Ok(self.apply_wrappers(content, directive_options))
+    }
+
+    fn render_code_transclusion(
+        &self,
+        path: &PathBuf,
+        directive_options: &transclusion::BlockOptions,
+        state: &EffectiveState,
+        options: &TransformOptions,
+    ) -> MarkdownResult<String> {
+        let raw = match std::fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
+                return Err(transclusion::TransclusionError::NonTextCodeSource {
+                    path: path.clone(),
+                }
+                .into());
+            }
+            Err(err) => return Err(err.into()),
+        };
+
+        let base_map = state.get_replace_map().cloned().unwrap_or_default();
+        let effective_map = match &directive_options.replace {
+            transclusion::ReplaceOption::InheritDefault => base_map,
+            transclusion::ReplaceOption::ParentWins => base_map,
+            transclusion::ReplaceOption::OneOff(one_off) => {
+                state::merge_replace_maps(Some(&base_map), Some(one_off))
+            }
+        };
+
+        let replaced = if effective_map.is_empty() {
+            raw
+        } else {
+            self.apply_replace_map(&raw, &effective_map, options)
+        };
+
+        let language =
+            transclusion::infer_language(path, &options.transclusion.code_fallback_language);
+        let fenced = transclusion::wrap_in_code_block(&replaced, &language);
+        let spaced = transclusion::ensure_vertical_spacing(&fenced);
+        Ok(self.apply_wrappers(spaced, directive_options))
+    }
+
+    fn apply_wrappers(
+        &self,
+        mut content: String,
+        directive_options: &transclusion::BlockOptions,
+    ) -> String {
+        if let Some(quotation) = &directive_options.quotation {
+            let attribution = if quotation.is_empty() {
+                None
+            } else {
+                Some(quotation.as_str())
+            };
+            content = transclusion::wrap_quotation(&content, attribution);
+        }
+
+        if let Some(summary) = &directive_options.disclosure {
+            content = transclusion::wrap_disclosure(&content, summary);
+        }
+
+        content
+    }
+
+    fn apply_replace_map(
+        &self,
+        content: &str,
+        map: &Map<String, Value>,
+        options: &TransformOptions,
+    ) -> String {
+        let mut frontmatter = HashMap::new();
+        frontmatter.insert("replace".to_string(), Value::Object(map.clone()));
+
+        let state = EffectiveStateBuilder::new()
+            .with_frontmatter(frontmatter)
+            .with_context(options.context().clone())
+            .build();
+        let (replaced, _) = replacement::apply_replacements(content, &state);
+        replaced
+    }
+
+    fn build_child_external_state(
+        &self,
+        state: &EffectiveState,
+        directive_options: &transclusion::BlockOptions,
+    ) -> Value {
+        let mut inherited: Map<String, Value> = state.data().clone().into_iter().collect();
+
+        if let transclusion::ReplaceOption::OneOff(one_off) = &directive_options.replace {
+            let current_replace = inherited.get("replace").and_then(Value::as_object);
+            let merged = state::merge_replace_maps(current_replace, Some(one_off));
+            inherited.insert("replace".to_string(), Value::Object(merged));
+        }
+
+        Value::Object(inherited)
+    }
+
+    fn resolve_ignore_invalid(&self, options: &TransformOptions) -> bool {
+        if let Some(value) = options.transclusion.ignore_invalid {
+            return value;
+        }
+
+        if let Ok(Some(value)) = self.fm_get::<bool>("ignore_invalid") {
+            return value;
+        }
+
+        options
+            .context()
+            .env
+            .get("IGNORE_INVALID")
+            .and_then(|raw| parse_bool(raw))
+            .unwrap_or(false)
+    }
+}
+
+fn parse_bool(raw: &str) -> Option<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     #[allow(unused_imports)]
     use super::HeadingLevel;
+    use super::*;
 
     #[test]
     fn test_transform_returns_unchanged_document() {
@@ -443,8 +944,8 @@ mod tests {
         let md: Markdown = content.into();
 
         // External state should merge with frontmatter
-        let options = TransformOptions::new()
-            .with_external_state(serde_json::json!({"external": "data"}));
+        let options =
+            TransformOptions::new().with_external_state(serde_json::json!({"external": "data"}));
 
         let result = md.transform_with(options);
         assert!(result.is_ok());
@@ -556,8 +1057,8 @@ mod tests {
     }
 
     #[test]
-    fn test_replacement_stage_external_overrides_frontmatter() {
-        // External state replace map should merge/override frontmatter
+    fn test_replacement_stage_frontmatter_overrides_external_with_deep_merge() {
+        // External state replace map is merged as defaults; frontmatter wins on conflicts.
         let content = "---\nreplace:\n  foo: from_fm\n  baz: qux\n---\nfoo baz";
         let md: Markdown = content.into();
 
@@ -569,10 +1070,8 @@ mod tests {
 
         let (transformed, report) = md.transform_with(options).unwrap();
 
-        // External wins on "foo", but we lose "baz" because replace is replaced wholesale
-        // This is the correct behavior based on PreferExternal merge strategy
-        assert!(transformed.content().contains("from_external"));
-        assert_eq!(report.replacements_applied, 1);
+        assert_eq!(transformed.content(), "from_fm qux");
+        assert_eq!(report.replacements_applied, 2);
     }
 
     #[test]
@@ -807,7 +1306,7 @@ mod tests {
     }
 
     #[test]
-    fn test_interpolation_external_overrides_frontmatter() {
+    fn test_interpolation_frontmatter_overrides_external() {
         let content = "---\nname: Frontmatter\n---\n# Hello {{ name }}!";
         let md: Markdown = content.into();
 
@@ -817,8 +1316,8 @@ mod tests {
 
         let (transformed, report) = md.transform_with(options).unwrap();
 
-        // External state wins
-        assert_eq!(transformed.content(), "# Hello External!");
+        // Frontmatter wins on conflict
+        assert_eq!(transformed.content(), "# Hello Frontmatter!");
         assert_eq!(report.interpolations_applied, 1);
     }
 
@@ -974,5 +1473,161 @@ Rounded: {{ round(pi) }}"#;
         assert!(transformed.content().contains("Number: 42"));
         assert!(transformed.content().contains("Rounded: 3"));
         assert_eq!(report.interpolations_applied, 3);
+    }
+
+    #[test]
+    fn test_stage2_file_transclusion_relevels_to_parent_heading() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(&root, "## Parent\n\n::file ./child.md").unwrap();
+        std::fs::write(&child, "# Child\n\nBody").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert!(transformed.content().contains("### Child"));
+        assert!(transformed.content().contains("Body"));
+        assert_eq!(report.transclusions_applied, 1);
+    }
+
+    #[test]
+    fn test_stage2_nested_transclusion_counts_recursive_includes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let a = dir.path().join("a.md");
+        let b = dir.path().join("b.md");
+
+        std::fs::write(&root, "::file ./a.md").unwrap();
+        std::fs::write(&a, "::file ./b.md").unwrap();
+        std::fs::write(&b, "# Leaf").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert!(transformed.content().contains("# Leaf"));
+        assert_eq!(report.transclusions_applied, 2);
+        assert!(report.max_transclusion_depth >= 2);
+    }
+
+    #[test]
+    fn test_stage2_cycle_detection_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.md");
+        let b = dir.path().join("b.md");
+
+        std::fs::write(&a, "::file ./b.md").unwrap();
+        std::fs::write(&b, "::file ./a.md").unwrap();
+
+        let md = Markdown::try_from(a.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(a);
+        let err = md.transform_with(options).unwrap_err();
+
+        assert!(matches!(
+            err,
+            MarkdownError::Transclusion(transclusion::TransclusionError::CycleDetected { .. })
+        ));
+    }
+
+    #[test]
+    fn test_stage2_code_transclusion_wraps_fenced_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let code = dir.path().join("main.rs");
+
+        std::fs::write(&root, "## Code\n\n::code ./main.rs").unwrap();
+        std::fs::write(&code, "fn main() {\n    println!(\"hi\");\n}\n").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert!(transformed.content().contains("```rs"));
+        assert!(transformed.content().contains("fn main()"));
+        assert_eq!(report.transclusions_applied, 1);
+    }
+
+    #[test]
+    fn test_stage2_when_false_skips_directive() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(
+            &root,
+            "---\nenabled: false\n---\n::file ./child.md when=\"enabled\"",
+        )
+        .unwrap();
+        std::fs::write(&child, "# Child").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert!(!transformed.content().contains("Child"));
+        assert_eq!(report.transclusions_skipped, 1);
+    }
+
+    #[test]
+    fn test_stage2_frontmatter_prologue_epilogue() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let intro = dir.path().join("intro.md");
+        let outro = dir.path().join("outro.md");
+
+        std::fs::write(
+            &root,
+            "---\nprologue: ./intro.md\nepilogue: [\"./outro.md\"]\n---\nBody",
+        )
+        .unwrap();
+        std::fs::write(&intro, "Intro").unwrap();
+        std::fs::write(&outro, "Outro").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert!(transformed.content().starts_with("Intro"));
+        assert!(transformed.content().contains("Body"));
+        assert!(transformed.content().ends_with("Outro"));
+        assert_eq!(report.transclusions_applied, 2);
+    }
+
+    #[test]
+    fn test_stage2_missing_source_context_for_relative_path() {
+        let md: Markdown = "::file ./child.md".into();
+        let err = md.transform().unwrap_err();
+        assert!(matches!(
+            err,
+            MarkdownError::Transclusion(
+                transclusion::TransclusionError::MissingSourceContext { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn test_stage2_h6_overflow_converts_to_bold_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(&root, "###### Root\n\n::file ./child.md").unwrap();
+        std::fs::write(&child, "## Child\n\n### Deep").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert!(transformed.content().contains("###### Child"));
+        assert!(transformed.content().contains("**Deep**"));
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.message.contains("Heading overflow"))
+        );
     }
 }

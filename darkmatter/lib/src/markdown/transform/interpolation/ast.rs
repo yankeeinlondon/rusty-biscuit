@@ -8,9 +8,10 @@
 //!
 //! Precedence from highest to lowest:
 //! 1. **Function calls** - `length(x)`, `number(x, 0)`
-//! 2. **Comparison** - `==`, `!=`, `>`, `>=`, `<`
-//! 3. **Fallback** - `|`
-//! 4. **Ternary** - `? :`
+//! 2. **Unary NOT** - `!x`
+//! 3. **Comparison** - `==`, `!=`, `>`, `>=`, `<`
+//! 4. **Fallback** - `|`
+//! 5. **Ternary** - `? :`
 //!
 //! ## Examples
 //!
@@ -49,6 +50,9 @@ pub enum Expr {
 
     /// Number literal: `42`, `3.14`, `-1`.
     NumberLiteral(f64),
+
+    /// Unary not expression: `!expr`.
+    UnaryNot(Box<Expr>),
 
     /// Fallback expression: `expr | fallback`.
     ///
@@ -103,6 +107,7 @@ impl fmt::Display for Expr {
                     write!(f, "{}", n)
                 }
             }
+            Expr::UnaryNot(expr) => write!(f, "!{}", expr),
             Expr::Fallback { primary, fallback } => {
                 write!(f, "{} | {}", primary, fallback)
             }
@@ -165,6 +170,12 @@ mod tests {
             fallback: Box::new(Expr::StringLiteral("default".to_string())),
         };
         assert_eq!(expr.to_string(), "foo | \"default\"");
+    }
+
+    #[test]
+    fn display_unary_not() {
+        let expr = Expr::UnaryNot(Box::new(Expr::Variable("enabled".to_string())));
+        assert_eq!(expr.to_string(), "!enabled");
     }
 
     #[test]

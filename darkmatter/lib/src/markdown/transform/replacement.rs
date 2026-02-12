@@ -164,10 +164,7 @@ fn scan_and_replace(content: &str, rules: &[ReplacementRule]) -> (String, usize)
     let mut pos = 0;
 
     while pos < content_len {
-        let remaining = &content[content_chars[..pos]
-            .iter()
-            .collect::<String>()
-            .len()..];
+        let remaining = &content[content_chars[..pos].iter().collect::<String>().len()..];
 
         // Try to match rules in order (longest first due to sorting)
         let matched = rules.iter().find(|rule| remaining.starts_with(&rule.key));

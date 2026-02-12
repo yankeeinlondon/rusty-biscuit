@@ -7,7 +7,8 @@
 //! expression     = ternary
 //! ternary        = fallback ("?" fallback ":" fallback)?
 //! fallback       = comparison ("|" comparison)*
-//! comparison     = primary (comp_op primary)?
+//! comparison     = unary (comp_op unary)?
+//! unary          = "!" unary | primary
 //! primary        = literal | variable | function_call | "(" expression ")"
 //! function_call  = variable "(" args? ")"
 //! args           = expression ("," expression)*
@@ -18,9 +19,10 @@
 //!
 //! Precedence from highest to lowest:
 //! 1. **Function calls** - `length(x)`, `number(x, 0)`
-//! 2. **Comparison** - `==`, `!=`, `>`, `>=`, `<`
-//! 3. **Fallback** - `|`
-//! 4. **Ternary** - `? :`
+//! 2. **Unary NOT** - `!x`
+//! 3. **Comparison** - `==`, `!=`, `>`, `>=`, `<`
+//! 4. **Fallback** - `|`
+//! 5. **Ternary** - `? :`
 //!
 //! ## Examples
 //!
@@ -40,7 +42,7 @@
 //! assert!(matches!(expr, Expr::Ternary { .. }));
 //! ```
 
-use super::{ast::Expr, Lexer, LexerError, Token};
+use super::{Lexer, LexerError, Token, ast::Expr};
 use std::fmt;
 
 #[cfg(test)]
@@ -205,13 +207,13 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    /// Parses a comparison expression: `primary (comp_op primary)?`
+    /// Parses a comparison expression: `unary (comp_op unary)?`
     fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
-        let left = self.parse_primary()?;
+        let left = self.parse_unary()?;
 
         if let Token::CompOp(op) = self.current {
             self.advance()?; // consume operator
-            let right = self.parse_primary()?;
+            let right = self.parse_unary()?;
             return Ok(Expr::Comparison {
                 left: Box::new(left),
                 op,
@@ -220,6 +222,16 @@ impl<'a> Parser<'a> {
         }
 
         Ok(left)
+    }
+
+    /// Parses unary expressions: `"!" unary | primary`.
+    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.current, Token::Bang) {
+            self.advance()?;
+            let expr = self.parse_unary()?;
+            return Ok(Expr::UnaryNot(Box::new(expr)));
+        }
+        self.parse_primary()
     }
 
     /// Parses a primary expression: literal, variable, function call, or parenthesized expression.
@@ -333,6 +345,12 @@ mod tests {
         }
 
         #[test]
+        fn parses_unary_not() {
+            let expr = parse("!missing").unwrap();
+            assert!(matches!(expr, Expr::UnaryNot(_)));
+        }
+
+        #[test]
         fn parses_string_literal() {
             let expr = parse(r#""hello world""#).unwrap();
             assert!(matches!(expr, Expr::StringLiteral(s) if s == "hello world"));
@@ -422,9 +440,7 @@ mod tests {
             let expr = parse(r#"env.FAVORITE_COLOR | "unknown""#).unwrap();
             match expr {
                 Expr::Fallback { primary, fallback } => {
-                    assert!(
-                        matches!(*primary, Expr::Variable(ref n) if n == "env.FAVORITE_COLOR")
-                    );
+                    assert!(matches!(*primary, Expr::Variable(ref n) if n == "env.FAVORITE_COLOR"));
                     assert!(matches!(*fallback, Expr::StringLiteral(ref s) if s == "unknown"));
                 }
                 _ => panic!("Expected Fallback"),
@@ -584,9 +600,7 @@ mod tests {
                 } => {
                     assert!(matches!(*condition, Expr::Comparison { .. }));
                     assert!(matches!(*then_branch, Expr::StringLiteral(ref s) if s == "equal"));
-                    assert!(
-                        matches!(*else_branch, Expr::StringLiteral(ref s) if s == "different")
-                    );
+                    assert!(matches!(*else_branch, Expr::StringLiteral(ref s) if s == "different"));
                 }
                 _ => panic!("Expected Ternary"),
             }
@@ -609,9 +623,7 @@ mod tests {
                         }
                         _ => panic!("Expected Comparison in condition"),
                     }
-                    assert!(
-                        matches!(*then_branch, Expr::StringLiteral(ref s) if s == "has items")
-                    );
+                    assert!(matches!(*then_branch, Expr::StringLiteral(ref s) if s == "has items"));
                     assert!(matches!(*else_branch, Expr::StringLiteral(ref s) if s == "empty"));
                 }
                 _ => panic!("Expected Ternary"),
@@ -860,7 +872,10 @@ mod tests {
         #[test]
         fn error_unexpected() {
             let err = ParseError::unexpected("expression", &Token::Pipe, 3);
-            assert_eq!(err.to_string(), "Expected expression, found '|' at position 3");
+            assert_eq!(
+                err.to_string(),
+                "Expected expression, found '|' at position 3"
+            );
         }
     }
 

@@ -12,6 +12,7 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
 - **Visual diff utilities**: Reusable string/file diff rendering (no Markdown dependency)
 - **Table of Contents**: Hierarchical extraction with content hashing
 - **Heading normalization**: Fix hierarchy violations, relevel documents
+- **Transclusion (Stage 2)**: Recursive `::file`/`::code` and frontmatter `prologue`/`epilogue`
 - **Image rendering**: Inline images via biscuit-terminal (Kitty/iTerm2 protocols)
 
 ## Architecture
@@ -21,6 +22,7 @@ Darkmatter focuses on **markdown parsing and transformation**. Visual diff rende
 | Responsibility | Package |
 |----------------|---------|
 | Markdown parsing (CommonMark + GFM) | darkmatter-lib |
+| Transform pipeline (Stage 1 + Stage 2 transclusion) | darkmatter-lib |
 | Syntax highlighting | darkmatter-lib (syntect) |
 | Frontmatter extraction | darkmatter-lib |
 | Document comparison/normalization | darkmatter-lib |
@@ -139,6 +141,28 @@ let output = md.as_string();  // Includes frontmatter if present
 let mut md: Markdown = content.into();
 md.cleanup();  // Normalize spacing, align tables
 ```
+
+### Transform Pipeline (Stage 1 + Stage 2)
+
+```rust
+use darkmatter::markdown::transform::TransformOptions;
+
+let md = darkmatter::markdown::Markdown::try_from(std::path::Path::new("docs/root.md"))?;
+let options = TransformOptions::new()
+    .with_source_file("docs/root.md");
+
+let (transformed, report) = md.transform_with(options)?;
+println!("{}", report.summary());
+println!("{}", transformed.content());
+```
+
+Stage 2 includes:
+
+- `::file` markdown transclusion with recursive processing
+- `::code` code/text transclusion with fenced block generation
+- `when=\"...\"` conditions
+- `prologue` / `epilogue` frontmatter transclusion
+- cycle detection and depth limits
 
 ### Table of Contents
 

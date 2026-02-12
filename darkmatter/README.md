@@ -29,6 +29,7 @@ just -f darkmatter/justfile cli README.md
 - **Theme support**: 9 theme pairs with automatic light/dark detection
 - **Hyperlink rendering**: Clickable links in supported terminals via OSC 8
 - **Markdown cleanup**: Normalize formatting and heading levels
+- **Transclusion pipeline**: Stage 2 support for `::file`, `::code`, `prologue`, and `epilogue`
 - **Frontmatter operations**: Parse, extract, and manipulate YAML frontmatter
 - **Visual diff**: Colored inline diffs for strings and files
 - **Table of contents**: Extract document structure as tree or JSON
@@ -43,6 +44,16 @@ just -f darkmatter/justfile cli README.md
 | `render` | Hyperlink rendering (OSC 8 terminal links) |
 | `terminal` | ANSI color depth detection utilities |
 | `testing` | Test utilities for terminal output verification |
+
+## Transclusion Support
+
+Darkmatter's transform pipeline now includes Stage 2 transclusion:
+
+- Block directives: `::file ./doc.md`, `::code ./main.rs`
+- Frontmatter directives: `prologue`, `epilogue`
+- Recursive includes with cycle detection and max-depth limits
+- Conditional includes via `when=\"...\"`
+- Heading re-leveling for included markdown (with graceful H6 overflow handling)
 
 ## Common Commands
 

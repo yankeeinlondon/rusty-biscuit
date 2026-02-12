@@ -227,6 +227,9 @@ pub enum Token {
     /// A comparison operator.
     CompOp(ComparisonOp),
 
+    /// Unary logical not `!`.
+    Bang,
+
     /// End of input.
     Eof,
 }
@@ -244,6 +247,7 @@ impl fmt::Display for Token {
             Token::StringLiteral(s) => write!(f, "\"{}\"", s),
             Token::NumberLiteral(n) => write!(f, "{}", n),
             Token::CompOp(op) => write!(f, "{}", op),
+            Token::Bang => write!(f, "!"),
             Token::Eof => write!(f, "<EOF>"),
         }
     }
@@ -400,10 +404,7 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     Ok(Token::CompOp(ComparisonOp::NotEqual))
                 } else {
-                    Err(LexerError::new(
-                        "Expected '=' after '!' for inequality operator",
-                        start_pos,
-                    ))
+                    Ok(Token::Bang)
                 }
             }
             '>' => {
@@ -419,7 +420,9 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 Ok(Token::CompOp(ComparisonOp::LessThan))
             }
-            _ if ch.is_ascii_digit() || (ch == '-' && self.peek_char().is_some_and(|c| c.is_ascii_digit())) => {
+            _ if ch.is_ascii_digit()
+                || (ch == '-' && self.peek_char().is_some_and(|c| c.is_ascii_digit())) =>
+            {
                 self.read_number()
             }
             _ if is_identifier_start(ch) => self.read_variable(),
@@ -943,6 +946,16 @@ After code {{ end }}."#;
         }
 
         #[test]
+        fn tokenizes_unary_not() {
+            let mut lexer = Lexer::new("!enabled");
+            let tokens = lexer.tokenize_all().unwrap();
+
+            assert_eq!(tokens.len(), 3);
+            assert!(matches!(&tokens[0], Token::Bang));
+            assert!(matches!(&tokens[1], Token::Variable(v) if v == "enabled"));
+        }
+
+        #[test]
         fn tokenizes_greater_than() {
             let mut lexer = Lexer::new("a > b");
             let tokens = lexer.tokenize_all().unwrap();
@@ -1113,9 +1126,10 @@ After code {{ end }}."#;
             let mut lexer = Lexer::new("!foo");
             let result = lexer.tokenize_all();
 
-            assert!(result.is_err());
-            let err = result.unwrap_err();
-            assert!(err.message.contains("Expected '='"));
+            assert!(result.is_ok());
+            let tokens = result.unwrap();
+            assert!(matches!(&tokens[0], Token::Bang));
+            assert!(matches!(&tokens[1], Token::Variable(v) if v == "foo"));
         }
     }
 

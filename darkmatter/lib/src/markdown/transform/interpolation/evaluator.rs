@@ -66,9 +66,9 @@
 //! }
 //! ```
 
-use super::ast::Expr;
 use super::super::state::EffectiveState;
 use super::ComparisonOp;
+use super::ast::Expr;
 use serde_json::Value;
 
 /// Result of evaluating an expression.
@@ -241,6 +241,11 @@ impl<'a> Evaluator<'a> {
                 EvalResult::Value(s)
             }
 
+            Expr::UnaryNot(expr) => {
+                let v = self.eval_value(expr);
+                EvalResult::Value((!v.is_truthy()).to_string())
+            }
+
             Expr::Fallback { primary, fallback } => {
                 // Evaluate primary; if truthy, use it; otherwise evaluate fallback
                 let pv = self.eval_value(primary);
@@ -301,6 +306,8 @@ impl<'a> Evaluator<'a> {
 
             Expr::NumberLiteral(n) => EvalValue::Number(*n),
 
+            Expr::UnaryNot(expr) => EvalValue::Bool(!self.eval_value(expr).is_truthy()),
+
             Expr::Fallback { primary, fallback } => {
                 let pv = self.eval_value(primary);
                 if pv.is_truthy() {
@@ -348,10 +355,15 @@ impl<'a> Evaluator<'a> {
     /// - `number(value, default = 0)` - Converts to number
     /// - `round(value, default = 0)` - Rounds to nearest integer
     fn eval_function(&self, name: &str, args: &[Expr]) -> EvalResult {
-        match name {
+        let normalized = name.to_ascii_lowercase();
+        match normalized.as_str() {
             "length" => self.fn_length(args),
             "number" => self.fn_number(args),
             "round" => self.fn_round(args),
+            "haskey" | "has_key" => self.fn_has_key(args),
+            "contains" => self.fn_contains(args),
+            "and" => self.fn_and(args),
+            "or" => self.fn_or(args),
             _ => EvalResult::Error {
                 message: format!("Unknown function: {}", name),
                 original: format!("{}(...)", name),
@@ -473,10 +485,75 @@ impl<'a> Evaluator<'a> {
         let value = self.eval_value(&args[0]);
         let result = match value {
             EvalValue::Number(n) => n.round() as i64,
-            EvalValue::String(s) => s.parse::<f64>().map(|n| n.round() as i64).unwrap_or(default),
+            EvalValue::String(s) => s
+                .parse::<f64>()
+                .map(|n| n.round() as i64)
+                .unwrap_or(default),
             _ => default,
         };
 
+        EvalResult::Value(result.to_string())
+    }
+
+    /// Evaluates `HasKey(object, key)`.
+    fn fn_has_key(&self, args: &[Expr]) -> EvalResult {
+        if args.len() < 2 {
+            return EvalResult::Error {
+                message: "HasKey() requires 2 arguments".to_string(),
+                original: "HasKey()".to_string(),
+            };
+        }
+
+        let key = self.eval_value(&args[1]).as_string();
+        let found = match &args[0] {
+            Expr::Variable(path) => self
+                .state
+                .get(path)
+                .and_then(|v| v.as_object().map(|obj| obj.contains_key(&key)))
+                .unwrap_or(false),
+            _ => false,
+        };
+
+        EvalResult::Value(found.to_string())
+    }
+
+    /// Evaluates `Contains(collection, value)`.
+    fn fn_contains(&self, args: &[Expr]) -> EvalResult {
+        if args.len() < 2 {
+            return EvalResult::Error {
+                message: "Contains() requires 2 arguments".to_string(),
+                original: "Contains()".to_string(),
+            };
+        }
+
+        let needle = self.eval_value(&args[1]).as_string();
+        let found = match &args[0] {
+            Expr::Variable(path) => match self.state.get(path) {
+                Some(Value::Array(values)) => values
+                    .iter()
+                    .any(|v| EvalValue::from_json(v).as_string() == needle),
+                Some(Value::Object(values)) => values
+                    .values()
+                    .any(|v| EvalValue::from_json(v).as_string() == needle),
+                Some(Value::String(s)) => s.contains(&needle),
+                Some(v) => EvalValue::from_json(&v).as_string().contains(&needle),
+                None => false,
+            },
+            _ => self.eval_value(&args[0]).as_string().contains(&needle),
+        };
+
+        EvalResult::Value(found.to_string())
+    }
+
+    /// Evaluates `And(a, b, c...)`.
+    fn fn_and(&self, args: &[Expr]) -> EvalResult {
+        let result = args.iter().all(|arg| self.eval_value(arg).is_truthy());
+        EvalResult::Value(result.to_string())
+    }
+
+    /// Evaluates `Or(a, b, c...)`.
+    fn fn_or(&self, args: &[Expr]) -> EvalResult {
+        let result = args.iter().any(|arg| self.eval_value(arg).is_truthy());
         EvalResult::Value(result.to_string())
     }
 
@@ -498,24 +575,18 @@ impl<'a> Evaluator<'a> {
         match op {
             ComparisonOp::Equal => lv.as_string() == rv.as_string(),
             ComparisonOp::NotEqual => lv.as_string() != rv.as_string(),
-            ComparisonOp::GreaterThan => {
-                match (lv.as_number(), rv.as_number()) {
-                    (Some(l), Some(r)) => l > r,
-                    _ => false,
-                }
-            }
-            ComparisonOp::GreaterThanOrEqual => {
-                match (lv.as_number(), rv.as_number()) {
-                    (Some(l), Some(r)) => l >= r,
-                    _ => false,
-                }
-            }
-            ComparisonOp::LessThan => {
-                match (lv.as_number(), rv.as_number()) {
-                    (Some(l), Some(r)) => l < r,
-                    _ => false,
-                }
-            }
+            ComparisonOp::GreaterThan => match (lv.as_number(), rv.as_number()) {
+                (Some(l), Some(r)) => l > r,
+                _ => false,
+            },
+            ComparisonOp::GreaterThanOrEqual => match (lv.as_number(), rv.as_number()) {
+                (Some(l), Some(r)) => l >= r,
+                _ => false,
+            },
+            ComparisonOp::LessThan => match (lv.as_number(), rv.as_number()) {
+                (Some(l), Some(r)) => l < r,
+                _ => false,
+            },
         }
     }
 }
@@ -1437,7 +1508,10 @@ mod tests {
         #[test]
         fn string_number_to_number() {
             assert_eq!(EvalValue::String("42".to_string()).as_number(), Some(42.0));
-            assert_eq!(EvalValue::String("3.14".to_string()).as_number(), Some(3.14));
+            assert_eq!(
+                EvalValue::String("3.14".to_string()).as_number(),
+                Some(3.14)
+            );
             assert_eq!(EvalValue::String("-5".to_string()).as_number(), Some(-5.0));
         }
 
@@ -1911,6 +1985,52 @@ mod tests {
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "no items"),
+                _ => panic!("Expected Value"),
+            }
+        }
+    }
+
+    mod condition_helpers {
+        use super::*;
+
+        #[test]
+        fn unary_not_truthiness() {
+            let state = create_test_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse("!missing").unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(v) => assert_eq!(v, "true"),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        #[test]
+        fn has_key_function() {
+            let state = create_test_state(json!({"user": {"name": "Alice"}}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse(r#"HasKey(user, "name")"#).unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(v) => assert_eq!(v, "true"),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        #[test]
+        fn and_or_functions() {
+            let state = create_test_state(json!({"a": true, "b": false}));
+            let evaluator = Evaluator::new(&state);
+
+            let and_expr = parse("And(a, b)").unwrap();
+            let or_expr = parse("Or(a, b)").unwrap();
+
+            match evaluator.eval(&and_expr) {
+                EvalResult::Value(v) => assert_eq!(v, "false"),
+                _ => panic!("Expected Value"),
+            }
+            match evaluator.eval(&or_expr) {
+                EvalResult::Value(v) => assert_eq!(v, "true"),
                 _ => panic!("Expected Value"),
             }
         }

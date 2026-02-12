@@ -68,4 +68,4 @@ mod parser;
 pub use ast::Expr;
 pub use evaluator::{EvalResult, EvalValue, Evaluator};
 pub use lexer::{ComparisonOp, ExpressionFinder, ExpressionLocation, Lexer, LexerError, Token};
-pub use parser::{parse, ParseError, Parser};
+pub use parser::{ParseError, Parser, parse};

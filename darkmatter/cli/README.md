@@ -224,6 +224,8 @@ Or let the tool use `npx` to install temporarily (slower first run).
 
 For programmatic access, see the [darkmatter-lib](../lib/) library.
 
+Note: Stage 2 transclusion (`::file`, `::code`, `prologue`, `epilogue`) is currently available through the library transform API.
+
 ```rust
 use darkmatter::markdown::{Markdown, output::{TerminalOptions, write_terminal}};
 

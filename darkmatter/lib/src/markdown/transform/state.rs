@@ -8,6 +8,42 @@ use super::types::TransformContext;
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// Deeply merges two JSON values.
+///
+/// `overlay` wins for non-object conflicts. When both values are objects,
+/// keys are merged recursively.
+pub(crate) fn deep_merge(base: &Value, overlay: &Value) -> Value {
+    match (base, overlay) {
+        (Value::Object(base_obj), Value::Object(overlay_obj)) => {
+            let mut merged = base_obj.clone();
+            for (key, overlay_value) in overlay_obj {
+                let next = match merged.get(key) {
+                    Some(base_value) => deep_merge(base_value, overlay_value),
+                    None => overlay_value.clone(),
+                };
+                merged.insert(key.clone(), next);
+            }
+            Value::Object(merged)
+        }
+        _ => overlay.clone(),
+    }
+}
+
+/// Merges two `replace` maps with deep merge semantics.
+///
+/// Values from `overlay` take precedence on conflict.
+pub(crate) fn merge_replace_maps(
+    base: Option<&serde_json::Map<String, Value>>,
+    overlay: Option<&serde_json::Map<String, Value>>,
+) -> serde_json::Map<String, Value> {
+    let base = base.cloned().unwrap_or_default();
+    let overlay = overlay.cloned().unwrap_or_default();
+    match deep_merge(&Value::Object(base), &Value::Object(overlay)) {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    }
+}
+
 /// Resolved state available to replacement and interpolation stages.
 ///
 /// This struct holds the merged result of:
@@ -36,17 +72,19 @@ impl EffectiveState {
         external_state: Option<&Value>,
         context: TransformContext,
     ) -> Self {
-        let mut data = frontmatter.clone();
-
-        // Merge external state if present
-        if let Some(external) = external_state
-            && let Some(obj) = external.as_object()
-        {
-            for (key, value) in obj {
-                // PreferExternal: always overwrite
-                data.insert(key.clone(), value.clone());
+        let data = match external_state.and_then(Value::as_object) {
+            Some(external_obj) => {
+                let merged = deep_merge(
+                    &Value::Object(external_obj.clone()),
+                    &Value::Object(frontmatter.clone().into_iter().collect()),
+                );
+                match merged {
+                    Value::Object(obj) => obj.into_iter().collect(),
+                    _ => frontmatter.clone(),
+                }
             }
-        }
+            None => frontmatter.clone(),
+        };
 
         Self { data, context }
     }
@@ -210,28 +248,25 @@ impl EffectiveStateBuilder {
     pub fn build(self) -> EffectiveState {
         let context = self.context.unwrap_or_else(TransformContext::capture);
 
-        let mut data = self.frontmatter;
+        let frontmatter_value = Value::Object(self.frontmatter.clone().into_iter().collect());
+        let external_value = self
+            .external_state
+            .as_ref()
+            .and_then(Value::as_object)
+            .cloned()
+            .map(Value::Object)
+            .unwrap_or(Value::Object(serde_json::Map::new()));
 
-        // Merge external state based on strategy
-        if let Some(external) = &self.external_state
-            && let Some(obj) = external.as_object()
-        {
-            for (key, value) in obj {
-                match self.merge_strategy {
-                    MergeStrategy::PreferExternal => {
-                        data.insert(key.clone(), value.clone());
-                    }
-                    MergeStrategy::PreferDocument => {
-                        data.entry(key.clone()).or_insert_with(|| value.clone());
-                    }
-                    MergeStrategy::ErrorOnConflict => {
-                        // For building state, we use PreferExternal on conflict
-                        // (error handling is at a higher level)
-                        data.insert(key.clone(), value.clone());
-                    }
-                }
-            }
-        }
+        let merged = match self.merge_strategy {
+            MergeStrategy::PreferExternal => deep_merge(&frontmatter_value, &external_value),
+            MergeStrategy::PreferDocument => deep_merge(&external_value, &frontmatter_value),
+            MergeStrategy::ErrorOnConflict => deep_merge(&frontmatter_value, &external_value),
+        };
+
+        let data: HashMap<String, Value> = match merged {
+            Value::Object(obj) => obj.into_iter().collect(),
+            _ => self.frontmatter,
+        };
 
         EffectiveState { data, context }
     }
@@ -311,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn test_effective_state_external_overrides() {
+    fn test_effective_state_frontmatter_overrides_external() {
         let mut fm = HashMap::new();
         fm.insert("title".to_string(), json!("Original"));
         fm.insert("author".to_string(), json!("Alice"));
@@ -323,8 +358,8 @@ mod tests {
 
         let state = EffectiveState::new(&fm, Some(&external), test_context());
 
-        // External wins on conflict
-        assert_eq!(state.get("title"), Some(json!("Overridden")));
+        // Frontmatter wins on conflict (external acts as defaults)
+        assert_eq!(state.get("title"), Some(json!("Original")));
         // Original preserved when no conflict
         assert_eq!(state.get("author"), Some(json!("Alice")));
         // New keys added
@@ -410,5 +445,58 @@ mod tests {
 
         // External wins with PreferExternal
         assert_eq!(state.get("key"), Some(json!("external")));
+    }
+
+    #[test]
+    fn test_deep_merge_nested_objects() {
+        let base = json!({
+            "a": 1,
+            "nested": {
+                "left": "x",
+                "shared": {
+                    "base": true
+                }
+            }
+        });
+        let overlay = json!({
+            "nested": {
+                "right": "y",
+                "shared": {
+                    "overlay": true
+                }
+            },
+            "b": 2
+        });
+
+        let merged = deep_merge(&base, &overlay);
+        assert_eq!(merged["a"], json!(1));
+        assert_eq!(merged["b"], json!(2));
+        assert_eq!(merged["nested"]["left"], json!("x"));
+        assert_eq!(merged["nested"]["right"], json!("y"));
+        assert_eq!(merged["nested"]["shared"]["base"], json!(true));
+        assert_eq!(merged["nested"]["shared"]["overlay"], json!(true));
+    }
+
+    #[test]
+    fn test_merge_replace_maps_child_wins() {
+        let parent = serde_json::json!({
+            "A": "parent",
+            "nested": {
+                "left": "x"
+            }
+        });
+        let child = serde_json::json!({
+            "A": "child",
+            "nested": {
+                "right": "y"
+            }
+        });
+        let parent_map = parent.as_object().unwrap();
+        let child_map = child.as_object().unwrap();
+
+        let merged = merge_replace_maps(Some(parent_map), Some(child_map));
+        assert_eq!(merged.get("A"), Some(&json!("child")));
+        assert_eq!(merged["nested"]["left"], json!("x"));
+        assert_eq!(merged["nested"]["right"], json!("y"));
     }
 }

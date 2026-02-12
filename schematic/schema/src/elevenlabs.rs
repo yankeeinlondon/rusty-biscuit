@@ -73,9 +73,9 @@
 //!     Ok(())
 //! }
 //! ```
-use crate::shared::{RequestParts, SchematicError};
-pub use schematic_definitions::elevenlabs::*;
 use serde::{Deserialize, Serialize};
+pub use schematic_definitions::elevenlabs::*;
+use crate::shared::{RequestParts, SchematicError};
 /// Request for `CreateSpeech` endpoint.
 ///
 /// ## Example
@@ -125,7 +125,7 @@ impl CreateSpeechRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -184,7 +184,7 @@ impl StreamSpeechRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -243,7 +243,7 @@ impl CreateSpeechWithTimestampsRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -297,15 +297,14 @@ impl StreamSpeechWithTimestampsRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/v1/text-to-speech/{}/stream/with-timestamps",
-            self.voice_id
+            "/v1/text-to-speech/{}/stream/with-timestamps", self.voice_id
         );
         Ok((
             "POST",
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -367,9 +366,7 @@ pub struct GetVoiceRequest {
 impl GetVoiceRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(voice_id: impl Into<String>) -> Self {
-        Self {
-            voice_id: voice_id.into(),
-        }
+        Self { voice_id: voice_id.into() }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -423,9 +420,7 @@ pub struct DeleteVoiceRequest {
 impl DeleteVoiceRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(voice_id: impl Into<String>) -> Self {
-        Self {
-            voice_id: voice_id.into(),
-        }
+        Self { voice_id: voice_id.into() }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -514,9 +509,7 @@ pub struct GetVoiceSettingsRequest {
 impl GetVoiceSettingsRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(voice_id: impl Into<String>) -> Self {
-        Self {
-            voice_id: voice_id.into(),
-        }
+        Self { voice_id: voice_id.into() }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -602,7 +595,7 @@ impl UpdateVoiceSettingsRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -652,8 +645,7 @@ impl GetVoiceSampleAudioRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/v1/voices/{}/samples/{}/audio",
-            self.voice_id, self.sample_id
+            "/v1/voices/{}/samples/{}/audio", self.voice_id, self.sample_id
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -726,9 +718,7 @@ pub struct AddVoiceSampleRequest {
 impl AddVoiceSampleRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(voice_id: impl Into<String>) -> Self {
-        Self {
-            voice_id: voice_id.into(),
-        }
+        Self { voice_id: voice_id.into() }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -856,7 +846,7 @@ impl AddSharedVoiceRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -910,7 +900,7 @@ impl CreatePvcVoiceRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -974,7 +964,7 @@ impl UpdatePvcVoiceRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -1033,7 +1023,7 @@ impl TrainPvcVoiceRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -1087,7 +1077,7 @@ impl CreateSoundEffectRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -1277,9 +1267,7 @@ impl From<&str> for GetHistoryItemRequest {
 }
 impl From<String> for GetHistoryItemRequest {
     fn from(param: String) -> Self {
-        Self {
-            history_item_id: param,
-        }
+        Self { history_item_id: param }
     }
 }
 impl crate::shared::EndpointSpec for GetHistoryItemRequest {
@@ -1335,9 +1323,7 @@ impl From<&str> for DeleteHistoryItemRequest {
 }
 impl From<String> for DeleteHistoryItemRequest {
     fn from(param: String) -> Self {
-        Self {
-            history_item_id: param,
-        }
+        Self { history_item_id: param }
     }
 }
 impl crate::shared::EndpointSpec for DeleteHistoryItemRequest {
@@ -1393,9 +1379,7 @@ impl From<&str> for GetHistoryItemAudioRequest {
 }
 impl From<String> for GetHistoryItemAudioRequest {
     fn from(param: String) -> Self {
-        Self {
-            history_item_id: param,
-        }
+        Self { history_item_id: param }
     }
 }
 impl crate::shared::EndpointSpec for GetHistoryItemAudioRequest {
@@ -1446,7 +1430,7 @@ impl DownloadHistoryItemsRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -1671,7 +1655,7 @@ impl ShareResourceRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -1730,7 +1714,7 @@ impl UnshareResourceRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -1784,15 +1768,14 @@ impl CopyResourceToWorkspaceRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/v1/workspace/resources/{}/copy-to-workspace",
-            self.resource_id
+            "/v1/workspace/resources/{}/copy-to-workspace", self.resource_id
         );
         Ok((
             "POST",
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -1874,8 +1857,7 @@ impl ListServiceAccountApiKeysRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/v1/service-accounts/{}/api-keys",
-            self.service_account_user_id
+            "/v1/service-accounts/{}/api-keys", self.service_account_user_id
         );
         Ok(("GET", path, None, vec![]))
     }
@@ -1920,7 +1902,10 @@ pub struct CreateApiKeyRequest {
 }
 impl CreateApiKeyRequest {
     /// Creates a new request with the required path parameters and body.
-    pub fn new(service_account_user_id: impl Into<String>, body: CreateApiKeyBody) -> Self {
+    pub fn new(
+        service_account_user_id: impl Into<String>,
+        body: CreateApiKeyBody,
+    ) -> Self {
         Self {
             service_account_user_id: service_account_user_id.into(),
             body,
@@ -1942,15 +1927,14 @@ impl CreateApiKeyRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/v1/service-accounts/{}/api-keys",
-            self.service_account_user_id
+            "/v1/service-accounts/{}/api-keys", self.service_account_user_id
         );
         Ok((
             "POST",
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -2011,15 +1995,15 @@ impl UpdateApiKeyRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/v1/service-accounts/{}/api-keys/{}",
-            self.service_account_user_id, self.api_key_id
+            "/v1/service-accounts/{}/api-keys/{}", self.service_account_user_id, self
+            .api_key_id
         );
         Ok((
             "PATCH",
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -2047,7 +2031,10 @@ pub struct DeleteApiKeyRequest {
 }
 impl DeleteApiKeyRequest {
     /// Creates a new request with the required path parameters.
-    pub fn new(service_account_user_id: impl Into<String>, api_key_id: impl Into<String>) -> Self {
+    pub fn new(
+        service_account_user_id: impl Into<String>,
+        api_key_id: impl Into<String>,
+    ) -> Self {
         Self {
             service_account_user_id: service_account_user_id.into(),
             api_key_id: api_key_id.into(),
@@ -2069,8 +2056,8 @@ impl DeleteApiKeyRequest {
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = format!(
-            "/v1/service-accounts/{}/api-keys/{}",
-            self.service_account_user_id, self.api_key_id
+            "/v1/service-accounts/{}/api-keys/{}", self.service_account_user_id, self
+            .api_key_id
         );
         Ok(("DELETE", path, None, vec![]))
     }
@@ -2158,7 +2145,7 @@ impl CreateWebhookRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -2222,7 +2209,7 @@ impl UpdateWebhookRequest {
             path,
             Some(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -2450,8 +2437,12 @@ impl ElevenLabsRequest {
             Self::StreamSpeechWithTimestamps(_) => {
                 <StreamSpeechWithTimestampsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListVoices(_) => <ListVoicesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
-            Self::GetVoice(_) => <GetVoiceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::ListVoices(_) => {
+                <ListVoicesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetVoice(_) => {
+                <GetVoiceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::DeleteVoice(_) => {
                 <DeleteVoiceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -2491,11 +2482,15 @@ impl ElevenLabsRequest {
             Self::CreateSoundEffect(_) => {
                 <CreateSoundEffectRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::ListModels(_) => <ListModelsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::ListModels(_) => {
+                <ListModelsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::CreateSingleUseToken(_) => {
                 <CreateSingleUseTokenRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::GetHistory(_) => <GetHistoryRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::GetHistory(_) => {
+                <GetHistoryRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::GetHistoryItem(_) => {
                 <GetHistoryItemRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -2511,7 +2506,9 @@ impl ElevenLabsRequest {
             Self::GetUsageStats(_) => {
                 <GetUsageStatsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::GetUser(_) => <GetUserRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::GetUser(_) => {
+                <GetUserRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::GetUserSubscription(_) => {
                 <GetUserSubscriptionRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -2786,34 +2783,36 @@ impl ElevenLabs {
     /// Base URL for the API.
     pub const BASE_URL: &'static str = "https://api.elevenlabs.io";
     /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> = Some("https://elevenlabs.io/docs/api-reference");
+    pub const DOCS_URL: Option<&'static str> = Some(
+        "https://elevenlabs.io/docs/api-reference",
+    );
     /// Creates a new API client with the default base URL.
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec![
-                "ELEVEN_LABS_API_KEY".to_string(),
-                "ELEVENLABS_API_KEY".to_string(),
+                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY".to_string()
             ],
             auth_strategy: schematic_define::AuthStrategy::ApiKey {
                 header: "xi-api-key".to_string(),
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec![
-                            "ELEVEN_LABS_API_KEY".to_string(),
-                            "ELEVENLABS_API_KEY".to_string(),
-                        ]),
+                        names: schematic_define::EnvList::new(
+                            vec![
+                                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY"
+                                .to_string()
+                            ],
+                        ),
                         header: "xi-api-key".to_string(),
                     }),
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -2829,27 +2828,27 @@ impl ElevenLabs {
             client: reqwest::Client::new(),
             base_url: base_url.into(),
             env_auth: vec![
-                "ELEVEN_LABS_API_KEY".to_string(),
-                "ELEVENLABS_API_KEY".to_string(),
+                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY".to_string()
             ],
             auth_strategy: schematic_define::AuthStrategy::ApiKey {
                 header: "xi-api-key".to_string(),
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec![
-                            "ELEVEN_LABS_API_KEY".to_string(),
-                            "ELEVENLABS_API_KEY".to_string(),
-                        ]),
+                        names: schematic_define::EnvList::new(
+                            vec![
+                                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY"
+                                .to_string()
+                            ],
+                        ),
                         header: "xi-api-key".to_string(),
                     }),
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -2871,27 +2870,27 @@ impl ElevenLabs {
             client,
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec![
-                "ELEVEN_LABS_API_KEY".to_string(),
-                "ELEVENLABS_API_KEY".to_string(),
+                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY".to_string()
             ],
             auth_strategy: schematic_define::AuthStrategy::ApiKey {
                 header: "xi-api-key".to_string(),
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec![
-                            "ELEVEN_LABS_API_KEY".to_string(),
-                            "ELEVENLABS_API_KEY".to_string(),
-                        ]),
+                        names: schematic_define::EnvList::new(
+                            vec![
+                                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY"
+                                .to_string()
+                            ],
+                        ),
                         header: "xi-api-key".to_string(),
                     }),
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -2906,32 +2905,35 @@ impl ElevenLabs {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
+    pub fn with_client_and_base_url(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             client,
             base_url: base_url.into(),
             env_auth: vec![
-                "ELEVEN_LABS_API_KEY".to_string(),
-                "ELEVENLABS_API_KEY".to_string(),
+                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY".to_string()
             ],
             auth_strategy: schematic_define::AuthStrategy::ApiKey {
                 header: "xi-api-key".to_string(),
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
                     api_key: Some(schematic_define::ApiKeyEnv {
-                        names: schematic_define::EnvList::new(vec![
-                            "ELEVEN_LABS_API_KEY".to_string(),
-                            "ELEVENLABS_API_KEY".to_string(),
-                        ]),
+                        names: schematic_define::EnvList::new(
+                            vec![
+                                "ELEVEN_LABS_API_KEY".to_string(), "ELEVENLABS_API_KEY"
+                                .to_string()
+                            ],
+                        ),
                         header: "xi-api-key".to_string(),
                     }),
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -3157,9 +3159,7 @@ impl<'a> ElevenLabsVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError>
-            + Send
-            + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -3187,15 +3187,13 @@ impl<'a> ElevenLabsVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError>
-            + Send
-            + Sync
-            + 'static,
+            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
     {
-        self.response_mutators.insert(
-            R::ENDPOINT_ID,
-            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-        );
+        self.response_mutators
+            .insert(
+                R::ENDPOINT_ID,
+                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+            );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -3257,7 +3255,8 @@ impl ElevenLabs {
                         .ok_or_else(|| SchematicError::MissingCredential {
                             env_vars: self.env_auth.clone(),
                         })?;
-                    req_builder = req_builder.header(header_name, format!("Bearer {}", token));
+                    req_builder = req_builder
+                        .header(header_name, format!("Bearer {}", token));
                 }
                 schematic_define::AuthStrategy::ApiKey { header } => {
                     let key = self
@@ -3270,22 +3269,23 @@ impl ElevenLabs {
                     req_builder = req_builder.header(header.as_str(), key);
                 }
                 schematic_define::AuthStrategy::Basic => {
-                    let username_env = self.env_username.as_deref().unwrap_or("USERNAME");
+                    let username_env = self
+                        .env_username
+                        .as_deref()
+                        .unwrap_or("USERNAME");
                     let password_env = self
                         .env_auth
                         .first()
                         .map(String::as_str)
                         .unwrap_or("PASSWORD");
-                    let username = std::env::var(username_env).map_err(|_| {
-                        SchematicError::MissingCredential {
+                    let username = std::env::var(username_env)
+                        .map_err(|_| SchematicError::MissingCredential {
                             env_vars: vec![username_env.to_string()],
-                        }
-                    })?;
-                    let password = std::env::var(password_env).map_err(|_| {
-                        SchematicError::MissingCredential {
+                        })?;
+                    let password = std::env::var(password_env)
+                        .map_err(|_| SchematicError::MissingCredential {
                             env_vars: vec![password_env.to_string()],
-                        }
-                    })?;
+                        })?;
                     req_builder = req_builder.basic_auth(username, Some(password));
                 }
                 _ => {}
@@ -3385,7 +3385,11 @@ impl ElevenLabs {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
+            if let Some(mutator) = self
+                .variant_hooks
+                .response_mutators
+                .get(ctx.endpoint_id)
+            {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)

@@ -44,6 +44,10 @@ pub enum MarkdownError {
     /// Transform pipeline error.
     #[error("Transform error: {0}")]
     Transform(String),
+
+    /// Transclusion pipeline error.
+    #[error("Transclusion error: {0}")]
+    Transclusion(#[from] crate::markdown::transform::TransclusionError),
 }
 
 /// Result type for markdown operations.

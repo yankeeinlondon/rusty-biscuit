@@ -1,13 +1,16 @@
 //! Type definitions for the transform pipeline.
 //!
-//! This module contains the core types used by the Stage 1 transform pipeline:
+//! This module contains the core types used by the transform pipeline:
 //! - `TransformOptions` - Configuration for transform execution
 //! - `TransformContext` - Runtime context captured at transform start
 //! - `TransformReport` - Results and diagnostics from transform execution
-//! - `Stage1Stages` - Toggle flags for individual transform stages
+//! - `Stage1Stages` - Toggle flags for Stage 1 preparation stages
+//! - `Stage2Stages` - Toggle flags for Stage 2 transclusion stages
 
 use super::super::normalize::NormalizationReport;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use url::Url;
 
 /// Configuration options for the transform pipeline.
 ///
@@ -39,10 +42,16 @@ pub struct TransformOptions {
     /// Controls which Stage 1 stages are enabled.
     pub stages: Stage1Stages,
 
+    /// Controls which Stage 2 stages are enabled.
+    pub stage2: Stage2Stages,
+
+    /// Stage 2 transclusion options.
+    pub transclusion: TransclusionOptions,
+
     /// External state to merge with frontmatter for interpolation/replacement.
     ///
     /// When present, this state is merged with document frontmatter using
-    /// `PreferExternal` strategy by default.
+    /// deep merge semantics in the effective state builder.
     pub external_state: Option<serde_json::Value>,
 
     /// If true, the pipeline returns an error on first failure.
@@ -62,6 +71,8 @@ impl TransformOptions {
     pub fn new() -> Self {
         Self {
             stages: Stage1Stages::default(),
+            stage2: Stage2Stages::default(),
+            transclusion: TransclusionOptions::default(),
             external_state: None,
             fail_fast: false,
             context: TransformContext::capture(),
@@ -77,6 +88,34 @@ impl TransformOptions {
     #[must_use]
     pub fn with_stages(mut self, stages: Stage1Stages) -> Self {
         self.stages = stages;
+        self
+    }
+
+    /// Sets the Stage 2 stages configuration.
+    #[must_use]
+    pub fn with_stage2(mut self, stage2: Stage2Stages) -> Self {
+        self.stage2 = stage2;
+        self
+    }
+
+    /// Sets transclusion options.
+    #[must_use]
+    pub fn with_transclusion(mut self, transclusion: TransclusionOptions) -> Self {
+        self.transclusion = transclusion;
+        self
+    }
+
+    /// Sets the transform source as a file path.
+    #[must_use]
+    pub fn with_source_file(mut self, path: impl Into<PathBuf>) -> Self {
+        self.transclusion.source = TransformSource::File(path.into());
+        self
+    }
+
+    /// Sets the transform source as a URL.
+    #[must_use]
+    pub fn with_source_url(mut self, url: Url) -> Self {
+        self.transclusion.source = TransformSource::Url(url);
         self
     }
 
@@ -178,6 +217,112 @@ impl Stage1Stages {
         Self {
             normalization: true,
             ..Self::none()
+        }
+    }
+}
+
+/// Controls which Stage 2 transclusion stages are enabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stage2Stages {
+    /// Block directive transclusion (`::file`, `::code`, `::url`).
+    pub block_transclusion: bool,
+
+    /// Frontmatter transclusion (`prologue`, `epilogue`).
+    pub fm_transclusion: bool,
+}
+
+impl Default for Stage2Stages {
+    fn default() -> Self {
+        Self {
+            block_transclusion: true,
+            fm_transclusion: true,
+        }
+    }
+}
+
+impl Stage2Stages {
+    /// Creates stages with all disabled.
+    pub fn none() -> Self {
+        Self {
+            block_transclusion: false,
+            fm_transclusion: false,
+        }
+    }
+
+    /// Creates stages with only block transclusion enabled.
+    pub fn only_block() -> Self {
+        Self {
+            block_transclusion: true,
+            fm_transclusion: false,
+        }
+    }
+
+    /// Creates stages with only frontmatter transclusion enabled.
+    pub fn only_frontmatter() -> Self {
+        Self {
+            block_transclusion: false,
+            fm_transclusion: true,
+        }
+    }
+}
+
+/// Source context for transform execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransformSource {
+    /// Source is unknown (e.g., in-memory string).
+    Unknown,
+    /// Source is a local file.
+    File(PathBuf),
+    /// Source is a URL.
+    Url(Url),
+}
+
+impl TransformSource {
+    /// Creates a file source from a path reference.
+    pub fn infer_from_path(path: impl AsRef<Path>) -> Self {
+        Self::File(path.as_ref().to_path_buf())
+    }
+}
+
+/// Transclusion-specific options for Stage 2.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransclusionOptions {
+    /// Source context of the document being transformed.
+    pub source: TransformSource,
+
+    /// Maximum recursive include depth.
+    pub max_depth: usize,
+
+    /// Whether remote transclusion is allowed.
+    pub allow_remote: bool,
+
+    /// Whether local markdown files can be included with `::file`.
+    pub allow_local_markdown: bool,
+
+    /// Whether local text files can be included with `::code`.
+    pub allow_local_code_text: bool,
+
+    /// Fallback code language for unknown extensions.
+    pub code_fallback_language: String,
+
+    /// Explicit override for invalid-reference behavior.
+    pub ignore_invalid: Option<bool>,
+
+    /// Whether repo-root (`@`) resolution is enabled.
+    pub resolve_repo_root: bool,
+}
+
+impl Default for TransclusionOptions {
+    fn default() -> Self {
+        Self {
+            source: TransformSource::Unknown,
+            max_depth: 16,
+            allow_remote: false,
+            allow_local_markdown: true,
+            allow_local_code_text: true,
+            code_fallback_language: "txt".to_string(),
+            ignore_invalid: None,
+            resolve_repo_root: true,
         }
     }
 }
@@ -299,6 +444,15 @@ pub struct TransformReport {
     /// Normalization report if normalization was performed.
     pub normalization_report: Option<NormalizationReport>,
 
+    /// Number of transclusions applied.
+    pub transclusions_applied: usize,
+
+    /// Number of transclusions skipped (conditions/invalid ignored).
+    pub transclusions_skipped: usize,
+
+    /// Maximum recursive transclusion depth observed.
+    pub max_transclusion_depth: usize,
+
     /// Warnings generated during transform (non-fatal issues).
     pub warnings: Vec<TransformWarning>,
 }
@@ -314,6 +468,7 @@ impl TransformReport {
         self.replacements_applied > 0
             || self.interpolations_applied > 0
             || self.cleanup_changed
+            || self.transclusions_applied > 0
             || self
                 .normalization_report
                 .as_ref()
@@ -329,21 +484,26 @@ impl TransformReport {
         let mut parts = Vec::new();
 
         if self.replacements_applied > 0 {
-            parts.push(format!(
-                "{} replacement(s)",
-                self.replacements_applied
-            ));
+            parts.push(format!("{} replacement(s)", self.replacements_applied));
         }
 
         if self.interpolations_applied > 0 {
-            parts.push(format!(
-                "{} interpolation(s)",
-                self.interpolations_applied
-            ));
+            parts.push(format!("{} interpolation(s)", self.interpolations_applied));
         }
 
         if self.cleanup_changed {
             parts.push("cleanup applied".to_string());
+        }
+
+        if self.transclusions_applied > 0 {
+            parts.push(format!("{} transclusion(s)", self.transclusions_applied));
+        }
+
+        if self.transclusions_skipped > 0 {
+            parts.push(format!(
+                "{} transclusion(s) skipped",
+                self.transclusions_skipped
+            ));
         }
 
         if let Some(ref norm) = self.normalization_report
@@ -418,6 +578,19 @@ mod tests {
         assert!(options.stages.interpolation);
         assert!(options.stages.cleanup);
         assert!(options.stages.normalization);
+        assert!(options.stage2.block_transclusion);
+        assert!(options.stage2.fm_transclusion);
+    }
+
+    #[test]
+    fn test_transclusion_options_defaults() {
+        let options = TransformOptions::new();
+        assert_eq!(options.transclusion.max_depth, 16);
+        assert!(matches!(
+            options.transclusion.source,
+            TransformSource::Unknown
+        ));
+        assert_eq!(options.transclusion.code_fallback_language, "txt");
     }
 
     #[test]
@@ -427,10 +600,18 @@ mod tests {
                 cleanup: false,
                 ..Default::default()
             })
+            .with_stage2(Stage2Stages::only_block())
+            .with_transclusion(TransclusionOptions {
+                max_depth: 8,
+                ..Default::default()
+            })
             .with_fail_fast(true)
             .with_external_state(serde_json::json!({"key": "value"}));
 
         assert!(!options.stages.cleanup);
+        assert!(options.stage2.block_transclusion);
+        assert!(!options.stage2.fm_transclusion);
+        assert_eq!(options.transclusion.max_depth, 8);
         assert!(options.fail_fast);
         assert!(options.external_state.is_some());
     }
@@ -480,6 +661,21 @@ mod tests {
     }
 
     #[test]
+    fn test_stage2_stages_only_methods() {
+        let none = Stage2Stages::none();
+        assert!(!none.block_transclusion);
+        assert!(!none.fm_transclusion);
+
+        let block = Stage2Stages::only_block();
+        assert!(block.block_transclusion);
+        assert!(!block.fm_transclusion);
+
+        let fm = Stage2Stages::only_frontmatter();
+        assert!(!fm.block_transclusion);
+        assert!(fm.fm_transclusion);
+    }
+
+    #[test]
     fn test_transform_context_capture() {
         let ctx = TransformContext::capture();
 
@@ -511,6 +707,9 @@ mod tests {
         assert_eq!(report.interpolations_applied, 0);
         assert!(!report.cleanup_changed);
         assert!(report.normalization_report.is_none());
+        assert_eq!(report.transclusions_applied, 0);
+        assert_eq!(report.transclusions_skipped, 0);
+        assert_eq!(report.max_transclusion_depth, 0);
         assert!(report.warnings.is_empty());
     }
 
@@ -531,11 +730,15 @@ mod tests {
         report.replacements_applied = 2;
         report.interpolations_applied = 3;
         report.cleanup_changed = true;
+        report.transclusions_applied = 1;
+        report.transclusions_skipped = 1;
 
         let summary = report.summary();
         assert!(summary.contains("2 replacement(s)"));
         assert!(summary.contains("3 interpolation(s)"));
         assert!(summary.contains("cleanup applied"));
+        assert!(summary.contains("1 transclusion(s)"));
+        assert!(summary.contains("1 transclusion(s) skipped"));
     }
 
     #[test]
