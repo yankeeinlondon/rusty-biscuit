@@ -96,15 +96,26 @@ fn test_detect_pnpm_workspace() {
 
 // === Regression tests for JSON serialization of partial results ===
 // Bug: Skipped sections were serialized as empty objects instead of being omitted.
+//
+// NOTE: These tests parse JSON as serde_json::Value and check top-level keys
+// rather than using substring matching, because nested data (e.g. Cargo feature
+// names like "network") can produce false positives with contains().
+
+/// Helper: parse SniffResult JSON and return the top-level key set.
+fn top_level_keys(result: &sniff::SniffResult) -> std::collections::HashSet<String> {
+    let json = serde_json::to_string(result).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    value.as_object().unwrap().keys().cloned().collect()
+}
 
 #[test]
 fn test_skip_hardware_json_omits_hardware_key() {
     // Regression test: JSON should NOT contain "hardware" key when skipped
     let config = SniffConfig::new().skip_hardware();
     let result = detect_with_config(config).unwrap();
-    let json = serde_json::to_string(&result).unwrap();
-    assert!(!json.contains("\"hardware\""), "JSON should not contain hardware key when skipped");
-    assert!(json.contains("\"network\""), "JSON should contain network key");
+    let keys = top_level_keys(&result);
+    assert!(!keys.contains("hardware"), "JSON should not contain hardware key when skipped");
+    assert!(keys.contains("network"), "JSON should contain network key");
 }
 
 #[test]
@@ -112,9 +123,9 @@ fn test_skip_network_json_omits_network_key() {
     // Regression test: JSON should NOT contain "network" key when skipped
     let config = SniffConfig::new().skip_network();
     let result = detect_with_config(config).unwrap();
-    let json = serde_json::to_string(&result).unwrap();
-    assert!(!json.contains("\"network\""), "JSON should not contain network key when skipped");
-    assert!(json.contains("\"hardware\""), "JSON should contain hardware key");
+    let keys = top_level_keys(&result);
+    assert!(!keys.contains("network"), "JSON should not contain network key when skipped");
+    assert!(keys.contains("hardware"), "JSON should contain hardware key");
 }
 
 #[test]
@@ -122,12 +133,9 @@ fn test_skip_filesystem_json_omits_filesystem_key() {
     // Regression test: JSON should NOT contain "filesystem" key when skipped
     let config = SniffConfig::new().skip_filesystem();
     let result = detect_with_config(config).unwrap();
-    let json = serde_json::to_string(&result).unwrap();
-    assert!(
-        !json.contains("\"filesystem\""),
-        "JSON should not contain filesystem key when skipped"
-    );
-    assert!(json.contains("\"hardware\""), "JSON should contain hardware key");
+    let keys = top_level_keys(&result);
+    assert!(!keys.contains("filesystem"), "JSON should not contain filesystem key when skipped");
+    assert!(keys.contains("hardware"), "JSON should contain hardware key");
 }
 
 #[test]
@@ -135,11 +143,10 @@ fn test_hardware_only_json_contains_only_hardware() {
     // Regression test: When only hardware is requested, JSON should contain ONLY hardware
     let config = SniffConfig::new().skip_network().skip_filesystem();
     let result = detect_with_config(config).unwrap();
-    let json = serde_json::to_string(&result).unwrap();
-    assert!(json.contains("\"hardware\""), "JSON should contain hardware key");
-    assert!(!json.contains("\"network\""), "JSON should not contain network key");
-    assert!(!json.contains("\"filesystem\""), "JSON should not contain filesystem key");
-    assert!(!json.contains("\"interfaces\""), "JSON should not contain interfaces (from network)");
+    let keys = top_level_keys(&result);
+    assert!(keys.contains("hardware"), "JSON should contain hardware key");
+    assert!(!keys.contains("network"), "JSON should not contain network key");
+    assert!(!keys.contains("filesystem"), "JSON should not contain filesystem key");
 }
 
 #[test]
