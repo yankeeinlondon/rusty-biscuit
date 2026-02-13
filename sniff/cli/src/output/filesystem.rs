@@ -1,11 +1,12 @@
 //! Filesystem section output formatting (Git, Repo, Languages, Docs).
 
 use std::path::Path;
+use std::sync::Arc;
 
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::Renderable;
+use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::utils::layout::Margin;
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{BehindStatus, ConventionalCommit, FileStatus, RefKind};
@@ -399,45 +400,148 @@ pub fn print_git_section(git: &sniff::filesystem::git::GitInfo, history_count: u
     println!();
 }
 
+/// Format a MonorepoTool for display.
+fn format_monorepo_tool(tool: &sniff::filesystem::repo::MonorepoTool) -> &'static str {
+    use sniff::filesystem::repo::MonorepoTool;
+    match tool {
+        MonorepoTool::CargoWorkspace => "Cargo Workspace",
+        MonorepoTool::NpmWorkspaces => "npm Workspaces",
+        MonorepoTool::PnpmWorkspaces => "pnpm Workspaces",
+        MonorepoTool::YarnWorkspaces => "Yarn Workspaces",
+        MonorepoTool::Nx => "Nx",
+        MonorepoTool::Turborepo => "Turborepo",
+        MonorepoTool::Lerna => "Lerna",
+        _ => "Unknown",
+    }
+}
+
+/// Render a single package as a styled list item string.
+///
+/// Always shows: name, version, relative path, language, updatable indicator.
+/// At `-v`: adds depends_on.
+/// At `-vv`: adds used_by, languages.
+fn format_package_item(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> String {
+    let version_part = pkg
+        .version
+        .as_ref()
+        .map(|v| format!(" <dim>v{}</dim>", v))
+        .unwrap_or_default();
+
+    let lang_part = pkg
+        .primary_language
+        .as_ref()
+        .map(|l| format!(" <dim>[{}]</dim>", l))
+        .unwrap_or_default();
+
+    let updatable_part = match pkg.is_updatable {
+        Some(true) => " <yellow>*</yellow>",
+        _ => "",
+    };
+
+    let mut line = format!(
+        "<b>{}</b>{} <dim>({})</dim>{}{}",
+        pkg.name, version_part, pkg.relative, lang_part, updatable_part
+    );
+
+    if verbose > 0 {
+        if !pkg.features.is_empty() {
+            line.push_str(&format!(
+                " <dim>features:</dim> {}",
+                pkg.features.join(", ")
+            ));
+        }
+        if !pkg.depends_on.is_empty() {
+            line.push_str(&format!(
+                " <dim>depends on:</dim> {}",
+                pkg.depends_on.join(", ")
+            ));
+        }
+    }
+
+    if verbose > 1 {
+        if !pkg.used_by.is_empty() {
+            line.push_str(&format!(
+                " <dim>used by:</dim> {}",
+                pkg.used_by.join(", ")
+            ));
+        }
+        if !pkg.languages.is_empty() {
+            line.push_str(&format!(
+                " <dim>langs:</dim> {}",
+                pkg.languages.join(", ")
+            ));
+        }
+    }
+
+    line
+}
+
 pub fn print_repo_section(
     repo: &sniff::filesystem::repo::RepoInfo,
     verbose: u8,
-    repo_root: Option<&Path>,
+    _repo_root: Option<&Path>,
 ) {
-    println!("=== Repository ===");
-
-    if repo.is_monorepo {
-        if let Some(ref tool) = repo.monorepo_tool {
-            println!("Monorepo: {:?}", tool);
-        }
-        if let Some(ref packages) = repo.packages {
-            println!("Packages: {}", packages.len());
-            let show_count = if verbose > 0 { packages.len() } else { 5 };
-            for pkg in packages.iter().take(show_count) {
-                let path_str = relative_path(&pkg.path, repo_root);
-                let lang_info = pkg
-                    .primary_language
-                    .as_ref()
-                    .map(|l| format!(" [{}]", l))
-                    .unwrap_or_default();
-                println!("  {} ({}){}", pkg.name, path_str, lang_info);
-
-                if verbose > 0 && !pkg.detected_managers.is_empty() {
-                    println!("    Managers: {}", pkg.detected_managers.join(", "));
-                }
-                if verbose > 1 && !pkg.languages.is_empty() {
-                    println!("    Languages: {}", pkg.languages.join(", "));
-                }
-            }
-            if packages.len() > show_count {
-                println!("  ... and {} more", packages.len() - show_count);
-            }
-        }
-    } else {
-        println!("Single-package repository");
-        println!("Root: {}", repo.root.display());
+    if !repo.is_monorepo {
+        let title = Prose::new("<b><u>Repository</u></b>");
+        println!("\n{}\n", title.render(None));
+        let items = vec![
+            Prose::new(&format!("<b>Type:</b> Single-package")).render(None),
+            Prose::new(&format!("<b>Root:</b> {}", repo.root.display())).render(None),
+        ];
+        let list = UnorderedList::new(items);
+        println!("{}", list.render(None));
+        return;
     }
-    println!();
+
+    // Monorepo heading
+    let tool_name = repo
+        .monorepo_tool
+        .as_ref()
+        .map(format_monorepo_tool)
+        .unwrap_or("Unknown");
+
+    let pkg_count = repo.packages.as_ref().map(|p| p.len()).unwrap_or(0);
+
+    let title = Prose::new(&format!(
+        "<b><u>Repository</u></b> <dim>({} / {} packages)</dim>",
+        tool_name, pkg_count,
+    ));
+    println!("\n{}\n", title.render(None));
+
+    if let Some(ref packages) = repo.packages {
+        // Group packages by area, preserving discovery order
+        let mut areas: Vec<String> = Vec::new();
+        let mut area_packages: std::collections::HashMap<&str, Vec<&sniff::filesystem::repo::Package>> =
+            std::collections::HashMap::new();
+        for pkg in packages {
+            let area = pkg.package_area.as_str();
+            if !area_packages.contains_key(area) {
+                areas.push(area.to_string());
+            }
+            area_packages.entry(area).or_default().push(pkg);
+        }
+
+        let mut outer_items: Vec<RenderableContent> = Vec::new();
+        for area in &areas {
+            // Area heading
+            let label = Prose::new(&format!("<b>{}</b>", area)).render(None);
+            outer_items.push(RenderableContent::String(label));
+
+            // Nested package list
+            let pkg_items: Vec<String> = area_packages[area.as_str()]
+                .iter()
+                .map(|pkg| {
+                    let markup = format_package_item(pkg, verbose);
+                    Prose::new(&markup).render(None)
+                })
+                .collect();
+            let inner_list = UnorderedList::new(pkg_items);
+            outer_items.push(RenderableContent::Component(Arc::new(inner_list)));
+        }
+
+        let list = UnorderedList::from(outer_items);
+        println!("{}", list.render(None));
+    }
 }
 
 pub fn print_language_section(
@@ -678,34 +782,30 @@ pub fn print_filesystem_section(fs: &sniff::FilesystemInfo, verbose: u8, repo_ro
     if let Some(ref repo) = fs.repo
         && repo.is_monorepo
     {
-        if let Some(ref tool) = repo.monorepo_tool {
-            println!("Monorepo: {:?}", tool);
-        }
-        if let Some(ref packages) = repo.packages {
-            println!("  Packages: {}", packages.len());
-            let show_count = if verbose > 0 { packages.len() } else { 5 };
-            for pkg in packages.iter().take(show_count) {
-                let path_str = relative_path(&pkg.path, repo_root);
-                let lang_info = pkg
-                    .primary_language
-                    .as_ref()
-                    .map(|l| format!(" [{}]", l))
-                    .unwrap_or_default();
-                println!("    {} ({}){}", pkg.name, path_str, lang_info);
+        let tool_name = repo
+            .monorepo_tool
+            .as_ref()
+            .map(format_monorepo_tool)
+            .unwrap_or("Unknown");
+        let pkg_count = repo.packages.as_ref().map(|p| p.len()).unwrap_or(0);
 
-                // Show package details at verbose level 1+
-                if verbose > 0 {
-                    if !pkg.detected_managers.is_empty() {
-                        println!("      Managers: {}", pkg.detected_managers.join(", "));
-                    }
-                    if verbose > 1 && !pkg.languages.is_empty() {
-                        println!("      Languages: {}", pkg.languages.join(", "));
-                    }
-                }
-            }
-            if packages.len() > show_count {
-                println!("    ... and {} more", packages.len() - show_count);
-            }
+        let header = Prose::new(&format!(
+            "<b>Packages:</b> <dim>({} / {} packages)</dim>",
+            tool_name, pkg_count,
+        ));
+        println!("{}", header.render(None));
+
+        if let Some(ref packages) = repo.packages {
+            let items: Vec<String> = packages
+                .iter()
+                .map(|pkg| {
+                    let markup = format_package_item(pkg, verbose);
+                    Prose::new(&markup).render(None)
+                })
+                .collect();
+
+            let list = UnorderedList::new(items);
+            println!("{}", list.render(None));
         }
     }
 }

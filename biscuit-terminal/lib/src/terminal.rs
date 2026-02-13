@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use sniff::filesystem::git::detect_git;
-use sniff::filesystem::repo::PackageLocation;
+use sniff::filesystem::repo::Package;
 use sniff::filesystem::repo::detect_repo;
 
 use crate::discovery::config_paths::get_terminal_config_path;
@@ -803,7 +803,7 @@ fn compute_package_root(
     cwd: &Path,
     repo_root: &Path,
     in_monorepo: bool,
-    packages: Option<&[PackageLocation]>,
+    packages: Option<&[Package]>,
 ) -> Option<String> {
     if !in_monorepo {
         return None;

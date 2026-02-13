@@ -1174,35 +1174,43 @@ fn get_remotes(repo: &Repository, deep: bool) -> Vec<RemoteInfo> {
         .unwrap_or_default()
 }
 
-/// Fetches branch names from a remote using ls-remote.
+/// Fetches branch names from a remote using ls-remote with a timeout.
 ///
-/// Returns `None` if the fetch fails or times out. This is a read-only
-/// operation that connects to the remote without authentication.
-/// Network failures are handled gracefully.
+/// Returns `None` if the fetch fails, times out, or requires authentication.
+/// Uses a 5-second timeout to prevent hangs on SSH auth prompts.
 fn get_remote_branches(repo: &Repository, remote_name: &str) -> Option<Vec<String>> {
-    let mut remote = repo.find_remote(remote_name).ok()?;
+    use std::sync::mpsc;
+    use std::time::Duration;
 
-    // Connect to remote - use default callbacks (no auth)
-    // This is a read-only operation (ls-remote)
-    remote.connect_auth(git2::Direction::Fetch, None, None).ok()?;
+    let repo_path = repo.path().to_path_buf();
+    let remote_name_owned = remote_name.to_string();
 
-    // Get the list of remote refs
-    let refs = remote.list().ok()?;
+    let (tx, rx) = mpsc::channel();
 
-    let branches: Vec<String> = refs
-        .iter()
-        .filter_map(|head| {
-            let name = head.name();
-            // Filter to only branch refs (refs/heads/*)
-            name.strip_prefix("refs/heads/").map(|branch| branch.to_string())
-        })
-        .collect();
+    std::thread::spawn(move || {
+        let result = (|| -> Option<Vec<String>> {
+            let repo = Repository::open(&repo_path).ok()?;
+            let mut remote = repo.find_remote(&remote_name_owned).ok()?;
 
-    if branches.is_empty() {
-        None
-    } else {
-        Some(branches)
-    }
+            // Connect to remote - use default callbacks (no auth)
+            remote.connect_auth(git2::Direction::Fetch, None, None).ok()?;
+
+            let refs = remote.list().ok()?;
+
+            let branches: Vec<String> = refs
+                .iter()
+                .filter_map(|head| {
+                    let name = head.name();
+                    name.strip_prefix("refs/heads/").map(|branch| branch.to_string())
+                })
+                .collect();
+
+            if branches.is_empty() { None } else { Some(branches) }
+        })();
+        let _ = tx.send(result);
+    });
+
+    rx.recv_timeout(Duration::from_secs(5)).ok().flatten()
 }
 
 /// Checks which remotes the local branch is behind.

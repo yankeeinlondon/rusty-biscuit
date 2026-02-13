@@ -59,7 +59,7 @@ impl RepoDocuments {
             .to_path_buf();
 
         // Leverage the existing repo detection to get monorepo package locations.
-        // PackageLocation.path is absolute, so convert to relative for matching.
+        // Package.path is absolute, so convert to relative for matching.
         let packages = detect_repo(&repo_root)
             .ok()
             .flatten()
@@ -481,7 +481,7 @@ mod tests {
 
         #[test]
         fn matches_file_to_package() {
-            // PackageLocation paths are the actual member paths from detect_repo
+            // Package paths are the actual member paths from detect_repo
             let packages = vec![
                 ("research-lib".to_string(), PathBuf::from("research/lib")),
                 ("research-cli".to_string(), PathBuf::from("research/cli")),

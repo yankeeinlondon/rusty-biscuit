@@ -114,6 +114,7 @@ impl CargoNetwork {
             client: Some(
                 Client::builder()
                     .user_agent("sniff-lib (https://github.com/anthropics/dockhand)")
+                    .timeout(std::time::Duration::from_secs(10))
                     .build()
                     .ok(),
             )
@@ -273,6 +274,7 @@ impl NpmNetwork {
             client: Some(
                 Client::builder()
                     .user_agent("sniff-lib (https://github.com/anthropics/dockhand)")
+                    .timeout(std::time::Duration::from_secs(10))
                     .build()
                     .ok(),
             )
@@ -583,6 +585,7 @@ mod tests {
             target: None,
             optional: false,
             features: vec![],
+            is_updatable: false,
         };
 
         let enriched = enrich_dependency(entry).await;
@@ -602,6 +605,7 @@ mod tests {
             target: None,
             optional: false,
             features: vec![],
+            is_updatable: false,
         };
 
         let enriched = enrich_dependency(entry).await;
@@ -621,6 +625,7 @@ mod tests {
             target: None,
             optional: false,
             features: vec![],
+            is_updatable: false,
         };
 
         let enriched = enrich_dependency(entry).await;

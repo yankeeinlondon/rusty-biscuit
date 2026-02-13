@@ -1,7 +1,7 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::CompleteEnv;
 use clap_complete::Shell;
-use sniff::package::enrich_dependencies;
+use sniff::package::enrich_dependency;
 use sniff::programs::ProgramsInfo;
 use sniff::services::{ServiceState, detect_services};
 use sniff::{SniffConfig, SniffResult, detect_with_config};
@@ -622,10 +622,12 @@ fn print_completions_help() {
 
 /// Enriches all dependencies in a SniffResult with latest versions from package registries.
 ///
-/// This function iterates through the filesystem.repo section and enriches:
-/// - Non-monorepo dependencies (on RepoInfo)
-/// - Monorepo package dependencies (on each PackageLocation)
+/// Collects all dependencies across all packages, deduplicates by (name, package_manager),
+/// enriches in parallel with bounded concurrency, then distributes results back.
 async fn enrich_result_dependencies(mut result: SniffResult) -> SniffResult {
+    use futures::stream::{self, StreamExt};
+    use std::collections::HashMap;
+
     let Some(ref mut filesystem) = result.filesystem else {
         return result;
     };
@@ -634,35 +636,96 @@ async fn enrich_result_dependencies(mut result: SniffResult) -> SniffResult {
         return result;
     };
 
-    // Enrich non-monorepo dependencies
-    if let Some(deps) = repo.dependencies.take() {
-        repo.dependencies = Some(enrich_dependencies(deps).await);
-    }
-    if let Some(deps) = repo.dev_dependencies.take() {
-        repo.dev_dependencies = Some(enrich_dependencies(deps).await);
-    }
-    if let Some(deps) = repo.peer_dependencies.take() {
-        repo.peer_dependencies = Some(enrich_dependencies(deps).await);
-    }
-    if let Some(deps) = repo.optional_dependencies.take() {
-        repo.optional_dependencies = Some(enrich_dependencies(deps).await);
+    // Collect unique (name, package_manager) pairs from all dependency lists
+    let mut unique_deps: HashMap<(String, Option<String>), sniff::filesystem::DependencyEntry> =
+        HashMap::new();
+
+    // Helper to collect from an optional dep list
+    let mut collect = |deps: &Option<Vec<sniff::filesystem::DependencyEntry>>| {
+        if let Some(dep_list) = deps {
+            for dep in dep_list {
+                let key = (dep.name.clone(), dep.package_manager.clone());
+                unique_deps.entry(key).or_insert_with(|| dep.clone());
+            }
+        }
+    };
+
+    // Collect from repo-level deps
+    collect(&repo.dependencies);
+    collect(&repo.dev_dependencies);
+    collect(&repo.peer_dependencies);
+    collect(&repo.optional_dependencies);
+
+    // Collect from all package deps
+    if let Some(ref packages) = repo.packages {
+        for pkg in packages {
+            collect(&pkg.dependencies);
+            collect(&pkg.dev_dependencies);
+            collect(&pkg.peer_dependencies);
+            collect(&pkg.optional_dependencies);
+        }
     }
 
-    // Enrich monorepo package dependencies
+    // Enrich all unique deps in parallel with bounded concurrency (max 20)
+    let unique_entries: Vec<_> = unique_deps.into_values().collect();
+    let enriched: Vec<sniff::filesystem::DependencyEntry> = stream::iter(unique_entries)
+        .map(|dep| async move { enrich_dependency(dep).await })
+        .buffer_unordered(20)
+        .collect()
+        .await;
+
+    // Build lookup from (name, package_manager) -> latest_version
+    let lookup: HashMap<(String, Option<String>), Option<String>> = enriched
+        .into_iter()
+        .map(|dep| {
+            let key = (dep.name.clone(), dep.package_manager.clone());
+            (key, dep.latest_version)
+        })
+        .collect();
+
+    // Helper to apply enrichment results and compute is_updatable
+    let apply = |deps: &mut Option<Vec<sniff::filesystem::DependencyEntry>>| {
+        if let Some(dep_list) = deps {
+            for dep in dep_list.iter_mut() {
+                let key = (dep.name.clone(), dep.package_manager.clone());
+                if let Some(latest) = lookup.get(&key).and_then(|v| v.clone()) {
+                    dep.latest_version = Some(latest.clone());
+                    // Compute is_updatable: latest differs from actual (when both known)
+                    if let Some(ref actual) = dep.actual_version {
+                        dep.is_updatable = *actual != latest;
+                    }
+                }
+            }
+        }
+    };
+
+    // Apply to repo-level deps
+    apply(&mut repo.dependencies);
+    apply(&mut repo.dev_dependencies);
+    apply(&mut repo.peer_dependencies);
+    apply(&mut repo.optional_dependencies);
+
+    // Apply to package deps and compute package-level is_updatable
     if let Some(ref mut packages) = repo.packages {
         for pkg in packages.iter_mut() {
-            if let Some(deps) = pkg.dependencies.take() {
-                pkg.dependencies = Some(enrich_dependencies(deps).await);
-            }
-            if let Some(deps) = pkg.dev_dependencies.take() {
-                pkg.dev_dependencies = Some(enrich_dependencies(deps).await);
-            }
-            if let Some(deps) = pkg.peer_dependencies.take() {
-                pkg.peer_dependencies = Some(enrich_dependencies(deps).await);
-            }
-            if let Some(deps) = pkg.optional_dependencies.take() {
-                pkg.optional_dependencies = Some(enrich_dependencies(deps).await);
-            }
+            apply(&mut pkg.dependencies);
+            apply(&mut pkg.dev_dependencies);
+            apply(&mut pkg.peer_dependencies);
+            apply(&mut pkg.optional_dependencies);
+
+            // Package-level is_updatable: true if any dep is updatable
+            let any_updatable = [
+                &pkg.dependencies,
+                &pkg.dev_dependencies,
+                &pkg.peer_dependencies,
+                &pkg.optional_dependencies,
+            ]
+            .iter()
+            .filter_map(|deps| deps.as_ref())
+            .flat_map(|deps| deps.iter())
+            .any(|d| d.is_updatable);
+
+            pkg.is_updatable = Some(any_updatable);
         }
     }
 

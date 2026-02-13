@@ -15,8 +15,11 @@ pub use git::{
 };
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
 pub use repo::{
-    DependencyEntry, DependencyKind, MonorepoTool, PackageLocation, RepoInfo, detect_repo,
+    DependencyEntry, DependencyKind, MonorepoTool, Package, RepoInfo, detect_repo,
 };
+
+#[deprecated(note = "Use `Package` instead")]
+pub type PackageLocation = Package;
 
 /// Complete filesystem analysis for a directory.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -44,7 +47,10 @@ pub struct FilesystemInfo {
 pub fn detect_filesystem(root: &Path, deep: bool, commit_count: usize) -> Result<FilesystemInfo> {
     let languages = detect_languages(root).ok();
     let git = detect_git(root, deep, commit_count)?;
-    let repo = detect_repo(root)?;
+    // Use git repo root (if available) for repo detection so that running
+    // from a subdirectory still finds workspace markers at the repo root.
+    let repo_root_path = git.as_ref().map(|g| g.repo_root.as_path()).unwrap_or(root);
+    let repo = detect_repo(repo_root_path)?;
     let formatting = detect_formatting(root).ok().flatten();
     let docs = detect_docs(root);
 
