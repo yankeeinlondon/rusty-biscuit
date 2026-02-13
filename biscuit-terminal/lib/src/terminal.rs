@@ -779,16 +779,27 @@ mod tests {
         let package_path = root.join("packages").join("app");
         std::fs::create_dir_all(&package_path).unwrap();
 
-        let packages = vec![PackageLocation {
-            name: "packages/app".to_string(),
+        let packages = vec![Package {
+            name: "app".to_string(),
+            relative: "packages/app".to_string(),
+            package_area: "packages".to_string(),
             path: package_path.clone(),
             primary_language: None,
             languages: Vec::new(),
-            detected_managers: Vec::new(),
+            configuration: Vec::new(),
+            documentation: Vec::new(),
+            editor_config: None,
+            command_runner: Vec::new(),
+            package_managers: Vec::new(),
+            version: None,
+            features: Vec::new(),
+            depends_on: Vec::new(),
+            used_by: Vec::new(),
             dependencies: None,
             dev_dependencies: None,
             peer_dependencies: None,
             optional_dependencies: None,
+            is_updatable: None,
         }];
 
         let cwd = package_path.join("src");
