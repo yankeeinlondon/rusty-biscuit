@@ -1,8 +1,6 @@
-//! Programs section output formatting (markdown and JSON).
+//! Programs section output formatting (table and JSON).
 
-use darkmatter::markdown::Markdown;
-use darkmatter::markdown::output::terminal::{TerminalOptions, for_terminal};
-use darkmatter::render::link::Link;
+use biscuit_terminal::prelude::*;
 use sniff::programs::{ExecutableSource, ProgramsInfo};
 
 use super::OutputFilter;
@@ -18,17 +16,11 @@ struct ProgramTableEntry {
     website: String,
 }
 
-fn escape_markdown_cell(value: &str) -> String {
-    value.replace('|', "\\|")
-}
-
-fn name_link(name: &str, website: &str) -> String {
+fn name_with_url(name: &str, website: &str) -> String {
     if website.is_empty() {
-        return escape_markdown_cell(name);
+        return name.to_string();
     }
-
-    let display = escape_markdown_cell(name);
-    Link::new(display, website).to_markdown()
+    format!("{name} [{website}]")
 }
 
 fn version_allowed(include_versions: bool, source: Option<ExecutableSource>) -> bool {
@@ -280,55 +272,48 @@ fn collect_program_entries(
 pub fn print_programs_markdown(programs: &ProgramsInfo, verbose: u8, filter: OutputFilter) {
     let include_versions = verbose > 1;
     let entries = collect_program_entries(programs, filter, include_versions);
-    let mut headers = vec!["Name", "Installed", "Description"];
+
+    let mut columns = vec![
+        TableColumn::new("Name"),
+        TableColumn::new("Installed")
+            .with_alignment(Alignment::Center)
+            .with_uniform_alignment(true),
+    ];
 
     if verbose > 0 {
-        headers.insert(2, "Binary");
-        headers.insert(3, "Path");
+        columns.push(TableColumn::new("Binary"));
+        columns.push(TableColumn::new("Path"));
     }
     if verbose > 1 {
-        headers.insert(4, "Version");
+        columns.push(TableColumn::new("Version"));
     }
 
-    let mut lines = Vec::new();
-    lines.push(format!("| {} |", headers.join(" | ")));
-    lines.push(format!(
-        "| {} |",
-        headers
-            .iter()
-            .map(|_| "---")
-            .collect::<Vec<_>>()
-            .join(" | ")
-    ));
+    columns.push(TableColumn::new("Description"));
 
-    for entry in entries {
-        let mut cells = vec![
-            name_link(&entry.name, &entry.website),
-            if entry.installed {
-                "✅".to_string()
-            } else {
-                "❌".to_string()
-            },
+    let mut table = Table::new()
+        .with_columns(columns)
+        .prefer_cursor_alignment();
+
+    for entry in &entries {
+        let mut cells: Vec<TableCellContent> = vec![
+            name_with_url(&entry.name, &entry.website).into(),
+            (if entry.installed { "✅" } else { "❌" }).into(),
         ];
 
         if verbose > 0 {
-            cells.push(escape_markdown_cell(&entry.binary_name));
-            cells.push(escape_markdown_cell(entry.path.as_deref().unwrap_or("")));
+            cells.push(entry.binary_name.clone().into());
+            cells.push(entry.path.as_deref().unwrap_or("").into());
         }
         if verbose > 1 {
-            cells.push(escape_markdown_cell(entry.version.as_deref().unwrap_or("")));
+            cells.push(entry.version.as_deref().unwrap_or("").into());
         }
 
-        cells.push(escape_markdown_cell(&entry.description));
-
-        lines.push(format!("| {} |", cells.join(" | ")));
+        cells.push(entry.description.clone().into());
+        table.add_row(cells);
     }
 
-    let markdown = Markdown::from(lines.join("\n"));
-    match for_terminal(&markdown, TerminalOptions::default()) {
-        Ok(rendered) => print!("{}", rendered),
-        Err(_) => println!("{}", markdown.content()),
-    }
+    let term = Terminal::default();
+    print!("{}", table.display(&term));
 }
 
 /// Rich program metadata for JSON output.
