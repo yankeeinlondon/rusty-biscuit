@@ -5,5 +5,7 @@
 //! HTML, and Markdown.
 
 pub mod link;
+// pub mod image_ref;
+// pub mod stylesheet;
 
 pub use link::{Link, LinkType};

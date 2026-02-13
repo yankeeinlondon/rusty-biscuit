@@ -23,7 +23,7 @@ This basic example will bring in another file's content but more specifically it
 
 ### Frontmatter and Recursion
 
-When we kickoff the [markdown pipeline](./darkmatter-pipeline.md) we're allowed to pass in some initial "state". This "state" is a key/value structure and if it's provided then it will be provided to the base document as _default values_ for the base document's frontmatter. That means before any transforms are done the base document's frontmatter will be a merged dictionary of:
+When we kickoff the [markdown pipeline](../darkmatter-pipeline.md) we're allowed to pass in some initial "state". This "state" is a key/value structure and if it's provided then it will be provided to the base document as _default values_ for the base document's frontmatter. That means before any transforms are done the base document's frontmatter will be a merged dictionary of:
 
 - a base of the key/value passed in as the initial state
 - any frontmatter that was hardcoded on the page will be maintained (and override any conflicting value passed in)
@@ -63,7 +63,7 @@ The example showed a relative path used to the foreign file and this is the reco
 
 - ENV based paths
 
-    - in the [Markdown Pipeline](./darkmatter-pipeline.md) processing during the "prep" stages (aka, before we render transclusion) we have a Frontmatter interpolation stage which is run. This stage has access to environment variables and so it's possible to use these ENV variables to dereference your file paths.
+    - in the [Markdown Pipeline](../darkmatter-pipeline.md) processing during the "prep" stages (aka, before we render transclusion) we have a Frontmatter interpolation stage which is run. This stage has access to environment variables and so it's possible to use these ENV variables to dereference your file paths.
     - for example, you could specify:
 
       ```md
