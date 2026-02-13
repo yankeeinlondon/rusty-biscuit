@@ -1,51 +1,304 @@
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
 BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
 RESET := '\033[0m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+
+AREA := "Biscuit Speaks"
+LIB_NAME := AREA + " Library"
+CLI_BINARY := "so-you-speak"
+CLI_NAME := AREA + " CLI " + RESET + "(" + DIM + BLUE + ITALIC + CLI_BINARY + RESET + ")" + RESET
+CLI_NAME_SPEAK := AREA + " CLI (called " + CLI_BINARY + ")"
+LIBRARY := replace(lowercase(AREA), " ", "-")
+CLI := replace(lowercase(AREA) + "-cli", " ", "-")
+CLI_PATH := "./cli"
+DOCS := ""
+
 
 default:
-    @echo "{{BOLD}}biscuit-speaks{{RESET}} Library"
-    @echo
-    @just --list | grep -v 'default'
+    #!/usr/bin/env bash
+    set -euo pipefail
 
-# build library
+    if command -v md &> /dev/null; then
+        md just.md
+    else
+      echo
+      echo -e "{{BOLD}}{{AREA}} ({{RESET}}Library & CLI{{BOLD}}){{RESET}}"
+      echo "======================================================================================"
+      echo ""
+    fi
+
+    just --list | grep -v 'default'
+    echo
+
+# Uses TTS if available but never error
+_speak *args:
+    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
+
+# Ask Claude Code via a prompt file in a non-interactive session
+# NOTE: just hangs when large multi-line strings are passed via {{PROMPT}} parameters.
+# All callers should write their prompt to a temp file and call this recipe instead.
+_claude_file PROMPT_FILE:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo -e "\033[2m⏳ claude is working (max 30 turns)...\033[0m" >&2
+    (while true; do sleep 30; printf "." >&2; done) &
+    DOTS_PID=$!
+    trap 'kill $DOTS_PID 2>/dev/null || true' EXIT
+    unset ANTHROPIC_API_KEY
+    PROMPT_CONTENT="$(cat "{{PROMPT_FILE}}")"
+    cd .. && claude --dangerously-skip-permissions --max-turns 30 -p "$PROMPT_CONTENT"
+    echo -e "\n\033[2m✓ claude finished\033[0m" >&2
+
+
+
+
+# Build the library and CLI
 build *args="":
-    @echo "Building biscuit-speaks..."
+    @echo -e "Building {{LIB_NAME}}"
     @echo
-    @cargo build -p biscuit-speaks {{args}}
+    cargo build -p {{LIBRARY}} {{args}} || ( just _speak "The {{LIB_NAME}} build failed!" && echo -e "\n❌ The {{LIB_NAME}} build failed!" && exit 1)
+    @echo
+    @echo -e "✅ {{BOLD}}{{LIB_NAME}}{{RESET}} built successfully"
+    @echo
+    @echo -e "Building {{BOLD}}{{CLI_NAME}}{{RESET}}"
+    @echo
+    cargo build -p {{CLI}} {{args}} || ( just _speak "The {{CLI_NAME}} build failed!" && echo -e "\n❌ The {{CLI_NAME}} build failed!" && exit 1)
+    @echo
+    @echo -e "✅ {{BOLD}}{{CLI_NAME}}{{RESET}} built successfully"
     @echo
 
-# test library
-test *args="":
-    @echo "Testing {{BOLD}}biscuit-speaks{{RESET}} library"
+# Test both library and CLI
+test:
+    @echo
+    @echo -e "Testing {{BOLD}}{{LIB_NAME}}{{RESET}}"
+    @echo
+    @cargo test -p {{LIBRARY}} || ( just _speak "The {{LIB_NAME}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing tests!" && exit 1 )
+    @echo
+    @echo -e "✅ {{BOLD}}{{GREEN}}{{LIB_NAME}} has passed all tests{{RESET}}"
+    @echo -e "Testing {{BOLD}}{{CLI_NAME}}{{RESET}}"
+    @echo
+    @cargo test -p "{{CLI}}" || ( just _speak "The {{CLI_NAME_SPEAK}} has failing tests" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing tests!" && exit 1 )
+    @echo
+    @echo -e "✅ {{BOLD}}{{GREEN}}{{CLI_NAME}} has passed all tests{{RESET}}"
+
+# Lint both the library and CLI
+lint:
+    @echo
+    @echo -e "Linting {{BOLD}}{{LIB_NAME}}{{RESET}}"
+    @echo
+    @cargo clippy -p {{LIBRARY}} -- -D warnings || ( just _speak "The {{LIB_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && exit 1 )
+    @echo
+    @echo -e "Linting {{BOLD}}{{CLI_NAME}}{{RESET}}"
+    @echo
+    @cargo clippy -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
+
+# Lint (and fix) both the library and CLI
+lint-fix:
+    @echo
+    @echo -e "Linting ({{ITALIC}}with fixes{{RESET}}) {{BOLD}}{{LIB_NAME}}{{RESET}}"
+    @echo
+    @cargo clippy --fix -p {{LIBRARY}} -- -D warnings || ( just _speak "The {{LIB_NAME}} has failing lints even after attempt to autofix" && echo -e "\n❌ The {{BOLD}}{{RED}}{{LIB_NAME}}{{RESET}} has failing lints!" && exit 1 )
+    @echo
+    @echo -e "Linting ({{ITALIC}}with fixes{{RESET}}) {{BOLD}}{{CLI_NAME}}{{RESET}}"
+    @echo
+    cargo clippy --fix -p {{CLI}} -- -D warnings || ( just _speak "The {{CLI_NAME}} has failing lints" && echo -e "\n❌ The {{BOLD}}{{RED}}{{CLI_NAME}}{{RESET}} has failing lints!" && exit 1)
+
+_lint_fix_library ERR_FILE:
+    @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{LIB_NAME}}{{RESET}}; kicking off AI to fix.\n"
+    @echo -e "/{{LIBRARY}} Fix the lint errors in {{LIB_NAME}}:" > "/tmp/{{LIBRARY}}_claude_prompt.txt"
+    @echo "" >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
+    @cat {{ERR_FILE}} >> "/tmp/{{LIBRARY}}_claude_prompt.txt"
+    @just _claude_file "/tmp/{{LIBRARY}}_claude_prompt.txt" || ( so-you-say "claude code was unable to fix the lint errors" | exit 1 )
+    @echo -e "\n🎉 Claude Code believes all lint errors in {{BOLD}}{{LIB_NAME}}{{RESET}} are now fixed"
+    @just _speak "Claude Code believes it has fixed all lint errors in {{LIB_NAME}}"
+    @cargo clippy -p {{LIBRARY}} -- -D warnings 2> "/tmp/{{LIBRARY}}_clippy_errors.txt" || ( so-you-say "it appears that claude code did NOT remove all the lint errors in {{LIB_NAME}}" && exit 1)
+
+_lint_fix_cli ERR_FILE:
+    @echo -e "❌ {{RED}}Errors{{RESET}} {{ITALIC}}were{{RESET}} found in {{BOLD}}{{CLI_NAME}}{{RESET}}; kicking off AI to fix.\n"
+    @echo -e "/{{CLI}} Fix the lint errors in {{CLI_NAME}}:" > "/tmp/{{CLI}}_claude_prompt.txt"
+    @echo "" >> "/tmp/{{CLI}}_claude_prompt.txt"
+    @cat {{ERR_FILE}} >> "/tmp/{{CLI}}_claude_prompt.txt"
+    @just _claude_file "/tmp/{{CLI}}_claude_prompt.txt" || ( so-you-say "claude code was unable to fix the lint errors" | exit 1 )
+    @echo -e "\n🎉 Claude Code believes all lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}} are now fixed"
+    @just _speak "Claude Code believes it has fixed all lint errors in {{CLI_NAME}}"
+    @cargo clippy -p {{CLI}} -- -D warnings 2> "/tmp/{{CLI}}_clippy_errors.txt" || ( so-you-say "it appears that claude code did NOT remove all the lint errors in {{LIB_NAME}}" && exit 1)
+    @echo -e "✅ It has been confirmed that all lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}} have been fixed"
+
+# Fix lint errors with AI
+lint-fix-ai:
+    @echo
+    @echo -e "Checking {{BOLD}}{{LIB_NAME}}{{RESET}} for lint errors"
+    @cargo clippy -p {{LIBRARY}} -- -D warnings 2> "/tmp/{{LIBRARY}}_clippy_errors.txt" || just _lint_fix_library "/tmp/{{LIBRARY}}_clippy_errors.txt"
+    @echo -e "✅ No lint errors in {{BOLD}}{{LIB_NAME}}{{RESET}}"
+    @echo
+    @echo -e "Checking {{BOLD}}{{CLI_NAME}}{{RESET}} for lint errors"
+    @cargo clippy -p {{CLI}} -- -D warnings 2> "/tmp/{{CLI}}_clippy_errors.txt" || just _lint_fix_cli "/tmp/{{CLI}}_clippy_errors.txt"
+    @echo -e "✅ No lint errors in {{BOLD}}{{CLI_NAME}}{{RESET}}"
+    @just _speak "No lint errors were found in {{AREA}}"
+
+# commits all the staged changes using GPT 5.2 (via Opencode)
+commit:
     @echo ""
-    @cargo test -p biscuit-speaks --all-features {{args}}
-
-# lint with clippy
-lint *args="":
-    @cargo clippy -p biscuit-speaks -- {{args}}
-
-
-# build and show the docs for the library code
-docs:
-    @echo "Build and then show latest docs for the biscuit-speaks library code"
+    @echo -e "Committing staged changes in the {{BOLD}}Rusty Biscuit{{RESET}} monorepo to git"
     @echo ""
-    @cargo doc -p biscuit-speaks --open
+    @opencode run commit "-f" --model "openai/gpt-5.2"
+    @if command -v so-you-say >/dev/null 2>&1; then \
+        so-you-say "git commits completed in rusty-biscuit monorepo"; \
+    fi
+
+# Install the CLI
+install *args="":
+    @echo
+    @echo -e "{{BOLD}}Building {{LIB_NAME}}{{RESET}}"
+    @echo
+    @cargo build -p {{LIBRARY}} --release  || ( playa effect error-2 2>/dev/null && exit 1 )
+    @echo
+    @echo -e "{{BOLD}}{{YELLOW}}Installing {{CLI_NAME}}{{RESET}}"
+    @echo
+    @cargo install --path {{CLI_PATH}} {{args}} || ( playa effect error-2 2>/dev/null && exit 1 )
+    @echo -e "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
+    @playa effect drop-4 2>/dev/null || return 0
+
+# Validate the source code without doing a full build
+check:
+    @cargo check -p {{LIBRARY}} -p {{CLI}}
+
+# Run the latest debug build of the Claudine CLI
+cli *args="":
+    @cargo run -p {{CLI}} {{args}}
 
 # Open Claude Code in yolo mode
 oc *args="":
     @clear
-    @echo "Loading {{BOLD}}Opencode{{RESET}}"
-    @cd .. && echo "Loading {{BOLD}}Opencode{{RESET}}" && opencode {{args}}
+    @echo -e "Loading {{BOLD}}Opencode{{RESET}}"
+    @cd .. && opencode {{args}}
 
 # Open Opencode
 cc *args="":
     @clear
-    @echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
-    @cd .. && echo "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})" && claude --dangerously-skip-permissions {{args}}
+    @echo -e "Loading {{BOLD}}Claude Code{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @cd .. && claude --dangerously-skip-permissions {{args}}
 
-# Use GPT 5.2 to commit staged changes
-commit:
-    @cd .. && opencode run commit "-f" --model "openai/gpt-5.2"
-    @if command -v so-you-say >/dev/null 2>&1; then \
-        so-you-say "git commits completed in rusty-biscuit monorepo"; \
-    fi
-    @cd -
+# Open Codex CLI
+codex *args="":
+    @clear
+    @echo -e "Loading {{BOLD}}Codex CLI{{RESET}} ({{ITALIC}}in yolo mode{{RESET}})"
+    @cd .. && codex --dangerously-bypass-approvals-and-sandbox {{args}}
+
+# Show the dependencies for this package
+deps:
+    @echo "Dependencies:"
+    @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{LIBRARY}}*:"
+
+readme_files:
+    @sniff docs --readme --json | jq -r '[.[] | select(.relative | startswith("{{LIBRARY}}")) | "@" + .relative ] | join(" ")'
+
+# review this package using the Codex CLI
+review *args="":
+    @clear
+    @echo -e "Performing a code review on the {{BOLD}}{{LIB_NAME}}{{RESET}} package"
+    @echo ""
+    @cd .. && codex exec "/code-review the code in the {{LIB_NAME}} package; use the rust, {{LIBRARY}}, biscuit-terminal, and clap skills during the review. Write your findings to the file '@{{LIBRARY}}/docs/{YYYY}-{MM}. {{LIBRARY}}-review.md' (where YYYY is the current year, and MM is the current month).\n\n$(just deps)\n\n{{args}}"  || ( so-you-say "There was a problem running the code review in the {{LIB_NAME}} package" >/dev/null 2>&1 && echo -e "{RED}ERROR:{RESET}: problems with the {{LIB_NAME}} review."  && exit 1 )
+    @echo
+    @echo -e "Code Review for the {{BLUE}}{{LIB_NAME}}{{RESET}} package has completed"
+    @just _speak "Review for {{LIB_NAME}} package has completed."
+
+
+TODAY := `date +%F`
+# the temp file for the documents prompt
+DOCS_PROMPT := "../.ai/logs/" + TODAY + ". docs_prompt_for_" + LIBRARY + "_docs_prompt.md"
+# the temp file for the skills prompt
+SKILL_PROMPT := "../.ai/logs/" + TODAY + ". skill_prompt_for_" + LIBRARY + "_skill_prompt.md"
+# the captured summary from the docs refresh step
+DOCS_SUMMARY := "../.ai/logs/" + TODAY +  ". doc_update_summary_for_" + LIBRARY + "_docs_summary.md"
+
+# Render the documentation refresh prompt template.
+#
+# Placeholder keys in the template: DOCS, ARGS, LIBRARY, CLI, LIB_NAME, DEPS
+_docs_prompt TEMPLATE DOCS ARGS LIBRARY CLI LIB_NAME DEPS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TEMPLATE_CONTENT="$(cat "{{TEMPLATE}}")"
+    DOCS_VALUE={{quote(DOCS)}}
+    ARGS_VALUE={{quote(ARGS)}}
+    LIBRARY_VALUE={{quote(LIBRARY)}}
+    CLI_VALUE={{quote(CLI)}}
+    LIB_NAME_VALUE={{quote(LIB_NAME)}}
+    DEPS_VALUE={{quote(DEPS)}}
+    OPEN=$'\x7b\x7b'
+    CLOSE=$'\x7d\x7d'
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DOCS${CLOSE}/${DOCS_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}ARGS${CLOSE}/${ARGS_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIBRARY${CLOSE}/${LIBRARY_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}CLI${CLOSE}/${CLI_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIB_NAME${CLOSE}/${LIB_NAME_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DEPS${CLOSE}/${DEPS_VALUE}}"
+    mkdir -p "$(dirname "{{DOCS_PROMPT}}")"
+    printf '%s\n' "$TEMPLATE_CONTENT" > "{{DOCS_PROMPT}}"
+
+# Render the skill refresh prompt template.
+#
+# Placeholder keys in the template: LIBRARY, LIB_NAME, DOCS, SUMMARY, ARGS
+_skill_prompt TEMPLATE LIBRARY LIB_NAME DOCS SUMMARY_FILE ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TEMPLATE_CONTENT="$(cat "{{TEMPLATE}}")"
+    LIBRARY_VALUE={{quote(LIBRARY)}}
+    LIB_NAME_VALUE={{quote(LIB_NAME)}}
+    DOCS_VALUE={{quote(DOCS)}}
+    ARGS_VALUE={{quote(ARGS)}}
+    SUMMARY_VALUE="$(cat "{{SUMMARY_FILE}}")"
+    OPEN=$'\x7b\x7b'
+    CLOSE=$'\x7d\x7d'
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIBRARY${CLOSE}/${LIBRARY_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIB_NAME${CLOSE}/${LIB_NAME_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DOCS${CLOSE}/${DOCS_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}SUMMARY${CLOSE}/${SUMMARY_VALUE}}"
+    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}ARGS${CLOSE}/${ARGS_VALUE}}"
+    mkdir -p "$(dirname "{{SKILL_PROMPT}}")"
+    printf '%s\n' "$TEMPLATE_CONTENT" > "{{SKILL_PROMPT}}"
+
+_refresh_docs *args="":
+    @echo >&2
+    @echo -e "🏃 starting the refresh of the {{ITALIC}}documents{{RESET}} in {{BOLD}}{{AREA}}{{RESET}}: {{DIM}}$(just readme_files) {{DOCS}} {{args}}{{RESET}}" >&2
+    @just _docs_prompt "../.ai/prompts/refresh_documentation.md" "$(just readme_files)" "{{args}}" "{{LIBRARY}}" "{{CLI}}" "{{LIB_NAME}}" "$(just deps)"
+    @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{DOCS_PROMPT}}{{RESET}}" >&2
+    @just _claude_file "{{DOCS_PROMPT}}"
+
+
+_refresh_skill SUMMARY_FILE *args:
+    @just _speak "The documentation files for {{AREA}} were updated and now we're starting the update of the skill files"
+    @echo >&2
+    @echo -e "🏃 starting the update of the {{ITALIC}}skill files{{RESET}} for {{BOLD}}{{AREA}}{{RESET}}" >&2
+    @echo >&2
+    @just _skill_prompt "../.ai/prompts/agent-skills.md" "{{LIBRARY}}" "{{LIB_NAME}}" "$(just readme_files)" "{{SUMMARY_FILE}}" "{{args}}"
+    @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{SKILL_PROMPT}}{{RESET}}" >&2
+    @just _claude_file "{{SKILL_PROMPT}}"
+
+# fix documentation drift and update the skill
+drift *args="":
+    @echo
+    @echo -e "Refreshing the {{BOLD}}{{LIBRARY}}{{RESET}} {{BLUE}}skill{{RESET}}"
+    @echo
+    @echo -e "- this will be done by updating all of the README.md files in the repo ({{DIM}}{{ITALIC}}as well as any files{{RESET}}"
+    @echo -e "  {{DIM}}{{ITALIC}}passed in by caller{{RESET}})"
+    @echo -e "- once the {{ITALIC}}drift{{RESET}} of the documentation files has been eliminated we'll rework the {{BOLD}}skill{{RESET}} files"
+    @echo -e "- as a final step, we'll look at whether the {{BOLD}}CLAUDE.md{{RESET}} file would benefit from being updated"
+    @echo -e "  based on the changes made\n"
+
+    @DOC_SUMMARY_FILE="{{DOCS_SUMMARY}}" && mkdir -p "$(dirname "$DOC_SUMMARY_FILE")" && just _refresh_docs {{args}} > "$DOC_SUMMARY_FILE" && just _refresh_skill "$DOC_SUMMARY_FILE" "{{args}}"
+
+
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} >/dev/null || true

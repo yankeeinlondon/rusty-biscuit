@@ -26,7 +26,7 @@ description: this command will evaluate a package in this monorepo for "drift" (
 - **biscuit-hash**
     - a library and CLI which provider best in class hashing features (xxHash, Blake3, and Argon2)
 - **biscuit-speaks**
-    - a library which abstracts a host's TTS programs and provides a unified TTS interface
+    - a library and CLI (`so-you-say`) which abstracts a host's TTS programs and provides a unified TTS interface
 - **biscuit-terminal**
     - a library and CLI which interrogates/detects features in terminals as well as provides a lot of highly useful "components" for rendering to the terminal including: Table, TwoColumns, OrderedList, UnorderedList, TerminalImage and more
 - **claudine**
@@ -47,8 +47,8 @@ description: this command will evaluate a package in this monorepo for "drift" (
     - a set of sub-packages which
 - **sniff**
     - a library and CLI which detects hardware, network, services, and installed applications on the host machine. It also evaluates the current working directory to give insight into the current repo, packages, etc.
-- **so-you-say**
-    - A CLI which provides TTS functionality (by leveraging the `biscuit-speaks` library)
+- **biscuit-speaks-cli** (binary: `so-you-say`)
+    - A CLI which provides TTS functionality (by leveraging the `biscuit-speaks` library, located at `biscuit-speaks/cli`)
 - **tree-hugger**
     - A static analysis library and CLI (`hug`) which provides code analysis via the popular tree-hugger library
 - **unchained-ai**

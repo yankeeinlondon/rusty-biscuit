@@ -70,8 +70,8 @@ name = "research-lib"
 changelog_path = "research/lib/CHANGELOG.md"
 
 [[package]]
-name = "so-you-say"
-changelog_path = "so-you-say/CHANGELOG.md"
+name = "biscuit-speaks-cli"
+changelog_path = "biscuit-speaks/cli/CHANGELOG.md"
 
 [[package]]
 name = "sniff-cli"

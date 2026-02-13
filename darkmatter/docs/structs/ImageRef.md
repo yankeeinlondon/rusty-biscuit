@@ -88,7 +88,7 @@ Of the methods for getting started with a `ImageRef`, the `TryFrom` implementati
     - In Darkmatter we offer a convenience to Markdown authors of specifying the image's width as an _addon_ to the Alt Text:
         - The following image reference: `![hi|15%](./my-image.png)` would have:
             - an Alt Text of: `hi`
-            - the image would be expected to be rendered at a width of 15% of the viewport
+            - the image would be expected to be rendered at a width of 15% of the viewport, during the import process this would be achieved by setting the `style`
 
 ### Working With
 

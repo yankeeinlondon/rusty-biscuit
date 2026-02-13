@@ -13,7 +13,7 @@ description: CLI for text-to-speech using system TTS providers. Use when working
 - Provider-specific configuration
 - Cache management
 
-**Binary Name**: `speak` (installed as `so-you-say`)
+**Binary Name**: `so-you-say` (package: `biscuit-speaks-cli`, located at `biscuit-speaks/cli`)
 
 ## Quick Reference
 

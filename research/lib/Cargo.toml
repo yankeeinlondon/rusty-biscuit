@@ -44,7 +44,7 @@ tokio = { version = "1.48.0", features = ["full", "tokio-macros"] }
 tracing = "0.1"
 walkdir = "2"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
-biscuit-speaks = { path = "../../biscuit-speaks" }
+biscuit-speaks = { path = "../../biscuit-speaks/lib" }
 sniff = { path = "../../sniff/lib"}
 
 [dev-dependencies]

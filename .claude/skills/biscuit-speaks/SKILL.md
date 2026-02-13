@@ -103,6 +103,6 @@ OS-specific default stacks (highest quality first):
 
 ## Related Packages
 
-- **so-you-say**: CLI that uses biscuit-speaks (`speak` binary)
+- **biscuit-speaks-cli**: CLI that uses biscuit-speaks (`so-you-say` binary, located at `biscuit-speaks/cli`)
 - **playa**: Audio playback library (optional feature for `biscuit-speaks`)
 - **sniff-lib**: System detection for available TTS providers

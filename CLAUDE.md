@@ -23,6 +23,9 @@ dockhand/
 ├── biscuit-hash/     # Best-in-class hashing algorithms
 │   ├── cli/          # Binary: `bh` (hash CLI)
 │   └── lib/          # xxHash, BLAKE3, Argon2id hashing
+├── biscuit-speaks/   # Cross-platform TTS with multi-provider support
+│   ├── cli/          # Binary: `so-you-say` (TTS CLI)
+│   └── lib/          # Provider detection, voice caching, failover
 ├── biscuit-terminal/ # Terminal detection and rich rendering
 │   ├── cli/          # Binary: `bt` (terminal inspector + diagram renderer)
 │   └── lib/          # Terminal capabilities, image rendering, mermaid diagrams
@@ -55,7 +58,6 @@ dockhand/
 ├── sniff/
 │   ├── cli/          # Binary: `sniff`
 │   └── lib/          # Hardware, Network, OS, and package manager discovery
-├── so-you-say/       # Binary: `speak` (TTS CLI, uses playa for playback)
 ├── tree-hugger/      # Tree-sitter symbol extraction
 │   ├── cli/          # Binary: `hug` (symbol/import/export CLI)
 │   └── lib/          # Symbol extraction library (16 languages)
@@ -234,7 +236,7 @@ When running in Wezterm, Queue creates a split layout:
 This repository has local Claude Code skills in `.claude/skills/`:
 
 - `biscuit-hash` - Hashing trifecta: xxHash (fast), BLAKE3 (crypto), Argon2id (passwords)
-- `biscuit-speaks` - Cross-platform TTS with multi-provider support (ElevenLabs, Say, eSpeak, Kokoro, etc.)
+- `biscuit-speaks` - Cross-platform TTS library and CLI (`so-you-say`) with multi-provider support (ElevenLabs, Say, eSpeak, Kokoro, etc.)
 - `biscuit-terminal` - **Terminal authority**: detection, image rendering (viuer), mermaid diagrams
 - `claudine` - Universal hook/event handler for agentic CLIs (Claude, Codex, Gemini, Goose, Kimi, OpenCode, Qwen)
 - `darkmatter` - Markdown parsing/rendering (delegates terminal rendering to biscuit-terminal)
@@ -244,7 +246,7 @@ This repository has local Claude Code skills in `.claude/skills/`:
 - `research` - AI-powered library research with two-phase LLM pipeline
 - `schematic` - REST API client code generation, OpenAPI import/export, Headers builder
 - `sniff` - System detection (OS, hardware, network, programs, services)
-- `so-you-say` - TTS CLI (`speak` binary) wrapping biscuit-speaks
+- `so-you-say` - TTS CLI (`speak` binary) wrapping biscuit-speaks (located at `biscuit-speaks/cli`)
 - `clap` - Command-line argument parsing
 - `color-eyre` - Error reporting
 - `ratatui` - Terminal UI framework
@@ -271,8 +273,7 @@ When working in this repository, you **must** follow these workflows:
    - Working in `homelab/`? Use the `homelab` skill
    - Working in `model-citizen/`? Use the `model-citizen` skill
    - Working in `biscuit-terminal/`? Use the `biscuit-terminal` skill
-   - Working in `biscuit-speaks/`? Use the `biscuit-speaks` skill
-   - Working in `so-you-say/`? Use the `so-you-say` skill
+   - Working in `biscuit-speaks/`? Use the `biscuit-speaks` and `so-you-say` skills
    - Working in `playa/`? Use the `playa` skill
    - Working in `sniff/`? Use the `sniff` skill
    - Working in `unchained-ai/`? Use the `unchained-ai` skill
@@ -294,12 +295,12 @@ just build
 
 # Build specific area
 just -f research/justfile build
-just -f so-you-say/justfile build
+just -f biscuit-speaks/justfile build
 
 # Build specific package
 cargo build -p research-cli
 cargo build -p research-lib
-cargo build -p so-you-say
+cargo build -p biscuit-speaks-cli
 ```
 
 ### Testing
@@ -310,7 +311,7 @@ just test
 
 # Test specific area
 just -f research/justfile test
-just -f so-you-say/justfile test
+just -f biscuit-speaks/justfile test
 
 # Test specific package with additional args
 cargo test -p research-lib --lib
@@ -332,7 +333,7 @@ just install
 
 # Install specific binary
 just -f research/justfile install    # Installs `research`
-just -f so-you-say/justfile install  # Installs `speak`
+just -f biscuit-speaks/justfile install  # Installs `so-you-say`
 cargo install --path queue/cli       # Installs `queue`
 ```
 
@@ -349,14 +350,14 @@ research pull clap
 research pull tokio --local  # Also copy underlying research docs
 
 # Speak CLI (debug mode)
-just -f so-you-say/justfile cli "Hello world"
+just -f biscuit-speaks/justfile cli "Hello world"
 ```
 
 ### Linting
 
 ```bash
 # Lint specific area
-just -f so-you-say/justfile lint
+just -f biscuit-speaks/justfile lint
 
 # Or use cargo clippy directly
 cargo clippy -p queue-lib -p queue-cli

@@ -9,7 +9,7 @@ This is a Rust workspace with the following modules:
 - `biscuit-file/cli/Cargo.toml` - File utilities CLI (`bf`)
 - `biscuit-hash/lib/Cargo.toml` - Hashing library (xxHash, BLAKE3, Argon2id)
 - `biscuit-hash/cli/Cargo.toml` - Hashing CLI (`bh`)
-- `biscuit-speaks/Cargo.toml` - Cross-platform TTS library
+- `biscuit-speaks/lib/Cargo.toml` - Cross-platform TTS library
 - `biscuit-terminal/lib/Cargo.toml` - Terminal detection, image rendering, diagrams
 - `biscuit-terminal/cli/Cargo.toml` - Terminal inspector CLI (`bt`)
 - `claudine/lib/Cargo.toml` - Universal hook/event handler for agentic CLIs
@@ -33,7 +33,7 @@ This is a Rust workspace with the following modules:
 - `schematic/schema/Cargo.toml` - Generated REST API clients (auto-generated)
 - `sniff/lib/Cargo.toml` - System discovery (OS, hardware, network, programs)
 - `sniff/cli/Cargo.toml` - System discovery CLI (`sniff`)
-- `so-you-say/Cargo.toml` - TTS CLI (`so-you-say`)
+- `biscuit-speaks/cli/Cargo.toml` - TTS CLI (`so-you-say`)
 - `tabby/Cargo.toml` - Future module (no dependencies)
 - `tabby/ui/Cargo.toml` - Future UI module
 - `tree-hugger/lib/Cargo.toml` - Tree-sitter symbol extraction (16 languages)
@@ -213,9 +213,9 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, cli, system_
 
-- [so-you-say](./so-you-say) _v0.1.0_
+- [biscuit-speaks-cli](./biscuit-speaks/cli) _v0.1.0_
 
-    _TTS CLI wrapping biscuit-speaks._
+    _TTS CLI wrapping biscuit-speaks (binary: `so-you-say`)._
 
     _Tags: workspace, cli, tts_
 

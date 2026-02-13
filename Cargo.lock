@@ -653,6 +653,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "biscuit-speaks-cli"
+version = "0.1.0"
+dependencies = [
+ "biscuit-speaks",
+ "clap 4.5.57",
+ "clap_complete",
+ "darkmatter",
+ "inquire 0.9.1",
+ "owo-colors",
+ "tokio",
+]
+
+[[package]]
 name = "biscuit-terminal"
 version = "0.1.0"
 dependencies = [
@@ -6719,19 +6732,6 @@ dependencies = [
  "serde_json",
  "sniff",
  "strum 0.27.2",
- "tokio",
-]
-
-[[package]]
-name = "so-you-say"
-version = "0.1.0"
-dependencies = [
- "biscuit-speaks",
- "clap 4.5.57",
- "clap_complete",
- "darkmatter",
- "inquire 0.9.1",
- "owo-colors",
  "tokio",
 ]
 
