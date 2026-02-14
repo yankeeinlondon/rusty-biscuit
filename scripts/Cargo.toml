@@ -17,3 +17,4 @@ path = "drift.rs"
 [dependencies]
 cargo_metadata = "0.18"
 anyhow = "1.0"
+biscuit-terminal = { path = "../biscuit-terminal/lib" }

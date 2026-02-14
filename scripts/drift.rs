@@ -9,6 +9,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
+use biscuit_terminal::prelude::{
+    OrderedList, Prose, Renderable, RenderableContent, Table, TableColumn, Terminal, UnorderedList,
+};
 use cargo_metadata::{Metadata, MetadataCommand, PackageId};
 
 const AGENT_SKILLS_PROMPT: &str = ".ai/prompts/agent-skills.md";
@@ -143,11 +146,9 @@ impl Ui {
     }
 
     fn heartbeat(&self, phase: &str, elapsed: Duration) {
-        let spinner = ['|', '/', '-', '\\'][(elapsed.as_secs() as usize) % 4];
         println!(
-            "  {} [{}] {phase} running ({})",
+            "  {} {phase} running (elapsed {})",
             self.paint(ANSI_DIM, "status:"),
-            spinner,
             format_duration(elapsed)
         );
     }
@@ -648,8 +649,8 @@ fn run_agent(
         .take()
         .ok_or_else(|| anyhow!("failed to capture agent stderr"))?;
 
-    let stdout_thread = spawn_output_thread(stdout_handle, false);
-    let stderr_thread = spawn_output_thread(stderr_handle, true);
+    let stdout_thread = spawn_stdout_thread(stdout_handle);
+    let stderr_thread = spawn_stderr_thread(stderr_handle);
 
     let start = Instant::now();
     let mut last_heartbeat = start;
@@ -709,11 +710,116 @@ fn run_agent(
     Ok(stdout)
 }
 
-fn spawn_output_thread<R>(reader: R, stderr: bool) -> thread::JoinHandle<Result<String>>
+#[derive(Debug)]
+struct MarkdownStreamRenderer {
+    term: Terminal,
+    pending_table_lines: Vec<String>,
+    pending_list_lines: Vec<String>,
+}
+
+impl MarkdownStreamRenderer {
+    fn new() -> Self {
+        Self {
+            term: Terminal::new(),
+            pending_table_lines: Vec::new(),
+            pending_list_lines: Vec::new(),
+        }
+    }
+
+    fn process_line(&mut self, line: &str) {
+        let raw = line.trim_end_matches(['\n', '\r']);
+        let had_newline = line.ends_with('\n');
+
+        if is_markdown_table_line(raw) {
+            self.flush_pending_list();
+            self.pending_table_lines.push(raw.to_owned());
+            return;
+        }
+
+        if is_markdown_list_line(raw) {
+            self.flush_pending_table();
+            self.pending_list_lines.push(raw.to_owned());
+            return;
+        }
+
+        self.flush_pending_table();
+        self.flush_pending_list();
+        self.print_markdownish_line(raw, had_newline);
+    }
+
+    fn finish(&mut self) {
+        self.flush_pending_table();
+        self.flush_pending_list();
+    }
+
+    fn flush_pending_table(&mut self) {
+        if self.pending_table_lines.is_empty() {
+            return;
+        }
+
+        if let Some(rendered_table) =
+            render_markdown_table_block(&self.pending_table_lines, &self.term)
+        {
+            print!("{rendered_table}");
+            if !rendered_table.ends_with('\n') {
+                println!();
+            }
+        } else {
+            for line in &self.pending_table_lines {
+                self.print_markdownish_line(line, true);
+            }
+        }
+
+        self.pending_table_lines.clear();
+        io::stdout().flush().ok();
+    }
+
+    fn flush_pending_list(&mut self) {
+        if self.pending_list_lines.is_empty() {
+            return;
+        }
+
+        if let Some(rendered_list) =
+            render_markdown_list_block(&self.pending_list_lines, &self.term)
+        {
+            print!("{rendered_list}");
+            if !rendered_list.ends_with('\n') {
+                println!();
+            }
+        } else {
+            for line in &self.pending_list_lines {
+                self.print_markdownish_line(line, true);
+            }
+        }
+
+        self.pending_list_lines.clear();
+        io::stdout().flush().ok();
+    }
+
+    fn print_markdownish_line(&self, line: &str, had_newline: bool) {
+        if line.is_empty() {
+            if had_newline {
+                println!();
+            }
+            return;
+        }
+
+        let rendered = render_markdownish_line(line, &self.term);
+        if had_newline {
+            println!("{rendered}");
+        } else {
+            print!("{rendered}");
+        }
+        io::stdout().flush().ok();
+    }
+}
+
+fn spawn_stdout_thread<R>(reader: R) -> thread::JoinHandle<Result<String>>
 where
     R: Read + Send + 'static,
 {
     thread::spawn(move || -> Result<String> {
+        let mut renderer = MarkdownStreamRenderer::new();
         let mut buffered = BufReader::new(reader);
         let mut line = String::new();
         let mut captured = String::new();
@@ -728,18 +834,319 @@ where
             }
 
             captured.push_str(&line);
+            renderer.process_line(&line);
+        }
 
-            if stderr {
-                eprint!("{line}");
-                io::stderr().flush().ok();
-            } else {
-                print!("{line}");
-                io::stdout().flush().ok();
+        renderer.finish();
+        Ok(captured)
+    })
+}
+
+fn spawn_stderr_thread<R>(reader: R) -> thread::JoinHandle<Result<String>>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || -> Result<String> {
+        let mut buffered = BufReader::new(reader);
+        let mut line = String::new();
+        let mut captured = String::new();
+
+        loop {
+            line.clear();
+            let read = buffered
+                .read_line(&mut line)
+                .context("failed reading agent stderr stream")?;
+            if read == 0 {
+                break;
             }
+
+            captured.push_str(&line);
+            eprint!("{line}");
+            io::stderr().flush().ok();
         }
 
         Ok(captured)
     })
+}
+
+fn is_markdown_table_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with('|') && trimmed.ends_with('|') && trimmed.len() >= 3
+}
+
+fn render_markdown_table_block(lines: &[String], term: &Terminal) -> Option<String> {
+    if lines.len() < 2 {
+        return None;
+    }
+
+    let header = parse_markdown_row(&lines[0])?;
+    let separator = parse_markdown_row(&lines[1])?;
+    if header.is_empty() || header.len() != separator.len() {
+        return None;
+    }
+    if !separator
+        .iter()
+        .all(|cell| is_markdown_separator_cell(cell))
+    {
+        return None;
+    }
+
+    let mut data = Vec::new();
+    for row in &lines[2..] {
+        let parsed = parse_markdown_row(row)?;
+        if parsed.len() != header.len() {
+            return None;
+        }
+        data.push(
+            parsed
+                .iter()
+                .map(|cell| cleanup_markdown_inline(cell).into())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    let columns = header
+        .iter()
+        .map(|cell| TableColumn::new(cleanup_markdown_inline(cell)))
+        .collect::<Vec<_>>();
+
+    let table = Table::new()
+        .with_columns(columns)
+        .with_data(data)
+        .prefer_cursor_alignment();
+    Some(table.render(Some(term.width())))
+}
+
+fn parse_markdown_row(line: &str) -> Option<Vec<String>> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
+        return None;
+    }
+
+    let content = trimmed.trim_start_matches('|').trim_end_matches('|');
+    Some(
+        content
+            .split('|')
+            .map(|cell| cell.trim().to_owned())
+            .collect(),
+    )
+}
+
+fn is_markdown_separator_cell(cell: &str) -> bool {
+    let trimmed = cell.trim();
+    !trimmed.is_empty() && trimmed.contains('-') && trimmed.chars().all(|ch| ch == '-' || ch == ':')
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ListKind {
+    Ordered,
+    Unordered,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ParsedListLine {
+    indent: usize,
+    kind: ListKind,
+    text: String,
+}
+
+fn is_markdown_list_line(line: &str) -> bool {
+    parse_markdown_list_line(line).is_some()
+}
+
+fn parse_markdown_list_line(line: &str) -> Option<ParsedListLine> {
+    let byte_indent = line
+        .char_indices()
+        .find(|(_, ch)| !ch.is_whitespace())
+        .map(|(idx, _)| idx)
+        .unwrap_or(line.len());
+    let indent = line[..byte_indent].chars().count();
+    let trimmed = line[byte_indent..].trim_end();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let bullet_prefix = ['-', '*', '+']
+        .iter()
+        .find_map(|bullet| trimmed.strip_prefix(*bullet))
+        .and_then(|rest| rest.strip_prefix(' '));
+    if let Some(text) = bullet_prefix {
+        return Some(ParsedListLine {
+            indent,
+            kind: ListKind::Unordered,
+            text: text.to_owned(),
+        });
+    }
+
+    let digit_count = trimmed.chars().take_while(|ch| ch.is_ascii_digit()).count();
+    if digit_count > 0 {
+        let rest = &trimmed[digit_count..];
+        if let Some(text) = rest.strip_prefix(". ") {
+            return Some(ParsedListLine {
+                indent,
+                kind: ListKind::Ordered,
+                text: text.to_owned(),
+            });
+        }
+    }
+
+    None
+}
+
+fn render_markdown_list_block(lines: &[String], term: &Terminal) -> Option<String> {
+    let parsed = lines
+        .iter()
+        .map(|line| parse_markdown_list_line(line))
+        .collect::<Option<Vec<_>>>()?;
+    if parsed.is_empty() {
+        return None;
+    }
+
+    let mut output = String::new();
+    let mut idx = 0;
+    while idx < parsed.len() {
+        let line = &parsed[idx];
+        let (component, next_idx) = build_list_component(&parsed, idx, line.indent, line.kind)?;
+        match component {
+            RenderableContent::String(text) => output.push_str(&text),
+            RenderableContent::Component(component) => {
+                output.push_str(&component.fallback_render(term))
+            }
+        }
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
+        idx = next_idx;
+    }
+
+    Some(output)
+}
+
+fn build_list_component(
+    lines: &[ParsedListLine],
+    mut idx: usize,
+    indent: usize,
+    kind: ListKind,
+) -> Option<(RenderableContent, usize)> {
+    let mut items: Vec<RenderableContent> = Vec::new();
+
+    while idx < lines.len() {
+        let line = &lines[idx];
+        if line.indent < indent {
+            break;
+        }
+
+        if line.indent > indent {
+            let (nested, next_idx) = build_list_component(lines, idx, line.indent, line.kind)?;
+            items.push(nested);
+            idx = next_idx;
+            continue;
+        }
+
+        if line.kind != kind {
+            break;
+        }
+
+        items.push(cleanup_markdown_inline(&line.text).into());
+        idx += 1;
+    }
+
+    let component = match kind {
+        ListKind::Ordered => RenderableContent::from(OrderedList::from(items)),
+        ListKind::Unordered => {
+            RenderableContent::from(UnorderedList::from(items).with_bullet("- "))
+        }
+    };
+
+    Some((component, idx))
+}
+
+fn render_markdownish_line(line: &str, term: &Terminal) -> String {
+    if line.contains('\u{1b}') {
+        return line.to_owned();
+    }
+
+    let mut normalized = line.to_owned();
+    if let Some(heading) = markdown_heading_text(&normalized) {
+        normalized = format!("<b>{heading}</b>");
+    } else {
+        normalized = markdown_bold_to_prose(&normalized);
+        normalized = markdown_inline_code_to_dim(&normalized);
+    }
+
+    Prose::new(normalized).fallback_render(term)
+}
+
+fn markdown_heading_text(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let hashes = trimmed.chars().take_while(|ch| *ch == '#').count();
+    if hashes == 0 || hashes > 6 {
+        return None;
+    }
+
+    let title = trimmed[hashes..].trim();
+    if title.is_empty() {
+        None
+    } else {
+        Some(title.to_owned())
+    }
+}
+
+fn markdown_bold_to_prose(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    let mut bold_open = false;
+
+    while let Some(ch) = chars.next() {
+        if ch == '*' && chars.peek() == Some(&'*') {
+            chars.next();
+            if bold_open {
+                output.push_str("</b>");
+            } else {
+                output.push_str("<b>");
+            }
+            bold_open = !bold_open;
+            continue;
+        }
+        output.push(ch);
+    }
+
+    if bold_open {
+        output.push_str("</b>");
+    }
+
+    output
+}
+
+fn markdown_inline_code_to_dim(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    let mut code_open = false;
+
+    while let Some(ch) = chars.next() {
+        if ch == '`' {
+            if code_open {
+                output.push_str("</dim>");
+            } else {
+                output.push_str("<dim>");
+            }
+            code_open = !code_open;
+            continue;
+        }
+        output.push(ch);
+    }
+
+    if code_open {
+        output.push_str("</dim>");
+    }
+
+    output
+}
+
+fn cleanup_markdown_inline(input: &str) -> String {
+    let without_ticks = input.replace('`', "");
+    let without_double_stars = without_ticks.replace("**", "");
+    without_double_stars.trim().to_owned()
 }
 
 fn osc8_file_link(workspace_root: &Path, path: &Path) -> String {
@@ -1025,6 +1432,73 @@ mod tests {
         let text = "0123456789";
         assert_eq!(tail_excerpt(text, 4), "6789");
         assert_eq!(tail_excerpt(text, 20), "0123456789");
+    }
+
+    #[test]
+    fn markdown_bold_to_prose_converts_delimiters() {
+        assert_eq!(
+            markdown_bold_to_prose("a **b** c"),
+            "a <b>b</b> c".to_owned()
+        );
+    }
+
+    #[test]
+    fn markdown_heading_text_extracts_title() {
+        assert_eq!(
+            markdown_heading_text("## Final Report"),
+            Some("Final Report".to_owned())
+        );
+        assert_eq!(markdown_heading_text("no heading"), None);
+    }
+
+    #[test]
+    fn markdown_table_parser_accepts_basic_table() {
+        let lines = vec![
+            "| Col A | Col B |".to_owned(),
+            "|-------|-------|".to_owned(),
+            "| one   | two   |".to_owned(),
+        ];
+        let term = Terminal::new();
+        let rendered = render_markdown_table_block(&lines, &term);
+        assert!(rendered.is_some());
+    }
+
+    #[test]
+    fn parse_markdown_list_line_detects_unordered_and_ordered() {
+        let unordered = parse_markdown_list_line("  - item");
+        assert_eq!(
+            unordered,
+            Some(ParsedListLine {
+                indent: 2,
+                kind: ListKind::Unordered,
+                text: "item".to_owned()
+            })
+        );
+
+        let ordered = parse_markdown_list_line("12. step");
+        assert_eq!(
+            ordered,
+            Some(ParsedListLine {
+                indent: 0,
+                kind: ListKind::Ordered,
+                text: "step".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn markdown_list_renderer_accepts_nested_lists() {
+        let lines = vec![
+            "- parent".to_owned(),
+            "  - child".to_owned(),
+            "- sibling".to_owned(),
+        ];
+        let term = Terminal::new();
+        let rendered = render_markdown_list_block(&lines, &term);
+        let output = rendered.unwrap_or_default();
+        assert!(output.contains("- parent"));
+        assert!(output.contains("- child"));
+        assert!(output.contains("- sibling"));
     }
 
     fn unique_temp_root() -> PathBuf {
