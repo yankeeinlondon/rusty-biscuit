@@ -209,89 +209,14 @@ review *args="":
     @just _speak "Review for {{LIB_NAME}} package has completed."
 
 
-TODAY := `date +%F`
-# the temp file for the documents prompt
-DOCS_PROMPT := "../.ai/logs/" + TODAY + ". docs_prompt_for_" + LIBRARY + "_docs_prompt.md"
-# the temp file for the skills prompt
-SKILL_PROMPT := "../.ai/logs/" + TODAY + ". skill_prompt_for_" + LIBRARY + "_skill_prompt.md"
-# the captured summary from the docs refresh step
-DOCS_SUMMARY := "../.ai/logs/" + TODAY +  ". doc_update_summary_for_" + LIBRARY + "_docs_summary.md"
-
-# Render the documentation refresh prompt template.
-#
-# Placeholder keys in the template: DOCS, ARGS, LIBRARY, CLI, LIB_NAME, DEPS
-_docs_prompt TEMPLATE DOCS ARGS LIBRARY CLI LIB_NAME DEPS:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    TEMPLATE_CONTENT="$(cat "{{TEMPLATE}}")"
-    DOCS_VALUE={{quote(DOCS)}}
-    ARGS_VALUE={{quote(ARGS)}}
-    LIBRARY_VALUE={{quote(LIBRARY)}}
-    CLI_VALUE={{quote(CLI)}}
-    LIB_NAME_VALUE={{quote(LIB_NAME)}}
-    DEPS_VALUE={{quote(DEPS)}}
-    OPEN=$'\x7b\x7b'
-    CLOSE=$'\x7d\x7d'
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DOCS${CLOSE}/${DOCS_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}ARGS${CLOSE}/${ARGS_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIBRARY${CLOSE}/${LIBRARY_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}CLI${CLOSE}/${CLI_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIB_NAME${CLOSE}/${LIB_NAME_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DEPS${CLOSE}/${DEPS_VALUE}}"
-    mkdir -p "$(dirname "{{DOCS_PROMPT}}")"
-    printf '%s\n' "$TEMPLATE_CONTENT" > "{{DOCS_PROMPT}}"
-
-# Render the skill refresh prompt template.
-#
-# Placeholder keys in the template: LIBRARY, LIB_NAME, DOCS, SUMMARY, ARGS
-_skill_prompt TEMPLATE LIBRARY LIB_NAME DOCS SUMMARY_FILE ARGS:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    TEMPLATE_CONTENT="$(cat "{{TEMPLATE}}")"
-    LIBRARY_VALUE={{quote(LIBRARY)}}
-    LIB_NAME_VALUE={{quote(LIB_NAME)}}
-    DOCS_VALUE={{quote(DOCS)}}
-    ARGS_VALUE={{quote(ARGS)}}
-    SUMMARY_VALUE="$(cat "{{SUMMARY_FILE}}")"
-    OPEN=$'\x7b\x7b'
-    CLOSE=$'\x7d\x7d'
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIBRARY${CLOSE}/${LIBRARY_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}LIB_NAME${CLOSE}/${LIB_NAME_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}DOCS${CLOSE}/${DOCS_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}SUMMARY${CLOSE}/${SUMMARY_VALUE}}"
-    TEMPLATE_CONTENT="${TEMPLATE_CONTENT//${OPEN}ARGS${CLOSE}/${ARGS_VALUE}}"
-    mkdir -p "$(dirname "{{SKILL_PROMPT}}")"
-    printf '%s\n' "$TEMPLATE_CONTENT" > "{{SKILL_PROMPT}}"
-
-_refresh_docs *args="":
-    @echo >&2
-    @echo -e "🏃 starting the refresh of the {{ITALIC}}documents{{RESET}} in {{BOLD}}{{PACKAGE}}{{RESET}}: {{DIM}}$(just readme_files) {{DOCS}} {{args}}{{RESET}}" >&2
-    @just _docs_prompt "../.ai/prompts/refresh_documentation.md" "$(just readme_files)" "{{args}}" "{{LIBRARY}}" "{{CLI}}" "{{LIB_NAME}}" "$(just deps)"
-    @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{DOCS_PROMPT}}{{RESET}}" >&2
-    @just _claude_file "{{DOCS_PROMPT}}"
-
-
-_refresh_skill SUMMARY_FILE *args:
-    @just _speak "The documentation files for {{PACKAGE}} were updated and now we're starting the update of the skill files"
-    @echo >&2
-    @echo -e "🏃 starting the update of the {{ITALIC}}skill files{{RESET}} for {{BOLD}}{{PACKAGE}}{{RESET}}" >&2
-    @echo >&2
-    @just _skill_prompt "../.ai/prompts/agent-skills.md" "{{LIBRARY}}" "{{LIB_NAME}}" "$(just readme_files)" "{{SUMMARY_FILE}}" "{{args}}"
-    @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{SKILL_PROMPT}}{{RESET}}" >&2
-    @just _claude_file "{{SKILL_PROMPT}}"
-
 # fix documentation drift and update the skill
 drift *args="":
     @echo
-    @echo -e "Refreshing the {{BOLD}}{{LIBRARY}}{{RESET}} {{BLUE}}skill{{RESET}}"
+    @echo -e "Refreshing the {{BOLD}}{{LIBRARY}}{{RESET}} {{BLUE}}skill{{RESET}} via Rust drift script"
     @echo
-    @echo -e "- this will be done by updating all of the README.md files in the repo ({{DIM}}{{ITALIC}}as well as any files{{RESET}}"
-    @echo -e "  {{DIM}}{{ITALIC}}passed in by caller{{RESET}})"
-    @echo -e "- once the {{ITALIC}}drift{{RESET}} of the documentation files has been eliminated we'll rework the {{BOLD}}skill{{RESET}} files"
-    @echo -e "- as a final step, we'll look at whether the {{BOLD}}CLAUDE.md{{RESET}} file would benefit from being updated"
-    @echo -e "  based on the changes made\n"
-
-    @DOC_SUMMARY_FILE="{{DOCS_SUMMARY}}" && mkdir -p "$(dirname "$DOC_SUMMARY_FILE")" && just _refresh_docs {{args}} > "$DOC_SUMMARY_FILE" && just _refresh_skill "$DOC_SUMMARY_FILE" "{{args}}"
+    @echo -e "- set {{BOLD}}PREFER_AGENT=codex{{RESET}} to force codex (default is claude)"
+    @echo -e "- extra document paths can still be passed as drift args\n"
+    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{LIBRARY}} {{args}}
 
 
 
