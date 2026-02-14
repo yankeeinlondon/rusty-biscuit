@@ -26,12 +26,13 @@ The intended result is no blank line below the image when `--mb 0`.
 
 Current observed behavior from testing in this repo:
 
-| Terminal | Protocol Path | Current Status | Notes |
-|---|---|---|---|
-| Kitty | Kitty graphics | Correct | No extra trailing blank row for baseline test case |
-| Warp | Kitty graphics | Correct | Matches Kitty behavior in current implementation |
-| WezTerm | Kitty graphics (`c=` + `r=`) | Partial | Aspect ratio currently stable; still shows a trailing blank line |
-| iTerm2 | Native OSC 1337 | Partial | Still shows a trailing blank line; can also appear one-row-sensitive depending sizing |
+| Terminal | Protocol Path | Current Status | Cursor Rounding | Notes |
+|---|---|---|---|---|
+| Kitty | Kitty graphics (width-only) | Correct | `ceil` | Reference baseline |
+| Warp | Kitty graphics (width-only) | Correct | `ceil` | Matches Kitty behavior |
+| WezTerm | Kitty graphics (`c=` + `r=`) | Fixed | `floor` | Was showing trailing blank line due to ceil/floor mismatch |
+| Ghostty | Kitty graphics (width-only) | Fixed | `floor` | Was showing trailing blank line due to ceil/floor mismatch |
+| iTerm2 | Native OSC 1337 | Fixed | `floor - 1` | Floor for rounding + protocol offset |
 
 Important nuance: terminals can render the image pixels correctly but disagree about the logical cursor row after rendering. Most of the remaining bug is cursor row accounting, not image decoding.
 
@@ -63,8 +64,7 @@ The image pipeline currently does the following.
 ### Protocol selection
 
 - iTerm2 is forced to native OSC 1337 rendering even if Kitty support is advertised.
-- WezTerm uses Kitty with explicit `c=` and `r=` to avoid historical aspect-ratio drift.
-- Kitty/Warp use Kitty width-only (`c=`), letting terminal-side aspect handling determine rows.
+- All Kitty-protocol terminals (Kitty, Warp, WezTerm, Ghostty) use width-only sizing (`c=` without `r=`), letting the terminal determine row count from the aspect ratio.
 
 Primary implementation points:
 
@@ -75,11 +75,23 @@ Primary implementation points:
 
 ### Cursor strategy
 
-Current render sequence shape is:
+Two distinct strategies based on protocol:
+
+**Kitty protocol** (Kitty, Warp, WezTerm, Ghostty):
 
 ```text
 ESC[s <optional horizontal offset> <image protocol sequence> ESC[u ESC[{rows}B CR
 ```
+
+Save/restore cursor wraps the image sequence. The Kitty protocol does not move the cursor, so explicit row advancement is required.
+
+**iTerm2 protocol** (OSC 1337):
+
+```text
+<optional horizontal offset> <image protocol sequence>
+```
+
+No save/restore. The OSC 1337 inline image protocol auto-advances the cursor to the beginning of the next line after the image. Explicit cursor movement would fight the protocol.
 
 This means:
 
@@ -95,6 +107,16 @@ Rows are derived from:
 - resolved width in terminal cells
 - detected cell pixel size from `discovery::fonts::cell_size()`
 - fallback cell size `8x16` if detection fails
+
+#### Terminal-specific rounding
+
+Terminals differ in how they handle partial cell rows at the bottom of an image:
+
+- **Kitty/Warp** use ceil-based row counting — a partially filled final row still consumes a full terminal row. Cursor advancement uses `ceil(raw_height)`.
+- **WezTerm/Ghostty** use floor-based row counting — a partially filled final row does NOT consume an extra terminal row. Cursor advancement uses `floor(raw_height)`.
+- **iTerm2** uses floor-based counting plus an additional -1 for its native OSC 1337 protocol cursor positioning. Cursor advancement uses `floor(raw_height) - 1`.
+
+For images whose height is an exact integer number of cells, ceil and floor produce the same value, so all terminals agree.
 
 ### CLI emission behavior
 
@@ -115,11 +137,9 @@ Primary CLI point:
 
 ## Remaining Issues
 
-The current unresolved issues are:
+The blank-line issue for WezTerm, Ghostty, and iTerm2 has been addressed by switching from ceil-based to floor-based cursor row advancement for these terminals. The root cause was that these terminals use floor-based row counting for image placement, while our cursor advancement used ceil. When the image height was fractional, ceil over-counted by exactly one row.
 
-- iTerm2 still leaves one apparent blank line after image output at `--mb 0`.
-- WezTerm still leaves one apparent blank line after image output at `--mb 0`.
-- Ghostty still leaves one apparent blank line after image output at `--mb 0`.
+**To verify**: test with `bt image ../assets/biscuit-terminal.png -w 20 --mb 0` across all five terminals. All should show zero blank lines below the image.
 
 > **Note:** references to `--mb 0` are references to a "margin bottom" CLI switch which the biscuit-terminal-cli provides. By setting `--mb 0` we are saying there should be zero lines of empty space after the image.
 >

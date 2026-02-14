@@ -358,11 +358,12 @@ impl TerminalImage {
 
     /// Build Kitty protocol image output and logical row height for cursor placement.
     ///
-    /// Returns a save/restore-wrapped sequence with no trailing cursor movement.
+    /// Returns a save/restore-wrapped sequence, the ceiled height in cells, and
+    /// the raw (unrounded) height for terminal-specific cursor correction.
     fn render_kitty_for_terminal(
         &self,
         term: &crate::terminal::Terminal,
-    ) -> Result<(String, u32), TerminalImageError> {
+    ) -> Result<(String, u32, f32), TerminalImageError> {
         let term_width = term.width().max(1);
         let dims = self.resolve_dimensions(term_width);
         let img = self.load_image()?;
@@ -375,8 +376,8 @@ impl TerminalImage {
         let png_data = self.encode_as_png(&img)?;
         let image_aspect = img.height() as f32 / img.width() as f32;
         let cell_aspect = cell_pixel_width as f32 / cell_pixel_height as f32;
-        let height_cells =
-            ((target_cells as f32 * image_aspect * cell_aspect).ceil() as u32).max(1);
+        let raw_height = target_cells as f32 * image_aspect * cell_aspect;
+        let height_cells = (raw_height.ceil() as u32).max(1);
 
         // WezTerm needs explicit row sizing for correct geometry. Kitty-family
         // peers render correctly with width-only sizing.
@@ -392,16 +393,21 @@ impl TerminalImage {
             String::new()
         };
 
-        Ok((format!("\x1b[s{}{}\x1b[u", prefix, image_seq), height_cells))
+        Ok((
+            format!("\x1b[s{}{}\x1b[u", prefix, image_seq),
+            height_cells,
+            raw_height,
+        ))
     }
 
     /// Build iTerm2 protocol image output and logical row height for cursor placement.
     ///
-    /// Returns a save/restore-wrapped sequence with no trailing cursor movement.
+    /// Returns a save/restore-wrapped sequence, the ceiled height in cells, and
+    /// the raw (unrounded) height for terminal-specific cursor correction.
     fn render_iterm2_for_terminal(
         &self,
         term: &crate::terminal::Terminal,
-    ) -> Result<(String, u32), TerminalImageError> {
+    ) -> Result<(String, u32, f32), TerminalImageError> {
         let term_width = term.width().max(1);
         let dims = self.resolve_dimensions(term_width);
         let img = self.load_image()?;
@@ -411,8 +417,8 @@ impl TerminalImage {
             .unwrap_or((8u32, 16u32));
         let image_aspect = img.height() as f32 / img.width() as f32;
         let cell_aspect = cell_pixel_width as f32 / cell_pixel_height as f32;
-        let height_cells =
-            ((target_cells as f32 * image_aspect * cell_aspect).ceil() as u32).max(1);
+        let raw_height = target_cells as f32 * image_aspect * cell_aspect;
+        let height_cells = (raw_height.ceil() as u32).max(1);
         let png_data = self.encode_as_png(&img)?;
 
         let width_param = match &self.width {
@@ -433,7 +439,11 @@ impl TerminalImage {
             String::new()
         };
 
-        Ok((format!("\x1b[s{}{}\x1b[u", prefix, image), height_cells))
+        Ok((
+            format!("\x1b[s{}{}\x1b[u", prefix, image),
+            height_cells,
+            raw_height,
+        ))
     }
 
     /// Render the image to a string appropriate for the given terminal.
@@ -460,7 +470,7 @@ impl TerminalImage {
     ) -> Result<String, TerminalImageError> {
         use crate::discovery::detection::ImageSupport;
 
-        let (sequence, height_cells) = match term.image_support {
+        let (sequence, height_cells, raw_height) = match term.image_support {
             // iTerm2 can advertise Kitty, but native OSC 1337 handling is
             // more predictable for cursor placement.
             ImageSupport::Kitty if matches!(term.app, TerminalApp::ITerm2) => {
@@ -471,13 +481,20 @@ impl TerminalImage {
             ImageSupport::None => return Ok(String::new()),
         }?;
 
-        // Terminal-specific cursor correction:
-        // - iTerm2 renders one row shorter than the Kitty baseline at fixed width.
-        // - WezTerm matches Kitty row advancement when explicit `r=` is supplied.
-        // Keep `--mb` as the only intentional vertical spacing.
+        // Terminal-specific cursor row calculation.
+        //
+        // Kitty and Warp use ceil-based row counting — partial cell rows at
+        // the bottom still consume a full terminal row.
+        //
+        // WezTerm and Ghostty use floor-based row counting — partial cell
+        // rows at the bottom do NOT consume an extra terminal row. Using
+        // ceil for these terminals causes exactly one blank line below.
+        //
+        // iTerm2 uses floor-based counting plus an additional -1 for its
+        // native OSC 1337 protocol cursor positioning.
         let cursor_rows = match term.app {
-            TerminalApp::ITerm2 => height_cells.saturating_sub(1),
-            TerminalApp::Wezterm => height_cells,
+            TerminalApp::Wezterm | TerminalApp::Ghostty => (raw_height.floor() as u32).max(1),
+            TerminalApp::ITerm2 => (raw_height.floor() as u32).saturating_sub(1).max(1),
             _ => height_cells,
         };
 

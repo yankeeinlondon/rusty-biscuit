@@ -15,5 +15,9 @@ The `Stylesheet` struct provides a type safe way to define and validate CSS key/
 - it exposes a new() function which initializes an empty Stylesheet
 - it exposes a `.add<T,U>(prop: T, value: U) -> Self` method which allows adding properties in a type strong manner
 - it implements `TryFrom` from `&str`, `&String`, and `String` which effectively acts as a validation function and an import mechanism.
--
+- it provides four render functions:
+    - `to_css() -> String`
+    - `to_terminal(&Terminal) -> void` (just like `to_css()` but we render to the terminal and use some color coding to make the CSS more readable)
+    - `to_json() -> String`
+    - `to_json5() -> String`
 
