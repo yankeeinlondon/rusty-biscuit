@@ -269,10 +269,10 @@ fn run_compose(
                     extension: "md",
                     label: "markdown",
                 };
-                print!("{content}");
+                println!("{content}");
                 open_output_artifact(&artifact)?;
             } else {
-                print!("{content}");
+                println!("{content}");
             }
         }
         OutputFormat::Html => {
@@ -367,13 +367,19 @@ fn emit_or_show_artifact(artifact: OutputArtifact, show: bool) -> Result<()> {
     if show {
         open_output_artifact(&artifact)
     } else {
-        print!("{}", artifact.content);
+        println!("{}", artifact.content);
         Ok(())
     }
 }
 
 fn open_output_artifact(artifact: &OutputArtifact) -> Result<()> {
     let temp_path = write_output_artifact_file(artifact)?;
+
+    // MD_DRY_RUN=1 writes the temp file but skips launching the viewer.
+    // Useful in tests and CI where opening a GUI app is undesirable.
+    if std::env::var("MD_DRY_RUN").is_ok_and(|v| !v.is_empty()) {
+        return Ok(());
+    }
 
     // Non-blocking open, graceful error handling
     if let Err(error) = open::that(&temp_path) {

@@ -188,6 +188,9 @@ fn apply_option(
         "when" => {
             options.when_expr = Some(value.to_string());
         }
+        "exclude" => {
+            options.exclude.push(value.to_string());
+        }
         _ => {
             options.unknown_options.push(key.to_string());
         }
@@ -520,6 +523,19 @@ mod tests {
 
         assert_eq!(directives.len(), 1);
         assert_eq!(directives[0].raw_target, "./included.md");
+    }
+
+    #[test]
+    fn parses_exclude_option() {
+        let content =
+            r###"::file ./doc.md exclude="## Bad Section" exclude="## Also Bad*""###;
+        let directives = parse_directives(content).unwrap();
+
+        assert_eq!(directives.len(), 1);
+        assert_eq!(
+            directives[0].options.exclude,
+            vec!["## Bad Section", "## Also Bad*"]
+        );
     }
 
     #[test]

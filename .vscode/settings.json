@@ -374,5 +374,12 @@
         "zorin"
     ],
     "editor.tabSize": 4,
-    "editor.detectIndentation": false
+    "editor.detectIndentation": false,
+    "rust-analyzer.server.extraEnv": {
+        "RUSTC_WRAPPER": "sccache",
+        "CARGO_TARGET_DIR": "/Users/ken/.cargo/ra-target"
+    },
+    "rust-analyzer.trace.server": "verbose",
+    "rust-analyzer.trace.extension": true,
+    "rust-analyzer.cargo.allTargets": false,
 }

@@ -62,9 +62,17 @@ fn eval_expr(expr: &Expr, state: &EffectiveState) -> Result<Value, String> {
         Expr::Comparison { left, op, right } => {
             let left = eval_expr(left, state)?;
             let right = eval_expr(right, state)?;
+
+            // Null-safe comparisons: when both sides are Null (undefined),
+            // equality and inequality both return false. Comparing two
+            // unknown values yields no meaningful result.
+            let both_null = left.is_null() && right.is_null();
+
             let outcome = match op {
-                ComparisonOp::Equal => scalar_string(&left) == scalar_string(&right),
-                ComparisonOp::NotEqual => scalar_string(&left) != scalar_string(&right),
+                ComparisonOp::Equal => !both_null && scalar_string(&left) == scalar_string(&right),
+                ComparisonOp::NotEqual => {
+                    !both_null && scalar_string(&left) != scalar_string(&right)
+                }
                 ComparisonOp::GreaterThan => to_number_coerce(&left) > to_number_coerce(&right),
                 ComparisonOp::GreaterThanOrEqual => {
                     to_number_coerce(&left) >= to_number_coerce(&right)
@@ -252,5 +260,94 @@ mod tests {
     fn numeric_comparison_coerces_non_numeric_to_zero() {
         let state = test_state(json!({ "name": "Alice" }));
         assert!(evaluate_condition("name >= 0", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn null_equal_null_is_false() {
+        let state = test_state(json!({}));
+        // Two undefined variables should NOT be considered equal
+        assert!(!evaluate_condition("missing_a == missing_b", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn null_not_equal_null_is_false() {
+        let state = test_state(json!({}));
+        // Two undefined variables: neither equal nor not-equal
+        assert!(!evaluate_condition("missing_a != missing_b", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn defined_equal_null_is_false() {
+        let state = test_state(json!({ "color": "red" }));
+        // A defined value is not equal to an undefined variable
+        assert!(!evaluate_condition("color == missing", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn defined_not_equal_null_is_true() {
+        let state = test_state(json!({ "color": "red" }));
+        // A defined value is not equal to an undefined variable
+        assert!(evaluate_condition("color != missing", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn equality_with_string_literal() {
+        let state = test_state(json!({ "color": "red" }));
+        assert!(evaluate_condition(r#"color == "red""#, &state, 1).unwrap());
+        assert!(!evaluate_condition(r#"color == "blue""#, &state, 1).unwrap());
+    }
+
+    #[test]
+    fn equality_with_single_quoted_string() {
+        let state = test_state(json!({ "color": "red" }));
+        assert!(evaluate_condition("color == 'red'", &state, 1).unwrap());
+        assert!(!evaluate_condition("color == 'blue'", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn env_equality_with_string_literal() {
+        let mut ctx = TransformContext::fixed_for_testing();
+        ctx.env.insert("AGENT".to_string(), "claude".to_string());
+
+        let state = EffectiveStateBuilder::new()
+            .with_frontmatter(HashMap::new())
+            .with_context(ctx)
+            .build();
+
+        assert!(evaluate_condition("env.AGENT == 'claude'", &state, 1).unwrap());
+        assert!(!evaluate_condition("env.AGENT == 'opencode'", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn unset_env_equality_with_string_literal_is_false() {
+        let state = test_state(json!({}));
+        // env.AGENT is not set → Null. "claude" is a string literal → not Null.
+        // Null scalar_string is "", which != "claude", so false.
+        assert!(!evaluate_condition("env.AGENT == 'claude'", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn mutual_exclusion_pattern() {
+        // Tests the pattern used in base.md: only one of three conditions should be true
+        let mut ctx = TransformContext::fixed_for_testing();
+        ctx.env.insert("AGENT".to_string(), "claude".to_string());
+        let state = EffectiveStateBuilder::new()
+            .with_frontmatter(HashMap::new())
+            .with_context(ctx)
+            .build();
+
+        assert!(evaluate_condition("env.AGENT == 'claude'", &state, 1).unwrap());
+        assert!(!evaluate_condition("env.AGENT == 'opencode'", &state, 1).unwrap());
+        assert!(!evaluate_condition("!env.AGENT", &state, 1).unwrap());
+    }
+
+    #[test]
+    fn mutual_exclusion_pattern_unset() {
+        // When AGENT is not set, only `!env.AGENT` should be true
+        let state = test_state(json!({}));
+
+        assert!(!evaluate_condition("env.AGENT == 'claude'", &state, 1).unwrap());
+        assert!(!evaluate_condition("env.AGENT == 'opencode'", &state, 1).unwrap());
+        assert!(evaluate_condition("!env.AGENT", &state, 1).unwrap());
     }
 }

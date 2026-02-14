@@ -104,11 +104,26 @@ The syntax we've covered so far for block file transclusion is just `::file <fil
     >
     > Note: when outputting to the terminal (e.g., with escape codes and formatting), the progressive disclosure feature is stripped out and the full text is displayed as there's no way to get this to work in the terminal.
 
+4. `exclude`
+
+    Sometimes we want to transclude a document into a part of the parent document but we want to expressly **exclude** certain heading sections. This is what the **exclude** option is for:
+
+    ```md
+    ::file ./some_content.md exclude="## Bad Content for Bad People*"
+    ```
+
+    This will include the Markdown content from `./some_content.md` but before adding it it will look for a H2 section who's title _starts with_ (because of the `*` wildcard usage) and remove those sections.
+
+    - The **exclude** command can be used more than once for a single transclusion but each exclusion needs to express the full `exclude=XYZ` key value pair.
+    - The exclusion requires a valid staring string; valid string are:
+        - `## `, `### `, `#### `, `#### `, and `##### ` for the H2 to H6 headings
+        - `!prelude` - any content _before_ the first heading tag (of any level)
+
 And then finally the maybe most powerful option/key is `when` which provides _conditional_ transclusion.
 
 #### Conditional Transclusion
 
-The `when` open allows you to express a condition which must equal `true` for the transclusion to be included. When a condition reaches a `false` outcome then nothing is rendered (and the transclusion reference is removed).
+The `when` option allows you to express a condition which must equal `true` for the transclusion to be included. When a condition reaches a `false` outcome then nothing is rendered (and the transclusion reference is removed).
 
 The conditional logic provided for is based on the values of frontmatter and in the same way that the [interpolation](./interpolation.md) stage got some helpful utility properties injected into the frontmatter for interpolation, we get that SAME `ctx` and `env` based frontmatter dictionaries made available here.
 

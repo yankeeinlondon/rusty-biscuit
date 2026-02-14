@@ -626,6 +626,13 @@ impl Markdown {
 
         let mut content = child.content().to_string();
 
+        // Apply exclude patterns to remove heading sections from the child.
+        if !directive_options.exclude.is_empty() {
+            let mut child_md = Markdown::new(content);
+            child_md.remove_sections(&directive_options.exclude);
+            content = child_md.into_parts().1;
+        }
+
         match &directive_options.replace {
             transclusion::ReplaceOption::ParentWins => {
                 if let Some(parent_map) = state.get_replace_map() {
@@ -1815,6 +1822,113 @@ Rounded: {{ round(pi) }}"#;
     }
 
     #[test]
+    fn test_stage2_exclude_removes_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(
+            &root,
+            "::file ./child.md exclude=\"## Remove Me\"",
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            "## Keep\n\nKept body.\n\n## Remove Me\n\nRemoved body.\n\n## Also Keep\n\nAlso kept.",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert!(transformed.content().contains("## Keep"));
+        assert!(transformed.content().contains("Kept body."));
+        assert!(!transformed.content().contains("Remove Me"));
+        assert!(!transformed.content().contains("Removed body."));
+        assert!(transformed.content().contains("## Also Keep"));
+        assert_eq!(report.transclusions_applied, 1);
+    }
+
+    #[test]
+    fn test_stage2_exclude_wildcard() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(
+            &root,
+            "::file ./child.md exclude=\"## Remove*\"",
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            "## Keep\n\nKept.\n\n## Remove This\n\nGone.\n\n## Also Keep\n\nStays.",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, _) = md.transform_with(options).unwrap();
+
+        assert!(transformed.content().contains("## Keep"));
+        assert!(!transformed.content().contains("Remove This"));
+        assert!(transformed.content().contains("## Also Keep"));
+    }
+
+    #[test]
+    fn test_stage2_exclude_prelude() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(
+            &root,
+            "::file ./child.md exclude=\"!prelude\"",
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            "Prelude text here.\n\n## Heading\n\nBody.",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, _) = md.transform_with(options).unwrap();
+
+        assert!(!transformed.content().contains("Prelude text"));
+        assert!(transformed.content().contains("## Heading"));
+        assert!(transformed.content().contains("Body."));
+    }
+
+    #[test]
+    fn test_stage2_multiple_excludes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(
+            &root,
+            "::file ./child.md exclude=\"## A\" exclude=\"## C\"",
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            "## A\n\nA body.\n\n## B\n\nB body.\n\n## C\n\nC body.",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, _) = md.transform_with(options).unwrap();
+
+        assert!(!transformed.content().contains("## A"));
+        assert!(transformed.content().contains("## B"));
+        assert!(!transformed.content().contains("## C"));
+    }
+
+    #[test]
     fn test_stage2_quotation_wrapper_does_not_absorb_following_content() {
         // Regression: wrap_quotation consumed trailing \n\n, causing the
         // next paragraph to become a lazy continuation of the blockquote.
@@ -1844,5 +1958,176 @@ Rounded: {{ round(pi) }}"#;
         // Verify blockquote is present
         assert!(content.contains("> Quoted content here."));
         assert!(content.contains("> — Source"));
+    }
+
+    // ============================================
+    // Conditional transclusion tests
+    // ============================================
+
+    #[test]
+    fn test_stage2_when_env_match_includes_directive() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(
+            &root,
+            "## Section\n\n::file ./child.md when=\"env.AGENT == 'claude'\"",
+        )
+        .unwrap();
+        std::fs::write(&child, "Claude content.").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let mut ctx = types::TransformContext::capture();
+        ctx.env.insert("AGENT".to_string(), "claude".to_string());
+        let options = TransformOptions::new().with_source_file(root).with_context(ctx);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert!(transformed.content().contains("Claude content."));
+        assert_eq!(report.transclusions_applied, 1);
+        assert_eq!(report.transclusions_skipped, 0);
+    }
+
+    #[test]
+    fn test_stage2_when_env_mismatch_skips_directive() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(
+            &root,
+            "## Section\n\n::file ./child.md when=\"env.AGENT == 'claude'\"",
+        )
+        .unwrap();
+        std::fs::write(&child, "Claude content.").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let mut ctx = types::TransformContext::capture();
+        ctx.env.insert("AGENT".to_string(), "opencode".to_string());
+        let options = TransformOptions::new().with_source_file(root).with_context(ctx);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert!(!transformed.content().contains("Claude content."));
+        assert_eq!(report.transclusions_applied, 0);
+        assert_eq!(report.transclusions_skipped, 1);
+    }
+
+    #[test]
+    fn test_stage2_when_env_unset_skips_equality() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(
+            &root,
+            "## Section\n\n::file ./child.md when=\"env.AGENT == 'claude'\"",
+        )
+        .unwrap();
+        std::fs::write(&child, "Claude content.").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        // Use a fixed context with no AGENT env var
+        let ctx = types::TransformContext::fixed_for_testing();
+        let options = TransformOptions::new().with_source_file(root).with_context(ctx);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert!(!transformed.content().contains("Claude content."));
+        assert_eq!(report.transclusions_skipped, 1);
+    }
+
+    #[test]
+    fn test_stage2_mutual_exclusion_conditions() {
+        // Three directives with mutually exclusive conditions:
+        //   AGENT == 'claude'
+        //   AGENT == 'opencode'
+        //   !env.AGENT (unset)
+        // Only one should match at any time.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let cc = dir.path().join("cc.md");
+        let oc = dir.path().join("oc.md");
+        let default = dir.path().join("default.md");
+
+        std::fs::write(
+            &root,
+            "## Section\n\n\
+             ::file ./cc.md when=\"env.AGENT == 'claude'\"\n\
+             ::file ./oc.md when=\"env.AGENT == 'opencode'\"\n\
+             ::file ./default.md when=\"!env.AGENT\"",
+        )
+        .unwrap();
+        std::fs::write(&cc, "CC only.").unwrap();
+        std::fs::write(&oc, "OC only.").unwrap();
+        std::fs::write(&default, "Default only.").unwrap();
+
+        // Test 1: AGENT=claude → only cc.md included
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let mut ctx = types::TransformContext::capture();
+        ctx.env.insert("AGENT".to_string(), "claude".to_string());
+        let opts = TransformOptions::new().with_source_file(&root).with_context(ctx);
+        let (out, report) = md.transform_with(opts).unwrap();
+        assert!(out.content().contains("CC only."), "Expected CC content");
+        assert!(!out.content().contains("OC only."), "Should not contain OC");
+        assert!(!out.content().contains("Default only."), "Should not contain default");
+        assert_eq!(report.transclusions_applied, 1);
+        assert_eq!(report.transclusions_skipped, 2);
+
+        // Test 2: AGENT=opencode → only oc.md included
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let mut ctx = types::TransformContext::capture();
+        ctx.env.insert("AGENT".to_string(), "opencode".to_string());
+        let opts = TransformOptions::new().with_source_file(&root).with_context(ctx);
+        let (out, report) = md.transform_with(opts).unwrap();
+        assert!(!out.content().contains("CC only."));
+        assert!(out.content().contains("OC only."), "Expected OC content");
+        assert!(!out.content().contains("Default only."));
+        assert_eq!(report.transclusions_applied, 1);
+        assert_eq!(report.transclusions_skipped, 2);
+
+        // Test 3: AGENT not set → only default.md included
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let ctx = types::TransformContext::fixed_for_testing();
+        let opts = TransformOptions::new().with_source_file(&root).with_context(ctx);
+        let (out, report) = md.transform_with(opts).unwrap();
+        assert!(!out.content().contains("CC only."));
+        assert!(!out.content().contains("OC only."));
+        assert!(out.content().contains("Default only."), "Expected default content");
+        assert_eq!(report.transclusions_applied, 1);
+        assert_eq!(report.transclusions_skipped, 2);
+    }
+
+    // ============================================
+    // Re-leveling tests
+    // ============================================
+
+    #[test]
+    fn test_stage2_relevel_h1_child_under_h3_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(
+            &root,
+            "# Title\n\n## Overview\n\n### Details\n\n::file ./child.md",
+        )
+        .unwrap();
+        std::fs::write(&child, "# Child Title\n\n## Child Sub\n\nBody.").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, _) = md.transform_with(options).unwrap();
+
+        // Parent heading before directive is H3, so child should be re-leveled:
+        // H1 → H4, H2 → H5
+        assert!(
+            transformed.content().contains("#### Child Title"),
+            "H1 should become H4, got:\n{}",
+            transformed.content()
+        );
+        assert!(
+            transformed.content().contains("##### Child Sub"),
+            "H2 should become H5, got:\n{}",
+            transformed.content()
+        );
     }
 }

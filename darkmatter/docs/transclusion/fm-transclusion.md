@@ -21,5 +21,5 @@ With frontmatter transclusion we imbue two frontmatter properties special meanin
 
 > **Propagation Exception:** Unlike other frontmatter properties (which propagate from parent to child during transclusion for use in replacement and interpolation), `prologue` and `epilogue` are scoped to the document that defines them. They are not inherited by child documents brought in via `::file` directives or frontmatter transclusion.
 
-> **Note:** the "options" which we provide in [block transclusion](./block-transclusion.md) -- including _conditional_ transclusion -- are not available for Frontmatter transclusion.
+> **Note:** the "options" which we provide in [block transclusion](./block-transclusion.md#) -- including _conditional_ transclusion -- are not available for Frontmatter transclusion.
 

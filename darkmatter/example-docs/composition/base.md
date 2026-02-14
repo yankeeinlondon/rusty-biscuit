@@ -14,7 +14,12 @@ flowchart LR
     S1 --> S2 --> S3
 ```
 
-::file ./one.md
+::file ./preparation.md
 
-::file ./two.md
+::file ./what-is-transclusion.md exclude="## Secret Section"
 
+## Conditional Disclosure
+
+::file ./disclosure-cc.md when="env.AGENT == 'claude'"
+::file ./disclosure-oc.md when="env.AGENT == 'opencode'"
+::file ./disclosure.md when="!env.AGENT"

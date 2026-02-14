@@ -1,0 +1,2 @@
+- Claude Code is the best
+- anyone who tells you otherwise is lying and should be avoided

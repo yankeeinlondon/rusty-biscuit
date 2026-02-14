@@ -1,0 +1,2 @@
+- All agentic software is amazing
+- Anyone who says it's not is lying and should be avoided

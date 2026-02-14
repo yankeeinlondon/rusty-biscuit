@@ -284,6 +284,96 @@ impl Markdown {
         self
     }
 
+    /// Removes a heading section from the document by pattern.
+    ///
+    /// A "section" is the heading itself plus all content until the next heading
+    /// at the same or shallower level (or end of document).
+    ///
+    /// ## Pattern format
+    ///
+    /// - `"## Title"` — exact match on heading level and title
+    /// - `"## Title*"` — prefix match (title starts with text before `*`)
+    /// - `"!prelude"` — content before the first heading of any level
+    ///
+    /// ## Returns
+    ///
+    /// `true` if a section was removed, `false` if no match was found.
+    pub fn remove_section(&mut self, pattern: &str) -> bool {
+        let pattern = pattern.trim();
+
+        // Handle !prelude: remove content before the first heading
+        if pattern == "!prelude" {
+            let headings = normalize::extract_headings(&self.content);
+            if headings.is_empty() {
+                // No headings — entire document is prelude
+                self.content.clear();
+                return true;
+            }
+            let first_start = headings[0].byte_start;
+            if first_start == 0 {
+                return false; // No prelude content
+            }
+            self.content = self.content[first_start..].to_string();
+            // Trim leading blank lines from the result
+            self.content = self.content.trim_start_matches('\n').to_string();
+            return true;
+        }
+
+        // Parse pattern: "## Title" or "## Title*"
+        let (level, title_pattern, is_prefix) = match parse_heading_pattern(pattern) {
+            Some(parsed) => parsed,
+            None => return false,
+        };
+
+        let headings = normalize::extract_headings(&self.content);
+
+        // Find matching heading
+        let match_idx = headings.iter().position(|h| {
+            h.level == level && heading_matches(&h.title, &title_pattern, is_prefix)
+        });
+
+        let Some(idx) = match_idx else {
+            return false;
+        };
+
+        let section_start = headings[idx].byte_start;
+        let match_level = headings[idx].level;
+
+        // Find end: next heading at same or shallower level
+        let section_end = headings[idx + 1..]
+            .iter()
+            .find(|h| h.level <= match_level)
+            .map(|h| h.byte_start)
+            .unwrap_or(self.content.len());
+
+        self.content = format!(
+            "{}{}",
+            &self.content[..section_start],
+            &self.content[section_end..]
+        );
+
+        // Clean up double blank lines
+        while self.content.contains("\n\n\n") {
+            self.content = self.content.replace("\n\n\n", "\n\n");
+        }
+
+        true
+    }
+
+    /// Removes multiple heading sections by pattern.
+    ///
+    /// Patterns are applied in reverse document order to preserve byte offsets.
+    /// Returns the number of sections successfully removed.
+    pub fn remove_sections(&mut self, patterns: &[String]) -> usize {
+        let mut count = 0;
+        for pattern in patterns {
+            if self.remove_section(pattern) {
+                count += 1;
+            }
+        }
+        count
+    }
+
     /// Converts the markdown document to a string representation.
     ///
     /// If the document has frontmatter, it will be serialized as YAML between
@@ -653,6 +743,42 @@ fn escape_markdown_title(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Parses a heading pattern like `"## Title"` or `"## Title*"`.
+///
+/// Returns `(level, title, is_prefix)`.
+fn parse_heading_pattern(pattern: &str) -> Option<(normalize::HeadingLevel, String, bool)> {
+    let trimmed = pattern.trim();
+    if !trimmed.starts_with('#') {
+        return None;
+    }
+
+    let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
+    let level = normalize::HeadingLevel::new(hash_count as u8)?;
+
+    let title_part = trimmed[hash_count..].trim();
+    if title_part.is_empty() {
+        return None;
+    }
+
+    let is_prefix = title_part.ends_with('*');
+    let title = if is_prefix {
+        title_part[..title_part.len() - 1].to_string()
+    } else {
+        title_part.to_string()
+    };
+
+    Some((level, title, is_prefix))
+}
+
+/// Checks if a heading title matches a pattern.
+fn heading_matches(title: &str, pattern: &str, is_prefix: bool) -> bool {
+    if is_prefix {
+        title.starts_with(pattern)
+    } else {
+        title == pattern
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -837,5 +963,88 @@ title: Test
 
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].alt(), "Use `cargo test` here");
+    }
+
+    // ============================================
+    // remove_section tests
+    // ============================================
+
+    #[test]
+    fn remove_section_by_exact_heading() {
+        let content = "## Foo\n\nFoo body.\n\n## Bar\n\nBar body.";
+        let mut md: Markdown = content.into();
+
+        assert!(md.remove_section("## Foo"));
+        assert!(!md.content().contains("Foo"));
+        assert!(md.content().contains("## Bar"));
+        assert!(md.content().contains("Bar body."));
+    }
+
+    #[test]
+    fn remove_section_by_prefix_wildcard() {
+        let content = "## Foobar\n\nContent.\n\n## Other\n\nKept.";
+        let mut md: Markdown = content.into();
+
+        assert!(md.remove_section("## Foo*"));
+        assert!(!md.content().contains("Foobar"));
+        assert!(md.content().contains("## Other"));
+    }
+
+    #[test]
+    fn remove_section_preserves_sibling() {
+        let content = "## A\n\nA content.\n\n## B\n\nB content.\n\n## C\n\nC content.";
+        let mut md: Markdown = content.into();
+
+        assert!(md.remove_section("## B"));
+        assert!(md.content().contains("## A"));
+        assert!(md.content().contains("A content."));
+        assert!(!md.content().contains("## B"));
+        assert!(!md.content().contains("B content."));
+        assert!(md.content().contains("## C"));
+        assert!(md.content().contains("C content."));
+    }
+
+    #[test]
+    fn remove_section_removes_nested_children() {
+        let content = "## A\n\n### A1\n\nNested.\n\n## B\n\nKept.";
+        let mut md: Markdown = content.into();
+
+        assert!(md.remove_section("## A"));
+        assert!(!md.content().contains("## A"));
+        assert!(!md.content().contains("### A1"));
+        assert!(!md.content().contains("Nested."));
+        assert!(md.content().contains("## B"));
+    }
+
+    #[test]
+    fn remove_prelude() {
+        let content = "Some prelude text.\n\n## First Heading\n\nBody.";
+        let mut md: Markdown = content.into();
+
+        assert!(md.remove_section("!prelude"));
+        assert!(!md.content().contains("prelude text"));
+        assert!(md.content().contains("## First Heading"));
+        assert!(md.content().contains("Body."));
+    }
+
+    #[test]
+    fn remove_section_no_match_returns_false() {
+        let content = "## Existing\n\nContent.";
+        let mut md: Markdown = content.into();
+
+        assert!(!md.remove_section("## Missing"));
+        assert_eq!(md.content(), content);
+    }
+
+    #[test]
+    fn remove_sections_multiple() {
+        let content = "## A\n\nA body.\n\n## B\n\nB body.\n\n## C\n\nC body.";
+        let mut md: Markdown = content.into();
+
+        let count = md.remove_sections(&["## A".to_string(), "## C".to_string()]);
+        assert_eq!(count, 2);
+        assert!(!md.content().contains("## A"));
+        assert!(md.content().contains("## B"));
+        assert!(!md.content().contains("## C"));
     }
 }

@@ -56,6 +56,9 @@ pub struct BlockOptions {
     /// Optional `when` expression.
     pub when_expr: Option<String>,
 
+    /// Heading sections to exclude from transcluded content.
+    pub exclude: Vec<String>,
+
     /// Unknown options captured for warning reporting.
     pub unknown_options: Vec<String>,
 }

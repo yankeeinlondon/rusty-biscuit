@@ -31,12 +31,12 @@ use pulldown_cmark::{Event, HeadingLevel as PulldownLevel, Parser, Tag, TagEnd};
 
 /// Information about a heading extracted during parsing.
 #[derive(Debug, Clone)]
-struct HeadingInfo {
-    level: HeadingLevel,
-    title: String,
-    line_number: usize,
-    byte_start: usize,
-    byte_end: usize,
+pub struct HeadingInfo {
+    pub level: HeadingLevel,
+    pub title: String,
+    pub line_number: usize,
+    pub byte_start: usize,
+    pub byte_end: usize,
 }
 
 /// Converts pulldown_cmark HeadingLevel to our HeadingLevel.
@@ -52,7 +52,7 @@ fn pulldown_to_heading_level(level: PulldownLevel) -> HeadingLevel {
 }
 
 /// Extracts heading information from markdown content.
-fn extract_headings(content: &str) -> Vec<HeadingInfo> {
+pub fn extract_headings(content: &str) -> Vec<HeadingInfo> {
     let parser = Parser::new(content);
 
     let mut headings = Vec::new();

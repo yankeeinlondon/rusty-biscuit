@@ -100,6 +100,7 @@ fn test_output_json_alias_ast() {
 #[test]
 fn test_show_option_with_markdown_output() {
     md_cmd()
+        .env("MD_DRY_RUN", "1")
         .args(["--output", "markdown", "--show", "-"])
         .write_stdin("# Show Test")
         .assert()
