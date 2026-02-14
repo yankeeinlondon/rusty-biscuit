@@ -1,11 +1,11 @@
 ---
 name: playa
-description: Audio playback via host CLI players with format detection, capability-ranked player matching, and 85 embedded sound effects. Use when working with audio playback, the playa package, so-you-say TTS CLI, or implementing sound effects.
+description: Audio playback via host CLI players with format detection, capability-ranked player matching, 88 embedded sound effects, and optional audio ducking. Use when working with audio playback, the playa package, so-you-say TTS CLI, or implementing sound effects.
 ---
 
 # playa
 
-Audio playback library that detects formats, matches the best available player, and provides 85 embedded sound effects.
+Audio playback library that detects formats, matches the best available player, provides 88 embedded sound effects, and supports optional audio ducking.
 
 ## Quick Start
 
@@ -48,15 +48,27 @@ playa effect sad-trombone      # Built-in effect
 playa list-effects             # List all effects
 playa list-effects cartoon     # Filter effects
 playa players                  # Show player table
+playa duck-info                # Audio ducking backend info
+playa --no-duck audio.wav      # Disable ducking
 ```
 
 Shell completions are available for Bash, Zsh, and Fish. Effect names autocomplete at `playa effect <TAB>`.
 
+## Audio Ducking
+
+Feature-gated (`audio-ducking`). Automatically lowers system volume during playback.
+
+```rust
+Playa::from_path("audio.mp3")?
+    .with_ducked_audio()  // Lower system volume during playback
+    .play_async().await?;
+```
+
 ## Detailed Topics
 
 - [Players](./players.md) - Capability scoring, 13 supported players
-- [Sound Effects](./effects.md) - 85 effects, feature flags
-- [Integration](./integration.md) - TTS, sniff-lib, patterns
+- [Sound Effects](./effects.md) - 88 effects, feature flags
+- [Integration](./integration.md) - TTS, sniff-lib, audio ducking, patterns
 
 ## See Also
 

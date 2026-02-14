@@ -69,7 +69,7 @@ md toc README.md --json
 # Document comparison
 md delta original.md updated.md
 md delta original.md updated.md --json
-md delta original.md updated.md -v
+md -v delta original.md updated.md
 ```
 
 ### Document Cleanup

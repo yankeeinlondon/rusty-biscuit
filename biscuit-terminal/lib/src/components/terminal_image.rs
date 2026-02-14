@@ -523,11 +523,7 @@ impl TerminalImage {
                 }
             };
 
-        let suffix = if needs_scroll_compensation {
-            "\n"
-        } else {
-            ""
-        };
+        let suffix = if needs_scroll_compensation { "\n" } else { "" };
 
         if cursor_rows > 0 {
             Ok(format!("{}\x1b[{}B\r{}", sequence, cursor_rows, suffix))

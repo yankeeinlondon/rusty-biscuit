@@ -23,6 +23,10 @@ SCHEMA := SCHEMATIC + "/schema"
 
 DOCS := "@schematic/docs/io/openapi-extensions.md @schematic/docs/json-schema/deep-dive.md "
 
+# Uses TTS if available but never error
+_speak *args:
+    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
+
 default:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -220,8 +224,7 @@ TODAY := `date +%F`
 DOCS_PROMPT := "../.ai/logs/" + TODAY + ". docs_prompt_for_" + SCHEMATIC + "_docs_prompt.md"
 # the temp file for the skills prompt
 SKILL_PROMPT := "../.ai/logs/" + TODAY + ". skill_prompt_for_" + SCHEMATIC + "_skill_prompt.md"
-# the captured summary from the docs refresh step
-DOCS_SUMMARY := "../.ai/logs/" + TODAY +  ". doc_update_summary_for_" + SCHEMATIC + "_docs_summary.md"
+
 
 # Render the documentation refresh prompt template.
 #
@@ -289,14 +292,15 @@ _refresh_skill SUMMARY_FILE *args:
 # fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":
     @echo
-    @echo -e "Running drift workflow for {{BOLD}}{{SCHEMATIC}}{{RESET}} via Rust drift script"
+    @printf "%b\n" "Running drift workflow for {{BOLD}}{{SCHEMATIC}}{{RESET}} via Rust drift script"
     @echo
     @echo "- step 1: update package docs for code drift"
     @echo "- step 2: refresh package skill from updated docs"
     @echo "- step 3: review CLAUDE.md for needed updates"
-    @echo "- set PREFER_AGENT=codex to force codex (default is claude)"
+    @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
     @echo
     @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{SCHEMATIC}} {{DOCS}} {{args}}
+    @_speak "the drift recipe for the {{PACKAGE}} package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.

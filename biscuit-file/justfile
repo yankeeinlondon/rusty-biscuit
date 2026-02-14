@@ -15,6 +15,10 @@ CYAN := '\033[36m'
 WHITE := '\033[37m'
 DOCS := ""
 
+# Uses TTS if available but never error
+_speak *args:
+    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
+
 default:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -98,11 +102,12 @@ commit:
 # fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":
     @echo
-    @echo -e "Running drift workflow for {{BOLD}}biscuit-file{{RESET}} via Rust drift script"
+    @printf "%b\n" "Running drift workflow for {{BOLD}}biscuit-file{{RESET}} via Rust drift script"
     @echo
     @echo "- step 1: update package docs for code drift"
     @echo "- step 2: refresh package skill from updated docs"
     @echo "- step 3: review CLAUDE.md for needed updates"
-    @echo "- set PREFER_AGENT=codex to force codex (default is claude)"
+    @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
     @echo
     @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- biscuit-file {{DOCS}} {{args}}
+    @_speak "the drift recipe for the biscuit-file package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."

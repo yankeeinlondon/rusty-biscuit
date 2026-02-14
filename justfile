@@ -371,13 +371,14 @@ skill-claudine:
 # fix package documentation drift, refresh skill files, and review CLAUDE.md
 drift AREA *args="":
     @echo
-    @echo -e "Running drift workflow for {{BOLD}}{{AREA}}{{RESET}} via Rust drift script"
+    @printf "%b\n" "Running drift workflow for {{BOLD}}{{AREA}}{{RESET}} via Rust drift script"
     @echo
     @echo "- step 1: update package docs for code drift"
     @echo "- step 2: refresh package skill from updated docs"
     @echo "- step 3: review CLAUDE.md for needed updates"
     @echo "- package-level DOCS defaults are configured in each package justfile"
-    @echo "- set {{BOLD}}PREFER_AGENT=codex{{RESET}} to force codex (default is claude)"
+    @echo "- export {{BOLD}}PREFER_AGENT=codex{{RESET}} to force codex (default is claude)"
     @echo "- extra document paths can be passed as drift args"
     @echo
     @cargo run --manifest-path scripts/Cargo.toml --bin drift -- {{AREA}} {{args}}
+    @_speak "the drift recipe for the {{AREA}} package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."

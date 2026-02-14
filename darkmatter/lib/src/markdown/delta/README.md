@@ -4,7 +4,7 @@ Structural diff analysis between markdown documents.
 
 ## Features
 
-- **Change Classification**: NoChange, WhitespaceOnly, FrontmatterAndWhitespace, FrontmatterOnly, MinorEdit, ContentUpdate, StructuralChange, MajorRewrite
+- **Change Classification**: NoChange, WhitespaceOnly, FrontmatterOnly, FrontmatterAndWhitespace, StructuralOnly, ContentMinor, ContentModerate, ContentMajor, Rewritten
 - **Content Changes**: Track additions, removals, and modifications at section level
 - **Section Movements**: Detect when sections are relocated within the document
 - **Frontmatter Changes**: Track YAML frontmatter additions, removals, and modifications
@@ -33,12 +33,12 @@ if !delta.is_unchanged() {
 | Type | Description |
 |------|-------------|
 | `MarkdownDelta` | Complete diff result |
-| `DocumentChange` | Change classification enum (8 variants) |
+| `DocumentChange` | Change classification enum (9 variants) |
 | `DeltaStatistics` | Numeric change counts |
 | `SectionPath` | Type alias for `Vec<String>` representing a section's path |
 | `SectionId` | Section identifier with path and title |
 | `ContentChange` | Individual content change |
-| `ChangeAction` | Added, Removed, Modified |
+| `ChangeAction` | Change type: Added, Removed, Renamed, Promoted, Demoted, Reordered, MovedSameLevel, MovedDifferentLevel, ContentModified, WhitespaceOnly, PropertyAdded, PropertyRemoved, PropertyUpdated, PropertyReordered |
 | `MovedSection` | Section relocation info |
 | `FrontmatterChange` | Frontmatter key change |
 | `BrokenLink` | Potentially broken internal link |

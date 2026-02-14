@@ -33,7 +33,7 @@ playa effect sad-trombone --loud
 List built-in sound effects:
 
 ```bash
-playa list-effects             # All 85 effects
+playa list-effects             # All 88 effects
 playa list-effects cartoon     # Filter by name, description, or category
 ```
 
@@ -57,6 +57,7 @@ playa --meta audio.wav
 | `effect <NAME>` | Play a built-in sound effect by name |
 | `list-effects [FILTER]` | List available sound effects, optionally filtered |
 | `players` | Show table of available players and their capabilities |
+| `duck-info` | Show audio ducking backend info (requires `audio-ducking` feature) |
 
 ## Playback Options
 
@@ -71,6 +72,9 @@ These options apply to `play` and `effect` subcommands, as well as the default m
 | `--loud` | Play at 150% volume |
 | `--speed <N>` | Custom playback speed (0.5 to 2.0) |
 | `--volume <N>` | Custom volume level (0.0 to 2.0) |
+| `--no-duck` | Disable audio ducking (requires `audio-ducking` feature) |
+| `--duck-ramp-ms <MS>` | Ducking ramp duration in milliseconds (default: 1000) |
+| `--duck-floor <LEVEL>` | Ducking floor level, 0.0–1.0 (default: 0.2) |
 
 ## Shell Completions
 

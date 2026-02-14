@@ -100,7 +100,7 @@ bt columns --gap 6 --left 40% "Title" "Description"
 bt columns --margin-left 2 --alignment center "Left" "Right"
 ```
 
-**Terminal-specific cursor handling:** WezTerm, Ghostty, Kitty, iTerm2, and Warp each get tailored cursor moves for correct column alignment when images are rendered inline.
+**Terminal-specific cursor handling:** WezTerm, Ghostty, Kitty, and iTerm2 get tailored cursor reset behavior; other terminals (including Warp) use the standard save/restore fallback path.
 
 ## Todo
 
@@ -124,10 +124,12 @@ See [Table README](../../../biscuit-terminal/lib/src/components/table/README.md)
 
 Key features:
 
-- Box-drawing borders (`│`, `├─┼─┤`)
+- Full box-drawing borders (`┌┬┐`, `├┼┤`, `└┴┘`)
 - Auto-sized columns with min/max constraints
 - `TableColumn::new("Header").with_min_width(8).with_max_width(30)`
-- Data via `with_data(vec![vec!["cell".into()]])` or `add_row()`
+- Data via `with_data(vec![vec!["cell".into()]])` or `add_row()` (`&mut self`, returns `()`)
+- Extra cells beyond defined columns are rendered as additional columns
+- Alignment defaults come from `ColumnType` (text left, numeric right); wrapping is resolved per cell/column strategy
 
 ## Lists (OrderedList, UnorderedList)
 

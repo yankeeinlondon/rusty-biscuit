@@ -33,7 +33,7 @@ This derives `clap::ValueEnum` on supported enums, enabling:
 - **Image Rendering**: Inline images via Kitty/iTerm2 protocols with security guards
 - **Mermaid Diagrams**: Render diagrams to terminal using mmdc CLI with viuer
 - **OS Detection**: Identify operating system and Linux distribution
-- **Repo Detection**: Detect git repo root and monorepo status
+- **Repo Detection**: Detect git repo root and monorepo status via `sniff`
 - **Font Detection**: Extract font name and size from terminal config files
 - **Color Support**: Query color depth, mode (light/dark), and background color
 - **Escape Code Analysis**: Calculate visual line widths, detect escape codes
@@ -113,7 +113,7 @@ fn main() {
 - Default behavior uses `c=` (columns only) so Kitty preserves aspect ratio.
 - WezTerm requires `c=` + `r=` (both columns and rows) for correct aspect ratio; Kitty/Ghostty use `c=` only.
 - `render_to_terminal()` handles cursor positioning per terminal: Kitty/Ghostty auto-advance and overshoot by 1 row (corrected with CUU), Wezterm doesn't auto-advance (explicit CUD + CR applied).
-- Does not append a trailing newline — callers are responsible for line termination.
+- Usually does not append a trailing newline; it may append one line feed when bottom-of-screen scroll compensation is needed.
 
 ### iTerm2 specifics
 
@@ -127,28 +127,29 @@ fn main() {
 
 - The image column is emitted as a single escape sequence, then the text column is drawn with a cursor offset.
 - Terminals disagree on cursor save/restore semantics. The layout applies terminal-specific cursor resets to keep the right column aligned to the top of the image.
-- Warp, WezTerm, Ghostty, Kitty, and iTerm2 are supported with tailored cursor moves; other terminals fall back to standard save/restore.
+- WezTerm, Ghostty, Kitty, and iTerm2 use tailored cursor moves; other terminals (including Warp) use the standard save/restore fallback path.
 
-### Security Features
+### Path and Input Validation
 
-`TerminalImage` includes built-in security guards:
+`TerminalImage::new()` validates that the input path exists and can be canonicalized to a local file path.
+Width strings are validated by `parse_width_spec()` (`50%`, `80`, `80ch`, `fill`).
 
-- **Path traversal protection**: Rejects paths containing `..` or absolute paths outside the base path
-- **File size limits**: Configurable maximum file size (prevents memory exhaustion)
-- **Remote URL blocking**: Only local files are allowed; remote URLs return an error
+For policy-level controls in your app (base-path checks, max file size, remote URL allowance), use `TerminalImageOptions`:
 
 ```rust
-// Path traversal is blocked
-let result = TerminalImage::new(Path::new("../../../etc/passwd"));
-assert!(matches!(result, Err(TerminalImageError::PathTraversalBlocked { .. })));
+use biscuit_terminal::components::image_options::TerminalImageOptions;
 
-// Large files are rejected
-let result = TerminalImage::new_with_max_size(Path::new("huge.png"), 1_000_000);
+let options = TerminalImageOptions::builder()
+    .max_file_size(5 * 1024 * 1024)
+    .allow_remote(false)
+    .build();
+
+assert!(options.validate_file_size(1_024));
 ```
 
 ### Image rendering architecture
 
-All image rendering is string-based: `render()`, `fallback_render()`, and `render_to_terminal()` return escape sequences as strings. `render_to_terminal()` applies terminal-aware cursor management by saving/restoring cursor position, explicitly advancing rows by computed image height, and normalizing to column 0 with a trailing `\r`. It does **not** append a trailing newline — callers handle line termination. The Kitty graphics protocol is bidirectional — terminals respond with `\x1b_Gi=<id>;OK\x1b\\` after receiving image data. To prevent this response from appearing as garbage text, all Kitty sequences include `q=2` (quiet mode) which suppresses terminal responses entirely.
+All image rendering is string-based: `render()`, `fallback_render()`, and `render_to_terminal()` return escape sequences as strings. `render_to_terminal()` applies terminal-aware cursor management by saving/restoring cursor position, explicitly advancing rows by computed image height, and normalizing to column 0 with a trailing `\r`. It usually avoids trailing newlines, but may append one line feed when bottom-of-screen scroll compensation is needed. The Kitty graphics protocol is bidirectional — terminals respond with `\x1b_Gi=<id>;OK\x1b\\` after receiving image data. To prevent this response from appearing as garbage text, all Kitty sequences include `q=2` (quiet mode) which suppresses terminal responses entirely.
 
 ### Gotchas and notes
 
@@ -158,7 +159,7 @@ All image rendering is string-based: `render()`, `fallback_render()`, and `rende
 
 ## Mermaid Diagrams (MermaidRenderer)
 
-`MermaidRenderer` renders Mermaid diagrams to the terminal using the `mmdc` CLI tool. Rendered diagrams are cached to disk via `MermaidCache` using xxHash-based keys derived from all render parameters (source, theme, scale, config, transparency, title, mmdc version). Cached PNGs are stored in the OS temp directory (`/var/folders/.../mermaid-cache/` on macOS, `/tmp/mermaid-cache/` on Linux) and cleaned up by the OS automatically.
+`MermaidRenderer` renders Mermaid diagrams to the terminal using the `mmdc` CLI tool. Rendered diagrams are cached to disk via `MermaidCache` using `biscuit-hash` xxHash-based keys derived from all render parameters (source, theme, scale, config, transparency, title, mmdc version). Cached PNGs are stored in the OS temp directory (`/var/folders/.../mermaid-cache/` on macOS, `/tmp/mermaid-cache/` on Linux) and cleaned up by the OS automatically.
 
 ### Basic Usage
 
@@ -369,7 +370,7 @@ The library detects these terminal emulators:
 |----------|--------------|------------|---------|
 | WezTerm | Kitty | Yes | Yes |
 | Kitty | Kitty | Yes | Yes |
-| iTerm2 | Kitty | Yes | Yes |
+| iTerm2 | ITerm | Yes | Yes |
 | Ghostty | Kitty | Yes | Yes |
 | Alacritty | None | Yes | Yes |
 | Apple Terminal | None | No | Yes |

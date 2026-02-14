@@ -9,7 +9,7 @@
       <ul>
         <li>terminal <b>metadata</b> (<i>color support, character width and height, light/dark themed, etc.</i>)</li>
         <li>OSC8 Links</li>
-        <li>multiplex support for Wezterm, Ghostty</li>
+        <li>multiplex detection for tmux/Zellij plus native WezTerm/Ghostty/Kitty support</li>
         <li>smart rendering utilities to write to the terminal in style</li>
       </ul>
     </td>
@@ -110,7 +110,7 @@ let term = Terminal::builder()
 
 ## Image Rendering Architecture
 
-All `TerminalImage` rendering is string-based — `render()`, `fallback_render()`, and `render_to_terminal()` return escape sequences as composable strings. `render_to_terminal()` uses save/restore cursor positioning and explicit row advancement by computed image height, then normalizes to column 0 with a trailing carriage return (`\r`). It does **not** append a trailing newline — callers are responsible for line termination. Kitty protocol sequences include `q=2` (quiet mode) to suppress terminal responses that would otherwise appear as garbage text.
+All `TerminalImage` rendering is string-based — `render()`, `fallback_render()`, and `render_to_terminal()` return escape sequences as composable strings. `render_to_terminal()` uses save/restore cursor positioning and explicit row advancement by computed image height, then normalizes to column 0 with a trailing carriage return (`\r`). It usually avoids trailing newlines, but may append one line feed when bottom-of-screen scroll compensation is needed. Kitty protocol sequences include `q=2` (quiet mode) to suppress terminal responses that would otherwise appear as garbage text.
 
 ## Rendering to the Terminal
 
@@ -141,11 +141,7 @@ The following renderable _components_ are provided in this library:
 - `Progress`
 - `TerminalImage`
 
-In the following sections we'll cover each in more detail but before we do let's quickly mention that you can write to the terminal either _via_ the `Terminal` crate or _via_ the `Compose` struct:
-
-```rust
-
-```
+In the following sections we'll cover each in more detail.
 
 ### `Prose` struct
 
@@ -174,7 +170,7 @@ The `Currency` enum in `table/types.rs` defines currency symbols for use with `T
 
 ### `Table` struct
 
-Of all the components offered, the `Table` struct is the most complex and therefore will be defined not here, but in the `./lib/src/components/table/README.md` file. In general though, it's function is to provide a well formed table that is responsive to the amount of space available and context-aware of the escape codes which may be used in a modern terminal and able to not be
+Of all the components offered, the `Table` struct is the most complex and is documented in `./lib/src/components/table/README.md`. It provides width-aware column sizing, per-column alignment/wrapping rules, and terminal-aware rendering.
 
 ### Lists: `UnorderedList` and `OrderedList`
 

@@ -4,6 +4,10 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -12,6 +16,8 @@ use biscuit_terminal::prelude::{
     OrderedList, Prose, Renderable, RenderableContent, Table, TableColumn, Terminal, UnorderedList,
 };
 use cargo_metadata::{Metadata, MetadataCommand, PackageId};
+use serde_json::Value;
+use sniff::filesystem::{detect_repo, RepoInfo};
 
 const AGENT_SKILLS_PROMPT: &str = ".ai/prompts/agent-skills.md";
 const REFRESH_DOCUMENTATION_CODEX_PROMPT: &str = ".ai/prompts/refresh_documentation_codex.md";
@@ -23,6 +29,9 @@ const MAX_SKILL_SUMMARY_CHARS: usize = 16_000;
 const MIN_SKILL_SUMMARY_CHARS: usize = 2_000;
 const MAX_CLAUDE_MD_SUMMARY_LINES: usize = 140;
 const MAX_CLAUDE_MD_SUMMARY_CHARS: usize = 8_000;
+const INTERRUPTED_MESSAGE: &str = "interrupted by user (Ctrl+C)";
+const DRIFT_PREFIX_MARKUP: &str = "<rgb 255,165,0>▌</rgb>";
+const AGENT_PREFIX_MARKUP: &str = "<blue>▌</blue>";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Agent {
@@ -57,6 +66,7 @@ impl Agent {
 #[derive(Debug, Eq, PartialEq)]
 struct CliArgs {
     package_area: String,
+    agent_override: Option<Agent>,
     extra_docs: Vec<String>,
 }
 
@@ -80,45 +90,69 @@ struct LogPaths {
 struct Ui {
     total_steps: usize,
     term: Terminal,
+    drift_prefix: String,
+}
+
+#[derive(Clone, Debug)]
+struct Cancellation {
+    sigint_count: Arc<AtomicUsize>,
+}
+
+impl Cancellation {
+    fn install() -> Result<Self> {
+        let sigint_count = Arc::new(AtomicUsize::new(0));
+        let captured = Arc::clone(&sigint_count);
+        ctrlc::set_handler(move || {
+            captured.fetch_add(1, Ordering::SeqCst);
+        })
+        .context("failed to install Ctrl+C handler")?;
+
+        Ok(Self { sigint_count })
+    }
+
+    fn hits(&self) -> usize {
+        self.sigint_count.load(Ordering::SeqCst)
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.hits() > 0
+    }
 }
 
 impl Ui {
     fn new(total_steps: usize) -> Self {
+        let term = Terminal::new();
+        let drift_prefix = render_prefix(&term, DRIFT_PREFIX_MARKUP);
         Self {
             total_steps,
-            term: Terminal::new(),
+            term,
+            drift_prefix,
         }
     }
 
     fn banner(&self, package_area: &str, agent: &str) {
-        println!();
-        println!(
-            "{}",
-            self.prose(&format!(
-                "<b>drift :: {package_area} (docs sync + skill refresh + CLAUDE.md review)</b>"
-            ))
-        );
-        println!(
-            "{}",
-            self.prose(&format!("<dim>agent={agent}  mode=non-interactive</dim>"))
-        );
-        println!();
+        self.print_line("");
+        self.print_line(&self.prose(&format!(
+            "<b>drift :: {package_area} (docs sync + skill refresh + CLAUDE.md review)</b>"
+        )));
+        self.print_line(&self.prose(&format!("<dim>agent={agent}  mode=non-interactive</dim>")));
+        self.print_line("");
     }
 
     fn stage(&self, index: usize, label: &str) {
-        println!(
+        self.print_line(&format!(
             "{} {}",
             self.prose(&format!("<cyan>[{index}/{}]</cyan>", self.total_steps)),
             label
-        );
+        ));
     }
 
     fn item(&self, label: &str, value: &str) {
-        println!(
+        self.print_line(&format!(
             "  {} {}",
             self.prose(&format!("<dim>{label}:</dim>")),
             value
-        );
+        ));
     }
 
     fn doc_list(&self, docs: &[(String, String)]) {
@@ -134,38 +168,43 @@ impl Ui {
             .collect::<Vec<_>>();
         let list = UnorderedList::from(items).with_bullet("- ");
         let rendered = list.fallback_render(&self.term);
-        print!("{rendered}");
-        if !rendered.ends_with('\n') {
-            println!();
-        }
+        print_prefixed_stdout(&self.drift_prefix, &rendered);
     }
 
     fn warn(&self, message: &str) {
-        println!("  {} {}", self.prose("<yellow>warning:</yellow>"), message);
+        self.print_line(&format!(
+            "  {} {}",
+            self.prose("<yellow>warning:</yellow>"),
+            message
+        ));
     }
 
     fn ok(&self, message: &str) {
-        println!("  {} {}", self.prose("<green>ok:</green>"), message);
+        self.print_line(&format!(
+            "  {} {}",
+            self.prose("<green>ok:</green>"),
+            message
+        ));
     }
 
     fn phase_start(&self, phase: &str, agent: &str) {
-        println!(
+        self.print_line(&format!(
             "  {} {}",
             self.prose("<cyan>phase:</cyan>"),
             format!("{phase} (agent={agent})")
-        );
-        println!(
+        ));
+        self.print_line(&format!(
             "  {} waiting for agent output...",
             self.prose("<dim>status:</dim>")
-        );
+        ));
     }
 
     fn heartbeat(&self, phase: &str, elapsed: Duration) {
-        println!(
+        self.print_line(&format!(
             "  {} {phase} running (elapsed {})",
             self.prose("<dim>status:</dim>"),
             format_duration(elapsed)
-        );
+        ));
     }
 
     fn phase_done(&self, phase: &str, elapsed: Duration, status: &str, success: bool) {
@@ -174,20 +213,31 @@ impl Ui {
         } else {
             self.prose("<yellow>failed:</yellow>")
         };
-        println!(
+        self.print_line(&format!(
             "  {prefix} {phase} in {} (status={status})",
             format_duration(elapsed)
-        );
+        ));
     }
 
     fn prose(&self, text: &str) -> String {
         Prose::new(text).fallback_render(&self.term)
     }
+
+    fn print_line(&self, text: &str) {
+        print_prefixed_stdout(&self.drift_prefix, text);
+    }
 }
 
 fn main() {
     if let Err(err) = run() {
-        eprintln!("drift failed: {err:#}");
+        let term = Terminal::new();
+        let prefix = render_prefix(&term, DRIFT_PREFIX_MARKUP);
+        let rendered = format!("{err:#}");
+        if rendered.contains(INTERRUPTED_MESSAGE) {
+            print_prefixed_stderr(&prefix, "drift cancelled by user");
+            std::process::exit(130);
+        }
+        print_prefixed_stderr(&prefix, &format!("drift failed: {rendered}"));
         std::process::exit(1);
     }
 }
@@ -199,18 +249,69 @@ fn format_duration(duration: Duration) -> String {
     format!("{minutes:02}:{seconds:02}")
 }
 
+fn render_prefix(term: &Terminal, markup: &str) -> String {
+    Prose::new(markup).fallback_render(term)
+}
+
+fn ensure_not_cancelled(cancellation: &Cancellation) -> Result<()> {
+    if cancellation.is_cancelled() {
+        bail!(INTERRUPTED_MESSAGE);
+    }
+    Ok(())
+}
+
+fn print_prefixed_stdout(prefix: &str, text: &str) {
+    if text.is_empty() {
+        println!("{prefix}");
+        io::stdout().flush().ok();
+        return;
+    }
+
+    for line in text.lines() {
+        if line.is_empty() {
+            println!("{prefix}");
+        } else {
+            println!("{prefix} {line}");
+        }
+    }
+    io::stdout().flush().ok();
+}
+
+fn print_prefixed_stderr(prefix: &str, text: &str) {
+    if text.is_empty() {
+        eprintln!("{prefix}");
+        io::stderr().flush().ok();
+        return;
+    }
+
+    for line in text.lines() {
+        if line.is_empty() {
+            eprintln!("{prefix}");
+        } else {
+            eprintln!("{prefix} {line}");
+        }
+    }
+    io::stderr().flush().ok();
+}
+
 fn run() -> Result<()> {
     let workflow_start = Instant::now();
+    let cancellation = Cancellation::install()?;
     let cli_args = parse_cli_args(env::args())?;
-    let agent = resolve_agent_preference(env::var("PREFER_AGENT").ok().as_deref());
+    let agent = cli_args
+        .agent_override
+        .unwrap_or_else(|| resolve_agent_preference(env::var("PREFER_AGENT").ok().as_deref()));
     let ui = Ui::new(8);
 
+    ensure_not_cancelled(&cancellation)?;
     ui.banner(&cli_args.package_area, agent.command_name());
     ui.stage(1, "Loading workspace metadata");
     let metadata = MetadataCommand::new()
         .exec()
         .context("failed to load Cargo workspace metadata")?;
-    let workspace_root = metadata.workspace_root.clone().into_std_path_buf();
+    let metadata_workspace_root = metadata.workspace_root.clone().into_std_path_buf();
+    let workspace_root =
+        resolve_workspace_root_for_package_area(&metadata_workspace_root, &cli_args.package_area);
 
     ui.stage(
         2,
@@ -262,7 +363,14 @@ fn run() -> Result<()> {
     );
 
     ui.stage(5, "Running docs refresh");
-    let docs_summary = run_agent(agent, &workspace_root, &docs_prompt, "docs refresh", &ui)?;
+    let docs_summary = run_agent(
+        agent,
+        &workspace_root,
+        &docs_prompt,
+        "docs refresh",
+        &ui,
+        &cancellation,
+    )?;
     write_file(&log_paths.docs_summary, &docs_summary)?;
     ui.item(
         "Docs summary",
@@ -334,7 +442,14 @@ fn run() -> Result<()> {
     );
 
     ui.stage(7, "Running skill refresh");
-    let _ = run_agent(agent, &workspace_root, &skill_prompt, "skill refresh", &ui)?;
+    let _ = run_agent(
+        agent,
+        &workspace_root,
+        &skill_prompt,
+        "skill refresh",
+        &ui,
+        &cancellation,
+    )?;
 
     ui.stage(8, "Reviewing CLAUDE.md for drift");
     let claude_md_template = fs::read_to_string(workspace_root.join(CLAUDE_MD_UPDATE_PROMPT))
@@ -372,6 +487,7 @@ fn run() -> Result<()> {
         &claude_md_prompt,
         "claude.md review",
         &ui,
+        &cancellation,
     )?;
 
     ui.ok(&format!(
@@ -392,11 +508,52 @@ fn parse_cli_args(mut args: impl Iterator<Item = String>) -> Result<CliArgs> {
         bail!("invalid package area `{package_area}`");
     }
 
-    let extra_docs = args.collect();
+    let raw_args = args.collect::<Vec<_>>();
+    let mut extra_docs = Vec::new();
+    let mut agent_override = None;
+    let mut idx = 0usize;
+
+    while idx < raw_args.len() {
+        let current = &raw_args[idx];
+
+        if current == "--agent" {
+            let value = raw_args.get(idx + 1).ok_or_else(|| {
+                anyhow!("missing value for `--agent`; expected `claude` or `codex`")
+            })?;
+            agent_override = Some(parse_agent(value)?);
+            idx += 2;
+            continue;
+        }
+
+        if let Some(value) = current.strip_prefix("--agent=") {
+            agent_override = Some(parse_agent(value)?);
+            idx += 1;
+            continue;
+        }
+
+        if let Some(value) = current
+            .strip_prefix("PREFER_AGENT=")
+            .or_else(|| current.strip_prefix("prefer_agent="))
+        {
+            agent_override = Some(parse_agent(value)?);
+            idx += 1;
+            continue;
+        }
+
+        extra_docs.push(current.clone());
+        idx += 1;
+    }
 
     Ok(CliArgs {
         package_area,
+        agent_override,
         extra_docs,
+    })
+}
+
+fn parse_agent(value: &str) -> Result<Agent> {
+    Agent::from_preference(value).ok_or_else(|| {
+        anyhow!("invalid agent `{value}`; expected one of: claude, claude-code, codex")
     })
 }
 
@@ -551,6 +708,34 @@ fn collect_readmes(workspace_root: &Path, package_area: &str) -> Result<Vec<Stri
     Ok(targets)
 }
 
+fn resolve_workspace_root_for_package_area(
+    metadata_workspace_root: &Path,
+    package_area: &str,
+) -> PathBuf {
+    for candidate_root in metadata_workspace_root.ancestors() {
+        let Ok(Some(repo_info)) = detect_repo(candidate_root) else {
+            continue;
+        };
+        if repo_contains_package_area(&repo_info, package_area) {
+            return candidate_root.to_path_buf();
+        }
+    }
+    metadata_workspace_root.to_path_buf()
+}
+
+fn repo_contains_package_area(repo_info: &RepoInfo, package_area: &str) -> bool {
+    let Some(packages) = repo_info.packages.as_ref() else {
+        return false;
+    };
+
+    let area_prefix = format!("{package_area}/");
+    packages.iter().any(|package| {
+        package.package_area == package_area
+            || package.relative == package_area
+            || package.relative.starts_with(&area_prefix)
+    })
+}
+
 fn collect_doc_links(
     workspace_root: &Path,
     readme_targets: &[String],
@@ -660,13 +845,21 @@ fn write_file(path: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StdoutMode {
+    MarkdownText,
+    ClaudeStreamJson,
+}
+
 fn run_agent(
     agent: Agent,
     workspace_root: &Path,
     prompt: &str,
     phase: &str,
     ui: &Ui,
+    cancellation: &Cancellation,
 ) -> Result<String> {
+    ensure_not_cancelled(cancellation)?;
     let mut command = Command::new(agent.command_name());
     command.current_dir(workspace_root);
 
@@ -675,6 +868,10 @@ fn run_agent(
             command.env_remove("ANTHROPIC_API_KEY");
             command
                 .arg("--dangerously-skip-permissions")
+                .arg("--verbose")
+                .arg("--output-format")
+                .arg("stream-json")
+                .arg("--include-partial-messages")
                 .arg("--max-turns")
                 .arg("30")
                 .arg("-p")
@@ -702,12 +899,37 @@ fn run_agent(
         .take()
         .ok_or_else(|| anyhow!("failed to capture agent stderr"))?;
 
-    let stdout_thread = spawn_stdout_thread(stdout_handle);
+    let stdout_mode = match agent {
+        Agent::ClaudeCode => StdoutMode::ClaudeStreamJson,
+        Agent::Codex => StdoutMode::MarkdownText,
+    };
+    let stdout_thread = spawn_stdout_thread(stdout_handle, stdout_mode);
     let stderr_thread = spawn_stderr_thread(stderr_handle);
 
     let start = Instant::now();
     let mut last_heartbeat = start;
+    let mut cancellation_logged = false;
+    let mut termination_requested = false;
     let status = loop {
+        let hits = cancellation.hits();
+        if hits >= 2 {
+            ui.warn("Second interrupt received; exiting immediately.");
+            std::process::exit(130);
+        }
+
+        if hits >= 1 && !termination_requested {
+            if !cancellation_logged {
+                ui.warn("Interrupt received; stopping active agent run...");
+                cancellation_logged = true;
+            }
+            match child.kill() {
+                Ok(()) => {}
+                Err(err) if err.kind() == io::ErrorKind::InvalidInput => {}
+                Err(err) => ui.warn(&format!("Failed to stop agent process cleanly: {err}")),
+            }
+            termination_requested = true;
+        }
+
         if let Some(status) = child.try_wait().context("failed while waiting for agent")? {
             break status;
         }
@@ -731,6 +953,10 @@ fn run_agent(
         .code()
         .map_or_else(|| "<signal>".to_owned(), |code| code.to_string());
     ui.phase_done(phase, start.elapsed(), &status_label, status.success());
+
+    if termination_requested {
+        bail!(INTERRUPTED_MESSAGE);
+    }
 
     if !status.success() {
         let combined = format!("{stdout}\n{stderr}");
@@ -766,14 +992,18 @@ fn run_agent(
 #[derive(Debug)]
 struct MarkdownStreamRenderer {
     term: Terminal,
+    agent_prefix: String,
     pending_table_lines: Vec<String>,
     pending_list_lines: Vec<String>,
 }
 
 impl MarkdownStreamRenderer {
     fn new() -> Self {
+        let term = Terminal::new();
+        let agent_prefix = render_prefix(&term, AGENT_PREFIX_MARKUP);
         Self {
-            term: Terminal::new(),
+            term,
+            agent_prefix,
             pending_table_lines: Vec::new(),
             pending_list_lines: Vec::new(),
         }
@@ -813,10 +1043,7 @@ impl MarkdownStreamRenderer {
         if let Some(rendered_table) =
             render_markdown_table_block(&self.pending_table_lines, &self.term)
         {
-            print!("{rendered_table}");
-            if !rendered_table.ends_with('\n') {
-                println!();
-            }
+            print_prefixed_stdout(&self.agent_prefix, &rendered_table);
         } else {
             for line in &self.pending_table_lines {
                 self.print_markdownish_line(line, true);
@@ -824,7 +1051,6 @@ impl MarkdownStreamRenderer {
         }
 
         self.pending_table_lines.clear();
-        io::stdout().flush().ok();
     }
 
     fn flush_pending_list(&mut self) {
@@ -835,10 +1061,7 @@ impl MarkdownStreamRenderer {
         if let Some(rendered_list) =
             render_markdown_list_block(&self.pending_list_lines, &self.term)
         {
-            print!("{rendered_list}");
-            if !rendered_list.ends_with('\n') {
-                println!();
-            }
+            print_prefixed_stdout(&self.agent_prefix, &rendered_list);
         } else {
             for line in &self.pending_list_lines {
                 self.print_markdownish_line(line, true);
@@ -846,53 +1069,376 @@ impl MarkdownStreamRenderer {
         }
 
         self.pending_list_lines.clear();
-        io::stdout().flush().ok();
     }
 
     fn print_markdownish_line(&self, line: &str, had_newline: bool) {
         if line.is_empty() {
             if had_newline {
-                println!();
+                print_prefixed_stdout(&self.agent_prefix, "");
             }
             return;
         }
 
         let rendered = render_markdownish_line(line, &self.term);
         if had_newline {
-            println!("{rendered}");
+            print_prefixed_stdout(&self.agent_prefix, &rendered);
         } else {
-            print!("{rendered}");
+            print_prefixed_stdout(&self.agent_prefix, &rendered);
         }
-        io::stdout().flush().ok();
     }
 }
 
-fn spawn_stdout_thread<R>(reader: R) -> thread::JoinHandle<Result<String>>
+fn spawn_stdout_thread<R>(reader: R, mode: StdoutMode) -> thread::JoinHandle<Result<String>>
 where
     R: Read + Send + 'static,
 {
     thread::spawn(move || -> Result<String> {
-        let mut renderer = MarkdownStreamRenderer::new();
-        let mut buffered = BufReader::new(reader);
-        let mut line = String::new();
-        let mut captured = String::new();
+        match mode {
+            StdoutMode::MarkdownText => capture_markdown_stdout(reader),
+            StdoutMode::ClaudeStreamJson => capture_claude_stream_json_stdout(reader),
+        }
+    })
+}
 
-        loop {
-            line.clear();
-            let read = buffered
-                .read_line(&mut line)
-                .context("failed reading agent output stream")?;
-            if read == 0 {
-                break;
-            }
+fn capture_markdown_stdout<R>(reader: R) -> Result<String>
+where
+    R: Read,
+{
+    let mut renderer = MarkdownStreamRenderer::new();
+    let term = Terminal::new();
+    let agent_prefix = render_prefix(&term, AGENT_PREFIX_MARKUP);
+    let mut buffered = BufReader::new(reader);
+    let mut line = String::new();
+    let mut captured = String::new();
 
-            captured.push_str(&line);
-            renderer.process_line(&line);
+    loop {
+        line.clear();
+        let read = buffered
+            .read_line(&mut line)
+            .context("failed reading agent output stream")?;
+        if read == 0 {
+            break;
         }
 
+        captured.push_str(&line);
+        safe_renderer_process_line(&mut renderer, &line, &agent_prefix);
+    }
+
+    safe_renderer_finish(&mut renderer, &agent_prefix);
+    Ok(captured)
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct ClaudeStreamEvent {
+    status_lines: Vec<String>,
+    text_lines: Vec<String>,
+    result_text: Option<String>,
+}
+
+fn capture_claude_stream_json_stdout<R>(reader: R) -> Result<String>
+where
+    R: Read,
+{
+    let mut renderer = MarkdownStreamRenderer::new();
+    let mut buffered = BufReader::new(reader);
+    let term = Terminal::new();
+    let agent_prefix = render_prefix(&term, AGENT_PREFIX_MARKUP);
+    let mut line = String::new();
+    let mut raw_captured = String::new();
+    let mut summary = String::new();
+    let mut last_status = String::new();
+    let mut last_text = String::new();
+
+    loop {
+        line.clear();
+        let read = buffered
+            .read_line(&mut line)
+            .context("failed reading claude stream-json output")?;
+        if read == 0 {
+            break;
+        }
+
+        raw_captured.push_str(&line);
+        let raw = line.trim_end_matches(['\n', '\r']);
+        if raw.trim().is_empty() {
+            continue;
+        }
+
+        if let Some(event) = parse_claude_stream_json_line(raw) {
+            for status in event.status_lines {
+                let status = status.trim().to_owned();
+                if status.is_empty() || status == last_status {
+                    continue;
+                }
+                last_status = status.clone();
+                print_prefixed_stdout(&agent_prefix, &format!("status: {status}"));
+            }
+
+            for text in event.text_lines {
+                let text = text.trim_end().to_owned();
+                if text.is_empty() || text == last_text {
+                    continue;
+                }
+                last_text = text.clone();
+                safe_renderer_process_line(&mut renderer, &format!("{text}\n"), &agent_prefix);
+                summary.push_str(&text);
+                summary.push('\n');
+            }
+
+            if let Some(result) = event.result_text {
+                let result = result.trim().to_owned();
+                if !result.is_empty() && result != last_text {
+                    last_text = result.clone();
+                    safe_renderer_process_line(
+                        &mut renderer,
+                        &format!("{result}\n"),
+                        &agent_prefix,
+                    );
+                    summary.push_str(&result);
+                    summary.push('\n');
+                }
+            }
+            continue;
+        }
+
+        safe_renderer_process_line(&mut renderer, &line, &agent_prefix);
+        summary.push_str(raw);
+        summary.push('\n');
+    }
+
+    safe_renderer_finish(&mut renderer, &agent_prefix);
+
+    if summary.trim().is_empty() {
+        Ok(raw_captured)
+    } else {
+        Ok(summary)
+    }
+}
+
+fn safe_renderer_process_line(
+    renderer: &mut MarkdownStreamRenderer,
+    line: &str,
+    agent_prefix: &str,
+) {
+    let line_owned = line.to_owned();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        renderer.process_line(&line_owned);
+    }));
+    if result.is_err() {
+        let raw = line_owned.trim_end_matches(['\n', '\r']);
+        if raw.is_empty() {
+            print_prefixed_stdout(agent_prefix, "");
+        } else {
+            print_prefixed_stdout(agent_prefix, raw);
+        }
+        print_prefixed_stdout(
+            agent_prefix,
+            "warning: markdown rendering failed for one line; continued with raw output",
+        );
+    }
+}
+
+fn safe_renderer_finish(renderer: &mut MarkdownStreamRenderer, agent_prefix: &str) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         renderer.finish();
-        Ok(captured)
-    })
+    }));
+    if result.is_err() {
+        print_prefixed_stdout(
+            agent_prefix,
+            "warning: markdown renderer failed during flush; continuing",
+        );
+    }
+}
+
+fn parse_claude_stream_json_line(line: &str) -> Option<ClaudeStreamEvent> {
+    let value: Value = serde_json::from_str(line).ok()?;
+    Some(parse_claude_stream_json_value(&value))
+}
+
+fn parse_claude_stream_json_value(value: &Value) -> ClaudeStreamEvent {
+    let mut event = ClaudeStreamEvent::default();
+    let event_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let subtype = value.get("subtype").and_then(Value::as_str);
+
+    match event_type {
+        "system" => {
+            if let Some(kind) = subtype {
+                event
+                    .status_lines
+                    .push(format!("claude system event `{kind}`"));
+            } else {
+                event.status_lines.push("claude system event".to_owned());
+            }
+        }
+        "result" => {
+            let mut details = Vec::new();
+            if let Some(kind) = subtype {
+                details.push(kind.to_owned());
+            }
+            if let Some(turns) = value.get("num_turns").and_then(Value::as_u64) {
+                details.push(format!("turns={turns}"));
+            }
+            if let Some(duration_ms) = value.get("duration_ms").and_then(Value::as_u64) {
+                details.push(format!("duration={duration_ms}ms"));
+            }
+            if let Some(cost_usd) = json_value_as_f64(
+                value
+                    .get("total_cost_usd")
+                    .or_else(|| value.get("cost_usd"))
+                    .unwrap_or(&Value::Null),
+            ) {
+                details.push(format!("cost=${cost_usd:.4}"));
+            }
+            if !details.is_empty() {
+                event
+                    .status_lines
+                    .push(format!("claude result ({})", details.join(", ")));
+            }
+            if value.get("is_error").and_then(Value::as_bool) == Some(true) {
+                event
+                    .status_lines
+                    .push("claude reported an error".to_owned());
+            }
+            if let Some(result_text) = value.get("result").and_then(Value::as_str) {
+                let trimmed = result_text.trim();
+                if !trimmed.is_empty() {
+                    event.result_text = Some(trimmed.to_owned());
+                }
+            }
+        }
+        "assistant" => {
+            event.status_lines.push("assistant message".to_owned());
+        }
+        _ => {}
+    }
+
+    if let Some(error) = value.get("error").and_then(Value::as_str) {
+        let trimmed = error.trim();
+        if !trimmed.is_empty() {
+            event.status_lines.push(format!("claude error: {trimmed}"));
+        }
+    }
+
+    if let Some(message) = value.get("message") {
+        extract_message_text_and_status(message, &mut event);
+    }
+    if let Some(partial_message) = value.get("partial_message") {
+        extract_message_text_and_status(partial_message, &mut event);
+    }
+    if let Some(delta_text) = value
+        .get("delta")
+        .and_then(|delta| delta.get("text"))
+        .and_then(Value::as_str)
+    {
+        append_non_empty_lines(&mut event.text_lines, delta_text);
+    }
+    if let Some(top_level_text) = value.get("text").and_then(Value::as_str) {
+        append_non_empty_lines(&mut event.text_lines, top_level_text);
+    }
+
+    event
+}
+
+fn extract_message_text_and_status(message: &Value, event: &mut ClaudeStreamEvent) {
+    if let Some(content) = message.get("content").and_then(Value::as_array) {
+        for block in content {
+            extract_content_block(block, event);
+        }
+        return;
+    }
+
+    if let Some(text) = message.get("text").and_then(Value::as_str) {
+        append_non_empty_lines(&mut event.text_lines, text);
+    }
+}
+
+fn extract_content_block(block: &Value, event: &mut ClaudeStreamEvent) {
+    let block_type = block
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+
+    match block_type {
+        "text" | "thinking" => {
+            if let Some(text) = block.get("text").and_then(Value::as_str) {
+                append_non_empty_lines(&mut event.text_lines, text);
+            }
+        }
+        "tool_use" => {
+            let name = block
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let detail = block
+                .get("input")
+                .and_then(summarize_tool_input)
+                .unwrap_or_default();
+            if detail.is_empty() {
+                event.status_lines.push(format!("tool call: {name}"));
+            } else {
+                event
+                    .status_lines
+                    .push(format!("tool call: {name} ({detail})"));
+            }
+        }
+        "tool_result" => {
+            if block.get("is_error").and_then(Value::as_bool) == Some(true) {
+                event.status_lines.push("tool result: error".to_owned());
+            } else {
+                event.status_lines.push("tool result: ok".to_owned());
+            }
+        }
+        _ => {
+            if let Some(text) = block.get("text").and_then(Value::as_str) {
+                append_non_empty_lines(&mut event.text_lines, text);
+            }
+        }
+    }
+}
+
+fn summarize_tool_input(input: &Value) -> Option<String> {
+    if let Some(command) = input.get("command").and_then(Value::as_str) {
+        return Some(format!("command `{}`", inline_excerpt(command, 80)));
+    }
+    if let Some(file_path) = input.get("file_path").and_then(Value::as_str) {
+        return Some(format!("file `{file_path}`"));
+    }
+    if let Some(pattern) = input.get("pattern").and_then(Value::as_str) {
+        return Some(format!("pattern `{}`", inline_excerpt(pattern, 80)));
+    }
+    None
+}
+
+fn append_non_empty_lines(lines: &mut Vec<String>, text: &str) {
+    for raw in text.lines() {
+        let trimmed = raw.trim_end();
+        if trimmed.trim().is_empty() {
+            continue;
+        }
+        lines.push(trimmed.to_owned());
+    }
+}
+
+fn inline_excerpt(value: &str, max_chars: usize) -> String {
+    let collapsed = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= max_chars {
+        return collapsed;
+    }
+
+    let suffix = "...";
+    let budget = max_chars.saturating_sub(suffix.len());
+    format!("{}{}", truncate_chars(&collapsed, budget), suffix)
+}
+
+fn json_value_as_f64(value: &Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_i64().map(|value| value as f64))
+        .or_else(|| value.as_u64().map(|value| value as f64))
+        .or_else(|| value.as_str().and_then(|text| text.parse::<f64>().ok()))
 }
 
 fn spawn_stderr_thread<R>(reader: R) -> thread::JoinHandle<Result<String>>
@@ -900,6 +1446,8 @@ where
     R: Read + Send + 'static,
 {
     thread::spawn(move || -> Result<String> {
+        let term = Terminal::new();
+        let agent_prefix = render_prefix(&term, AGENT_PREFIX_MARKUP);
         let mut buffered = BufReader::new(reader);
         let mut line = String::new();
         let mut captured = String::new();
@@ -914,8 +1462,8 @@ where
             }
 
             captured.push_str(&line);
-            eprint!("{line}");
-            io::stderr().flush().ok();
+            let raw = line.trim_end_matches(['\n', '\r']);
+            print_prefixed_stderr(&agent_prefix, raw);
         }
 
         Ok(captured)
@@ -963,11 +1511,8 @@ fn render_markdown_table_block(lines: &[String], term: &Terminal) -> Option<Stri
         .map(|cell| TableColumn::new(cleanup_markdown_inline(cell)))
         .collect::<Vec<_>>();
 
-    let table = Table::new()
-        .with_columns(columns)
-        .with_data(data)
-        .prefer_cursor_alignment();
-    Some(table.render(Some(term.width())))
+    let table = Table::new().with_columns(columns).with_data(data);
+    Some(table.fallback_render(term))
 }
 
 fn parse_markdown_row(line: &str) -> Option<Vec<String>> {
@@ -1322,12 +1867,81 @@ mod tests {
             parsed,
             CliArgs {
                 package_area: "claudine".to_owned(),
+                agent_override: None,
                 extra_docs: vec![
                     "@claudine/docs/extra.md".to_owned(),
                     "@claudine/docs/more.md".to_owned()
                 ],
             }
         );
+    }
+
+    #[test]
+    fn parse_cli_args_extracts_agent_from_assignment() {
+        let args = vec![
+            "drift".to_owned(),
+            "claudine".to_owned(),
+            "PREFER_AGENT=codex".to_owned(),
+            "@claudine/docs/extra.md".to_owned(),
+        ];
+        let parsed = parse_cli_args(args.into_iter()).unwrap();
+        assert_eq!(
+            parsed,
+            CliArgs {
+                package_area: "claudine".to_owned(),
+                agent_override: Some(Agent::Codex),
+                extra_docs: vec!["@claudine/docs/extra.md".to_owned()],
+            }
+        );
+    }
+
+    #[test]
+    fn parse_cli_args_extracts_agent_from_flag() {
+        let args = vec![
+            "drift".to_owned(),
+            "claudine".to_owned(),
+            "--agent".to_owned(),
+            "codex".to_owned(),
+            "@claudine/docs/extra.md".to_owned(),
+        ];
+        let parsed = parse_cli_args(args.into_iter()).unwrap();
+        assert_eq!(
+            parsed,
+            CliArgs {
+                package_area: "claudine".to_owned(),
+                agent_override: Some(Agent::Codex),
+                extra_docs: vec!["@claudine/docs/extra.md".to_owned()],
+            }
+        );
+    }
+
+    #[test]
+    fn parse_cli_args_rejects_invalid_agent_value() {
+        let args = vec![
+            "drift".to_owned(),
+            "claudine".to_owned(),
+            "--agent".to_owned(),
+            "bad-agent".to_owned(),
+        ];
+        let err = parse_cli_args(args.into_iter()).unwrap_err();
+        assert!(err.to_string().contains("invalid agent"));
+    }
+
+    #[test]
+    fn ensure_not_cancelled_allows_normal_flow() {
+        let cancellation = Cancellation {
+            sigint_count: Arc::new(AtomicUsize::new(0)),
+        };
+        assert!(ensure_not_cancelled(&cancellation).is_ok());
+    }
+
+    #[test]
+    fn ensure_not_cancelled_reports_interrupt() {
+        let cancellation = Cancellation {
+            sigint_count: Arc::new(AtomicUsize::new(1)),
+        };
+        let err = ensure_not_cancelled(&cancellation).unwrap_err();
+        assert!(err.to_string().contains(INTERRUPTED_MESSAGE));
     }
 
     #[test]
@@ -1437,6 +2051,60 @@ mod tests {
     }
 
     #[test]
+    fn resolve_workspace_root_walks_ancestors_via_sniff_repo_detection() {
+        let test_root = unique_temp_root();
+        let repo_root = test_root.join("workspace");
+        let package_area_root = repo_root.join("schematic");
+        let package_root = package_area_root.join("define");
+        fs::create_dir_all(&package_root).unwrap();
+
+        fs::write(
+            repo_root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"schematic/define\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            package_area_root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"define\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            package_root.join("Cargo.toml"),
+            "[package]\nname = \"schematic-define\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+
+        let resolved = resolve_workspace_root_for_package_area(&package_area_root, "schematic");
+        assert_eq!(resolved, repo_root);
+
+        fs::remove_dir_all(test_root).unwrap();
+    }
+
+    #[test]
+    fn resolve_workspace_root_falls_back_to_metadata_workspace_root() {
+        let test_root = unique_temp_root();
+        let repo_root = test_root.join("workspace");
+        let package_root = repo_root.join("foo");
+        fs::create_dir_all(&package_root).unwrap();
+
+        fs::write(
+            repo_root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"foo\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            package_root.join("Cargo.toml"),
+            "[package]\nname = \"foo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+
+        let resolved = resolve_workspace_root_for_package_area(&repo_root, "schematic");
+        assert_eq!(resolved, repo_root);
+
+        fs::remove_dir_all(test_root).unwrap();
+    }
+
+    #[test]
     fn percent_encode_path_for_uri_encodes_spaces_and_symbols() {
         let encoded = percent_encode_path_for_uri("/tmp/file name#[x].md");
         assert_eq!(encoded, "/tmp/file%20name%23%5Bx%5D.md");
@@ -1517,6 +2185,19 @@ mod tests {
     }
 
     #[test]
+    fn markdown_table_renderer_avoids_cursor_alignment_sequences() {
+        let lines = vec![
+            "| Col A | Col B |".to_owned(),
+            "|-------|-------|".to_owned(),
+            "| one   | two   |".to_owned(),
+        ];
+        let term = Terminal::new();
+        let rendered = render_markdown_table_block(&lines, &term).unwrap_or_default();
+        assert!(!rendered.contains("\x1b[1G"));
+        assert!(!rendered.contains("\x1b[G"));
+    }
+
+    #[test]
     fn parse_markdown_list_line_detects_unordered_and_ordered() {
         let unordered = parse_markdown_list_line("  - item");
         assert_eq!(
@@ -1552,6 +2233,50 @@ mod tests {
         assert!(output.contains("- parent"));
         assert!(output.contains("- child"));
         assert!(output.contains("- sibling"));
+    }
+
+    #[test]
+    fn parse_claude_stream_json_extracts_assistant_text_and_tool_call() {
+        let raw = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Reading docs now"},{"type":"tool_use","name":"Read","input":{"file_path":"homelab/README.md"}}]}}"#;
+        let event = parse_claude_stream_json_line(raw).unwrap();
+        assert!(event
+            .status_lines
+            .iter()
+            .any(|line| line == "assistant message"));
+        assert!(event
+            .status_lines
+            .iter()
+            .any(|line| line.contains("tool call: Read")));
+        assert!(event
+            .text_lines
+            .iter()
+            .any(|line| line == "Reading docs now"));
+    }
+
+    #[test]
+    fn parse_claude_stream_json_extracts_result_payload() {
+        let raw = r#"{"type":"result","subtype":"success","num_turns":4,"duration_ms":1510,"total_cost_usd":0.0125,"result":"Completed with 3 doc updates."}"#;
+        let event = parse_claude_stream_json_line(raw).unwrap();
+        assert!(event
+            .status_lines
+            .iter()
+            .any(|line| line.starts_with("claude result")));
+        assert_eq!(
+            event.result_text,
+            Some("Completed with 3 doc updates.".to_owned())
+        );
+    }
+
+    #[test]
+    fn parse_claude_stream_json_extracts_delta_text() {
+        let raw = r#"{"type":"assistant","delta":{"text":"partial chunk"}}"#;
+        let event = parse_claude_stream_json_line(raw).unwrap();
+        assert!(event.text_lines.iter().any(|line| line == "partial chunk"));
+    }
+
+    #[test]
+    fn parse_claude_stream_json_rejects_non_json_lines() {
+        assert!(parse_claude_stream_json_line("not json").is_none());
     }
 
     fn unique_temp_root() -> PathBuf {

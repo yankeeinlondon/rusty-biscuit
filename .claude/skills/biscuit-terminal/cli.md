@@ -32,10 +32,12 @@ cargo install --path biscuit-terminal/cli
 
 All diagram commands support:
 - `--example` / `-e`: Render example with command shown
-- `--width` / `-w`: Width spec (`50%`, `80ch`, `fill`)
+- `--width` / `-w`: Width spec (`50%`, `80ch`, `80`, `fill`)
 - `--inverse`: Solid background with inverted colors
 - `--title` / `-t`: Add title above diagram
 - `--json`: Output as JSON (for scripting)
+
+Bar/line chart extras: `--horizontal`, `--show-data-label`, `--aspect-ratio`
 
 ## Terminal Inspection (Default)
 
@@ -74,6 +76,8 @@ Protocol selection:
 
 See [Mermaid Diagrams](./mermaid-diagrams.md) for comprehensive diagram documentation.
 
+Render failures are reported as errors and return a non-zero exit code. `bt` does not auto-print Mermaid code-block fallback output.
+
 ### Quick Examples
 
 ```bash
@@ -93,8 +97,9 @@ bt pie-chart --show-data "TypeScript: 45 #3178c6" "Rust: 35"
 bt git-graph "commit" "branch feature" "commit" "merge feature"
 
 # Bar/Line charts
-bt bar-chart 10 20 15 25
-bt line-chart --x-axis "Mon,Tue,Wed" 20 22 19
+bt bar-chart --horizontal --show-data-label --aspect-ratio 2.0 --inverse 10 20 15 25
+bt line-chart --show-data-label --horizontal 1 8 7 5
+bt line-chart --aspect-ratio 1.8 --inverse --width 60% 1 8 7 5
 
 # Timeline
 bt timeline "2020: Founded" "2022: Series A" "2024: IPO"

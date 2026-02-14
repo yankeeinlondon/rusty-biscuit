@@ -70,6 +70,7 @@ just -f homelab/justfile install-server
 | GET | `/sony_receiver` | List all configured receivers |
 | POST | `/sony_receiver` | Create a new receiver |
 | PUT | `/sony_receiver/{name}` | Update a receiver |
+| PATCH | `/sony_receiver/{name}` | Rename a receiver (plain text body) |
 | DELETE | `/sony_receiver/{name}` | Delete a receiver |
 
 ### Sony Receiver Control
@@ -94,6 +95,7 @@ just -f homelab/justfile install-server
 | GET | `/arcam_amp` | List all configured amplifiers |
 | POST | `/arcam_amp` | Create a new amplifier |
 | PUT | `/arcam_amp/{name}` | Update an amplifier |
+| PATCH | `/arcam_amp/{name}` | Rename an amplifier (plain text body) |
 | DELETE | `/arcam_amp/{name}` | Delete an amplifier |
 
 ### Arcam Amplifier Control
@@ -129,7 +131,7 @@ curl http://localhost:3000/health
 # List Sony receivers
 curl http://localhost:3000/sony_receiver
 
-# Add a Sony receiver
+# Add a Sony receiver (port defaults to 10000)
 curl -X POST http://localhost:3000/sony_receiver \
   -H "Content-Type: application/json" \
   -d '{"name": "living-room", "host": "192.168.1.100"}'
@@ -150,6 +152,11 @@ curl -X POST http://localhost:3000/sony_receiver/living-room/mute \
 # Power on Arcam
 curl -X POST http://localhost:3000/arcam_amp/office/power/on
 
+# Rename a device
+curl -X PATCH http://localhost:3000/sony_receiver/living-room \
+  -H "Content-Type: text/plain" \
+  -d 'main-room'
+
 # Delete a device
 curl -X DELETE http://localhost:3000/sony_receiver/living-room
 ```
@@ -169,6 +176,7 @@ All errors return JSON with `error` and `code` fields:
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
+| `DEVICE_NOT_CONFIGURED` | 404 | Device not configured (legacy routes) |
 | `DEVICE_NOT_FOUND` | 404 | Device name not in config |
 | `DEVICE_EXISTS` | 409 | Device name already exists |
 | `INVALID_DEVICE_NAME` | 400 | Invalid device name format |
@@ -191,7 +199,7 @@ Examples: `living-room`, `office_1`, `bedroom`
 
 ## API Documentation
 
-Visit `/explore` when the server is running to access the Swagger UI.
+Visit `/explore` when the server is running to access the Scalar API explorer.
 
 ## Development
 

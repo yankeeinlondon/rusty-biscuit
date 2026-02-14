@@ -51,7 +51,7 @@ println!("{}", table.render(Some(120)));
 | `with_title(title)` | Set an optional title line above the table |
 | `with_columns(cols)` | Set column definitions |
 | `with_data(rows)` | Set all data rows at once |
-| `add_row(row)` | Append a single data row (`&mut self`) |
+| `add_row(row)` | Append a single data row (mutates in place, returns `()`) |
 | `prefer_cursor_alignment()` | Enable ANSI cursor-based cell alignment |
 | `alternate_background_color()` | Enable row striping via background color |
 | `alternate_text_color()` | Enable row striping via text color |
@@ -123,23 +123,25 @@ Enum with `USD`, `GBP`, and `EUR` variants. Defined in `types.rs` with a `symbol
 3. **Constraint pass** -- Clamp each column to `max_width` if set.
 4. **Fit pass** -- `constrain_widths_to_available()` proportionally reduces non-fixed column widths when total width (including border overhead) exceeds available terminal width.
 
-The number of columns is derived from whichever is larger: the column definitions count or the widest data row. This means data rows can exceed the defined column count without panicking (extra cells are ignored in rendering, but they influence width calculation up to `widths.len()`).
+The number of columns is derived from whichever is larger: the column definitions count or the widest data row. This means data rows can exceed the defined column count without panicking. Extra cells still participate in width calculation and render as additional columns (with default alignment/wrap behavior when no `TableColumn` is defined for that index).
 
 ## Rendering Pipeline
 
 ### Box-Drawing Output
 
-The renderer produces Unicode box-drawing output with `│` column separators and a `├─┼─┤` header/data divider:
+The renderer produces Unicode box-drawing output with top/header/separator/data/bottom borders:
 
 ```
 Users
+┌───────┬─────┐
 │ Name  │ Age │
 ├───────┼─────┤
-│ Alice │ 30  │
-│ Bob   │ 25  │
+│ Alice │  30 │
+│ Bob   │  25 │
+└───────┴─────┘
 ```
 
-Cells are left-aligned and padded with spaces to the computed column width.
+Cell alignment follows each column's effective alignment (for example: text defaults to left, numeric types default to right), with space padding to the computed column width.
 
 ### Renderable Trait Integration
 
@@ -191,5 +193,5 @@ Controls vertical positioning of multi-line cell content. Default is `Top`.
 The table delegates all spatial concerns to `Layout`:
 
 - **Margins** can be absolute (`Chars`), relative (`Percent`), or composed (`Offset`) for nesting inside parent layouts.
-- **Word wrapping** applies to the entire rendered table string, not individual cells.
+- **Word wrapping** is applied per cell using each column's effective wrap strategy (for example, text columns can wrap while numeric columns force `WordWrap::None`).
 - **`with_parent_layout(parent, left, right)`** (from `Renderable`) lets the table inherit and extend a parent's margins for nested rendering contexts.

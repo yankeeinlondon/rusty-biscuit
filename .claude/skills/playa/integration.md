@@ -11,10 +11,11 @@ playa/
 │   ├── playback.rs    # Sync/async playback functions
 │   ├── playa.rs       # Builder API (Playa struct)
 │   ├── types.rs       # Codec, AudioFileFormat, PlaybackOptions
-│   ├── effects.rs     # 85 embedded sound effects
+│   ├── effects.rs     # 88 embedded sound effects
+│   ├── ducking/       # Audio ducking (feature-gated)
 │   └── error.rs       # Error types
 ├── cli/           # Binary: `playa`
-└── effects/       # 85 embedded audio files (~31MB)
+└── effects/       # 88 embedded audio files (~31MB)
 ```
 
 ## TTS Integration (so-you-say)
@@ -60,6 +61,20 @@ use playa::{DetectionError, InvalidAudio, PlaybackError};
 // InvalidAudio: Cannot create Audio from source
 // PlaybackError: Player execution failed
 ```
+
+## Audio Ducking
+
+Feature-gated (`audio-ducking`, `audio-ducking-macos`, `audio-ducking-linux`). Automatically lowers system volume during playback.
+
+```rust
+// Cargo.toml: playa = { features = ["audio-ducking"] }
+
+Playa::from_path("audio.mp3")?
+    .with_ducked_audio()
+    .play_async().await?;
+```
+
+CLI flags: `--no-duck`, `--duck-ramp-ms <MS>` (default: 1000), `--duck-floor <LEVEL>` (default: 0.2).
 
 ## Async Playback
 

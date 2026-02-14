@@ -186,7 +186,7 @@ bt flowchart --json "A --> B"                      # Output as JSON
 **Requirements:**
 - `mmdc` (Mermaid CLI): Install with `npm install -g @mermaid-js/mermaid-cli`
 - Falls back to `npx` if mmdc is not installed
-- Falls back to a code block if image rendering is not supported
+- Use `--json` to inspect generated Mermaid instructions when image rendering is not available
 
 **Error handling:**
 - Syntax errors show the location and expected tokens
@@ -312,6 +312,7 @@ bt bar-chart --x-axis "Q1,Q2,Q3,Q4" --y-axis Sales 10 20 15 25
 bt bar-chart --horizontal 1 8 7 5
 bt bar-chart --show-data-label 1 8 7 5
 bt bar-chart --line 10 20 15 25  # Add trend line
+bt bar-chart --aspect-ratio 2.0 --width 60% 10 20 15 25
 ```
 
 Input formats: JSON array `"[1,8,7]"`, comma-separated `"1,8,7"`, or space-separated `1 8 7`
@@ -324,6 +325,8 @@ Render Mermaid line charts:
 bt line-chart 1 8 7 5 9 3
 bt line-chart --x-axis "Mon,Tue,Wed" --y-axis Temperature 20 22 19
 bt line-chart --bar 1 8 7 5  # Add bars under line
+bt line-chart --show-data-label --horizontal 1 8 7 5
+bt line-chart --aspect-ratio 1.8 --inverse --width 60% 1 8 7 5
 ```
 
 ### Timeline Rendering

@@ -642,13 +642,13 @@ fn image_support_from_known_terminals() -> Option<ImageSupportResult> {
     // Terminals with definitive Kitty Graphics Protocol support.
     // These don't need probing - we know they support it.
     const KITTY_TERMINALS: &[&str] = &[
-        "ghostty", // Ghostty supports Kitty protocol on all platforms
-        "kitty",   // Kitty is the originator of the protocol
-        "WezTerm", // WezTerm has full Kitty support
-        "Warp",            // Warp supports Kitty protocol
-        "WarpTerminal",    // Warp sets TERM_PROGRAM=WarpTerminal
-        "konsole", // Konsole supports Kitty protocol
-        "wast",    // Wast supports Kitty protocol
+        "ghostty",      // Ghostty supports Kitty protocol on all platforms
+        "kitty",        // Kitty is the originator of the protocol
+        "WezTerm",      // WezTerm has full Kitty support
+        "Warp",         // Warp supports Kitty protocol
+        "WarpTerminal", // Warp sets TERM_PROGRAM=WarpTerminal
+        "konsole",      // Konsole supports Kitty protocol
+        "wast",         // Wast supports Kitty protocol
     ];
 
     // Check TERM_PROGRAM for known Kitty-supporting terminals

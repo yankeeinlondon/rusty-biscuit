@@ -7,7 +7,7 @@ Home automation control for AV equipment over the local network.
 | Package | Binary | Description |
 |---------|--------|-------------|
 | `homelab` (lib) | — | Core library: Arcam amplifier + Sony ES receiver control |
-| `homey` (cli) | `homey` | CLI for controlling AV devices from the terminal |
+| `homelab-cli` (cli) | `homey` | CLI for controlling AV devices from the terminal |
 | `homelab-server` (server) | `homelab-server` | REST API server (Axum) for AV device control |
 
 ## Quick Start

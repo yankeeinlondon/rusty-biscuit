@@ -5,6 +5,10 @@ Command-line interface for the research automation tool.
 ## Installation
 
 ```bash
+# Via workspace justfile (recommended)
+just -f research/justfile install
+
+# Or build manually
 cargo build --release
 ```
 
@@ -53,8 +57,10 @@ research list [OPTIONS] [FILTER]...
 - `--json` - Output as JSON instead of terminal format
     - Useful for scripting and integration with other tools
 
-- `-v, --verbose...` - Increase verbosity (-v, -vv, -vvv)
-    - Controls logging output level
+- `--verbose` - Show detailed metadata for each topic (sub-bullets with issues)
+    - This is a boolean flag, distinct from the global `-v` verbosity flag
+
+- `--migrate` - Migrate all v0 metadata files to v1 schema
 
 - `-h, --help` - Print help
 
@@ -174,6 +180,46 @@ export RESEARCH_DIR=/path/to/research
 research list
 ```
 
+### `research link [FILTERS...] [OPTIONS]`
+
+Create symbolic links from research skills to Claude Code and OpenCode directories.
+
+```bash
+research link [FILTERS...] [-t <TYPE>] [--json]
+```
+
+See the [main README](../README.md) for detailed documentation.
+
+### `research show <TOPIC>`
+
+Open a research topic's deep dive document in the system's default application.
+
+```bash
+research show <TOPIC>
+```
+
+See the [main README](../README.md) for detailed documentation.
+
+### `research api <API_NAME> [QUESTIONS...] [OPTIONS]`
+
+Research a public API.
+
+```bash
+research api <API_NAME> [QUESTIONS...] [-o <DIR>] [-f, --force]
+```
+
+See the [main README](../README.md) for detailed documentation.
+
+### `research pull <TOPIC> [OPTIONS]`
+
+Copy a research skill from user scope to the current git repository.
+
+```bash
+research pull <TOPIC> [--local]
+```
+
+See the [main README](../README.md) for detailed documentation.
+
 ## Global Options
 
 - `-v, --verbose...` - Increase verbosity (-v, -vv, -vvv)
@@ -187,7 +233,7 @@ research list
 | `RESEARCH_DIR` | Base directory for research output | `$HOME` |
 | `OPENAI_API_KEY` | OpenAI API key for GPT-5.2 | (required for research) |
 | `GEMINI_API_KEY` | Google Gemini API key | (required for research) |
-| `ZAI_API_KEY` | ZAI API key for GLM-4-7 | (required for research) |
+| `ZAI_API_KEY` | ZAI API key for GLM-4-7 (overview) | (optional, falls back to Gemini) |
 
 ## Exit Codes
 

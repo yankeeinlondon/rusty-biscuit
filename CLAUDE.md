@@ -55,7 +55,7 @@ dockhand/
 │   └── schema/       # Generated API clients (auto-generated, do not edit)
 ├── playa/            # Audio playback with host player detection
 │   ├── cli/          # Binary: `playa` (audio player)
-│   └── lib/          # Player detection, format detection, 53 sound effects
+│   └── lib/          # Player detection, format detection, 88 sound effects
 ├── sniff/
 │   ├── cli/          # Binary: `sniff`
 │   └── lib/          # OS, hardware, network, filesystem, programs, services detection
@@ -238,12 +238,12 @@ This repository has local Claude Code skills in `.claude/skills/`:
 
 - `biscuit-hash` - Hashing trifecta: xxHash (fast), BLAKE3 (crypto), Argon2id (passwords)
 - `biscuit-speaks` - Cross-platform TTS library and CLI (`so-you-say`) with multi-provider support (ElevenLabs, Say, eSpeak, Kokoro, etc.)
-- `biscuit-terminal` - **Terminal authority**: detection, image rendering (viuer), mermaid diagrams
+- `biscuit-terminal` - **Terminal authority**: detection, image rendering (Kitty/iTerm2 protocols), mermaid diagrams
 - `claudine` - Universal hook/event handler for agentic CLIs (Claude, Codex, Gemini, Goose, Kimi, OpenCode, Qwen)
 - `darkmatter` - Markdown parsing/rendering (delegates terminal rendering to biscuit-terminal)
 - `homelab` - Home automation AV control (Sony ES receivers, Arcam amplifiers) via CLI and REST API
 - `model-citizen` - Local LLM model management across Ollama, LM Studio, and Llama.cpp
-- `playa` - Audio playback via host players, format detection, 53 embedded sound effects
+- `playa` - Audio playback via host players, format detection, 88 embedded sound effects
 - `research` - AI-powered library research with two-phase LLM pipeline
 - `schematic` - REST API client code generation, OpenAPI import/export, Headers builder
 - `sniff` - System detection (OS, hardware, network, filesystem, programs, services)

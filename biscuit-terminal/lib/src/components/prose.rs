@@ -176,17 +176,18 @@ impl Prose {
                                     // Check for nested opening tag: <tag_name>
                                     if len >= opening_tag_full.len() {
                                         let start = len - opening_tag_full.len();
-                                        if inner_content[start..]
-                                            .eq_ignore_ascii_case(&opening_tag_full)
-                                        {
+                                        if inner_content.get(start..).is_some_and(|slice| {
+                                            slice.eq_ignore_ascii_case(&opening_tag_full)
+                                        }) {
                                             depth += 1;
                                         }
                                     }
                                     // Check for closing tag: </tag_name>
                                     if len >= closing_tag.len() {
                                         let start = len - closing_tag.len();
-                                        if inner_content[start..].eq_ignore_ascii_case(&closing_tag)
-                                        {
+                                        if inner_content.get(start..).is_some_and(|slice| {
+                                            slice.eq_ignore_ascii_case(&closing_tag)
+                                        }) {
                                             depth -= 1;
                                             if depth == 0 {
                                                 // Remove the closing tag from content
@@ -198,9 +199,9 @@ impl Prose {
                                     // Check for opening tag with attributes: <tag_name ...
                                     if len >= opening_tag_with_space.len() {
                                         let start = len - opening_tag_with_space.len();
-                                        if inner_content[start..]
-                                            .eq_ignore_ascii_case(&opening_tag_with_space)
-                                        {
+                                        if inner_content.get(start..).is_some_and(|slice| {
+                                            slice.eq_ignore_ascii_case(&opening_tag_with_space)
+                                        }) {
                                             depth += 1;
                                         }
                                     }
@@ -1317,6 +1318,15 @@ mod tests {
             result,
             "\x1b[1m\x1b[3mbold italic\x1b[23m\x1b[0m\x1b[22m\x1b[0m"
         );
+    }
+
+    #[test]
+    fn test_nested_tags_with_unicode_before_rgb_attr_tag() {
+        let prose = Prose::new("<b>Stage 0 — <rgb 64,128,255>planning</rgb></b>");
+        let result = prose.render(None);
+        assert!(result.contains("Stage 0 —"));
+        assert!(result.contains("planning"));
+        assert!(result.contains("\x1b[38;2;64;128;255m"));
     }
 
     #[test]

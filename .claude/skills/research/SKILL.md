@@ -26,7 +26,7 @@ research/
 | `research link [FILTERS]` | Create symlinks to skill directories |
 | `research show <TOPIC>` | Open deep dive document |
 | `research pull <TOPIC>` | Copy skill to current repository |
-| `research api <NAME>` | Research a public API (placeholder) |
+| `research api <NAME>` | Research a public API (stub: metadata only) |
 
 ### Environment Variables
 
@@ -38,6 +38,7 @@ research/
 | `ZAI_API_KEY` | GLM-4.7 for overview | No (fallback to Gemini) |
 | `BRAVE_API_KEY` | Web search tool | No |
 | `BRAVE_PLAN` | Brave plan tier: `free`, `base`, `pro` | No (default: `free`) |
+| `GITHUB_TOKEN` | GitHub changelog API requests (avoids rate limiting) | No |
 
 ### Output Location
 
@@ -126,12 +127,24 @@ research pull clap
 research pull clap --local
 ```
 
+## Library Modules
+
+| Module | Description |
+|--------|-------------|
+| `changelog` | Tiered changelog generation: GitHub Releases, registry versions, changelog files, LLM synthesis |
+| `link` | Symlink creation from research skills to Claude Code, OpenCode, and Roo Code user directories |
+| `list` | Topic discovery, glob/type filtering, and terminal/JSON output formatting |
+| `metadata` | Schema-versioned research metadata, SQLite persistence, v0-to-v1 migration, content policy, topic types |
+| `pull` | Copy skills from user-level research library into git repositories with framework symlinks |
+| `validation` | SKILL.md frontmatter parsing/repair and comprehensive topic health checking |
+| `utils` | Filename sanitization for custom prompt naming |
+
 ## Two-Phase Pipeline Summary
 
 **Phase 1** (parallel): 5 standard prompts + custom questions
 - Uses Gemini Flash (fast) for most tasks
 - Uses GLM-4.7 for overview, GPT-5.2 for changelog
-- All run concurrently via `tokio::join!`
+- All run concurrently via `tokio::join_all`
 
 **Phase 2** (after Phase 1): Synthesis
 - **2a** (parallel): `skill/SKILL.md` + `deep_dive.md` via GPT-5.2
@@ -147,7 +160,7 @@ cargo build -p research-cli
 just -f research/justfile build
 
 # Test
-cargo test -p research-lib
+cargo test -p research --lib
 just -f research/justfile test
 
 # Install
@@ -157,10 +170,11 @@ just -f research/justfile install
 just -f research/justfile cli library clap
 ```
 
-## Key Dependencies
+## Workspace Dependencies
 
-- **rig-core**: LLM agent framework
-- **tokio**: Async runtime
-- **clap**: CLI argument parsing
-- **pulldown-cmark**: Markdown normalization
-- **biscuit-speaks**: TTS completion announcements
+| Crate | Purpose |
+|-------|---------|
+| `unchained-ai` | LLM provider clients (OpenAI, Gemini, ZAI), tool definitions (BraveSearch, ScreenScrape) |
+| `darkmatter` | Markdown normalization via pulldown-cmark round-tripping |
+| `biscuit-speaks` | TTS completion announcements |
+| `sniff` | System detection (used for environment context) |

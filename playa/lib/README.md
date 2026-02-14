@@ -12,7 +12,8 @@ capabilities.
 - Stateful `Audio` wrapper with pause position tracking
 - Builder API with fluent interface (`Playa`)
 - Optional async support via `async` feature
-- 85 embedded sound effects (feature-gated)
+- 88 embedded sound effects (feature-gated)
+- Optional audio ducking via `audio-ducking` feature
 
 ## Usage
 
@@ -43,6 +44,7 @@ Playa::from_path("audio.mp3")?
 
 - `Audio::from_path`, `Audio::from_url`, `Audio::from_bytes`
 - `Playa::from_path`, `Playa::from_bytes` (builder API)
+- `Playa::play_async`, `Playa::with_ducked_audio` (requires `audio-ducking`)
 
 ### Detection
 
@@ -52,9 +54,9 @@ Playa::from_path("audio.mp3")?
 
 ### Playback
 
-- `playa`, `playa_explicit`, `playa_with_player`
-- `playa_with_player_and_options`
-- Async variants: `playa_async`, `playa_explicit_async`, etc.
+- `playa`, `playa_explicit`, `playa_explicit_with_options`
+- `playa_with_player`, `playa_with_player_and_options`
+- Async variants (feature-gated): `playa_async`, `playa_explicit_async`, etc.
 
 ### Player Matching
 
@@ -65,7 +67,9 @@ Playa::from_path("audio.mp3")?
 ### Types
 
 - `AudioPlayer` - 13 supported players enum
+- `AudioData` - File path, URL, or bytes input
 - `Codec` - PCM, FLAC, ALAC, MP3, AAC, Vorbis, Opus
 - `AudioFileFormat` - WAV, AIFF, FLAC, MP3, OGG, M4A, WebM
 - `PlaybackOptions` - Volume and speed control
-- `SoundEffect` - Embedded sound effects (feature-gated)
+- `SoundEffect` - 88 embedded sound effects (feature-gated)
+- `DetectionError`, `InvalidAudio`, `PlaybackError` - Error types

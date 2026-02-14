@@ -1,6 +1,6 @@
 ---
 name: biscuit-terminal
-description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (12+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 via viuer), Mermaid diagram rendering (10 diagram types), OS/font detection, escape code analysis, and styled output. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline support, or querying terminal environment. Darkmatter depends on this for all terminal rendering.
+description: Expert knowledge for the biscuit-terminal Rust library - the authority for terminal capability detection (12+ emulators) and rich terminal rendering. Provides inline image rendering (Kitty/iTerm2 protocols), Mermaid diagram rendering (10 diagram types), OS/font detection, escape code analysis, and styled output. Use when building CLI apps with terminal-aware features, rendering images or diagrams inline, detecting color/underline support, or querying terminal environment. Darkmatter depends on this for all terminal rendering.
 ---
 
 # biscuit-terminal
@@ -10,9 +10,9 @@ Terminal detection and rich rendering library for Rust. The authority for termin
 ## Core Principles
 
 1. **Detection before rendering**: Always check terminal capabilities first
-2. **Graceful fallback**: Use `fallback_render()` or alt text for unsupported terminals
+2. **Graceful fallback**: Use `fallback_render()` and explicit app-level text fallback where needed
 3. **Static vs dynamic**: `Terminal` struct fields for static properties, methods for dynamic
-4. **Security by default**: Path traversal protection, file size limits, remote URL blocking
+4. **Input validation + policy**: `TerminalImage::new()` validates local paths; apply app-level policies with `TerminalImageOptions`
 
 ## Quick Start
 
@@ -38,7 +38,7 @@ if term.supports_italic { println!("\x1b[3mItalic\x1b[0m"); }
 |-------|-------------|
 | [Terminal Struct](./terminal-struct.md) | Main struct, static vs dynamic properties, enums |
 | [Components](./components.md) | All renderable components: Compose, Section, BlockQuote, Todo, TwoColumn |
-| [Image Rendering](./image-rendering.md) | Kitty/iTerm2 protocols, width specs, security |
+| [Image Rendering](./image-rendering.md) | Kitty/iTerm2 protocols, width parsing, cursor behavior, policy controls |
 | [Mermaid Diagrams](./mermaid-diagrams.md) | 10 diagram types via mmdc CLI |
 | [Detection Functions](./discovery.md) | App, color, underline, multiplex detection |
 | [OS & Environment](./os-environment.md) | OS, distro, CI, fonts, locale |
@@ -65,9 +65,11 @@ match term.image_support {
 use biscuit_terminal::components::mermaid::MermaidRenderer;
 
 let renderer = MermaidRenderer::for_terminal("flowchart LR\n    A --> B");
-renderer.render_for_terminal().unwrap_or_else(|_| {
+if let Err(err) = renderer.render_for_terminal() {
+    eprintln!("Diagram render failed: {err}");
+    // Optional app-level fallback if you want textual output:
     println!("{}", renderer.fallback_code_block());
-});
+}
 ```
 
 ### Light/Dark Adaptation
@@ -85,13 +87,11 @@ let fg = match Terminal::color_mode() {
 |----------|-------|------|---------|
 | WezTerm | Kitty | Yes | Yes |
 | Kitty | Kitty | Yes | Yes |
-| iTerm2 | Kitty* | Yes | Yes |
+| iTerm2 | ITerm | Yes | Yes |
 | Ghostty | Kitty | Yes | Yes |
 | Alacritty | - | Yes | Yes |
 | Konsole | Kitty | Yes | Yes |
 | VS Code | - | Yes | Yes |
-
-*iTerm2 uses native protocol even if Kitty advertised.
 
 ## bt CLI Commands
 
@@ -113,14 +113,15 @@ bt flowchart "A --> B --> C"
 bt quadrant "Task: [0.5, 0.5]"
 bt pie-chart "Dogs: 50" "Cats: 30"
 bt git-graph "commit" "branch feature" "merge feature"
-bt bar-chart 10 20 15 25
-bt line-chart 1 8 7 5
+bt bar-chart --horizontal --show-data-label --aspect-ratio 2.0 --inverse 10 20 15 25
+bt line-chart --width 60% --horizontal --show-data-label 1 8 7 5
 bt timeline "2020: Started" "2022: Launch"
 bt state-diagram "[*] --> Idle" "Idle --> Running"
 bt erd "Customer ||--o{ Order : places"
 ```
 
 Diagram options: `--example`, `--width`, `--inverse`, `--title`, `--json`
+Bar/line chart extras: `--horizontal`, `--show-data-label`, `--aspect-ratio`
 
 ## Module Structure
 
@@ -149,7 +150,7 @@ biscuit_terminal/
 │   ├── two_column.rs     # TwoColumn side-by-side layout
 │   ├── todo.rs           # Todo with states (Open, InProgress, etc.)
 │   ├── terminal_image.rs # Image (Kitty/iTerm2 protocols)
-│   ├── image_options.rs  # Security guards
+│   ├── image_options.rs  # Policy options/helpers (app-enforced)
 │   ├── mermaid.rs        # Diagram rendering
 │   └── mermaid_cache.rs  # Content-hashed diagram cache
 └── utils/
@@ -162,6 +163,11 @@ biscuit_terminal/
     ├── truncate.rs       # Text truncation
     └── multiplex.rs      # Multiplexing detection
 ```
+
+## Key Dependencies
+
+- `sniff` - Git/repo/monorepo detection used by `Terminal::new()`
+- `biscuit-hash` - xxHash keys for Mermaid cache entries
 
 ## Resources
 

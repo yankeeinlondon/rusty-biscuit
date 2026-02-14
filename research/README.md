@@ -11,7 +11,7 @@ This area of the `dockhand` monorepo is focused on **research** and is broken up
 
     Exposes functions which allow research into various topics and items.
 
-    > **Note:** _leverages the `biscuit` module in this monorepo for highly generalizable operations_
+    > **Note:** _leverages workspace crates: `unchained-ai` (LLM pipelines), `darkmatter` (markdown), `biscuit-speaks` (TTS), and `sniff` (system detection)_
 
 - **CLI** (`/research/cli`)
 
@@ -62,6 +62,7 @@ sudo pacman -S speech-dispatcher
 | `ZAI_API_KEY` | ZAI API key for `glm-4.7` (overview) | (optional, falls back to Gemini) |
 | `BRAVE_API_KEY` | Brave Search API key for web search tool | (optional) |
 | `BRAVE_PLAN` | Brave plan tier: `free`, `base`, `pro` | `free` |
+| `GITHUB_TOKEN` | GitHub personal access token for changelog API requests (avoids rate limiting) | (optional) |
 
 ### Output Location
 
@@ -193,6 +194,8 @@ research show <TOPIC>
 ```
 
 #### API Research (`research api`)
+
+> **Note:** This command is currently a stub. It creates the directory structure and `metadata.json` but does not run LLM research prompts. Questions are accepted but not processed.
 
 Research a public API.
 
@@ -365,7 +368,9 @@ The `details` field is a tagged enum supporting:
 
 ### Schema Migration
 
-Old v0 metadata (with `library_info` field) is automatically migrated to v1 format on load. The original file is backed up as `metadata.v0.json.backup`. Use `research list --migrate` to batch-migrate all topics.
+**v0 to v1:** Old v0 metadata (with `library_info` field) is automatically migrated to v1 format on load. The original file is backed up as `metadata.v0.json.backup`. Use `research list --migrate` to batch-migrate all topics.
+
+**v1 to v2 (inventory):** A v2 centralized inventory system (`ResearchInventory`) exists in `metadata/migration_v2.rs`. Migration is lazy: when the inventory is first loaded and doesn't exist, the system scans all `metadata.json` files and builds the inventory. Original per-topic `metadata.json` files are preserved (non-destructive). The v2 system adds content hashing (xxHash), document-level metadata, and `KindCategory` typing.
 
 ## Incremental Research (DRY)
 

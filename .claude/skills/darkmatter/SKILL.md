@@ -14,12 +14,13 @@ Markdown parsing, rendering, and transformation library. Part of the dockhand mo
 | Responsibility | Package |
 |----------------|---------|
 | Markdown parsing (CommonMark + GFM) | darkmatter |
-| Transform pipeline (replacement, interpolation) | darkmatter |
+| Transform pipeline (Stage 1 + Stage 2 transclusion) | darkmatter |
 | Syntax highlighting | darkmatter (syntect) |
 | Frontmatter extraction | darkmatter |
 | HTML output | darkmatter |
+| Visual diff utilities | darkmatter |
 | Document comparison/normalization | darkmatter |
-| Terminal detection, image/mermaid rendering | **biscuit-terminal** |
+| Terminal detection, image/mermaid rendering, tables | **biscuit-terminal** |
 
 ## Quick Start
 
@@ -33,31 +34,32 @@ write_terminal(&mut stdout, &md, TerminalOptions::default())?;
 
 ## Transform Pipeline
 
-The `transform()` API processes markdown through 4 stages:
+Two-stage pipeline for document preparation:
 
+**Stage 1** (in-memory transforms):
 1. **Text Replacement** - `replace:` frontmatter replaces literal strings
 2. **Interpolation** - `{{ variable }}` expressions expand to values
 3. **Cleanup** - Normalizes formatting (spacing, tables)
 4. **Normalization** - Adjusts heading levels
 
+**Stage 2** (file-based transclusion):
+- `::file ./doc.md` - Markdown transclusion with recursive processing
+- `::code ./main.rs` - Code/text transclusion with fenced block generation
+- `prologue` / `epilogue` - Frontmatter-driven transclusion
+- `when="..."` conditions, cycle detection, depth limits
+
 ```rust
 use darkmatter::markdown::{Markdown, transform::TransformOptions};
 
-let content = r#"---
-replace:
-  PLACEHOLDER: actual
-name: Alice
----
-# Welcome {{ name }}
-PLACEHOLDER content here.
-"#;
-
+// Stage 1 only
 let mut md: Markdown = content.into();
 let report = md.transform_mut()?;
 
-// Content is now: "# Welcome Alice\nactual content here."
-println!("Replacements: {}", report.replacements_applied);
-println!("Interpolations: {}", report.interpolations_applied);
+// Stage 1 + Stage 2 (requires source file path)
+let md = Markdown::try_from(std::path::Path::new("docs/root.md"))?;
+let options = TransformOptions::new()
+    .with_source_file("docs/root.md");
+let (transformed, report) = md.transform_with(options)?;
 ```
 
 ### Interpolation Expressions
@@ -90,10 +92,16 @@ println!("Interpolations: {}", report.interpolations_applied);
 ## CLI
 
 ```bash
-md doc.md              # Render to terminal
-md doc.md --clean      # Clean document
-md doc.md --html       # Render to HTML
-md doc.md --ast        # Render as JSON AST
+md doc.md                        # Render to terminal (auto mode)
+md doc.md --output html          # HTML output
+md doc.md --output json          # AST JSON output
+md doc.md --output markdown      # Plain markdown text
+md doc.md --clean                # Normalize formatting (stdout)
+md doc.md --clean-save           # Normalize and save back to file
+md doc.md --output html --show   # Open in default app
+md toc doc.md                    # Table of contents
+md delta old.md new.md           # Document comparison
+md -v delta old.md new.md        # Verbose comparison (-v is top-level)
 ```
 
 ## See Also

@@ -119,7 +119,7 @@ let output = for_terminal(&md, options)?;
 use darkmatter::markdown::output::{HtmlOptions, as_html};
 
 let options = HtmlOptions::default();
-let html = md.as_html(options)?;
+let html = as_html(&md, options)?;
 ```
 
 #### MDAST JSON
@@ -302,6 +302,6 @@ For command-line usage, see the [darkmatter-cli](../cli/) package which provides
 - **pulldown-cmark**: CommonMark parsing with GFM extensions
 - **syntect**: Syntax highlighting engine
 - **two-face**: Theme loading with bat-curated themes
-- **biscuit-terminal**: Terminal detection, image rendering, mermaid diagrams
-- **comfy-table**: Table rendering with box-drawing characters
+- **biscuit-terminal**: Terminal detection, image rendering, mermaid diagrams, table rendering
+- **biscuit-hash**: Content hashing (xxHash) for TOC, delta, and mermaid caching
 - **serde**: Frontmatter serialization

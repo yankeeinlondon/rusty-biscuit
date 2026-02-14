@@ -1,47 +1,33 @@
 # Transform Pipeline
 
-The darkmatter transform pipeline provides document preparation capabilities through the `Markdown::transform()` family of methods.
+The darkmatter transform pipeline provides document preparation through two stages.
 
-## Pipeline Stages
+## Pipeline Overview
 
-The pipeline executes four stages in order:
+**Stage 1** (in-memory transforms — 4 sub-stages):
 
-```
-Input Document
-    │
-    ▼
-┌─────────────────────┐
-│ 1. Text Replacement │  Replace literal strings from frontmatter
-└─────────────────────┘
-    │
-    ▼
-┌─────────────────────┐
-│ 2. Interpolation    │  Expand {{ variable }} expressions
-└─────────────────────┘
-    │
-    ▼
-┌─────────────────────┐
-│ 3. Cleanup          │  Normalize markdown formatting
-└─────────────────────┘
-    │
-    ▼
-┌─────────────────────┐
-│ 4. Normalization    │  Adjust heading levels
-└─────────────────────┘
-    │
-    ▼
-Output Document + Report
-```
+1. **Text Replacement** - `replace:` frontmatter replaces literal strings
+2. **Interpolation** - `{{ variable }}` expressions expand to values
+3. **Cleanup** - Normalizes markdown formatting
+4. **Normalization** - Adjusts heading levels
+
+**Stage 2** (file-based transclusion):
+
+- `::file ./doc.md` - Include markdown with recursive processing
+- `::code ./main.rs` - Include as fenced code block
+- `prologue` / `epilogue` - Frontmatter-driven file includes
+- `when="..."` conditions, cycle detection, depth limits
+- Heading re-leveling for included markdown (H6 overflow handled gracefully)
 
 ## API
 
 ```rust
 use darkmatter::markdown::{Markdown, transform::{TransformOptions, Stage1Stages}};
 
-// Transform with defaults
+// Stage 1 only (transform with defaults)
 let (transformed, report) = md.transform()?;
 
-// Transform with options
+// Stage 1 with options
 let options = TransformOptions::new()
     .with_external_state(json!({"key": "value"}))
     .with_stages(Stage1Stages::only_interpolation())
@@ -50,6 +36,13 @@ let (transformed, report) = md.transform_with(options)?;
 
 // In-place mutation (no clone)
 let report = md.transform_mut()?;
+
+// Stage 1 + Stage 2 (requires source file path for transclusion)
+let md = Markdown::try_from(std::path::Path::new("docs/root.md"))?;
+let options = TransformOptions::new()
+    .with_source_file("docs/root.md");
+let (transformed, report) = md.transform_with(options)?;
+println!("{}", report.summary());
 ```
 
 ## Text Replacement
@@ -184,6 +177,41 @@ With `fail_fast: true`:
 - Parse errors logged and continue
 - Evaluation errors logged and continue
 - (Future: may return errors)
+
+## Stage 2: Transclusion
+
+Stage 2 runs after Stage 1 when a source file path is provided. It resolves file-based includes.
+
+### Block Directives
+
+```markdown
+<!-- Include another markdown file (recursive) -->
+::file ./chapter.md
+
+<!-- Include as fenced code block -->
+::code ./main.rs
+
+<!-- Conditional include -->
+::file ./appendix.md when="include_appendix"
+```
+
+### Frontmatter Directives
+
+```yaml
+---
+prologue: ./header.md
+epilogue: ./footer.md
+---
+```
+
+- `prologue` content is prepended before the document body
+- `epilogue` content is appended after the document body
+
+### Safety Features
+
+- **Cycle detection**: Prevents infinite recursion from circular includes
+- **Max depth limits**: Configurable depth for nested transclusion
+- **Heading re-leveling**: Included markdown headings are adjusted to fit the nesting context (H6 overflow handled gracefully)
 
 ## Module Structure
 

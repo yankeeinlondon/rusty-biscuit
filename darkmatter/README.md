@@ -66,9 +66,6 @@ just -f darkmatter/justfile test
 
 # Lint with clippy
 just -f darkmatter/justfile lint
-
-# Open library documentation
-just -f darkmatter/justfile docs
 ```
 
 ## License

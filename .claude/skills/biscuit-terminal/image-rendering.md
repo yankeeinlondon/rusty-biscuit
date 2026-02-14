@@ -1,6 +1,6 @@
 # Image Rendering
 
-The `TerminalImage` component renders images inline using the Kitty graphics protocol or iTerm2 protocol, with automatic fallback to alt text for unsupported terminals.
+`TerminalImage` renders inline images as escape-sequence strings (Kitty or iTerm2 protocol), with terminal-aware cursor management in `render_to_terminal()`.
 
 ## Basic Usage
 
@@ -13,136 +13,106 @@ let term = Terminal::new();
 let img = TerminalImage::new(Path::new("photo.jpg"))?;
 
 let output = img.render_to_terminal(&term)?;
-println!("{}", output);
+if output.is_empty() {
+    // Unsupported terminals currently return an empty render string.
+    println!("{}", img.generate_alt_text());
+} else {
+    print!("{}", output);
+}
 ```
 
-## Secure Rendering with Options (Recommended)
+## Path and Width Validation
 
-For production use, prefer `render_with_options()` which applies all security guards:
+`TerminalImage::new()` validates that:
+- The file exists
+- The path can be canonicalized to a local absolute path
+
+Width input is validated by `parse_width_spec()`:
+- `50%` -> `ImageWidth::Percent(0.5)`
+- `80` or `80ch` -> `ImageWidth::Characters(80)`
+- `fill` -> `ImageWidth::Fill`
 
 ```rust
-use biscuit_terminal::components::image_options::TerminalImageOptions;
-use biscuit_terminal::components::terminal_image::{TerminalImage, ImageWidth};
-use std::path::PathBuf;
+use biscuit_terminal::components::terminal_image::{parse_width_spec, TerminalImage};
+use std::path::Path;
 
-let options = TerminalImageOptions::builder()
-    .base_path(PathBuf::from("/safe/directory"))  // Security boundary
-    .max_file_size(10 * 1024 * 1024)              // 10MB limit
-    .allow_remote(false)                           // Block URLs
-    .width(ImageWidth::Percent(0.75))
-    .use_viuer(true)                               // Use viuer for rendering
-    .build();
-
-let img = TerminalImage::new(path)?;
-img.render_with_options(&options)?;  // Applies security checks then renders
+let width = parse_width_spec("75%")?;
+let img = TerminalImage::new(Path::new("photo.jpg"))?.with_width(width);
 ```
+
+## Policy Controls with TerminalImageOptions
+
+`TerminalImageOptions` is a policy helper (`base_path`, `max_file_size`, `allow_remote`, `width`) that your application can enforce before rendering.
+
+Current runtime flow (`TerminalImage::new()`, `from_spec()`, `render_to_terminal()`) does **not** automatically enforce remote/path/size policy checks.
 
 ### TerminalImageOptions Fields
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `base_path` | `Option<PathBuf>` | `None` | Security boundary for relative paths |
+| `base_path` | `Option<PathBuf>` | `None` | Optional directory boundary for allowed files |
 | `max_file_size` | `u64` | `10MB` | Maximum allowed file size |
-| `allow_remote` | `bool` | `false` | Allow http:// and https:// URLs |
-| `width` | `ImageWidth` | `Percent(0.5)` | Width specification |
-| `use_viuer` | `bool` | `true` | Use viuer for rendering |
+| `allow_remote` | `bool` | `false` | Whether URL-like inputs are allowed |
+| `width` | `ImageWidth` | `Percent(0.5)` | Default width policy |
 
-### Helper Methods
-
-```rust
-// Check if file size is within limits
-if options.is_size_allowed(file_size) { ... }
-
-// Check if path is within allowed base path
-if options.is_path_allowed(&path) { ... }
-```
-
-## Width Specifications
-
-### ImageWidth Enum
+### App-Enforced Policy Example
 
 ```rust
-pub enum ImageWidth {
-    Fill,               // Fill available width
-    Percent(f32),       // Percentage (0.0-1.0)
-    Characters(u32),    // Fixed column count
+use biscuit_terminal::components::image_options::{ImageWidth, TerminalImageOptions};
+use biscuit_terminal::components::terminal_image::TerminalImage;
+use std::path::{Path, PathBuf};
+
+let options = TerminalImageOptions::builder()
+    .base_path(PathBuf::from("/safe/images"))
+    .max_file_size(5 * 1024 * 1024)
+    .allow_remote(false)
+    .width(ImageWidth::Percent(0.6))
+    .build();
+
+let path = Path::new("photo.jpg");
+let file_size = std::fs::metadata(path)?.len();
+
+if !options.is_size_allowed(file_size) || !options.is_path_allowed(path) {
+    panic!("Image blocked by policy");
 }
 
-impl Default for ImageWidth {
-    fn default() -> Self {
-        ImageWidth::Percent(0.5)  // 50% default
-    }
-}
+let img = TerminalImage::new(path)?.with_width(options.width.clone());
 ```
 
-### Builder Pattern
-
-```rust
-let img = TerminalImage::new(path)?
-    .with_width(ImageWidth::Percent(0.75))  // 75% of terminal
-    .with_margins(2, 2)                      // Left/right margins
-    .with_alt_text("Screenshot of UI");
-```
-
-### Parsing Width Specs
-
-For CLI or user input:
-
-```rust
-use biscuit_terminal::components::terminal_image::{
-    parse_filepath_and_width, parse_width_spec, TerminalImage
-};
-
-// Parse "image.png|50%" format
-let (filepath, width_spec) = parse_filepath_and_width("image.png|50%")?;
-
-// Parse width string directly
-let width = parse_width_spec("75%")?;   // Percent(0.75)
-let width = parse_width_spec("80")?;    // Characters(80)
-let width = parse_width_spec("fill")?;  // Fill
-
-// Full spec parsing
-let img = TerminalImage::from_spec("photo.jpg|fill")?;
-```
-
-### Width Examples
+## Width Syntax
 
 ```
-image.png           → Default 50% width
-image.png|25%       → 25% of terminal width
-image.png|80        → Fixed 80 columns
-image.png|fill      → Fill available width
+image.png           -> Default 50% width
+image.png|25%       -> 25% of terminal width
+image.png|80        -> Fixed 80 columns
+image.png|80ch      -> Fixed 80 columns
+image.png|fill      -> Fill available width
 ```
 
-## Protocol Selection
+## Protocol Selection and Cursor Behavior
 
-`render_to_terminal()` selects the protocol and applies terminal-aware cursor management:
+`render_to_terminal()` selects protocol and terminal-specific cursor handling:
 
-| Terminal | Protocol | Escape Strategy | Cursor Handling |
+| Terminal | Protocol | Sizing Strategy | Cursor Behavior |
 |----------|----------|-----------------|-----------------|
-| Kitty/Ghostty | Kitty (`c=` only) | Terminal calculates rows | Auto-advances; CUU(1) corrects overshoot |
-| Wezterm | Kitty (`c=` + `r=`) | Explicit row count | No auto-advance; explicit CUD + CR |
-| iTerm2 | iTerm2 | Native scaling | Auto-advances; CUU(1) corrects overshoot |
-| Others | None | Alt text | N/A |
+| Kitty/Ghostty/Konsole | Kitty (`c=` only) | Terminal derives rows | Auto-advance with overshoot correction |
+| WezTerm | Kitty (`c=` + `r=`) | Explicit rows required | Explicit row advance + carriage return |
+| iTerm2 | iTerm2 OSC 1337 | Native scaling (`preserveAspectRatio=1`) | Overshoot correction + row advance |
+| Warp | Kitty (`c=` only) | Terminal derives rows | Uses floor-based row count to avoid blank-line overshoot |
+| Others | None | N/A | Returns empty output |
 
-`render_to_terminal()` does **not** append a trailing newline — callers handle line termination (e.g., `println!`).
+`render_to_terminal()` normalizes back to column 0 with `\r`. It usually avoids trailing newlines, but may append one `\n` when bottom-of-screen scroll compensation is needed.
 
-### Direct Protocol Methods
+## Direct Protocol Methods
 
-For backward compatibility or composition, the public `render_as_kitty()` and `render_as_iterm2()` methods still exist with their own cursor advancement. Prefer `render_to_terminal()` for direct terminal output.
-
-## Direct Protocol Rendering
-
-For lower-level control or composition (these include their own cursor advancement):
+For lower-level composition paths:
 
 ```rust
-// Kitty protocol (includes cursor advance — not terminal-aware)
-let output = img.render_as_kitty(80)?;
+// Includes its own cursor advancement
+let kitty = img.render_as_kitty(80)?;
+let iterm = img.render_as_iterm2(80)?;
 
-// iTerm2 protocol (includes cursor advance — not terminal-aware)
-let output = img.render_as_iterm2(80)?;
-
-// Raw escape sequences (no cursor handling)
+// Raw protocol payload constructors
 let png_data = img.encode_as_png(&loaded_image)?;
 let kitty_escape = img.render_kitty_cells(&png_data, width_cells, height_cells);
 let iterm_escape = img.render_iterm2(&png_data, "40", "filename.png");
@@ -150,107 +120,23 @@ let iterm_escape = img.render_iterm2(&png_data, "40", "filename.png");
 
 ## Cell Size and Aspect Ratio
 
-The library uses measured cell size for correct aspect ratio:
+`TerminalImage` uses measured cell size when available (`discovery::fonts::cell_size()`), with an `8x16` fallback. This avoids visibly distorted images on terminals with non-2:1 cell geometry.
 
-```rust
-use biscuit_terminal::discovery::fonts::cell_size;
+## Error Handling Notes
 
-// Returns pixel dimensions of terminal cells
-if let Some(cs) = cell_size() {
-    println!("Cell: {}x{} pixels", cs.width, cs.height);
-}
-// Falls back to 8×16 if detection fails
-```
+`TerminalImageError` includes:
+- File/path/encoding/runtime errors (`FileNotFound`, `InvalidPath`, `ImageLoadError`, etc.)
+- Policy-style variants (`PathTraversalBlocked`, `FileTooLarge`, `RemoteUrlBlocked`)
 
-This prevents "squished" images in terminals with non-2:1 cell aspect ratios (like WezTerm).
+The policy-style variants are primarily tied to helper checks; they are not all emitted by the default `new()/render_to_terminal()` path.
 
-## Security Features
+## Fallback Behavior Clarification
 
-`TerminalImage` includes built-in security guards:
-
-- **Path traversal protection**: Rejects paths containing `..` or absolute paths outside base
-- **File size limits**: Configurable maximum file size (prevents memory exhaustion)
-- **Remote URL blocking**: Only local files allowed; remote URLs return an error
-
-```rust
-// Path traversal is blocked
-let result = TerminalImage::new(Path::new("../../../etc/passwd"));
-assert!(matches!(result, Err(TerminalImageError::PathTraversalBlocked { .. })));
-```
-
-## Error Handling
-
-```rust
-pub enum TerminalImageError {
-    FileNotFound { path: String },
-    InvalidPath { path: String, reason: String },
-    InvalidWidthSpec { spec: String },
-    IoError(std::io::Error),
-    ImageLoadError(image::ImageError),
-    EncodingError { message: String },
-    UnsupportedTerminal,
-    PathTraversalBlocked { path: String },
-    FileTooLarge { size: u64, max_size: u64 },
-    RemoteUrlBlocked { url: String },
-}
-```
-
-## Alt Text Generation
-
-```rust
-// Default: generates from filename
-let alt = img.generate_alt_text();  // "[Image: photo.jpg]"
-
-// Custom alt text
-let img = img.with_alt_text("Product screenshot");
-```
-
-## Kitty Protocol Details
-
-The Kitty graphics protocol transmits images as base64-encoded PNG:
-
-```
-ESC_G f=100,a=T,t=d,c=<cols>,r=<rows>,m=1;<base64_chunk> ESC\
-ESC_G m=0;<final_chunk> ESC\
-```
-
-- `f=100`: PNG format
-- `a=T`: Transmit and display
-- `t=d`: Direct (inline) data
-- `c=`/`r=`: Cell dimensions
-- `m=0|1`: More chunks flag
-- Data chunked at 4096 bytes
-
-## iTerm2 Protocol Details
-
-```
-ESC]1337;File=name=<base64_name>;inline=1;preserveAspectRatio=1;width=<spec>;size=auto:<base64_data>BEL
-```
-
-## Complete Example
-
-```rust
-use biscuit_terminal::components::terminal_image::{TerminalImage, ImageWidth};
-use biscuit_terminal::terminal::Terminal;
-use std::path::Path;
-
-fn display_image(path: &str, width_pct: f32) -> Result<(), Box<dyn std::error::Error>> {
-    let term = Terminal::new();
-
-    let img = TerminalImage::new(Path::new(path))?
-        .with_width(ImageWidth::Percent(width_pct))
-        .with_alt_text(format!("Image: {}", path));
-
-    match img.render_to_terminal(&term) {
-        Ok(output) => println!("{}", output),
-        Err(e) => eprintln!("Failed to render image: {}", e),
-    }
-
-    Ok(())
-}
-```
+- `render_to_terminal()` returns `Ok(String::new())` when `ImageSupport::None`
+- `fallback_render()` currently delegates to `render_to_terminal()` and therefore also yields empty output in that case
+- If you want textual fallback, print `generate_alt_text()` from your application
 
 ## Related
 
-- [Terminal Struct](./terminal-struct.md) - ImageSupport detection
-- [Discovery Functions](./discovery.md) - image_support() function
+- [Terminal Struct](./terminal-struct.md) - `ImageSupport` detection
+- [Discovery Functions](./discovery.md) - `image_support()` and terminal detection

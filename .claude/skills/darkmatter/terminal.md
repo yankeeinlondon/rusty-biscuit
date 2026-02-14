@@ -9,19 +9,32 @@ pub struct TerminalOptions {
     pub code_theme: ThemePair,        // Theme for code blocks
     pub prose_theme: ThemePair,       // Theme for prose
     pub color_mode: ColorMode,        // Light or Dark
-    pub include_line_numbers: bool,   // Show line numbers
+    pub include_line_numbers: bool,   // Show line numbers in code
     pub color_depth: Option<ColorDepth>,  // Auto-detect if None
-    pub render_images: bool,          // Enable image rendering
+    pub image_mode: TerminalImageMode, // Auto, Never, Force
     pub base_path: Option<PathBuf>,   // For relative image paths
     pub italic_mode: ItalicMode,      // Auto, Always, Never
     pub max_width: Option<u16>,       // Text wrapping width
     pub mermaid_mode: MermaidMode,    // Off, Image, Text
+    pub hyperlink_mode: HyperlinkMode, // Auto, Always, Never
 }
+```
+
+## Output Functions
+
+```rust
+use darkmatter::markdown::output::{TerminalOptions, write_terminal, for_terminal};
+
+// Write directly to a writer
+write_terminal(&mut std::io::stdout(), &md, TerminalOptions::default())?;
+
+// Get as string
+let output = for_terminal(&md, TerminalOptions::default())?;
 ```
 
 ## Theme Pairs
 
-Themes come in light/dark pairs:
+Themes come in light/dark pairs with automatic mode detection:
 
 | Theme | Light | Dark |
 |-------|-------|------|
@@ -29,9 +42,11 @@ Themes come in light/dark pairs:
 | `OneHalf` | One Half Light | One Half Dark |
 | `Gruvbox` | Gruvbox Light | Gruvbox Dark |
 | `Solarized` | Solarized Light | Solarized Dark |
+| `Base16Ocean` | Base16 Ocean Light | Base16 Ocean Dark |
 | `Nord` | Nord | Nord |
 | `Dracula` | Dracula | Dracula |
 | `Monokai` | Monokai | Monokai |
+| `VisualStudioDark` | VS Dark | VS Dark |
 
 ## Color Mode Detection
 
@@ -75,9 +90,12 @@ match renderer.render_for_terminal() {
 HTML (via darkmatter):
 
 ```rust
-use darkmatter_lib::mermaid::{Mermaid, MermaidTheme};
+use darkmatter::mermaid::{Mermaid, MermaidTheme};
 
 let diagram = Mermaid::new("flowchart LR\n    A --> B")
-    .with_title("My Flowchart");
+    .with_title("My Flowchart")
+    .with_footer("Generated 2026-01-29");
+
 let html = diagram.render_for_html();
+println!("<head>{}</head><body>{}</body>", html.head, html.body);
 ```

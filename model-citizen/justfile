@@ -31,6 +31,10 @@ default:
     just --list | grep -v 'default'
     echo
 
+# Uses TTS if available but never error
+_speak *args:
+    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
+
 # build model-citizen packages (lib, cli)
 build *args="":
     @echo ""
@@ -106,14 +110,15 @@ refresh-skill:
 # fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":
     @echo
-    @echo -e "Running drift workflow for {{BOLD}}model-citizen{{RESET}} via Rust drift script"
+    @printf "%b\n" "Running drift workflow for {{BOLD}}model-citizen{{RESET}} via Rust drift script"
     @echo
     @echo "- step 1: update package docs for code drift"
     @echo "- step 2: refresh package skill from updated docs"
     @echo "- step 3: review CLAUDE.md for needed updates"
-    @echo "- set PREFER_AGENT=codex to force codex (default is claude)"
+    @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
     @echo
     @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- model-citizen {{DOCS}} {{args}}
+    @_speak "the drift recipe for the model-citizen package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.

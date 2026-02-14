@@ -22,26 +22,25 @@ if md.has_frontmatter() {
 ## Merge Strategies
 
 ```rust
-use darkmatter_lib::markdown::frontmatter::MergeStrategy;
+use darkmatter::markdown::frontmatter::MergeStrategy;
 
-// Merge with strategy
+// Error on conflict (strict)
 md.fm_merge_with(json!({"tags": ["rust"]}), MergeStrategy::ErrorOnConflict)?;
 
-// Set defaults (document wins on conflict)
-md.fm_set_defaults(json!({"draft": false}))?;
+// External values win on conflict
+md.fm_merge_with(json!({"status": "published"}), MergeStrategy::PreferExternal)?;
 
-// Override (new values win)
-md.fm_merge_with(json!({"status": "published"}), MergeStrategy::Override)?;
+// Document values win on conflict (set defaults)
+md.fm_set_defaults(json!({"draft": false}))?;
 ```
 
 ## Available Strategies
 
 | Strategy | Behavior |
 |----------|----------|
-| `MergeStrategy::ErrorOnConflict` | Fail if keys conflict |
-| `MergeStrategy::Override` | New values win |
-| `MergeStrategy::Preserve` | Existing values win |
-| `MergeStrategy::Append` | Append arrays, merge objects |
+| `ErrorOnConflict` | Fail if keys exist in both |
+| `PreferExternal` | Incoming values win on conflict |
+| `PreferDocument` | Existing document values win |
 
 ## Typed Extraction
 

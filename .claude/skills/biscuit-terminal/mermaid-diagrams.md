@@ -2,6 +2,8 @@
 
 The `bt` CLI and `MermaidRenderer` library render Mermaid diagrams inline in terminals using the mmdc CLI.
 
+`bt` does not auto-fallback to code blocks on render errors; it reports the error and exits non-zero. If you need textual fallback, use `--json` or call `fallback_code_block()` in your own app flow.
+
 ## Requirements
 
 ```bash
@@ -90,6 +92,7 @@ bt bar-chart 10 20 15 25
 bt bar-chart --x-axis "Q1,Q2,Q3,Q4" --y-axis Sales 10 20 15 25
 bt bar-chart --horizontal --show-data-label 1 8 7 5
 bt bar-chart --line 10 20 15 25  # Add trend line
+bt bar-chart --aspect-ratio 2.0 --width 60% --inverse 10 20 15 25
 ```
 
 Input formats: JSON array `"[1,8,7]"`, comma-separated `"1,8,7"`, or space-separated `1 8 7`
@@ -106,6 +109,8 @@ Options:
 bt line-chart 1 8 7 5 9 3
 bt line-chart --x-axis "Mon,Tue,Wed" --y-axis Temperature 20 22 19
 bt line-chart --bar 1 8 7 5  # Add bars under line
+bt line-chart --show-data-label --horizontal 1 8 7 5
+bt line-chart --aspect-ratio 1.8 --inverse --width 60% 1 8 7 5
 ```
 
 Same options as bar-chart, plus `--bar` to add bars.
@@ -158,9 +163,10 @@ Options:
 use biscuit_terminal::components::mermaid::MermaidRenderer;
 
 let renderer = MermaidRenderer::new("flowchart LR\n    A --> B");
-match renderer.render_for_terminal() {
-    Ok(()) => {},
-    Err(_) => println!("{}", renderer.fallback_code_block()),
+if let Err(err) = renderer.render_for_terminal() {
+    eprintln!("Render failed: {err}");
+    // Optional app-level fallback:
+    println!("{}", renderer.fallback_code_block());
 }
 ```
 
@@ -238,7 +244,7 @@ if let Some(version) = detect_mmdc_version() {
 
 ## Caching
 
-Mermaid renders are cached to avoid redundant CLI calls. The cache uses content hash + configuration as the key.
+Mermaid renders are cached to avoid redundant CLI calls. The cache key is an xxHash derived from content + configuration (`biscuit-hash`).
 
 ```rust
 use biscuit_terminal::components::mermaid_cache::MermaidCache;
@@ -251,7 +257,7 @@ let cache = MermaidCache::new();
 
 - **Size limit**: Diagrams over 10KB are rejected
 - **Terminal check**: Only renders when image protocols are supported
-- **Safe fallback**: Falls back to code block if rendering fails
+- **No automatic CLI fallback**: failures are returned as errors; use `fallback_code_block()` manually if desired
 
 ## Icon Support
 

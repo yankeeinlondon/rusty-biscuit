@@ -34,7 +34,7 @@ assert_eq!(toc.title, Some("Introduction".to_string()));
 | `CodeBlockInfo` | Code block metadata (language, content, hashes, location) |
 | `InternalLinkInfo` | Internal anchor link target and location |
 
-Note: `PreludeNode` is used internally within `MarkdownTocNode` but is not re-exported from the `markdown` module.
+Note: `PreludeNode` is used within `MarkdownTocNode` and is exported from the `toc` submodule (`darkmatter::markdown::toc::PreludeNode`) but is not re-exported from the top-level `markdown` module.
 
 ## Node Structure
 

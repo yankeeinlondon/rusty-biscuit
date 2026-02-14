@@ -1,3 +1,3 @@
 # Model Citizen
 
-![logo|25](../assets/model-citizen-512.png)
+![logo|35](../assets/model-citizen-512.png)

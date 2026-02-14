@@ -1,6 +1,6 @@
 # Sound Effects
 
-85 embedded sound effects across 6 categories, feature-gated to control binary size.
+88 embedded sound effects across 6 categories, feature-gated to control binary size.
 
 ## Feature Flags
 
@@ -8,11 +8,11 @@
 |---------|---------|------|
 | `sfx-ui` | 43 UI sounds | ~4MB |
 | `sfx-cartoon` | 13 cartoon effects | ~8MB |
-| `sfx-reactions` | 6 reactions | ~4MB |
+| `sfx-reactions` | 9 reactions | ~4MB |
 | `sfx-scifi` | 11 sci-fi effects | ~3MB |
 | `sfx-atmosphere` | 5 atmosphere | ~7MB |
 | `sfx-motion` | 7 motion effects | ~5MB |
-| `sound-effects` | All 85 effects | ~31MB |
+| `sound-effects` | All 88 effects | ~31MB |
 
 ## Usage
 
