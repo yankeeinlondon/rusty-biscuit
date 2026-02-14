@@ -8,10 +8,10 @@
       <ul>
         <li><code>define</code> - <i>provides primitives for defining an API, Request and Response schemas, and REST, Websocket, or Multi-part Form Endpoints</i></li>
         <li>
-            <code>definition</code> - <i>uses the primitives from <code>define</code> to define an API surface</i>
+            <code>definitions</code> - <i>uses the primitives from <code>define</code> to define an API surface</i>
         </li>
         <li>
-            <code>gen</code> - <i>takes the definitions found in the <code>definition</code> package and generates structs and enums to represent these API definitions including a fully functioning network client</i>
+            <code>gen</code> - <i>takes the definitions found in the <code>definitions</code> package and generates structs and enums to represent these API definitions including a fully functioning network client</i>
         </li>
         <li>
             <code>schema</code> - <i>this is where the finalized API and schema definition go for use by external libraries</i>
@@ -63,7 +63,7 @@ use schematic_schema::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), SchematicError> {
-    let client = OpenAI::new()?;
+    let client = OpenAI::new();
 
     // List all models (no required params - use Default)
     let models: ListModelsResponse = client
@@ -106,7 +106,7 @@ async fn main() -> Result<(), SchematicError> {
 | OpenAI | `openai` | 3 | Bearer | Models API (list, retrieve, delete) |
 | HuggingFace Hub | `huggingface` | 28+ | Bearer | Models, datasets, spaces, repos |
 | ElevenLabs | `elevenlabs` | 45+ REST, 2 WebSocket | API Key (`xi-api-key`) | TTS, voices, audio generation |
-| LM Studio | `lmstudio` | 6 | None | Local inference (OpenAI-compatible) |
+| LM Studio | `lmstudio` | 6 | Bearer (`LM_API_TOKEN`) | Local inference (OpenAI-compatible) |
 | Ollama Native | `ollama` | 11 | None | Local inference (generate, chat, embed) |
 | Ollama OpenAI | `ollama` | 4 | None | OpenAI-compatible subset |
 | EMQX Basic | `emqx` | 36 | Basic | MQTT broker REST API |
@@ -142,7 +142,7 @@ The `variant()` builder creates alternate API client configurations with optiona
 ```rust
 use schematic_define::UpdateStrategy;
 
-let client = OpenAI::new()?;
+let client = OpenAI::new();
 
 // Simple environment switch
 let staging = client.variant_with(
@@ -272,7 +272,7 @@ The generator produces different methods based on `ApiResponse` types:
 
 1. **Verify the response type is correct** - Binary audio endpoints must use `ApiResponse::Binary`, not `ApiResponse::Json`
 2. **Test the generated code compiles** - Run `cargo check -p schematic-schema`
-3. **Test runtime behavior** - Unit tests only verify syntax, not that `response.bytes()` vs `response.json()` is called correctly
+3. **Run generation tests** - `schematic-gen` e2e tests verify response-method generation (`response.bytes()`, `response.text()`, etc.), but they do not exercise live provider HTTP behavior
 
 ### 2. Module Path Configuration
 

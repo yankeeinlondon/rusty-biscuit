@@ -18,12 +18,13 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 | Anthropic | `anthropic` | `define_anthropic_api()` | 4 | Anthropic Messages API for Claude AI and agent tool use |
 | OpenAI | `openai` | `define_openai_api()` | 3 | OpenAI Models API (list, retrieve, delete models) |
 | HuggingFace Hub | `huggingface` | `define_huggingface_hub_api()` | 28+ | Hugging Face Hub API (models, datasets, spaces, repos) |
+| LM Studio | `lmstudio` | `define_lmstudio_api()` | 6 | LM Studio local inference API |
 | Ollama Native | `ollama` | `define_ollama_native_api()` | 11 | Ollama local inference API (generate, chat, embeddings) |
 | Ollama OpenAI | `ollama` | `define_ollama_openai_api()` | 4 | Ollama OpenAI-compatible API |
 | ElevenLabs REST | `elevenlabs` | `define_elevenlabs_rest_api()` | 45+ | ElevenLabs TTS REST API (voices, text-to-speech, audio) |
 | ElevenLabs WebSocket | `elevenlabs` | `define_elevenlabs_websocket_api()` | 2 | ElevenLabs TTS WebSocket streaming API |
-| EMQX Basic | `emqx` | `define_emqx_basic_api()` | 30+ | EMQX MQTT Broker REST API with Basic auth |
-| EMQX Bearer | `emqx` | `define_emqx_bearer_api()` | 32+ | EMQX MQTT Broker REST API with Bearer token auth |
+| EMQX Basic | `emqx` | `define_emqx_basic_api()` | 36 | EMQX MQTT Broker REST API with Basic auth |
+| EMQX Bearer | `emqx` | `define_emqx_bearer_api()` | 38 | EMQX MQTT Broker REST API with Bearer token auth |
 
 ## Usage
 

@@ -4,13 +4,14 @@ This document specifies the vendor extensions used by Schematic when exporting A
 
 ## Overview
 
-Schematic uses three extension types at different levels of the OpenAPI document:
+Schematic currently emits two `x-schematic` extension types in exported OpenAPI documents:
 
 | Extension | Level | Purpose |
 |-----------|-------|---------|
 | `x-schematic` | Document | API-wide configuration (module path, headers, env mapping) |
 | `x-schematic` | Operation | Endpoint-specific metadata (request/response types, headers) |
-| `x-schematic` | Schema | Type metadata (Rust type paths) |
+
+The library also defines a schema-level extension type (`SchematicSchemaExtension`) for Rust type metadata, but the current exporter does not emit schema-level `x-schematic` fields.
 
 All extensions are optional. Documents without `x-schematic` extensions can still be imported, but some Schematic-specific features may require manual configuration.
 
@@ -53,16 +54,18 @@ env_mapping:
   api_key:
     names: ["ANTHROPIC_API_KEY"]
     header: X-Api-Key
-  basic_auth:
-    username: ["API_USER"]
-    password: ["API_PASSWORD"]
+  basic_user:
+    names: ["API_USER"]
+  basic_pass:
+    names: ["API_PASSWORD"]
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `bearer_token` | `{names: string[]}` | Env vars for Bearer token authentication |
 | `api_key` | `{names: string[], header: string}` | Env vars and header name for API key auth |
-| `basic_auth` | `{username: string[], password: string[]}` | Env vars for HTTP Basic authentication |
+| `basic_user` | `{names: string[]}` | Env vars for HTTP Basic auth username |
+| `basic_pass` | `{names: string[]}` | Env vars for HTTP Basic auth password |
 
 ## Operation-Level Extension
 
@@ -74,11 +77,10 @@ paths:
     get:
       operationId: ListModels
       x-schematic:
-        request: null
         response:
-          type: Json
-          schema:
+          Json:
             type_name: ListModelsResponse
+            module_path: null
         headers: []
 ```
 
@@ -87,7 +89,7 @@ paths:
 | Field | Type | Description |
 |-------|------|-------------|
 | `request` | `object?` | Request body specification. See [Request Types](#request-types). |
-| `response` | `object` | Response specification. See [Response Types](#response-types). |
+| `response` | `object \| string` | Response specification. See [Response Types](#response-types). |
 | `headers` | `array<[string, string]>` | Endpoint-specific headers. |
 
 ### Request Types
@@ -95,47 +97,47 @@ paths:
 ```yaml
 # JSON body
 request:
-  type: Json
-  schema:
+  Json:
     type_name: CreateMessageBody
+    module_path: null
 
 # Multipart form data
 request:
-  type: FormData
-  fields:
-    - name: document
-      kind:
-        type: File
-        accept: ["application/pdf", "image/*"]
-      required: true
-      description: The file to upload
-    - name: metadata
-      kind:
-        type: Json
-        schema:
-          type_name: FileMetadata
-      required: false
+  FormData:
+    fields:
+      - name: document
+        kind:
+          File:
+            accept: ["application/pdf", "image/*"]
+        required: true
+        description: The file to upload
+      - name: metadata
+        kind:
+          Json:
+            type_name: FileMetadata
+            module_path: null
+        required: false
 
 # URL-encoded form
 request:
-  type: UrlEncoded
-  fields:
-    - name: username
-      kind: Text
-      required: true
-    - name: password
-      kind: Text
-      required: true
+  UrlEncoded:
+    fields:
+      - name: username
+        kind: Text
+        required: true
+      - name: password
+        kind: Text
+        required: true
 
 # Plain text
 request:
-  type: Text
-  content_type: text/csv
+  Text:
+    content_type: text/csv
 
 # Binary
 request:
-  type: Binary
-  content_type: application/octet-stream
+  Binary:
+    content_type: application/octet-stream
 ```
 
 ### Response Types
@@ -143,26 +145,23 @@ request:
 ```yaml
 # JSON response
 response:
-  type: Json
-  schema:
+  Json:
     type_name: MessageResponse
+    module_path: null
 
 # Binary response (audio, images)
-response:
-  type: Binary
+response: Binary
 
 # Plain text response
-response:
-  type: Text
+response: Text
 
 # No content (204)
-response:
-  type: Empty
+response: Empty
 ```
 
-## Schema-Level Extension
+## Schema-Level Extension (Reserved)
 
-Added at the schema level to preserve Rust type information:
+`SchematicSchemaExtension` exists for preserving Rust type information, but schema-level `x-schematic` fields are not currently emitted by `export()`. If emitted in a future release, the shape is:
 
 ```yaml
 components:
@@ -210,9 +209,9 @@ paths:
       description: Lists the currently available models
       x-schematic:
         response:
-          type: Json
-          schema:
+          Json:
             type_name: ListModelsResponse
+            module_path: null
       responses:
         "200":
           description: Successful JSON response
@@ -227,9 +226,9 @@ paths:
       description: Retrieves a model instance
       x-schematic:
         response:
-          type: Json
-          schema:
+          Json:
             type_name: Model
+            module_path: null
       responses:
         "200":
           description: Successful JSON response
@@ -249,9 +248,9 @@ paths:
       description: Delete a fine-tuned model
       x-schematic:
         response:
-          type: Json
-          schema:
+          Json:
             type_name: DeleteModelResponse
+            module_path: null
       responses:
         "200":
           description: Successful JSON response

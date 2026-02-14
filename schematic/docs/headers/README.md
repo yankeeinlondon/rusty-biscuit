@@ -82,7 +82,7 @@ let headers = Headers::default()
 
 ```rust
 use schematic_define::Headers;
-use schematic_schema::OpenAI;
+use schematic_schema::openai::{ListModelsRequest, ListModelsResponse, OpenAI};
 
 // Create headers with programmatic credentials - no env vars needed!
 let client = OpenAI::new()
@@ -91,7 +91,9 @@ let client = OpenAI::new()
     .build();
 
 // Make authenticated requests
-let response = client.request::<ChatCompletionResponse>(req).await?;
+let response: ListModelsResponse = client
+    .request(ListModelsRequest::default())
+    .await?;
 ```
 
 ### Automatic Environment Auth Bypass
@@ -187,8 +189,8 @@ let client_b = OpenAI::default().variant_with_headers(tenant_b_headers);
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_api_call() {
+    #[tokio::test]
+    async fn test_api_call() {
         let headers = Headers::default()
             .use_bearer_token("test-token-12345")
             .build()

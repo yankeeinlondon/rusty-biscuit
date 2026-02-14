@@ -17,7 +17,7 @@ The definition process is intentionally **data-driven**: you describe *what* the
 | `RestApi` | Complete API definition with base URL, auth, endpoints, and codegen options |
 | `Endpoint` | Single endpoint with method, path, request/response schemas |
 | `RestMethod` | HTTP methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS); supports `FromStr`, `TryFrom<String>` |
-| `AuthStrategy` | Authentication configuration (Bearer, API Key, Basic, None) |
+| `AuthStrategy` | Authentication configuration (Bearer, API Key header, API Key query/cookie, Basic, None) |
 | `ApiRequest` | Request body type (JSON, FormData, UrlEncoded, Text, Binary) |
 | `ApiResponse` | Response type (JSON, Text, Binary, Empty) |
 | `FormField` | Form field definition for multipart/URL-encoded requests |
@@ -295,7 +295,7 @@ match auth {
 }
 ```
 
-This applies to: `AuthStrategy`, `UpdateStrategy`, `ApiRequest`, `FormFieldKind`, `ApiResponse`, `RestMethod`.
+This applies to: `AuthStrategy`, `ApiKeyLocation`, `UpdateStrategy`, `ApiRequest`, `FormFieldKind`, `ApiResponse`, `RestMethod`.
 
 ## Response Types
 
@@ -303,7 +303,7 @@ This applies to: `AuthStrategy`, `UpdateStrategy`, `ApiRequest`, `FormFieldKind`
 |---------|----------------------|----------|
 | `ApiResponse::Json(schema)` | Deserialized struct | Most API responses |
 | `ApiResponse::Text` | `String` | Plain text endpoints |
-| `ApiResponse::Binary` | `Vec<u8>` | File downloads, images |
+| `ApiResponse::Binary` | `bytes::Bytes` | File downloads, images |
 | `ApiResponse::Empty` | `()` | DELETE, 204 responses |
 
 ## WebSocket APIs

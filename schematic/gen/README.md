@@ -462,8 +462,15 @@ impl OpenAI {
     pub fn with_client(client: reqwest::Client) -> Self { ... }
     pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self { ... }
 
-    /// Create a variant with different configuration (base URL, credentials, auth strategy)
-    pub fn variant(&self, base_url: impl Into<String>, env_auth: Vec<String>, strategy: UpdateStrategy) -> Self { ... }
+    /// Create a variant builder with optional response hooks
+    pub fn variant(&self) -> OpenAIVariantBuilder<'_> { ... }
+    pub fn variant_with(
+        &self,
+        base_url: impl Into<String>,
+        env_auth: Vec<String>,
+        strategy: UpdateStrategy
+    ) -> Self { ... }
+    pub fn variant_with_headers(&self, headers: schematic_define::Headers) -> Self { ... }
 
     /// Access the underlying HTTP client for custom requests
     pub fn http_client(&self) -> &reqwest::Client { ... }
@@ -485,7 +492,7 @@ impl OpenAI {
 ## Using Generated Code
 
 ```rust
-use schematic_schema::{OpenAI, RetrieveModelRequest, ListModelsResponse, Model};
+use schematic_schema::{OpenAI, ListModelsRequest, ListModelsResponse, Model, RetrieveModelRequest};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -525,7 +532,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 The generator supports multiple authentication strategies defined in `schematic-define`. Authentication is configured in two parts:
 
 1. **`RestApi::auth`** - Defines *how* authentication is applied (Bearer, API Key, Basic)
-2. **`RestApi::env_auth`** / **`env_username`** / **`env_password`** - Defines *where* credentials come from
+2. **`RestApi::env_auth`** / **`env_username`** / **`env_mapping`** - Defines *where* credentials come from
 
 All strategies return `SchematicError::MissingCredential` if required credentials are not found.
 
@@ -579,7 +586,7 @@ req_builder = req_builder.header("X-API-Key", key);
 RestApi {
     auth: AuthStrategy::Basic,
     env_username: Some("API_USER".to_string()),
-    env_password: Some("API_PASS".to_string()),
+    env_auth: vec!["API_PASS".to_string()],
     // ...
 }
 ```
@@ -948,14 +955,16 @@ The current test suite verifies:
 2. **Formatting** - Output is properly formatted via `prettyplease`
 3. **Individual generators** - Each generator function has unit tests
 4. **Auth strategies** - All authentication patterns generate correct code
+5. **Response method generation** - E2E tests verify `request_bytes()`/`request_text()`/`request_empty()` generation and emitted `response.bytes()`/`response.text()` calls
+6. **Multi-API compile checks** - Ignored slow tests compile generated output with `cargo check`
 
 ### What Tests DO NOT Cover
 
-**Runtime behavior is NOT tested!** Specifically:
+**Live HTTP behavior is NOT tested!** Specifically:
 
-1. **Response type handling** - Tests don't verify that `ApiResponse::Binary` endpoints actually call `.bytes()` instead of `.json()`
-2. **Module path resolution** - Tests don't verify that multi-API modules work correctly together
-3. **End-to-end API calls** - No integration tests with real or mocked HTTP servers
+1. **Provider integration** - No tests exercise real API endpoints
+2. **Network-layer behavior** - No tests cover retries, timeouts, or transport failures against a live/mocked server
+3. **Auth at runtime** - No end-to-end test validates real credential sourcing against external services
 
 ### Known Failure Modes
 

@@ -23,7 +23,7 @@ use schematic_schema::prelude::*;
 #[tokio::main]
 async fn main() -> Result<(), SchematicError> {
     // Create client (reads OPENAI_API_KEY from environment)
-    let client = OpenAI::new()?;
+    let client = OpenAI::new();
 
     // List all models
     let models: ListModelsResponse = client
@@ -49,7 +49,7 @@ use schematic_schema::openai::{
 
 #[tokio::main]
 async fn main() -> Result<(), schematic_schema::openai::SchematicError> {
-    let client = OpenAI::new()?;
+    let client = OpenAI::new();
 
     // Retrieve a specific model - type-safe construction with new()
     let gpt4: Model = client
@@ -74,11 +74,11 @@ async fn main() -> Result<(), schematic_schema::openai::SchematicError> {
 | OpenAI | `openai` | `OpenAI` | 3 | Bearer token (`OPENAI_API_KEY`) |
 | HuggingFace Hub | `huggingface` | `HuggingFaceHub` | 28+ | Bearer token (`HUGGINGFACE_API_KEY`) |
 | ElevenLabs | `elevenlabs` | `ElevenLabs` | 45+ | API Key (`ELEVEN_LABS_API_KEY`, header: `xi-api-key`) |
-| LM Studio | `lmstudio` | `LmStudio` | 6 | None (local) |
+| LM Studio | `lmstudio` | `LmStudio` | 6 | Bearer (`LM_API_TOKEN`) |
 | Ollama Native | `ollama` | `OllamaNative` | 11 | None (local) |
 | Ollama OpenAI | `ollama` | `OllamaOpenAI` | 4 | None (local) |
-| EMQX Basic | `emqx` | `EmqxBasic` | 36 | Basic (`EMQX_API_KEY`, `EMQX_SECRET_KEY`) |
-| EMQX Bearer | `emqx` | `EmqxBearer` | 38 | Bearer (`EMQX_API_KEY`) |
+| EMQX Basic | `emqx` | `EmqxBasic` | 36 | Basic (`EMQX_API_KEY`, `EMQX_API_SECRET`) |
+| EMQX Bearer | `emqx` | `EmqxBearer` | 38 | Bearer (`EMQX_TOKEN`) |
 
 APIs sharing a module (Ollama, EMQX) are combined into a single file with distinct request suffixes.
 
@@ -129,7 +129,7 @@ All async request methods are marked `#[must_use]` to warn if the returned Futur
 
 ```rust
 // Uses default base URL and reads credentials from environment
-let client = OpenAI::new()?;
+let client = OpenAI::new();
 
 // Access API metadata
 println!("Base URL: {}", OpenAI::BASE_URL);
@@ -192,10 +192,10 @@ Create variants with different configurations:
 ```rust
 use schematic_define::UpdateStrategy;
 
-let production = OpenAI::new()?;
+let production = OpenAI::new();
 
 // Staging environment with different credentials
-let staging = production.variant(
+let staging = production.variant_with(
     "https://staging.openai.com/v1",
     vec!["STAGING_OPENAI_KEY".to_string()],
     UpdateStrategy::NoChange,

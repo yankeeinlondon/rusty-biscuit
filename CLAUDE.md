@@ -183,13 +183,13 @@ RestApi { name: "OllamaNative".to_string(), module_path: Some("ollama".to_string
 RestApi { name: "OllamaOpenAI".to_string(), module_path: Some("ollama".to_string()), ... }
 ```
 
-**⚠️ CRITICAL - Testing Gap:**
+**⚠️ CRITICAL - Testing Coverage & Gaps:**
 
-Schematic tests verify **syntax only**, NOT runtime behavior! After modifying:
+Schematic tests verify syntax and include E2E generation checks for response-method selection (`request_bytes()`/`request_text()`/`request_empty()`), but they still do **not** cover runtime HTTP behavior. After modifying:
 1. Run `cargo test -p schematic-gen`
 2. Run `just -f schematic/justfile generate`
 3. Run `cargo check -p schematic-schema`
-4. **Manually verify** correct methods generated: `grep "request_bytes" schematic/schema/src/*.rs`
+4. If response handling changed, **manually verify** generated methods: `grep -n "request_bytes\|request_text\|request_empty" schematic/schema/src/*.rs`
 
 #### 3. Tree-sitter Symbol Extraction (Tree Hugger)
 
