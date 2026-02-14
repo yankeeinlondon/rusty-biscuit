@@ -52,7 +52,11 @@ pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
 pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
 
 use std::path::Path;
+
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use url::Url;
+
+use crate::render::{ImageRef, Link};
 
 /// A markdown document with frontmatter support.
 #[derive(Debug, Clone, PartialEq)]
@@ -63,18 +67,18 @@ pub struct Markdown {
 
 impl Markdown {
     /// Creates a new markdown document with empty frontmatter.
-    pub fn new(content: String) -> Self {
+    pub fn new(content: impl Into<String>) -> Self {
         Self {
             frontmatter: Frontmatter::new(),
-            content,
+            content: content.into(),
         }
     }
 
     /// Creates a markdown document with frontmatter.
-    pub fn with_frontmatter(frontmatter: Frontmatter, content: String) -> Self {
+    pub fn with_frontmatter(frontmatter: Frontmatter, content: impl Into<String>) -> Self {
         Self {
             frontmatter,
-            content,
+            content: content.into(),
         }
     }
 
@@ -138,6 +142,122 @@ impl Markdown {
     /// Returns a mutable reference to the content.
     pub fn content_mut(&mut self) -> &mut String {
         &mut self.content
+    }
+
+    /// Consumes the markdown document and returns `(frontmatter, content)`.
+    pub fn into_parts(self) -> (Frontmatter, String) {
+        (self.frontmatter, self.content)
+    }
+
+    /// Extracts typed links from document content.
+    ///
+    /// Link display text is preserved as visible markdown text (including inline code
+    /// markers) and link metadata from markdown titles is parsed via [`Link`].
+    pub fn links(&self) -> Vec<Link> {
+        let parser = Parser::new_ext(&self.content, markdown_parse_options());
+
+        let mut links = Vec::new();
+        let mut in_link = false;
+        let mut current_href = String::new();
+        let mut current_title = String::new();
+        let mut current_display = String::new();
+
+        for event in parser {
+            match event {
+                Event::Start(Tag::Link {
+                    dest_url, title, ..
+                }) => {
+                    in_link = true;
+                    current_href = dest_url.to_string();
+                    current_title = title.to_string();
+                    current_display.clear();
+                }
+                Event::End(TagEnd::Link) if in_link => {
+                    let display = std::mem::take(&mut current_display);
+                    let href = std::mem::take(&mut current_href);
+                    let title = std::mem::take(&mut current_title);
+
+                    if let Ok(link) = Link::with_title_parsed(display, href, &title) {
+                        links.push(link);
+                    }
+
+                    in_link = false;
+                }
+                Event::Text(text) if in_link => {
+                    current_display.push_str(&text);
+                }
+                Event::Code(code) if in_link => {
+                    current_display.push('`');
+                    current_display.push_str(&code);
+                    current_display.push('`');
+                }
+                Event::SoftBreak if in_link => {
+                    current_display.push(' ');
+                }
+                Event::HardBreak if in_link => {
+                    current_display.push('\n');
+                }
+                _ => {}
+            }
+        }
+
+        links
+    }
+
+    /// Extracts typed image references from document content.
+    ///
+    /// The extraction path round-trips through markdown image parsing so `ImageRef`
+    /// behaviors (such as width hints in alt text and metadata title payloads) are
+    /// applied consistently with standalone `ImageRef::try_from`.
+    pub fn images(&self) -> Vec<ImageRef> {
+        let parser = Parser::new_ext(&self.content, markdown_parse_options());
+
+        let mut images = Vec::new();
+        let mut in_image = false;
+        let mut current_src = String::new();
+        let mut current_title = String::new();
+        let mut current_alt = String::new();
+
+        for event in parser {
+            match event {
+                Event::Start(Tag::Image {
+                    dest_url, title, ..
+                }) => {
+                    in_image = true;
+                    current_src = dest_url.to_string();
+                    current_title = title.to_string();
+                    current_alt.clear();
+                }
+                Event::End(TagEnd::Image) if in_image => {
+                    let alt = std::mem::take(&mut current_alt);
+                    let src = std::mem::take(&mut current_src);
+                    let title = std::mem::take(&mut current_title);
+
+                    if let Some(image_ref) = image_ref_from_parts(&alt, &src, &title) {
+                        images.push(image_ref);
+                    }
+
+                    in_image = false;
+                }
+                Event::Text(text) if in_image => {
+                    current_alt.push_str(&text);
+                }
+                Event::Code(code) if in_image => {
+                    current_alt.push('`');
+                    current_alt.push_str(&code);
+                    current_alt.push('`');
+                }
+                Event::SoftBreak if in_image => {
+                    current_alt.push(' ');
+                }
+                Event::HardBreak if in_image => {
+                    current_alt.push('\n');
+                }
+                _ => {}
+            }
+        }
+
+        images
     }
 
     /// Cleans up markdown content by normalizing formatting.
@@ -487,6 +607,52 @@ impl TryFrom<&Path> for Markdown {
     }
 }
 
+fn markdown_parse_options() -> Options {
+    Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH
+}
+
+fn image_ref_from_parts(alt: &str, src: &str, title: &str) -> Option<ImageRef> {
+    let markdown = build_markdown_image_literal(alt, src, title);
+
+    if let Ok(image_ref) = ImageRef::try_from(markdown.as_str()) {
+        return Some(image_ref);
+    }
+
+    let mut image_ref = ImageRef::new(src, alt).ok()?;
+    if !title.trim().is_empty() {
+        image_ref = image_ref.with_title(title);
+    }
+
+    Some(image_ref)
+}
+
+fn build_markdown_image_literal(alt: &str, src: &str, title: &str) -> String {
+    let alt = escape_markdown_image_alt(alt);
+    let src = escape_markdown_image_url(src);
+
+    if title.trim().is_empty() {
+        return format!("![{alt}]({src})");
+    }
+
+    let title = escape_markdown_title(title);
+    format!("![{alt}]({src} \"{title}\")")
+}
+
+fn escape_markdown_image_alt(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+}
+
+fn escape_markdown_image_url(value: &str) -> String {
+    value.replace('(', "%28").replace(')', "%29")
+}
+
+fn escape_markdown_title(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -621,5 +787,55 @@ title: Test
 
         let author: Option<String> = md.fm_get("author").unwrap();
         assert_eq!(author, Some("Alice".to_string()));
+    }
+
+    #[test]
+    fn test_markdown_into_parts() {
+        let mut md = Markdown::new("# Hi");
+        md.fm_insert("title", "Doc").unwrap();
+
+        let (frontmatter, content) = md.into_parts();
+        let title: Option<String> = frontmatter.get("title").unwrap();
+
+        assert_eq!(title, Some("Doc".to_string()));
+        assert_eq!(content, "# Hi");
+    }
+
+    #[test]
+    fn test_markdown_links_extract_structured_metadata() {
+        let md: Markdown =
+            r#"[Click](https://example.com "class='btn' prompt='Read docs'")"#.into();
+        let links = md.links();
+
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].display(), "Click");
+        assert_eq!(links[0].href(), "https://example.com");
+        assert_eq!(links[0].class(), Some("btn"));
+        assert_eq!(links[0].prompt(), Some("Read docs"));
+    }
+
+    #[test]
+    fn test_markdown_images_extract_width_hint() {
+        let md: Markdown = "![Diagram|50%](./diagram.png)".into();
+        let images = md.images();
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].alt(), "Diagram");
+        assert_eq!(images[0].src(), Some("./diagram.png"));
+
+        let html = images[0].to_html();
+        assert!(
+            html.contains(r#"style="width: 50%;""#),
+            "expected width hint in style, got: {html}"
+        );
+    }
+
+    #[test]
+    fn test_markdown_images_preserve_inline_code_in_alt() {
+        let md: Markdown = "![Use `cargo test` here](./diagram.png)".into();
+        let images = md.images();
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].alt(), "Use `cargo test` here");
     }
 }

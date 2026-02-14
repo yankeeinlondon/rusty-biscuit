@@ -165,7 +165,9 @@ fn format_main_line(topic: &TopicInfo, hide_type_badge: bool, verbose: bool) -> 
         .location
         .join(ResearchOutput::DeepDive.path_for(&topic.name));
     let link_url = format!("file://{}", deep_dive_path.display());
-    let formatted_name = Link::new(styled_name, link_url).to_terminal();
+    let formatted_name = Link::new(styled_name.clone(), link_url)
+        .map(|link| link.to_terminal())
+        .unwrap_or(styled_name);
     parts.push(formatted_name);
 
     // Type badge (unless hidden)

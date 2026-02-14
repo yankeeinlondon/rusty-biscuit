@@ -1,369 +1,327 @@
-# Link Struct
+# `Link` Struct
 
-A multi-format hyperlink container that supports rendering to terminal (OSC 8 escape sequences), HTML anchor elements, and Markdown links.
+The `Link` struct in `darkmatter` is a type-safe, multi-format hyperlink model that can:
+
+1. Parse HTML or Markdown links into structured state
+2. Render links for terminal (`OSC 8`), HTML, and Markdown
+3. Preserve rich metadata in Markdown using a lossless policy by default
 
 ## Overview
 
-The `Link` struct pairs display text with a destination URL or file path, storing optional HTML attributes (class, style, target, title, prompt, data-*) and providing methods to render to different output formats. It can parse both HTML and Markdown strings, and supports a structured Markdown format that preserves rich attributes during parsing.
+`Link` stores visible text, destination, and optional metadata commonly used by HTML anchors.
 
 ```rust
 use darkmatter::render::Link;
 
-let link = Link::new("Click here", "https://example.com");
+let link = Link::new("Click here", "https://example.com").unwrap();
+assert_eq!(link.href(), "https://example.com");
 ```
 
-## Core Fields
+## Core State
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `display` | `String` | The visible text shown to users |
-| `href` | `String` | The URL or file path destination |
-| `kind` | `LinkType` | Auto-detected as `Url` (http/https) or `File` |
-| `class` | `Option<String>` | CSS class for HTML output |
-| `style` | `Option<String>` | Inline CSS for HTML output |
-| `target` | `Option<String>` | Target attribute (e.g., "_blank") |
-| `title` | `Option<String>` | Tooltip text (HTML and Markdown) |
-| `prompt` | `Option<String>` | Popover hint text (HTML with Popover API) |
-| `data` | `Option<HashMap<String, String>>` | Custom data-* attributes |
+| Field | Type | Notes |
+|---|---|---|
+| `display` | `String` | Visible text shown to users |
+| `href` | `String` | Destination URL/path |
+| `kind` | `LinkType` | Auto-detected: `Url` for `http/https`, otherwise `File` |
+| `class` | `Option<String>` | HTML `class` attribute |
+| `style` | `Option<Stylesheet>` | Typed inline CSS |
+| `target` | `Option<LinkTarget>` | Typed anchor target |
+| `title` | `Option<String>` | Optional title/tooltip text |
+| `prompt` | `Option<String>` | Optional prompt text (`data-prompt`) |
+| `data` | `BTreeMap<String, String>` | `data-*` attributes (stored without `data-` prefix) |
+
+## Types
+
+### `LinkType`
+
+```rust
+use darkmatter::render::LinkType;
+
+let _ = LinkType::Url;
+let _ = LinkType::File;
+```
+
+### `LinkTarget`
+
+`LinkTarget` provides typed target handling:
+
+- `LinkTarget::Self_`
+- `LinkTarget::Blank`
+- `LinkTarget::Parent`
+- `LinkTarget::Top`
+- `LinkTarget::Named(String)`
+
+```rust
+use darkmatter::render::{Link, LinkTarget};
+
+let link = Link::new("Docs", "https://example.com")
+    .unwrap()
+    .with_target(LinkTarget::Blank);
+
+assert_eq!(link.target_attr().as_deref(), Some("_blank"));
+```
 
 ## Creating Links
 
-### Direct Construction
+### `new` (fallible)
 
-Use `Link::new()` for basic links. The `kind` field is automatically determined from the URL scheme:
+`Link::new` validates that href is non-empty.
 
 ```rust
-use darkmatter::render::{Link, LinkType};
+use darkmatter::render::Link;
 
-let url_link = Link::new("Website", "https://example.com");
-assert!(url_link.is_url());
-assert_eq!(url_link.kind(), LinkType::Url);
+let link = Link::new("README", "./README.md").unwrap();
+assert!(link.is_file());
 
-let file_link = Link::new("README", "/path/to/file.md");
-assert!(file_link.is_file());
-assert_eq!(file_link.kind(), LinkType::File);
+assert!(Link::new("x", "   ").is_err());
 ```
 
-For links that need structured attributes parsed from a title string, use `Link::with_title_parsed()`:
+### `with_title_parsed`
+
+`with_title_parsed` parses a Markdown title segment as either:
+
+- plain title text, or
+- structured metadata (`class=... style=... target=... prompt=... data-*`), or
+- a lossless metadata payload (base64 JSON package used by `to_markdown(false)`)
 
 ```rust
+use darkmatter::render::{Link, LinkTarget};
+
 let link = Link::with_title_parsed(
     "Submit",
     "https://example.com/form",
-    r#"class="btn btn-primary" prompt="Submit the form""#
-);
+    "class='btn' target='_blank' prompt='Continue'",
+)
+.unwrap();
 
-assert_eq!(link.class(), Some("btn btn-primary"));
-assert_eq!(link.prompt(), Some("Submit the form"));
+assert_eq!(link.class(), Some("btn"));
+assert_eq!(link.target(), Some(&LinkTarget::Blank));
+assert_eq!(link.prompt(), Some("Continue"));
 ```
 
-### Builder Pattern
+### Tuple conversions
 
-Chain builder methods to add optional attributes:
+`Link` implements `From` for:
+
+- `(&str, &str)`
+- `(&String, &String)`
+- `(&str, &Prose)`
+- `(&String, &Prose)`
+
+These conversions are ergonomic, but they `expect(...)` internally and therefore require a valid, non-empty href.
+
+## Builder API
 
 ```rust
+use darkmatter::render::{Link, LinkTarget};
+
 let link = Link::new("Open", "https://example.com")
+    .unwrap()
     .with_class("external-link")
-    .with_style("color: blue; text-decoration: underline;")
-    .with_target("_blank")
+    .with_style_css("color: blue; text-decoration: underline;").unwrap()
+    .with_target(LinkTarget::Blank)
     .with_title("Opens in a new tab")
     .with_prompt("Click to visit example.com")
     .with_data("analytics-id", "link-123")
     .with_data("category", "navigation");
 
 assert_eq!(link.class(), Some("external-link"));
-assert_eq!(link.target(), Some("_blank"));
-assert_eq!(link.data().unwrap().get("analytics-id"), Some(&"link-123".to_string()));
+assert_eq!(link.target_attr().as_deref(), Some("_blank"));
+assert_eq!(link.data().get("analytics-id"), Some(&"link-123".to_string()));
 ```
 
-### From Tuple
+Notable setters:
 
-Convert a tuple of `(display, url)` into a `Link`:
+- `with_href(...) -> Result<Self, LinkError>`
+- `with_style(Stylesheet) -> Self`
+- `with_style_css(...) -> Result<Self, LinkError>`
+- `with_target(LinkTarget) -> Self`
+- `with_target_str(...) -> Result<Self, LinkError>`
+- `with_data_map(BTreeMap<String, String>) -> Self`
 
-```rust
-let link: Link = ("Documentation", "https://docs.rs").into();
+## Parsing (`TryFrom`)
 
-assert_eq!(link.display(), "Documentation");
-assert_eq!(link.href(), "https://docs.rs");
-```
+`Link` supports parsing from `String`, `&String`, and `&str`.
 
-### Parsing Strings
-
-The `Link` struct implements `TryFrom<String>` and `TryFrom<&str>` to parse existing link strings.
-
-#### Parsing HTML
-
-Parse complete anchor elements including all attributes:
+### HTML input
 
 ```rust
 use darkmatter::render::Link;
 
-let html = r#"<a href="https://example.com" class="btn" target="_blank" title="Go to example" data-id="123">Click me</a>"#;
+let html = r#"<a href="https://example.com" class="btn" target="_blank" title="Go" data-id="123">Click</a>"#;
 let link = Link::try_from(html).unwrap();
 
-assert_eq!(link.display(), "Click me");
+assert_eq!(link.display(), "Click");
 assert_eq!(link.href(), "https://example.com");
 assert_eq!(link.class(), Some("btn"));
-assert_eq!(link.target(), Some("_blank"));
-assert_eq!(link.title(), Some("Go to example"));
-assert_eq!(link.data().unwrap().get("id"), Some(&"123".to_string()));
+assert_eq!(link.target_attr().as_deref(), Some("_blank"));
+assert_eq!(link.title(), Some("Go"));
+assert_eq!(link.data().get("id"), Some(&"123".to_string()));
 ```
 
-HTML entities are automatically unescaped during parsing:
+### Markdown input
 
 ```rust
-let html = r#"<a href="https://example.com?a=1&amp;b=2">&lt;Script&gt;</a>"#;
-let link = Link::try_from(html).unwrap();
+use darkmatter::render::Link;
 
-assert_eq!(link.display(), "<Script>");
-assert_eq!(link.href(), "https://example.com?a=1&b=2");
-```
+let basic = Link::try_from("[Example](https://example.com)").unwrap();
+assert_eq!(basic.title(), None);
 
-#### Parsing Markdown
+let title_mode = Link::try_from(r#"[Example](https://example.com "Visit example")"#).unwrap();
+assert_eq!(title_mode.title(), Some("Visit example"));
 
-**Basic format:**
-
-```rust
-let link = Link::try_from("[Example](https://example.com)").unwrap();
-assert_eq!(link.display(), "Example");
-assert_eq!(link.href(), "https://example.com");
-```
-
-**With title (Title Mode):**
-
-```rust
-let link = Link::try_from(r#"[Example](https://example.com "Visit example.com")"#).unwrap();
-assert_eq!(link.title(), Some("Visit example.com"));
-```
-
-**With structured attributes (Structured Mode):**
-
-When the parentheses contain `key=value` patterns, the parser enters Structured Mode:
-
-```rust
-let link = Link::try_from(
-    r#"[Submit](https://example.com/form class="btn primary" prompt="Click to submit" data-action="submit")"#
+let structured = Link::try_from(
+    r#"[X](https://example.com class='btn' prompt='go' data-id=42)"#
 ).unwrap();
-
-assert_eq!(link.class(), Some("btn primary"));
-assert_eq!(link.prompt(), Some("Click to submit"));
-assert_eq!(link.data().unwrap().get("action"), Some(&"submit".to_string()));
+assert_eq!(structured.class(), Some("btn"));
+assert_eq!(structured.prompt(), Some("go"));
+assert_eq!(structured.data().get("id"), Some(&"42".to_string()));
 ```
 
-Structured mode supports comma or space delimiters and quoted or unquoted values:
+## Errors
 
-```rust
-// All equivalent:
-let a = Link::try_from(r#"[X](url class="btn")"#).unwrap();
-let b = Link::try_from("[X](url class=btn)").unwrap();
-let c = Link::try_from("[X](url class=btn,target=_blank)").unwrap();
-```
+Parsing and construction use `LinkError` (alias: `LinkParseError`):
 
-#### Error Handling
-
-Parse failures return `LinkParseError`:
+- `EmptyHref`
+- `UnrecognizedFormat`
+- `MalformedHtml(String)`
+- `MalformedMarkdown(String)`
+- `MissingHref`
+- `InvalidStyle(StylesheetError)`
+- `InvalidTarget { value }`
 
 ```rust
 use darkmatter::render::{Link, LinkParseError};
 
-// Unrecognized format
 let err = Link::try_from("plain text").unwrap_err();
 assert!(matches!(err, LinkParseError::UnrecognizedFormat));
 
-// Missing URL
 let err = Link::try_from("[Click]()").unwrap_err();
-assert!(matches!(err, LinkParseError::MissingUrl));
-
-// Malformed HTML
-let err = Link::try_from("<div>not a link</div>").unwrap_err();
-assert!(matches!(err, LinkParseError::MalformedHtml(_)));
+assert!(matches!(err, LinkParseError::MissingHref));
 ```
 
 ## Output Formats
 
-### Terminal (OSC 8 Hyperlinks)
-
-Render clickable terminal links using [OSC 8 escape sequences](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda):
+### Terminal
 
 ```rust
-let link = Link::new("GitHub", "https://github.com");
+use darkmatter::render::Link;
 
-// Auto-detects terminal support
-let terminal = link.to_terminal();
-// With support: \x1b]8;;https://github.com\x07GitHub\x1b]8;;\x07
-// Without support: GitHub [https://github.com]
+let link = Link::new("GitHub", "https://github.com").unwrap();
 
-// Force output regardless of detection
+let auto = link.to_terminal();
 let forced = link.to_terminal_unchecked();
-// Always: \x1b]8;;https://github.com\x07GitHub\x1b]8;;\x07
-```
 
-#### Display Trait
-
-The `Display` trait implementation uses terminal format:
-
-```rust
-let link = Link::new("Home", "https://example.com");
-println!("{}", link); // Outputs terminal-formatted link
+assert!(forced.starts_with("\x1b]8;;https://github.com\x07"));
+assert!(forced.ends_with("\x1b]8;;\x07"));
 ```
 
 ### HTML
 
-Render as an anchor element with all attributes:
+Canonical renderer: `to_html()`
+
+Compatibility alias: `to_browser()`
 
 ```rust
+use darkmatter::render::{Link, LinkTarget};
+
 let link = Link::new("Submit", "https://example.com/form")
-    .with_class("btn btn-primary")
-    .with_style("font-weight: bold;")
-    .with_target("_blank")
-    .with_title("Submit the form")
-    .with_prompt("Click to submit");
+    .unwrap()
+    .with_class("btn")
+    .with_style_css("font-weight: bold;").unwrap()
+    .with_target(LinkTarget::Blank)
+    .with_title("Submit the form");
 
-let html = link.to_browser();
-// <a href="https://example.com/form" class="btn btn-primary" style="font-weight: bold;" target="_blank" title="Submit the form" data-prompt="Click to submit">Submit</a>
+let html = link.to_html();
+assert!(html.contains("href=\"https://example.com/form\""));
+assert!(html.contains("target=\"_blank\""));
 ```
 
-All values are HTML-escaped to prevent XSS:
+`display` and `title` are sanitized for HTML output via `display_plain()` and `title_plain()`.
+
+### HTML + Popover
+
+Canonical renderer: `to_html_with_popover()`
+
+Compatibility alias: `to_browser_with_popover()`
 
 ```rust
-let link = Link::new("<script>alert('xss')</script>", "https://example.com?a=1&b=2");
-let html = link.to_browser();
-// <a href="https://example.com?a=1&amp;b=2">&lt;script&gt;alert('xss')&lt;/script&gt;</a>
-```
+use darkmatter::render::Link;
 
-#### Popover API
-
-For modern browsers supporting the Popover API, render with a companion popover element:
-
-```rust
 let link = Link::new("Help", "https://docs.example.com")
-    .with_prompt("Open documentation in a new tab")
-    .with_target("_blank");
+    .unwrap()
+    .with_prompt("Open documentation");
 
-if let Some((anchor, popover)) = link.to_browser_with_popover() {
-    // anchor: <a href="..." interestfor="popover-abc123" target="_blank">Help</a>
-    // popover: <div id="popover-abc123" popover="hint">Open documentation in a new tab</div>
-    println!("{}", anchor);
-    println!("{}", popover);
-}
+let (anchor, popover) = link.to_html_with_popover().unwrap();
+assert!(anchor.contains("interestfor="));
+assert!(popover.contains("popover=\"hint\""));
 ```
 
 ### Markdown
 
-Render as standard Markdown link format:
+`to_markdown(with_inline: bool)` uses policy-based handling when metadata beyond `(display, href, title)` exists.
+
+- If `with_inline == true`: emits inline HTML.
+- Else if `LINK_METADATA=inline`: emits inline HTML.
+- Else if `LINK_METADATA=strip`: emits idiomatic Markdown and drops extended metadata.
+- Else (default): emits idiomatic Markdown with a lossless metadata payload in the title field.
 
 ```rust
-let link = Link::new("Example", "https://example.com");
-assert_eq!(link.to_markdown(), "[Example](https://example.com)");
+use darkmatter::render::{Link, LinkTarget};
 
-let link_with_title = Link::new("Example", "https://example.com")
-    .with_title("Visit example.com");
-assert_eq!(link_with_title.to_markdown(), r#"[Example](https://example.com "Visit example.com")"#);
+let basic = Link::new("Example", "https://example.com").unwrap();
+assert_eq!(basic.to_markdown(false), "[Example](https://example.com)");
+
+let rich = Link::new("Example", "https://example.com")
+    .unwrap()
+    .with_class("chip")
+    .with_target(LinkTarget::Blank);
+
+let inline = rich.to_markdown(true);
+assert!(inline.starts_with("<a "));
 ```
 
-Special characters are escaped:
+Compatibility alias: `to_markdown_legacy()` (equivalent to `to_markdown(false)`).
+
+## Helper Accessors
+
+- `display_plain()` strips ANSI from display text.
+- `title_plain()` strips ANSI from title text.
+- `style_css()` renders typed `Stylesheet` as inline CSS text.
+- `target_attr()` returns string form of `LinkTarget`.
+- `parsed_style()` parses style into `BTreeMap<String, String>` for inspection.
 
 ```rust
-let link = Link::new("[text]", "https://example.com/path(1)");
-assert_eq!(link.to_markdown(), r"[\[text\]](https://example.com/path%281%29)");
-```
+use darkmatter::render::Link;
 
-## Helper Methods
-
-### parsed_style()
-
-Parse the inline style string into a HashMap of CSS property-value pairs:
-
-```rust
 let link = Link::new("Button", "#")
-    .with_style("color: red; font-size: 14px; margin: 10px 20px;");
+    .unwrap()
+    .with_style_css("color: red; font-size: 14px;").unwrap();
 
 let styles = link.parsed_style().unwrap();
 assert_eq!(styles.get("color"), Some(&"red".to_string()));
-assert_eq!(styles.get("font-size"), Some(&"14px".to_string()));
-assert_eq!(styles.get("margin"), Some(&"10px 20px".to_string()));
 ```
 
-Property names are normalized to lowercase, and edge cases like extra whitespace and trailing semicolons are handled gracefully.
+## Roundtrip Behavior
 
-### Getters
-
-Access all fields through getter methods:
+By default, markdown output is designed to preserve metadata (lossless mode), unlike legacy lossy behavior.
 
 ```rust
-let link = Link::new("Text", "https://example.com")
-    .with_class("my-class");
+use darkmatter::render::{Link, LinkTarget};
 
-assert_eq!(link.display(), "Text");
-assert_eq!(link.href(), "https://example.com");
-assert_eq!(link.kind(), LinkType::Url);
-assert_eq!(link.class(), Some("my-class"));
-assert_eq!(link.style(), None);
-assert_eq!(link.target(), None);
-assert_eq!(link.title(), None);
-assert_eq!(link.prompt(), None);
-assert_eq!(link.data(), None);
-```
+let original = Link::new("Docs", "https://example.com")
+    .unwrap()
+    .with_class("chip")
+    .with_target(LinkTarget::Blank)
+    .with_prompt("Open docs")
+    .with_data("id", "abc");
 
-## Roundtrip Considerations
+let markdown = original.to_markdown(false);
+let reparsed = Link::try_from(markdown.as_str()).unwrap();
 
-When converting between formats, some attributes may be lost:
-
-| Attribute | HTML → Link | Markdown → Link | Link → HTML | Link → Markdown |
-|-----------|-------------|-----------------|-------------|-----------------|
-| `href` | ✅ | ✅ | ✅ | ✅ |
-| `display` | ✅ | ✅ | ✅ | ✅ |
-| `title` | ✅ | ✅ | ✅ | ✅ |
-| `class` | ✅ | ✅ (structured) | ✅ | ❌ |
-| `style` | ✅ | ✅ (structured) | ✅ | ❌ |
-| `target` | ✅ | ✅ (structured) | ✅ | ❌ |
-| `prompt` | ✅ | ✅ (structured) | ✅ | ❌ |
-| `data-*` | ✅ | ✅ (structured) | ✅ | ❌ |
-
-**Note:** The Markdown parser supports Structured Mode (e.g., `[text](url class="btn")`), but `to_markdown()` only outputs the standard format with title. This means:
-
-- **HTML → Markdown → Link**: You lose class, style, target, prompt, and data-* attributes
-- **Structured Markdown → Link → Markdown**: You lose those same attributes on output
-
-## Complete Example
-
-A realistic workflow showing the full lifecycle:
-
-```rust
-use darkmatter::render::{Link, LinkType};
-
-// Create a rich link with all attributes
-let original = Link::new("API Documentation", "https://docs.example.com/v2")
-    .with_class("doc-link external")
-    .with_style("color: #0066cc; font-weight: 500;")
-    .with_target("_blank")
-    .with_title("Open API reference (new tab)")
-    .with_prompt("External link - opens in new tab")
-    .with_data("section", "api")
-    .with_data("version", "v2");
-
-// Output for different contexts
-let terminal_output = original.to_terminal();  // For CLI tools
-let html_output = original.to_browser();       // For web apps
-let markdown_output = original.to_markdown();  // For documentation
-
-// Parse from different sources
-let from_html = Link::try_from(r#"<a href="https://docs.example.com/v2" class="doc-link">API Docs</a>"#).unwrap();
-let from_markdown = Link::try_from("[API Docs](https://docs.example.com/v2)").unwrap();
-
-// Use parsed style for programmatic access
-if let Some(styles) = original.parsed_style() {
-    if let Some(color) = styles.get("color") {
-        println!("Link color: {}", color);
-    }
-}
-
-// Check link type for routing logic
-match original.kind() {
-    LinkType::Url => println!("Web URL - use HTTP client"),
-    LinkType::File => println!("Local file - use filesystem"),
-}
-
-// Display trait for quick terminal output
-println!("Link: {}", original);
+assert_eq!(reparsed.class(), Some("chip"));
+assert_eq!(reparsed.target(), Some(&LinkTarget::Blank));
+assert_eq!(reparsed.prompt(), Some("Open docs"));
+assert_eq!(reparsed.data().get("id"), Some(&"abc".to_string()));
 ```

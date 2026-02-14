@@ -11,7 +11,7 @@ pub mod stylesheet;
 pub use image_ref::{
     FetchPriority, ImageDecoding, ImageLoading, ImageRef, ImageRefError, ReferrerPolicy,
 };
-pub use link::{Link, LinkType};
+pub use link::{Link, LinkError, LinkParseError, LinkTarget, LinkType};
 pub use stylesheet::{
     CssColor, CssColorProp, CssCustomProp, CssIntegerProp, CssProp, CssRaw, CssSizing,
     CssSizingMulti, CssSizingMultiProp, CssSizingProp, CssUnit, CssValue, CssValueKind, Stylesheet,

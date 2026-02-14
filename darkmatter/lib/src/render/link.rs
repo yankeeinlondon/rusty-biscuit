@@ -1,54 +1,80 @@
-/// BEL character - the most widely supported OSC sequence terminator.
-/// Used by: iTerm2, macOS Terminal, GNOME Terminal, Konsole, Kitty, Alacritty, WezTerm.
-const BEL: &str = "\x07";
+//! Type-safe hyperlinks with Markdown, HTML, and terminal rendering.
+//!
+//! `Link` provides strongly-typed link metadata while preserving ergonomic
+//! parsing and rendering for terminal, HTML, and Markdown outputs.
 
-/// The OSC 8 sequence to start a hyperlink: ESC ] 8 ; ; <params> ; <URI> BEL
-/// Note: params section is empty (between the two semicolons after 8).
-const LINK_START: &str = "\x1b]8;;";
-
-/// The OSC 8 sequence to close a hyperlink: ESC ] 8 ; ; BEL
-const LINK_END: &str = "\x1b]8;;\x07";
-
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::env;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::Renderable;
+use serde::{Deserialize, Serialize};
 use supports_hyperlinks::Stream;
+use thiserror::Error;
 
-/// Errors that can occur when parsing a link from a string.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LinkParseError {
-    /// Input doesn't match HTML or Markdown link format
+use crate::render::stylesheet::{Stylesheet, StylesheetError};
+
+/// BEL character used by OSC 8 hyperlinks.
+const BEL: &str = "\x07";
+/// OSC 8 hyperlink start sequence.
+const LINK_START: &str = "\x1b]8;;";
+/// OSC 8 hyperlink end sequence.
+const LINK_END: &str = "\x1b]8;;\x07";
+/// Marker used for markdown metadata payload titles.
+const MARKDOWN_METADATA_MARKER: &str = "darkmatter:link:v1";
+/// Env var used to control markdown metadata behavior.
+const LINK_METADATA_ENV: &str = "LINK_METADATA";
+
+/// Errors returned by [`Link`] construction, parsing, and validation.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum LinkError {
+    /// The URL/href was empty.
+    #[error("link href cannot be empty")]
+    EmptyHref,
+
+    /// Input does not match HTML or Markdown link syntax.
+    #[error("input is not a recognized link format")]
     UnrecognizedFormat,
-    /// HTML link is malformed
+
+    /// HTML input failed to parse.
+    #[error("malformed HTML link: {0}")]
     MalformedHtml(String),
-    /// Markdown link is malformed
+
+    /// Markdown input failed to parse.
+    #[error("malformed markdown link: {0}")]
     MalformedMarkdown(String),
-    /// Missing required href/url
-    MissingUrl,
+
+    /// Missing required href/url field.
+    #[error("link is missing href/url")]
+    MissingHref,
+
+    /// Invalid typed style declaration.
+    #[error("invalid CSS style: {0}")]
+    InvalidStyle(#[from] StylesheetError),
+
+    /// Invalid target value.
+    #[error("invalid link target `{value}`")]
+    InvalidTarget {
+        /// Received target value.
+        value: String,
+    },
 }
 
-impl std::fmt::Display for LinkParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnrecognizedFormat => write!(f, "Input is not a recognized link format"),
-            Self::MalformedHtml(msg) => write!(f, "Malformed HTML link: {msg}"),
-            Self::MalformedMarkdown(msg) => write!(f, "Malformed Markdown link: {msg}"),
-            Self::MissingUrl => write!(f, "Link is missing URL/href"),
-        }
-    }
-}
-
-impl std::error::Error for LinkParseError {}
+/// Backward-compatible parse error alias.
+pub type LinkParseError = LinkError;
 
 /// The type of resource a link points to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LinkType {
-    File,
+    /// HTTP or HTTPS URL.
     Url,
+    /// Non-HTTP resource such as relative or absolute file path.
+    File,
 }
 
-/// Determines the resource type by how the string starts.
 fn type_from_string(input: &str) -> LinkType {
     if input.starts_with("http://") || input.starts_with("https://") {
         LinkType::Url
@@ -57,56 +83,92 @@ fn type_from_string(input: &str) -> LinkType {
     }
 }
 
-/// A container for pairing display text with a link to some resource.
-///
-/// Supports multiple output formats: terminal (OSC 8), browser (HTML), and markdown.
-///
-/// ## Examples
-///
-/// ```
-/// use darkmatter::render::link::Link;
-///
-/// // Basic usage
-/// let link = Link::new("Click here", "https://example.com");
-///
-/// // With builder methods
-/// let styled_link = Link::new("Styled", "https://example.com")
-///     .with_class("btn btn-primary")
-///     .with_target("_blank")
-///     .with_title("Opens in new tab");
-///
-/// // From tuple
-/// let link: Link = ("Display", "https://url.com").into();
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Link {
-    /// The type of resource being linked to
-    kind: LinkType,
-    /// The text to display to the target device
-    display: String,
-    /// The link destination (URL or file path)
-    link_to: String,
-    /// Optional CSS class for HTML output
-    class: Option<String>,
-    /// Optional inline style for HTML output
-    style: Option<String>,
-    /// Optional target attribute for HTML (e.g., "_blank", "_self")
-    target: Option<String>,
-    /// Optional title/tooltip text (used in HTML and markdown)
-    title: Option<String>,
-    /// Optional prompt text for modern browser Popover API
-    prompt: Option<String>,
-    /// Optional data-* attributes for HTML output
-    data: Option<HashMap<String, String>>,
+/// Typed HTML target values for links.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum LinkTarget {
+    /// `_self`
+    Self_,
+    /// `_blank`
+    Blank,
+    /// `_parent`
+    Parent,
+    /// `_top`
+    Top,
+    /// Named browsing context.
+    Named(String),
 }
 
+impl LinkTarget {
+    /// Returns the target string value to use in HTML attributes.
+    pub fn as_attr_value(&self) -> Cow<'_, str> {
+        match self {
+            Self::Self_ => Cow::Borrowed("_self"),
+            Self::Blank => Cow::Borrowed("_blank"),
+            Self::Parent => Cow::Borrowed("_parent"),
+            Self::Top => Cow::Borrowed("_top"),
+            Self::Named(value) => Cow::Borrowed(value.as_str()),
+        }
+    }
+}
+
+impl fmt::Display for LinkTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_attr_value())
+    }
+}
+
+impl TryFrom<&str> for LinkTarget {
+    type Error = LinkError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(LinkError::InvalidTarget {
+                value: value.to_string(),
+            });
+        }
+
+        match trimmed.to_ascii_lowercase().as_str() {
+            "_self" => Ok(Self::Self_),
+            "_blank" => Ok(Self::Blank),
+            "_parent" => Ok(Self::Parent),
+            "_top" => Ok(Self::Top),
+            _ => Ok(Self::Named(trimmed.to_string())),
+        }
+    }
+}
+
+impl TryFrom<String> for LinkTarget {
+    type Error = LinkError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
+/// A rich hyperlink supporting terminal, HTML, and Markdown rendering.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Link {
+    kind: LinkType,
+    display: String,
+    link_to: String,
+    class: Option<String>,
+    style: Option<Stylesheet>,
+    target: Option<LinkTarget>,
+    title: Option<String>,
+    prompt: Option<String>,
+    data: BTreeMap<String, String>,
+}
+
+impl Eq for Link {}
+
 impl Link {
-    /// Creates a new link with the given display text and destination.
-    pub fn new(display: impl Into<String>, link: impl Into<String>) -> Self {
-        let link_to = link.into();
+    /// Creates a new link with validated href.
+    pub fn new(display: impl Into<String>, link: impl Into<String>) -> Result<Self, LinkError> {
+        let link_to = normalize_optional(link.into()).ok_or(LinkError::EmptyHref)?;
         let kind = type_from_string(&link_to);
 
-        Self {
+        Ok(Self {
             kind,
             display: display.into(),
             link_to,
@@ -115,209 +177,197 @@ impl Link {
             target: None,
             title: None,
             prompt: None,
-            data: None,
-        }
+            data: BTreeMap::new(),
+        })
     }
 
-    /// Creates a new link with a title that may contain structured content.
-    ///
-    /// The title is parsed to detect structured mode (key=value pairs) vs title mode:
-    /// - **Title Mode**: Simple string becomes the `title` attribute
-    /// - **Structured Mode**: Parses `class`, `style`, `prompt`, `title`, `target`, and `data-*`
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use darkmatter::render::link::Link;
-    ///
-    /// // Title mode - simple title
-    /// let link = Link::with_title_parsed("Click", "https://example.com", "A tooltip");
-    /// assert_eq!(link.title(), Some("A tooltip"));
-    ///
-    /// // Structured mode - key=value pairs
-    /// let link = Link::with_title_parsed(
-    ///     "Click",
-    ///     "https://example.com",
-    ///     "class='btn' style='color:red' prompt='hover text'"
-    /// );
-    /// assert_eq!(link.class(), Some("btn"));
-    /// assert_eq!(link.style(), Some("color:red"));
-    /// assert_eq!(link.prompt(), Some("hover text"));
-    /// ```
+    /// Creates a link and parses the markdown title segment as title or structured metadata.
     pub fn with_title_parsed(
         display: impl Into<String>,
         link: impl Into<String>,
         title: &str,
-    ) -> Self {
-        let mut result = Self::new(display, link);
+    ) -> Result<Self, LinkError> {
+        let mut result = Self::new(display, link)?;
         let title = title.trim();
-
         if title.is_empty() {
-            return result;
+            return Ok(result);
+        }
+
+        if let Some(metadata) = decode_markdown_metadata(title) {
+            result.apply_markdown_metadata(metadata);
+            return Ok(result);
         }
 
         if is_structured_mode(title) {
-            // Parse structured properties
-            let _ = parse_structured_props(&mut result, title);
+            parse_structured_props(&mut result, title);
         } else {
-            // Title mode - use as plain title
-            result.title = Some(parse_title_value(title));
+            result.title = normalize_optional(parse_title_value(title));
         }
 
-        result
+        Ok(result)
     }
 
-    // -------------------------------------------------------------------------
-    // Builder methods
-    // -------------------------------------------------------------------------
+    /// Sets display text.
+    pub fn with_display(mut self, display: impl Into<String>) -> Self {
+        self.display = display.into();
+        self
+    }
 
-    /// Sets the CSS class attribute for HTML output.
+    /// Sets href and updates the computed link type.
+    pub fn with_href(mut self, href: impl Into<String>) -> Result<Self, LinkError> {
+        let href = normalize_optional(href.into()).ok_or(LinkError::EmptyHref)?;
+        self.kind = type_from_string(&href);
+        self.link_to = href;
+        Ok(self)
+    }
+
+    /// Sets CSS class.
     pub fn with_class(mut self, class: impl Into<String>) -> Self {
-        self.class = Some(class.into());
+        self.class = normalize_optional(class.into());
         self
     }
 
-    /// Sets the inline style attribute for HTML output.
-    pub fn with_style(mut self, style: impl Into<String>) -> Self {
-        self.style = Some(style.into());
+    /// Sets typed inline stylesheet.
+    pub fn with_style(mut self, style: Stylesheet) -> Self {
+        self.style = if style.is_empty() { None } else { Some(style) };
         self
     }
 
-    /// Sets the target attribute for HTML output (e.g., "_blank").
-    pub fn with_target(mut self, target: impl Into<String>) -> Self {
-        self.target = Some(target.into());
+    /// Sets inline stylesheet from CSS text.
+    pub fn with_style_css(mut self, style: impl Into<String>) -> Result<Self, LinkError> {
+        let parsed = Stylesheet::try_from(style.into().as_str())?;
+        self.style = if parsed.is_empty() {
+            None
+        } else {
+            Some(parsed)
+        };
+        Ok(self)
+    }
+
+    /// Sets typed target.
+    pub fn with_target(mut self, target: LinkTarget) -> Self {
+        self.target = Some(target);
         self
     }
 
-    /// Sets the title/tooltip text (used in HTML and markdown).
+    /// Sets target from raw string.
+    pub fn with_target_str(mut self, target: impl Into<String>) -> Result<Self, LinkError> {
+        self.target = Some(LinkTarget::try_from(target.into())?);
+        Ok(self)
+    }
+
+    /// Sets title text.
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
-        self.title = Some(title.into());
+        self.title = normalize_optional(title.into());
         self
     }
 
-    /// Sets the prompt text for modern browser Popover API.
+    /// Sets optional prompt text.
     pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.prompt = Some(prompt.into());
+        self.prompt = normalize_optional(prompt.into());
         self
     }
 
-    /// Adds a data-* attribute for HTML output.
+    /// Adds a `data-*` attribute.
     pub fn with_data(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.data
-            .get_or_insert_with(HashMap::new)
-            .insert(key.into(), value.into());
+        if let Some(key) = normalize_data_key(key.into()) {
+            self.data.insert(key, value.into());
+        }
         self
     }
 
-    /// Sets all data-* attributes from a HashMap.
-    pub fn with_data_map(mut self, data: HashMap<String, String>) -> Self {
-        self.data = Some(data);
+    /// Replaces all `data-*` attributes.
+    pub fn with_data_map(mut self, data: BTreeMap<String, String>) -> Self {
+        self.data = data
+            .into_iter()
+            .filter_map(|(k, v)| normalize_data_key(k).map(|nk| (nk, v)))
+            .collect();
         self
     }
 
-    // -------------------------------------------------------------------------
-    // Getters
-    // -------------------------------------------------------------------------
-
-    /// Returns the link destination (URL or file path).
+    /// Returns href.
     pub fn href(&self) -> &str {
         &self.link_to
     }
 
-    /// Returns the display text.
+    /// Returns display text (terminal representation may include ANSI escapes).
     pub fn display(&self) -> &str {
         &self.display
     }
 
-    /// Returns the link type.
+    /// Returns display text with ANSI removed.
+    pub fn display_plain(&self) -> String {
+        strip_ansi_sequences(&self.display)
+    }
+
+    /// Returns computed link type.
     pub fn kind(&self) -> LinkType {
         self.kind
     }
 
-    /// Returns the CSS class if set.
+    /// Returns class if set.
     pub fn class(&self) -> Option<&str> {
         self.class.as_deref()
     }
 
-    /// Returns the inline style if set.
-    pub fn style(&self) -> Option<&str> {
-        self.style.as_deref()
+    /// Returns typed style if set.
+    pub fn style(&self) -> Option<&Stylesheet> {
+        self.style.as_ref()
     }
 
-    /// Returns the target attribute if set.
-    pub fn target(&self) -> Option<&str> {
-        self.target.as_deref()
+    /// Returns style as inline CSS string if set.
+    pub fn style_css(&self) -> Option<String> {
+        style_inline_css(self.style.as_ref())
     }
 
-    /// Returns the title/tooltip if set.
+    /// Returns target if set.
+    pub fn target(&self) -> Option<&LinkTarget> {
+        self.target.as_ref()
+    }
+
+    /// Returns target as HTML attribute value if set.
+    pub fn target_attr(&self) -> Option<String> {
+        self.target.as_ref().map(ToString::to_string)
+    }
+
+    /// Returns title if set.
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
     }
 
-    /// Returns the prompt text if set.
+    /// Returns title with ANSI removed if set.
+    pub fn title_plain(&self) -> Option<String> {
+        self.title
+            .as_ref()
+            .and_then(|t| normalize_optional(strip_ansi_sequences(t)))
+    }
+
+    /// Returns prompt if set.
     pub fn prompt(&self) -> Option<&str> {
         self.prompt.as_deref()
     }
 
-    /// Returns the data-* attributes if any are set.
-    pub fn data(&self) -> Option<&HashMap<String, String>> {
-        self.data.as_ref()
+    /// Returns data map (`data-*` keys without prefix).
+    pub fn data(&self) -> &BTreeMap<String, String> {
+        &self.data
     }
 
-    /// Parses the inline style string into a HashMap of property-value pairs.
-    ///
-    /// Returns `None` if no style is set. Property names are normalized to lowercase.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use darkmatter::render::link::Link;
-    ///
-    /// let link = Link::new("Click", "https://example.com")
-    ///     .with_style("color: red; font-size: 14px");
-    ///
-    /// let parsed = link.parsed_style().unwrap();
-    /// assert_eq!(parsed.get("color"), Some(&"red".to_string()));
-    /// assert_eq!(parsed.get("font-size"), Some(&"14px".to_string()));
-    /// ```
-    pub fn parsed_style(&self) -> Option<HashMap<String, String>> {
-        self.style.as_ref().map(|s| parse_css_style(s))
+    /// Parses style into property-value map for diagnostics.
+    pub fn parsed_style(&self) -> Option<BTreeMap<String, String>> {
+        self.style_css().map(|style| parse_css_style(&style))
     }
 
-    // -------------------------------------------------------------------------
-    // Convenience methods
-    // -------------------------------------------------------------------------
-
-    /// Returns true if this link points to a URL (http/https).
+    /// Returns `true` for HTTP/HTTPS links.
     pub fn is_url(&self) -> bool {
         self.kind == LinkType::Url
     }
 
-    /// Returns true if this link points to a file.
+    /// Returns `true` for non-HTTP links.
     pub fn is_file(&self) -> bool {
         self.kind == LinkType::File
     }
 
-    // -------------------------------------------------------------------------
-    // Output methods
-    // -------------------------------------------------------------------------
-
-    /// Renders the link for terminal output using OSC 8 escape sequences.
-    ///
-    /// Uses the BEL character (`\x07`) as the sequence terminator, which has
-    /// the widest terminal support (iTerm2, macOS Terminal, GNOME Terminal,
-    /// Konsole, Kitty, Alacritty, WezTerm, and others).
-    ///
-    /// ## Format
-    ///
-    /// ```text
-    /// ESC ] 8 ; ; <URI> BEL <display text> ESC ] 8 ; ; BEL
-    /// ```
-    ///
-    /// ## Returns
-    ///
-    /// If the terminal supports hyperlinks, outputs a clickable link.
-    /// Otherwise, outputs the display text followed by the URL in brackets.
+    /// Renders an OSC 8 hyperlink with capability fallback.
     pub fn to_terminal(&self) -> String {
         if supports_hyperlinks::on(Stream::Stdout) {
             format!(
@@ -329,16 +379,7 @@ impl Link {
         }
     }
 
-    /// Renders the link as an OSC 8 hyperlink without checking terminal support.
-    ///
-    /// Use this when you've already verified terminal support or want to force
-    /// hyperlink output regardless of detection.
-    ///
-    /// ## Format
-    ///
-    /// ```text
-    /// ESC ] 8 ; ; <URI> BEL <display text> ESC ] 8 ; ; BEL
-    /// ```
+    /// Renders an OSC 8 hyperlink without capability checks.
     pub fn to_terminal_unchecked(&self) -> String {
         format!(
             "{}{}{}{}{}",
@@ -346,142 +387,222 @@ impl Link {
         )
     }
 
-    /// Renders the link as an HTML anchor element.
-    ///
-    /// Includes class, style, target, title, prompt, and data-* attributes when set.
-    /// All values are HTML-escaped to prevent XSS.
+    /// Renders as HTML `<a ...>...</a>`.
+    pub fn to_html(&self) -> String {
+        let mut attrs = Vec::new();
+        attrs.push(format!(r#"href="{}""#, html_escape(&self.link_to)));
+
+        if let Some(class) = &self.class {
+            attrs.push(format!(r#"class="{}""#, html_escape(class)));
+        }
+
+        if let Some(style) = self.style_css() {
+            attrs.push(format!(r#"style="{}""#, html_escape(&style)));
+        }
+
+        if let Some(target) = &self.target {
+            attrs.push(format!(r#"target="{}""#, html_escape(&target.to_string())));
+        }
+
+        if let Some(title) = self.title_plain() {
+            attrs.push(format!(r#"title="{}""#, html_escape(&title)));
+        }
+
+        if let Some(prompt) = self
+            .prompt
+            .as_ref()
+            .and_then(|p| normalize_optional(strip_ansi_sequences(p)))
+        {
+            attrs.push(format!(r#"data-prompt="{}""#, html_escape(&prompt)));
+        }
+
+        for (key, value) in &self.data {
+            attrs.push(format!(
+                r#"data-{}="{}""#,
+                html_escape(key),
+                html_escape(value)
+            ));
+        }
+
+        format!(
+            "<a {}>{}</a>",
+            attrs.join(" "),
+            html_escape(&self.display_plain())
+        )
+    }
+
+    /// Backward-compatible alias for [`Link::to_html`].
     pub fn to_browser(&self) -> String {
-        let mut attrs = format!(r#"href="{}""#, html_escape(&self.link_to));
+        self.to_html()
+    }
 
-        maybe_attr(&mut attrs, "class", &self.class);
-        maybe_attr(&mut attrs, "style", &self.style);
-        maybe_attr(&mut attrs, "target", &self.target);
-        maybe_attr(&mut attrs, "title", &self.title);
-
-        if let Some(prompt) = &self.prompt {
-            attrs.push_str(&format!(r#" data-prompt="{}""#, html_escape(prompt)));
+    /// Renders Markdown with policy-driven metadata handling.
+    ///
+    /// When extended metadata exists (class/style/target/prompt/data):
+    /// - `with_inline=true` => inline HTML
+    /// - env `LINK_METADATA=inline` => inline HTML
+    /// - env `LINK_METADATA=strip` => strip metadata
+    /// - otherwise => lossless metadata payload in markdown title
+    pub fn to_markdown(&self, with_inline: bool) -> String {
+        if !self.has_extended_metadata() {
+            return self.render_markdown_basic(self.title_plain().as_deref());
         }
 
-        if let Some(data) = &self.data {
-            for (key, value) in data {
-                attrs.push_str(&format!(
-                    r#" data-{}="{}""#,
-                    html_escape(key),
-                    html_escape(value)
-                ));
+        match metadata_policy(with_inline) {
+            MetadataPolicy::Inline => self.to_html(),
+            MetadataPolicy::Strip => self.render_markdown_basic(self.title_plain().as_deref()),
+            MetadataPolicy::Lossless => {
+                let encoded = self
+                    .to_markdown_metadata_package()
+                    .and_then(|pkg| encode_markdown_metadata(&pkg));
+                self.render_markdown_basic(encoded.as_deref())
             }
         }
-
-        format!("<a {}>{}</a>", attrs, html_escape(&self.display))
     }
 
-    /// Renders the link as markdown: `[display](url)` or `[display](url "title")`.
-    ///
-    /// Special characters in display and URL are escaped appropriately.
-    pub fn to_markdown(&self) -> String {
-        let display = self.display.replace('[', "\\[").replace(']', "\\]");
-        let link = self.link_to.replace('(', "%28").replace(')', "%29");
+    /// Backward-compatible alias for legacy callers.
+    pub fn to_markdown_legacy(&self) -> String {
+        self.to_markdown(false)
+    }
 
-        if let Some(title) = &self.title {
-            let escaped_title = title.replace('"', "\\\"");
-            format!("[{}]({} \"{}\")", display, link, escaped_title)
-        } else {
-            format!("[{}]({})", display, link)
+    /// Renders HTML with Popover companion element when prompt is present.
+    pub fn to_html_with_popover(&self) -> Option<(String, String)> {
+        let prompt = self
+            .prompt
+            .as_ref()
+            .and_then(|p| normalize_optional(strip_ansi_sequences(p)))?;
+
+        let id = generate_popover_id(&self.link_to, &self.display);
+        let mut attrs = vec![
+            format!(r#"href="{}""#, html_escape(&self.link_to)),
+            format!(r#"interestfor="{}""#, id),
+        ];
+
+        if let Some(class) = &self.class {
+            attrs.push(format!(r#"class="{}""#, html_escape(class)));
         }
+
+        if let Some(style) = self.style_css() {
+            attrs.push(format!(r#"style="{}""#, html_escape(&style)));
+        }
+
+        if let Some(target) = &self.target {
+            attrs.push(format!(r#"target="{}""#, html_escape(&target.to_string())));
+        }
+
+        if let Some(title) = self.title_plain() {
+            attrs.push(format!(r#"title="{}""#, html_escape(&title)));
+        }
+
+        for (key, value) in &self.data {
+            attrs.push(format!(
+                r#"data-{}="{}""#,
+                html_escape(key),
+                html_escape(value)
+            ));
+        }
+
+        let anchor = format!(
+            "<a {}>{}</a>",
+            attrs.join(" "),
+            html_escape(&self.display_plain())
+        );
+        let popover = format!(
+            r#"<div id="{}" popover="hint">{}</div>"#,
+            id,
+            html_escape(&prompt)
+        );
+
+        Some((anchor, popover))
     }
 
-    /// Renders the link as HTML with a modern Popover API companion element.
-    ///
-    /// Returns `Some((anchor_html, popover_html))` when a prompt is set, `None` otherwise.
-    ///
-    /// Uses the experimental `interestfor` attribute for hover/focus activation.
-    /// The popover uses `popover="hint"` for tooltip-like behavior.
-    ///
-    /// ## Browser Support
-    ///
-    /// The `interestfor` attribute is experimental (as of 2025). Use feature detection:
-    ///
-    /// ```javascript
-    /// const supported = 'interestForElement' in HTMLButtonElement.prototype;
-    /// ```
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use darkmatter::render::link::Link;
-    ///
-    /// let link = Link::new("Click here", "https://example.com")
-    ///     .with_prompt("Opens example.com");
-    ///
-    /// if let Some((anchor, popover)) = link.to_browser_with_popover() {
-    ///     // anchor: <a href="..." interestfor="popover-...">Click here</a>
-    ///     // popover: <div id="popover-..." popover="hint">Opens example.com</div>
-    ///     println!("{}", anchor);
-    ///     println!("{}", popover);
-    /// }
-    /// ```
+    /// Backward-compatible alias for legacy callers.
     pub fn to_browser_with_popover(&self) -> Option<(String, String)> {
-        self.prompt.as_ref().map(|prompt_text| {
-            let id = generate_popover_id(&self.link_to, &self.display);
+        self.to_html_with_popover()
+    }
 
-            // Build anchor with interestfor attribute
-            let mut attrs = format!(
-                r#"href="{}" interestfor="{}""#,
-                html_escape(&self.link_to),
-                id
-            );
+    fn has_extended_metadata(&self) -> bool {
+        self.class.is_some()
+            || self.style.as_ref().is_some_and(|style| !style.is_empty())
+            || self.target.is_some()
+            || self.prompt.is_some()
+            || !self.data.is_empty()
+    }
 
-            if let Some(class) = &self.class {
-                attrs.push_str(&format!(r#" class="{}""#, html_escape(class)));
-            }
+    fn render_markdown_basic(&self, title: Option<&str>) -> String {
+        let display = escape_markdown_display(&self.display_plain());
+        let href = escape_markdown_url(&self.link_to);
 
-            if let Some(style) = &self.style {
-                attrs.push_str(&format!(r#" style="{}""#, html_escape(style)));
-            }
+        if let Some(title) = title {
+            let escaped_title = title.replace('"', "\\\"");
+            format!("[{display}]({href} \"{escaped_title}\")")
+        } else {
+            format!("[{display}]({href})")
+        }
+    }
 
-            if let Some(target) = &self.target {
-                attrs.push_str(&format!(r#" target="{}""#, html_escape(target)));
-            }
+    fn to_markdown_metadata_package(&self) -> Option<LinkMarkdownMetadataPackage> {
+        if !self.has_extended_metadata() {
+            return None;
+        }
 
-            if let Some(title) = &self.title {
-                attrs.push_str(&format!(r#" title="{}""#, html_escape(title)));
-            }
+        let package = LinkMarkdownMetadataPackage {
+            marker: MARKDOWN_METADATA_MARKER.to_string(),
+            class: self.class.clone(),
+            style: self.style_css(),
+            target: self.target.as_ref().map(ToString::to_string),
+            title: self.title_plain(),
+            prompt: self
+                .prompt
+                .as_ref()
+                .and_then(|p| normalize_optional(strip_ansi_sequences(p))),
+            data: self.data.clone(),
+        };
 
-            if let Some(data) = &self.data {
-                for (key, value) in data {
-                    attrs.push_str(&format!(
-                        r#" data-{}="{}""#,
-                        html_escape(key),
-                        html_escape(value)
-                    ));
-                }
-            }
+        if package.has_payload() {
+            Some(package)
+        } else {
+            None
+        }
+    }
 
-            let anchor = format!("<a {}>{}</a>", attrs, html_escape(&self.display));
-            let popover = format!(
-                r#"<div id="{}" popover="hint">{}</div>"#,
-                id,
-                html_escape(prompt_text)
-            );
+    fn apply_markdown_metadata(&mut self, metadata: LinkMarkdownMetadataPackage) {
+        if metadata.marker != MARKDOWN_METADATA_MARKER {
+            return;
+        }
 
-            (anchor, popover)
-        })
+        self.class = metadata.class.and_then(normalize_optional);
+        self.title = metadata.title.and_then(normalize_optional);
+        self.prompt = metadata.prompt.and_then(normalize_optional);
+
+        if let Some(style) = metadata.style.and_then(normalize_optional)
+            && let Ok(parsed) = Stylesheet::try_from(style.as_str())
+            && !parsed.is_empty()
+        {
+            self.style = Some(parsed);
+        }
+
+        if let Some(target) = metadata
+            .target
+            .and_then(normalize_optional)
+            .and_then(|t| LinkTarget::try_from(t.as_str()).ok())
+        {
+            self.target = Some(target);
+        }
+
+        if !metadata.data.is_empty() {
+            self.data.extend(metadata.data);
+        }
     }
 }
 
-// -----------------------------------------------------------------------------
-// Trait implementations
-// -----------------------------------------------------------------------------
-
 impl fmt::Display for Link {
-    /// Formats the link using terminal representation.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_terminal())
     }
 }
 
 impl Hash for Link {
-    /// Hashes based on kind, display, and link_to (the identity fields).
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.kind.hash(state);
         self.display.hash(state);
@@ -496,7 +617,6 @@ impl PartialOrd for Link {
 }
 
 impl Ord for Link {
-    /// Orders by link destination, then by display text.
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.link_to
             .cmp(&other.link_to)
@@ -504,191 +624,262 @@ impl Ord for Link {
     }
 }
 
-impl<S1, S2> From<(S1, S2)> for Link
-where
-    S1: Into<String>,
-    S2: Into<String>,
-{
-    /// Creates a Link from a tuple of (display, url).
-    fn from((display, link): (S1, S2)) -> Self {
-        Link::new(display, link)
-    }
-}
+impl TryFrom<String> for Link {
+    type Error = LinkError;
 
-// -----------------------------------------------------------------------------
-// Helper functions
-// -----------------------------------------------------------------------------
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let trimmed = value.trim();
 
-/// Escapes HTML special characters in a string.
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#x27;")
-}
-
-/// Appends an HTML attribute to the builder if the value is Some.
-///
-/// ## Arguments
-///
-/// * `attrs` - String buffer to append to
-/// * `name` - Attribute name (e.g., "class", "style")
-/// * `value` - Optional attribute value
-#[inline]
-fn maybe_attr(attrs: &mut String, name: &str, value: &Option<String>) {
-    if let Some(v) = value {
-        attrs.push_str(&format!(r#" {}="{}""#, name, html_escape(v)));
-    }
-}
-
-/// Unescapes HTML entities back to their original characters.
-fn html_unescape(s: &str) -> String {
-    s.replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#x27;", "'")
-        .replace("&#39;", "'")
-}
-
-/// Parses a CSS style string into a HashMap of property-value pairs.
-///
-/// Handles edge cases including:
-/// - Extra whitespace around properties and values
-/// - Trailing semicolons
-/// - Empty declarations (consecutive semicolons)
-/// - Case-insensitive property names (normalized to lowercase)
-///
-/// ## Examples
-///
-/// ```ignore
-/// let styles = parse_css_style("color: red; font-size: 14px");
-/// assert_eq!(styles.get("color"), Some(&"red".to_string()));
-/// assert_eq!(styles.get("font-size"), Some(&"14px".to_string()));
-/// ```
-fn parse_css_style(style: &str) -> HashMap<String, String> {
-    let mut result = HashMap::new();
-    for declaration in style.split(';') {
-        let trimmed = declaration.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Some(colon_pos) = trimmed.find(':') {
-            let key = trimmed[..colon_pos].trim().to_lowercase();
-            let value = trimmed[colon_pos + 1..].trim();
-            if !key.is_empty() && !value.is_empty() {
-                result.insert(key, value.to_string());
-            }
+        if trimmed.starts_with('<') {
+            parse_html_link(trimmed)
+        } else if trimmed.starts_with('[') {
+            parse_markdown_link(trimmed)
+        } else {
+            Err(LinkError::UnrecognizedFormat)
         }
     }
-    result
 }
 
-/// Generates a unique popover ID based on the URL and display text.
-///
-/// Uses a hash of the combined values to ensure uniqueness while remaining
-/// deterministic for the same input.
-fn generate_popover_id(url: &str, display: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    let mut hasher = DefaultHasher::new();
-    url.hash(&mut hasher);
-    display.hash(&mut hasher);
-    format!("popover-{:x}", hasher.finish())
+impl TryFrom<&str> for Link {
+    type Error = LinkError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::try_from(value.to_string())
+    }
 }
 
-// -----------------------------------------------------------------------------
-// Link Parsing
-// -----------------------------------------------------------------------------
+impl TryFrom<&String> for Link {
+    type Error = LinkError;
 
-/// Parses an HTML anchor element into a Link.
-///
-/// Expected format: `<a href="URL" [attr="value"]*>DISPLAY</a>`
-fn parse_html_link(input: &str) -> Result<Link, LinkParseError> {
+    fn try_from(value: &String) -> Result<Self, Self::Error> {
+        Self::try_from(value.as_str())
+    }
+}
+
+impl From<(&str, &str)> for Link {
+    fn from((display, link): (&str, &str)) -> Self {
+        Link::new(display, link).expect("Link tuple conversion requires a non-empty href")
+    }
+}
+
+impl From<(&String, &String)> for Link {
+    fn from((display, link): (&String, &String)) -> Self {
+        Link::new(display.as_str(), link.as_str())
+            .expect("Link tuple conversion requires a non-empty href")
+    }
+}
+
+impl From<(&str, &Prose)> for Link {
+    fn from((href, display): (&str, &Prose)) -> Self {
+        let rendered_display = display.render(None);
+        Link::new(rendered_display, href).expect("Link tuple conversion requires a non-empty href")
+    }
+}
+
+impl From<(&String, &Prose)> for Link {
+    fn from((href, display): (&String, &Prose)) -> Self {
+        let rendered_display = display.render(None);
+        Link::new(rendered_display, href.as_str())
+            .expect("Link tuple conversion requires a non-empty href")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MetadataPolicy {
+    Inline,
+    Strip,
+    Lossless,
+}
+
+fn metadata_policy(with_inline: bool) -> MetadataPolicy {
+    if with_inline {
+        return MetadataPolicy::Inline;
+    }
+
+    let value = env::var(LINK_METADATA_ENV)
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase());
+
+    match value.as_deref() {
+        Some("inline") => MetadataPolicy::Inline,
+        Some("strip") => MetadataPolicy::Strip,
+        _ => MetadataPolicy::Lossless,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LinkMarkdownMetadataPackage {
+    #[serde(rename = "__link_ref")]
+    marker: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    class: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    style: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    data: BTreeMap<String, String>,
+}
+
+impl LinkMarkdownMetadataPackage {
+    fn has_payload(&self) -> bool {
+        self.class.is_some()
+            || self.style.is_some()
+            || self.target.is_some()
+            || self.title.is_some()
+            || self.prompt.is_some()
+            || !self.data.is_empty()
+    }
+}
+
+fn parse_html_link(input: &str) -> Result<Link, LinkError> {
     let input = input.trim();
 
-    // Must start with <a and end with </a>
     if !input.starts_with("<a ") && !input.starts_with("<a>") {
-        return Err(LinkParseError::MalformedHtml(
-            "Link must start with '<a ' or '<a>'".into(),
+        return Err(LinkError::MalformedHtml(
+            "link must start with '<a ' or '<a>'".to_string(),
         ));
     }
 
     if !input.ends_with("</a>") {
-        return Err(LinkParseError::MalformedHtml(
-            "Link must end with '</a>'".into(),
+        return Err(LinkError::MalformedHtml(
+            "link must end with '</a>'".to_string(),
         ));
     }
 
-    // Find the end of the opening tag
     let Some(tag_end) = input.find('>') else {
-        return Err(LinkParseError::MalformedHtml(
-            "Could not find end of opening tag".into(),
+        return Err(LinkError::MalformedHtml(
+            "could not find end of opening tag".to_string(),
         ));
     };
 
     let opening_tag = &input[..tag_end];
     let display_start = tag_end + 1;
-    let display_end = input.len() - 4; // Remove "</a>"
+    let display_end = input.len() - 4;
 
-    if display_start >= display_end {
-        return Err(LinkParseError::MalformedHtml("Empty display text".into()));
+    if display_start > display_end {
+        return Err(LinkError::MalformedHtml("empty display text".to_string()));
     }
 
     let display = html_unescape(&input[display_start..display_end]);
-
-    // Parse attributes from the opening tag
-    let attrs_str = &opening_tag[2..].trim(); // Remove "<a"
+    let attrs_str = opening_tag[2..].trim();
     let attrs = parse_html_attributes(attrs_str);
 
-    let href = attrs.get("href").ok_or(LinkParseError::MissingUrl)?.clone();
+    let href = attrs
+        .get("href")
+        .cloned()
+        .and_then(normalize_optional)
+        .ok_or(LinkError::MissingHref)?;
 
-    let mut link = Link::new(display, href);
+    let mut link = Link::new(display, href)?;
 
-    if let Some(class) = attrs.get("class") {
-        link = link.with_class(class);
+    if let Some(class) = attrs
+        .get("class")
+        .and_then(|v| normalize_optional(v.clone()))
+    {
+        link.class = Some(class);
     }
 
-    if let Some(style) = attrs.get("style") {
-        link = link.with_style(style);
+    if let Some(style) = attrs.get("style")
+        && let Ok(parsed) = Stylesheet::try_from(style.as_str())
+        && !parsed.is_empty()
+    {
+        link.style = Some(parsed);
     }
 
-    if let Some(target) = attrs.get("target") {
-        link = link.with_target(target);
+    if let Some(target) = attrs
+        .get("target")
+        .and_then(|v| normalize_optional(v.clone()))
+        .and_then(|v| LinkTarget::try_from(v.as_str()).ok())
+    {
+        link.target = Some(target);
     }
 
-    if let Some(title) = attrs.get("title") {
-        link = link.with_title(title);
+    if let Some(title) = attrs
+        .get("title")
+        .and_then(|v| normalize_optional(v.clone()))
+    {
+        link.title = Some(title);
     }
 
-    // Handle data-prompt separately (maps to prompt field)
-    if let Some(prompt) = attrs.get("data-prompt") {
-        link = link.with_prompt(prompt);
+    if let Some(prompt) = attrs
+        .get("data-prompt")
+        .and_then(|v| normalize_optional(v.clone()))
+    {
+        link.prompt = Some(prompt);
     }
 
-    // Handle other data-* attributes
-    for (key, value) in &attrs {
-        if key.starts_with("data-") && key != "data-prompt" {
-            let data_key = &key[5..]; // Remove "data-" prefix
-            link = link.with_data(data_key, value);
+    for (key, value) in attrs {
+        if let Some(data_key) = key.strip_prefix("data-") {
+            if data_key == "prompt" || data_key.is_empty() {
+                continue;
+            }
+            link.data.insert(data_key.to_string(), value);
         }
     }
 
     Ok(link)
 }
 
-/// Parses HTML attributes from a string like `href="url" class="foo"`.
-fn parse_html_attributes(input: &str) -> HashMap<String, String> {
-    let mut attrs = HashMap::new();
+fn parse_markdown_link(input: &str) -> Result<Link, LinkError> {
+    let input = input.trim();
+    if !input.starts_with('[') {
+        return Err(LinkError::MalformedMarkdown(
+            "link must start with '['".to_string(),
+        ));
+    }
+
+    let display_end = find_closing_bracket(input, 0)?;
+    let display = unescape_markdown_display(&input[1..display_end]);
+
+    let rest = &input[display_end + 1..];
+    if !rest.starts_with('(') {
+        return Err(LinkError::MalformedMarkdown(
+            "expected '(' after display text".to_string(),
+        ));
+    }
+
+    let paren_end = find_closing_paren(rest, 0)?;
+    let paren_content = &rest[1..paren_end];
+
+    let (url, trailing) = extract_url(paren_content);
+    let url = normalize_optional(url).ok_or(LinkError::MissingHref)?;
+    let url = decode_markdown_url(&url);
+
+    let mut link = Link::new(display, url)?;
+
+    let trailing = trailing.trim();
+    if trailing.is_empty() {
+        return Ok(link);
+    }
+
+    if let Some(metadata) = decode_markdown_metadata(&parse_title_value(trailing)) {
+        link.apply_markdown_metadata(metadata);
+        return Ok(link);
+    }
+
+    if is_structured_mode(trailing) {
+        parse_structured_props(&mut link, trailing);
+    } else {
+        link.title = normalize_optional(parse_title_value(trailing));
+    }
+
+    Ok(link)
+}
+
+fn parse_html_attributes(input: &str) -> BTreeMap<String, String> {
+    let mut attrs = BTreeMap::new();
     let mut chars = input.chars().peekable();
 
     while chars.peek().is_some() {
-        // Skip whitespace
         while chars.peek().is_some_and(|c| c.is_whitespace()) {
             chars.next();
         }
 
-        // Read attribute name
         let mut name = String::new();
         while let Some(&c) = chars.peek() {
             if c == '=' || c.is_whitespace() {
@@ -702,26 +893,22 @@ fn parse_html_attributes(input: &str) -> HashMap<String, String> {
             break;
         }
 
-        // Skip whitespace and equals sign
         while chars.peek().is_some_and(|c| c.is_whitespace()) {
             chars.next();
         }
 
         if chars.peek() != Some(&'=') {
-            // Boolean attribute with no value
             attrs.insert(name.to_lowercase(), String::new());
             continue;
         }
-        chars.next(); // consume '='
+        chars.next();
 
-        // Skip whitespace after equals
         while chars.peek().is_some_and(|c| c.is_whitespace()) {
             chars.next();
         }
 
-        // Read attribute value
         let value = if chars.peek() == Some(&'"') || chars.peek() == Some(&'\'') {
-            let quote = chars.next().unwrap();
+            let quote = chars.next().unwrap_or('"');
             let mut val = String::new();
             for c in chars.by_ref() {
                 if c == quote {
@@ -731,7 +918,6 @@ fn parse_html_attributes(input: &str) -> HashMap<String, String> {
             }
             html_unescape(&val)
         } else {
-            // Unquoted value - read until whitespace
             let mut val = String::new();
             while let Some(&c) = chars.peek() {
                 if c.is_whitespace() {
@@ -749,95 +935,53 @@ fn parse_html_attributes(input: &str) -> HashMap<String, String> {
     attrs
 }
 
-/// Parses a Markdown link into a Link.
-///
-/// Supports formats:
-/// - `[display](url)`
-/// - `[display](url "title")` (Title Mode)
-/// - `[display](url key=value ...)` (Structured Mode)
-fn parse_markdown_link(input: &str) -> Result<Link, LinkParseError> {
-    let input = input.trim();
-
-    if !input.starts_with('[') {
-        return Err(LinkParseError::MalformedMarkdown(
-            "Link must start with '['".into(),
-        ));
-    }
-
-    // Find the matching closing bracket, handling escaped brackets
-    let display_end = find_closing_bracket(input, 0)?;
-    let display = unescape_markdown_display(&input[1..display_end]);
-
-    // After ], expect (
-    let rest = &input[display_end + 1..];
-    if !rest.starts_with('(') {
-        return Err(LinkParseError::MalformedMarkdown(
-            "Expected '(' after display text".into(),
-        ));
-    }
-
-    // Find the matching closing paren
-    let paren_content_start = 1;
-    let paren_end = find_closing_paren(rest, 0)?;
-    let paren_content = &rest[paren_content_start..paren_end];
-
-    // Parse the parenthesis content (URL and optional title/structured data)
-    parse_markdown_paren_content(display, paren_content)
-}
-
-/// Finds the index of the closing bracket `]` that matches the opening `[` at `start`.
-fn find_closing_bracket(input: &str, start: usize) -> Result<usize, LinkParseError> {
+fn find_closing_bracket(input: &str, start: usize) -> Result<usize, LinkError> {
     let bytes = input.as_bytes();
-    let mut depth = 0;
-    let mut i = start;
+    let mut depth = 0usize;
+    let mut idx = start;
 
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' if i + 1 < bytes.len() => {
-                // Skip escaped character
-                i += 2;
-            }
+    while idx < bytes.len() {
+        match bytes[idx] {
+            b'\\' if idx + 1 < bytes.len() => idx += 2,
             b'[' => {
                 depth += 1;
-                i += 1;
+                idx += 1;
             }
             b']' => {
-                depth -= 1;
+                depth = depth.saturating_sub(1);
                 if depth == 0 {
-                    return Ok(i);
+                    return Ok(idx);
                 }
-                i += 1;
+                idx += 1;
             }
-            _ => i += 1,
+            _ => idx += 1,
         }
     }
 
-    Err(LinkParseError::MalformedMarkdown(
-        "Unmatched '[' in link".into(),
+    Err(LinkError::MalformedMarkdown(
+        "unmatched '[' in link".to_string(),
     ))
 }
 
-/// Finds the index of the closing paren `)` that matches the opening `(` at position after `start`.
-fn find_closing_paren(input: &str, start: usize) -> Result<usize, LinkParseError> {
+fn find_closing_paren(input: &str, start: usize) -> Result<usize, LinkError> {
     let bytes = input.as_bytes();
-    let mut depth = 0;
-    let mut i = start;
+    let mut depth = 0usize;
+    let mut idx = start;
     let mut in_quotes = false;
     let mut quote_char = b'"';
 
-    while i < bytes.len() {
-        let b = bytes[i];
+    while idx < bytes.len() {
+        let b = bytes[idx];
 
         if in_quotes {
-            if b == b'\\' && i + 1 < bytes.len() {
-                // Skip escaped character in quotes
-                i += 2;
+            if b == b'\\' && idx + 1 < bytes.len() {
+                idx += 2;
                 continue;
             }
             if b == quote_char {
                 in_quotes = false;
             }
-            i += 1;
+            idx += 1;
             continue;
         }
 
@@ -845,85 +989,33 @@ fn find_closing_paren(input: &str, start: usize) -> Result<usize, LinkParseError
             b'"' | b'\'' => {
                 in_quotes = true;
                 quote_char = b;
-                i += 1;
+                idx += 1;
             }
             b'(' => {
                 depth += 1;
-                i += 1;
+                idx += 1;
             }
             b')' => {
-                depth -= 1;
+                depth = depth.saturating_sub(1);
                 if depth == 0 {
-                    return Ok(i);
+                    return Ok(idx);
                 }
-                i += 1;
+                idx += 1;
             }
-            _ => i += 1,
+            _ => idx += 1,
         }
     }
 
-    Err(LinkParseError::MalformedMarkdown(
-        "Unmatched '(' in link".into(),
+    Err(LinkError::MalformedMarkdown(
+        "unmatched '(' in link".to_string(),
     ))
 }
 
-/// Unescapes markdown display text (handles `\[` and `\]`).
-fn unescape_markdown_display(s: &str) -> String {
-    s.replace("\\[", "[").replace("\\]", "]")
-}
-
-/// Parses the content inside markdown link parentheses.
-///
-/// This content can be:
-/// - Just a URL: `https://example.com`
-/// - URL with title: `https://example.com "My Title"`
-/// - URL with structured props: `https://example.com class=foo prompt="click me"`
-fn parse_markdown_paren_content(display: String, content: &str) -> Result<Link, LinkParseError> {
-    let content = content.trim();
-
-    if content.is_empty() {
-        return Err(LinkParseError::MissingUrl);
-    }
-
-    // Split into URL and the rest (title or structured)
-    let (url, rest) = extract_url(content);
-
-    if url.is_empty() {
-        return Err(LinkParseError::MissingUrl);
-    }
-
-    // Unescape URL-encoded parentheses
-    let url = url.replace("%28", "(").replace("%29", ")");
-    let mut link = Link::new(display, url);
-
-    let rest = rest.trim();
-    if rest.is_empty() {
-        return Ok(link);
-    }
-
-    // Determine if this is Title Mode or Structured Mode
-    // Structured Mode: contains `key=value` patterns
-    // Title Mode: starts with a quoted string
-    if is_structured_mode(rest) {
-        parse_structured_props(&mut link, rest)?;
-    } else {
-        // Title Mode: parse as a single quoted or unquoted title
-        let title = parse_title_value(rest);
-        if !title.is_empty() {
-            link = link.with_title(title);
-        }
-    }
-
-    Ok(link)
-}
-
-/// Extracts the URL from the beginning of the parenthesis content.
-/// Returns (url, rest).
 fn extract_url(content: &str) -> (String, &str) {
+    let content = content.trim();
     let bytes = content.as_bytes();
     let mut i = 0;
 
-    // Handle angle-bracket URLs: <url>
     if bytes.first() == Some(&b'<') {
         i = 1;
         while i < bytes.len() && bytes[i] != b'>' {
@@ -934,10 +1026,8 @@ fn extract_url(content: &str) -> (String, &str) {
         }
     }
 
-    // Regular URL: read until whitespace
     while i < bytes.len() {
-        let b = bytes[i];
-        if b.is_ascii_whitespace() {
+        if bytes[i].is_ascii_whitespace() {
             break;
         }
         i += 1;
@@ -946,23 +1036,17 @@ fn extract_url(content: &str) -> (String, &str) {
     (content[..i].to_string(), &content[i..])
 }
 
-/// Determines if the rest of the content is in Structured Mode.
-///
-/// Structured Mode is detected if there's a `key=value` pattern.
 fn is_structured_mode(content: &str) -> bool {
     let content = content.trim();
 
-    // If it starts with a quote, it could be Title Mode with just a string
-    // But we need to check if there's a `=` that's not inside quotes
     let mut in_quotes = false;
     let mut quote_char = '"';
     let bytes = content.as_bytes();
-    let mut has_unquoted_equals = false;
 
     for (i, &b) in bytes.iter().enumerate() {
         if in_quotes {
             if b == b'\\' {
-                continue; // Skip next char
+                continue;
             }
             if b == quote_char as u8 {
                 in_quotes = false;
@@ -974,7 +1058,6 @@ fn is_structured_mode(content: &str) -> bool {
                     quote_char = b as char;
                 }
                 b'=' => {
-                    // Check if there's a valid key before this =
                     let before = &content[..i];
                     let key_part = before
                         .trim()
@@ -986,8 +1069,7 @@ fn is_structured_mode(content: &str) -> bool {
                             .chars()
                             .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
                     {
-                        has_unquoted_equals = true;
-                        break;
+                        return true;
                     }
                 }
                 _ => {}
@@ -995,15 +1077,13 @@ fn is_structured_mode(content: &str) -> bool {
         }
     }
 
-    has_unquoted_equals
+    false
 }
 
-/// Parses structured key=value properties and applies them to the link.
-fn parse_structured_props(link: &mut Link, content: &str) -> Result<(), LinkParseError> {
+fn parse_structured_props(link: &mut Link, content: &str) {
     let mut chars = content.chars().peekable();
 
     while chars.peek().is_some() {
-        // Skip whitespace and commas
         while chars.peek().is_some_and(|&c| c.is_whitespace() || c == ',') {
             chars.next();
         }
@@ -1012,7 +1092,6 @@ fn parse_structured_props(link: &mut Link, content: &str) -> Result<(), LinkPars
             break;
         }
 
-        // Read key
         let mut key = String::new();
         while let Some(&c) = chars.peek() {
             if c == '=' || c.is_whitespace() || c == ',' {
@@ -1026,112 +1105,93 @@ fn parse_structured_props(link: &mut Link, content: &str) -> Result<(), LinkPars
             break;
         }
 
-        // Skip whitespace
         while chars.peek().is_some_and(|c| c.is_whitespace()) {
             chars.next();
         }
 
-        // Expect =
         if chars.peek() != Some(&'=') {
-            // Key without value - skip
             continue;
         }
-        chars.next(); // consume '='
+        chars.next();
 
-        // Skip whitespace
         while chars.peek().is_some_and(|c| c.is_whitespace()) {
             chars.next();
         }
 
-        // Read value
         let value = if chars.peek() == Some(&'"') || chars.peek() == Some(&'\'') {
-            let quote = chars.next().unwrap();
-            let mut val = String::new();
+            let quote = chars.next().unwrap_or('"');
+            let mut value = String::new();
             while let Some(c) = chars.next() {
                 if c == '\\' {
-                    // Escaped character
                     if let Some(escaped) = chars.next() {
-                        val.push(escaped);
+                        value.push(escaped);
                     }
                 } else if c == quote {
                     break;
                 } else {
-                    val.push(c);
+                    value.push(c);
                 }
             }
-            val
+            value
         } else {
-            // Unquoted value - read until whitespace or comma
-            let mut val = String::new();
+            let mut value = String::new();
             while let Some(&c) = chars.peek() {
                 if c.is_whitespace() || c == ',' {
                     break;
                 }
-                val.push(c);
+                value.push(c);
                 chars.next();
             }
-            val
+            value
         };
 
-        // Apply the property to the link
-        apply_structured_prop(link, &key.to_lowercase(), value);
+        apply_structured_prop(link, key.trim(), value);
     }
-
-    Ok(())
 }
 
-/// Applies a structured property to the link based on the key.
 fn apply_structured_prop(link: &mut Link, key: &str, value: String) {
-    match key {
-        "title" => {
-            link.title = Some(value);
-        }
-        "prompt" => {
-            link.prompt = Some(value);
-        }
-        "class" => {
-            link.class = Some(value);
-        }
+    let key = key.to_ascii_lowercase();
+    match key.as_str() {
+        "title" => link.title = normalize_optional(value),
+        "prompt" => link.prompt = normalize_optional(value),
+        "class" => link.class = normalize_optional(value),
         "style" => {
-            link.style = Some(value);
+            if let Some(style) = normalize_optional(value)
+                && let Ok(parsed) = Stylesheet::try_from(style.as_str())
+                && !parsed.is_empty()
+            {
+                link.style = Some(parsed);
+            }
         }
         "target" => {
-            link.target = Some(value);
+            if let Some(target) = normalize_optional(value)
+                && let Ok(parsed) = LinkTarget::try_from(target.as_str())
+            {
+                link.target = Some(parsed);
+            }
         }
         k if k.starts_with("data-") => {
-            let data_key = &k[5..];
-            link.data
-                .get_or_insert_with(HashMap::new)
-                .insert(data_key.to_string(), value);
+            if let Some(normalized) = normalize_data_key(k.to_string()) {
+                link.data.insert(normalized, value);
+            }
         }
-        _ => {
-            // Unknown keys are ignored
-        }
+        _ => {}
     }
 }
 
-/// Parses a title value in Title Mode.
-///
-/// Handles quoted strings: `"title"` or `'title'`
-/// Or unquoted: `title`
 fn parse_title_value(content: &str) -> String {
     let content = content.trim();
-
     if content.is_empty() {
         return String::new();
     }
 
     let bytes = content.as_bytes();
-
-    // Check for quoted string
     if (bytes[0] == b'"' || bytes[0] == b'\'') && bytes.len() > 1 {
         let quote = bytes[0];
-        // Find the closing quote
         let mut i = 1;
         let mut result = String::new();
         while i < bytes.len() {
             if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                // Escaped character
                 result.push(content.chars().nth(i + 1).unwrap_or('\\'));
                 i += 2;
             } else if bytes[i] == quote {
@@ -1141,966 +1201,509 @@ fn parse_title_value(content: &str) -> String {
                 i += 1;
             }
         }
-        return result;
+        result
+    } else {
+        content.to_string()
     }
-
-    // Unquoted - return as-is
-    content.to_string()
 }
 
-// -----------------------------------------------------------------------------
-// TryFrom implementations
-// -----------------------------------------------------------------------------
+fn unescape_markdown_display(value: &str) -> String {
+    value.replace("\\[", "[").replace("\\]", "]")
+}
 
-impl TryFrom<String> for Link {
-    type Error = LinkParseError;
+fn escape_markdown_display(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+}
 
-    /// Parses a Link from a String.
-    ///
-    /// Supports HTML anchor elements and Markdown links.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use darkmatter::render::link::Link;
-    /// use std::convert::TryFrom;
-    ///
-    /// // Parse HTML link
-    /// let html_link = Link::try_from(r#"<a href="https://example.com">Click</a>"#.to_string());
-    /// assert!(html_link.is_ok());
-    ///
-    /// // Parse Markdown link
-    /// let md_link = Link::try_from("[Click](https://example.com)".to_string());
-    /// assert!(md_link.is_ok());
-    ///
-    /// // Parse Markdown with structured props
-    /// let structured = Link::try_from(
-    ///     r#"[Click](https://example.com class="btn" prompt="click me")"#.to_string()
-    /// );
-    /// assert!(structured.is_ok());
-    /// ```
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let trimmed = value.trim();
+fn decode_markdown_url(value: &str) -> String {
+    value.replace("%28", "(").replace("%29", ")")
+}
 
-        if trimmed.starts_with('<') {
-            parse_html_link(trimmed)
-        } else if trimmed.starts_with('[') {
-            parse_markdown_link(trimmed)
-        } else {
-            Err(LinkParseError::UnrecognizedFormat)
+fn escape_markdown_url(value: &str) -> String {
+    value.replace('(', "%28").replace(')', "%29")
+}
+
+fn encode_markdown_metadata(value: &LinkMarkdownMetadataPackage) -> Option<String> {
+    let json = serde_json::to_string(value).ok()?;
+    Some(base64_encode(json.as_bytes()))
+}
+
+fn decode_markdown_metadata(value: &str) -> Option<LinkMarkdownMetadataPackage> {
+    let decoded = base64_decode(value.trim())?;
+    let json = String::from_utf8(decoded).ok()?;
+    let metadata = serde_json::from_str::<LinkMarkdownMetadataPackage>(&json).ok()?;
+    if metadata.marker == MARKDOWN_METADATA_MARKER {
+        Some(metadata)
+    } else {
+        None
+    }
+}
+
+fn generate_popover_id(url: &str, display: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    let mut hasher = DefaultHasher::new();
+    url.hash(&mut hasher);
+    display.hash(&mut hasher);
+    format!("popover-{:x}", hasher.finish())
+}
+
+fn parse_css_style(style: &str) -> BTreeMap<String, String> {
+    let mut result = BTreeMap::new();
+    for declaration in style.split(';') {
+        let trimmed = declaration.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(colon_pos) = trimmed.find(':') {
+            let key = trimmed[..colon_pos].trim().to_lowercase();
+            let value = trimmed[colon_pos + 1..].trim();
+            if !key.is_empty() && !value.is_empty() {
+                result.insert(key, value.to_string());
+            }
         }
     }
+    result
 }
 
-impl TryFrom<&str> for Link {
-    type Error = LinkParseError;
+fn style_inline_css(style: Option<&Stylesheet>) -> Option<String> {
+    let style = style?;
+    if style.is_empty() {
+        return None;
+    }
 
-    /// Parses a Link from a string slice.
-    ///
-    /// See [`TryFrom<String>`] for details.
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        Link::try_from(value.to_string())
+    let rendered = style
+        .to_css()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    normalize_optional(rendered)
+}
+
+fn normalize_optional(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_data_key(key: String) -> Option<String> {
+    let key = key.trim();
+    if key.is_empty() {
+        return None;
+    }
+
+    let normalized = key.strip_prefix("data-").unwrap_or(key);
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.to_string())
+    }
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
+fn html_unescape(value: &str) -> String {
+    value
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&#39;", "'")
+}
+
+fn strip_ansi_sequences(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch != '\u{1b}' {
+            out.push(ch);
+            continue;
+        }
+
+        match chars.peek().copied() {
+            Some('[') => {
+                chars.next();
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                chars.next();
+                let mut prev_escape = false;
+                for c in chars.by_ref() {
+                    if c == '\u{7}' {
+                        break;
+                    }
+                    if prev_escape && c == '\\' {
+                        break;
+                    }
+                    prev_escape = c == '\u{1b}';
+                }
+            }
+            _ => {}
+        }
+    }
+
+    out
+}
+
+fn base64_encode(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    let mut idx = 0usize;
+
+    while idx < input.len() {
+        let b0 = input[idx];
+        let b1 = if idx + 1 < input.len() {
+            input[idx + 1]
+        } else {
+            0
+        };
+        let b2 = if idx + 2 < input.len() {
+            input[idx + 2]
+        } else {
+            0
+        };
+
+        let n = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
+        out.push(TABLE[((n >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((n >> 12) & 0x3f) as usize] as char);
+        if idx + 1 < input.len() {
+            out.push(TABLE[((n >> 6) & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if idx + 2 < input.len() {
+            out.push(TABLE[(n & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+
+        idx += 3;
+    }
+
+    out
+}
+
+fn base64_decode(input: &str) -> Option<Vec<u8>> {
+    let input = input.trim();
+    if input.is_empty() || input.len() % 4 != 0 {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(input.len() / 4 * 3);
+    let bytes = input.as_bytes();
+    let mut idx = 0usize;
+
+    while idx < bytes.len() {
+        let c0 = bytes[idx] as char;
+        let c1 = bytes[idx + 1] as char;
+        let c2 = bytes[idx + 2] as char;
+        let c3 = bytes[idx + 3] as char;
+
+        let v0 = base64_value(c0)?;
+        let v1 = base64_value(c1)?;
+        let v2 = if c2 == '=' {
+            None
+        } else {
+            Some(base64_value(c2)?)
+        };
+        let v3 = if c3 == '=' {
+            None
+        } else {
+            Some(base64_value(c3)?)
+        };
+
+        let n = ((v0 as u32) << 18)
+            | ((v1 as u32) << 12)
+            | ((v2.unwrap_or(0) as u32) << 6)
+            | (v3.unwrap_or(0) as u32);
+
+        out.push(((n >> 16) & 0xff) as u8);
+        if v2.is_some() {
+            out.push(((n >> 8) & 0xff) as u8);
+        }
+        if v3.is_some() {
+            out.push((n & 0xff) as u8);
+        }
+
+        idx += 4;
+    }
+
+    Some(out)
+}
+
+fn base64_value(ch: char) -> Option<u8> {
+    match ch {
+        'A'..='Z' => Some((ch as u8) - b'A'),
+        'a'..='z' => Some((ch as u8) - b'a' + 26),
+        '0'..='9' => Some((ch as u8) - b'0' + 52),
+        '+' => Some(62),
+        '/' => Some(63),
+        _ => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::stylesheet::{CssSizing, CssSizingProp};
+    use serial_test::serial;
+
+    struct ScopedEnv {
+        key: String,
+        original: Option<String>,
+    }
+
+    impl ScopedEnv {
+        fn set(key: &str, value: &str) -> Self {
+            let original = env::var(key).ok();
+            // SAFETY: Used only in serial tests in this module.
+            unsafe {
+                env::set_var(key, value);
+            }
+            Self {
+                key: key.to_string(),
+                original,
+            }
+        }
+
+        fn remove(key: &str) -> Self {
+            let original = env::var(key).ok();
+            // SAFETY: Used only in serial tests in this module.
+            unsafe {
+                env::remove_var(key);
+            }
+            Self {
+                key: key.to_string(),
+                original,
+            }
+        }
+    }
+
+    impl Drop for ScopedEnv {
+        fn drop(&mut self) {
+            // SAFETY: Used only in serial tests in this module.
+            unsafe {
+                match &self.original {
+                    Some(value) => env::set_var(&self.key, value),
+                    None => env::remove_var(&self.key),
+                }
+            }
+        }
+    }
 
     #[test]
-    fn test_link_type_detection() {
-        let http = Link::new("test", "http://example.com");
-        assert!(http.is_url());
-        assert!(!http.is_file());
+    fn new_requires_non_empty_href() {
+        assert!(matches!(Link::new("x", "  "), Err(LinkError::EmptyHref)));
+    }
 
-        let https = Link::new("test", "https://example.com");
-        assert!(https.is_url());
+    #[test]
+    fn new_sets_kind() {
+        let url = Link::new("x", "https://example.com").expect("link should build");
+        let file = Link::new("x", "./file.md").expect("link should build");
 
-        let file = Link::new("test", "/path/to/file");
+        assert!(url.is_url());
         assert!(file.is_file());
-        assert!(!file.is_url());
     }
 
     #[test]
-    fn test_builder_methods() {
-        let link = Link::new("text", "https://example.com")
-            .with_class("my-class")
-            .with_style("color: red")
-            .with_target("_blank")
-            .with_title("A title");
-
-        assert_eq!(link.class(), Some("my-class"));
-        assert_eq!(link.style(), Some("color: red"));
-        assert_eq!(link.target(), Some("_blank"));
-        assert_eq!(link.title(), Some("A title"));
-    }
-
-    #[test]
-    fn test_getters() {
-        let link = Link::new("Display Text", "https://example.com/path");
-
-        assert_eq!(link.display(), "Display Text");
-        assert_eq!(link.href(), "https://example.com/path");
-        assert_eq!(link.kind(), LinkType::Url);
-    }
-
-    #[test]
-    fn test_to_browser_basic() {
-        let link = Link::new("Click", "https://example.com");
-        assert_eq!(
-            link.to_browser(),
-            r#"<a href="https://example.com">Click</a>"#
-        );
-    }
-
-    #[test]
-    fn test_to_browser_with_attributes() {
+    fn typed_style_is_rendered_to_html() {
+        let style = Stylesheet::new().add(CssSizingProp::TopMargin, CssSizing::px(8.0));
         let link = Link::new("Click", "https://example.com")
-            .with_class("btn")
-            .with_style("color: blue")
-            .with_target("_blank")
+            .expect("link should build")
+            .with_style(style);
+
+        let html = link.to_html();
+        assert!(html.contains(r#"style="margin-top: 8px;""#));
+    }
+
+    #[test]
+    fn html_output_strips_ansi_from_display_and_title() {
+        let link = Link::new("\u{1b}[31mClick\u{1b}[0m", "https://example.com")
+            .expect("link should build")
+            .with_title("\u{1b}[1mTitle\u{1b}[0m");
+
+        let html = link.to_html();
+        assert!(html.contains("Click"));
+        assert!(html.contains("Title"));
+        assert!(!html.contains("\u{1b}["));
+    }
+
+    #[test]
+    fn markdown_core_state_stays_idiomatic() {
+        let link = Link::new("Example", "https://example.com")
+            .expect("link should build")
             .with_title("Tooltip");
 
         assert_eq!(
-            link.to_browser(),
-            r#"<a href="https://example.com" class="btn" style="color: blue" target="_blank" title="Tooltip">Click</a>"#
+            link.to_markdown(false),
+            r#"[Example](https://example.com "Tooltip")"#
         );
     }
 
     #[test]
-    fn test_to_browser_escapes_html() {
-        let link = Link::new("<script>", "https://example.com?a=1&b=2");
+    fn markdown_inline_mode_uses_html_for_extended_metadata() {
+        let link = Link::new("Example", "https://example.com")
+            .expect("link should build")
+            .with_class("chip")
+            .with_target(LinkTarget::Blank);
+
+        let markdown = link.to_markdown(true);
+        assert!(markdown.starts_with("<a "));
+        assert!(markdown.contains(r#"class="chip""#));
+        assert!(markdown.contains(r#"target="_blank""#));
+    }
+
+    #[test]
+    #[serial]
+    fn markdown_env_strip_drops_extended_metadata() {
+        let _env = ScopedEnv::set(LINK_METADATA_ENV, "strip");
+
+        let link = Link::new("Example", "https://example.com")
+            .expect("link should build")
+            .with_class("chip")
+            .with_title("Title");
+
         assert_eq!(
-            link.to_browser(),
-            r#"<a href="https://example.com?a=1&amp;b=2">&lt;script&gt;</a>"#
+            link.to_markdown(false),
+            r#"[Example](https://example.com "Title")"#
         );
     }
 
     #[test]
-    fn test_to_markdown_basic() {
-        let link = Link::new("Example", "https://example.com");
-        assert_eq!(link.to_markdown(), "[Example](https://example.com)");
+    #[serial]
+    fn markdown_env_inline_uses_html() {
+        let _env = ScopedEnv::set(LINK_METADATA_ENV, "inline");
+
+        let link = Link::new("Example", "https://example.com")
+            .expect("link should build")
+            .with_class("chip");
+
+        assert!(link.to_markdown(false).starts_with("<a "));
     }
 
     #[test]
-    fn test_to_markdown_with_title() {
-        let link = Link::new("Example", "https://example.com").with_title("A tooltip");
-        assert_eq!(
-            link.to_markdown(),
-            r#"[Example](https://example.com "A tooltip")"#
-        );
+    #[serial]
+    fn markdown_default_is_lossless_and_roundtrips_extended_metadata() {
+        let _env = ScopedEnv::remove(LINK_METADATA_ENV);
+
+        let style = Stylesheet::new().add(CssSizingProp::TopMargin, CssSizing::px(10.0));
+        let original = Link::new("Example", "https://example.com")
+            .expect("link should build")
+            .with_class("chip")
+            .with_style(style)
+            .with_target(LinkTarget::Blank)
+            .with_title("Tooltip")
+            .with_prompt("Prompt")
+            .with_data("id", "abc");
+
+        let markdown = original.to_markdown(false);
+        assert!(markdown.starts_with("[Example](https://example.com \""));
+        assert!(!markdown.contains("Tooltip"));
+
+        let parsed = Link::try_from(markdown.as_str()).expect("roundtrip markdown should parse");
+        assert_eq!(parsed.class(), Some("chip"));
+        assert_eq!(parsed.target(), Some(&LinkTarget::Blank));
+        assert_eq!(parsed.title(), Some("Tooltip"));
+        assert_eq!(parsed.prompt(), Some("Prompt"));
+        assert_eq!(parsed.data().get("id"), Some(&"abc".to_string()));
+        assert!(parsed.style().is_some());
     }
 
     #[test]
-    fn test_to_markdown_escapes_special_chars() {
-        let link = Link::new("[text]", "https://example.com/path(1)");
-        assert_eq!(
-            link.to_markdown(),
-            r"[\[text\]](https://example.com/path%281%29)"
-        );
-    }
-
-    #[test]
-    fn test_from_tuple() {
-        let link: Link = ("Display", "https://url.com").into();
-        assert_eq!(link.display(), "Display");
-        assert_eq!(link.href(), "https://url.com");
-    }
-
-    #[test]
-    fn test_hash_equality() {
-        use std::collections::HashSet;
-
-        let link1 = Link::new("Text", "https://example.com");
-        let link2 = Link::new("Text", "https://example.com").with_class("different");
-
-        // Same identity fields, different styling - should hash the same
-        let mut set = HashSet::new();
-        set.insert(link1);
-        // link2 has same hash but different Eq (class differs), so it's a different entry
-        // Actually, our Eq derives from all fields, so they're different
-        set.insert(link2);
-        assert_eq!(set.len(), 2); // They're different because Eq includes all fields
-    }
-
-    #[test]
-    fn test_ordering() {
-        let a = Link::new("Z", "https://aaa.com");
-        let b = Link::new("A", "https://bbb.com");
-        let c = Link::new("A", "https://aaa.com");
-
-        // Orders by link_to first, then display
-        assert!(c < a); // aaa < aaa, but A < Z... wait, same link_to
-        assert!(a < b); // aaa < bbb
-        assert!(c < a); // same link_to, A < Z
-    }
-
-    // -------------------------------------------------------------------------
-    // Tests for new fields: prompt and data
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_builder_prompt() {
-        let link = Link::new("Click", "https://example.com").with_prompt("Click me!");
-        assert_eq!(link.prompt(), Some("Click me!"));
-    }
-
-    #[test]
-    fn test_builder_data() {
-        let link = Link::new("Click", "https://example.com")
-            .with_data("id", "123")
-            .with_data("action", "submit");
-
-        let data = link.data().unwrap();
-        assert_eq!(data.get("id"), Some(&"123".to_string()));
-        assert_eq!(data.get("action"), Some(&"submit".to_string()));
-    }
-
-    #[test]
-    fn test_builder_data_map() {
-        let mut map = HashMap::new();
-        map.insert("foo".to_string(), "bar".to_string());
-        map.insert("baz".to_string(), "qux".to_string());
-
-        let link = Link::new("Click", "https://example.com").with_data_map(map);
-
-        let data = link.data().unwrap();
-        assert_eq!(data.get("foo"), Some(&"bar".to_string()));
-        assert_eq!(data.get("baz"), Some(&"qux".to_string()));
-    }
-
-    #[test]
-    fn test_to_browser_with_prompt() {
-        let link = Link::new("Click", "https://example.com").with_prompt("Hover text");
-        assert!(link.to_browser().contains(r#"data-prompt="Hover text""#));
-    }
-
-    #[test]
-    fn test_to_browser_with_data_attributes() {
-        let link = Link::new("Click", "https://example.com")
-            .with_data("id", "123")
-            .with_data("type", "button");
-
-        let html = link.to_browser();
-        assert!(html.contains(r#"data-id="123""#));
-        assert!(html.contains(r#"data-type="button""#));
-    }
-
-    // -------------------------------------------------------------------------
-    // TryFrom HTML tests
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_try_from_html_basic() {
-        let link = Link::try_from(r#"<a href="https://example.com">Click</a>"#).unwrap();
-        assert_eq!(link.display(), "Click");
-        assert_eq!(link.href(), "https://example.com");
-    }
-
-    #[test]
-    fn test_try_from_html_with_attributes() {
+    fn parse_html_link_with_attributes() {
         let link = Link::try_from(
-            r#"<a href="https://example.com" class="btn" style="color:red" target="_blank" title="Tooltip">Click</a>"#
-        ).unwrap();
-
-        assert_eq!(link.display(), "Click");
-        assert_eq!(link.href(), "https://example.com");
-        assert_eq!(link.class(), Some("btn"));
-        assert_eq!(link.style(), Some("color:red"));
-        assert_eq!(link.target(), Some("_blank"));
-        assert_eq!(link.title(), Some("Tooltip"));
-    }
-
-    #[test]
-    fn test_try_from_html_with_data_attributes() {
-        let link = Link::try_from(
-            r#"<a href="https://example.com" data-prompt="Click me" data-id="123">Click</a>"#,
+            r#"<a href="https://example.com" class="btn" style="margin-top: 8px;" target="_blank" title="Go" data-id="123">Click</a>"#,
         )
-        .unwrap();
+        .expect("html link should parse");
 
-        assert_eq!(link.prompt(), Some("Click me"));
-        let data = link.data().unwrap();
-        assert_eq!(data.get("id"), Some(&"123".to_string()));
-    }
-
-    #[test]
-    fn test_try_from_html_with_escaped_content() {
-        let link =
-            Link::try_from(r#"<a href="https://example.com?a=1&amp;b=2">&lt;script&gt;</a>"#)
-                .unwrap();
-
-        assert_eq!(link.display(), "<script>");
-        assert_eq!(link.href(), "https://example.com?a=1&b=2");
-    }
-
-    #[test]
-    fn test_try_from_html_missing_href() {
-        let result = Link::try_from(r#"<a class="btn">Click</a>"#);
-        assert!(matches!(result, Err(LinkParseError::MissingUrl)));
-    }
-
-    #[test]
-    fn test_try_from_html_malformed() {
-        let result = Link::try_from(r#"<div href="url">text</div>"#);
-        assert!(matches!(result, Err(LinkParseError::MalformedHtml(_))));
-    }
-
-    // -------------------------------------------------------------------------
-    // TryFrom Markdown tests - Basic
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_try_from_markdown_basic() {
-        let link = Link::try_from("[Click](https://example.com)").unwrap();
         assert_eq!(link.display(), "Click");
         assert_eq!(link.href(), "https://example.com");
-    }
-
-    #[test]
-    fn test_try_from_markdown_with_escaped_brackets() {
-        let link = Link::try_from(r"[\[special\]](https://example.com)").unwrap();
-        assert_eq!(link.display(), "[special]");
-    }
-
-    #[test]
-    fn test_try_from_markdown_with_encoded_parens() {
-        let link = Link::try_from("[Click](https://example.com/path%28param%29)").unwrap();
-        assert_eq!(link.href(), "https://example.com/path(param)");
-    }
-
-    #[test]
-    fn test_try_from_markdown_with_angle_bracket_url() {
-        let link = Link::try_from("[Click](<https://example.com/path with spaces>)").unwrap();
-        assert_eq!(link.href(), "https://example.com/path with spaces");
-    }
-
-    // -------------------------------------------------------------------------
-    // TryFrom Markdown tests - Title Mode
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_try_from_markdown_title_mode_double_quotes() {
-        let link = Link::try_from(r#"[Click](https://example.com "A title")"#).unwrap();
-        assert_eq!(link.display(), "Click");
-        assert_eq!(link.href(), "https://example.com");
-        assert_eq!(link.title(), Some("A title"));
-    }
-
-    #[test]
-    fn test_try_from_markdown_title_mode_single_quotes() {
-        let link = Link::try_from("[Click](https://example.com 'A title')").unwrap();
-        assert_eq!(link.title(), Some("A title"));
-    }
-
-    #[test]
-    fn test_try_from_markdown_title_mode_escaped_quotes() {
-        let link = Link::try_from(r#"[Click](https://example.com "A \"quoted\" title")"#).unwrap();
-        assert_eq!(link.title(), Some(r#"A "quoted" title"#));
-    }
-
-    // -------------------------------------------------------------------------
-    // TryFrom Markdown tests - Structured Mode
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_try_from_markdown_structured_class() {
-        let link = Link::try_from(r#"[Click](https://example.com class="btn")"#).unwrap();
         assert_eq!(link.class(), Some("btn"));
+        assert_eq!(link.target(), Some(&LinkTarget::Blank));
+        assert_eq!(link.title(), Some("Go"));
+        assert_eq!(link.data().get("id"), Some(&"123".to_string()));
+        assert!(link.style().is_some());
     }
 
     #[test]
-    fn test_try_from_markdown_structured_multiple_props() {
+    fn parse_markdown_title_mode() {
+        let link = Link::try_from(r#"[Click](https://example.com "Title")"#)
+            .expect("markdown link should parse");
+        assert_eq!(link.display(), "Click");
+        assert_eq!(link.href(), "https://example.com");
+        assert_eq!(link.title(), Some("Title"));
+    }
+
+    #[test]
+    fn parse_markdown_structured_mode_legacy() {
         let link = Link::try_from(
-            r#"[Click](https://example.com class="btn" prompt="click me" style="color:red")"#,
+            r#"[Click](https://example.com class="btn" target=_blank prompt="go" data-id=42)"#,
         )
-        .unwrap();
+        .expect("structured markdown should parse");
 
         assert_eq!(link.class(), Some("btn"));
-        assert_eq!(link.prompt(), Some("click me"));
-        assert_eq!(link.style(), Some("color:red"));
+        assert_eq!(link.target(), Some(&LinkTarget::Blank));
+        assert_eq!(link.prompt(), Some("go"));
+        assert_eq!(link.data().get("id"), Some(&"42".to_string()));
     }
 
     #[test]
-    fn test_try_from_markdown_structured_unquoted_values() {
-        let link = Link::try_from("[Click](https://example.com class=btn target=_blank)").unwrap();
-        assert_eq!(link.class(), Some("btn"));
-        assert_eq!(link.target(), Some("_blank"));
+    fn with_title_parsed_supports_structured_and_title_modes() {
+        let title_mode = Link::with_title_parsed("Click", "https://example.com", "Simple")
+            .expect("link should build");
+        assert_eq!(title_mode.title(), Some("Simple"));
+
+        let structured = Link::with_title_parsed(
+            "Click",
+            "https://example.com",
+            "class='btn' target='_blank'",
+        )
+        .expect("link should build");
+        assert_eq!(structured.class(), Some("btn"));
+        assert_eq!(structured.target(), Some(&LinkTarget::Blank));
     }
 
     #[test]
-    fn test_try_from_markdown_structured_comma_delimited() {
-        let link = Link::try_from("[Click](https://example.com class=btn,target=_blank)").unwrap();
-        assert_eq!(link.class(), Some("btn"));
-        assert_eq!(link.target(), Some("_blank"));
-    }
-
-    #[test]
-    fn test_try_from_markdown_structured_with_title() {
-        let link =
-            Link::try_from(r#"[Click](https://example.com title="My Title" class="btn")"#).unwrap();
-
-        assert_eq!(link.title(), Some("My Title"));
-        assert_eq!(link.class(), Some("btn"));
-    }
-
-    #[test]
-    fn test_try_from_markdown_structured_data_attributes() {
-        let link =
-            Link::try_from(r#"[Click](https://example.com data-id="123" data-action="submit")"#)
-                .unwrap();
-
-        let data = link.data().unwrap();
-        assert_eq!(data.get("id"), Some(&"123".to_string()));
-        assert_eq!(data.get("action"), Some(&"submit".to_string()));
-    }
-
-    #[test]
-    fn test_try_from_markdown_structured_mixed_example_from_docs() {
-        // Example from advanced-links.md
-        let link = Link::try_from(
-            r#"[my link](https://somewhere.com prompt="click me",class=buttercup style="background:red")"#
-        ).unwrap();
-
-        assert_eq!(link.display(), "my link");
-        assert_eq!(link.href(), "https://somewhere.com");
-        assert_eq!(link.prompt(), Some("click me"));
-        assert_eq!(link.class(), Some("buttercup"));
-        assert_eq!(link.style(), Some("background:red"));
-    }
-
-    // -------------------------------------------------------------------------
-    // TryFrom error cases
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_try_from_unrecognized_format() {
-        let result = Link::try_from("just plain text");
-        assert!(matches!(result, Err(LinkParseError::UnrecognizedFormat)));
-    }
-
-    #[test]
-    fn test_try_from_markdown_unmatched_bracket() {
-        let result = Link::try_from("[Click(https://example.com)");
-        assert!(matches!(result, Err(LinkParseError::MalformedMarkdown(_))));
-    }
-
-    #[test]
-    fn test_try_from_markdown_missing_paren() {
-        let result = Link::try_from("[Click]https://example.com");
-        assert!(matches!(result, Err(LinkParseError::MalformedMarkdown(_))));
-    }
-
-    #[test]
-    fn test_try_from_markdown_empty_url() {
-        let result = Link::try_from("[Click]()");
-        assert!(matches!(result, Err(LinkParseError::MissingUrl)));
-    }
-
-    // -------------------------------------------------------------------------
-    // Roundtrip tests
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_roundtrip_markdown_basic() {
-        let original = Link::new("Example", "https://example.com");
-        let markdown = original.to_markdown();
-        let parsed = Link::try_from(markdown.as_str()).unwrap();
-
-        assert_eq!(parsed.display(), original.display());
-        assert_eq!(parsed.href(), original.href());
-    }
-
-    #[test]
-    fn test_roundtrip_markdown_with_title() {
-        let original = Link::new("Example", "https://example.com").with_title("A tooltip");
-        let markdown = original.to_markdown();
-        let parsed = Link::try_from(markdown.as_str()).unwrap();
-
-        assert_eq!(parsed.display(), original.display());
-        assert_eq!(parsed.href(), original.href());
-        assert_eq!(parsed.title(), original.title());
-    }
-
-    #[test]
-    fn test_roundtrip_html_basic() {
-        let original = Link::new("Click", "https://example.com");
-        let html = original.to_browser();
-        let parsed = Link::try_from(html.as_str()).unwrap();
-
-        assert_eq!(parsed.display(), original.display());
-        assert_eq!(parsed.href(), original.href());
-    }
-
-    #[test]
-    fn test_roundtrip_html_with_attributes() {
-        let original = Link::new("Click", "https://example.com")
-            .with_class("btn")
-            .with_style("color:blue")
-            .with_target("_blank")
-            .with_title("Tooltip");
-
-        let html = original.to_browser();
-        let parsed = Link::try_from(html.as_str()).unwrap();
-
-        assert_eq!(parsed.display(), original.display());
-        assert_eq!(parsed.href(), original.href());
-        assert_eq!(parsed.class(), original.class());
-        assert_eq!(parsed.style(), original.style());
-        assert_eq!(parsed.target(), original.target());
-        assert_eq!(parsed.title(), original.title());
-    }
-
-    // -------------------------------------------------------------------------
-    // Terminal output tests (OSC 8 escape sequence format)
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_to_terminal_unchecked_format() {
-        let link = Link::new("Example", "https://example.com");
+    fn terminal_unchecked_uses_osc8_sequence() {
+        let link = Link::new("Click", "https://example.com").expect("link should build");
         let output = link.to_terminal_unchecked();
 
-        // Verify the OSC 8 format: ESC ] 8 ; ; <URI> BEL <text> ESC ] 8 ; ; BEL
-        // ESC = 0x1b, ] = 0x5d, 8 = 0x38, ; = 0x3b, BEL = 0x07
-        assert!(output.starts_with("\x1b]8;;"));
-        assert!(output.contains("\x07Example"));
+        assert!(output.starts_with("\x1b]8;;https://example.com\x07"));
         assert!(output.ends_with("\x1b]8;;\x07"));
     }
 
     #[test]
-    fn test_to_terminal_unchecked_byte_sequence() {
-        let link = Link::new("Test", "https://test.com");
-        let output = link.to_terminal_unchecked();
-        let bytes: Vec<u8> = output.bytes().collect();
-
-        // Start sequence: ESC ] 8 ; ;
-        assert_eq!(bytes[0], 0x1b); // ESC
-        assert_eq!(bytes[1], 0x5d); // ]
-        assert_eq!(bytes[2], 0x38); // 8
-        assert_eq!(bytes[3], 0x3b); // ;
-        assert_eq!(bytes[4], 0x3b); // ;
-
-        // URL starts at index 5
-        let url_bytes = b"https://test.com";
-        assert_eq!(&bytes[5..5 + url_bytes.len()], url_bytes);
-
-        // BEL after URL
-        assert_eq!(bytes[5 + url_bytes.len()], 0x07);
-
-        // Display text "Test"
-        let text_start = 5 + url_bytes.len() + 1;
-        assert_eq!(&bytes[text_start..text_start + 4], b"Test");
-
-        // End sequence: ESC ] 8 ; ; BEL
-        let end_start = text_start + 4;
-        assert_eq!(bytes[end_start], 0x1b);
-        assert_eq!(bytes[end_start + 1], 0x5d);
-        assert_eq!(bytes[end_start + 2], 0x38);
-        assert_eq!(bytes[end_start + 3], 0x3b);
-        assert_eq!(bytes[end_start + 4], 0x3b);
-        assert_eq!(bytes[end_start + 5], 0x07);
-    }
-
-    #[test]
-    fn test_to_terminal_unchecked_with_special_chars_in_url() {
-        let link = Link::new("Query", "https://example.com?foo=bar&baz=1");
-        let output = link.to_terminal_unchecked();
-
-        // URL should be included as-is (no escaping for terminal)
-        assert!(output.contains("https://example.com?foo=bar&baz=1"));
-        assert!(output.contains("\x07Query\x1b]8;;\x07"));
-    }
-
-    #[test]
-    fn test_to_terminal_fallback_format() {
-        let link = Link::new("Example", "https://example.com");
-        // When terminal doesn't support hyperlinks, should return display [url]
-        // We can't easily test the conditional path, but we can verify the format
-        let fallback = format!("{} [{}]", link.display(), link.href());
-        assert_eq!(fallback, "Example [https://example.com]");
-    }
-
-    #[test]
-    fn test_terminal_bel_not_st() {
-        let link = Link::new("Link", "https://example.com");
-        let output = link.to_terminal_unchecked();
-
-        // Verify we use BEL (0x07), not ST (0x1b 0x5c)
-        assert!(output.contains("\x07"), "Should use BEL as terminator");
-        assert!(
-            !output.contains("\x1b\\"),
-            "Should NOT use ST as terminator"
-        );
-    }
-
-    // -------------------------------------------------------------------------
-    // CSS Style Parsing tests
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_parsed_style_basic() {
-        let link =
-            Link::new("Click", "https://example.com").with_style("color: red; font-size: 14px");
-        let parsed = link.parsed_style().unwrap();
-        assert_eq!(parsed.get("color"), Some(&"red".to_string()));
-        assert_eq!(parsed.get("font-size"), Some(&"14px".to_string()));
-    }
-
-    #[test]
-    fn test_parsed_style_whitespace() {
+    fn html_with_popover_uses_prompt() {
         let link = Link::new("Click", "https://example.com")
-            .with_style("  color  :  blue  ;  margin : 10px  ");
-        let parsed = link.parsed_style().unwrap();
-        assert_eq!(parsed.get("color"), Some(&"blue".to_string()));
-        assert_eq!(parsed.get("margin"), Some(&"10px".to_string()));
-    }
+            .expect("link should build")
+            .with_prompt("Hover me");
 
-    #[test]
-    fn test_parsed_style_trailing_semicolon() {
-        let link = Link::new("Click", "https://example.com").with_style("color: green;");
-        let parsed = link.parsed_style().unwrap();
-        assert_eq!(parsed.get("color"), Some(&"green".to_string()));
-        assert_eq!(parsed.len(), 1);
-    }
-
-    #[test]
-    fn test_parsed_style_empty_declarations() {
-        let link =
-            Link::new("Click", "https://example.com").with_style("color: red;;;font-size: 12px");
-        let parsed = link.parsed_style().unwrap();
-        assert_eq!(parsed.get("color"), Some(&"red".to_string()));
-        assert_eq!(parsed.get("font-size"), Some(&"12px".to_string()));
-    }
-
-    #[test]
-    fn test_parsed_style_none_when_no_style() {
-        let link = Link::new("Click", "https://example.com");
-        assert!(link.parsed_style().is_none());
-    }
-
-    #[test]
-    fn test_parsed_style_case_insensitive_keys() {
-        let link =
-            Link::new("Click", "https://example.com").with_style("Color: red; FONT-SIZE: 14px");
-        let parsed = link.parsed_style().unwrap();
-        assert_eq!(parsed.get("color"), Some(&"red".to_string()));
-        assert_eq!(parsed.get("font-size"), Some(&"14px".to_string()));
-    }
-
-    #[test]
-    fn test_parsed_style_preserves_value_case() {
-        let link =
-            Link::new("Click", "https://example.com").with_style("font-family: Arial, Helvetica");
-        let parsed = link.parsed_style().unwrap();
-        assert_eq!(
-            parsed.get("font-family"),
-            Some(&"Arial, Helvetica".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parsed_style_complex_values() {
-        let link = Link::new("Click", "https://example.com")
-            .with_style("background: url(image.png); border: 1px solid #333");
-        let parsed = link.parsed_style().unwrap();
-        assert_eq!(
-            parsed.get("background"),
-            Some(&"url(image.png)".to_string())
-        );
-        assert_eq!(parsed.get("border"), Some(&"1px solid #333".to_string()));
-    }
-
-    #[test]
-    fn test_parsed_style_skips_invalid_declarations() {
-        let link = Link::new("Click", "https://example.com")
-            .with_style("color: red; invalid; font-size: 12px");
-        let parsed = link.parsed_style().unwrap();
-        assert_eq!(parsed.get("color"), Some(&"red".to_string()));
-        assert_eq!(parsed.get("font-size"), Some(&"12px".to_string()));
-        assert_eq!(parsed.len(), 2);
-    }
-
-    #[test]
-    fn test_parsed_style_empty_key_or_value() {
-        let link =
-            Link::new("Click", "https://example.com").with_style(": red; color: ; valid: value");
-        let parsed = link.parsed_style().unwrap();
-        // Empty key and empty value should be skipped
-        assert_eq!(parsed.get("valid"), Some(&"value".to_string()));
-        assert_eq!(parsed.len(), 1);
-    }
-
-    // -------------------------------------------------------------------------
-    // Popover API tests (to_browser_with_popover)
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_to_browser_with_popover_returns_none_without_prompt() {
-        let link = Link::new("Click", "https://example.com");
-        assert!(link.to_browser_with_popover().is_none());
-    }
-
-    #[test]
-    fn test_to_browser_with_popover_basic() {
-        let link = Link::new("Click", "https://example.com").with_prompt("Tooltip text");
-        let (anchor, popover) = link.to_browser_with_popover().unwrap();
-
-        assert!(anchor.contains(r#"href="https://example.com""#));
-        assert!(anchor.contains("interestfor="));
-        assert!(anchor.contains(">Click</a>"));
-
-        assert!(popover.contains(r#"popover="hint""#));
-        assert!(popover.contains("Tooltip text"));
-    }
-
-    #[test]
-    fn test_to_browser_with_popover_id_consistency() {
-        // Same inputs should produce the same ID
-        let link1 = Link::new("Click", "https://example.com").with_prompt("Test");
-        let link2 = Link::new("Click", "https://example.com").with_prompt("Different prompt");
-
-        let (anchor1, popover1) = link1.to_browser_with_popover().unwrap();
-        let (anchor2, popover2) = link2.to_browser_with_popover().unwrap();
-
-        // Extract the ID from popover1 (format: <div id="popover-..." ...)
-        let id1_start = popover1.find("id=\"").unwrap() + 4;
-        let id1_end = popover1[id1_start..].find('"').unwrap() + id1_start;
-        let id1 = &popover1[id1_start..id1_end];
-
-        let id2_start = popover2.find("id=\"").unwrap() + 4;
-        let id2_end = popover2[id2_start..].find('"').unwrap() + id2_start;
-        let id2 = &popover2[id2_start..id2_end];
-
-        // Same URL and display should produce the same ID
-        assert_eq!(id1, id2);
-
-        // Verify anchor references the same ID
-        assert!(anchor1.contains(&format!(r#"interestfor="{}""#, id1)));
-        assert!(anchor2.contains(&format!(r#"interestfor="{}""#, id2)));
-    }
-
-    #[test]
-    fn test_to_browser_with_popover_id_uniqueness() {
-        let link1 = Link::new("Click", "https://example.com").with_prompt("Test");
-        let link2 = Link::new("Click", "https://other.com").with_prompt("Test");
-
-        let (anchor1, _) = link1.to_browser_with_popover().unwrap();
-        let (anchor2, _) = link2.to_browser_with_popover().unwrap();
-
-        // Different URLs should produce different IDs
-        assert_ne!(anchor1, anchor2);
-    }
-
-    #[test]
-    fn test_to_browser_with_popover_escapes_content() {
-        let link = Link::new("<script>", "https://example.com")
-            .with_prompt("<script>alert('xss')</script>");
-        let (anchor, popover) = link.to_browser_with_popover().unwrap();
-
-        assert!(!anchor.contains("<script>"));
-        assert!(anchor.contains("&lt;script&gt;"));
-        assert!(!popover.contains("<script>alert"));
-        assert!(popover.contains("&lt;script&gt;"));
-    }
-
-    #[test]
-    fn test_to_browser_with_popover_includes_other_attrs() {
-        let link = Link::new("Click", "https://example.com")
-            .with_prompt("Tooltip")
-            .with_class("btn")
-            .with_target("_blank");
-        let (anchor, _) = link.to_browser_with_popover().unwrap();
-
-        assert!(anchor.contains(r#"class="btn""#));
-        assert!(anchor.contains(r#"target="_blank""#));
-    }
-
-    #[test]
-    fn test_to_browser_with_popover_includes_style() {
-        let link = Link::new("Click", "https://example.com")
-            .with_prompt("Tooltip")
-            .with_style("color: blue");
-        let (anchor, _) = link.to_browser_with_popover().unwrap();
-
-        assert!(anchor.contains(r#"style="color: blue""#));
-    }
-
-    #[test]
-    fn test_to_browser_with_popover_includes_title() {
-        let link = Link::new("Click", "https://example.com")
-            .with_prompt("Tooltip")
-            .with_title("Link title");
-        let (anchor, _) = link.to_browser_with_popover().unwrap();
-
-        assert!(anchor.contains(r#"title="Link title""#));
-    }
-
-    #[test]
-    fn test_to_browser_with_popover_includes_data_attrs() {
-        let link = Link::new("Click", "https://example.com")
-            .with_prompt("Tooltip")
-            .with_data("action", "submit")
-            .with_data("id", "123");
-        let (anchor, _) = link.to_browser_with_popover().unwrap();
-
-        assert!(anchor.contains(r#"data-action="submit""#));
-        assert!(anchor.contains(r#"data-id="123""#));
-    }
-
-    #[test]
-    fn test_to_browser_with_popover_id_format() {
-        let link = Link::new("Click", "https://example.com").with_prompt("Test");
-        let (_, popover) = link.to_browser_with_popover().unwrap();
-
-        // ID should start with "popover-" followed by hex characters
-        let id_start = popover.find("id=\"").unwrap() + 4;
-        let id_end = popover[id_start..].find('"').unwrap() + id_start;
-        let id = &popover[id_start..id_end];
-
-        assert!(id.starts_with("popover-"));
-        let hex_part = &id[8..];
-        assert!(hex_part.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn test_to_browser_with_popover_all_attributes() {
-        let link = Link::new("Click", "https://example.com")
-            .with_prompt("Popover content")
-            .with_class("btn btn-primary")
-            .with_style("font-weight: bold")
-            .with_target("_blank")
-            .with_title("My title")
-            .with_data("custom", "value");
-
-        let (anchor, popover) = link.to_browser_with_popover().unwrap();
-
-        // Verify all attributes are present in anchor
-        assert!(anchor.contains(r#"href="https://example.com""#));
-        assert!(anchor.contains("interestfor="));
-        assert!(anchor.contains(r#"class="btn btn-primary""#));
-        assert!(anchor.contains(r#"style="font-weight: bold""#));
-        assert!(anchor.contains(r#"target="_blank""#));
-        assert!(anchor.contains(r#"title="My title""#));
-        assert!(anchor.contains(r#"data-custom="value""#));
-        assert!(anchor.contains(">Click</a>"));
-
-        // Verify popover structure
-        assert!(popover.starts_with("<div id=\"popover-"));
-        assert!(popover.contains(r#"popover="hint""#));
-        assert!(popover.contains("Popover content"));
-        assert!(popover.ends_with("</div>"));
-    }
-
-    #[test]
-    fn test_generate_popover_id_deterministic() {
-        let id1 = generate_popover_id("https://example.com", "Click");
-        let id2 = generate_popover_id("https://example.com", "Click");
-        assert_eq!(id1, id2);
-    }
-
-    #[test]
-    fn test_generate_popover_id_varies_with_url() {
-        let id1 = generate_popover_id("https://example.com", "Click");
-        let id2 = generate_popover_id("https://other.com", "Click");
-        assert_ne!(id1, id2);
-    }
-
-    #[test]
-    fn test_generate_popover_id_varies_with_display() {
-        let id1 = generate_popover_id("https://example.com", "Click");
-        let id2 = generate_popover_id("https://example.com", "Different");
-        assert_ne!(id1, id2);
-    }
-
-    // -------------------------------------------------------------------------
-    // with_title_parsed tests - regression tests for structured link parsing
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_with_title_parsed_empty_title() {
-        let link = Link::with_title_parsed("Click", "https://example.com", "");
-        assert!(link.title().is_none());
-        assert!(link.class().is_none());
-        assert!(link.style().is_none());
-    }
-
-    #[test]
-    fn test_with_title_parsed_title_mode_plain_text() {
-        // Plain text without key=value should be treated as title
-        let link = Link::with_title_parsed("Click", "https://example.com", "A simple tooltip");
-        assert_eq!(link.title(), Some("A simple tooltip"));
-        assert!(link.class().is_none());
-        assert!(link.style().is_none());
-    }
-
-    #[test]
-    fn test_with_title_parsed_title_mode_quoted() {
-        // Quoted title should be parsed as title mode
-        let link = Link::with_title_parsed("Click", "https://example.com", "\"My tooltip\"");
-        assert_eq!(link.title(), Some("My tooltip"));
-    }
-
-    #[test]
-    fn test_with_title_parsed_structured_mode_class() {
-        // key=value pattern triggers structured mode
-        let link = Link::with_title_parsed("Click", "https://example.com", "class='btn'");
-        assert_eq!(link.class(), Some("btn"));
-        assert!(link.title().is_none());
-    }
-
-    #[test]
-    fn test_with_title_parsed_structured_mode_style() {
-        let link = Link::with_title_parsed("Click", "https://example.com", "style='color:red'");
-        assert_eq!(link.style(), Some("color:red"));
-    }
-
-    #[test]
-    fn test_with_title_parsed_structured_mode_multiple() {
-        let link = Link::with_title_parsed(
-            "Click",
-            "https://example.com",
-            "class='btn' style='color:red' prompt='hover me'",
-        );
-        assert_eq!(link.class(), Some("btn"));
-        assert_eq!(link.style(), Some("color:red"));
-        assert_eq!(link.prompt(), Some("hover me"));
-    }
-
-    #[test]
-    fn test_with_title_parsed_structured_mode_with_title_key() {
-        // In structured mode, title= sets the title
-        let link = Link::with_title_parsed(
-            "Click",
-            "https://example.com",
-            "title='My Title' class='btn'",
-        );
-        assert_eq!(link.title(), Some("My Title"));
-        assert_eq!(link.class(), Some("btn"));
-    }
-
-    #[test]
-    fn test_with_title_parsed_structured_mode_unquoted_values() {
-        let link =
-            Link::with_title_parsed("Click", "https://example.com", "class=btn target=_blank");
-        assert_eq!(link.class(), Some("btn"));
-        assert_eq!(link.target(), Some("_blank"));
-    }
-
-    #[test]
-    fn test_with_title_parsed_structured_mode_data_attributes() {
-        let link = Link::with_title_parsed(
-            "Click",
-            "https://example.com",
-            "data-id='123' data-action='submit'",
-        );
-        let data = link.data().unwrap();
-        assert_eq!(data.get("id"), Some(&"123".to_string()));
-        assert_eq!(data.get("action"), Some(&"submit".to_string()));
-    }
-
-    #[test]
-    fn test_with_title_parsed_whitespace_handling() {
-        // Should handle extra whitespace
-        let link = Link::with_title_parsed("Click", "https://example.com", "  class='btn'  ");
-        assert_eq!(link.class(), Some("btn"));
+        let (anchor, popover) = link
+            .to_html_with_popover()
+            .expect("popover should be generated");
+        assert!(anchor.contains("interestfor"));
+        assert!(popover.contains("popover=\"hint\""));
     }
 }

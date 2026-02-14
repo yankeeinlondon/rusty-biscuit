@@ -35,7 +35,6 @@ use crate::markdown::{
     },
     inline::{InlineEvent, InlineTag, MarkProcessor},
 };
-use crate::render::link::Link;
 use biscuit_terminal::components::image_options::TerminalImageOptions;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::Renderable;
@@ -1609,11 +1608,10 @@ fn render_table_link(
             emit_prose_text(text, style, emit_italic, false, false, None)
         )
     } else {
-        let link = Link::new(text.to_string(), url.to_string());
         format!(
             "{} [{}]",
-            emit_prose_text(link.display(), style, emit_italic, false, false, None),
-            link.href()
+            emit_prose_text(text, style, emit_italic, false, false, None),
+            url
         )
     }
 }

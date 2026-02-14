@@ -30,7 +30,7 @@ use crate::markdown::inline::{InlineEvent, InlineTag, MarkProcessor};
 use crate::markdown::output::terminal::MermaidMode;
 use crate::markdown::{Markdown, MarkdownResult};
 use crate::mermaid::Mermaid;
-use crate::render::link::Link;
+use crate::render::{ImageRef, Link};
 use html_escape;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use syntect::easy::HighlightLines;
@@ -126,6 +126,10 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     let mut code_lang = String::new();
     let mut code_info = String::new();
     let mut has_mermaid = false;
+    let mut in_image = false;
+    let mut current_image_alt = String::new();
+    let mut current_image_src = String::new();
+    let mut current_image_title = String::new();
 
     for event in events {
         match event {
@@ -268,36 +272,38 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
             InlineEvent::Standard(Event::Start(Tag::Link {
                 dest_url, title, ..
             })) => {
-                // Parse title for structured content (class, style, prompt, etc.)
-                // We use a placeholder display since we're streaming; actual text follows
-                let link = Link::with_title_parsed("", &*dest_url, &title);
+                // Parse title for structured content (class, style, prompt, etc.).
+                // We use a placeholder display since we're streaming; actual text follows.
+                let link = Link::with_title_parsed("", &*dest_url, &title).ok();
 
                 // Build anchor tag with parsed attributes
                 let mut attrs = format!(r#"href="{}""#, html_escape::encode_text(&dest_url));
 
-                if let Some(class) = link.class() {
-                    attrs.push_str(&format!(r#" class="{}""#, html_escape::encode_text(class)));
-                }
-                if let Some(style) = link.style() {
-                    attrs.push_str(&format!(r#" style="{}""#, html_escape::encode_text(style)));
-                }
-                if let Some(target) = link.target() {
-                    attrs.push_str(&format!(
-                        r#" target="{}""#,
-                        html_escape::encode_text(target)
-                    ));
-                }
-                if let Some(title) = link.title() {
-                    attrs.push_str(&format!(r#" title="{}""#, html_escape::encode_text(title)));
-                }
-                if let Some(prompt) = link.prompt() {
-                    attrs.push_str(&format!(
-                        r#" data-prompt="{}""#,
-                        html_escape::encode_text(prompt)
-                    ));
-                }
-                if let Some(data) = link.data() {
-                    for (key, value) in data {
+                if let Some(link) = link.as_ref() {
+                    if let Some(class) = link.class() {
+                        attrs.push_str(&format!(r#" class="{}""#, html_escape::encode_text(class)));
+                    }
+                    if let Some(style) = link.style_css() {
+                        attrs
+                            .push_str(&format!(r#" style="{}""#, html_escape::encode_text(&style)));
+                    }
+                    if let Some(target) = link.target_attr() {
+                        attrs.push_str(&format!(
+                            r#" target="{}""#,
+                            html_escape::encode_text(&target)
+                        ));
+                    }
+                    if let Some(title) = link.title_plain() {
+                        attrs
+                            .push_str(&format!(r#" title="{}""#, html_escape::encode_text(&title)));
+                    }
+                    if let Some(prompt) = link.prompt() {
+                        attrs.push_str(&format!(
+                            r#" data-prompt="{}""#,
+                            html_escape::encode_text(prompt)
+                        ));
+                    }
+                    for (key, value) in link.data() {
                         attrs.push_str(&format!(
                             r#" data-{}="{}""#,
                             html_escape::encode_text(key),
@@ -312,16 +318,64 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
                 output.push_str("</a>");
             }
             InlineEvent::Standard(Event::Code(text)) => {
-                output.push_str(&format!("<code>{}</code>", html_escape::encode_text(&text)));
+                if in_image {
+                    current_image_alt.push('`');
+                    current_image_alt.push_str(&text);
+                    current_image_alt.push('`');
+                } else {
+                    output.push_str(&format!("<code>{}</code>", html_escape::encode_text(&text)));
+                }
+            }
+            InlineEvent::Standard(Event::Start(Tag::Image {
+                dest_url, title, ..
+            })) => {
+                in_image = true;
+                current_image_alt.clear();
+                current_image_src = dest_url.to_string();
+                current_image_title = title.to_string();
+            }
+            InlineEvent::Standard(Event::End(TagEnd::Image)) => {
+                if in_image {
+                    if let Some(image_ref) = image_ref_from_parts(
+                        &current_image_alt,
+                        &current_image_src,
+                        &current_image_title,
+                    ) {
+                        output.push_str(&image_ref.to_html());
+                    } else {
+                        output.push_str(&format!(
+                            r#"<img src="{}" alt="{}" />"#,
+                            html_escape::encode_text(&current_image_src),
+                            html_escape::encode_text(&current_image_alt)
+                        ));
+                    }
+                }
+
+                in_image = false;
+                current_image_alt.clear();
+                current_image_src.clear();
+                current_image_title.clear();
             }
             InlineEvent::Standard(Event::Text(text)) if !in_code_block => {
-                output.push_str(html_escape::encode_text(&text).as_ref());
+                if in_image {
+                    current_image_alt.push_str(&text);
+                } else {
+                    output.push_str(html_escape::encode_text(&text).as_ref());
+                }
             }
             InlineEvent::Standard(Event::SoftBreak) => {
-                output.push('\n');
+                if in_image {
+                    current_image_alt.push(' ');
+                } else {
+                    output.push('\n');
+                }
             }
             InlineEvent::Standard(Event::HardBreak) => {
-                output.push_str("<br>\n");
+                if in_image {
+                    current_image_alt.push('\n');
+                } else {
+                    output.push_str("<br>\n");
+                }
             }
             InlineEvent::Standard(Event::Html(html) | Event::InlineHtml(html)) => {
                 // Raw HTML - escape it for safety
@@ -347,6 +401,47 @@ pub fn as_html(md: &Markdown, options: HtmlOptions) -> MarkdownResult<String> {
     }
 
     Ok(output)
+}
+
+fn image_ref_from_parts(alt: &str, src: &str, title: &str) -> Option<ImageRef> {
+    let markdown = build_markdown_image_literal(alt, src, title);
+
+    if let Ok(image_ref) = ImageRef::try_from(markdown.as_str()) {
+        return Some(image_ref);
+    }
+
+    let mut image_ref = ImageRef::new(src, alt).ok()?;
+    if !title.trim().is_empty() {
+        image_ref = image_ref.with_title(title);
+    }
+    Some(image_ref)
+}
+
+fn build_markdown_image_literal(alt: &str, src: &str, title: &str) -> String {
+    let alt = escape_markdown_image_alt(alt);
+    let src = escape_markdown_image_url(src);
+
+    if title.trim().is_empty() {
+        return format!("![{alt}]({src})");
+    }
+
+    let title = escape_markdown_title(title);
+    format!("![{alt}]({src} \"{title}\")")
+}
+
+fn escape_markdown_image_alt(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+}
+
+fn escape_markdown_image_url(value: &str) -> String {
+    value.replace('(', "%28").replace(')', "%29")
+}
+
+fn escape_markdown_title(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// Highlights a code block with syntax highlighting and optional line numbers.
@@ -685,7 +780,8 @@ fn main() {
         let html = as_html(&md, HtmlOptions::default()).unwrap();
         assert!(html.contains(r#"href="https://example.com""#));
         assert!(html.contains(r#"class="btn""#));
-        assert!(html.contains(r#"style="color:red""#));
+        // Styles are normalized through typed CSS parsing.
+        assert!(html.contains(r#"style="color: red;""#));
         // Should NOT have title attribute in structured mode (unless title= key is used)
         assert!(!html.contains("title="));
         assert!(html.contains("Click here"));
@@ -697,6 +793,33 @@ fn main() {
             r#"[Hover me](https://example.com "prompt='Click for more info'")"#.into();
         let html = as_html(&md, HtmlOptions::default()).unwrap();
         assert!(html.contains(r#"data-prompt="Click for more info""#));
+    }
+
+    #[test]
+    fn test_as_html_image_basic() {
+        let md: Markdown = "![Diagram](./diagram.png)".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+
+        assert!(
+            html.contains(r#"src="./diagram.png""#),
+            "HTML was: {}",
+            html
+        );
+        assert!(html.contains(r#"alt="Diagram""#), "HTML was: {}", html);
+        assert!(html.contains("<img "), "HTML was: {}", html);
+    }
+
+    #[test]
+    fn test_as_html_image_width_hint_via_imageref() {
+        let md: Markdown = "![My chart|40%](./chart.png)".into();
+        let html = as_html(&md, HtmlOptions::default()).unwrap();
+
+        assert!(html.contains(r#"alt="My chart""#), "HTML was: {}", html);
+        assert!(
+            html.contains(r#"style="width: 40%;""#),
+            "HTML was: {}",
+            html
+        );
     }
 
     #[test]
