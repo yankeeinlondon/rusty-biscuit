@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
-use std::io::IsTerminal;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -24,12 +23,6 @@ const MAX_SKILL_SUMMARY_CHARS: usize = 16_000;
 const MIN_SKILL_SUMMARY_CHARS: usize = 2_000;
 const MAX_CLAUDE_MD_SUMMARY_LINES: usize = 140;
 const MAX_CLAUDE_MD_SUMMARY_CHARS: usize = 8_000;
-const ANSI_RESET: &str = "\x1b[0m";
-const ANSI_BOLD: &str = "\x1b[1m";
-const ANSI_DIM: &str = "\x1b[2m";
-const ANSI_GREEN: &str = "\x1b[32m";
-const ANSI_YELLOW: &str = "\x1b[33m";
-const ANSI_CYAN: &str = "\x1b[36m";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Agent {
@@ -83,17 +76,17 @@ struct LogPaths {
     docs_summary: PathBuf,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 struct Ui {
-    color: bool,
     total_steps: usize,
+    term: Terminal,
 }
 
 impl Ui {
     fn new(total_steps: usize) -> Self {
         Self {
-            color: supports_color(),
             total_steps,
+            term: Terminal::new(),
         }
     }
 
@@ -101,14 +94,13 @@ impl Ui {
         println!();
         println!(
             "{}",
-            self.paint(
-                ANSI_BOLD,
-                &format!("drift :: {package_area} (docs sync + skill refresh + CLAUDE.md review)")
-            )
+            self.prose(&format!(
+                "<b>drift :: {package_area} (docs sync + skill refresh + CLAUDE.md review)</b>"
+            ))
         );
         println!(
             "{}",
-            self.paint(ANSI_DIM, &format!("agent={agent}  mode=non-interactive"))
+            self.prose(&format!("<dim>agent={agent}  mode=non-interactive</dim>"))
         );
         println!();
     }
@@ -116,48 +108,71 @@ impl Ui {
     fn stage(&self, index: usize, label: &str) {
         println!(
             "{} {}",
-            self.paint(ANSI_CYAN, &format!("[{index}/{}]", self.total_steps)),
+            self.prose(&format!("<cyan>[{index}/{}]</cyan>", self.total_steps)),
             label
         );
     }
 
     fn item(&self, label: &str, value: &str) {
-        println!("  {} {}", self.paint(ANSI_DIM, &format!("{label}:")), value);
+        println!(
+            "  {} {}",
+            self.prose(&format!("<dim>{label}:</dim>")),
+            value
+        );
+    }
+
+    fn doc_list(&self, docs: &[(String, String)]) {
+        if docs.is_empty() {
+            return;
+        }
+
+        let items = docs
+            .iter()
+            .map(|(display, uri)| {
+                RenderableContent::from(Prose::new(format!("<a href=\"{uri}\">{display}</a>")))
+            })
+            .collect::<Vec<_>>();
+        let list = UnorderedList::from(items).with_bullet("- ");
+        let rendered = list.fallback_render(&self.term);
+        print!("{rendered}");
+        if !rendered.ends_with('\n') {
+            println!();
+        }
     }
 
     fn warn(&self, message: &str) {
-        println!("  {} {}", self.paint(ANSI_YELLOW, "warning:"), message);
+        println!("  {} {}", self.prose("<yellow>warning:</yellow>"), message);
     }
 
     fn ok(&self, message: &str) {
-        println!("  {} {}", self.paint(ANSI_GREEN, "ok:"), message);
+        println!("  {} {}", self.prose("<green>ok:</green>"), message);
     }
 
     fn phase_start(&self, phase: &str, agent: &str) {
         println!(
             "  {} {}",
-            self.paint(ANSI_CYAN, "phase:"),
+            self.prose("<cyan>phase:</cyan>"),
             format!("{phase} (agent={agent})")
         );
         println!(
             "  {} waiting for agent output...",
-            self.paint(ANSI_DIM, "status:")
+            self.prose("<dim>status:</dim>")
         );
     }
 
     fn heartbeat(&self, phase: &str, elapsed: Duration) {
         println!(
             "  {} {phase} running (elapsed {})",
-            self.paint(ANSI_DIM, "status:"),
+            self.prose("<dim>status:</dim>"),
             format_duration(elapsed)
         );
     }
 
     fn phase_done(&self, phase: &str, elapsed: Duration, status: &str, success: bool) {
         let prefix = if success {
-            self.paint(ANSI_GREEN, "completed:")
+            self.prose("<green>completed:</green>")
         } else {
-            self.paint(ANSI_YELLOW, "failed:")
+            self.prose("<yellow>failed:</yellow>")
         };
         println!(
             "  {prefix} {phase} in {} (status={status})",
@@ -165,12 +180,8 @@ impl Ui {
         );
     }
 
-    fn paint(&self, style: &str, text: &str) -> String {
-        if self.color {
-            format!("{style}{text}{ANSI_RESET}")
-        } else {
-            text.to_owned()
-        }
+    fn prose(&self, text: &str) -> String {
+        Prose::new(text).fallback_render(&self.term)
     }
 }
 
@@ -179,10 +190,6 @@ fn main() {
         eprintln!("drift failed: {err:#}");
         std::process::exit(1);
     }
-}
-
-fn supports_color() -> bool {
-    env::var_os("NO_COLOR").is_none() && io::stdout().is_terminal()
 }
 
 fn format_duration(duration: Duration) -> String {
@@ -213,15 +220,13 @@ fn run() -> Result<()> {
     let date = current_date()?;
     let log_paths = build_log_paths(&workspace_root, &date, &package_context.library);
 
-    ui.stage(3, "Discovering README targets");
+    ui.stage(3, "Discovering document targets");
     let readme_targets = collect_readmes(&workspace_root, &cli_args.package_area)?;
     let docs_value = readme_targets.join(" ");
     let args_value = cli_args.extra_docs.join(" ");
-    ui.item("README targets", &format!("{} files", readme_targets.len()));
-    ui.item("README list", &docs_value);
-    if !args_value.is_empty() {
-        ui.item("Extra docs", &args_value);
-    }
+    let doc_links = collect_doc_links(&workspace_root, &readme_targets, &cli_args.extra_docs);
+    ui.item("Analyzed docs", &format!("{} files", doc_links.len()));
+    ui.doc_list(&doc_links);
 
     ui.stage(4, "Rendering docs refresh prompt");
     let docs_template = fs::read_to_string(workspace_root.join(agent.docs_template_path()))
@@ -544,6 +549,54 @@ fn collect_readmes(workspace_root: &Path, package_area: &str) -> Result<Vec<Stri
     targets.sort();
     targets.dedup();
     Ok(targets)
+}
+
+fn collect_doc_links(
+    workspace_root: &Path,
+    readme_targets: &[String],
+    extra_docs: &[String],
+) -> Vec<(String, String)> {
+    let mut links = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for raw in readme_targets.iter().chain(extra_docs.iter()) {
+        let Some((display, uri)) = doc_target_link(workspace_root, raw) else {
+            continue;
+        };
+        if seen.insert(display.clone()) {
+            links.push((display, uri));
+        }
+    }
+
+    links
+}
+
+fn doc_target_link(workspace_root: &Path, raw_target: &str) -> Option<(String, String)> {
+    let trimmed = raw_target.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let target = trimmed.strip_prefix('@').unwrap_or(trimmed);
+    if target.is_empty() {
+        return None;
+    }
+
+    let path = Path::new(target);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        workspace_root.join(path)
+    };
+    let absolute = fs::canonicalize(&absolute).unwrap_or(absolute);
+
+    let display = absolute
+        .strip_prefix(workspace_root)
+        .map(path_to_slash_string)
+        .unwrap_or_else(|_| target.replace('\\', "/"));
+    let uri = file_uri(&absolute);
+
+    Some((display, uri))
 }
 
 fn is_readme(path: &Path) -> bool {
