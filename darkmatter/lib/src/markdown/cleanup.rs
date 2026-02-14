@@ -26,11 +26,14 @@ use unicode_width::UnicodeWidthStr;
 
 /// Returns parser options suitable for cleanup operations.
 ///
-/// Enables all extensions EXCEPT `ENABLE_SMART_PUNCTUATION` to preserve
-/// original quote characters (`"` and `'`) without converting them to
-/// typographic "smart quotes" (`"`, `"`, `'`, `'`).
+/// Enables all extensions except:
+/// - `ENABLE_SMART_PUNCTUATION` - preserves original quote characters (`"` and `'`)
+///   without converting them to typographic "smart quotes" (`\u{201c}`, `\u{201d}`, `\u{2018}`, `\u{2019}`).
+/// - `ENABLE_DEFINITION_LIST` - prevents `::file`/`::code`/`::url` transclusion
+///   directives from being parsed as definition list items (which would mangle
+///   the `::` prefix into `: :`).
 fn cleanup_parser_options() -> Options {
-    Options::all() - Options::ENABLE_SMART_PUNCTUATION
+    Options::all() - Options::ENABLE_SMART_PUNCTUATION - Options::ENABLE_DEFINITION_LIST
 }
 
 /// Emphasis style used for italics in markdown.
@@ -330,25 +333,38 @@ pub fn cleanup_content(content: &str) -> String {
     output.trim_start_matches('\n').to_string()
 }
 
-/// Extracts the list marker character for each unordered list from the source.
+/// Extracts the list marker character for each unordered list item from the source.
 ///
-/// Returns a vector of (list_index, marker_char) pairs where list_index is the
-/// sequential index of unordered lists encountered and marker_char is the original
-/// marker used (*, -, or +).
+/// Returns a vector of marker characters in document order, one per unordered
+/// list item. This ensures a 1:1 correspondence with `* ` lines in the cmark
+/// output, which is critical for loose lists where items are separated by
+/// blank lines.
 fn extract_list_markers(content: &str, events: &[(Event, Range<usize>)]) -> Vec<char> {
     let mut markers = Vec::new();
+    // Track whether the innermost list is unordered (true) or ordered (false)
+    let mut list_type_stack: Vec<bool> = Vec::new();
 
     for (event, range) in events {
-        if let Event::Start(Tag::List(None)) = event {
-            // Unordered list - find the marker in source
-            // The range points to the list start; look for the marker character
-            let source_slice = &content[range.start..];
-            if let Some(marker) = find_list_marker(source_slice) {
-                markers.push(marker);
-            } else {
-                // Default to '*' if we can't find the marker
-                markers.push('*');
+        match event {
+            Event::Start(Tag::List(None)) => {
+                list_type_stack.push(true); // unordered
             }
+            Event::Start(Tag::List(Some(_))) => {
+                list_type_stack.push(false); // ordered
+            }
+            Event::End(TagEnd::List(_)) => {
+                list_type_stack.pop();
+            }
+            Event::Start(Tag::Item) if list_type_stack.last() == Some(&true) => {
+                // Item inside an unordered list - extract its marker from source
+                let source_slice = &content[range.start..];
+                if let Some(marker) = find_list_marker(source_slice) {
+                    markers.push(marker);
+                } else {
+                    markers.push('*');
+                }
+            }
+            _ => {}
         }
     }
 
@@ -373,10 +389,9 @@ fn find_list_marker(source: &str) -> Option<char> {
 /// The pulldown-cmark-to-cmark library normalizes all unordered list markers to '*'.
 /// This function replaces them with the original markers from the source.
 ///
-/// The approach tracks indentation levels to determine which list we're in:
-/// - Each indentation level has an associated marker
-/// - When we see a list item at a new (deeper) indentation, we consume the next marker
-/// - All items at the same level use the same marker until we leave that level
+/// Since `extract_list_markers` produces one marker per unordered list item (in
+/// document order), and cmark produces exactly one `* ` line per item, this is a
+/// simple sequential 1:1 replacement.
 fn restore_list_markers(output: &mut String, markers: &[char]) {
     if markers.is_empty() {
         return;
@@ -384,22 +399,19 @@ fn restore_list_markers(output: &mut String, markers: &[char]) {
 
     let mut result = String::with_capacity(output.len());
     let mut lines = output.lines().peekable();
-    let mut markers_iter = markers.iter();
-    // Stack of (indent_level, marker) pairs
-    let mut indent_stack: Vec<(usize, char)> = Vec::new();
+    let mut marker_idx = 0;
     let mut in_code_block = false;
-    let mut prev_was_list_item = false;
 
     while let Some(line) = lines.next() {
-        // Track code blocks to avoid modifying markers inside them
         let trimmed = line.trim_start();
+
+        // Track code blocks to avoid modifying markers inside them
         if trimmed.starts_with("```") {
             in_code_block = !in_code_block;
             result.push_str(line);
             if lines.peek().is_some() {
                 result.push('\n');
             }
-            prev_was_list_item = false;
             continue;
         }
 
@@ -411,35 +423,16 @@ fn restore_list_markers(output: &mut String, markers: &[char]) {
             continue;
         }
 
-        // Check if this line is a list item (starts with optional whitespace + '* ')
-        let indent = line.len() - line.trim_start().len();
-        let trimmed = line.trim_start();
-
         if trimmed.starts_with("* ") {
-            // This is a list item - determine which marker to use
-            let marker = get_marker_for_indent(
-                indent,
-                &mut indent_stack,
-                &mut markers_iter,
-                prev_was_list_item,
-            );
+            let indent = line.len() - trimmed.len();
+            let marker = markers.get(marker_idx).copied().unwrap_or('*');
+            marker_idx += 1;
 
-            // Reconstruct the line with the correct marker
             result.push_str(&" ".repeat(indent));
             result.push(marker);
             result.push_str(&trimmed[1..]); // Skip the '*', keep the rest (including space)
-            prev_was_list_item = true;
         } else {
-            // Not a list item
-            // A blank line or non-indented content might end all lists
-            if trimmed.is_empty() {
-                // Blank line - lists might continue after this
-            } else if indent == 0 && !trimmed.starts_with("* ") {
-                // Non-list content at root level - clear the stack
-                indent_stack.clear();
-            }
             result.push_str(line);
-            prev_was_list_item = false;
         }
 
         if lines.peek().is_some() {
@@ -453,49 +446,6 @@ fn restore_list_markers(output: &mut String, markers: &[char]) {
     }
 
     *output = result;
-}
-
-/// Gets the marker for a list item at the given indentation level.
-///
-/// Manages a stack of (indent, marker) pairs:
-/// - Pops entries with larger indent (we've exited those nested lists)
-/// - If entry matches current indent AND we had a contiguous list, use its marker
-/// - Otherwise, push a new entry with next marker
-fn get_marker_for_indent<'a>(
-    indent: usize,
-    indent_stack: &mut Vec<(usize, char)>,
-    markers_iter: &mut impl Iterator<Item = &'a char>,
-    prev_was_list_item: bool,
-) -> char {
-    // If this is a new root-level list after a break, clear the stack first
-    // This handles: "- item1\n\n+ item2" where item2 is a new list
-    if indent == 0 && !prev_was_list_item && !indent_stack.is_empty() {
-        indent_stack.clear();
-    }
-
-    // Pop any entries with larger indent (we've exited those nested lists)
-    while let Some(&(top_indent, _)) = indent_stack.last() {
-        if indent < top_indent {
-            indent_stack.pop();
-        } else {
-            break;
-        }
-    }
-
-    // Check if we have an entry at this exact indent level AND previous was a list item
-    // (meaning we're continuing an existing list, not starting a new one)
-    if prev_was_list_item
-        && let Some(&(top_indent, marker)) = indent_stack.last()
-        && top_indent == indent
-    {
-        // Continuing same list, use same marker
-        return marker;
-    }
-
-    // New list at this indent level - get next marker
-    let marker = markers_iter.next().copied().unwrap_or('*');
-    indent_stack.push((indent, marker));
-    marker
 }
 
 /// Fixes blockquote formatting issues introduced by pulldown-cmark-to-cmark v18.
@@ -2009,6 +1959,34 @@ mod tests {
         assert!(
             cleaned.contains("\n    - [ ] Sub-task 1"),
             "Nested TODO items should preserve 4-space indentation, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_loose_list_markers_preserved() {
+        // Regression test: loose lists (items separated by blank lines with paragraph
+        // content) should preserve all markers. Previously, only the first item kept
+        // its original marker; subsequent items reverted to '*'.
+        let content = "\
+- **First**
+
+    Paragraph under first item.
+
+- **Second**
+
+    Paragraph under second item.
+
+- **Third**
+
+    Paragraph under third item.";
+        let cleaned = cleanup_content(content);
+
+        let dash_count =
+            cleaned.matches("\n- ").count() + if cleaned.starts_with("- ") { 1 } else { 0 };
+        assert_eq!(
+            dash_count, 3,
+            "All 3 loose list items should use dash marker, got:\n{}",
             cleaned
         );
     }

@@ -481,7 +481,11 @@ impl Markdown {
                 ignore_invalid,
             )? {
                 Some(content) => {
-                    report.transclusions_applied += 1;
+                    if transclusion::is_file_like_reference(&reference)
+                        || transclusion::is_url_like(&reference)
+                    {
+                        report.transclusions_applied += 1;
+                    }
                     prologue_blocks.push(content);
                 }
                 None => {
@@ -500,7 +504,11 @@ impl Markdown {
                 ignore_invalid,
             )? {
                 Some(content) => {
-                    report.transclusions_applied += 1;
+                    if transclusion::is_file_like_reference(&reference)
+                        || transclusion::is_url_like(&reference)
+                    {
+                        report.transclusions_applied += 1;
+                    }
                     epilogue_blocks.push(content);
                 }
                 None => {
@@ -531,6 +539,13 @@ impl Markdown {
         report: &mut TransformReport,
         ignore_invalid: bool,
     ) -> MarkdownResult<Option<String>> {
+        // Inline string content: not a URL, not a file path → use as-is.
+        if !transclusion::is_url_like(reference)
+            && !transclusion::is_file_like_reference(reference)
+        {
+            return Ok(Some(reference.to_string()));
+        }
+
         let kind = if transclusion::is_url_like(reference) {
             transclusion::DirectiveKind::Url
         } else {
@@ -637,7 +652,22 @@ impl Markdown {
             }
         }
 
-        Ok(self.apply_wrappers(content, directive_options))
+        // For block directives (::file), ensure the final output ends with a
+        // blank line so subsequent parent content is not absorbed into the last
+        // block element of the child (e.g., a list item or blockquote).
+        // This runs AFTER apply_wrappers because wrappers like wrap_quotation
+        // use `.lines().join("\n")` which strips trailing newlines.
+        // Frontmatter prologue/epilogue transclusion (insertion_context=None)
+        // doesn't need this because sections are joined with "\n\n".
+        let mut result = self.apply_wrappers(content, directive_options);
+        if insertion_context.is_some() && !result.ends_with("\n\n") {
+            if !result.ends_with('\n') {
+                result.push('\n');
+            }
+            result.push('\n');
+        }
+
+        Ok(result)
     }
 
     fn render_code_transclusion(
@@ -724,6 +754,10 @@ impl Markdown {
         directive_options: &transclusion::BlockOptions,
     ) -> Value {
         let mut inherited: Map<String, Value> = state.data().clone().into_iter().collect();
+
+        // Prologue/epilogue are scoped to the defining document — never propagate.
+        inherited.remove("prologue");
+        inherited.remove("epilogue");
 
         if let transclusion::ReplaceOption::OneOff(one_off) = &directive_options.replace {
             let current_replace = inherited.get("replace").and_then(Value::as_object);
@@ -1629,5 +1663,186 @@ Rounded: {{ round(pi) }}"#;
                 .iter()
                 .any(|warning| warning.message.contains("Heading overflow"))
         );
+    }
+
+    #[test]
+    fn test_stage2_consecutive_file_directives_separated_by_blank_line() {
+        // Regression test: when two ::file directives are consecutive, the second
+        // file's content must not be absorbed into the last block element (e.g., a
+        // list) of the first file.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let one = dir.path().join("one.md");
+        let two = dir.path().join("two.md");
+
+        std::fs::write(&root, "::file ./one.md\n\n::file ./two.md").unwrap();
+        std::fs::write(&one, "- Item A\n- Item B").unwrap();
+        std::fs::write(&two, "## Section Two\n\nParagraph.").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        // Two transclusions should have occurred
+        assert_eq!(report.transclusions_applied, 2);
+        // The heading from two.md must exist as a proper heading, not inside a list
+        assert!(
+            transformed.content().contains("\n## Section Two\n")
+                || transformed.content().contains("\n## Section Two"),
+            "Second file's heading should not be absorbed into first file's list, got:\n{}",
+            transformed.content()
+        );
+    }
+
+    #[test]
+    fn test_stage2_frontmatter_inline_string_prologue() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        std::fs::write(
+            &root,
+            "---\nprologue: \"**Draft** document\"\n---\nBody content.",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert!(transformed.content().starts_with("**Draft** document"));
+        assert!(transformed.content().contains("Body content."));
+        assert_eq!(report.transclusions_applied, 0); // inline string is not a transclusion
+    }
+
+    #[test]
+    fn test_stage2_frontmatter_inline_string_epilogue() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        std::fs::write(
+            &root,
+            "---\nepilogue: \"End of document.\"\n---\nBody.",
+        )
+        .unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert!(transformed.content().ends_with("End of document."));
+        assert_eq!(report.transclusions_applied, 0);
+    }
+
+    #[test]
+    fn test_stage2_frontmatter_mixed_file_and_inline() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let intro = dir.path().join("intro.md");
+
+        std::fs::write(
+            &root,
+            "---\nprologue: [\"./intro.md\", \"Inline note.\"]\n---\nBody.",
+        )
+        .unwrap();
+        std::fs::write(&intro, "File intro.").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        let content = transformed.content();
+        assert!(content.starts_with("File intro."));
+        assert!(content.contains("Inline note."));
+        assert!(content.contains("Body."));
+        assert_eq!(report.transclusions_applied, 1); // only the file counts
+    }
+
+    #[test]
+    fn test_stage2_parent_frontmatter_propagates_to_child_interpolation() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(&root, "---\nauthor: Alice\n---\n::file ./child.md").unwrap();
+        std::fs::write(&child, "Written by {{ author }}.").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, _report) = md.transform_with(options).unwrap();
+
+        assert!(transformed.content().contains("Written by Alice."));
+    }
+
+    #[test]
+    fn test_stage2_parent_replace_map_propagates_to_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(
+            &root,
+            "---\nreplace:\n  PLACEHOLDER: actual\n---\n::file ./child.md",
+        )
+        .unwrap();
+        std::fs::write(&child, "Content with PLACEHOLDER here.").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, _report) = md.transform_with(options).unwrap();
+
+        assert!(transformed.content().contains("Content with actual here."));
+    }
+
+    #[test]
+    fn test_stage2_prologue_epilogue_do_not_propagate_to_children() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(
+            &root,
+            "---\nepilogue: \"Root epilogue.\"\n---\n::file ./child.md",
+        )
+        .unwrap();
+        std::fs::write(&child, "Child body.").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, _report) = md.transform_with(options).unwrap();
+
+        let content = transformed.content();
+        // "Root epilogue." should appear exactly once — at the end of root, not within child
+        assert_eq!(content.matches("Root epilogue.").count(), 1);
+        assert!(content.ends_with("Root epilogue."));
+    }
+
+    #[test]
+    fn test_stage2_quotation_wrapper_does_not_absorb_following_content() {
+        // Regression: wrap_quotation consumed trailing \n\n, causing the
+        // next paragraph to become a lazy continuation of the blockquote.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(
+            &root,
+            "## Section\n\n::file ./child.md quotation=\"Source\"\n\nFollowing paragraph.",
+        )
+        .unwrap();
+        std::fs::write(&child, "Quoted content here.").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert_eq!(report.transclusions_applied, 1);
+        // The "Following paragraph" must NOT be inside the blockquote
+        let content = transformed.content();
+        assert!(
+            content.contains("\n\nFollowing paragraph."),
+            "Following content should be separated from blockquote by blank line, got:\n{}",
+            content
+        );
+        // Verify blockquote is present
+        assert!(content.contains("> Quoted content here."));
+        assert!(content.contains("> — Source"));
     }
 }

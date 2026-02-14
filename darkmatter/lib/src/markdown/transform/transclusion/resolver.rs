@@ -201,6 +201,16 @@ pub fn is_url_like(reference: &str) -> bool {
     reference.starts_with("http://") || reference.starts_with("https://")
 }
 
+/// Returns `true` if the reference looks like a filesystem path rather than
+/// inline string content.  A reference is path-like when it contains a path
+/// separator (`/` or `\`) or starts with a special path prefix (`@` or `~`).
+pub fn is_file_like_reference(reference: &str) -> bool {
+    reference.contains('/')
+        || reference.contains('\\')
+        || reference.starts_with('@')
+        || reference.starts_with('~')
+}
+
 /// Attempts to normalize relative reference tokens before parsing.
 pub fn normalize_reference_token(raw: &str) -> String {
     if raw.starts_with('@') {
@@ -305,6 +315,19 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, TransclusionError::InvalidReference { .. }));
+    }
+
+    #[test]
+    fn classifies_file_like_references() {
+        assert!(is_file_like_reference("./intro.md"));
+        assert!(is_file_like_reference("../shared/header.md"));
+        assert!(is_file_like_reference("@/docs/intro.md"));
+        assert!(is_file_like_reference("~/notes/intro.md"));
+        assert!(is_file_like_reference("/absolute/path.md"));
+        assert!(!is_file_like_reference("Just some text content"));
+        assert!(!is_file_like_reference("**Bold** markdown"));
+        assert!(!is_file_like_reference("intro.md")); // no path separator → inline
+        assert!(!is_file_like_reference(""));
     }
 
     #[test]

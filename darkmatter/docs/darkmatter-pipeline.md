@@ -1,5 +1,32 @@
 # Darkmatter Processing Pipeline
 
+## High Level Flow
+
+```mermaid title="Pipeline Flow"
+flowchart LR
+
+  S1[Preparation]
+  S2[Transclusion]
+  S3[Output]
+
+  S1 --> S2 --> S3
+```
+
+The most important part of the Darkmatter pipelining process is [transclusion](https://en.wikipedia.org/wiki/Transclusion) but before we do that we ensure that the base document is run through some preparation steps to get it ready for transclusion.
+
+The **output** of the Markdown pipelining process is any of the following formats:
+
+- Markdown
+- HTML (_with inline JS and CSS_)
+- AST (_[mdast](https://github.com/syntax-tree/mdast) based AST in JSON format_)
+- Terminal rendering of Markdown (_e.g., using escape codes, inline image embeddings, etc._)
+
+> **Note:** we may at some future stage add output formats like `PDF` and `Word`
+
+The final stage of the Markdown processing will take the _composed_ output and render it to one of the supported output types.
+
+### Operations Per Stage
+
 | **Stage 1**: Preparation  | **Stage 2**: Transclusion |  **Stage 3**: Rendering    |
 | -------------             | -------------             |  ---------------           |
 | Text Replacement          | Block Transclusion        |  Table Rendering           |
@@ -13,6 +40,7 @@
 |                           |                           |  Audio Content             |
 |                           |                           |  Charting                  |
 |                           |                           |  Mermaid Rendering         |
+
 
 
 ## Variance by Output Target

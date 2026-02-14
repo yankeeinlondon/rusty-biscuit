@@ -261,13 +261,18 @@ fn run_compose(
 
     match output {
         OutputFormat::Auto | OutputFormat::Markdown => {
-            let artifact = markdown_artifact(&transformed);
+            // Frontmatter drives the pipeline; once composition is complete, discard it.
+            let content = transformed.content().to_string();
             if show {
-                // Print to stdout AND open in default app
-                print!("{}", artifact.content);
+                let artifact = OutputArtifact {
+                    content: content.clone(),
+                    extension: "md",
+                    label: "markdown",
+                };
+                print!("{content}");
                 open_output_artifact(&artifact)?;
             } else {
-                print!("{}", artifact.content);
+                print!("{content}");
             }
         }
         OutputFormat::Html => {

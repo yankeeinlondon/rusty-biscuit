@@ -305,6 +305,18 @@ fn test_compose_output_html() {
 }
 
 #[test]
+fn test_compose_strips_frontmatter() {
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin("---\ntitle: Test\n---\n# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Hello"))
+        .stdout(predicate::str::contains("World"))
+        .stdout(predicate::str::contains("---").not());
+}
+
+#[test]
 fn test_compose_invalid_state() {
     md_cmd()
         .args(["compose", "-", "--state", "bad json"])
