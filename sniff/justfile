@@ -3,6 +3,7 @@ set positional-arguments
 
 BOLD := '\033[1m'
 RESET := '\033[0m'
+DOCS := ""
 
 default:
     #!/usr/bin/env bash
@@ -85,13 +86,14 @@ commit:
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
 
-# fix documentation drift and update the skill
+# fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":
     @echo
-    @echo "Refreshing {{BOLD}}sniff{{RESET}} skill via Rust drift script"
+    @echo -e "Running drift workflow for {{BOLD}}sniff{{RESET}} via Rust drift script"
     @echo
+    @echo "- step 1: update package docs for code drift"
+    @echo "- step 2: refresh package skill from updated docs"
+    @echo "- step 3: review CLAUDE.md for needed updates"
     @echo "- set PREFER_AGENT=codex to force codex (default is claude)"
-    @echo "- extra document paths can still be passed as drift args"
     @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- sniff {{args}}
-
+    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- sniff {{DOCS}} {{args}}

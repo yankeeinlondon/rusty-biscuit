@@ -118,7 +118,7 @@ install:
             echo "- no justfile for the area **$area**" >&2
         fi
     done
-    @just _speak "all apps in the monorepo have been rebuilt and installed"; \
+    @just _speak "all apps in the monorepo have been rebuilt and installed"
 
 
 # executes the latest Darkmatter CLI code in debug mode
@@ -368,12 +368,16 @@ skill-claudine:
         claudine "The claudine package has synced it's documents for drift and updated the skill tree."; \
     fi
 
-# fix documentation drift and update a package skill
+# fix package documentation drift, refresh skill files, and review CLAUDE.md
 drift AREA *args="":
     @echo
-    @echo "Refreshing {{BOLD}}{{AREA}}{{RESET}} skill via Rust drift script"
+    @echo -e "Running drift workflow for {{BOLD}}{{AREA}}{{RESET}} via Rust drift script"
     @echo
+    @echo "- step 1: update package docs for code drift"
+    @echo "- step 2: refresh package skill from updated docs"
+    @echo "- step 3: review CLAUDE.md for needed updates"
+    @echo "- package-level DOCS defaults are configured in each package justfile"
     @echo "- set {{BOLD}}PREFER_AGENT=codex{{RESET}} to force codex (default is claude)"
-    @echo "- extra document paths can still be passed as drift args"
+    @echo "- extra document paths can be passed as drift args"
     @echo
     @cargo run --manifest-path scripts/Cargo.toml --bin drift -- {{AREA}} {{args}}

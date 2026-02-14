@@ -286,14 +286,17 @@ _refresh_skill SUMMARY_FILE *args:
     @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{SKILL_PROMPT}}{{RESET}}" >&2
     @just _claude_file "{{SKILL_PROMPT}}"
 
-# fix documentation drift and update the skill
+# fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":
     @echo
-    @echo -e "Refreshing the {{BOLD}}{{SCHEMATIC}}{{RESET}} {{BLUE}}skill{{RESET}} via Rust drift script"
+    @echo -e "Running drift workflow for {{BOLD}}{{SCHEMATIC}}{{RESET}} via Rust drift script"
     @echo
-    @echo -e "- set {{BOLD}}PREFER_AGENT=codex{{RESET}} to force codex (default is claude)"
-    @echo -e "- extra document paths can still be passed as drift args\n"
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{SCHEMATIC}} {{args}}
+    @echo "- step 1: update package docs for code drift"
+    @echo "- step 2: refresh package skill from updated docs"
+    @echo "- step 3: review CLAUDE.md for needed updates"
+    @echo "- set PREFER_AGENT=codex to force codex (default is claude)"
+    @echo
+    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{SCHEMATIC}} {{DOCS}} {{args}}
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.

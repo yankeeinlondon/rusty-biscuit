@@ -17,6 +17,7 @@ CLI_NAME := PACKAGE + " CLI"
 LIBRARY := lowercase(PACKAGE)
 CLI := lowercase(PACKAGE) + "-cli"
 CLI_PATH := "./cli"
+DOCS := ""
 
 
 default:
@@ -150,7 +151,8 @@ install *args="":
     @echo -e "{{BOLD}}{{YELLOW}}Installing {{CLI_NAME}}{{RESET}}"
     @echo
     @cargo install --path {{CLI_PATH}} {{args}} || ( playa effect error-2 2>/dev/null && exit 1 )
-    @echo "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
+    @echo -e "{{BOLD}}{{BLUE}}{{CLI_NAME}} installed{{RESET}}"
+    @echo
     @playa effect drop-4 2>/dev/null || return 0
 
 # Validate the source code without doing a full build
@@ -194,15 +196,17 @@ review *args="":
     @echo -e "Code Review for the {{BLUE}}{{LIB_NAME}}{{RESET}} package has completed"
     @just _speak "Review for {{LIB_NAME}} package has completed."
 
-# fix documentation drift and update the skill
+# fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":
     @echo
-    @echo "Refreshing {{BOLD}}{{LIBRARY}}{{RESET}} skill via Rust drift script"
+    @echo -e "Running drift workflow for {{BOLD}}{{LIBRARY}}{{RESET}} via Rust drift script"
     @echo
+    @echo "- step 1: update package docs for code drift"
+    @echo "- step 2: refresh package skill from updated docs"
+    @echo "- step 3: review CLAUDE.md for needed updates"
     @echo "- set PREFER_AGENT=codex to force codex (default is claude)"
-    @echo "- extra document paths can still be passed as drift args"
     @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{LIBRARY}} {{args}}
+    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{LIBRARY}} {{DOCS}} {{args}}
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.
