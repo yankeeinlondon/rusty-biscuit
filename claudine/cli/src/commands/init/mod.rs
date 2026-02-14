@@ -196,7 +196,7 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     }
 
     log::message("");
-    log::message("Done! Run `claudine status` to verify.");
+    log::message("Done! Run `claudine hooks` to verify.");
     Ok(())
 }
 
@@ -289,7 +289,7 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
     }
 
     log::message("");
-    log::message("Done! Run `claudine status` to verify.");
+    log::message("Done! Run `claudine hooks` to verify.");
     Ok(())
 }
 

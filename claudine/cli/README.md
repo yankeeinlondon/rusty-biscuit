@@ -28,7 +28,7 @@ Inspect hook registrations and provider capabilities.
 | `--support` | Event support matrix across all providers (✅ hook / ⛔️ non-hook / ❌ none) |
 | `--mapping` | Native event name mappings per provider |
 | `--describe` | Event descriptions, payload schemas, and return schemas |
-| `--variables` | All 29 template variables with current detected values |
+| `--variables` | All 28 template variables with current detected values |
 | `--fix` | Validate sound effect names and auto-fix with suggestions |
 
 Sound effect validation uses a 5-tier fuzzy matching algorithm to suggest replacements for invalid effect names.
@@ -43,6 +43,8 @@ Synchronize skills, commands, and agents across providers via symlinks.
 | `<provider>` | Detailed capability view for one provider (fuzzy matching) |
 | `--dry-run` | Preview what would be linked without creating symlinks |
 | `--filter <name>` | Link only a specific skill by name |
+| `--detailed` | Show detailed output |
+| `--replace-duplicates` | Replace duplicate real directories with symlinks |
 
 ### `claudine sync [flags]`
 

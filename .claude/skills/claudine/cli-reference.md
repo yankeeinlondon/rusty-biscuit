@@ -78,7 +78,7 @@ claudine hooks [OPTIONS] [PROVIDER]
 | `--support` | Event support matrix across all providers (✅ hook / ⛔️ non-hook / ❌ none) |
 | `--mapping` | Native event name mappings per provider |
 | `--describe` | Event descriptions, payload schemas, and return schemas |
-| `--variables` | All 29 template variables with current detected values |
+| `--variables` | All 28 template variables with current detected values |
 | `--fix` | Validate sound effect names and auto-fix with suggestions |
 
 **Provider fuzzy matching**: commands that accept a provider name use a 3-tier resolution: exact match → prefix match → contains match. This lets users type `cl` instead of `claude`.
@@ -130,6 +130,8 @@ claudine link [OPTIONS] [PROVIDER]
 | `<provider>` | Detailed capability view for one provider (fuzzy matching) |
 | `--dry-run` | Preview what would be linked without creating symlinks |
 | `--filter <name>` | Link only a specific skill by name |
+| `--detailed` | Show detailed output |
+| `--replace-duplicates` | Replace duplicate real directories with symlinks |
 | `-v, --verbose` | Show detailed hash values and paths |
 
 **Behavior:**

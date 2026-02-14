@@ -68,7 +68,7 @@ claudine link
 | `claudine hooks --describe` | Event descriptions and payload schemas |
 | `claudine hooks --variables` | Template variables with current values |
 | `claudine hooks --fix` | Auto-fix invalid sound effect names |
-| `claudine link [--dry-run] [--filter]` | Sync skills across providers |
+| `claudine link [--dry-run] [--filter] [--detailed] [--replace-duplicates]` | Sync skills across providers |
 | `claudine link --support` | Provider resource support matrix |
 | `claudine sync [--dry-run] [--provider] [--fix]` | Re-apply registrations |
 | `claudine handle <event> [--provider]` | Process event from stdin (hook target) |
@@ -108,7 +108,7 @@ claudine link
 | `report` | Output to stdout with optional template/format | Synchronous |
 | `run` | Execute shell command | Configurable |
 
-## Template Variables (29)
+## Template Variables (28)
 
 **Event:** `{provider}`, `{event}`, `{timestamp}`, `{session_id}`, `{cwd}`, `{tool_name}`, `{error}`, `{prompt}`, `{agent_type}`, `{notification_type}`
 

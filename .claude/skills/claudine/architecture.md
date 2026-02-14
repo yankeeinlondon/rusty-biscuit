@@ -206,7 +206,7 @@ The core event processing pipeline runs in 7 steps:
 ### Dispatch Sub-modules
 
 - `loader` — Config file discovery, loading, and user+repo merge logic
-- `template` — `{placeholder}` interpolation engine with 29 variables across 5 categories
+- `template` — `{placeholder}` interpolation engine with 28 variables across 5 categories
 - `matcher` — Regex-based event filtering
 - `resolver` — Extracts enabled/actions/matcher from bindings
 - `runner` — Executes actions (TTS via biscuit-speaks, logging, shell commands, sound effects via playa)
@@ -251,7 +251,7 @@ Atomic file writes (`config::atomic`) prevent corruption during concurrent acces
 
 ## Template Interpolation
 
-29 variables in 5 categories. Template regex is lazy-compiled via `LazyLock<Regex>`.
+28 variables in 5 categories. Template regex is lazy-compiled via `LazyLock<Regex>`.
 
 ### Event Fields
 
@@ -306,7 +306,6 @@ Full, CustomFormat, Limited, None
 | Codex | `~/.codex/skills/` | `.codex/skills/` |
 | Gemini | `~/.gemini/skills/` | `.gemini/skills/` |
 | OpenCode | `~/.config/opencode/skills/` | `.opencode/skills/` |
-| QwenCode | `~/.qwen/skills/` | `.qwen/skills/` |
 
 Note: OpenCode also reads `.claude/skills/` directly
 

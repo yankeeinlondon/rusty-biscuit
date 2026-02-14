@@ -79,7 +79,7 @@ Sub-modules:
 
 ### Template Variables (`dispatch::template`)
 
-29 variables in 5 categories, available for `{placeholder}` interpolation in speak and report templates:
+28 variables in 5 categories, available for `{placeholder}` interpolation in speak and report templates:
 
 | Category | Variables |
 |----------|-----------|
@@ -129,7 +129,6 @@ Cross-provider skill synchronization via symlinks:
 | Codex | `~/.codex/skills/` | `.codex/skills/` |
 | Gemini | `~/.gemini/skills/` | `.gemini/skills/` |
 | OpenCode | `~/.config/opencode/skills/` | `.opencode/skills/` |
-| QwenCode | `~/.qwen/skills/` | `.qwen/skills/` |
 
 ## Action Execution
 

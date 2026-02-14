@@ -195,6 +195,7 @@ deps:
     @echo "Dependencies:"
     @echo "$(just -f ../justfile repo-deps 2>/dev/null)" | rg "{{LIBRARY}}*:"
 
+# Show all README.md files in the package
 readme_files:
     @sniff docs --readme --json | jq -r '[.[] | select(.relative | startswith("{{LIBRARY}}")) | "@" + .relative ] | join(" ")'
 
