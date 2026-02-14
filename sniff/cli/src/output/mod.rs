@@ -27,7 +27,8 @@ pub use topics::print_topics_table;
 
 // Re-export types needed by submodules
 pub(crate) use filesystem::{
-    print_docs_section, print_filesystem_section, print_language_section, print_repo_section,
+    print_docs_section, print_filesystem_section, print_language_section, print_repo_deps,
+    print_repo_section,
 };
 pub(crate) use hardware::{
     print_cpu_section, print_gpu_section, print_hardware_section, print_memory_section,
@@ -239,6 +240,7 @@ pub fn print_text(
     filter: OutputFilter,
     history_count: usize,
     docs_filter: &DocsFilter,
+    deps: bool,
 ) {
     // Get repo root for relative paths
     let repo_root = result
@@ -315,7 +317,11 @@ pub fn print_text(
             if let Some(ref filesystem) = result.filesystem
                 && let Some(ref repo) = filesystem.repo
             {
-                print_repo_section(repo, verbose, repo_root);
+                if deps {
+                    print_repo_deps(repo);
+                } else {
+                    print_repo_section(repo, verbose, repo_root);
+                }
             }
         }
         OutputFilter::Language => {

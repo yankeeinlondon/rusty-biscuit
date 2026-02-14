@@ -93,7 +93,11 @@ pub enum Commands {
     },
 
     /// Show only repository/monorepo structure
-    Repo,
+    Repo {
+        /// Render an internal dependency diagram
+        #[arg(long)]
+        deps: bool,
+    },
 
     /// Show only language detection results
     Language,
@@ -213,7 +217,7 @@ impl Commands {
 
             // Filesystem detail sections
             Commands::Git { .. } => OutputFilter::Git,
-            Commands::Repo => OutputFilter::Repo,
+            Commands::Repo { .. } => OutputFilter::Repo,
             Commands::Language => OutputFilter::Language,
             Commands::Docs { .. } => OutputFilter::Docs,
 
@@ -279,6 +283,11 @@ impl Commands {
             Commands::Git { history } => *history,
             _ => 5, // default
         }
+    }
+
+    /// Check if this is a repo command with `--deps` flag.
+    pub fn deps(&self) -> bool {
+        matches!(self, Commands::Repo { deps: true })
     }
 
     /// Get docs filter flags if this is a docs command.
@@ -354,6 +363,7 @@ Commands:
   Filesystem details:
     sniff git         Show only git repository information
     sniff repo        Show only repository/monorepo structure
+    sniff repo --deps Show internal dependency diagram
     sniff language    Show only language detection results
     sniff docs              Show markdown documents in the repository
     sniff docs --readme     Show only README.md files
@@ -561,6 +571,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .as_ref()
         .map_or(DocsFilter::default(), |c| c.docs_filter());
 
+    let deps = cli.command.as_ref().is_some_and(|c| c.deps());
+
     let use_json = cli.command.is_none() || cli.json;
 
     if use_json {
@@ -572,6 +584,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             output_filter,
             history_count,
             &docs_filter,
+            deps,
         );
     }
 
@@ -870,7 +883,13 @@ mod tests {
         #[test]
         fn repo_subcommand_parses() {
             let cli = parse_args(&["repo"]).unwrap();
-            assert!(matches!(cli.command, Some(Commands::Repo)));
+            assert!(matches!(cli.command, Some(Commands::Repo { deps: false })));
+        }
+
+        #[test]
+        fn repo_deps_flag_parses() {
+            let cli = parse_args(&["repo", "--deps"]).unwrap();
+            assert!(matches!(cli.command, Some(Commands::Repo { deps: true })));
         }
 
         #[test]
@@ -1139,7 +1158,7 @@ mod tests {
 
         #[test]
         fn repo_maps_to_repo_filter() {
-            let cmd = Commands::Repo;
+            let cmd = Commands::Repo { deps: false };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Repo);
         }
 

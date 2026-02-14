@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use biscuit_terminal::components::block_quote::BlockQuote;
 use biscuit_terminal::components::list::UnorderedList;
+use biscuit_terminal::components::mermaid::MermaidRenderer;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{Renderable, RenderableContent};
 use biscuit_terminal::utils::layout::Margin;
@@ -440,15 +441,15 @@ fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> 
         _ => "",
     };
 
-    let excluded_part = if pkg.is_excluded {
-        " <dim>[excluded]</dim>"
+    let name_part = if pkg.is_excluded {
+        format!("<orange>{}</orange>", pkg.name)
     } else {
-        ""
+        format!("<b>{}</b>", pkg.name)
     };
 
     let main_line = format!(
-        "<b>{}</b>{} <dim>({})</dim>{}{}{}",
-        pkg.name, version_part, pkg.relative, lang_part, updatable_part, excluded_part
+        "{}{} <dim>({})</dim>{}{}",
+        name_part, version_part, pkg.relative, lang_part, updatable_part
     );
 
     let mut items = vec![main_line];
@@ -510,8 +511,9 @@ pub fn print_repo_section(
     println!("\n{}\n", title.render(None));
 
     if let Some(ref packages) = repo.packages {
-        // Track whether any package has updatable deps for the key
+        // Track whether any package has updatable deps or excluded packages for the key
         let has_updatable = packages.iter().any(|pkg| pkg.is_updatable == Some(true));
+        let has_excluded = packages.iter().any(|pkg| pkg.is_excluded);
 
         // Group packages by area, preserving discovery order
         let mut areas: Vec<String> = Vec::new();
@@ -557,15 +559,23 @@ pub fn print_repo_section(
         let list = UnorderedList::from(outer_items).with_indent_children(Some(4));
         println!("{}", list.render(None));
 
-        // Legend for the updatable indicators
-        if has_updatable {
-            let has_major = packages
-                .iter()
-                .any(|pkg| pkg.has_major_update == Some(true));
-
-            let mut legend = String::from("\n<dim><yellow>*</yellow> dependency updates available");
-            if has_major {
-                legend.push_str("  <red>*</red> major version update available");
+        // Legend for indicators
+        if has_updatable || has_excluded {
+            let mut legend = String::from("\n<dim>");
+            if has_updatable {
+                legend.push_str("<yellow>*</yellow> dependency updates available");
+                let has_major = packages
+                    .iter()
+                    .any(|pkg| pkg.has_major_update == Some(true));
+                if has_major {
+                    legend.push_str("  <red>*</red> major version update available");
+                }
+                if has_excluded {
+                    legend.push_str("  ");
+                }
+            }
+            if has_excluded {
+                legend.push_str("<orange>name</orange> excluded from workspace");
             }
             legend.push_str("</dim>");
             println!("{}", Prose::new(&legend).render(None));
@@ -901,6 +911,189 @@ fn format_doc_filepath(relative: &str, absolute: &str) -> String {
         None => {
             // No directory prefix, just the filename
             format!("<a href=\"{absolute}\"><blue><b>{relative}</b></blue></a>")
+        }
+    }
+}
+
+/// Build a Mermaid flowchart from workspace package dependencies.
+///
+/// Packages are grouped into subgraphs by `package_area`. Edges are drawn
+/// from each package to its `depends_on` entries.
+///
+/// Returns `None` when there are no internal dependency edges.
+fn build_deps_mermaid(packages: &[sniff::filesystem::repo::Package]) -> Option<String> {
+    use std::collections::HashMap;
+
+    // Assign each package a stable node ID and build name→id lookup
+    let mut node_ids: HashMap<&str, String> = HashMap::new();
+    for (i, pkg) in packages.iter().enumerate() {
+        node_ids.insert(pkg.name.as_str(), format!("n{i}"));
+    }
+
+    // Check if there are any edges at all
+    let has_edges = packages.iter().any(|p| !p.depends_on.is_empty());
+    if !has_edges {
+        return None;
+    }
+
+    let mut lines = vec!["flowchart TD".to_string()];
+
+    // Group packages by area, preserving discovery order
+    let mut areas: Vec<&str> = Vec::new();
+    let mut area_packages: HashMap<&str, Vec<&sniff::filesystem::repo::Package>> = HashMap::new();
+    for pkg in packages {
+        let area = pkg.package_area.as_str();
+        if !area_packages.contains_key(area) {
+            areas.push(area);
+        }
+        area_packages.entry(area).or_default().push(pkg);
+    }
+
+    // Emit subgraphs
+    for area in &areas {
+        let pkgs = &area_packages[area];
+        if pkgs.len() == 1 && *area == "root" {
+            // Single root-level package doesn't need a subgraph
+            let pkg = pkgs[0];
+            let id = &node_ids[pkg.name.as_str()];
+            lines.push(format!("    {id}[\"{}\"]", pkg.name));
+        } else {
+            lines.push(format!("    subgraph {area}"));
+            for pkg in pkgs {
+                let id = &node_ids[pkg.name.as_str()];
+                lines.push(format!("        {id}[\"{}\"]", pkg.name));
+            }
+            lines.push("    end".to_string());
+        }
+    }
+
+    // Emit edges
+    for pkg in packages {
+        let from = &node_ids[pkg.name.as_str()];
+        for dep_name in &pkg.depends_on {
+            if let Some(to) = node_ids.get(dep_name.as_str()) {
+                lines.push(format!("    {from} --> {to}"));
+            }
+        }
+    }
+
+    Some(lines.join("\n"))
+}
+
+/// Render an internal dependency diagram for the repository.
+///
+/// Builds a Mermaid flowchart from package dependency data and renders it
+/// inline using `MermaidRenderer`. Falls back to a code block if the
+/// terminal cannot display images or mmdc is not available.
+pub fn print_repo_deps(repo: &sniff::filesystem::repo::RepoInfo) {
+    if !repo.is_monorepo {
+        println!("--deps requires a monorepo (no workspace packages found)");
+        return;
+    }
+
+    let packages = match repo.packages {
+        Some(ref pkgs) => pkgs,
+        None => {
+            println!("No packages found in workspace");
+            return;
+        }
+    };
+
+    let mermaid = match build_deps_mermaid(packages) {
+        Some(m) => m,
+        None => {
+            println!("No internal dependencies found between workspace packages");
+            return;
+        }
+    };
+
+    let renderer = MermaidRenderer::for_terminal(&mermaid);
+    match renderer.render_for_terminal() {
+        Ok(()) => {}
+        Err(_) => {
+            renderer.print_fallback();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sniff::filesystem::repo::Package;
+    use std::path::PathBuf;
+
+    fn make_package(name: &str, area: &str, depends_on: &[&str]) -> Package {
+        Package {
+            path: PathBuf::from(format!("/repo/{area}/{name}")),
+            relative: format!("{area}/{name}"),
+            package_area: area.to_string(),
+            name: name.to_string(),
+            primary_language: None,
+            languages: vec![],
+            configuration: vec![],
+            documentation: vec![],
+            editor_config: None,
+            command_runner: vec![],
+            package_managers: vec![],
+            version: None,
+            features: vec![],
+            depends_on: depends_on.iter().map(|s| s.to_string()).collect(),
+            used_by: vec![],
+            dependencies: None,
+            dev_dependencies: None,
+            peer_dependencies: None,
+            optional_dependencies: None,
+            is_updatable: None,
+            has_major_update: None,
+            is_excluded: false,
+        }
+    }
+
+    mod deps_mermaid {
+        use super::*;
+
+        #[test]
+        fn returns_none_when_no_edges() {
+            let packages = vec![
+                make_package("alpha", "area-a", &[]),
+                make_package("beta", "area-b", &[]),
+            ];
+            assert!(build_deps_mermaid(&packages).is_none());
+        }
+
+        #[test]
+        fn generates_flowchart_with_edges() {
+            let packages = vec![
+                make_package("cli", "sniff", &["lib"]),
+                make_package("lib", "sniff", &[]),
+            ];
+            let result = build_deps_mermaid(&packages).unwrap();
+            assert!(result.starts_with("flowchart TD"));
+            assert!(result.contains("subgraph sniff"));
+            assert!(result.contains("n0 --> n1"));
+        }
+
+        #[test]
+        fn groups_packages_by_area() {
+            let packages = vec![
+                make_package("speaks-cli", "biscuit-speaks", &["speaks-lib"]),
+                make_package("speaks-lib", "biscuit-speaks", &[]),
+                make_package("sniff-cli", "sniff", &["sniff-lib"]),
+                make_package("sniff-lib", "sniff", &[]),
+            ];
+            let result = build_deps_mermaid(&packages).unwrap();
+            assert!(result.contains("subgraph biscuit-speaks"));
+            assert!(result.contains("subgraph sniff"));
+        }
+
+        #[test]
+        fn cross_area_edges() {
+            let packages = vec![
+                make_package("app", "apps", &["core"]),
+                make_package("core", "libs", &[]),
+            ];
+            let result = build_deps_mermaid(&packages).unwrap();
+            assert!(result.contains("n0 --> n1"));
         }
     }
 }
