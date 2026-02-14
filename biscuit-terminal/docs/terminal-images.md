@@ -412,9 +412,7 @@ The `cursor AFTER` DSR query fails on some terminals after image rendering. This
 | Pad image to exact cell boundary | Always blank line | No change | N/A | N/A | N/A |
 | Delete all placements before render | Still intermittent; destroys images | N/A | N/A | N/A | N/A |
 
-| Wezterm | iTerm2 | Ghostty | Kitty |
-| ------- | ------ | ------- | ----- |
-| ![](./Wezterm.png)| ![](./iTerm2.png)  | ![](./Ghostty.png) | ![](./Kitty.png) |
+
 
 ## What NOT to Do
 
