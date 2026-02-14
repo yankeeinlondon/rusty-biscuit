@@ -108,7 +108,7 @@ Builder methods:
 
 Validation: `validate()` performs async HEAD requests on external URLs.
 
-**Not yet implemented**: `execute()` returns a fatal `StepError` (LLM execution not wired to rig-core).
+**Not yet implemented**: `execute()` returns a fatal `StepError` ("LLM execution not yet implemented").
 
 ### OpenCodeDelegation (`agent_delegation.rs`)
 
@@ -128,8 +128,7 @@ Delegates pipeline steps to the `opencode` CLI. Implements `AgentDelegation` tra
 ## Functional Grouping (`functional_grouping/`)
 
 Scaffold modules for future pipeline operators:
-- `concat.rs` - combining step outputs
-- `splinter.rs` - splitting/fanning out
+- `concat.rs` - combining step outputs (`SmartConcat`)
 
 ## Services (`services/`)
 
@@ -139,7 +138,7 @@ See [Agent Services](./agent-services.md) for full reference.
 
 ## Foreign Agents (`foreign_agent/`)
 
-Incomplete trait skeleton for integrating external agentic systems (Claude Code, OpenCode, Firecrawl). Defines types:
+Incomplete trait skeleton for integrating external agentic systems (Claude Code, OpenCode, Firecrawl). Not publicly exported. Defines types:
 - `ForeignAgentLocality` (LocalCli / CloudApi)
 - `ConcurrencyCap`, `UsageCap`, `AuthMethod`, `AgenticPlanType`
 

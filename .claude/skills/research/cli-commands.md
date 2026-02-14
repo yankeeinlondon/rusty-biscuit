@@ -99,7 +99,7 @@ research list [FILTERS...] [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `-t, --type <TYPE>` | Filter by research type (repeatable) |
-| `--verbose` | Show detailed metadata with issues |
+| `--verbose` | Show detailed metadata with issues (boolean flag, distinct from global `-v`) |
 | `--json` | Output as JSON |
 | `--migrate` | Migrate all v0 metadata files to v1 schema |
 
@@ -219,7 +219,7 @@ research show tokio
 
 ## research api
 
-Research a public API (currently placeholder).
+Research a public API (stub: creates directory structure and `metadata.json` only, LLM research prompts not yet implemented).
 
 ```bash
 research api <API_NAME> [QUESTIONS...] [OPTIONS]

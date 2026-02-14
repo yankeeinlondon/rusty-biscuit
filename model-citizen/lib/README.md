@@ -37,14 +37,14 @@ Three scanners are provided:
 
 - `UnifiedModel` - Core model representation with id, name, size, quantization, architecture, source, format, path, metadata
 - `ModelMetadata` - Rich optional metadata (context length, parameters, capabilities, inference defaults, HuggingFace repo)
-- `QuantizationType` - 25+ variants (GGUF quants, float types, IQ series, MLX types)
-- `ModelArchitecture` - 9 families (Llama, Mistral, Qwen, Phi, Gemma, Command, Yi, DeepSeek, StarCoder)
+- `QuantizationType` - 27 variants (GGUF quants, float types, IQ series, MLX types)
+- `ModelArchitecture` - 10 variants: 9 families (Llama, Mistral, Qwen, Phi, Gemma, Command, Yi, DeepSeek, StarCoder) + Unknown
 - `ModelFormat` - File format: Gguf, Safetensors, Unknown
 - `ModelSource` - Runner origin: Ollama, LmStudio, LlamaCpp
 
 ### GGUF Parsing (`gguf` module)
 
-- Filename-based quantization detection (30+ patterns, case-insensitive)
+- Filename-based quantization detection (61 patterns covering case and separator variants)
 - Header validation (magic bytes, version)
 - Full metadata extraction via `gguf-rs-lib` (architecture, context length, embedding dimensions)
 
@@ -58,7 +58,7 @@ Three scanners are provided:
 ### Sharing (`sharing` module)
 
 - Cross-platform symlink creation (Unix symlinks, Windows fallback chain: symlink -> hard link -> copy)
-- `ShareRegistry` tracks symlink relationships in JSON (`~/.local/share/model-citizen/shares.json`)
+- `ShareRegistry` tracks symlink relationships in caller-specified JSON file (default via `default_registry_path()`: `<data_local_dir>/model-citizen/shares.json`)
 - Symlink validation and recursive resolution (max depth: 20)
 
 ## Key Dependencies

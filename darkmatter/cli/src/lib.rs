@@ -80,10 +80,17 @@
 //!
 //! ```bash
 //! # Clean up markdown formatting (stdout)
-//! md README.md --clean
+//! md clean README.md
+//! echo "# Hello" | md clean -
+//! ```
 //!
-//! # Clean up and save back to file
-//! md README.md --clean-save
+//! ### Transform pipeline
+//!
+//! ```bash
+//! # Compose a document through the transform pipeline
+//! md compose doc.md
+//! md compose doc.md --state '{"name":"Alice"}'
+//! md compose doc.md --output html
 //! ```
 //!
 //! ### Theming
@@ -124,6 +131,7 @@
 //! - **Mermaid diagrams**: Render mermaid diagrams to terminal or HTML
 //! - **Theme support**: Multiple prose and code themes with light/dark mode detection
 //! - **Markdown cleanup**: Normalize markdown formatting
+//! - **Transform pipeline**: Compose documents with interpolation, replacement, and transclusion
 //! - **Document comparison**: Structural diff between markdown documents
 //! - **Table of contents**: Extract document structure as tree or JSON
 //!
@@ -167,9 +175,50 @@ mod cli {
         Json,
     }
 
-    /// Subcommands for non-render operations.
+    /// CLI subcommands.
     #[derive(Clone, Debug, Subcommand)]
     pub enum Command {
+        /// Render a markdown document (same as default behavior without a subcommand).
+        Read {
+            /// Input file path (use "-" for stdin)
+            #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
+            input: Option<PathBuf>,
+
+            /// Output format
+            #[arg(long, value_enum, default_value_t = OutputFormat::Auto)]
+            output: OutputFormat,
+
+            /// Open output in the default app using a temp file
+            #[arg(long)]
+            show: bool,
+        },
+
+        /// Clean up markdown formatting (output to stdout).
+        Clean {
+            /// Input file path (use "-" for stdin)
+            #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
+            input: Option<PathBuf>,
+        },
+
+        /// Compose a document through the transform pipeline.
+        Compose {
+            /// Input file path (use "-" for stdin)
+            #[arg(value_name = "INPUT", add = ArgValueCompleter::new(complete_markdown_files))]
+            input: Option<PathBuf>,
+
+            /// Initial state as JSON key/value pairs
+            #[arg(long, value_name = "JSON")]
+            state: Option<String>,
+
+            /// Output format (default: markdown for compose)
+            #[arg(long, value_enum, default_value_t = OutputFormat::Markdown)]
+            output: OutputFormat,
+
+            /// Render composed content to stdout AND open in default app
+            #[arg(long)]
+            show: bool,
+        },
+
         /// Show markdown table of contents.
         Toc {
             /// Input file path (use "-" for stdin)
@@ -220,29 +269,13 @@ mod cli {
         #[arg(long)]
         pub list_themes: bool,
 
-        /// Clean up markdown formatting (output to stdout)
-        #[arg(long, conflicts_with = "clean_save")]
-        pub clean: bool,
-
-        /// Clean up and save back to file
-        #[arg(long, conflicts_with = "clean")]
-        pub clean_save: bool,
-
-        /// Output format for top-level render mode
-        #[arg(long, value_enum, default_value_t = OutputFormat::Auto, conflicts_with_all = ["clean", "clean_save"])]
+        /// Output format for top-level render mode (when no subcommand given)
+        #[arg(long, value_enum, default_value_t = OutputFormat::Auto)]
         pub output: OutputFormat,
 
         /// Open selected output in the default app using a temp file
         #[arg(long)]
         pub show: bool,
-
-        /// Merge JSON into frontmatter (JSON wins on conflicts)
-        #[arg(long, value_name = "JSON")]
-        pub fm_merge_with: Option<String>,
-
-        /// Set default frontmatter values (document wins on conflicts)
-        #[arg(long, value_name = "JSON")]
-        pub fm_defaults: Option<String>,
 
         /// Include line numbers in code blocks
         #[arg(long)]
@@ -261,7 +294,7 @@ mod cli {
         #[arg(long, value_name = "SHELL")]
         pub completions: Option<Shell>,
 
-        /// TOC and delta subcommands
+        /// Subcommand (read, clean, compose, toc, delta)
         #[command(subcommand)]
         pub command: Option<Command>,
     }

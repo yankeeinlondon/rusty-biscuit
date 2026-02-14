@@ -97,7 +97,9 @@ Migration to v1:
 
 ## Centralized Inventory (v2)
 
-Recent addition: centralized `research-inventory.json` at `$RESEARCH_DIR/.research/`:
+A v2 centralized inventory system (`ResearchInventory`) exists in `metadata/migration_v2.rs`. Migration is lazy: when the inventory is first loaded and doesn't exist, the system scans all `metadata.json` files and builds the inventory. Original per-topic `metadata.json` files are preserved (non-destructive). The v2 system adds content hashing (xxHash), document-level metadata, and `KindCategory` typing.
+
+Centralized `research-inventory.json` at `$RESEARCH_DIR/.research/`:
 
 ```json
 {

@@ -50,9 +50,12 @@ Searches and downloads GGUF variants from HuggingFace with `indicatif` progress 
 ```bash
 model download bartowski/Qwen2.5-7B-Instruct-GGUF  # Direct repo ID (contains /)
 model download llama gguf                            # Search, then select repo
+model download --sort trending                       # Browse top models (no query)
+model download phi --limit 10 --sort likes           # Search with options
+model download phi --verbose                         # Show created/modified dates
 ```
 
-If query contains `/`, treated as direct repo ID (skips search). Otherwise searches HuggingFace and presents interactive repo selection. Always shows interactive multi-select for variant choice with size/RAM estimates.
+If query contains `/`, treated as direct repo ID (skips search). Otherwise searches HuggingFace and presents interactive repo selection. When no query is provided, shows "Browsing top models by [sort]..." and lists results by sort order. Always shows interactive multi-select for variant choice with size/RAM estimates.
 
 Output directory priority: `--output` flag > `MODELS_DIR` env > shared models dir from config > current directory.
 
@@ -77,7 +80,7 @@ Prints shell completion setup instructions for Bash, Zsh, and Fish.
 
 - `clap` (derive) + `clap_complete` (dynamic) - CLI parsing and completions
 - `biscuit-terminal` - Rich table rendering with hyperlinks
-- `tabled` - Table formatting for list/info output
+- `serde_json` - JSON output for list, info, search commands
 - `inquire` - Interactive prompts (model selection, download variants)
 - `indicatif` - Progress bars for downloads
 - `color-eyre` - Error reporting

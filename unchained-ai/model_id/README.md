@@ -62,7 +62,7 @@ For this procedural macro to work, your enum variant names must follow these con
 | 3. Hyphen encoding | `-` in wire ID is encoded as `__` (two underscores) | `Gpt_4o__Mini` → `"gpt.4o-mini"` |
 | 4. Dot encoding | `.` in wire ID is encoded as `_` (single underscore) | `Gpt_3_5` → `"gpt.3.5"` |
 | 5. Bespoke fallback | `Bespoke(String)` variant passes through the inner string | `Bespoke("custom".into())` → `"custom"` |
-| 6. Casing | PascalCase segments are lowercased in output | `GptFour` → `"gptfour"` |
+| 6. Casing | All ASCII characters are lowercased in output | `GptFour` → `"gptfour"` |
 
 ## Override Attribute
 
@@ -87,16 +87,42 @@ pub enum ProviderOpenAi {
 assert_eq!(ProviderOpenAi::Gpt4TurboPreview.model_id(), "gpt-4-turbo-preview");
 ```
 
+## Optional Metadata Lookup
+
+Add a `#[model_id_metadata(...)]` attribute alongside `#[derive(ModelId)]` to generate a `metadata()` method that looks up model metadata from a static table:
+
+```rust
+#[derive(ModelId)]
+#[model_id_metadata(
+    lookup = "super::metadata_generated::MODEL_METADATA",
+    returns = "crate::models::model_metadata::ModelMetadata"
+)]
+pub enum ProviderModelOpenAi {
+    O3,
+    O3__Mini,
+    Bespoke(String),
+}
+
+// Generated method:
+// pub fn metadata(&self) -> Option<&'static ModelMetadata> { ... }
+```
+
+The `lookup` path must point to a value implementing `get(&str) -> Option<&'static T>` (e.g., a `phf::Map`), and `returns` specifies the metadata type.
+
 ## Generated Code
 
 The macro generates the following for each enum:
 
 ```rust
 // Error type for parsing failures (only used if no Bespoke variant)
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnknownModelIdError {
     pub model_id: String,
     pub enum_name: String,
 }
+
+impl Display for UnknownModelIdError { ... }
+impl Error for UnknownModelIdError {}
 
 impl YourEnum {
     // All unit variants (excludes Bespoke)
@@ -105,6 +131,10 @@ impl YourEnum {
     // Get wire-format ID
     #[must_use]
     pub fn model_id(&self) -> &str { ... }
+
+    // Only generated when #[model_id_metadata(...)] is present
+    #[must_use]
+    pub fn metadata(&self) -> Option<&'static MetadataType> { ... }
 }
 
 impl std::str::FromStr for YourEnum {
@@ -120,7 +150,7 @@ impl std::str::FromStr for YourEnum {
 If a variant name contains multiple `___` delimiters, only the first is treated as the provider separator:
 
 ```rust
-// OpenAi___Gpt___4 becomes "openai/gpt-4" (second ___ becomes -)
+// OpenAi___Gpt___4 becomes "openai/gpt-.4" (second ___ is decoded as __ then _)
 ```
 
 ### Enums without Bespoke

@@ -1,3 +1,1 @@
-This directory provides all of the core information about concrete models which the caller can use.
-
-- for more abstracted "operations" refer to the `models/` directory
+This directory provides the core model type definitions: `ModelCapability` for abstract capability-based model selection, `ModelMetadata` and `Modality` for runtime model metadata, and `metadata.rs` for richer provider-specific model shapes.

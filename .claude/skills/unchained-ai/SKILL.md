@@ -89,7 +89,7 @@ cargo run -p unchained-ai-gen -- --dry-run
 
 **Implemented**: Pipeline state/execution, Prompt building (multi-modal), OpenCode delegation, provider registry (13 providers), model enums (auto-generated), model metadata (Parsera), rig tools (BraveSearch, ScreenScrape), client adaptors (Z.ai, ZenMux), ModelCapability serialization, agent status detection (ClaudeCode, Codex), PTY-based status command execution, cap limit parsing, CLI binary with `limits` subcommand (terminal + JSON output)
 
-**Not implemented**: `Prompt::execute()` (returns fatal error - LLM execution not wired), `UserContent`/`Transcribe` (placeholder structs), `ForeignAgent` trait (incomplete skeleton), `SmartConcat`/`splinter` (scaffold), HuggingFace API module (empty)
+**Not implemented**: `Prompt::execute()` (returns fatal "LLM execution not yet implemented"), `UserContent`/`Transcribe` (placeholder structs), `ForeignAgent` trait (incomplete skeleton, not publicly exported), `SmartConcat` (scaffold), HuggingFace API module (empty)
 
 ## Detailed References
 

@@ -6,17 +6,20 @@ Testing patterns and practices for the research library and CLI.
 
 ```bash
 # All tests
-cargo test -p research-lib
+cargo test -p research --lib
 cargo test -p research-cli
 
 # Using justfile
 just -f research/justfile test
 
+# Specific module tests
+cargo test -p research --lib -- pull
+
 # Specific test
-cargo test -p research-lib test_metadata_migration
+cargo test -p research --lib -- test_metadata_migration
 
 # With output
-cargo test -p research-lib -- --nocapture
+cargo test -p research --lib -- --nocapture
 ```
 
 ## Test Dependencies
@@ -27,6 +30,7 @@ cargo test -p research-lib -- --nocapture
 | `tempfile` | Temporary directories for output tests |
 | `serial_test` | Test isolation for environment variables |
 | `tracing-test` | Tracing assertions with `#[traced_test]` |
+| `proptest` | Property-based tests for filename sanitization |
 
 ## Environment Variable Tests
 

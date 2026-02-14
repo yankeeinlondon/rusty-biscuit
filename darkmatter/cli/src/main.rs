@@ -6,7 +6,8 @@ use darkmatter::markdown::highlighting::{
 };
 use darkmatter::markdown::output::terminal::TerminalImageMode;
 use darkmatter::markdown::output::{HtmlOptions, MermaidMode, TerminalOptions, write_terminal};
-use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode, MergeStrategy};
+use darkmatter::markdown::transform::TransformOptions;
+use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode};
 use darkmatter_cli::{Cli, CliCommand, OutputFormat};
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
@@ -86,91 +87,18 @@ fn main() -> Result<()> {
 
     if let Some(command) = cli.command.clone() {
         validate_subcommand_usage(&cli)?;
-        run_subcommand(command, cli.verbose)?;
+        run_subcommand(command, &cli)?;
         return Ok(());
     }
 
-    validate_show_usage(&cli)?;
-
-    // Load markdown from input or stdin
-    let mut md = load_markdown(cli.input.as_ref())?;
-
-    // Handle frontmatter operations
-    if let Some(ref json) = cli.fm_merge_with {
-        let data: serde_json::Value =
-            serde_json::from_str(json).wrap_err("Invalid JSON in --fm-merge-with argument")?;
-        md.fm_merge_with(&data, MergeStrategy::PreferExternal)
-            .wrap_err("Failed to merge frontmatter")?;
-        println!("{}", md.as_string());
+    // No subcommand given — if no input and interactive terminal, show help
+    if cli.input.is_none() && io::stdin().is_terminal() {
+        Cli::command().print_help()?;
         return Ok(());
     }
 
-    if let Some(ref json) = cli.fm_defaults {
-        let data: serde_json::Value =
-            serde_json::from_str(json).wrap_err("Invalid JSON in --fm-defaults argument")?;
-        md.fm_set_defaults(&data)
-            .wrap_err("Failed to set frontmatter defaults")?;
-        println!("{}", md.as_string());
-        return Ok(());
-    }
-
-    // Handle clean operations
-    if cli.clean {
-        md.cleanup();
-        println!("{}", md.as_string());
-        return Ok(());
-    }
-
-    if cli.clean_save {
-        let path = cli
-            .input
-            .ok_or_else(|| eyre!("--clean-save requires a file path, not stdin"))?;
-
-        // Reject stdin marker "-" - can't save back to stdin
-        if path.to_str() == Some("-") {
-            return Err(eyre!(
-                "Cannot use --clean-save with stdin input. Use --clean to output to stdout instead."
-            ));
-        }
-
-        md.cleanup();
-        std::fs::write(&path, md.as_string())
-            .wrap_err_with(|| format!("Failed to write to {:?}", path))?;
-        eprintln!("Saved cleaned content to {:?}", path);
-        return Ok(());
-    }
-
-    // Resolve themes
-    let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
-    let code_theme = cli
-        .code_theme
-        .unwrap_or_else(|| detect_code_theme(prose_theme));
-    let color_mode = detect_color_mode();
-    let stdout_is_tty = io::stdout().is_terminal();
-
-    match cli.output {
-        OutputFormat::Auto => {
-            if stdout_is_tty {
-                render_terminal_output(&md, &cli, prose_theme, code_theme, color_mode)?;
-                if cli.show {
-                    open_output_artifact(&markdown_artifact(&md))?;
-                }
-            } else {
-                emit_or_show_artifact(markdown_artifact(&md), cli.show)?;
-            }
-        }
-        OutputFormat::Markdown => {
-            emit_or_show_artifact(markdown_artifact(&md), cli.show)?;
-        }
-        OutputFormat::Html => {
-            let artifact = html_artifact(&md, prose_theme, code_theme, color_mode)?;
-            emit_or_show_artifact(artifact, cli.show)?;
-        }
-        OutputFormat::Json => {
-            let artifact = json_artifact(&md)?;
-            emit_or_show_artifact(artifact, cli.show)?;
-        }
-    }
+    // Run as implicit read using top-level args
+    run_read(cli.input.as_ref(), cli.output, cli.show, &cli)?;
 
     Ok(())
 }
@@ -181,35 +109,11 @@ fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
     if cli.input.is_some() {
         conflicts.push("[INPUT]");
     }
-    if cli.theme.is_some() {
-        conflicts.push("--theme");
-    }
-    if cli.code_theme.is_some() {
-        conflicts.push("--code-theme");
-    }
-    if cli.clean {
-        conflicts.push("--clean");
-    }
-    if cli.clean_save {
-        conflicts.push("--clean-save");
+    if cli.output != OutputFormat::Auto {
+        conflicts.push("--output");
     }
     if cli.show {
         conflicts.push("--show");
-    }
-    if cli.fm_merge_with.is_some() {
-        conflicts.push("--fm-merge-with");
-    }
-    if cli.fm_defaults.is_some() {
-        conflicts.push("--fm-defaults");
-    }
-    if cli.line_numbers {
-        conflicts.push("--line-numbers");
-    }
-    if cli.mermaid {
-        conflicts.push("--mermaid");
-    }
-    if cli.output != OutputFormat::Auto {
-        conflicts.push("--output");
     }
 
     if conflicts.is_empty() {
@@ -222,18 +126,28 @@ fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
     }
 }
 
-fn validate_show_usage(cli: &Cli) -> Result<()> {
-    if cli.show
-        && (cli.clean || cli.clean_save || cli.fm_merge_with.is_some() || cli.fm_defaults.is_some())
-    {
-        return Err(eyre!("--show is only available for render output modes"));
-    }
-
-    Ok(())
-}
-
-fn run_subcommand(command: CliCommand, verbose: u8) -> Result<()> {
+fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
     match command {
+        CliCommand::Read {
+            input,
+            output,
+            show,
+        } => {
+            run_read(input.as_ref(), output, show, cli)?;
+        }
+        CliCommand::Clean { input } => {
+            let mut md = load_markdown(input.as_ref())?;
+            md.cleanup();
+            println!("{}", md.as_string());
+        }
+        CliCommand::Compose {
+            input,
+            state,
+            output,
+            show,
+        } => {
+            run_compose(input.as_ref(), state.as_deref(), output, show, cli)?;
+        }
         CliCommand::Toc { input, json } => {
             let md = load_markdown(Some(&input))?;
             let toc = md.toc();
@@ -241,7 +155,7 @@ fn run_subcommand(command: CliCommand, verbose: u8) -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&toc)?);
             } else {
-                print_toc_tree(&toc, verbose > 0, None);
+                print_toc_tree(&toc, cli.verbose > 0, None);
             }
         }
         CliCommand::Delta {
@@ -258,8 +172,111 @@ fn run_subcommand(command: CliCommand, verbose: u8) -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&delta)?);
             } else {
-                print_delta(&delta, verbose > 0, &base_md, &updated_md);
+                print_delta(&delta, cli.verbose > 0, &base_md, &updated_md);
             }
+        }
+    }
+
+    Ok(())
+}
+
+/// Shared read/render logic for both implicit (no subcommand) and explicit `read` subcommand.
+fn run_read(
+    input: Option<&PathBuf>,
+    output: OutputFormat,
+    show: bool,
+    cli: &Cli,
+) -> Result<()> {
+    let md = load_markdown(input)?;
+
+    let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
+    let code_theme = cli
+        .code_theme
+        .unwrap_or_else(|| detect_code_theme(prose_theme));
+    let color_mode = detect_color_mode();
+    let stdout_is_tty = io::stdout().is_terminal();
+
+    match output {
+        OutputFormat::Auto => {
+            if stdout_is_tty {
+                render_terminal_output(&md, input, cli, prose_theme, code_theme, color_mode)?;
+                if show {
+                    open_output_artifact(&markdown_artifact(&md))?;
+                }
+            } else {
+                emit_or_show_artifact(markdown_artifact(&md), show)?;
+            }
+        }
+        OutputFormat::Markdown => {
+            emit_or_show_artifact(markdown_artifact(&md), show)?;
+        }
+        OutputFormat::Html => {
+            let artifact = html_artifact(&md, prose_theme, code_theme, color_mode)?;
+            emit_or_show_artifact(artifact, show)?;
+        }
+        OutputFormat::Json => {
+            let artifact = json_artifact(&md)?;
+            emit_or_show_artifact(artifact, show)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Run the compose (transform) pipeline.
+fn run_compose(
+    input: Option<&PathBuf>,
+    state_json: Option<&str>,
+    output: OutputFormat,
+    show: bool,
+    cli: &Cli,
+) -> Result<()> {
+    let md = load_markdown(input)?;
+
+    let mut options = TransformOptions::new();
+
+    // Parse --state as JSON if provided
+    if let Some(json_str) = state_json {
+        let state: serde_json::Value =
+            serde_json::from_str(json_str).wrap_err("Invalid JSON in --state argument")?;
+        options = options.with_external_state(state);
+    }
+
+    // Set source file for relative transclusion resolution
+    if let Some(path) = input
+        && path.to_str() != Some("-")
+    {
+        options = options.with_source_file(path);
+    }
+
+    let (transformed, _report) = md
+        .transform_with(options)
+        .map_err(|e| eyre!("Transform failed: {}", e))?;
+
+    let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);
+    let code_theme = cli
+        .code_theme
+        .unwrap_or_else(|| detect_code_theme(prose_theme));
+    let color_mode = detect_color_mode();
+
+    match output {
+        OutputFormat::Auto | OutputFormat::Markdown => {
+            let artifact = markdown_artifact(&transformed);
+            if show {
+                // Print to stdout AND open in default app
+                print!("{}", artifact.content);
+                open_output_artifact(&artifact)?;
+            } else {
+                print!("{}", artifact.content);
+            }
+        }
+        OutputFormat::Html => {
+            let artifact = html_artifact(&transformed, prose_theme, code_theme, color_mode)?;
+            emit_or_show_artifact(artifact, show)?;
+        }
+        OutputFormat::Json => {
+            let artifact = json_artifact(&transformed)?;
+            emit_or_show_artifact(artifact, show)?;
         }
     }
 
@@ -268,6 +285,7 @@ fn run_subcommand(command: CliCommand, verbose: u8) -> Result<()> {
 
 fn render_terminal_output(
     md: &Markdown,
+    input_path: Option<&PathBuf>,
     cli: &Cli,
     prose_theme: ThemePair,
     code_theme: ThemePair,
@@ -287,7 +305,7 @@ fn render_terminal_output(
     };
 
     // Derive base_path from input file for relative image resolution
-    if let Some(ref path) = cli.input
+    if let Some(path) = input_path
         && path.to_str() != Some("-")
     {
         options.base_path = path.parent().map(|p| p.to_path_buf());

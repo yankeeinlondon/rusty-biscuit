@@ -4,7 +4,7 @@ Guide to adding new research types, prompts, and providers.
 
 ## Adding New Research Types
 
-Research types are defined in the `ResearchDetails` enum.
+Research types are defined in the `ResearchDetails` enum (16 variants currently). The metadata module covers schema-versioned research metadata, SQLite persistence, v0-to-v1 migration, content policy, and topic types.
 
 ### Step 1: Add Detail Struct
 

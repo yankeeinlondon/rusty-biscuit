@@ -43,7 +43,6 @@ Set API keys for providers you want to generate:
 | ZAI | `ZAI_API_KEY` or `Z_AI_API_KEY` |
 | MoonshotAI | `MOONSHOT_API_KEY` or `MOONSHOT_AI_API_KEY` |
 | HuggingFace | `HF_TOKEN`, `HUGGINGFACE_TOKEN`, or `HUGGING_FACE_TOKEN` |
-| Mira | `MIRA_API_KEY` |
 
 ## Output
 
@@ -130,7 +129,7 @@ After generation, use the accessor methods on `ProviderModel`:
 use unchained_ai::rigging::providers::models::ProviderModel;
 use unchained_ai::models::model_metadata::Modality;
 
-let model = ProviderModel::OpenAi(ProviderModelOpenAi::Gpt__4o);
+let model = ProviderModel::OpenAi(ProviderModelOpenAi::O3);
 
 // Get full metadata
 if let Some(meta) = model.metadata() {

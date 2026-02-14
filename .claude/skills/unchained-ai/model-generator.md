@@ -102,7 +102,10 @@ Example (`openai.rs`):
 use model_id::ModelId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, ModelId)]
-#[model_id_metadata(fn = "crate::rigging::providers::models::metadata_generated::lookup")]
+#[model_id_metadata(
+    lookup = "super::metadata_generated::MODEL_METADATA",
+    returns = "crate::models::model_metadata::ModelMetadata"
+)]
 pub enum ProviderModelOpenAi {
     /// Model ID: `gpt-4o`
     Gpt__4o,

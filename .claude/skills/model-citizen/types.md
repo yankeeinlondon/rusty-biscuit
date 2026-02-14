@@ -58,14 +58,14 @@ pub struct ModelMetadata {
 
 ### QuantizationType (`model.rs`)
 
-25+ variants with flexible parsing:
+27 variants with flexible parsing:
 
 | Category | Variants |
 |----------|----------|
 | GGUF standard | Q4_0, Q4_1, Q4Km, Q4Ks, Q5_0, Q5_1, Q5Km, Q5Ks, Q6K, Q8_0 |
 | Float | F16, F32 |
 | IQ series | Iq1S, Iq2Xxs, Iq2Xs, Iq2S, Iq3Xxs, Iq3Xs, Iq3S, Iq4Xs, Iq4Nl |
-| MLX | Bf16, Bit4, Bit6, Bit8, Mxfp4 |
+| MLX/other | Bf16, Bit4, Bit6, Bit8, Mxfp4 |
 
 Key methods:
 - `as_str()` - Display string
@@ -149,6 +149,7 @@ pub struct ScannersConfig {
 | `LLAMA_CPP_MODELS` | Comma-separated Llama.cpp directories | (none) |
 | `OLLAMA_HOST` | Ollama API host | `http://localhost:11434` |
 | `LM_STUDIO_HOST` | LM Studio API host | `http://localhost:1234` |
+| `MODELS_DIR` | Additional Llama.cpp models dir; download output fallback | (none) |
 | `HF_TOKEN` / `HUGGING_FACE_API_KEY` / `HF_API_KEY` | HuggingFace auth token | (none) |
 
 ### Config Methods
@@ -203,7 +204,7 @@ pub enum SortOrder { Downloads, Likes, Trending, Created, Modified }
 
 ### ShareRegistry
 
-JSON persistence at `~/.local/share/model-citizen/shares.json`:
+JSON persistence at caller-specified path (default via `default_registry_path()`: `<data_local_dir>/model-citizen/shares.json`):
 
 ```rust
 pub struct ShareRegistry {
@@ -211,7 +212,7 @@ pub struct ShareRegistry {
 }
 ```
 
-Methods: `load()`, `save()`, `add_share()`, `remove_share()`, `get_shares()`, `find_original()`
+Methods: `load(path)`, `save(path)`, `add_share()`, `remove_share()`, `get_shares()`, `find_original()`
 
 ### Symlink Functions
 
@@ -230,7 +231,7 @@ Methods: `load()`, `save()`, `add_share()`, `remove_share()`, `get_shares()`, `f
 
 - `parse_header(path)` -> `GgufHeader` (reads first 1KB, validates magic `GGUF`)
 - `is_gguf_file(path)` -> `bool` (magic byte check)
-- `quantization_from_filename(path)` -> `QuantizationType` (30+ case-insensitive patterns)
+- `quantization_from_filename(path)` -> `QuantizationType` (61 patterns covering case and separator variants)
 - `detect_quantization(path)` -> `QuantizationType` (filename + header fallback)
 - `model_name_from_filename(path)` -> `Option<String>` (strips quant suffix)
 - `extract_metadata(path)` -> `Option<ModelMetadata>` (full `gguf-rs-lib` parse)

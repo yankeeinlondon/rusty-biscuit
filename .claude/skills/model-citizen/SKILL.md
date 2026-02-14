@@ -45,8 +45,8 @@ pub trait ModelScanner: Send + Sync {
 |------|---------|
 | `UnifiedModel` | Core model: id, name, size, quantization, architecture, source, format, path, metadata |
 | `ModelMetadata` | Optional rich data: context_length, parameters, capabilities, inference defaults, HF repo |
-| `QuantizationType` | 25+ variants: GGUF quants (Q4_K_M etc), float (F16/F32), IQ series, MLX (Bf16/Bit4/Bit8) |
-| `ModelArchitecture` | 9 families: Llama, Mistral, Qwen, Phi, Gemma, Command, Yi, DeepSeek, StarCoder |
+| `QuantizationType` | 27 variants: GGUF quants (Q4_K_M etc), float (F16/F32), IQ series, MLX (Bf16/Bit4/Bit6/Bit8/Mxfp4) |
+| `ModelArchitecture` | 10 variants: 9 families (Llama, Mistral, Qwen, Phi, Gemma, Command, Yi, DeepSeek, StarCoder) + Unknown |
 | `ModelFormat` | File format: Gguf, Safetensors, Unknown |
 | `ModelSource` | Ollama, LmStudio, LlamaCpp |
 | `Config` | Merged config: env vars > TOML file > defaults |
@@ -60,7 +60,7 @@ Binary: `model` with global `--json` flag
 | `list [filter]` | All models. Optional name filter. Flags: `--runner`, `--verbose`, `--app`, `--size` |
 | `info <model>` | Detailed metadata with lazy enrichment. Interactive selection on ambiguous match |
 | `search [query...]` | HuggingFace GGUF search. `--limit`, `--sort`, `--verbose` |
-| `download [query...]` | Search and download interactively. Direct repo if query contains `/` |
+| `download [query...]` | Search and download interactively. `--limit`, `--sort`, `--verbose`. Direct repo if `/` in query; browse mode if no query |
 | `remove <model>` | Delete with confirmation. `--runner`, `--force`. Warns about dependent symlinks |
 | `completions` | Shell completion setup (Bash/Zsh/Fish) |
 
@@ -82,7 +82,7 @@ Binary: `model` with global `--json` flag
 ### Modifying GGUF parsing
 
 Key functions in `lib/src/gguf.rs`:
-- `quantization_from_filename()` - 30+ case-insensitive patterns
+- `quantization_from_filename()` - 61 patterns covering case and separator variants
 - `extract_metadata()` - Architecture-prefixed key extraction via `gguf-rs-lib`
 - `detect_quantization()` - Filename detection + header fallback
 
@@ -105,7 +105,7 @@ cargo test -p model-citizen -p model-citizen-cli
 
 **Library**: `thiserror`, `tokio`, `async-trait`, `reqwest` (json/stream), `serde`/`serde_json`/`toml`, `gguf-rs-lib`, `schematic-definitions`, `schematic-schema`, `sniff`, `dirs`
 
-**CLI**: `clap` (derive) + `clap_complete` (dynamic), `biscuit-terminal`, `tabled`, `inquire`, `indicatif`, `color-eyre`
+**CLI**: `clap` (derive) + `clap_complete` (dynamic), `biscuit-terminal`, `serde_json`, `inquire`, `indicatif`, `color-eyre`
 
 ## Resources
 

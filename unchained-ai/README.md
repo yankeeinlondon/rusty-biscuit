@@ -33,7 +33,7 @@ Note: the `unchained-ai` workspace includes `lib`, `cli`, and `gen`; `model_id` 
   - agent cap monitoring for Claude Code and Codex
   - rig tools for web search and scraping
 - Not fully implemented:
-  - `Prompt::execute` (currently returns fatal "not implemented")
+  - `Prompt::execute` (currently returns fatal "LLM execution not yet implemented")
   - placeholder scaffolds (`UserContent`, `Transcribe`, `foreign_agent`, parts of functional grouping)
 
 ## Development

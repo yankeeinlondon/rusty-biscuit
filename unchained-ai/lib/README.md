@@ -57,7 +57,7 @@ Core pipeline machinery and the atomic steps used by the CLI and higher-level fl
 
 **Foreign agents (in progress)**
 
-- `foreign_agent` contains a trait skeleton for integrating external agentic systems (e.g., Claude Code, Firecrawl). It is currently incomplete and not yet wired into the pipeline.
+- `foreign_agent` contains a trait skeleton for integrating external agentic systems (e.g., Claude Code, Firecrawl). It is currently incomplete, not publicly exported, and not yet wired into the pipeline.
 
 **Services**
 
@@ -147,7 +147,7 @@ The provider registry (see `rigging/providers/provider.rs`) defines how each pro
 ## Known gaps and placeholders
 
 - `Prompt::execute` is not implemented yet and always returns a fatal `StepError`.
-- `api/hugging_face_api.rs`, `functional_grouping::SmartConcat`, `functional_grouping::splinter`, `Transcribe`, `UserContent`, and `foreign_agent` are scaffolds for future work.
+- `api/hugging_face_api.rs`, `functional_grouping::SmartConcat`, `Transcribe`, `UserContent`, and `foreign_agent` are scaffolds for future work.
 
 ## Where to start
 

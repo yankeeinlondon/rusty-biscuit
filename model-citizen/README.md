@@ -32,10 +32,12 @@ model list                          # List all models (table)
 model list llama                    # Filter by name substring
 model list --runner ollama          # Filter by runner
 model list --size                   # Sort by size (largest first)
+model list --verbose                # Show additional columns (format)
+model list --app                    # Sort by source app, then name
 model list --json                   # JSON output
 model info llama3                   # Detailed model info
 model search "qwen2 7b"            # Search HuggingFace
-model search "phi" --sort likes     # Sort by likes
+model search "phi" --sort likes     # Sort: downloads|likes|trending|created|modified
 model download bartowski/Qwen2.5-7B-Instruct-GGUF
 model remove mistral --force        # Skip confirmation
 ```
@@ -51,10 +53,12 @@ enable_sharing = true
 
 [scanners.ollama]
 enabled = true
+api_host = "http://localhost:11434"  # optional override
 timeout_secs = 5
 
 [scanners.lmstudio]
 enabled = true
+api_host = "http://localhost:1234"   # optional override
 timeout_secs = 5
 
 [scanners.llamacpp]
@@ -69,7 +73,8 @@ enabled = true
 | `LLAMA_CPP_MODELS` | Comma-separated Llama.cpp model directories |
 | `OLLAMA_HOST` | Ollama API host (default: `http://localhost:11434`) |
 | `LM_STUDIO_HOST` | LM Studio API host (default: `http://localhost:1234`) |
-| `HF_TOKEN` | HuggingFace API token (for authenticated downloads) |
+| `MODELS_DIR` | Additional Llama.cpp models directory; also used as download output fallback |
+| `HF_TOKEN` | HuggingFace API token (fallback: `HUGGING_FACE_API_KEY`, `HF_API_KEY`) |
 
 ## Sub-packages
 

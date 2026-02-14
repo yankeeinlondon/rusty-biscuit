@@ -18,8 +18,9 @@ fn test_help_flag() {
         .assert()
         .success()
         .stdout(predicate::str::contains("markdown"))
-        .stdout(predicate::str::contains("--output <OUTPUT>"))
-        .stdout(predicate::str::contains("--show"))
+        .stdout(predicate::str::contains("read"))
+        .stdout(predicate::str::contains("clean"))
+        .stdout(predicate::str::contains("compose"))
         .stdout(predicate::str::contains("toc"))
         .stdout(predicate::str::contains("delta"));
 }
@@ -115,6 +116,10 @@ fn test_removed_flags_are_rejected() {
         "--no-images",
         "--toc",
         "--delta",
+        "--clean",
+        "--clean-save",
+        "--fm-merge-with",
+        "--fm-defaults",
     ] {
         md_cmd()
             .args([flag, "-"])
@@ -198,13 +203,13 @@ fn test_delta_subcommand_json_output() {
 }
 
 // =============================================================================
-//                       EXISTING BUG FIX REGRESSION TESTS
+//                          CLEAN SUBCOMMAND TESTS
 // =============================================================================
 
 #[test]
-fn test_clean_output() {
+fn test_clean_subcommand_stdin() {
     md_cmd()
-        .args(["--clean", "-"])
+        .args(["clean", "-"])
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
@@ -213,101 +218,97 @@ fn test_clean_output() {
 }
 
 #[test]
-fn test_clean_save_rejects_stdin() {
+fn test_clean_subcommand_file() {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    writeln!(tmp, "# Hello \n\nWorld  \n").unwrap();
+
     md_cmd()
-        .args(["-", "--clean-save"])
+        .arg("clean")
+        .arg(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Hello"))
+        .stdout(predicate::str::contains("World"));
+}
+
+// =============================================================================
+//                          READ SUBCOMMAND TESTS
+// =============================================================================
+
+#[test]
+fn test_read_explicit() {
+    md_cmd()
+        .args(["read", "-"])
+        .write_stdin("# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Hello"))
+        .stdout(predicate::str::contains("World"));
+}
+
+#[test]
+fn test_read_default_backward_compat() {
+    // md file.md (no subcommand) still works
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    writeln!(tmp, "# Backward\n\nCompat test.").unwrap();
+
+    md_cmd()
+        .arg(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Backward"));
+}
+
+#[test]
+fn test_read_explicit_with_output() {
+    md_cmd()
+        .args(["read", "--output", "html", "-"])
+        .write_stdin("# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+}
+
+// =============================================================================
+//                          COMPOSE SUBCOMMAND TESTS
+// =============================================================================
+
+#[test]
+fn test_compose_basic() {
+    md_cmd()
+        .args(["compose", "-"])
+        .write_stdin("# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello"))
+        .stdout(predicate::str::contains("World"));
+}
+
+#[test]
+fn test_compose_with_state() {
+    md_cmd()
+        .args(["compose", "-", "--state", r#"{"name":"Alice"}"#])
+        .write_stdin("# Hello {{ name }}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello Alice"));
+}
+
+#[test]
+fn test_compose_output_html() {
+    md_cmd()
+        .args(["compose", "-", "--output", "html"])
+        .write_stdin("# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+}
+
+#[test]
+fn test_compose_invalid_state() {
+    md_cmd()
+        .args(["compose", "-", "--state", "bad json"])
         .write_stdin("# Test")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("--clean"));
-}
-
-#[test]
-fn test_clean_save_rejects_implicit_stdin() {
-    md_cmd()
-        .arg("--clean-save")
-        .write_stdin("# Test")
-        .assert()
-        .failure();
-}
-
-#[test]
-fn test_clean_save_works_with_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let file_path = dir.path().join("test.md");
-    std::fs::write(&file_path, "# Hello \n\nWorld  \n").unwrap();
-
-    md_cmd()
-        .args(["--clean-save"])
-        .arg(&file_path)
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("Saved cleaned content"));
-
-    let contents = std::fs::read_to_string(&file_path).unwrap();
-    assert!(
-        contents.contains("# Hello"),
-        "File should still contain heading"
-    );
-}
-
-#[test]
-fn test_fm_merge_with_valid_json() {
-    md_cmd()
-        .args(["--fm-merge-with", r#"{"title":"Hello"}"#, "-"])
-        .write_stdin("# Test\n\nContent")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("title: Hello"))
-        .stdout(predicate::str::contains("---"));
-}
-
-#[test]
-fn test_fm_merge_with_overwrites_existing() {
-    md_cmd()
-        .args(["--fm-merge-with", r#"{"title":"New Title"}"#, "-"])
-        .write_stdin("---\ntitle: Old Title\n---\n# Test")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("title: New Title"));
-}
-
-#[test]
-fn test_fm_merge_with_invalid_json() {
-    md_cmd()
-        .args(["--fm-merge-with", "not valid json", "-"])
-        .write_stdin("# Test")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Invalid JSON"));
-}
-
-#[test]
-fn test_fm_defaults_valid_json() {
-    md_cmd()
-        .args(["--fm-defaults", r#"{"draft":true}"#, "-"])
-        .write_stdin("---\ntitle: X\n---\n# Test")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("draft: true"))
-        .stdout(predicate::str::contains("title: X"));
-}
-
-#[test]
-fn test_fm_defaults_does_not_override_existing() {
-    md_cmd()
-        .args(["--fm-defaults", r#"{"title":"Default Title"}"#, "-"])
-        .write_stdin("---\ntitle: Original\n---\n# Test")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("title: Original"));
-}
-
-#[test]
-fn test_fm_defaults_invalid_json() {
-    md_cmd()
-        .args(["--fm-defaults", "{bad", "-"])
-        .write_stdin("---\ntitle: X\n---\n# Test")
         .assert()
         .failure()
         .stderr(predicate::str::contains("Invalid JSON"));

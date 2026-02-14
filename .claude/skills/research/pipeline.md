@@ -4,24 +4,16 @@ The research system uses a two-phase LLM pipeline optimized for parallel executi
 
 ## Phase 1: Underlying Research
 
-All Phase 1 tasks run concurrently via `tokio::join_all`:
+All Phase 1 tasks run concurrently via `tokio::join_all`. Phase 1 agents have access to web search (`BraveSearchTool`) and page scraping (`ScreenScrapeTool`) tools via `unchained-ai`. Prompt templates are embedded at compile time via `include_str!` from the `prompts/` directory.
 
 | Task | Output File | Model | Rationale |
 |------|-------------|-------|-----------|
-| Overview | `overview.md` | ZAI GLM-4.7 | Comprehensive analysis needs strong reasoning |
+| Overview | `overview.md` | ZAI GLM-4.7 | Balanced quality for core overview |
 | Similar Libraries | `similar_libraries.md` | Gemini Flash | Comparison is straightforward, speed matters |
 | Integration Partners | `integration_partners.md` | Gemini Flash | Ecosystem mapping is parallelizable |
 | Use Cases | `use_cases.md` | Gemini Flash | Pattern extraction is well-defined |
-| Changelog | `changelog.md` | OpenAI GPT-5.2 | Version analysis requires deep understanding |
+| Changelog | `changelog.md` | OpenAI GPT-5.2 | Cross-document reasoning for version history |
 | Additional Questions | `question_N.md` | Gemini Flash | User questions benefit from speed |
-
-### Tools Available in Phase 1
-
-Phase 1 agents have access to:
-- **BraveSearchTool**: Web search via Brave Search API (requires `BRAVE_API_KEY`)
-- **ScreenScrapeTool**: Web page content extraction
-
-Phase 2 agents run without tools (consolidation only).
 
 ### Execution Characteristics
 

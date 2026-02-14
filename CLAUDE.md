@@ -300,7 +300,7 @@ just -f biscuit-speaks/justfile build
 
 # Build specific package
 cargo build -p research-cli
-cargo build -p research-lib
+cargo build -p research
 cargo build -p biscuit-speaks-cli
 ```
 
@@ -315,7 +315,7 @@ just -f research/justfile test
 just -f biscuit-speaks/justfile test
 
 # Test specific package with additional args
-cargo test -p research-lib --lib
+cargo test -p research --lib
 
 # Tree Hugger tests (16 languages - critical for cross-language coverage)
 cargo test -p tree-hugger-lib
@@ -373,6 +373,8 @@ cargo clippy --workspace
 | `OPENAI_API_KEY` | OpenAI API key (GPT-5.2 for synthesis) | Research CLI |
 | `GEMINI_API_KEY` | Google Gemini API key (Flash for underlying research) | Research CLI |
 | `ZAI_API_KEY` | ZAI API key (GLM-4-7 for overview) | Research CLI |
+| `GITHUB_TOKEN` | GitHub PAT for changelog API requests (avoids rate limiting) | Research CLI (optional) |
+
 ## Output Locations
 
 ### Research Output
