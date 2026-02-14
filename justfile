@@ -367,3 +367,13 @@ skill-claudine:
     @if command -v claudine >/dev/null 2>&1; then \
         claudine "The claudine package has synced it's documents for drift and updated the skill tree."; \
     fi
+
+# fix documentation drift and update a package skill
+drift AREA *args="":
+    @echo
+    @echo "Refreshing {{BOLD}}{{AREA}}{{RESET}} skill via Rust drift script"
+    @echo
+    @echo "- set {{BOLD}}PREFER_AGENT=codex{{RESET}} to force codex (default is claude)"
+    @echo "- extra document paths can still be passed as drift args"
+    @echo
+    @cargo run --manifest-path scripts/Cargo.toml --bin drift -- {{AREA}} {{args}}

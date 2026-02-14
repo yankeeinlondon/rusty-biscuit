@@ -272,7 +272,7 @@ _skill_prompt TEMPLATE LIBRARY LIB_NAME DOCS SUMMARY_FILE ARGS:
 _refresh_docs *args="":
     @echo >&2
     @echo -e "🏃 starting the refresh of the {{ITALIC}}documents{{RESET}} in {{BOLD}}{{PACKAGE}}{{RESET}}: {{DIM}}$(just readme_files) {{DOCS}} {{args}}{{RESET}}" >&2
-    @just _docs_prompt "../.ai/prompts/refresh_documentation.md" "$(just readme_files)" "{{args}}" "{{DEFINE}}" "{{CLI}}" "{{DEFINE_NAME}}" "$(just deps)"
+    @just _docs_prompt "../.ai/prompts/refresh_documentation.md" "$(just readme_files)" "{{args}}" "{{DEFINE}}" "{{SCHEMATIC}}" "{{DEFINE_NAME}}" "$(just deps)"
     @echo -e "{{DIM}}- prompt stored at {{BLUE}}{{DOCS_PROMPT}}{{RESET}}" >&2
     @just _claude_file "{{DOCS_PROMPT}}"
 
@@ -289,15 +289,11 @@ _refresh_skill SUMMARY_FILE *args:
 # fix documentation drift and update the skill
 drift *args="":
     @echo
-    @echo -e "Refreshing the {{BOLD}}{{SCHEMATIC}}{{RESET}} {{BLUE}}skill{{RESET}}"
+    @echo -e "Refreshing the {{BOLD}}{{SCHEMATIC}}{{RESET}} {{BLUE}}skill{{RESET}} via Rust drift script"
     @echo
-    @echo -e "- this will be done by updating all of the README.md files in the repo ({{DIM}}{{ITALIC}}as well as any files{{RESET}}"
-    @echo -e "  {{DIM}}{{ITALIC}}passed in by caller{{RESET}})"
-    @echo -e "- once the {{ITALIC}}drift{{RESET}} of the documentation files has been eliminated we'll rework the {{BOLD}}skill{{RESET}} files"
-    @echo -e "- as a final step, we'll look at whether the {{BOLD}}CLAUDE.md{{RESET}} file would benefit from being updated"
-    @echo -e "  based on the changes made\n"
-
-    @DOC_SUMMARY_FILE="{{DOCS_SUMMARY}}" && mkdir -p "$(dirname "$DOC_SUMMARY_FILE")" && just _refresh_docs {{args}} > "$DOC_SUMMARY_FILE" && just _refresh_skill "$DOC_SUMMARY_FILE" "{{args}}"
+    @echo -e "- set {{BOLD}}PREFER_AGENT=codex{{RESET}} to force codex (default is claude)"
+    @echo -e "- extra document paths can still be passed as drift args\n"
+    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- {{SCHEMATIC}} {{args}}
 
 
 # No-op recipe: reference color vars so linters won't report them as unused.

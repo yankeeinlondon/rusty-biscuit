@@ -63,3 +63,13 @@ commit:
     @if command -v so-you-say >/dev/null 2>&1; then \
         so-you-say "git commits completed in rusty-biscuit monorepo"; \
     fi
+
+# fix documentation drift and update the skill
+drift *args="":
+    @echo
+    @echo "Refreshing {{BOLD}}tree-hugger{{RESET}} skill via Rust drift script"
+    @echo
+    @echo "- set PREFER_AGENT=codex to force codex (default is claude)"
+    @echo "- extra document paths can still be passed as drift args"
+    @echo
+    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- tree-hugger {{args}}

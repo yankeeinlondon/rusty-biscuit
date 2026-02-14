@@ -125,6 +125,16 @@ refresh-skill:
     @echo "Refreshing {{BOLD}}Homelab{{RESET}} skill"
     @unset ANTHROPIC_API_KEY && cd .. && claude --dangerously-skip-permissions --model opus -p \'"$(cat docs/skills-homelab.md)"\'
 
+# fix documentation drift and update the skill
+drift *args="":
+    @echo
+    @echo "Refreshing {{BOLD}}homelab{{RESET}} skill via Rust drift script"
+    @echo
+    @echo "- set PREFER_AGENT=codex to force codex (default is claude)"
+    @echo "- extra document paths can still be passed as drift args"
+    @echo
+    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- homelab {{args}}
+
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
