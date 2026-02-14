@@ -393,22 +393,11 @@ impl TerminalImage {
             String::new()
         };
 
-        // WezTerm and Ghostty: skip save/restore to avoid scroll-state
-        // interaction. The Kitty protocol does not move the cursor, so
-        // save/restore is a no-op — except that restore can capture a
-        // pre-scroll position when the image causes the terminal to
-        // scroll, producing an off-by-one blank line. Without
-        // save/restore, the cursor naturally reflects post-scroll state.
-        //
-        // Kitty and Warp keep save/restore because they already work
-        // correctly with it.
-        let seq = if matches!(term.app, TerminalApp::Wezterm | TerminalApp::Ghostty) {
-            format!("{}{}", prefix, image_seq)
-        } else {
-            format!("\x1b[s{}{}\x1b[u", prefix, image_seq)
-        };
-
-        Ok((seq, height_cells, raw_height))
+        Ok((
+            format!("\x1b[s{}{}\x1b[u", prefix, image_seq),
+            height_cells,
+            raw_height,
+        ))
     }
 
     /// Build iTerm2 protocol image output and logical row height for cursor placement.
@@ -509,16 +498,8 @@ impl TerminalImage {
             _ => height_cells,
         };
 
-        // WezTerm and Ghostty skip save/restore (see render_kitty_for_terminal),
-        // so cursor is still at the horizontal offset column after the image.
-        // CR first to return to column 0 before CUD advancement.
-        // Other terminals restore to column 0 via save/restore, so CUD then CR.
         if cursor_rows > 0 {
-            if matches!(term.app, TerminalApp::Wezterm | TerminalApp::Ghostty) {
-                Ok(format!("{}\r\x1b[{}B", sequence, cursor_rows))
-            } else {
-                Ok(format!("{}\x1b[{}B\r", sequence, cursor_rows))
-            }
+            Ok(format!("{}\x1b[{}B\r", sequence, cursor_rows))
         } else {
             Ok(format!("{}\r", sequence))
         }
@@ -1094,9 +1075,8 @@ mod tests {
     }
 
     fn extract_row_advance(output: &str) -> Option<u32> {
-        // Match CUD pattern: \x1b[{N}B — may be followed by \r or at end of string
-        let b_pos = output.rfind('B')?;
-        let head = &output[..b_pos];
+        let end = output.rfind("B\r")?;
+        let head = &output[..end];
         let start = head.rfind("\x1b[")?;
         head[start + 2..].parse::<u32>().ok()
     }
@@ -1533,13 +1513,12 @@ mod tests {
         let output = term_img.render_to_terminal(&term).unwrap();
 
         assert!(output.contains("\x1b_G"));
-        // WezTerm skips save/restore to avoid scroll-state interaction
-        assert!(!output.contains("\x1b[s"));
-        assert!(!output.contains("\x1b[u"));
+        assert!(output.contains("\x1b[s"));
+        assert!(output.contains("\x1b[u"));
         assert!(output.contains("c="));
         assert!(output.contains(",r="));
-        // CR before CUD (column reset then row advance)
-        assert!(output.contains("\r\x1b["));
+        assert!(output.contains("B\r"));
+        assert!(output.ends_with('\r'));
     }
 
     #[test]

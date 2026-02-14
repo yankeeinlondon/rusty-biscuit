@@ -168,6 +168,7 @@ Switching from ceil-based to floor-based cursor row advancement fixed Ghostty (a
 | Remove `r=` for WezTerm | N/A | Massively wrong aspect ratio | N/A |
 | Remove save/restore for iTerm2 | N/A | N/A | Inverted `%` + two blank lines |
 | `\n` repeated N times instead of CUD | Not tested | Massive over-scroll; prompt pushed to screen bottom | Not tested |
+| Remove save/restore for WezTerm/Ghostty only | Inconsistent: many blank lines or one | Inconsistent: many blank lines or one | N/A |
 
 | Wezterm | iTerm2 | Ghostty | Kitty |
 | ------- | ------ | ------- | ----- |
@@ -185,7 +186,12 @@ Replacing `\x1b[NB` (CUD) with `\n` repeated N times for cursor advancement caus
 
 ### Do NOT remove save/restore cursor wrapping
 
-Removing `\x1b[s`/`\x1b[u` around the image sequence causes the inverted `%` prompt artifact (zsh no-newline indicator) and multiple blank lines. The save/restore is essential for neutralizing protocol-specific cursor side effects (iTerm2's auto-advance, Kitty's no-move) so that explicit cursor management can take over uniformly.
+Removing `\x1b[s`/`\x1b[u` around the image sequence causes regressions on every terminal tested:
+
+- **iTerm2**: Inverted `%` prompt artifact (zsh no-newline indicator) and two blank lines.
+- **WezTerm and Ghostty** (Kitty protocol only, targeted removal): Inconsistent behavior — sometimes many blank lines, sometimes just one. Worse than the stable single blank line from the baseline. The theory that save/restore captures a stale pre-scroll position and that Kitty protocol's no-cursor-move makes it a safe no-op was wrong in practice. Terminals appear to rely on the save/restore sequence as part of their image placement bookkeeping, even for Kitty protocol.
+
+Save/restore is required for **all** terminals and **all** protocols. Do not remove it selectively or universally.
 
 ### Do NOT remove `r=` from WezTerm's Kitty protocol
 
