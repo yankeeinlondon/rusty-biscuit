@@ -119,9 +119,19 @@ The current unresolved issues are:
 
 - iTerm2 still leaves one apparent blank line after image output at `--mb 0`.
 - WezTerm still leaves one apparent blank line after image output at `--mb 0`.
-- Behavior can still shift after `clear` in some terminals, indicating terminal state transitions are affecting cursor/image accounting.
+- Ghostty still leaves one apparent blank line after image output at `--mb 0`.
+
+> **Note:** references to `--mb 0` are references to a "margin bottom" CLI switch which the biscuit-terminal-cli provides. By setting `--mb 0` we are saying there should be zero lines of empty space after the image.
+>
+> **Note:** image rendering now appears to be consistent between a normal render and a render _after_ a `clear` command is sent to the terminal. Historically Wezterm has a lot of issues with this but this looks to be fixed now.
 
 These are likely due to terminal-internal interpretation differences of logical row occupation versus drawn pixel height, not a single escaping bug.
+
+| Wezterm | iTerm2 | Ghostty | Kitty |
+| ------- | ------ | ------- | ----- |
+| ![](./Wezterm.png)| ![](./iTerm2.png)  | ![](./Ghostty.png) | ![](./Kitty.png) |
+
+
 
 ## Why This Is Hard to Fully Normalize
 
