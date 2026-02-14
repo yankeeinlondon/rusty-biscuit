@@ -30,6 +30,8 @@ just -f biscuit-terminal/justfile install
 | `bt timeline` | Timeline diagrams |
 | `bt state-diagram` | State machine diagrams |
 | `bt erd` | Entity relationship diagrams |
+| `bt quote` | Block quote with left border |
+| `bt list` | Bulleted list with hanging indents |
 | `bt columns` | Two-column text layout |
 
 ## Usage
@@ -81,7 +83,7 @@ bt prose "Hello {{bold}}world{{reset}}!"
 bt prose "{{red}}Error:{{reset}} Something went wrong"
 bt prose "<b>Bold</b> and <i>italic</i> text"
 bt prose "<a href='https://example.com'>Click here</a>"
-bt prose --left-margin 4 "Indented content"
+bt prose --margin-left 4 "Indented content"
 bt prose --no-wrap "Long line without wrapping"
 ```
 
@@ -91,9 +93,51 @@ Token types:
 - **Color support**: Basic colors, bright colors, web colors, Tailwind colors (foreground and background)
 
 Options:
-- `-l`/`--left-margin`: Left margin in characters
-- `-r`/`--right-margin`: Right margin in characters
+- `--margin-left` (alias `--ml`): Left margin in characters
+- `--margin-right` (alias `--mr`): Right margin in characters
+- `--margin-top` (alias `--mt`): Top margin in blank lines
+- `--margin-bottom` (alias `--mb`): Bottom margin in blank lines
+- `--alignment` (alias `--align`): Text alignment (`left`, `center`, `right`)
 - `--no-wrap`: Disable word wrapping
+
+### Block Quote Rendering
+
+Render styled text in a block quote with a left border:
+
+```bash
+bt quote "To be or not to be"
+bt quote --attribution "Shakespeare" "To be or not to be"
+bt quote "<bold>Important:</bold> This is <red>critical</red> information"
+bt quote --attribution "Albert Einstein" "<i>Imagination is more important than knowledge.</i>"
+```
+
+Options:
+- `--attribution`: Attribution (author/source) displayed below the quote
+- `--margin-left` (alias `--ml`): Left margin in characters
+- `--margin-right` (alias `--mr`): Right margin in characters
+- `--margin-top` (alias `--mt`): Top margin in blank lines
+- `--margin-bottom` (alias `--mb`): Bottom margin in blank lines
+- `--alignment` (alias `--align`): Text alignment (`left`, `center`, `right`)
+
+### List Rendering
+
+Render a bulleted list with hanging indents:
+
+```bash
+bt list "First item" "Second item" "Third item"
+bt list --bullet "- " "Item one" "Item two"
+bt list --bullet "→ " "Step one" "Step two" "Step three"
+bt list --no-hanging-indent "Item without hanging indent on wrap"
+```
+
+Options:
+- `-b`/`--bullet`: Custom bullet string (default: `"• "`)
+- `--no-hanging-indent`: Disable hanging indent on wrapped lines
+- `--margin-left` (alias `--ml`): Left margin in characters
+- `--margin-right` (alias `--mr`): Right margin in characters
+- `--margin-top` (alias `--mt`): Top margin in blank lines
+- `--margin-bottom` (alias `--mb`): Bottom margin in blank lines
+- `--alignment` (alias `--align`): Text alignment (`left`, `center`, `right`)
 
 ### Columns Rendering
 
@@ -110,6 +154,11 @@ bt columns --margin-left 2 --margin-right 2 --alignment center "Left" "Right"
 Options:
 - `--gap`: Gap between columns in characters (default: 3)
 - `--left`: Left column width (e.g., `20`, `20ch`, `40%`)
+- `--margin-left` (alias `--ml`): Left margin in characters
+- `--margin-right` (alias `--mr`): Right margin in characters
+- `--margin-top` (alias `--mt`): Top margin in blank lines
+- `--margin-bottom` (alias `--mb`): Bottom margin in blank lines
+- `--alignment` (alias `--align`): Text alignment (`left`, `center`, `right`)
 
 ### Flowchart Rendering
 

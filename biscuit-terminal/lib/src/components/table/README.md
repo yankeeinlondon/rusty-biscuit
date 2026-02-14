@@ -7,8 +7,8 @@ Terminal-aware table renderer with box-drawing borders, auto-sized columns, and 
 ```
 table/
 ├── mod.rs      # Module re-exports
-├── table.rs    # Table struct, TableColumn, TableCellContent, Renderable impl
-└── types.rs    # Future type definitions (ColumnType, ColumnAggregate, etc.)
+├── table.rs    # Table struct, TableColumn, TableCellContent, Conditional, Renderable impl
+└── types.rs    # ColumnType, Currency, VerticalAlign
 ```
 
 ## Core Types
@@ -40,6 +40,9 @@ println!("{}", table.render(Some(120)));
 | `columns` | `Vec<TableColumn>` | Column definitions (header text + width constraints) |
 | `data` | `Vec<Vec<TableCellContent>>` | Row data as a 2D grid of cell values |
 | `layout` | `Layout` | Controls margins, alignment, word-wrap, row-fill |
+| `prefer_cursor_alignment` | `bool` | Use ANSI cursor positioning instead of space-based padding for cell alignment (helps when glyphs render narrower than computed Unicode width) |
+| `alternate_background_color` | `bool` | Apply subtle background color to even data rows (requires true color) |
+| `alternate_text_color` | `bool` | Apply subtle text color shift to even data rows (requires true color) |
 
 **Builder Methods:**
 
@@ -49,6 +52,9 @@ println!("{}", table.render(Some(120)));
 | `with_columns(cols)` | Set column definitions |
 | `with_data(rows)` | Set all data rows at once |
 | `add_row(row)` | Append a single data row (`&mut self`) |
+| `prefer_cursor_alignment()` | Enable ANSI cursor-based cell alignment |
+| `alternate_background_color()` | Enable row striping via background color |
+| `alternate_text_color()` | Enable row striping via text color |
 
 All layout-level builders (margins, alignment, word-wrap, row-fill) are inherited from the `Renderable` trait's default implementations and operate on the owned `Layout`.
 
@@ -65,30 +71,57 @@ TableColumn::new("Status")
 | Field | Type | Description |
 |-------|------|-------------|
 | `header` | `String` | Column header text |
+| `fixed_width` | `Option<usize>` | Exact width (overrides header/data widths and min/max) |
 | `min_width` | `Option<usize>` | Floor for the column width |
 | `max_width` | `Option<usize>` | Ceiling for the column width |
+| `column_type` | `ColumnType` | Data type driving default alignment and word wrap |
+| `alignment` | `Option<Alignment>` | Explicit horizontal alignment override (None = use `column_type` default) |
+| `word_wrap` | `Option<WordWrap>` | Word wrap override (ignored for numeric column types) |
+| `vertical_align` | `VerticalAlign` | Vertical alignment for multi-line cells (default: `Top`) |
+| `uniform_alignment` | `bool` | Align all cells at the same position regardless of content width |
+| `when` | `Conditional` | Controls column visibility based on terminal width (default: `Always`) |
 
 ### `TableCellContent`
 
-Enum representing cell values. Currently supports `Text(String)` with commented-out variants for `Integer`, `Float`, and `Currency`.
+Enum representing cell values with four active variants:
 
-Any type that implements `Into<String>` converts into `TableCellContent::Text` via a blanket `From` impl, so string literals and `String` values work directly:
+| Variant | Wraps | Formatting |
+|---------|-------|------------|
+| `Text(String)` | `String` | As-is (supports ANSI escape codes) |
+| `Integer(i64)` | `i64` | Thousands separators (e.g., `1,234`) |
+| `Float(f64)` | `f64` | Two decimal places with thousands separators (e.g., `1,234.56`) |
+| `Currency(Currency, f64)` | `Currency` + `f64` | Symbol prefix with thousands separators (e.g., `$1,234.56`) |
+
+`From` impls are provided for `String`, `&str`, `i64`, and `f64`:
 
 ```rust
-vec!["Alice".into(), "30".into()]
+vec!["Alice".into(), 30i64.into(), TableCellContent::Currency(Currency::USD, 99.95)]
 ```
+
+### `Conditional`
+
+Controls whether a table column is visible based on terminal width. Set on `TableColumn` via `with_when()`.
+
+| Variant | Behavior |
+|---------|----------|
+| `Always` (default) | Column is always visible |
+| `WidthGreaterThan(u32)` | Visible only when renderable width exceeds the threshold |
+| `LessThanOrEqual(u32)` | Visible only when renderable width is at or below the threshold |
+
+The width checked is the **renderable width** (terminal width minus layout margins).
 
 ### `Currency`
 
-Simple enum with `USD`, `GBP`, and `EUR` variants. Defined in `table.rs` but not yet wired into cell rendering.
+Enum with `USD`, `GBP`, and `EUR` variants. Defined in `types.rs` with a `symbol()` method returning `$`, `£`, or `€`.
 
 ## Column Width Calculation
 
-`calculate_column_widths()` runs a three-pass algorithm:
+`calculate_column_widths()` runs a four-pass algorithm:
 
-1. **Header pass** -- Initialize each column's width to its header text length, flooring at `min_width` if set.
-2. **Data pass** -- Walk every cell in every row; widen the column if the cell content exceeds the current width.
+1. **Header pass** -- Initialize each column's width to its header text length, flooring at `min_width` if set. Columns with `fixed_width` use that value directly.
+2. **Data pass** -- Walk every cell in every row; widen the column if the cell content exceeds the current width (skipped for fixed-width columns).
 3. **Constraint pass** -- Clamp each column to `max_width` if set.
+4. **Fit pass** -- `constrain_widths_to_available()` proportionally reduces non-fixed column widths when total width (including border overhead) exceeds available terminal width.
 
 The number of columns is derived from whichever is larger: the column definitions count or the widest data row. This means data rows can exceed the defined column count without panicking (extra cells are ignored in rendering, but they influence width calculation up to `widths.len()`).
 
@@ -128,41 +161,30 @@ Both paths call `render_content()` to produce raw table text, then pass it throu
 
 `is_block_level()` returns `true`, signaling to composition systems (like `Compose`) that the table occupies full width and should not be placed inline with other components.
 
-## Planned Types (types.rs)
+## Types (types.rs)
 
-`types.rs` contains forward-looking type stubs that are **not yet compiled into the module** (they reference undefined types like `CurrencyOptions`, `MetricOptions`, and `ColumnAlignment`). These sketch out a richer column model:
+`types.rs` defines the following fully implemented types:
 
 ### `ColumnType`
 
 ```rust
 pub enum ColumnType {
-    String, Integer, Float,
-    Currency(CurrencyOptions),
-    Metric(MetricOptions),
-    OptString, OptInteger, OptFloat,
-    Unknown,
+    String,            // Default alignment: Left, word wrap: WrapProse
+    Integer,           // Default alignment: Right, word wrap: None
+    Float,             // Default alignment: Right, word wrap: None
+    Currency(Currency), // Default alignment: Right, word wrap: None
 }
 ```
 
-Intended to enable type-aware formatting and alignment per column (e.g., right-align numbers, format currency with symbols).
+Provides `default_alignment()`, `default_word_wrap()`, and `allows_word_wrap_override()` methods. Numeric types disallow word wrap overrides to preserve formatting.
 
-### `ColumnAggregate`
+### `VerticalAlign`
 
 ```rust
-pub enum ColumnAggregate {
-    None, Sum, Avg, Median, Min, Max, Range,
-}
+pub enum VerticalAlign { Top, Middle, Bottom }
 ```
 
-Would enable summary/footer rows showing computed aggregates.
-
-### Planned `TableColumn` (types.rs variant)
-
-A richer column definition with `kind: ColumnType`, `aggregate: ColumnAggregate`, and `alignment: ColumnAlignment` fields alongside an optional title.
-
-### Planned `TableRow` / `TableCell`
-
-Stub structs for row-level metadata (e.g., row titles) and cell-level customization.
+Controls vertical positioning of multi-line cell content. Default is `Top`.
 
 ## Relationship to Layout System
 

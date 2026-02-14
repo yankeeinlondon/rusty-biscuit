@@ -6,8 +6,9 @@ Terminal capability detection, rendering utilities, and image/diagram display fo
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `viuer` | Yes | Enable image rendering via [viuer](https://crates.io/crates/viuer) (Kitty/iTerm2 protocols) |
 | `clap` | No | Derive `clap::ValueEnum` on enums for CLI integration with shell completions |
+
+> **Note:** Image rendering via [viuer](https://crates.io/crates/viuer) is always available (unconditional dependency).
 
 ### When to use the `clap` feature
 
@@ -66,9 +67,24 @@ fn main() {
 - `discovery::osc_queries` - Terminal color queries
 - `discovery::clipboard` - OSC52 clipboard support
 - `discovery::mode_2027` - Unicode grapheme cluster support
+- `discovery::cursor_position` - Cursor position queries
+- `discovery::locale` - Locale detection
 - `discovery::eval` - Escape code analysis utilities
 - `components::terminal_image` - Terminal image rendering (Kitty/iTerm2 with fallbacks)
 - `components::mermaid` - Mermaid diagram rendering via mmdc CLI
+- `components::mermaid_cache` - File-based caching for rendered mermaid diagrams
+- `components::prose` - Styled prose rendering
+- `components::table` - Table rendering
+- `components::list` - List rendering
+- `components::block_quote` - Block quote rendering
+- `components::compose` - Component composition utilities
+- `components::image_options` - Image rendering configuration
+- `components::progress` - Progress indicator rendering
+- `components::renderable` - Renderable trait for components
+- `components::section` - Section rendering
+- `components::text_block` - Text block rendering
+- `components::todo` - Todo item rendering
+- `components::two_column` - Two-column layout rendering
 
 ## Terminal Images (TerminalImage)
 
@@ -142,7 +158,7 @@ All image rendering is string-based: `render()`, `fallback_render()`, and `rende
 
 ## Mermaid Diagrams (MermaidRenderer)
 
-`MermaidRenderer` renders Mermaid diagrams to the terminal using the `mmdc` CLI tool.
+`MermaidRenderer` renders Mermaid diagrams to the terminal using the `mmdc` CLI tool. Rendered diagrams are cached to disk via `MermaidCache` using xxHash-based keys derived from all render parameters (source, theme, scale, config, transparency, title, mmdc version). Cached PNGs are stored in the OS temp directory (`/var/folders/.../mermaid-cache/` on macOS, `/tmp/mermaid-cache/` on Linux) and cleaned up by the OS automatically.
 
 ### Basic Usage
 
@@ -363,6 +379,7 @@ The library detects these terminal emulators:
 | Contour | None | Yes | Yes |
 | VS Code | None | Yes | Yes |
 | Warp | Kitty | Yes | Yes |
+| Wast | Kitty | No | No |
 
 ## OS Detection
 
