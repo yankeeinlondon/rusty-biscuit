@@ -58,7 +58,7 @@ dockhand/
 │   └── lib/          # Player detection, format detection, 53 sound effects
 ├── sniff/
 │   ├── cli/          # Binary: `sniff`
-│   └── lib/          # Hardware, Network, OS, and package manager discovery
+│   └── lib/          # OS, hardware, network, filesystem, programs, services detection
 ├── tree-hugger/      # Tree-sitter symbol extraction
 │   ├── cli/          # Binary: `hug` (symbol/import/export CLI)
 │   └── lib/          # Symbol extraction library (16 languages)
@@ -246,7 +246,7 @@ This repository has local Claude Code skills in `.claude/skills/`:
 - `playa` - Audio playback via host players, format detection, 53 embedded sound effects
 - `research` - AI-powered library research with two-phase LLM pipeline
 - `schematic` - REST API client code generation, OpenAPI import/export, Headers builder
-- `sniff` - System detection (OS, hardware, network, programs, services)
+- `sniff` - System detection (OS, hardware, network, filesystem, programs, services)
 - `so-you-say` - TTS CLI (`speak` binary) wrapping biscuit-speaks (located at `biscuit-speaks/cli`)
 - `clap` - Command-line argument parsing
 - `color-eyre` - Error reporting
