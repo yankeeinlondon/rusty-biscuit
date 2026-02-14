@@ -409,7 +409,7 @@ pub fn get_terminal_app() -> TerminalApp {
             "Apple_Terminal" => return TerminalApp::AppleTerminal,
             "iterm2" | "iTerm.app" => return TerminalApp::ITerm2,
             "vscode" => return TerminalApp::VsCode,
-            "warp" => return TerminalApp::Warp,
+            "warp" | "WarpTerminal" => return TerminalApp::Warp,
             "ghostty" => return TerminalApp::Ghostty,
             "kitty" => return TerminalApp::Kitty,
             "Alacritty" => return TerminalApp::Alacritty,
@@ -645,7 +645,8 @@ fn image_support_from_known_terminals() -> Option<ImageSupportResult> {
         "ghostty", // Ghostty supports Kitty protocol on all platforms
         "kitty",   // Kitty is the originator of the protocol
         "WezTerm", // WezTerm has full Kitty support
-        "Warp",    // Warp supports Kitty protocol
+        "Warp",            // Warp supports Kitty protocol
+        "WarpTerminal",    // Warp sets TERM_PROGRAM=WarpTerminal
         "konsole", // Konsole supports Kitty protocol
         "wast",    // Wast supports Kitty protocol
     ];
@@ -731,7 +732,7 @@ fn image_support_from_env() -> ImageSupportResult {
     if let Ok(term_program) = env::var("TERM_PROGRAM") {
         match term_program.as_str() {
             // Terminals with Kitty Graphics Protocol support
-            "kitty" | "WezTerm" | "Warp" | "ghostty" | "konsole" | "wast" => {
+            "kitty" | "WezTerm" | "Warp" | "WarpTerminal" | "ghostty" | "konsole" | "wast" => {
                 tracing::debug!(
                     image_support = "Kitty",
                     term_program = %term_program,
@@ -835,8 +836,8 @@ pub fn osc8_link_support() -> bool {
 
     if let Ok(term_program) = env::var("TERM_PROGRAM") {
         match term_program.as_str() {
-            "iTerm.app" | "kitty" | "WezTerm" | "Alacritty" | "ghostty" | "warp" | "vscode"
-            | "gnome-terminal" => {
+            "iTerm.app" | "kitty" | "WezTerm" | "Alacritty" | "ghostty" | "warp"
+            | "WarpTerminal" | "vscode" | "gnome-terminal" => {
                 return true;
             }
             _ => {}

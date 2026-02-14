@@ -316,6 +316,21 @@ pub enum MermaidMode {
     Text,
 }
 
+/// Controls terminal image rendering behavior.
+///
+/// This lets callers keep default capability-driven behavior, disable images,
+/// or force protocol output attempts even when capability detection reports none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TerminalImageMode {
+    /// Auto-detect support and render only when supported.
+    #[default]
+    Auto,
+    /// Never render protocol images; always use text fallback.
+    Never,
+    /// Force protocol rendering attempts regardless of detection result.
+    Force,
+}
+
 /// Maximum image file size (10MB).
 const MAX_IMAGE_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
@@ -333,10 +348,10 @@ const MAX_IMAGE_FILE_SIZE: u64 = 10 * 1024 * 1024;
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::output::terminal::ImageRenderer;
+/// use darkmatter::markdown::output::terminal::{ImageRenderer, TerminalImageMode};
 /// use std::path::Path;
 ///
-/// let renderer = ImageRenderer::new(Some(Path::new("/tmp")));
+/// let renderer = ImageRenderer::new(Some(Path::new("/tmp")), TerminalImageMode::Auto);
 /// assert!(!renderer.graphics_supported()); // Usually false in test environment
 /// ```
 pub struct ImageRenderer {
@@ -346,6 +361,8 @@ pub struct ImageRenderer {
     base_path: PathBuf,
     /// Pre-built options for TerminalImage rendering.
     options: TerminalImageOptions,
+    /// Controls image rendering behavior.
+    image_mode: TerminalImageMode,
 }
 
 impl std::fmt::Debug for ImageRenderer {
@@ -355,6 +372,7 @@ impl std::fmt::Debug for ImageRenderer {
             .field("is_tty", &self.is_tty())
             .field("terminal_width", &self.terminal_width())
             .field("base_path", &self.base_path)
+            .field("image_mode", &self.image_mode)
             .finish()
     }
 }
@@ -374,15 +392,16 @@ impl ImageRenderer {
     ///
     /// ```
     /// use darkmatter::markdown::output::terminal::ImageRenderer;
+    /// use darkmatter::markdown::output::terminal::TerminalImageMode;
     /// use std::path::Path;
     ///
     /// // Use current directory
-    /// let renderer = ImageRenderer::new(None);
+    /// let renderer = ImageRenderer::new(None, TerminalImageMode::Auto);
     ///
     /// // Use specific base path
-    /// let renderer = ImageRenderer::new(Some(Path::new("/docs")));
+    /// let renderer = ImageRenderer::new(Some(Path::new("/docs")), TerminalImageMode::Auto);
     /// ```
-    pub fn new(base_path: Option<&Path>) -> Self {
+    pub fn new(base_path: Option<&Path>, image_mode: TerminalImageMode) -> Self {
         let terminal = Terminal::new();
 
         let base = base_path
@@ -403,6 +422,7 @@ impl ImageRenderer {
             graphics_supported = ?terminal.image_support,
             is_tty = terminal.is_tty,
             terminal_width = terminal.width(),
+            image_mode = ?image_mode,
             base_path = %base.display(),
             "ImageRenderer initialized (via biscuit-terminal)"
         );
@@ -411,6 +431,7 @@ impl ImageRenderer {
             terminal,
             base_path: base,
             options,
+            image_mode,
         }
     }
 
@@ -436,6 +457,28 @@ impl ImageRenderer {
     #[inline]
     pub fn base_path(&self) -> &Path {
         &self.base_path
+    }
+
+    #[inline]
+    fn should_attempt_protocol_render(&self) -> bool {
+        match self.image_mode {
+            TerminalImageMode::Auto => self.graphics_supported(),
+            TerminalImageMode::Never => false,
+            TerminalImageMode::Force => true,
+        }
+    }
+
+    fn render_terminal(&self) -> Terminal {
+        if self.image_mode != TerminalImageMode::Force {
+            return self.terminal.clone();
+        }
+
+        let mut forced = self.terminal.clone();
+        forced.is_tty = true;
+        if matches!(forced.image_support, ImageSupport::None) {
+            forced.image_support = ImageSupport::Kitty;
+        }
+        forced
     }
 
     /// Renders an image from the given path.
@@ -508,7 +551,7 @@ impl ImageRenderer {
         }
 
         // Fallback if graphics unsupported
-        if !self.graphics_supported() {
+        if !self.should_attempt_protocol_render() {
             tracing::debug!("Graphics protocol not available");
             // No warning here - this is expected behavior on terminals without graphics
             return format!("▉ IMAGE[{}]\n", alt_text);
@@ -542,7 +585,8 @@ impl ImageRenderer {
         }
 
         // Render via Renderable fallback (protocol-aware string output)
-        let output = term_image.fallback_render(&self.terminal);
+        let render_terminal = self.render_terminal();
+        let output = term_image.fallback_render(&render_terminal);
         if output.is_empty() {
             format!("▉ IMAGE[{}]\n", alt_text)
         } else {
@@ -571,10 +615,11 @@ impl ImageRenderer {
 ///
 /// ```
 /// use darkmatter::markdown::output::terminal::TerminalOptions;
+/// use darkmatter::markdown::output::terminal::TerminalImageMode;
 /// use std::path::PathBuf;
 ///
 /// let mut options = TerminalOptions::default();
-/// options.render_images = true; // Default
+/// options.image_mode = TerminalImageMode::Auto; // Default
 /// options.base_path = Some(PathBuf::from("/docs"));
 /// ```
 ///
@@ -606,9 +651,8 @@ pub struct TerminalOptions {
     pub include_line_numbers: bool,
     /// Color depth capability. None = auto-detect.
     pub color_depth: Option<ColorDepth>,
-    /// Whether to render images (via viuer) or show fallback text.
-    /// Default: `true`
-    pub render_images: bool,
+    /// Controls image rendering behavior for terminal output.
+    pub image_mode: TerminalImageMode,
     /// Base path for resolving relative image paths.
     /// If `None`, uses current working directory.
     pub base_path: Option<PathBuf>,
@@ -653,7 +697,7 @@ impl Default for TerminalOptions {
             color_mode,
             include_line_numbers: false,
             color_depth: None,
-            render_images: true,
+            image_mode: TerminalImageMode::default(),
             base_path: None,
             italic_mode: ItalicMode::default(),
             max_width: None,
@@ -796,10 +840,12 @@ pub fn write_terminal<W: std::io::Write>(
     let mut current_alt = String::new();
     let mut current_image_path = String::new();
     let mut just_rendered_image = false; // Track if we just rendered an image (skip paragraph spacing)
-    let image_renderer = if options.render_images {
-        Some(ImageRenderer::new(options.base_path.as_deref()))
-    } else {
-        None
+    let image_renderer = match options.image_mode {
+        TerminalImageMode::Never => None,
+        TerminalImageMode::Auto | TerminalImageMode::Force => Some(ImageRenderer::new(
+            options.base_path.as_deref(),
+            options.image_mode,
+        )),
     };
 
     // Track semantic font styles for proper rendering
@@ -2462,7 +2508,7 @@ mod tests {
             color_mode: ColorMode::Dark,
             include_line_numbers: false,
             color_depth: Some(ColorDepth::TrueColor),
-            render_images: false,
+            image_mode: TerminalImageMode::Never,
             base_path: None,
             italic_mode: ItalicMode::Always,
             max_width: Some(80),
@@ -5443,7 +5489,7 @@ More text after the table.
     /// Test ImageRenderer::new() initialization with None base path
     #[test]
     fn test_image_renderer_new_with_none_base_path() {
-        let renderer = ImageRenderer::new(None);
+        let renderer = ImageRenderer::new(None, TerminalImageMode::Auto);
 
         // Should use current directory as base
         let expected_base = std::env::current_dir().unwrap_or_default();
@@ -5457,7 +5503,7 @@ More text after the table.
     #[test]
     fn test_image_renderer_new_with_base_path() {
         let base = std::env::temp_dir();
-        let renderer = ImageRenderer::new(Some(&base));
+        let renderer = ImageRenderer::new(Some(&base), TerminalImageMode::Auto);
 
         assert_eq!(renderer.base_path(), base);
     }
@@ -5465,7 +5511,7 @@ More text after the table.
     /// Test ImageRenderer accessors
     #[test]
     fn test_image_renderer_accessors() {
-        let renderer = ImageRenderer::new(None);
+        let renderer = ImageRenderer::new(None, TerminalImageMode::Auto);
 
         // Test that accessors return values
         let is_tty = renderer.is_tty();
@@ -5485,7 +5531,7 @@ More text after the table.
     #[test]
     fn test_image_renderer_with_nonexistent_base() {
         let nonexistent = std::path::PathBuf::from("/this/path/does/not/exist/for/sure");
-        let renderer = ImageRenderer::new(Some(&nonexistent));
+        let renderer = ImageRenderer::new(Some(&nonexistent), TerminalImageMode::Auto);
 
         // Should use the path even if it doesn't exist
         assert_eq!(renderer.base_path(), nonexistent);
@@ -5498,8 +5544,8 @@ More text after the table.
     #[test]
     fn test_image_renderer_caches_detection() {
         // Create two renderers and verify they have consistent state
-        let renderer1 = ImageRenderer::new(None);
-        let renderer2 = ImageRenderer::new(None);
+        let renderer1 = ImageRenderer::new(None, TerminalImageMode::Auto);
+        let renderer2 = ImageRenderer::new(None, TerminalImageMode::Auto);
 
         // Both should have the same graphics support detection
         assert_eq!(
@@ -5512,7 +5558,7 @@ More text after the table.
     /// Test ImageRenderer debug formatting
     #[test]
     fn test_image_renderer_debug() {
-        let renderer = ImageRenderer::new(None);
+        let renderer = ImageRenderer::new(None, TerminalImageMode::Auto);
         let debug_str = format!("{:?}", renderer);
 
         // Should contain field names
@@ -5520,6 +5566,24 @@ More text after the table.
         assert!(debug_str.contains("graphics_supported"));
         assert!(debug_str.contains("is_tty"));
         assert!(debug_str.contains("terminal_width"));
+    }
+
+    /// Test force mode bypasses capability gating.
+    #[test]
+    fn test_image_renderer_force_mode_attempts_protocol_render() {
+        let renderer = ImageRenderer::new(None, TerminalImageMode::Force);
+        assert!(renderer.should_attempt_protocol_render());
+
+        let forced_terminal = renderer.render_terminal();
+        assert!(forced_terminal.is_tty);
+        assert!(!matches!(forced_terminal.image_support, ImageSupport::None));
+    }
+
+    /// Test never mode disables protocol rendering.
+    #[test]
+    fn test_image_renderer_never_mode_disables_protocol_render() {
+        let renderer = ImageRenderer::new(None, TerminalImageMode::Never);
+        assert!(!renderer.should_attempt_protocol_render());
     }
 
     // ---- Image Event Handling Tests ----
@@ -5722,7 +5786,7 @@ More text after the table.
     /// Test render_image with remote HTTP URL returns fallback
     #[test]
     fn test_render_image_rejects_http_url() {
-        let renderer = ImageRenderer::new(None);
+        let renderer = ImageRenderer::new(None, TerminalImageMode::Auto);
         let result = renderer.render_image("http://example.com/image.png", "Alt", None);
 
         assert!(result.contains("▉ IMAGE[Alt]"));
@@ -5731,7 +5795,7 @@ More text after the table.
     /// Test render_image with remote HTTPS URL returns fallback
     #[test]
     fn test_render_image_rejects_https_url() {
-        let renderer = ImageRenderer::new(None);
+        let renderer = ImageRenderer::new(None, TerminalImageMode::Auto);
         let result = renderer.render_image("https://example.com/image.png", "Alt", None);
 
         assert!(result.contains("▉ IMAGE[Alt]"));
@@ -5740,7 +5804,7 @@ More text after the table.
     /// Test render_image with missing file returns fallback
     #[test]
     fn test_render_image_missing_file() {
-        let renderer = ImageRenderer::new(Some(&std::env::temp_dir()));
+        let renderer = ImageRenderer::new(Some(&std::env::temp_dir()), TerminalImageMode::Auto);
         let result = renderer.render_image("nonexistent_file_12345.png", "Missing", None);
 
         assert!(result.contains("▉ IMAGE[Missing]"));
@@ -5749,7 +5813,7 @@ More text after the table.
     /// Test render_image with relative path joined to base
     #[test]
     fn test_render_image_relative_path() {
-        let renderer = ImageRenderer::new(Some(&std::env::temp_dir()));
+        let renderer = ImageRenderer::new(Some(&std::env::temp_dir()), TerminalImageMode::Auto);
         // This file doesn't exist, so we get fallback, but path is resolved correctly
         let result = renderer.render_image("subdir/image.png", "Test", None);
 
@@ -5759,7 +5823,7 @@ More text after the table.
     /// Test render_image with empty alt text
     #[test]
     fn test_render_image_empty_alt() {
-        let renderer = ImageRenderer::new(None);
+        let renderer = ImageRenderer::new(None, TerminalImageMode::Auto);
         let result = renderer.render_image("http://example.com/x.png", "", None);
 
         assert!(result.contains("▉ IMAGE[]"));
@@ -5768,7 +5832,7 @@ More text after the table.
     /// Test render_image fallback behavior
     #[test]
     fn test_render_image_no_graphics_support() {
-        let renderer = ImageRenderer::new(None);
+        let renderer = ImageRenderer::new(None, TerminalImageMode::Auto);
 
         // Create a temp file with invalid image data
         // This should trigger fallback regardless of graphics_supported value
@@ -5799,7 +5863,7 @@ More text after the table.
         let outside_file = std::env::temp_dir().join("outside_image_traversal.png");
         std::fs::write(&outside_file, b"outside file content").unwrap();
 
-        let renderer = ImageRenderer::new(Some(&base_dir));
+        let renderer = ImageRenderer::new(Some(&base_dir), TerminalImageMode::Auto);
 
         // Try to access file outside base via path traversal
         let result = renderer.render_image("../outside_image_traversal.png", "Outside", None);
@@ -5821,7 +5885,7 @@ More text after the table.
         let base_dir = std::env::temp_dir().join("image_test_base_deep");
         std::fs::create_dir_all(&base_dir).ok();
 
-        let renderer = ImageRenderer::new(Some(&base_dir));
+        let renderer = ImageRenderer::new(Some(&base_dir), TerminalImageMode::Auto);
 
         // Try deep traversal - should be blocked regardless of file existence
         let result = renderer.render_image("../../../etc/passwd", "Passwd", None);
@@ -5842,7 +5906,7 @@ More text after the table.
         let absolute_file = std::env::temp_dir().join("absolute_image_test.png");
         std::fs::write(&absolute_file, b"absolute file content").unwrap();
 
-        let renderer = ImageRenderer::new(Some(&std::env::temp_dir()));
+        let renderer = ImageRenderer::new(Some(&std::env::temp_dir()), TerminalImageMode::Auto);
 
         // Use an absolute path - should be rejected even if file exists
         let result =
@@ -5860,7 +5924,7 @@ More text after the table.
     /// Test render_image with Windows-style absolute path
     #[test]
     fn test_render_image_windows_absolute_path() {
-        let renderer = ImageRenderer::new(Some(&std::env::temp_dir()));
+        let renderer = ImageRenderer::new(Some(&std::env::temp_dir()), TerminalImageMode::Auto);
 
         // Windows-style absolute path (C:\...)
         let result = renderer.render_image("C:\\Windows\\System32\\image.png", "WinAbs", None);
@@ -5878,7 +5942,7 @@ More text after the table.
         let subdir = base_dir.join("subdir");
         std::fs::create_dir_all(&subdir).ok();
 
-        let renderer = ImageRenderer::new(Some(&base_dir));
+        let renderer = ImageRenderer::new(Some(&base_dir), TerminalImageMode::Auto);
 
         // Valid relative path within base (file doesn't exist, but path is valid)
         let result = renderer.render_image("subdir/image.png", "ValidRelative", None);
@@ -5900,7 +5964,7 @@ More text after the table.
         let image_file = base_dir.join("image.png");
         std::fs::write(&image_file, b"image content").unwrap();
 
-        let renderer = ImageRenderer::new(Some(&base_dir));
+        let renderer = ImageRenderer::new(Some(&base_dir), TerminalImageMode::Auto);
 
         // Path that uses .. but stays within base: subdir/../image.png resolves to base/image.png
         // This should be allowed since it stays within base
@@ -5916,7 +5980,7 @@ More text after the table.
     /// Test render_image fallback ends with newline
     #[test]
     fn test_render_image_fallback_ends_with_newline() {
-        let renderer = ImageRenderer::new(None);
+        let renderer = ImageRenderer::new(None, TerminalImageMode::Auto);
         let result = renderer.render_image("http://example.com/x.png", "Test", None);
 
         assert!(result.ends_with('\n'));
@@ -5930,29 +5994,29 @@ More text after the table.
         // This test specifically checks TerminalOptions::default() image behavior
         let options = TerminalOptions::default();
 
-        assert!(options.render_images);
+        assert!(matches!(options.image_mode, TerminalImageMode::Auto));
         assert!(options.base_path.is_none());
     }
 
-    /// Test for_terminal with render_images disabled
+    /// Test for_terminal with image rendering disabled
     #[test]
-    fn test_for_terminal_render_images_disabled() {
-        // test_options() has render_images = false by default
+    fn test_for_terminal_image_mode_never() {
+        // test_options() has image_mode = Never by default
         let options = test_options();
 
         let md: Markdown = "![Test](./image.png)".into();
         let output = for_terminal(&md, options).unwrap();
         let plain = strip_ansi_codes(&output);
 
-        // Should show fallback since render_images is false
+        // Should show fallback since images are disabled
         assert!(plain.contains("▉ IMAGE[Test]"));
     }
 
-    /// Test for_terminal with render_images enabled
+    /// Test for_terminal with image rendering enabled
     #[test]
-    fn test_for_terminal_render_images_enabled() {
+    fn test_for_terminal_image_mode_auto() {
         let mut options = test_options();
-        options.render_images = true;
+        options.image_mode = TerminalImageMode::Auto;
 
         let md: Markdown = "![Test](./image.png)".into();
         let output = for_terminal(&md, options).unwrap();

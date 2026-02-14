@@ -1,68 +1,63 @@
 # Markdown Pipelining in CLI
 
-Currently the Darkmatter CLI is first and foremost a Markdown renderer for the Terminal. This has been it's primary focus to date but as we start to build out the full Markdown pipelining features that will become less and less it's primary function.
+This document describes the current Darkmatter CLI output pipeline contract.
 
-To understand the pipelining process review the [Darkmatter Pipeline](./darkmatter-pipeline.md) which give a good overview of all the various things which take place in a full Markdown pipeline transform. One of the key observations is that the last stage is "rendering" and currently the rendering which has gotten the most attention is rendering for the terminal.
+## Render Pipeline Contract
 
-## Changes To Make
+Top-level render mode now uses one switch:
 
-The current number of switches is cluttered so we need to rationalize these.
+- `--output <output>`
+  - `auto` (default):
+    - TTY stdout: ANSI terminal rendering
+    - non-TTY stdout: markdown text
+  - `markdown` (alias: `text`)
+  - `html`
+  - `json` (alias: `ast`)
 
-### Output Format:
+`--show` is output-neutral and applies to top-level render mode:
 
-- Currently we have `--json`, `--html`, `--html-show`, and `--ast` which all relate to the output format
-- All of these switches should be removed and replace with a single `--output <output>` format
-- the valid "output" options are:
-    - `auto` - this is the default and it will output to the terminal when it detects a TTY terminal, otherwise it will report as just Markdown text
-    - `text` _or_ `markdown` - will export the content as Markdown plain text
-        - Note: this includes exporting the Frontmatter if the file has frontmatter
-    - `ast` _or_ `json` - will export the Markdown file as a md.AST JSON file
-    - `html` - will export as HTML (with inline JS)
+- selected output is written to a temp file and opened using the `open` crate
+- extension mapping:
+  - html -> `.html`
+  - markdown/text -> `.md`
+  - json/ast -> `.json`
+- in `--output auto` + TTY mode, ANSI output is still rendered to stdout and markdown is opened in a temp file
 
-### Images:
+## Subcommands
 
-- The options regarding images are largely dependant on the output format
-    - the default output is based on whether we're in a TTY session and whether the user has overridden the default output with the `--output` switch discussed above ... but it should always be available to the CLI
-- **Terminal Output:**
-    - we currently render images to the terminal based on capability (e.g., if the terminal is detected as supporting images we will render it)
-    - this is a good default and will remain AS IS
-    - if you want to explicitly override this there is no command line switch but it will respond to the `TERMINAL_IMAGES` environment variable:
-        - when not set the default is used
-        - when set to `false` then images are never set
-        - when set to `true` then images are always rendered (regardless of terminal support)
-    - there is currently a `--no-images` CLI switch but this should be removed
-- **Markdown Output:**
-    - In Markdown documents we typically have images referenced using the Markdown style of:
+The TOC and delta operations are subcommands:
 
-      ```md
-      ![alt text](./path/to/image.png)
-      ```
+- `md toc <input> [--json]`
+- `md delta <base> <updated> [--json]`
 
-    - But we cannot forget that Markdown documents _can_ and often are added via HTML because HTML provides more control
-        - there is nothing wrong with having inline HTML to reference images in Markdown, that is fully allowed
-        - the support in Markdown readers to render inline images is reasonably good but it's not 100% by any means
-    - In an ideal world we would always want Markdown documents to use Markdown syntax to render images. It is more idiomatic, it ensures better reader support, is less cluttered for AI readers, and far easier to author and edit.
-    - To solve this we must broadly categorize the "extra features" which an inline image provides over a Markdown image reference:
+JSON output for these operations is scoped to subcommands (`--json` is not top-level).
 
-        - **Image Width** - by far and away the most common thing that authors want control over is specifying the width of an image. Either by some fixed unit or as a percentage of the viewable viewport.
-        - **Popover Text** - far less common is the need to have a popover dialog appear to provide some additional information when a user hovers over an image.
-        - **Everything Else** - there are undoubtedly various
+## Terminal Image Behavior
 
-  There are two nuances here worth calling out:
+Top-level CLI no longer exposes `--no-images`.
 
-    - The 2nd Parameter
-        - the official CommonMark spec actually allows for a _second_ parameter to specified within the parenthesis (after the image's filepath).
-        - many, maybe even _most_, Markdown readers do not support this at all or not very well
-        - in the specification, this second parameter is intended for setting the `title` attribute when rendering the Markdown to HTML. This has the effect of providing some "popover text" when a user hovers over the image (not immediately but eventually).
-        - In modern terms though this is a poor UI experience compared to either JS or now modern browser support for a more full featured "popover" effect via HTML/CSS.
+Terminal image behavior is controlled through `TERMINAL_IMAGES`:
 
-    - Image Width in the Alt Text
+- truthy (`true`, `1`, `yes`, `on`) -> force protocol output attempts
+- falsy (`false`, `0`, `no`, `off`) -> never render protocol images
+- unset/invalid -> capability-driven auto mode
 
-        - We have already implemented a way to specify the image's width by adding it into the "alt text":
+## Markdown Image Semantics
 
-          ```md
-          ![alt text|15%](./path/to/image.png)
-          ```
+For markdown image parsing/serialization:
 
-        - The design and testing of this has been overly focused on outputting to the Terminal but now we must take a broader view:
-            - When we are rendering to "Markdown" we should simply remove the `|` character
+- width hints in alt text use only the `|` delimiter: `![alt|15%](./img.png)`
+- rich `ImageRef` metadata remains lossless in markdown mode when configured for lossless metadata
+- undefined metadata fields are omitted from serialized metadata payloads
+
+## Removed Legacy Flags
+
+The following top-level flags are removed:
+
+- `--html`
+- `--show-html`
+- `--ast`
+- `--json`
+- `--no-images`
+- `--toc`
+- `--delta`

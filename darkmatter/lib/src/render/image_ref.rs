@@ -1830,6 +1830,88 @@ mod tests {
     }
 
     #[test]
+    #[serial]
+    fn markdown_default_policy_roundtrips_all_defined_metadata_fields() {
+        let _env = ScopedEnv::remove("IMAGE_REF_METADATA");
+
+        let style = Stylesheet::new()
+            .add(CssSizingProp::Width, CssSizing::percent(40.0))
+            .add(CssSizingProp::Height, CssSizing::px(240.0));
+        let original = ImageRef::new("https://example.com/pic.png", "Diagram")
+            .expect("image should build")
+            .with_class("hero")
+            .with_style(style)
+            .with_title("Tooltip")
+            .with_decoding(ImageDecoding::Async)
+            .with_fetch_priority(FetchPriority::High)
+            .with_height(480)
+            .with_width(640)
+            .with_loading(ImageLoading::Lazy)
+            .with_referrer_policy(ReferrerPolicy::StrictOriginWhenCrossOrigin)
+            .with_sizes("(max-width: 600px) 100vw, 600px")
+            .with_srcset("small.png 1x, large.png 2x")
+            .expect("srcset should be valid")
+            .with_data("id", "123")
+            .with_data("role", "diagram");
+
+        let markdown = original.to_markdown(false);
+        let reparsed =
+            ImageRef::try_from(markdown.as_str()).expect("lossless markdown should parse");
+
+        assert_eq!(reparsed.class(), Some("hero"));
+        assert_eq!(reparsed.title(), Some("Tooltip"));
+        assert_eq!(reparsed.decoding(), ImageDecoding::Async);
+        assert_eq!(reparsed.fetch_priority(), FetchPriority::High);
+        assert_eq!(reparsed.height(), Some(480));
+        assert_eq!(reparsed.width(), Some(640));
+        assert_eq!(reparsed.loading(), ImageLoading::Lazy);
+        assert_eq!(
+            reparsed.referrer_policy(),
+            Some(ReferrerPolicy::StrictOriginWhenCrossOrigin)
+        );
+        assert_eq!(reparsed.sizes(), Some("(max-width: 600px) 100vw, 600px"));
+        assert_eq!(reparsed.srcset(), Some("small.png 1x, large.png 2x"));
+        assert_eq!(reparsed.data().get("id"), Some(&"123".to_string()));
+        assert_eq!(reparsed.data().get("role"), Some(&"diagram".to_string()));
+        assert_eq!(
+            reparsed.style().map(Stylesheet::to_css),
+            original.style().map(Stylesheet::to_css)
+        );
+    }
+
+    #[test]
+    fn markdown_metadata_payload_omits_undefined_fields() {
+        let markdown = ImageRef::new("https://example.com/pic.png", "Pic")
+            .expect("image should build")
+            .with_class("hero")
+            .to_markdown(false);
+
+        let alt_end = find_closing_bracket(&markdown, 1).expect("alt closing bracket");
+        let rest = &markdown[alt_end + 1..];
+        let paren_end = find_closing_paren(rest, 0).expect("closing paren");
+        let (_, trailing) = extract_markdown_url(&rest[1..paren_end]);
+        let encoded = parse_markdown_title_value(trailing.trim());
+        let decoded = base64_decode(&encoded).expect("metadata should be base64");
+        let json = String::from_utf8(decoded).expect("metadata should be utf8");
+
+        assert!(json.contains("\"class\":\"hero\""));
+        for key in [
+            "\"style\":",
+            "\"decoding\":",
+            "\"fetchpriority\":",
+            "\"height\":",
+            "\"width\":",
+            "\"loading\":",
+            "\"referrerpolicy\":",
+            "\"sizes\":",
+            "\"srcset\":",
+            "\"data\":",
+        ] {
+            assert!(!json.contains(key), "unexpected serialized key: {key}");
+        }
+    }
+
+    #[test]
     fn markdown_parse_width_hint_applies_style_width() {
         let image =
             ImageRef::try_from("![hi|15%](./my-image.png)").expect("markdown image should parse");

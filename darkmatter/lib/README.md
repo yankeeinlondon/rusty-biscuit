@@ -284,7 +284,7 @@ pub struct TerminalOptions {
     pub color_mode: ColorMode,        // Light or Dark
     pub include_line_numbers: bool,   // Show line numbers in code
     pub color_depth: Option<ColorDepth>,  // Auto-detect if None
-    pub render_images: bool,          // Enable image rendering
+    pub image_mode: TerminalImageMode, // Auto, Never, Force
     pub base_path: Option<PathBuf>,   // For relative image paths
     pub italic_mode: ItalicMode,      // Auto, Always, Never
     pub max_width: Option<u16>,       // Text wrapping width

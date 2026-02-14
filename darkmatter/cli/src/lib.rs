@@ -3,8 +3,8 @@
 //! A themed markdown renderer for the terminal and browser.
 //!
 //! Darkmatter renders markdown documents with syntax highlighting, image support,
-//! and theme-aware styling. It can output to ANSI terminals (with escape codes)
-//! or generate standalone HTML files.
+//! and theme-aware styling. It can render ANSI terminal output, markdown text,
+//! HTML, or AST JSON.
 //!
 //! ## Installation
 //!
@@ -29,7 +29,7 @@
 //! ### Basic rendering
 //!
 //! ```bash
-//! # Render a markdown file to terminal
+//! # Render a markdown file (auto mode)
 //! md README.md
 //!
 //! # Pipe content from stdin
@@ -40,19 +40,40 @@
 //! ### Output formats
 //!
 //! ```bash
-//! # Output as HTML
-//! md README.md --html > output.html
+//! # Explicit output format
+//! md README.md --output html > output.html
+//! md README.md --output markdown
+//! md README.md --output json
+//! md README.md --output ast      # Alias of json
+//! md README.md --output text     # Alias of markdown
+//! ```
 //!
-//! # Generate HTML and open in browser
-//! md README.md --show-html
+//! ### Show output artifact
 //!
-//! # Output MDAST JSON (abstract syntax tree)
-//! md README.md --ast
+//! ```bash
+//! # Open output in default app
+//! md README.md --output html --show
+//! md README.md --output markdown --show
+//! md README.md --output json --show
+//! ```
 //!
-//! # Show table of contents
-//! md README.md --toc
-//! md README.md --toc-filename  # Include filename in header
-//! md README.md --toc --json    # JSON format
+//! ### Table of contents
+//!
+//! ```bash
+//! # Show table of contents tree
+//! md toc README.md
+//!
+//! # JSON format
+//! md toc README.md --json
+//! ```
+//!
+//! ### Comparing documents
+//!
+//! ```bash
+//! # Show differences between two markdown files
+//! md delta original.md updated.md
+//! md delta original.md updated.md --json
+//! md delta original.md updated.md -v
 //! ```
 //!
 //! ### Markdown cleanup
@@ -63,15 +84,6 @@
 //!
 //! # Clean up and save back to file
 //! md README.md --clean-save
-//! ```
-//!
-//! ### Comparing documents
-//!
-//! ```bash
-//! # Show differences between two markdown files
-//! md original.md --delta updated.md
-//! md original.md --delta updated.md --json  # JSON format
-//! md original.md --delta updated.md -v      # Verbose with visual diff
 //! ```
 //!
 //! ### Theming
@@ -93,9 +105,6 @@
 //! # Show line numbers in code blocks
 //! md README.md --line-numbers
 //!
-//! # Disable image rendering
-//! md README.md --no-images
-//!
 //! # Render mermaid diagrams as images
 //! md README.md --mermaid
 //!
@@ -108,8 +117,9 @@
 //! ## Features
 //!
 //! - **Terminal rendering**: ANSI escape codes with automatic color depth detection
+//! - **Markdown output**: Clean markdown text output for piping and file workflows
 //! - **HTML output**: Standalone HTML with embedded styles and syntax highlighting
-//! - **Syntax highlighting**: Language-aware code block highlighting via syntect
+//! - **AST JSON output**: JSON AST export for programmatic workflows
 //! - **Image rendering**: Inline images in supported terminals (iTerm2, Kitty, etc.)
 //! - **Mermaid diagrams**: Render mermaid diagrams to terminal or HTML
 //! - **Theme support**: Multiple prose and code themes with light/dark mode detection
@@ -132,24 +142,67 @@
 //! write_terminal(&mut stdout, &md, options)?;
 //! ```
 
-// Re-export the CLI struct for programmatic access
-pub use cli::Cli;
+// Re-export CLI types for programmatic access
+pub use cli::{Cli, Command as CliCommand, OutputFormat};
 
 mod cli {
-    use clap::{ArgGroup, Parser};
+    use clap::{Parser, Subcommand, ValueEnum};
     use clap_complete::Shell;
     use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
     use darkmatter::markdown::highlighting::ThemePair;
     use std::path::{Path, PathBuf};
+
+    /// Output format for top-level render mode.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+    pub enum OutputFormat {
+        /// Auto: terminal rendering on TTY, markdown text on non-TTY.
+        Auto,
+        /// Markdown text output.
+        #[value(alias = "text")]
+        Markdown,
+        /// HTML output.
+        Html,
+        /// AST JSON output.
+        #[value(alias = "ast")]
+        Json,
+    }
+
+    /// Subcommands for non-render operations.
+    #[derive(Clone, Debug, Subcommand)]
+    pub enum Command {
+        /// Show markdown table of contents.
+        Toc {
+            /// Input file path (use "-" for stdin)
+            #[arg(value_name = "INPUT")]
+            input: PathBuf,
+
+            /// Output TOC as JSON
+            #[arg(long)]
+            json: bool,
+        },
+
+        /// Compare two markdown documents.
+        Delta {
+            /// Base/original markdown file
+            #[arg(value_name = "BASE")]
+            base: PathBuf,
+
+            /// Updated markdown file
+            #[arg(value_name = "UPDATED")]
+            updated: PathBuf,
+
+            /// Output delta as JSON
+            #[arg(long)]
+            json: bool,
+        },
+    }
 
     /// Command-line interface for the darkmatter markdown renderer.
     ///
     /// Use `md --help` to see all available options.
     #[derive(Parser)]
     #[command(name = "md", about = "Markdown Awesome Tool", version)]
-    #[command(group = ArgGroup::new("output-mode")
-        .args(["html", "show_html", "ast", "clean", "clean_save", "toc", "toc_filename", "delta"])
-        .multiple(false))]
+    #[command(subcommand_precedence_over_arg = true)]
     pub struct Cli {
         /// Input file path (reads from stdin if not provided, use "-" for explicit stdin)
         #[arg(add = ArgValueCompleter::new(complete_markdown_files))]
@@ -168,40 +221,20 @@ mod cli {
         pub list_themes: bool,
 
         /// Clean up markdown formatting (output to stdout)
-        #[arg(long, group = "output-mode")]
+        #[arg(long, conflicts_with = "clean_save")]
         pub clean: bool,
 
         /// Clean up and save back to file
-        #[arg(long, group = "output-mode")]
+        #[arg(long, conflicts_with = "clean")]
         pub clean_save: bool,
 
-        /// Output as HTML
-        #[arg(long, group = "output-mode")]
-        pub html: bool,
+        /// Output format for top-level render mode
+        #[arg(long, value_enum, default_value_t = OutputFormat::Auto, conflicts_with_all = ["clean", "clean_save"])]
+        pub output: OutputFormat,
 
-        /// Generate HTML and open in browser
-        #[arg(long, group = "output-mode")]
-        pub show_html: bool,
-
-        /// Output MDAST JSON
-        #[arg(long, group = "output-mode")]
-        pub ast: bool,
-
-        /// Show table of contents as a tree structure
-        #[arg(long, group = "output-mode")]
-        pub toc: bool,
-
-        /// Show table of contents with filename in header
-        #[arg(long, group = "output-mode")]
-        pub toc_filename: bool,
-
-        /// Compare with another markdown file and show differences
-        #[arg(long, group = "output-mode", value_name = "FILE")]
-        pub delta: Option<PathBuf>,
-
-        /// Output as JSON (for --toc and --delta modes)
+        /// Open selected output in the default app using a temp file
         #[arg(long)]
-        pub json: bool,
+        pub show: bool,
 
         /// Merge JSON into frontmatter (JSON wins on conflicts)
         #[arg(long, value_name = "JSON")]
@@ -215,10 +248,6 @@ mod cli {
         #[arg(long)]
         pub line_numbers: bool,
 
-        /// Disable image rendering (show placeholders instead)
-        #[arg(long)]
-        pub no_images: bool,
-
         /// Render mermaid diagrams to terminal as images.
         /// Falls back to code blocks if terminal doesn't support images.
         #[arg(long)]
@@ -231,6 +260,10 @@ mod cli {
         /// Generate shell completions for the specified shell
         #[arg(long, value_name = "SHELL")]
         pub completions: Option<Shell>,
+
+        /// TOC and delta subcommands
+        #[command(subcommand)]
+        pub command: Option<Command>,
     }
 
     /// Completes markdown files (.md, .dm) in current directory and one level deep.

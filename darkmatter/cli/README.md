@@ -2,7 +2,7 @@
 
 Binary: `md`
 
-A themed markdown renderer for the terminal and browser with syntax highlighting, image support, and document analysis tools.
+A themed markdown renderer for terminal and browser workflows with markdown, HTML, and AST JSON output modes.
 
 ## Installation
 
@@ -19,7 +19,7 @@ just -f darkmatter/justfile install
 ### Basic Rendering
 
 ```bash
-# Render markdown to terminal with syntax highlighting
+# Render markdown using auto mode
 md README.md
 
 # Pipe from stdin
@@ -30,26 +30,46 @@ echo "# Hello\n\nWorld" | md
 md -
 ```
 
-### Output Formats
+### Output Modes
+
+Use a single `--output <OUTPUT>` switch for render format selection:
+
+- `auto` (default): render ANSI terminal output on TTY, markdown text on non-TTY
+- `markdown` (alias: `text`)
+- `html`
+- `json` (alias: `ast`)
 
 ```bash
-# HTML output (standalone with embedded styles)
-md README.md --html > output.html
+md README.md --output markdown
+md README.md --output text
+md README.md --output html > output.html
+md README.md --output json
+md README.md --output ast
+```
 
-# Open in browser
-md README.md --show-html
+### Show Rendered Output
 
-# MDAST JSON (abstract syntax tree)
-md README.md --ast
+`--show` writes the selected output into a temp file and opens it with the system default app.
 
-# Table of contents (tree format)
-md README.md --toc
+```bash
+md README.md --output html --show
+md README.md --output markdown --show
+md README.md --output json --show
+```
 
-# Table of contents with filename
-md README.md --toc-filename
+In `--output auto` mode on a TTY, `md` renders ANSI output to the terminal and also opens markdown in a temp file.
 
-# Table of contents as JSON
-md README.md --toc --json
+### TOC and Delta Subcommands
+
+```bash
+# Table of contents
+md toc README.md
+md toc README.md --json
+
+# Document comparison
+md delta original.md updated.md
+md delta original.md updated.md --json
+md delta original.md updated.md -v
 ```
 
 ### Document Cleanup
@@ -62,48 +82,6 @@ md README.md --clean
 md README.md --clean-save
 ```
 
-Cleanup operations:
-
-- Inject blank lines between block elements
-- Align table columns
-- Normalize whitespace
-
-### Document Comparison
-
-```bash
-# Show structural diff between files
-md original.md --delta updated.md
-
-# JSON format for programmatic use
-md original.md --delta updated.md --json
-
-# Verbose with visual diff
-md original.md --delta updated.md -v
-```
-
-Delta analysis includes:
-
-- Change classification (identical, minor edit, major rewrite, etc.)
-- Content additions/removals/modifications
-- Section movements
-- Frontmatter changes
-- Broken link detection
-
-### Theming
-
-```bash
-# List available themes
-md --list-themes
-
-# Apply theme (affects both prose and code)
-md README.md --theme dracula
-
-# Separate prose and code themes
-md README.md --theme nord --code-theme monokai
-```
-
-Available themes: `github`, `one-half`, `base16-ocean`, `gruvbox`, `solarized`, `nord`, `dracula`, `monokai`, `vs-dark`
-
 ### Frontmatter Manipulation
 
 ```bash
@@ -114,14 +92,20 @@ md README.md --fm-merge-with '{"version": "2.0"}'
 md README.md --fm-defaults '{"draft": false}'
 ```
 
-### Rendering Options
+### Theming and Rendering Options
 
 ```bash
+# List available themes
+md --list-themes
+
+# Apply theme (affects both prose and code)
+md README.md --theme dracula
+
+# Separate prose and code themes
+md README.md --theme nord --code-theme monokai
+
 # Line numbers in code blocks
 md README.md --line-numbers
-
-# Disable image rendering (show placeholders)
-md README.md --no-images
 
 # Render mermaid diagrams as images
 md README.md --mermaid
@@ -154,77 +138,19 @@ COMPLETE=fish md | source
 $env:COMPLETE = "powershell"; md | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE
 ```
 
-Run `md --completions <SHELL>` to see the setup command for your shell.
+Run `md --completions <SHELL>` to print the setup command for your shell.
 
-## All Options
+## Notes
 
-```
-Usage: md [OPTIONS] [INPUT]
-
-Arguments:
-  [INPUT]  Input file path (reads from stdin if not provided)
-
-Options:
-      --theme <THEME>           Theme for prose content
-      --code-theme <THEME>      Theme for code blocks
-      --list-themes             List available themes
-      --clean                   Clean up markdown formatting (stdout)
-      --clean-save              Clean up and save back to file
-      --html                    Output as HTML
-      --show-html               Generate HTML and open in browser
-      --ast                     Output MDAST JSON
-      --toc                     Show table of contents
-      --toc-filename            Show TOC with filename in header
-      --delta <FILE>            Compare with another markdown file
-      --json                    Output as JSON (for --toc and --delta)
-      --fm-merge-with <JSON>    Merge JSON into frontmatter
-      --fm-defaults <JSON>      Set default frontmatter values
-      --line-numbers            Include line numbers in code blocks
-      --no-images               Disable image rendering
-      --mermaid                 Render mermaid diagrams as images
-      --completions <SHELL>     Generate shell completions setup command
-  -v, --verbose...              Increase verbosity
-  -h, --help                    Print help
-  -V, --version                 Print version
-```
-
-## Features
-
-| Feature | Description |
-|---------|-------------|
-| **Syntax highlighting** | Language-aware code blocks with 200+ grammars |
-| **Theme support** | 9 theme pairs with automatic light/dark detection |
-| **Terminal images** | Inline images in Kitty, iTerm2, and sixel terminals |
-| **Mermaid diagrams** | Render flowcharts, sequences, etc. as images |
-| **GFM tables** | GitHub-flavored tables with box-drawing |
-| **Hyperlinks** | OSC 8 terminal hyperlinks in supported terminals |
-| **Document diffing** | Structural comparison with change analysis |
-| **TOC extraction** | Hierarchical heading structure |
-| **Cleanup tools** | Normalize formatting, align tables |
-| **Shell completions** | Bash, Zsh, Fish, PowerShell with markdown file filtering |
-
-## Mermaid Support
-
-When `--mermaid` is enabled:
-
-1. Validates diagram size (max 10KB)
-2. Executes local `mmdc` CLI with dark theme
-3. Displays PNG image via viuer
-4. Falls back to syntax-highlighted code block on failure
-
-**Requirements**: Install mermaid CLI globally:
-
-```bash
-npm install -g @mermaid-js/mermaid-cli
-```
-
-Or let the tool use `npx` to install temporarily (slower first run).
+- `TERMINAL_IMAGES` controls terminal image behavior:
+  - truthy (`true`, `1`, `yes`, `on`) forces protocol image output attempts
+  - falsy (`false`, `0`, `no`, `off`) disables image protocol output
+  - unset/invalid uses capability auto-detection
+- Removed legacy flags: `--html`, `--show-html`, `--ast`, top-level `--json`, `--no-images`, top-level `--toc`, and top-level `--delta`.
 
 ## Library
 
-For programmatic access, see the [darkmatter-lib](../lib/) library.
-
-Note: Stage 2 transclusion (`::file`, `::code`, `prologue`, `epilogue`) is currently available through the library transform API.
+For programmatic access, see [darkmatter-lib](../lib/).
 
 ```rust
 use darkmatter::markdown::{Markdown, output::{TerminalOptions, write_terminal}};

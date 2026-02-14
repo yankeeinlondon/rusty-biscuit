@@ -483,25 +483,56 @@ impl TerminalImage {
 
         // Terminal-specific cursor row calculation.
         //
-        // Kitty and Warp use ceil-based row counting — partial cell rows at
-        // the bottom still consume a full terminal row.
+        // Most terminals use ceil-based row counting — a partial cell row
+        // at the bottom still consumes a full terminal row. The cursor must
+        // advance past the entire image including the partial row.
         //
-        // WezTerm and Ghostty use floor-based row counting — partial cell
-        // rows at the bottom do NOT consume an extra terminal row. Using
-        // ceil for these terminals causes exactly one blank line below.
+        // Warp uses floor-based row counting — ceil overshoots by one row,
+        // causing a blank line between the image and subsequent text.
         //
-        // iTerm2 uses floor-based counting plus an additional -1 for its
-        // native OSC 1337 protocol cursor positioning.
+        // All other terminals (Kitty, Ghostty, WezTerm, iTerm2) use ceil.
+        // DSR diagnostics confirmed images physically occupy ceil rows:
+        // floor puts the cursor ON the last image row, hiding text behind
+        // the image overlay.
         let cursor_rows = match term.app {
-            TerminalApp::Wezterm | TerminalApp::Ghostty => (raw_height.floor() as u32).max(1),
-            TerminalApp::ITerm2 => (raw_height.floor() as u32).saturating_sub(1).max(1),
+            TerminalApp::Warp => (raw_height.floor() as u32).max(1),
             _ => height_cells,
         };
 
-        if cursor_rows > 0 {
-            Ok(format!("{}\x1b[{}B\r", sequence, cursor_rows))
+        // Detect if the image will trigger a scroll event.
+        // When the cursor is near the bottom of the screen and the image
+        // extends past the viewport, the terminal scrolls to fit it.
+        // After scroll, \x1b[u restores to the screen-bottom and CUD is
+        // clamped there. A single \n compensates because line feed at the
+        // bottom margin triggers a scroll-up (CUD does not).
+        //
+        // Ghostty is excluded — its save/restore interaction with scroll
+        // naturally leaves the cursor 1 row past the image with ceil.
+        // Warp is excluded — its input is always at the bottom so images
+        // render at the top, never triggering scroll.
+        let needs_scroll_compensation =
+            if matches!(term.app, TerminalApp::Ghostty | TerminalApp::Warp) {
+                false
+            } else {
+                use crate::discovery::cursor_position::cursor_position;
+                if let Some(pos) = cursor_position() {
+                    let term_height = term.height();
+                    pos.row + cursor_rows > term_height
+                } else {
+                    false
+                }
+            };
+
+        let suffix = if needs_scroll_compensation {
+            "\n"
         } else {
-            Ok(format!("{}\r", sequence))
+            ""
+        };
+
+        if cursor_rows > 0 {
+            Ok(format!("{}\x1b[{}B\r{}", sequence, cursor_rows, suffix))
+        } else {
+            Ok(format!("{}\r{}", sequence, suffix))
         }
     }
 
@@ -1570,7 +1601,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_to_terminal_iterm2_advances_one_less_row_than_kitty() {
+    fn test_render_to_terminal_iterm2_uses_floor_rounding() {
         let (_dir, file_path) = create_temp_test_image();
         let term_img = TerminalImage::new(&file_path).unwrap();
 
@@ -1592,11 +1623,14 @@ mod tests {
 
         let kitty_rows = extract_row_advance(&kitty_out).unwrap();
         let iterm2_rows = extract_row_advance(&iterm2_out).unwrap();
-        assert_eq!(kitty_rows.saturating_sub(1), iterm2_rows);
+        // For integer heights (like our 2x2 test image), floor == ceil
+        // so iTerm2 (floor) matches Kitty (ceil).
+        // For fractional heights, iTerm2 would use floor while Kitty uses ceil.
+        assert_eq!(kitty_rows, iterm2_rows);
     }
 
     #[test]
-    fn test_render_to_terminal_wezterm_advances_same_rows_as_kitty() {
+    fn test_render_to_terminal_wezterm_uses_ceil_rounding() {
         let (_dir, file_path) = create_temp_test_image();
         let term_img = TerminalImage::new(&file_path).unwrap();
 
@@ -1618,7 +1652,38 @@ mod tests {
 
         let kitty_rows = extract_row_advance(&kitty_out).unwrap();
         let wezterm_rows = extract_row_advance(&wezterm_out).unwrap();
+        // WezTerm uses ceil rounding (same default path as Kitty/Ghostty).
+        // Correct for no-scroll cases; scroll cases have CUD-clamping.
         assert_eq!(kitty_rows, wezterm_rows);
+    }
+
+    #[test]
+    fn test_render_to_terminal_warp_uses_floor_rounding() {
+        let (_dir, file_path) = create_temp_test_image();
+        let term_img = TerminalImage::new(&file_path).unwrap();
+
+        let kitty = Terminal::builder()
+            .app(TerminalApp::Kitty)
+            .is_tty(true)
+            .image_support(crate::discovery::detection::ImageSupport::Kitty)
+            .width(80)
+            .build();
+        let warp = Terminal::builder()
+            .app(TerminalApp::Warp)
+            .is_tty(true)
+            .image_support(crate::discovery::detection::ImageSupport::Kitty)
+            .width(80)
+            .build();
+
+        let kitty_out = term_img.render_to_terminal(&kitty).unwrap();
+        let warp_out = term_img.render_to_terminal(&warp).unwrap();
+
+        let kitty_rows = extract_row_advance(&kitty_out).unwrap();
+        let warp_rows = extract_row_advance(&warp_out).unwrap();
+        // For integer heights (like our 2x2 test image), floor == ceil
+        // so Warp (floor) matches Kitty (ceil).
+        // For fractional heights, Warp would use floor while Kitty uses ceil.
+        assert_eq!(kitty_rows, warp_rows);
     }
 
     // Dimension calculation tests

@@ -18,8 +18,10 @@ fn test_help_flag() {
         .assert()
         .success()
         .stdout(predicate::str::contains("markdown"))
-        .stdout(predicate::str::contains("--clean"))
-        .stdout(predicate::str::contains("--html"));
+        .stdout(predicate::str::contains("--output <OUTPUT>"))
+        .stdout(predicate::str::contains("--show"))
+        .stdout(predicate::str::contains("toc"))
+        .stdout(predicate::str::contains("delta"));
 }
 
 #[test]
@@ -32,14 +34,14 @@ fn test_version_flag() {
 }
 
 #[test]
-fn test_stdin_rendering() {
-    // Pipe markdown through stdin using explicit "-" marker
+fn test_stdin_rendering_auto_non_tty_outputs_markdown() {
     md_cmd()
         .arg("-")
         .write_stdin("# Hello\n\nWorld")
         .assert()
         .success()
-        .stdout(predicate::str::is_empty().not());
+        .stdout(predicate::str::contains("# Hello"))
+        .stdout(predicate::str::contains("World"));
 }
 
 #[test]
@@ -52,7 +54,7 @@ fn test_file_rendering() {
         .arg(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::is_empty().not());
+        .stdout(predicate::str::contains("# Test File"));
 }
 
 #[test]
@@ -62,6 +64,142 @@ fn test_file_not_found() {
         .assert()
         .failure();
 }
+
+#[test]
+fn test_output_markdown_alias_text() {
+    md_cmd()
+        .args(["--output", "text", "-"])
+        .write_stdin("# Alias Test")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Alias Test"));
+}
+
+#[test]
+fn test_output_html() {
+    md_cmd()
+        .args(["--output", "html", "-"])
+        .write_stdin("# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<style>"))
+        .stdout(predicate::str::contains("<h1>Hello</h1>"));
+}
+
+#[test]
+fn test_output_json_alias_ast() {
+    md_cmd()
+        .args(["--output", "ast", "-"])
+        .write_stdin("# Hello\n\nWorld")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"type\""));
+}
+
+#[test]
+fn test_show_option_with_markdown_output() {
+    md_cmd()
+        .args(["--output", "markdown", "--show", "-"])
+        .write_stdin("# Show Test")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_removed_flags_are_rejected() {
+    for flag in [
+        "--html",
+        "--show-html",
+        "--ast",
+        "--json",
+        "--no-images",
+        "--toc",
+        "--delta",
+    ] {
+        md_cmd()
+            .args([flag, "-"])
+            .write_stdin("# Test")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("unexpected argument"));
+    }
+}
+
+#[test]
+fn test_subcommand_rejects_render_options() {
+    md_cmd()
+        .args(["--output", "html", "toc", "-"])
+        .write_stdin("# Test")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("subcommands cannot be combined"));
+}
+
+// =============================================================================
+//                          SUBCOMMAND TESTS
+// =============================================================================
+
+#[test]
+fn test_toc_subcommand_output() {
+    md_cmd()
+        .args(["toc", "-"])
+        .write_stdin("# Top\n\n## Section A\n\n## Section B\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Top"))
+        .stdout(predicate::str::contains("Section A"));
+}
+
+#[test]
+fn test_toc_subcommand_json_output() {
+    md_cmd()
+        .args(["toc", "--json", "-"])
+        .write_stdin("# Top\n\n## Section A\n\n## Section B\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"structure\""));
+}
+
+#[test]
+fn test_delta_subcommand_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.md");
+    let updated = dir.path().join("updated.md");
+
+    std::fs::write(&base, "# Title\n\nHello\n").unwrap();
+    std::fs::write(&updated, "# Title\n\nHello there\n").unwrap();
+
+    md_cmd()
+        .arg("delta")
+        .arg(&base)
+        .arg(&updated)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Modified"));
+}
+
+#[test]
+fn test_delta_subcommand_json_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().join("base.md");
+    let updated = dir.path().join("updated.md");
+
+    std::fs::write(&base, "# Title\n\nHello\n").unwrap();
+    std::fs::write(&updated, "# Title\n\nHello there\n").unwrap();
+
+    md_cmd()
+        .arg("delta")
+        .arg(&base)
+        .arg(&updated)
+        .arg("--json")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"classification\""));
+}
+
+// =============================================================================
+//                       EXISTING BUG FIX REGRESSION TESTS
+// =============================================================================
 
 #[test]
 fn test_clean_output() {
@@ -75,59 +213,7 @@ fn test_clean_output() {
 }
 
 #[test]
-fn test_ast_output_is_json() {
-    md_cmd()
-        .args(["--ast", "-"])
-        .write_stdin("# Hello\n\nWorld")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("{"))
-        .stdout(predicate::str::contains("}"));
-}
-
-#[test]
-fn test_toc_output() {
-    md_cmd()
-        .args(["--toc", "-"])
-        .write_stdin("# Top\n\n## Section A\n\n## Section B\n")
-        .assert()
-        .success()
-        .stdout(predicate::str::is_empty().not());
-}
-
-#[test]
-fn test_toc_json_output() {
-    md_cmd()
-        .args(["--toc", "--json", "-"])
-        .write_stdin("# Top\n\n## Section A\n\n## Section B\n")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("{"))
-        .stdout(predicate::str::contains("structure"));
-}
-
-#[test]
-fn test_list_themes() {
-    md_cmd()
-        .arg("--list-themes")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Available themes"))
-        .stdout(predicate::str::contains("--theme"));
-}
-
-// =============================================================================
-//                       BUG FIX REGRESSION TESTS
-// =============================================================================
-
-// ---------------------------------------------------------------------------
-// Bug fix: --clean-save should reject stdin input
-// ---------------------------------------------------------------------------
-
-#[test]
 fn test_clean_save_rejects_stdin() {
-    // Using "-" as input with --clean-save should fail because we cannot
-    // save back to stdin. The error message should suggest using --clean.
     md_cmd()
         .args(["-", "--clean-save"])
         .write_stdin("# Test")
@@ -138,18 +224,12 @@ fn test_clean_save_rejects_stdin() {
 
 #[test]
 fn test_clean_save_rejects_implicit_stdin() {
-    // When no input is provided at all and stdin is piped,
-    // --clean-save should still fail because there is no file to save to.
     md_cmd()
         .arg("--clean-save")
         .write_stdin("# Test")
         .assert()
         .failure();
 }
-
-// ---------------------------------------------------------------------------
-// Bug fix: --clean-save should work with a real file
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_clean_save_works_with_file() {
@@ -164,7 +244,6 @@ fn test_clean_save_works_with_file() {
         .success()
         .stderr(predicate::str::contains("Saved cleaned content"));
 
-    // Verify file was actually modified (written back)
     let contents = std::fs::read_to_string(&file_path).unwrap();
     assert!(
         contents.contains("# Hello"),
@@ -172,14 +251,8 @@ fn test_clean_save_works_with_file() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Bug fix: --fm-merge-with should accept valid JSON
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_fm_merge_with_valid_json() {
-    // Merge JSON into frontmatter; the output should contain YAML frontmatter
-    // with the merged key.
     md_cmd()
         .args(["--fm-merge-with", r#"{"title":"Hello"}"#, "-"])
         .write_stdin("# Test\n\nContent")
@@ -191,8 +264,6 @@ fn test_fm_merge_with_valid_json() {
 
 #[test]
 fn test_fm_merge_with_overwrites_existing() {
-    // When the document already has frontmatter, --fm-merge-with should
-    // override conflicting keys (PreferExternal strategy).
     md_cmd()
         .args(["--fm-merge-with", r#"{"title":"New Title"}"#, "-"])
         .write_stdin("---\ntitle: Old Title\n---\n# Test")
@@ -200,10 +271,6 @@ fn test_fm_merge_with_overwrites_existing() {
         .success()
         .stdout(predicate::str::contains("title: New Title"));
 }
-
-// ---------------------------------------------------------------------------
-// Bug fix: --fm-merge-with should reject invalid JSON
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_fm_merge_with_invalid_json() {
@@ -215,13 +282,8 @@ fn test_fm_merge_with_invalid_json() {
         .stderr(predicate::str::contains("Invalid JSON"));
 }
 
-// ---------------------------------------------------------------------------
-// Bug fix: --fm-defaults should accept valid JSON
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_fm_defaults_valid_json() {
-    // --fm-defaults adds missing keys but does NOT override existing keys.
     md_cmd()
         .args(["--fm-defaults", r#"{"draft":true}"#, "-"])
         .write_stdin("---\ntitle: X\n---\n# Test")
@@ -233,7 +295,6 @@ fn test_fm_defaults_valid_json() {
 
 #[test]
 fn test_fm_defaults_does_not_override_existing() {
-    // Existing keys should be preserved with their original values.
     md_cmd()
         .args(["--fm-defaults", r#"{"title":"Default Title"}"#, "-"])
         .write_stdin("---\ntitle: Original\n---\n# Test")
@@ -241,10 +302,6 @@ fn test_fm_defaults_does_not_override_existing() {
         .success()
         .stdout(predicate::str::contains("title: Original"));
 }
-
-// ---------------------------------------------------------------------------
-// Bug fix: --fm-defaults should reject invalid JSON
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_fm_defaults_invalid_json() {
@@ -254,30 +311,4 @@ fn test_fm_defaults_invalid_json() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("Invalid JSON"));
-}
-
-// =============================================================================
-//                          OUTPUT MODE EXCLUSIVITY
-// =============================================================================
-
-#[test]
-fn test_conflicting_output_modes() {
-    // Multiple output mode flags (e.g. --clean and --html) should be rejected
-    // by clap's ArgGroup constraint.
-    md_cmd()
-        .args(["--clean", "--html", "-"])
-        .write_stdin("# Test")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("cannot be used with"));
-}
-
-#[test]
-fn test_conflicting_clean_and_ast() {
-    md_cmd()
-        .args(["--clean", "--ast", "-"])
-        .write_stdin("# Test")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("cannot be used with"));
 }

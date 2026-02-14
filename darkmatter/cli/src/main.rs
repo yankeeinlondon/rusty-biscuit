@@ -4,12 +4,21 @@ use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::highlighting::{
     ColorMode, ThemePair, detect_code_theme, detect_color_mode, detect_prose_theme,
 };
+use darkmatter::markdown::output::terminal::TerminalImageMode;
 use darkmatter::markdown::output::{HtmlOptions, MermaidMode, TerminalOptions, write_terminal};
 use darkmatter::markdown::{Markdown, MarkdownDelta, MarkdownToc, MarkdownTocNode, MergeStrategy};
-use darkmatter_cli::Cli;
+use darkmatter_cli::{Cli, CliCommand, OutputFormat};
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+
+#[derive(Debug)]
+struct OutputArtifact {
+    content: String,
+    extension: &'static str,
+    label: &'static str,
+}
 
 /// Initialize tracing subscriber based on verbosity level.
 ///
@@ -75,6 +84,14 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if let Some(command) = cli.command.clone() {
+        validate_subcommand_usage(&cli)?;
+        run_subcommand(command, cli.verbose)?;
+        return Ok(());
+    }
+
+    validate_show_usage(&cli)?;
+
     // Load markdown from input or stdin
     let mut md = load_markdown(cli.input.as_ref())?;
 
@@ -129,88 +146,140 @@ fn main() -> Result<()> {
         .code_theme
         .unwrap_or_else(|| detect_code_theme(prose_theme));
     let color_mode = detect_color_mode();
+    let stdout_is_tty = io::stdout().is_terminal();
 
-    // Handle output modes
-    if cli.ast {
-        let ast = md.as_ast().context("Failed to generate AST")?;
-        println!("{}", serde_json::to_string_pretty(&ast)?);
-        return Ok(());
-    }
-
-    // Handle --toc and --toc-filename modes
-    if cli.toc || cli.toc_filename {
-        let toc = md.toc();
-        if cli.json {
-            println!("{}", serde_json::to_string_pretty(&toc)?);
-        } else {
-            // Extract filename if --toc-filename is used
-            let filename = if cli.toc_filename {
-                cli.input
-                    .as_ref()
-                    .and_then(|p| p.file_name().map(|f| f.to_string_lossy().into_owned()))
+    match cli.output {
+        OutputFormat::Auto => {
+            if stdout_is_tty {
+                render_terminal_output(&md, &cli, prose_theme, code_theme, color_mode)?;
+                if cli.show {
+                    open_output_artifact(&markdown_artifact(&md))?;
+                }
             } else {
-                None
-            };
-            print_toc_tree(&toc, cli.verbose > 0, filename.as_deref());
+                emit_or_show_artifact(markdown_artifact(&md), cli.show)?;
+            }
         }
-        return Ok(());
-    }
-
-    // Handle --delta mode
-    if let Some(ref other_path) = cli.delta {
-        let other_md = Markdown::try_from(other_path.as_path())
-            .wrap_err_with(|| format!("Failed to read comparison file: {:?}", other_path))?;
-        let delta = md.delta(&other_md);
-        if cli.json {
-            println!("{}", serde_json::to_string_pretty(&delta)?);
-        } else {
-            print_delta(&delta, cli.verbose > 0, &md, &other_md);
+        OutputFormat::Markdown => {
+            emit_or_show_artifact(markdown_artifact(&md), cli.show)?;
         }
-        return Ok(());
-    }
-
-    if cli.html {
-        let mut options = HtmlOptions::default();
-        options.prose_theme = prose_theme;
-        options.code_theme = code_theme;
-        options.color_mode = color_mode;
-        // For HTML output, default to interactive mermaid diagrams
-        // (browsers can render them natively via mermaid.js)
-        options.mermaid_mode = MermaidMode::Image;
-
-        let html = md.as_html(options).context("Failed to convert to HTML")?;
-        println!("{}", html);
-        return Ok(());
-    }
-
-    if cli.show_html {
-        let mut options = HtmlOptions::default();
-        options.prose_theme = prose_theme;
-        options.code_theme = code_theme;
-        options.color_mode = color_mode;
-        // For HTML output, default to interactive mermaid diagrams
-        options.mermaid_mode = MermaidMode::Image;
-
-        let html = md.as_html(options).context("Failed to convert to HTML")?;
-        let temp_path = std::env::temp_dir().join("md-preview.html");
-        std::fs::write(&temp_path, &html).wrap_err("Failed to write temp HTML file")?;
-
-        // Non-blocking open, graceful error handling
-        if let Err(e) = open::that(&temp_path) {
-            eprintln!("Failed to open browser: {}", e);
-            eprintln!("Preview available at: {}", temp_path.display());
+        OutputFormat::Html => {
+            let artifact = html_artifact(&md, prose_theme, code_theme, color_mode)?;
+            emit_or_show_artifact(artifact, cli.show)?;
         }
-        return Ok(());
+        OutputFormat::Json => {
+            let artifact = json_artifact(&md)?;
+            emit_or_show_artifact(artifact, cli.show)?;
+        }
     }
 
-    // Default: render to terminal
+    Ok(())
+}
+
+fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
+    let mut conflicts = Vec::new();
+
+    if cli.input.is_some() {
+        conflicts.push("[INPUT]");
+    }
+    if cli.theme.is_some() {
+        conflicts.push("--theme");
+    }
+    if cli.code_theme.is_some() {
+        conflicts.push("--code-theme");
+    }
+    if cli.clean {
+        conflicts.push("--clean");
+    }
+    if cli.clean_save {
+        conflicts.push("--clean-save");
+    }
+    if cli.show {
+        conflicts.push("--show");
+    }
+    if cli.fm_merge_with.is_some() {
+        conflicts.push("--fm-merge-with");
+    }
+    if cli.fm_defaults.is_some() {
+        conflicts.push("--fm-defaults");
+    }
+    if cli.line_numbers {
+        conflicts.push("--line-numbers");
+    }
+    if cli.mermaid {
+        conflicts.push("--mermaid");
+    }
+    if cli.output != OutputFormat::Auto {
+        conflicts.push("--output");
+    }
+
+    if conflicts.is_empty() {
+        Ok(())
+    } else {
+        Err(eyre!(
+            "subcommands cannot be combined with top-level render options: {}",
+            conflicts.join(", ")
+        ))
+    }
+}
+
+fn validate_show_usage(cli: &Cli) -> Result<()> {
+    if cli.show
+        && (cli.clean || cli.clean_save || cli.fm_merge_with.is_some() || cli.fm_defaults.is_some())
+    {
+        return Err(eyre!("--show is only available for render output modes"));
+    }
+
+    Ok(())
+}
+
+fn run_subcommand(command: CliCommand, verbose: u8) -> Result<()> {
+    match command {
+        CliCommand::Toc { input, json } => {
+            let md = load_markdown(Some(&input))?;
+            let toc = md.toc();
+
+            if json {
+                println!("{}", serde_json::to_string_pretty(&toc)?);
+            } else {
+                print_toc_tree(&toc, verbose > 0, None);
+            }
+        }
+        CliCommand::Delta {
+            base,
+            updated,
+            json,
+        } => {
+            let base_md = load_markdown(Some(&base))
+                .wrap_err_with(|| format!("Failed to read base file: {:?}", base))?;
+            let updated_md = load_markdown(Some(&updated))
+                .wrap_err_with(|| format!("Failed to read updated file: {:?}", updated))?;
+            let delta = base_md.delta(&updated_md);
+
+            if json {
+                println!("{}", serde_json::to_string_pretty(&delta)?);
+            } else {
+                print_delta(&delta, verbose > 0, &base_md, &updated_md);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn render_terminal_output(
+    md: &Markdown,
+    cli: &Cli,
+    prose_theme: ThemePair,
+    code_theme: ThemePair,
+    color_mode: ColorMode,
+) -> Result<()> {
     let mut options = TerminalOptions::default();
     options.prose_theme = prose_theme;
     options.code_theme = code_theme;
     options.color_mode = color_mode;
     options.include_line_numbers = cli.line_numbers;
     options.color_depth = None; // Auto-detect
-    options.render_images = !cli.no_images;
+    options.image_mode = terminal_image_mode_from_env();
     options.mermaid_mode = if cli.mermaid {
         MermaidMode::Image
     } else {
@@ -228,9 +297,110 @@ fn main() -> Result<()> {
     // (viuer requires direct stdout access for graphics protocols)
     let stdout = io::stdout();
     let mut handle = stdout.lock();
-    write_terminal(&mut handle, &md, options).context("Failed to render markdown for terminal")?;
+    write_terminal(&mut handle, md, options).context("Failed to render markdown for terminal")?;
 
     Ok(())
+}
+
+fn markdown_artifact(md: &Markdown) -> OutputArtifact {
+    OutputArtifact {
+        content: md.as_string(),
+        extension: "md",
+        label: "markdown",
+    }
+}
+
+fn html_artifact(
+    md: &Markdown,
+    prose_theme: ThemePair,
+    code_theme: ThemePair,
+    color_mode: ColorMode,
+) -> Result<OutputArtifact> {
+    let mut options = HtmlOptions::default();
+    options.prose_theme = prose_theme;
+    options.code_theme = code_theme;
+    options.color_mode = color_mode;
+    options.mermaid_mode = MermaidMode::Image;
+
+    let content = md.as_html(options).context("Failed to convert to HTML")?;
+    Ok(OutputArtifact {
+        content,
+        extension: "html",
+        label: "html",
+    })
+}
+
+fn json_artifact(md: &Markdown) -> Result<OutputArtifact> {
+    let ast = md.as_ast().context("Failed to generate AST")?;
+    let content = serde_json::to_string_pretty(&ast)?;
+    Ok(OutputArtifact {
+        content,
+        extension: "json",
+        label: "json",
+    })
+}
+
+fn emit_or_show_artifact(artifact: OutputArtifact, show: bool) -> Result<()> {
+    if show {
+        open_output_artifact(&artifact)
+    } else {
+        print!("{}", artifact.content);
+        Ok(())
+    }
+}
+
+fn open_output_artifact(artifact: &OutputArtifact) -> Result<()> {
+    let temp_path = write_output_artifact_file(artifact)?;
+
+    // Non-blocking open, graceful error handling
+    if let Err(error) = open::that(&temp_path) {
+        eprintln!("Failed to open {} output: {}", artifact.label, error);
+        eprintln!("Preview available at: {}", temp_path.display());
+    }
+
+    Ok(())
+}
+
+fn write_output_artifact_file(artifact: &OutputArtifact) -> Result<PathBuf> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let filename = format!(
+        "md-output-{}-{}.{}",
+        std::process::id(),
+        timestamp,
+        artifact.extension
+    );
+    let path = std::env::temp_dir().join(filename);
+
+    std::fs::write(&path, &artifact.content)
+        .wrap_err_with(|| format!("Failed to write {} output file", artifact.label))?;
+
+    Ok(path)
+}
+
+fn terminal_image_mode_from_env() -> TerminalImageMode {
+    let Ok(raw) = std::env::var("TERMINAL_IMAGES") else {
+        return TerminalImageMode::Auto;
+    };
+
+    match parse_bool_env(&raw) {
+        Some(true) => TerminalImageMode::Force,
+        Some(false) => TerminalImageMode::Never,
+        None => {
+            tracing::warn!(value = %raw, "Invalid TERMINAL_IMAGES value; falling back to auto mode");
+            TerminalImageMode::Auto
+        }
+    }
+}
+
+fn parse_bool_env(raw: &str) -> Option<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" | "y" => Some(true),
+        "0" | "false" | "no" | "off" | "n" => Some(false),
+        _ => None,
+    }
 }
 
 /// Loads markdown from a file path or stdin.
@@ -768,6 +938,32 @@ fn print_delta(delta: &MarkdownDelta, verbose: bool, original: &Markdown, update
                 .rendered
             )
             .ok();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_bool_env;
+
+    #[test]
+    fn parse_bool_env_supports_truthy_values() {
+        for value in ["1", "true", "TRUE", "yes", "on", "y"] {
+            assert_eq!(parse_bool_env(value), Some(true), "value: {value}");
+        }
+    }
+
+    #[test]
+    fn parse_bool_env_supports_falsy_values() {
+        for value in ["0", "false", "FALSE", "no", "off", "n"] {
+            assert_eq!(parse_bool_env(value), Some(false), "value: {value}");
+        }
+    }
+
+    #[test]
+    fn parse_bool_env_rejects_unknown_values() {
+        for value in ["", "maybe", "2", "enable", "disable"] {
+            assert_eq!(parse_bool_env(value), None, "value: {value}");
         }
     }
 }

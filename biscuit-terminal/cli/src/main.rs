@@ -186,6 +186,10 @@ enum Command {
         /// Output rendering metadata to stderr (filename, file size, render time)
         #[arg(long)]
         meta: bool,
+
+        /// Print cursor position diagnostics (before/after image render)
+        #[arg(long)]
+        debug: bool,
     },
 
     /// Render a flowchart from node definitions
@@ -1412,8 +1416,9 @@ fn main() -> color_eyre::Result<()> {
             ref width,
             ref layout,
             meta,
+            debug,
         }) => {
-            return render_image(filepath, width.as_deref(), layout, meta);
+            return render_image(filepath, width.as_deref(), layout, meta, debug);
         }
         Some(Command::Flowchart {
             vertical,
@@ -1877,7 +1882,9 @@ fn render_image(
     cli_width: Option<&str>,
     layout: &LayoutArgs,
     meta: bool,
+    debug: bool,
 ) -> color_eyre::Result<()> {
+    use biscuit_terminal::discovery::cursor_position::cursor_position;
     use std::time::Instant;
 
     let start_time = Instant::now();
@@ -1905,6 +1912,9 @@ fn render_image(
     // Get terminal capabilities
     let terminal = Terminal::new();
 
+    // Debug: query cursor position BEFORE image render
+    let pre_cursor = if debug { cursor_position() } else { None };
+
     // Render the image
     let output = term_image
         .render_to_terminal(&terminal)
@@ -1917,6 +1927,95 @@ fn render_image(
     emit_image_output(&output)?;
     for _ in 0..layout.margin_bottom.unwrap_or(0) {
         println!();
+    }
+
+    // Debug: query cursor position AFTER image render + output
+    if debug {
+        let post_cursor = cursor_position();
+
+        let term_height = terminal.height();
+        let term_width = terminal.width();
+        let dims = term_image.resolve_dimensions(term_width);
+        let img = term_image.load_image().ok();
+        let (cell_pw, cell_ph) = biscuit_terminal::discovery::fonts::cell_size()
+            .map(|cs| (cs.width.max(1), cs.height.max(1)))
+            .unwrap_or((8u32, 16u32));
+
+        let (raw_height, image_rows_ceil) = if let Some(ref img) = img {
+            let image_aspect = img.height() as f32 / img.width() as f32;
+            let cell_aspect = cell_pw as f32 / cell_ph as f32;
+            let raw = dims.image_width as f32 * image_aspect * cell_aspect;
+            (raw, raw.ceil() as u32)
+        } else {
+            (0.0, 0)
+        };
+
+        let image_rows_floor = raw_height.floor() as u32;
+
+        eprintln!("\x1b[2m--- image debug ---");
+        eprintln!("terminal:     {}x{} (cols x rows)", term_width, term_height);
+        eprintln!("cell size:    {}x{} px", cell_pw, cell_ph);
+        eprintln!("image width:  {} cells", dims.image_width);
+        eprintln!(
+            "image height: {:.2} raw -> ceil={} floor={}",
+            raw_height, image_rows_ceil, image_rows_floor
+        );
+        eprintln!("app:          {:?}", terminal.app);
+        eprintln!(
+            "cursor rows:  {} (used for CUD)",
+            match terminal.app {
+                biscuit_terminal::discovery::detection::TerminalApp::Warp =>
+                    image_rows_floor.max(1),
+                _ => image_rows_ceil,
+            }
+        );
+
+        if let Some(pre) = pre_cursor {
+            eprintln!("cursor BEFORE: row={} col={}", pre.row, pre.col);
+            let would_extend_to = pre.row + image_rows_ceil;
+            let predicted_scroll = would_extend_to.saturating_sub(term_height);
+            eprintln!(
+                "predicted:    image extends to row {} (screen has {})",
+                would_extend_to, term_height
+            );
+            if predicted_scroll > 0 {
+                eprintln!(
+                    "predicted:    SCROLL needed ({} rows past bottom)",
+                    predicted_scroll
+                );
+            } else {
+                eprintln!("predicted:    no scroll needed");
+            }
+        } else {
+            eprintln!("cursor BEFORE: (query failed)");
+        }
+
+        if let Some(post) = post_cursor {
+            eprintln!("cursor AFTER:  row={} col={}", post.row, post.col);
+        } else {
+            eprintln!("cursor AFTER:  (query failed)");
+        }
+
+        if let (Some(pre), Some(post)) = (pre_cursor, post_cursor) {
+            let actual_advance = post.row as i64 - pre.row as i64;
+            eprintln!("actual delta:  {} rows", actual_advance);
+            let expected = match terminal.app {
+                biscuit_terminal::discovery::detection::TerminalApp::Warp => {
+                    image_rows_floor.max(1)
+                }
+                _ => image_rows_ceil,
+            };
+            let diff = actual_advance - expected as i64;
+            if diff != 0 {
+                eprintln!(
+                    "MISMATCH:     expected {} rows, got {} (off by {})",
+                    expected, actual_advance, diff
+                );
+            } else {
+                eprintln!("match:        cursor advanced exactly as expected");
+            }
+        }
+        eprintln!("---\x1b[0m");
     }
 
     // Output metadata if requested

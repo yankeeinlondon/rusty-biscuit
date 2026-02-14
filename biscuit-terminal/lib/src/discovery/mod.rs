@@ -16,6 +16,7 @@
 
 pub mod clipboard;
 pub mod config_paths;
+pub mod cursor_position;
 pub mod detection;
 pub mod eval;
 pub mod fonts;
