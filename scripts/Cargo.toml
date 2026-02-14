@@ -10,6 +10,10 @@ publish = false
 name = "repo-deps"
 path = "repo-deps.rs"
 
+[[bin]]
+name = "drift"
+path = "drift.rs"
+
 [dependencies]
 cargo_metadata = "0.18"
 anyhow = "1.0"
