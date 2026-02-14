@@ -90,9 +90,18 @@ Of the methods for getting started with a `ImageRef`, the `TryFrom` implementati
             - an Alt Text of: `hi`
             - the image would be expected to be rendered at a width of 15% of the viewport, during the import process this would be achieved by setting the `style`
 
-### Working With
+### Working with `ImageRef`
 
-
+- we will use a series of builder methods which will help a user build up the ImageRef to the state they want
+- we will provide a `to_terminal()`, `to_markdown(with_inline: bool)`, and `to_html()` method to output the image reference to various targets
+    - **HTML:**
+        - this is quite straightforward and has a largely one-to-one mapping between the structs properties and the attributes on a `<img>` tag
+        - NOTE: we will strip all ANSI escape codes from the title if it's set
+    - **Markdown:**
+        - renders a simple idiomatic Markdown image reference when the only metadata present is alt-text, image-source, and title
+        - if the passed in `with_inline` is set to `true` then all images with additional metadata will be rendered as an inline HTML image reference.
+        - if the passed in `with_inline` is set to `false` then we will:
+            - serialize all metadata (outside of the alt-text and source)
 
 ### Styles that Matter
 

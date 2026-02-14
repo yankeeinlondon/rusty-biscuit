@@ -154,7 +154,15 @@ fn test_cli_empty_stdin() {
 #[test]
 fn test_cli_unicode_args() {
     let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "Hello", "世界", "🚀"])
+        .args([
+            "run",
+            "-p",
+            "biscuit-speaks-cli",
+            "--",
+            "Hello",
+            "世界",
+            "🚀",
+        ])
         .output()
         .expect("Failed to execute");
 
@@ -190,7 +198,15 @@ fn test_cli_special_chars_args() {
 #[test]
 fn test_cli_gender_flag_male() {
     let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--gender", "male", "test"])
+        .args([
+            "run",
+            "-p",
+            "biscuit-speaks-cli",
+            "--",
+            "--gender",
+            "male",
+            "test",
+        ])
         .output()
         .expect("Failed to execute");
 
@@ -224,7 +240,15 @@ fn test_cli_gender_flag_female() {
 #[test]
 fn test_cli_gender_flag_short() {
     let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "-g", "male", "test"])
+        .args([
+            "run",
+            "-p",
+            "biscuit-speaks-cli",
+            "--",
+            "-g",
+            "male",
+            "test",
+        ])
         .output()
         .expect("Failed to execute");
 
@@ -344,7 +368,15 @@ fn test_cli_help_shows_voice_option() {
 #[test]
 fn test_cli_provider_option() {
     let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--provider", "say", "test"])
+        .args([
+            "run",
+            "-p",
+            "biscuit-speaks-cli",
+            "--",
+            "--provider",
+            "say",
+            "test",
+        ])
         .output()
         .expect("Failed to execute");
 
@@ -417,7 +449,15 @@ fn test_cli_soft_flag() {
 #[test]
 fn test_cli_loud_and_soft_conflict() {
     let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--loud", "--soft", "test"])
+        .args([
+            "run",
+            "-p",
+            "biscuit-speaks-cli",
+            "--",
+            "--loud",
+            "--soft",
+            "test",
+        ])
         .output()
         .expect("Failed to execute");
 
@@ -474,7 +514,15 @@ fn test_cli_slow_flag() {
 #[test]
 fn test_cli_fast_and_slow_conflict() {
     let output = Command::new("cargo")
-        .args(["run", "-p", "biscuit-speaks-cli", "--", "--fast", "--slow", "test"])
+        .args([
+            "run",
+            "-p",
+            "biscuit-speaks-cli",
+            "--",
+            "--fast",
+            "--slow",
+            "test",
+        ])
         .output()
         .expect("Failed to execute");
 

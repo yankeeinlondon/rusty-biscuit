@@ -63,6 +63,21 @@ fn settle_terminal() {
     std::thread::sleep(std::time::Duration::from_millis(10));
 }
 
+/// Emit rendered image output and flush immediately.
+///
+/// `render_to_terminal()` owns final cursor placement.
+fn emit_image_output(output: &str) -> color_eyre::Result<()> {
+    use std::io::Write;
+
+    if output.is_empty() {
+        return Ok(());
+    }
+
+    print!("{}", output);
+    std::io::stdout().flush()?;
+    Ok(())
+}
+
 /// Prints the command used to generate an example diagram.
 ///
 /// Uses bold text for header and dim text for command.
@@ -1899,7 +1914,7 @@ fn render_image(
     for _ in 0..layout.margin_top.unwrap_or(0) {
         println!();
     }
-    println!("{}", output);
+    emit_image_output(&output)?;
     for _ in 0..layout.margin_bottom.unwrap_or(0) {
         println!();
     }
@@ -1984,7 +1999,7 @@ fn display_mermaid_diagram(
     }
 
     match term_image.render_to_terminal(&terminal) {
-        Ok(output) => println!("{}", output),
+        Ok(output) => emit_image_output(&output)?,
         Err(e) => {
             return Err(color_eyre::eyre::eyre!(
                 "Failed to display {}: {}",

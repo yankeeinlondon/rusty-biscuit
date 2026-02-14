@@ -76,6 +76,14 @@ pub struct DependencyEntry {
     /// Whether this dependency can be updated (latest != actual)
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_updatable: bool,
+    /// Whether the available update is a major version bump.
+    ///
+    /// Only set when `is_updatable` is true and both versions follow
+    /// semantic versioning (`major.minor.patch`). Considered major when:
+    /// - The major version is 0 and a newer minor version exists, or
+    /// - A newer major version exists.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_major_update: bool,
 }
 
 /// Information about a detected repository
@@ -162,6 +170,9 @@ pub struct Package {
     /// Whether any dependency can be updated (deep-mode only)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_updatable: Option<bool>,
+    /// Whether any dependency has a major version update available (deep-mode only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_major_update: Option<bool>,
 }
 
 /// Deprecated type alias for backward compatibility.
@@ -195,15 +206,14 @@ impl CargoLockVersions {
                     pkg.get("name").and_then(|n| n.as_str()),
                     pkg.get("version").and_then(|v| v.as_str()),
                 ) {
-                    versions
-                        .entry(name.to_string())
-                        .or_default()
-                        .push(version.to_string());
+                    versions.entry(name.to_string()).or_default().push(version.to_string());
                 }
             }
         }
 
-        Some(Self { versions })
+        Some(Self {
+            versions,
+        })
     }
 
     /// Resolve the version for a dependency name.
@@ -292,8 +302,12 @@ fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     let lock_versions = CargoLockVersions::parse(&root.join("Cargo.lock"));
 
     // Expand globs and collect packages with dependencies
-    let mut packages =
-        expand_glob_patterns_with_deps(root, &members, MonorepoTool::CargoWorkspace, &lock_versions);
+    let mut packages = expand_glob_patterns_with_deps(
+        root,
+        &members,
+        MonorepoTool::CargoWorkspace,
+        &lock_versions,
+    );
 
     // Resolve internal dependency graph
     resolve_internal_deps(&mut packages);
@@ -322,8 +336,12 @@ fn parse_cargo_dependencies(
         parse_cargo_dep_section(&parsed, "dependencies", DependencyKind::Normal, lock_versions);
     let dev_deps =
         parse_cargo_dep_section(&parsed, "dev-dependencies", DependencyKind::Dev, lock_versions);
-    let build_deps =
-        parse_cargo_dep_section(&parsed, "build-dependencies", DependencyKind::Build, lock_versions);
+    let build_deps = parse_cargo_dep_section(
+        &parsed,
+        "build-dependencies",
+        DependencyKind::Build,
+        lock_versions,
+    );
 
     Some((normal_deps, dev_deps, build_deps))
 }
@@ -372,6 +390,7 @@ fn parse_cargo_dep_section(
                 optional,
                 features,
                 is_updatable: false,
+                has_major_update: false,
             }
         })
         .collect()
@@ -515,42 +534,28 @@ fn detect_lerna(root: &Path) -> Result<Option<RepoInfo>> {
 fn read_cargo_package_name(cargo_toml: &Path) -> Option<String> {
     let content = std::fs::read_to_string(cargo_toml).ok()?;
     let parsed: toml::Value = toml::from_str(&content).ok()?;
-    parsed
-        .get("package")
-        .and_then(|p| p.get("name"))
-        .and_then(|n| n.as_str())
-        .map(String::from)
+    parsed.get("package").and_then(|p| p.get("name")).and_then(|n| n.as_str()).map(String::from)
 }
 
 /// Reads the package version from a Cargo.toml file.
 fn read_cargo_package_version(cargo_toml: &Path) -> Option<String> {
     let content = std::fs::read_to_string(cargo_toml).ok()?;
     let parsed: toml::Value = toml::from_str(&content).ok()?;
-    parsed
-        .get("package")
-        .and_then(|p| p.get("version"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
+    parsed.get("package").and_then(|p| p.get("version")).and_then(|v| v.as_str()).map(String::from)
 }
 
 /// Reads the package name from a package.json file.
 fn read_npm_package_name(package_json: &Path) -> Option<String> {
     let content = std::fs::read_to_string(package_json).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
-    parsed
-        .get("name")
-        .and_then(|n| n.as_str())
-        .map(String::from)
+    parsed.get("name").and_then(|n| n.as_str()).map(String::from)
 }
 
 /// Reads the package version from a package.json file.
 fn read_npm_package_version(package_json: &Path) -> Option<String> {
     let content = std::fs::read_to_string(package_json).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
-    parsed
-        .get("version")
-        .and_then(|v| v.as_str())
-        .map(String::from)
+    parsed.get("version").and_then(|v| v.as_str()).map(String::from)
 }
 
 /// Reads the feature flag names from a Cargo.toml `[features]` section.
@@ -581,8 +586,12 @@ fn read_cargo_features(cargo_toml: &Path) -> Vec<String> {
 /// All paths are stored relative to the repo root for portability.
 /// Only performs a shallow scan of the package root directory (no recursion).
 fn detect_package_files(path: &Path, repo_root: &Path) -> PackageFiles {
-    let config_extensions = ["json", "toml", "yaml", "yml", "ini", "cfg", "conf"];
-    let doc_extensions = ["md", "txt", "rst", "adoc"];
+    let config_extensions = [
+        "json", "toml", "yaml", "yml", "ini", "cfg", "conf",
+    ];
+    let doc_extensions = [
+        "md", "txt", "rst", "adoc",
+    ];
     let command_runners = [
         "justfile",
         "Justfile",
@@ -605,7 +614,7 @@ fn detect_package_files(path: &Path, repo_root: &Path) -> PackageFiles {
                 documentation,
                 editor_config,
                 command_runner,
-            }
+            };
         }
     };
 
@@ -615,16 +624,10 @@ fn detect_package_files(path: &Path, repo_root: &Path) -> PackageFiles {
             continue;
         }
 
-        let file_name = entry
-            .file_name()
-            .to_string_lossy()
-            .to_string();
+        let file_name = entry.file_name().to_string_lossy().to_string();
 
         // Convert to relative path from repo root
-        let rel_path = entry_path
-            .strip_prefix(repo_root)
-            .unwrap_or(&entry_path)
-            .to_path_buf();
+        let rel_path = entry_path.strip_prefix(repo_root).unwrap_or(&entry_path).to_path_buf();
 
         // Check for .editorconfig
         if file_name == ".editorconfig" {
@@ -677,7 +680,9 @@ fn resolve_package_name(path: &Path, root: &Path, tool: MonorepoTool) -> String 
                 }
             }
         }
-        MonorepoTool::NpmWorkspaces | MonorepoTool::PnpmWorkspaces | MonorepoTool::YarnWorkspaces => {
+        MonorepoTool::NpmWorkspaces
+        | MonorepoTool::PnpmWorkspaces
+        | MonorepoTool::YarnWorkspaces => {
             let package_json = path.join("package.json");
             if package_json.exists() {
                 if let Some(name) = read_npm_package_name(&package_json) {
@@ -700,7 +705,9 @@ fn resolve_package_version(path: &Path, tool: MonorepoTool) -> Option<String> {
                 return read_cargo_package_version(&cargo_toml);
             }
         }
-        MonorepoTool::NpmWorkspaces | MonorepoTool::PnpmWorkspaces | MonorepoTool::YarnWorkspaces => {
+        MonorepoTool::NpmWorkspaces
+        | MonorepoTool::PnpmWorkspaces
+        | MonorepoTool::YarnWorkspaces => {
             let package_json = path.join("package.json");
             if package_json.exists() {
                 return read_npm_package_version(&package_json);
@@ -749,10 +756,8 @@ fn resolve_internal_deps(packages: &mut [Package]) {
 
     // Pass 2: invert to populate used_by
     // Collect depends_on relationships first to avoid borrow issues
-    let dep_pairs: Vec<(String, Vec<String>)> = packages
-        .iter()
-        .map(|p| (p.name.clone(), p.depends_on.clone()))
-        .collect();
+    let dep_pairs: Vec<(String, Vec<String>)> =
+        packages.iter().map(|p| (p.name.clone(), p.depends_on.clone())).collect();
 
     for pkg in packages.iter_mut() {
         let mut used_by = Vec::new();
@@ -772,15 +777,9 @@ fn resolve_internal_deps(packages: &mut [Package]) {
 
 /// Creates a relative path string from root.
 fn make_relative_path(path: &Path, root: &Path) -> String {
-    path.strip_prefix(root)
-        .ok()
-        .and_then(|rel| rel.to_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            path.file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default()
-        })
+    path.strip_prefix(root).ok().and_then(|rel| rel.to_str()).map(|s| s.to_string()).unwrap_or_else(
+        || path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+    )
 }
 
 /// Derives the package area from a relative path.
@@ -932,9 +931,21 @@ fn create_package(
             let (optional, regular): (Vec<_>, Vec<_>) =
                 all_deps.into_iter().partition(|d| d.optional);
 
-            let deps = if regular.is_empty() { None } else { Some(regular) };
-            let dev_deps = if dev.is_empty() { None } else { Some(dev) };
-            let opt_deps = if optional.is_empty() { None } else { Some(optional) };
+            let deps = if regular.is_empty() {
+                None
+            } else {
+                Some(regular)
+            };
+            let dev_deps = if dev.is_empty() {
+                None
+            } else {
+                Some(dev)
+            };
+            let opt_deps = if optional.is_empty() {
+                None
+            } else {
+                Some(optional)
+            };
 
             (deps, dev_deps, opt_deps)
         } else {
@@ -965,6 +976,7 @@ fn create_package(
         peer_dependencies: None,
         optional_dependencies,
         is_updatable: None,
+        has_major_update: None,
     }
 }
 
@@ -1148,7 +1160,12 @@ mod tests {
         fs::write(dir.path().join("package.json"), "{}").unwrap();
 
         let managers = detect_package_managers(dir.path());
-        assert_eq!(managers, vec!["cargo", "npm"]);
+        assert_eq!(
+            managers,
+            vec![
+                "cargo", "npm"
+            ]
+        );
     }
 
     #[test]
@@ -1313,7 +1330,12 @@ mod tests {
         .unwrap();
 
         let features = read_cargo_features(&cargo_toml);
-        assert_eq!(features, vec!["default", "full", "net"]);
+        assert_eq!(
+            features,
+            vec![
+                "default", "full", "net"
+            ]
+        );
     }
 
     #[test]
@@ -1329,11 +1351,7 @@ mod tests {
     #[test]
     fn test_package_features_populated() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("Cargo.toml"),
-            "[workspace]\nmembers = [\"pkg\"]\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[workspace]\nmembers = [\"pkg\"]\n").unwrap();
         let pkg_dir = dir.path().join("pkg");
         fs::create_dir(&pkg_dir).unwrap();
         fs::write(
@@ -1345,7 +1363,12 @@ mod tests {
         let result = detect_repo(dir.path()).unwrap().unwrap();
         let packages = result.packages.unwrap();
         let pkg = &packages[0];
-        assert_eq!(pkg.features, vec!["default", "fast"]);
+        assert_eq!(
+            pkg.features,
+            vec![
+                "default", "fast"
+            ]
+        );
     }
 
     #[test]
@@ -1482,11 +1505,7 @@ version = "1.0.128"
     #[test]
     fn test_package_has_relative_path() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("Cargo.toml"),
-            "[workspace]\nmembers = [\"pkg\"]\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[workspace]\nmembers = [\"pkg\"]\n").unwrap();
         let pkg_dir = dir.path().join("pkg");
         fs::create_dir(&pkg_dir).unwrap();
         fs::write(
@@ -1517,6 +1536,7 @@ version = "1.0.128"
             optional: false,
             features: vec![],
             is_updatable: false,
+            has_major_update: false,
         };
 
         let json = serde_json::to_string(&dep).unwrap();
@@ -1537,6 +1557,7 @@ version = "1.0.128"
             optional: false,
             features: vec![],
             is_updatable: true,
+            has_major_update: false,
         };
 
         let json = serde_json::to_string(&dep).unwrap();

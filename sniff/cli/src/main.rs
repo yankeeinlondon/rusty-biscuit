@@ -683,7 +683,7 @@ async fn enrich_result_dependencies(mut result: SniffResult) -> SniffResult {
         })
         .collect();
 
-    // Helper to apply enrichment results and compute is_updatable
+    // Helper to apply enrichment results and compute is_updatable / has_major_update
     let apply = |deps: &mut Option<Vec<sniff::filesystem::DependencyEntry>>| {
         if let Some(dep_list) = deps {
             for dep in dep_list.iter_mut() {
@@ -693,6 +693,9 @@ async fn enrich_result_dependencies(mut result: SniffResult) -> SniffResult {
                     // Compute is_updatable: latest differs from actual (when both known)
                     if let Some(ref actual) = dep.actual_version {
                         dep.is_updatable = *actual != latest;
+                        if dep.is_updatable {
+                            dep.has_major_update = is_major_update(actual, &latest);
+                        }
                     }
                 }
             }
@@ -705,7 +708,7 @@ async fn enrich_result_dependencies(mut result: SniffResult) -> SniffResult {
     apply(&mut repo.peer_dependencies);
     apply(&mut repo.optional_dependencies);
 
-    // Apply to package deps and compute package-level is_updatable
+    // Apply to package deps and compute package-level is_updatable / has_major_update
     if let Some(ref mut packages) = repo.packages {
         for pkg in packages.iter_mut() {
             apply(&mut pkg.dependencies);
@@ -713,23 +716,70 @@ async fn enrich_result_dependencies(mut result: SniffResult) -> SniffResult {
             apply(&mut pkg.peer_dependencies);
             apply(&mut pkg.optional_dependencies);
 
-            // Package-level is_updatable: true if any dep is updatable
-            let any_updatable = [
+            let all_deps = [
                 &pkg.dependencies,
                 &pkg.dev_dependencies,
                 &pkg.peer_dependencies,
                 &pkg.optional_dependencies,
-            ]
-            .iter()
-            .filter_map(|deps| deps.as_ref())
-            .flat_map(|deps| deps.iter())
-            .any(|d| d.is_updatable);
+            ];
+
+            let any_updatable = all_deps
+                .iter()
+                .filter_map(|deps| deps.as_ref())
+                .flat_map(|deps| deps.iter())
+                .any(|d| d.is_updatable);
+
+            let any_major = all_deps
+                .iter()
+                .filter_map(|deps| deps.as_ref())
+                .flat_map(|deps| deps.iter())
+                .any(|d| d.has_major_update);
 
             pkg.is_updatable = Some(any_updatable);
+            pkg.has_major_update = Some(any_major);
         }
     }
 
     result
+}
+
+/// Check whether a version update is a major semver bump.
+///
+/// Returns `true` when both versions parse as `major.minor.patch` and either:
+/// - The actual major is 0 and the latest has a larger minor version, or
+/// - The latest has a larger major version.
+///
+/// Returns `false` for non-semver versions or patch/minor-only bumps.
+fn is_major_update(actual: &str, latest: &str) -> bool {
+    let parse = |v: &str| -> Option<(u64, u64)> {
+        let parts: Vec<&str> = v.split('.').collect();
+        if parts.len() < 3 {
+            return None;
+        }
+        let major = parts[0].parse::<u64>().ok()?;
+        let minor = parts[1].parse::<u64>().ok()?;
+        // Verify patch is also numeric (validates semver shape)
+        parts[2]
+            .split(|c: char| !c.is_ascii_digit())
+            .next()?
+            .parse::<u64>()
+            .ok()?;
+        Some((major, minor))
+    };
+
+    let Some((actual_major, actual_minor)) = parse(actual) else {
+        return false;
+    };
+    let Some((latest_major, latest_minor)) = parse(latest) else {
+        return false;
+    };
+
+    if actual_major == 0 {
+        // Pre-1.0: minor bump is considered major
+        latest_major > 0 || latest_minor > actual_minor
+    } else {
+        latest_major > actual_major
+    }
 }
 
 #[cfg(test)]
@@ -1271,6 +1321,70 @@ mod tests {
                 state: ServiceStateArg::Running,
             };
             assert!(!cmd.is_programs_mode());
+        }
+    }
+
+    mod major_update_detection {
+        use super::*;
+
+        #[test]
+        fn patch_bump_is_not_major() {
+            assert!(!is_major_update("1.0.0", "1.0.1"));
+        }
+
+        #[test]
+        fn minor_bump_is_not_major() {
+            assert!(!is_major_update("1.0.0", "1.1.0"));
+        }
+
+        #[test]
+        fn major_bump_is_major() {
+            assert!(is_major_update("1.0.0", "2.0.0"));
+        }
+
+        #[test]
+        fn pre_1_0_minor_bump_is_major() {
+            assert!(is_major_update("0.1.0", "0.2.0"));
+        }
+
+        #[test]
+        fn pre_1_0_patch_bump_is_not_major() {
+            assert!(!is_major_update("0.1.0", "0.1.1"));
+        }
+
+        #[test]
+        fn pre_1_0_to_1_0_is_major() {
+            assert!(is_major_update("0.9.0", "1.0.0"));
+        }
+
+        #[test]
+        fn same_version_is_not_major() {
+            assert!(!is_major_update("1.0.0", "1.0.0"));
+        }
+
+        #[test]
+        fn non_semver_returns_false() {
+            assert!(!is_major_update("abc", "def"));
+        }
+
+        #[test]
+        fn two_part_version_returns_false() {
+            assert!(!is_major_update("1.0", "2.0"));
+        }
+
+        #[test]
+        fn prerelease_suffix_still_parses() {
+            assert!(is_major_update("1.0.0-beta", "2.0.0-rc1"));
+        }
+
+        #[test]
+        fn real_world_serde_patch() {
+            assert!(!is_major_update("1.0.200", "1.0.210"));
+        }
+
+        #[test]
+        fn real_world_tokio_major() {
+            assert!(is_major_update("0.2.25", "1.48.0"));
         }
     }
 }

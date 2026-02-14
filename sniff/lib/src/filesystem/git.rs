@@ -1205,7 +1205,11 @@ fn get_remote_branches(repo: &Repository, remote_name: &str) -> Option<Vec<Strin
                 })
                 .collect();
 
-            if branches.is_empty() { None } else { Some(branches) }
+            if branches.is_empty() {
+                None
+            } else {
+                Some(branches)
+            }
         })();
         let _ = tx.send(result);
     });

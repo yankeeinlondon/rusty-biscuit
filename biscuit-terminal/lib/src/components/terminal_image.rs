@@ -356,22 +356,13 @@ impl TerminalImage {
         self
     }
 
-    /// Terminal-aware Kitty protocol rendering.
+    /// Build Kitty protocol image output and logical row height for cursor placement.
     ///
-    /// Positions the cursor at column 0 of the row immediately after the
-    /// image. Does **not** append a trailing newline — callers (CLI, etc.)
-    /// are responsible for the final `\n`.
-    ///
-    /// - **Wezterm**: Uses `render_kitty_cells` (both `c=` and `r=`) for
-    ///   correct aspect ratio, plus explicit cursor advance (Wezterm does
-    ///   not auto-advance).
-    /// - **Kitty/Ghostty/others**: Uses `render_kitty_width_only` (`c=` only,
-    ///   terminal calculates rows). These terminals auto-advance the cursor
-    ///   to `(0, row_after_image)`, so no explicit movement is needed.
+    /// Returns a save/restore-wrapped sequence with no trailing cursor movement.
     fn render_kitty_for_terminal(
         &self,
         term: &crate::terminal::Terminal,
-    ) -> Result<String, TerminalImageError> {
+    ) -> Result<(String, u32), TerminalImageError> {
         let term_width = term.width().max(1);
         let dims = self.resolve_dimensions(term_width);
         let img = self.load_image()?;
@@ -387,10 +378,9 @@ impl TerminalImage {
         let height_cells =
             ((target_cells as f32 * image_aspect * cell_aspect).ceil() as u32).max(1);
 
-        let is_wezterm = matches!(term.app, TerminalApp::Wezterm);
-
-        // Wezterm needs both c= and r= for correct aspect ratio
-        let image_seq = if is_wezterm {
+        // WezTerm needs explicit row sizing for correct geometry. Kitty-family
+        // peers render correctly with width-only sizing.
+        let image_seq = if matches!(term.app, TerminalApp::Wezterm) {
             self.render_kitty_cells(&png_data, target_cells, height_cells)
         } else {
             self.render_kitty_width_only(&png_data, target_cells)
@@ -402,36 +392,27 @@ impl TerminalImage {
             String::new()
         };
 
-        // Wezterm: no auto-advance → explicit cursor down + carriage return.
-        // Others: auto-advance overshoots by 1 row → pull back with CUU(1).
-        let suffix = if is_wezterm {
-            format!("\x1b[{}B\r", height_cells)
-        } else {
-            "\x1b[1A".to_string()
-        };
-
-        Ok(format!("{}{}{}", prefix, image_seq, suffix))
+        Ok((format!("\x1b[s{}{}\x1b[u", prefix, image_seq), height_cells))
     }
 
-    /// Terminal-aware iTerm2 protocol rendering.
+    /// Build iTerm2 protocol image output and logical row height for cursor placement.
     ///
-    /// Positions the cursor at column 0 of the row immediately after the
-    /// image. Does **not** append a trailing newline — callers (CLI, etc.)
-    /// are responsible for the final `\n`.
-    ///
-    /// iTerm2 auto-advances the cursor past the rendered image. Sends the
-    /// original image and lets iTerm2 handle scaling via
-    /// `preserveAspectRatio=1` for better accuracy.
+    /// Returns a save/restore-wrapped sequence with no trailing cursor movement.
     fn render_iterm2_for_terminal(
         &self,
         term: &crate::terminal::Terminal,
-    ) -> Result<String, TerminalImageError> {
+    ) -> Result<(String, u32), TerminalImageError> {
         let term_width = term.width().max(1);
         let dims = self.resolve_dimensions(term_width);
         let img = self.load_image()?;
-
-        // Send the original image — let iTerm2 handle scaling via
-        // preserveAspectRatio=1 and the width parameter for better accuracy.
+        let target_cells = dims.image_width;
+        let (cell_pixel_width, cell_pixel_height) = crate::discovery::fonts::cell_size()
+            .map(|cs| (cs.width.max(1), cs.height.max(1)))
+            .unwrap_or((8u32, 16u32));
+        let image_aspect = img.height() as f32 / img.width() as f32;
+        let cell_aspect = cell_pixel_width as f32 / cell_pixel_height as f32;
+        let height_cells =
+            ((target_cells as f32 * image_aspect * cell_aspect).ceil() as u32).max(1);
         let png_data = self.encode_as_png(&img)?;
 
         let width_param = match &self.width {
@@ -446,15 +427,13 @@ impl TerminalImage {
             .unwrap_or_else(|| "image.png".to_string());
 
         let image = self.render_iterm2(&png_data, &width_param, &filename);
-
         let prefix = if dims.x_offset > 0 {
             format!("\x1b[{}C", dims.x_offset)
         } else {
             String::new()
         };
 
-        // iTerm2 auto-advances cursor but overshoots by 1 row → pull back.
-        Ok(format!("{}{}\x1b[1A", prefix, image))
+        Ok((format!("\x1b[s{}{}\x1b[u", prefix, image), height_cells))
     }
 
     /// Render the image to a string appropriate for the given terminal.
@@ -481,10 +460,31 @@ impl TerminalImage {
     ) -> Result<String, TerminalImageError> {
         use crate::discovery::detection::ImageSupport;
 
-        match term.image_support {
+        let (sequence, height_cells) = match term.image_support {
+            // iTerm2 can advertise Kitty, but native OSC 1337 handling is
+            // more predictable for cursor placement.
+            ImageSupport::Kitty if matches!(term.app, TerminalApp::ITerm2) => {
+                self.render_iterm2_for_terminal(term)
+            }
             ImageSupport::Kitty => self.render_kitty_for_terminal(term),
             ImageSupport::ITerm => self.render_iterm2_for_terminal(term),
-            ImageSupport::None => Ok(String::new()),
+            ImageSupport::None => return Ok(String::new()),
+        }?;
+
+        // Terminal-specific cursor correction:
+        // - iTerm2 renders one row shorter than the Kitty baseline at fixed width.
+        // - WezTerm matches Kitty row advancement when explicit `r=` is supplied.
+        // Keep `--mb` as the only intentional vertical spacing.
+        let cursor_rows = match term.app {
+            TerminalApp::ITerm2 => height_cells.saturating_sub(1),
+            TerminalApp::Wezterm => height_cells,
+            _ => height_cells,
+        };
+
+        if cursor_rows > 0 {
+            Ok(format!("{}\x1b[{}B\r", sequence, cursor_rows))
+        } else {
+            Ok(format!("{}\r", sequence))
         }
     }
 
@@ -1047,6 +1047,23 @@ mod tests {
         buffer.into_inner()
     }
 
+    fn create_temp_test_image() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.png");
+        std::fs::File::create(&file_path)
+            .unwrap()
+            .write_all(&create_test_png())
+            .unwrap();
+        (dir, file_path)
+    }
+
+    fn extract_row_advance(output: &str) -> Option<u32> {
+        let end = output.rfind("B\r")?;
+        let head = &output[..end];
+        let start = head.rfind("\x1b[")?;
+        head[start + 2..].parse::<u32>().ok()
+    }
+
     // Error type tests
     #[test]
     fn test_error_file_not_found_message() {
@@ -1423,6 +1440,168 @@ mod tests {
         // Filename should be base64 encoded
         let expected_filename_b64 = BASE64.encode("test.png");
         assert!(result.contains(&format!("name={}", expected_filename_b64)));
+    }
+
+    #[test]
+    fn test_render_to_terminal_kitty_uses_save_restore_and_explicit_row_advance() {
+        let (_dir, file_path) = create_temp_test_image();
+        let term_img = TerminalImage::new(&file_path).unwrap();
+        let term = Terminal::builder()
+            .app(TerminalApp::Kitty)
+            .is_tty(true)
+            .image_support(crate::discovery::detection::ImageSupport::Kitty)
+            .width(80)
+            .build();
+
+        let output = term_img.render_to_terminal(&term).unwrap();
+
+        assert!(output.contains("\x1b_G"));
+        assert!(output.contains("\x1b[s"));
+        assert!(output.contains("\x1b[u"));
+        assert!(output.contains("B\r"));
+        assert!(!output.contains("\x1b[1A"));
+    }
+
+    #[test]
+    fn test_render_to_terminal_iterm2_uses_save_restore_and_explicit_row_advance() {
+        let (_dir, file_path) = create_temp_test_image();
+        let term_img = TerminalImage::new(&file_path).unwrap();
+        let term = Terminal::builder()
+            .app(TerminalApp::ITerm2)
+            .is_tty(true)
+            .image_support(crate::discovery::detection::ImageSupport::ITerm)
+            .width(80)
+            .build();
+
+        let output = term_img.render_to_terminal(&term).unwrap();
+
+        assert!(output.contains("\x1b]1337;File="));
+        assert!(output.contains("\x1b[s"));
+        assert!(output.contains("\x1b[u"));
+        assert!(output.contains("B\r"));
+        assert!(!output.contains("\x1b[1A"));
+    }
+
+    #[test]
+    fn test_render_to_terminal_wezterm_uses_explicit_row_sizing_and_row_advance() {
+        let (_dir, file_path) = create_temp_test_image();
+        let term_img = TerminalImage::new(&file_path).unwrap();
+        let term = Terminal::builder()
+            .app(TerminalApp::Wezterm)
+            .is_tty(true)
+            .image_support(crate::discovery::detection::ImageSupport::Kitty)
+            .width(80)
+            .build();
+
+        let output = term_img.render_to_terminal(&term).unwrap();
+
+        assert!(output.contains("\x1b_G"));
+        assert!(output.contains("\x1b[s"));
+        assert!(output.contains("\x1b[u"));
+        assert!(output.contains("c="));
+        assert!(output.contains(",r="));
+        assert!(output.contains("B\r"));
+        assert!(output.ends_with('\r'));
+    }
+
+    #[test]
+    fn test_render_to_terminal_iterm2_prefers_native_protocol_when_kitty_advertised() {
+        let (_dir, file_path) = create_temp_test_image();
+        let term_img = TerminalImage::new(&file_path).unwrap();
+        let iterm2 = Terminal::builder()
+            .app(TerminalApp::ITerm2)
+            .is_tty(true)
+            .image_support(crate::discovery::detection::ImageSupport::Kitty)
+            .width(80)
+            .build();
+
+        let iterm2_out = term_img.render_to_terminal(&iterm2).unwrap();
+
+        assert!(iterm2_out.contains("\x1b]1337;File="));
+        assert!(!iterm2_out.contains("\x1b_G"));
+    }
+
+    #[test]
+    fn test_render_to_terminal_warp_matches_kitty_cursor_management_strategy() {
+        let (_dir, file_path) = create_temp_test_image();
+        let term_img = TerminalImage::new(&file_path).unwrap();
+
+        let kitty = Terminal::builder()
+            .app(TerminalApp::Kitty)
+            .is_tty(true)
+            .image_support(crate::discovery::detection::ImageSupport::Kitty)
+            .width(80)
+            .build();
+        let warp = Terminal::builder()
+            .app(TerminalApp::Warp)
+            .is_tty(true)
+            .image_support(crate::discovery::detection::ImageSupport::Kitty)
+            .width(80)
+            .build();
+
+        let kitty_out = term_img.render_to_terminal(&kitty).unwrap();
+        let warp_out = term_img.render_to_terminal(&warp).unwrap();
+
+        assert!(kitty_out.contains("\x1b[s"));
+        assert!(kitty_out.contains("\x1b[u"));
+        assert!(kitty_out.contains("B\r"));
+        assert!(!kitty_out.contains("\x1b[1A"));
+        assert!(warp_out.contains("\x1b[s"));
+        assert!(warp_out.contains("\x1b[u"));
+        assert!(warp_out.contains("B\r"));
+        assert!(!warp_out.contains("\x1b[1A"));
+    }
+
+    #[test]
+    fn test_render_to_terminal_iterm2_advances_one_less_row_than_kitty() {
+        let (_dir, file_path) = create_temp_test_image();
+        let term_img = TerminalImage::new(&file_path).unwrap();
+
+        let kitty = Terminal::builder()
+            .app(TerminalApp::Kitty)
+            .is_tty(true)
+            .image_support(crate::discovery::detection::ImageSupport::Kitty)
+            .width(80)
+            .build();
+        let iterm2 = Terminal::builder()
+            .app(TerminalApp::ITerm2)
+            .is_tty(true)
+            .image_support(crate::discovery::detection::ImageSupport::ITerm)
+            .width(80)
+            .build();
+
+        let kitty_out = term_img.render_to_terminal(&kitty).unwrap();
+        let iterm2_out = term_img.render_to_terminal(&iterm2).unwrap();
+
+        let kitty_rows = extract_row_advance(&kitty_out).unwrap();
+        let iterm2_rows = extract_row_advance(&iterm2_out).unwrap();
+        assert_eq!(kitty_rows.saturating_sub(1), iterm2_rows);
+    }
+
+    #[test]
+    fn test_render_to_terminal_wezterm_advances_same_rows_as_kitty() {
+        let (_dir, file_path) = create_temp_test_image();
+        let term_img = TerminalImage::new(&file_path).unwrap();
+
+        let kitty = Terminal::builder()
+            .app(TerminalApp::Kitty)
+            .is_tty(true)
+            .image_support(crate::discovery::detection::ImageSupport::Kitty)
+            .width(80)
+            .build();
+        let wezterm = Terminal::builder()
+            .app(TerminalApp::Wezterm)
+            .is_tty(true)
+            .image_support(crate::discovery::detection::ImageSupport::Kitty)
+            .width(80)
+            .build();
+
+        let kitty_out = term_img.render_to_terminal(&kitty).unwrap();
+        let wezterm_out = term_img.render_to_terminal(&wezterm).unwrap();
+
+        let kitty_rows = extract_row_advance(&kitty_out).unwrap();
+        let wezterm_rows = extract_row_advance(&wezterm_out).unwrap();
+        assert_eq!(kitty_rows, wezterm_rows);
     }
 
     // Dimension calculation tests

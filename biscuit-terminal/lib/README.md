@@ -132,7 +132,7 @@ let result = TerminalImage::new_with_max_size(Path::new("huge.png"), 1_000_000);
 
 ### Image rendering architecture
 
-All image rendering is string-based: `render()`, `fallback_render()`, and `render_to_terminal()` return escape sequences as strings. `render_to_terminal()` applies terminal-aware cursor management and does **not** append a trailing newline — callers handle line termination. The Kitty graphics protocol is bidirectional — terminals respond with `\x1b_Gi=<id>;OK\x1b\\` after receiving image data. To prevent this response from appearing as garbage text, all Kitty sequences include `q=2` (quiet mode) which suppresses terminal responses entirely.
+All image rendering is string-based: `render()`, `fallback_render()`, and `render_to_terminal()` return escape sequences as strings. `render_to_terminal()` applies terminal-aware cursor management by saving/restoring cursor position, explicitly advancing rows by computed image height, and normalizing to column 0 with a trailing `\r`. It does **not** append a trailing newline — callers handle line termination. The Kitty graphics protocol is bidirectional — terminals respond with `\x1b_Gi=<id>;OK\x1b\\` after receiving image data. To prevent this response from appearing as garbage text, all Kitty sequences include `q=2` (quiet mode) which suppresses terminal responses entirely.
 
 ### Gotchas and notes
 

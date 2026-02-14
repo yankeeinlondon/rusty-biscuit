@@ -586,6 +586,7 @@ mod tests {
             optional: false,
             features: vec![],
             is_updatable: false,
+            has_major_update: false,
         };
 
         let enriched = enrich_dependency(entry).await;
@@ -606,6 +607,7 @@ mod tests {
             optional: false,
             features: vec![],
             is_updatable: false,
+            has_major_update: false,
         };
 
         let enriched = enrich_dependency(entry).await;
@@ -626,6 +628,7 @@ mod tests {
             optional: false,
             features: vec![],
             is_updatable: false,
+            has_major_update: false,
         };
 
         let enriched = enrich_dependency(entry).await;

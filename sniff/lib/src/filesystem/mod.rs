@@ -14,9 +14,7 @@ pub use git::{
     BehindStatus, CommitInfo, GitInfo, HostingProvider, RemoteInfo, RepoStatus, detect_git,
 };
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};
-pub use repo::{
-    DependencyEntry, DependencyKind, MonorepoTool, Package, RepoInfo, detect_repo,
-};
+pub use repo::{DependencyEntry, DependencyKind, MonorepoTool, Package, RepoInfo, detect_repo};
 
 #[deprecated(note = "Use `Package` instead")]
 pub type PackageLocation = Package;

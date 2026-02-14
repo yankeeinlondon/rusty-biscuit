@@ -800,6 +800,7 @@ mod tests {
             peer_dependencies: None,
             optional_dependencies: None,
             is_updatable: None,
+            has_major_update: None,
         }];
 
         let cwd = package_path.join("src");

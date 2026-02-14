@@ -56,9 +56,6 @@ similar = { version = "2.6", features = ["inline"] }
 termini = "1.0"
 terminal_size = "0.4"
 
-# Table rendering
-comfy-table = "7.1"
-
 # Terminal image rendering and mermaid diagrams (via biscuit-terminal)
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 

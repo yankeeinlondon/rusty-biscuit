@@ -290,9 +290,7 @@ pub fn print_programs_markdown(programs: &ProgramsInfo, verbose: u8, filter: Out
 
     columns.push(TableColumn::new("Description"));
 
-    let mut table = Table::new()
-        .with_columns(columns)
-        .prefer_cursor_alignment();
+    let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
 
     for entry in &entries {
         let mut cells: Vec<TableCellContent> = vec![

@@ -417,10 +417,11 @@ fn format_monorepo_tool(tool: &sniff::filesystem::repo::MonorepoTool) -> &'stati
 
 /// Render a single package as a styled list item string.
 ///
-/// Always shows: name, version, relative path, language, updatable indicator.
-/// At `-v`: adds depends_on.
-/// At `-vv`: adds used_by, languages.
-fn format_package_item(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> String {
+/// Format a single package as a list of renderable items.
+///
+/// The first item is the main line (name, version, path, etc.).
+/// Subsequent items are verbose details rendered as child bullets.
+fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> Vec<String> {
     let version_part = pkg
         .version
         .as_ref()
@@ -433,26 +434,26 @@ fn format_package_item(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> S
         .map(|l| format!(" <dim>[{}]</dim>", l))
         .unwrap_or_default();
 
-    let updatable_part = match pkg.is_updatable {
-        Some(true) => " <yellow>*</yellow>",
+    let updatable_part = match (pkg.is_updatable, pkg.has_major_update) {
+        (Some(true), Some(true)) => " <red>*</red>",
+        (Some(true), _) => " <yellow>*</yellow>",
         _ => "",
     };
 
-    let mut line = format!(
+    let main_line = format!(
         "<b>{}</b>{} <dim>({})</dim>{}{}",
         pkg.name, version_part, pkg.relative, lang_part, updatable_part
     );
 
+    let mut items = vec![main_line];
+
     if verbose > 0 {
         if !pkg.features.is_empty() {
-            line.push_str(&format!(
-                " <dim>features:</dim> {}",
-                pkg.features.join(", ")
-            ));
+            items.push(format!("<dim>features:</dim> {}", pkg.features.join(", ")));
         }
         if !pkg.depends_on.is_empty() {
-            line.push_str(&format!(
-                " <dim>depends on:</dim> {}",
+            items.push(format!(
+                "<dim>depends on:</dim> {}",
                 pkg.depends_on.join(", ")
             ));
         }
@@ -460,20 +461,14 @@ fn format_package_item(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> S
 
     if verbose > 1 {
         if !pkg.used_by.is_empty() {
-            line.push_str(&format!(
-                " <dim>used by:</dim> {}",
-                pkg.used_by.join(", ")
-            ));
+            items.push(format!("<dim>used by:</dim> {}", pkg.used_by.join(", ")));
         }
         if !pkg.languages.is_empty() {
-            line.push_str(&format!(
-                " <dim>langs:</dim> {}",
-                pkg.languages.join(", ")
-            ));
+            items.push(format!("<dim>langs:</dim> {}", pkg.languages.join(", ")));
         }
     }
 
-    line
+    items
 }
 
 pub fn print_repo_section(
@@ -509,10 +504,15 @@ pub fn print_repo_section(
     println!("\n{}\n", title.render(None));
 
     if let Some(ref packages) = repo.packages {
+        // Track whether any package has updatable deps for the key
+        let has_updatable = packages.iter().any(|pkg| pkg.is_updatable == Some(true));
+
         // Group packages by area, preserving discovery order
         let mut areas: Vec<String> = Vec::new();
-        let mut area_packages: std::collections::HashMap<&str, Vec<&sniff::filesystem::repo::Package>> =
-            std::collections::HashMap::new();
+        let mut area_packages: std::collections::HashMap<
+            &str,
+            Vec<&sniff::filesystem::repo::Package>,
+        > = std::collections::HashMap::new();
         for pkg in packages {
             let area = pkg.package_area.as_str();
             if !area_packages.contains_key(area) {
@@ -523,24 +523,47 @@ pub fn print_repo_section(
 
         let mut outer_items: Vec<RenderableContent> = Vec::new();
         for area in &areas {
-            // Area heading
-            let label = Prose::new(&format!("<b>{}</b>", area)).render(None);
+            // Area heading in blue
+            let label = Prose::new(&format!("<blue><b>{}</b></blue>", area)).render(None);
             outer_items.push(RenderableContent::String(label));
 
-            // Nested package list
-            let pkg_items: Vec<String> = area_packages[area.as_str()]
-                .iter()
-                .map(|pkg| {
-                    let markup = format_package_item(pkg, verbose);
-                    Prose::new(&markup).render(None)
-                })
-                .collect();
-            let inner_list = UnorderedList::new(pkg_items);
+            // Nested package list with left margin
+            let mut inner_items: Vec<RenderableContent> = Vec::new();
+            for pkg in &area_packages[area.as_str()] {
+                let items = format_package_items(pkg, verbose);
+                // First item is the main package line
+                let main = Prose::new(&items[0]).render(None);
+                inner_items.push(RenderableContent::String(main));
+                // Additional items are verbose details shown as a nested child list
+                if items.len() > 1 {
+                    let detail_items: Vec<String> = items[1..]
+                        .iter()
+                        .map(|s| Prose::new(s).render(None))
+                        .collect();
+                    let detail_list = UnorderedList::new(detail_items).with_bullet("  ");
+                    inner_items.push(RenderableContent::Component(Arc::new(detail_list)));
+                }
+            }
+            let inner_list = UnorderedList::from(inner_items);
             outer_items.push(RenderableContent::Component(Arc::new(inner_list)));
         }
 
-        let list = UnorderedList::from(outer_items);
+        let list = UnorderedList::from(outer_items).with_indent_children(Some(4));
         println!("{}", list.render(None));
+
+        // Legend for the updatable indicators
+        if has_updatable {
+            let has_major = packages
+                .iter()
+                .any(|pkg| pkg.has_major_update == Some(true));
+
+            let mut legend = String::from("\n<dim><yellow>*</yellow> dependency updates available");
+            if has_major {
+                legend.push_str("  <red>*</red> major version update available");
+            }
+            legend.push_str("</dim>");
+            println!("{}", Prose::new(&legend).render(None));
+        }
     }
 }
 
@@ -799,8 +822,8 @@ pub fn print_filesystem_section(fs: &sniff::FilesystemInfo, verbose: u8, repo_ro
             let items: Vec<String> = packages
                 .iter()
                 .map(|pkg| {
-                    let markup = format_package_item(pkg, verbose);
-                    Prose::new(&markup).render(None)
+                    let markup = &format_package_items(pkg, verbose)[0];
+                    Prose::new(markup).render(None)
                 })
                 .collect();
 
