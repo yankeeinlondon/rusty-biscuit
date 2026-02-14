@@ -19,7 +19,8 @@ dockhand/
 ├── unchained-ai/     # AI pipeline primitives and provider integrations
 │   ├── cli/          # Binary: `unchained` (agent status monitoring CLI)
 │   ├── gen/          # Binary: `gen-models` (provider model enum generator)
-│   └── lib/          # Core AI pipeline library
+│   ├── lib/          # Core AI pipeline library
+│   └── model_id/    # Proc-macro for model ID derivation
 ├── biscuit-hash/     # Best-in-class hashing algorithms
 │   ├── cli/          # Binary: `bh` (hash CLI)
 │   └── lib/          # xxHash, BLAKE3, Argon2id hashing

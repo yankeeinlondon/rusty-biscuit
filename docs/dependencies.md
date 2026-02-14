@@ -20,7 +20,7 @@ This is a Rust workspace with the following modules:
 - `homelab/cli/Cargo.toml` - Homelab CLI (`homey`)
 - `model-citizen/lib/Cargo.toml` - Local LLM model management library
 - `model-citizen/cli/Cargo.toml` - Model management CLI (`model`)
-- `model_id/Cargo.toml` - Proc-macro for model ID derivation
+- `unchained-ai/model_id/Cargo.toml` - Proc-macro for model ID derivation
 - `playa/lib/Cargo.toml` - Audio playback with host player detection
 - `playa/cli/Cargo.toml` - Audio player CLI (`playa`)
 - `queue/lib/Cargo.toml` - TUI command scheduler library

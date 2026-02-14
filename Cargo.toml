@@ -13,7 +13,7 @@ members = [
     "claudine/lib",
     "darkmatter/cli",
     "darkmatter/lib", "homelab/cli", "homelab/lib", "homelab/server", "model-citizen/cli", "model-citizen/lib",
-    "model_id",
+    "unchained-ai/model_id",
     "playa/cli",
     "playa/lib",
     "queue/cli",
