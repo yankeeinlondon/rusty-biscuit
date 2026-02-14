@@ -79,6 +79,7 @@ use std::path::PathBuf;
 let config = SniffConfig::new()
     .base_dir(PathBuf::from("."))
     .deep(true)              // Enable deep git inspection
+    .commit_count(20)        // Retrieve 20 recent commits (default: 10)
     .skip_network();         // Skip network detection
 
 let result = sniff_lib::detect_with_config(config)?;
@@ -148,6 +149,7 @@ pub struct SniffConfig {
     pub base_dir: Option<PathBuf>,
     pub include_cpu_usage: bool,
     pub deep: bool,               // Enable deep git inspection
+    pub commit_count: usize,      // Recent commits to retrieve (default: 10)
     pub skip_os: bool,
     pub skip_hardware: bool,
     pub skip_network: bool,
@@ -305,7 +307,7 @@ let filtered = detect_network_filtered()?;
 
 ### Filesystem Module
 
-Comprehensive filesystem analysis including Git, monorepo detection, and language breakdown.
+Comprehensive filesystem analysis including Git, monorepo detection, language breakdown, and markdown document discovery.
 
 **Submodules:**
 
@@ -313,6 +315,7 @@ Comprehensive filesystem analysis including Git, monorepo detection, and languag
 2. **Repository Detection** (`filesystem::repo`)
 3. **Language Analysis** (`filesystem::languages`)
 4. **EditorConfig** (`filesystem::formatting`)
+5. **Document Discovery** (`filesystem::docs`)
 
 #### Git Detection
 
@@ -394,7 +397,7 @@ Detects monorepo tools and package structure.
 
 - `RepoInfo` - Repository metadata and packages
 - `MonorepoTool` - Detected monorepo tool
-- `PackageLocation` - Package path, languages, managers, dependencies
+- `Package` - Package path, languages, managers, dependencies
 - `DependencyEntry` - Dependency with version requirements
 
 **Example:**
@@ -588,8 +591,8 @@ Detects system services across multiple init systems.
 
 **Key Types:**
 
-- `Services` - Init system detection result with service list
-- `ServiceInfo` - Individual service (name, running state, PID)
+- `ServicesInfo` - Init system detection result with service list
+- `Service` - Individual service (name, running state, PID)
 - `ServiceState` - Filter enum (All, Running, Stopped)
 - `InitSystem` - Detected init system (systemd, launchd, OpenRC, etc.)
 
@@ -694,12 +697,12 @@ When enabled, provides:
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| `sysinfo` | 0.33 | CPU, memory, storage detection |
-| `git2` | 0.19 | Git repository inspection |
-| `wgpu` | 23.0 | GPU detection (future cross-platform) |
-| `metal` | 0.30 | macOS GPU detection |
-| `getifaddrs` | 0.2 | Network interface enumeration |
-| `toml` | 0.8 | Cargo.toml parsing |
+| `sysinfo` | 0.37 | CPU, memory, storage detection |
+| `git2` | 0.20 | Git repository inspection |
+| `biscuit-hash` | workspace | xxHash content hashing for document fingerprinting |
+| `metal` | 0.33 | macOS GPU detection (target-specific) |
+| `getifaddrs` | 0.6 | Network interface enumeration |
+| `toml` | 0.9 | Cargo.toml parsing |
 | `serde_yaml` | 0.9 | pnpm-workspace.yaml parsing |
 | `reqwest` | 0.12 | HTTP client (network feature) |
 | `thiserror` | 2.0 | Error type derivation |
@@ -785,7 +788,7 @@ if hw.cpu.simd.avx2 && hw.memory.total_bytes >= 16 * 1024 * 1024 * 1024 {
 
 ## Future Enhancements
 
-See `.ai/plans/2026-01-14.plan-for-sniff-package-roundout.md` for planned features:
+Planned features:
 
 - Expanded dependency parsing (npm, pip, go.mod)
 - Lockfile resolution for actual versions

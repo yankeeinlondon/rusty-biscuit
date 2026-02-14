@@ -10,10 +10,23 @@ sniff/lib/src/
 ├── os.rs         # OS detection (distribution, locale, timezone)
 ├── hardware.rs   # CPU, GPU, memory, storage
 ├── network.rs    # Interface enumeration
-├── filesystem/   # Git, repo, languages
+├── filesystem/   # Git, repo, languages, docs, formatting
 ├── package/      # Package manager abstraction
-├── programs/     # Installed program detection
+├── programs/     # Installed program detection (8 categories)
 └── services/     # Init system and service detection
+
+sniff/cli/src/
+├── main.rs       # CLI parsing, config, enrichment
+└── output/       # Text/JSON rendering with per-topic modules
+    ├── mod.rs
+    ├── filesystem.rs
+    ├── hardware.rs
+    ├── network.rs
+    ├── os.rs
+    ├── programs.rs
+    ├── services.rs
+    ├── structure.rs
+    └── topics.rs
 ```
 
 ## Adding a Program Category
@@ -49,15 +62,22 @@ pub fn detect_my_programs() -> Vec<MyProgram> {
 }
 ```
 
-4. Add to `ProgramsInfo` in `programs/mod.rs`
-5. Add CLI flags in `cli/src/main.rs`
-6. Add output handling in `cli/src/output.rs`
+4. Add field to `ProgramsInfo` in `programs/mod.rs`
+5. Add CLI subcommand variant in `cli/src/main.rs`
+6. Add output handling in `cli/src/output/programs.rs`
 
 ## Adding an Init System
 
 1. Add variant to `InitSystem` enum in `services/mod.rs`
-2. Implement detection logic in `detect_init_system()`
-3. Implement `list_services()` for the new init system
+2. Implement detection logic in `detect_init()` / `detect_init_with_evidence()`
+3. Implement service listing for the new init system
+4. Update `ServiceManager::detect()` if needed
+
+## Adding a CLI Subcommand
+
+1. Add variant to `Commands` enum in `cli/src/main.rs`
+2. Add rendering in the appropriate `cli/src/output/*.rs` module
+3. Wire up in the match statement in `main()`
 
 ## Testing
 

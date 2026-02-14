@@ -9,24 +9,33 @@ System service detection across multiple init systems.
 | systemd | Linux | `systemctl` |
 | launchd | macOS | `launchctl` |
 | OpenRC | Linux | `/sbin/openrc` |
-| SysVinit | Linux | `/etc/init.d/` |
 | runit | Linux | `/etc/runit/` |
-| s6 | Linux | `/etc/s6/` |
+| S6 | Linux | `s6-rc` |
+| Dinit | Linux | `dinitctl` |
+| Upstart | Linux | `initctl` |
+| BusyboxInit | Linux | BusyBox init |
+| ContainerMinimalInit | Linux | Container init (tini, dumb-init) |
+| WindowsScm | Windows | Service Control Manager |
 
-## Usage
+## Key Types
 
 ```rust
-use sniff_lib::services::{detect_init_system, list_services, ServiceState};
+use sniff_lib::services::{detect_services, ServicesInfo, Service, ServiceState};
 
-// Detect init system
-let init = detect_init_system();
-println!("Init system: {:?}", init);
+// Detect everything
+let info: ServicesInfo = detect_services();
 
-// List services
-let services = list_services()?;
-for svc in services {
-    println!("{}: {:?}", svc.name, svc.state);
+if let Some(init) = &info.init_system {
+    println!("Init system: {:?}", init);
 }
+
+// Filter by state
+let running: Vec<_> = info.services
+    .iter()
+    .filter(|s| s.running)
+    .collect();
+
+println!("Running services: {}", running.len());
 ```
 
 ## Service States
@@ -35,8 +44,8 @@ for svc in services {
 |-------|-------------|
 | `Running` | Currently active |
 | `Stopped` | Not running |
-| `Failed` | Exited with error |
-| `Unknown` | State cannot be determined |
+| `Initializing` | Starting up |
+| `All` | Filter: show all services |
 
 ## CLI Subcommand
 
@@ -53,11 +62,9 @@ sniff services --json                # JSON output
 Detection uses multiple fallback methods with evidence tracking:
 
 ```rust
-pub struct InitSystemEvidence {
-    pub system: InitSystem,
-    pub detection_method: &'static str,
-    pub confidence: Confidence,
-}
-```
+use sniff_lib::services::ServiceManager;
 
-Confidence levels: `High`, `Medium`, `Low`
+let mgr = ServiceManager::detect();
+println!("Init: {:?}", mgr.init_system);
+println!("Evidence: {:?}", mgr.evidence);
+```

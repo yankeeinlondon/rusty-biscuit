@@ -11,12 +11,12 @@ Cross-platform system detection library and CLI for Rust.
 
 | Category | Detection |
 |----------|-----------|
-| OS | Distribution, locale, timezone |
-| Hardware | CPU, GPU, memory, storage |
-| Network | Interface enumeration |
-| Filesystem | Git repos, monorepos, languages |
+| OS | Distribution, kernel, architecture, package managers, locale, timezone |
+| Hardware | CPU (with SIMD), GPU (Metal), memory, storage |
+| Network | Interface enumeration with IPv4/IPv6 |
+| Filesystem | Git repos, monorepos, languages, EditorConfig, document discovery |
 | Programs | 8 categories with macOS bundle support |
-| Services | Multiple init systems (systemd, launchd, etc.) |
+| Services | 11 init systems (systemd, launchd, OpenRC, runit, etc.) |
 | Packages | 110+ package manager abstraction |
 
 ## Quick Start
@@ -31,6 +31,7 @@ let result = detect()?;
 let config = SniffConfig::new()
     .base_dir(PathBuf::from("."))
     .deep(true)           // Network queries for git/packages
+    .commit_count(20)     // Recent commits (default: 10)
     .skip_network();      // Skip section
 
 let result = detect_with_config(config)?;
@@ -44,13 +45,31 @@ sniff hardware             # Hardware only (text output)
 sniff cpu                  # Just CPU info
 sniff programs             # All programs
 sniff editors              # Just editors
+sniff agents               # AI CLI tools
 sniff services             # System services
+sniff docs                 # Markdown documents
+sniff topics               # Table of available topics
+sniff structure            # Structural overview
 sniff hardware --json      # Subcommand with JSON output
 ```
 
 **Output modes:**
 - No subcommand: JSON (all data)
 - With subcommand: Text (default), `--json` for JSON
+
+**Programs JSON formats:**
+- `sniff programs --json` - Simple format (backward compatible)
+- `sniff programs --json --json-format full` - Rich metadata
+
+## Key Types
+
+| Type | Description |
+|------|-------------|
+| `SniffResult` | Top-level: os, hardware, network, filesystem |
+| `SniffConfig` | Builder: base_dir, deep, commit_count, skip_* |
+| `ProgramsInfo` | 8 category fields with parallel detection |
+| `ServicesInfo` | Init system + service list |
+| `Package` | Package path, languages, managers, dependencies |
 
 ## Detailed Topics
 

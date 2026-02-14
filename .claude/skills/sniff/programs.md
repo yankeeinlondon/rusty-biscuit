@@ -4,16 +4,16 @@ Parallel detection across 8 categories with macOS app bundle support.
 
 ## Categories
 
-| Category | Examples |
-|----------|----------|
-| `editors` | VS Code, Neovim, Sublime Text |
-| `utilities` | ripgrep, fd, jq, fzf |
-| `pkg_managers` | brew, cargo, npm, pip |
-| `tts_clients` | say, espeak, piper |
-| `headless_audio` | mpv, ffplay, sox |
-| `browsers` | Chrome, Firefox, Safari |
-| `terminals` | iTerm2, Wezterm, Alacritty |
-| `shells` | zsh, bash, fish |
+| Category | Field | Enum | Examples |
+|----------|-------|------|----------|
+| Editors | `editors` | `Editor` | vim, VS Code, Cursor, IntelliJ, Sublime |
+| Utilities | `utilities` | `Utility` | ripgrep, fzf, bat, jq, fd, delta |
+| Language PMs | `language_package_managers` | `LanguagePackageManager` | cargo, npm, pip, poetry |
+| OS PMs | `os_package_managers` | `OsPackageManager` | homebrew, apt, dnf, pacman |
+| TTS Clients | `tts_clients` | `TtsClient` | say, espeak, piper |
+| Terminal Apps | `terminal_apps` | `TerminalApp` | alacritty, wezterm, kitty, iTerm2 |
+| Headless Audio | `headless_audio` | `HeadlessAudio` | afplay, pacat, aplay |
+| AI CLI | `ai_clients` | `AiCli` | claude, aider, goose |
 
 ## Usage
 
@@ -23,6 +23,12 @@ use sniff_lib::programs::ProgramsInfo;
 let programs = ProgramsInfo::detect();
 println!("Editors: {:?}", programs.editors);
 println!("Utilities: {:?}", programs.utilities);
+println!("AI CLI tools: {:?}", programs.ai_clients);
+
+// Access metadata
+for editor in &programs.editors {
+    println!("{}: {}", editor.display_name(), editor.description());
+}
 ```
 
 ## macOS App Bundle Fallback
@@ -48,21 +54,23 @@ Searches:
 ## CLI Subcommands
 
 ```bash
-sniff programs             # All categories (text output)
-sniff editors              # Just editors
-sniff utilities            # Just utilities
-sniff tts-clients          # TTS programs
-sniff audio                # Audio players
-sniff programs --json      # JSON output
+sniff programs                   # All categories (text output)
+sniff editors                    # Just editors
+sniff utilities                  # CLI utilities
+sniff language-package-managers  # Language package managers
+sniff os-package-managers        # OS package managers
+sniff tts-clients                # TTS programs
+sniff terminal-apps              # Terminal emulators
+sniff audio                      # Headless audio players
+sniff agents                     # AI agent/CLI tools
 ```
 
-## Parallel Detection
-
-Programs are detected in parallel using rayon for performance:
-
-```rust
-// Internal implementation uses parallel iteration
-let results: Vec<_> = categories.par_iter()
-    .map(|cat| detect_category(cat))
-    .collect();
+**JSON output:**
+```bash
+sniff programs --json                    # Simple format (backward compatible)
+sniff programs --json --json-format full # Rich metadata (display name, description, website, version, source)
 ```
+
+## Adding a Program Category
+
+See [extending.md](./extending.md) for step-by-step instructions.

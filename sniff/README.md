@@ -29,7 +29,7 @@ A comprehensive Rust library for system detection:
 - **OS Detection**: Distribution, kernel, architecture, package managers, locale, timezone
 - **Hardware Detection**: CPU (with SIMD), GPU (Metal support), memory, storage
 - **Network Detection**: Interface enumeration with IPv4/IPv6 addresses
-- **Filesystem Analysis**: Git repos, monorepo tools, language detection, EditorConfig
+- **Filesystem Analysis**: Git repos, monorepo tools, language detection, EditorConfig, document discovery with content hashing (via `biscuit-hash`)
 - **Programs Module**: Detect installed programs across 8 categories
 - **Services Module**: Detect and list system services across init systems
 
@@ -92,7 +92,9 @@ sniff/
 ├── cli/              # Binary crate (`sniff` command)
 │   ├── src/
 │   │   ├── main.rs   # CLI parsing, config, enrichment
-│   │   └── output.rs # Text/JSON rendering with filtering
+│   │   └── output/   # Text/JSON rendering with per-topic modules
+│   │       ├── mod.rs, filesystem.rs, hardware.rs, ...
+│   │       └── topics.rs, structure.rs
 │   └── Cargo.toml
 └── lib/              # Library crate
     ├── src/
@@ -100,9 +102,9 @@ sniff/
     │   ├── os.rs                     # OS detection
     │   ├── hardware.rs               # CPU, GPU, memory, storage
     │   ├── network.rs                # Network interfaces
-    │   ├── filesystem/               # Git, repo, languages
+    │   ├── filesystem/               # Git, repo, languages, docs, ...
     │   ├── package/                  # Package manager abstraction
-    │   ├── programs/                 # Program detection (8 categories)
+    │   ├── programs/                 # Program detection, inventory, schema, ...
     │   └── services/                 # System service detection
     └── Cargo.toml
 ```
