@@ -173,6 +173,9 @@ pub struct Package {
     /// Whether any dependency has a major version update available (deep-mode only)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub has_major_update: Option<bool>,
+    /// Whether this package is excluded from the workspace
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_excluded: bool,
 }
 
 /// Deprecated type alias for backward compatibility.
@@ -301,6 +304,12 @@ fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
     // Parse Cargo.lock once for version resolution
     let lock_versions = CargoLockVersions::parse(&root.join("Cargo.lock"));
 
+    let excludes = workspace
+        .get("exclude")
+        .and_then(|m| m.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+        .unwrap_or_default();
+
     // Expand globs and collect packages with dependencies
     let mut packages = expand_glob_patterns_with_deps(
         root,
@@ -308,6 +317,18 @@ fn detect_cargo_workspace(root: &Path) -> Result<Option<RepoInfo>> {
         MonorepoTool::CargoWorkspace,
         &lock_versions,
     );
+
+    // Expand excluded patterns and mark them
+    let mut excluded_packages = expand_glob_patterns_with_deps(
+        root,
+        &excludes,
+        MonorepoTool::CargoWorkspace,
+        &lock_versions,
+    );
+    for pkg in &mut excluded_packages {
+        pkg.is_excluded = true;
+    }
+    packages.extend(excluded_packages);
 
     // Resolve internal dependency graph
     resolve_internal_deps(&mut packages);
@@ -977,6 +998,7 @@ fn create_package(
         optional_dependencies,
         is_updatable: None,
         has_major_update: None,
+        is_excluded: false,
     }
 }
 
@@ -1007,6 +1029,31 @@ mod tests {
         assert!(info.is_monorepo);
         assert_eq!(info.monorepo_tool, Some(MonorepoTool::CargoWorkspace));
         assert_eq!(info.packages.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_cargo_workspace_excludes_detected() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[workspace]\nmembers = [\"pkg1\"]\nexclude = [\"excluded1\"]\n",
+        )
+        .unwrap();
+        fs::create_dir(dir.path().join("pkg1")).unwrap();
+        fs::create_dir(dir.path().join("excluded1")).unwrap();
+
+        let result = detect_repo(dir.path()).unwrap();
+        assert!(result.is_some());
+        let info = result.unwrap();
+        assert!(info.is_monorepo);
+        let packages = info.packages.as_ref().unwrap();
+        assert_eq!(packages.len(), 2);
+
+        let member = packages.iter().find(|p| p.name == "pkg1").unwrap();
+        assert!(!member.is_excluded);
+
+        let excluded = packages.iter().find(|p| p.name == "excluded1").unwrap();
+        assert!(excluded.is_excluded);
     }
 
     #[test]

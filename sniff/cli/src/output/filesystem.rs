@@ -440,9 +440,15 @@ fn format_package_items(pkg: &sniff::filesystem::repo::Package, verbose: u8) -> 
         _ => "",
     };
 
+    let excluded_part = if pkg.is_excluded {
+        " <dim>[excluded]</dim>"
+    } else {
+        ""
+    };
+
     let main_line = format!(
-        "<b>{}</b>{} <dim>({})</dim>{}{}",
-        pkg.name, version_part, pkg.relative, lang_part, updatable_part
+        "<b>{}</b>{} <dim>({})</dim>{}{}{}",
+        pkg.name, version_part, pkg.relative, lang_part, updatable_part, excluded_part
     );
 
     let mut items = vec![main_line];
