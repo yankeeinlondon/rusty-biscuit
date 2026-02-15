@@ -1,4 +1,5 @@
 use get_if_addrs::get_if_addrs;
+use homelab::arcam::Arcam;
 use homelab_server::{build_router, config::{self, HomeyConfig}, state::AppState};
 use std::time::Duration;
 use tokio::{net::TcpListener, signal};
@@ -31,6 +32,9 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    // Spawn Arcam heartbeat keepalive task
+    spawn_arcam_keepalive(app_state.clone());
 
     // Build router
     let app = build_router(app_state);
@@ -142,6 +146,42 @@ fn load_config() -> Result<AppState, Box<dyn std::error::Error>> {
     }
 
     Ok(AppState::from_config(config, config_path))
+}
+
+// --- Arcam Keepalive ---
+
+/// Heartbeat interval for Arcam amplifiers.
+///
+/// Sends a heartbeat to each configured Arcam amp every 10 minutes to keep
+/// the network interface active during standby. The PA series powers down
+/// its network port after an extended idle period; periodic heartbeats
+/// prevent this.
+const ARCAM_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10 * 60);
+
+/// Spawns a background task that sends periodic heartbeats to all configured
+/// Arcam amplifiers.
+fn spawn_arcam_keepalive(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(ARCAM_HEARTBEAT_INTERVAL).await;
+
+            let hosts = state.arcam_hosts.read().await;
+            for (name, service) in hosts.iter() {
+                let arcam = Arcam::from(service.host.as_str());
+                match arcam.heartbeat().await {
+                    Ok(true) => {
+                        tracing::debug!(device = %name, "Arcam heartbeat: alive");
+                    }
+                    Ok(false) => {
+                        tracing::warn!(device = %name, "Arcam heartbeat: unexpected response");
+                    }
+                    Err(e) => {
+                        tracing::warn!(device = %name, error = %e, "Arcam heartbeat failed");
+                    }
+                }
+            }
+        }
+    });
 }
 
 // --- Shutdown Signal ---

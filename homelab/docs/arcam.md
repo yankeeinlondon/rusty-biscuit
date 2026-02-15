@@ -377,3 +377,53 @@ The amp supports AMX Duet Dynamic Device Discovery Protocol.
 Cmd:  AMX\r
 Resp: AMXB<Device-SDKClass=Amplifier><Device-Make=ARCAM><Device-Model=PA720, PA240, PA410><Device-Revision=x.y.z>\r
 ```
+
+## Network Standby Behavior
+
+The PA series **powers down both the network interface and RS232 when entering standby** by default. TCP port 50000 becomes completely unreachable, and IP-based power-on commands cannot be sent.
+
+Source: [PA720/PA240/PA410 User Manual](https://www.arcam.co.uk/ugc/tor/PA410/User%20Manual/00_SH299_EN-FR-DE-NL-ES-RU-IT-CN-KO_web_Issue_5_040520.pdf)
+
+### Automatic Activation (No Menu Toggle)
+
+Unlike integrated amps (SA30, SA45) which have an explicit **Net Standby** menu setting, the PA series has no display or menu system. Instead, it uses **automatic activation**:
+
+> "In low power standby mode the network and RS232 functionality is disabled. To enable network and RS232 in standby, send a control or status request command to the unit whilst it is powered on. This will enable whichever control method was used when the unit is in standby."
+
+In practice this means:
+
+- Send **any** TCP command (e.g., heartbeat `0x25`) while the PA240 is powered on, and the network interface will remain active during the next standby cycle
+- Send **any** RS232 command while powered on, and the serial port will remain active during standby
+- The activation is per-interface — using IP does not activate RS232, and vice versa
+- If the amp is powered on only via the front panel or 12V trigger (with no IP/serial traffic), both interfaces will be disabled in standby
+
+### No Queryable State
+
+There is no protocol command to query whether the network will remain active during standby. The behavior is implicit — the firmware remembers whether an IP connection was active when the unit was last powered on. The System Status command (`0x5D`) does not include this information.
+
+### Wake-on-LAN
+
+The PA series **does not support Wake-on-LAN** (WoL magic packets). The only methods to power on from standby are:
+
+| Method | Requires Prior IP Activity |
+|--------|:--------------------------:|
+| IP command (port 50000) | Yes |
+| RS232 serial command | Yes (prior RS232 activity) |
+| 12V trigger | No |
+| Front panel STBY button | No |
+
+Note: The PA240 has **no IR receiver** and no remote control. It is a rack-mount power amplifier controlled exclusively via IP, RS232, 12V trigger, or front panel.
+
+### EuP Auto-Standby
+
+EU Energy-using Products (EuP) regulations require automatic standby after a period of inactivity. The Auto Shutdown Control (`0x58`) configures this timer (default: 20 minutes). Two commands help manage this:
+
+- **Heartbeat (`0x25`)**: Resets the EuP standby timer — send periodically during active use to prevent unexpected shutdown
+- **Timeout Counter (`0x55`)**: Queries seconds remaining until auto-standby triggers (0–14400 range)
+
+### Implications for IP Control
+
+1. **Maintain IP activity** — send at least one command (e.g., heartbeat) while the amp is powered on to ensure the network stays active during standby
+2. **Send periodic heartbeats** while the amp is on to prevent EuP auto-standby during active sessions
+3. **Handle reconnection gracefully** — if the amp enters standby without prior IP activity (e.g., powered on via front panel only), the network will be unreachable until the next manual power-on
+4. **12V trigger is the most reliable non-network wake method** — unlike SA-series amps, there is no IR fallback

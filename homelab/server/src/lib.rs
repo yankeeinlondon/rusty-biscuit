@@ -112,41 +112,20 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
                             d.insert("max_volume".into(), json!(v.max_volume));
                             d.insert("muted".into(), json!(v.mute == "on"));
                         }
-                        // Match current input URI to a native input category
                         let current_cat = input.as_ref().and_then(|i| {
-                            let cat = match_uri_to_category(&i.uri, native.as_deref());
-                            tracing::debug!(
-                                uri = %i.uri,
-                                matched_category = ?cat,
-                                "Current input matching"
-                            );
-                            cat
+                            match_uri_to_category(&i.uri, native.as_deref())
                         });
                         if let Some(inputs) = &native {
-                            // Show all sources — the native API's `visible` field
-                            // is always false on Sony ES receivers, so we ignore it.
                             let source_list: Vec<serde_json::Value> = inputs
                                 .iter()
                                 .map(|i| {
-                                    // URI for switching: extInput:{icon}
-                                    let uri = format!("extInput:{}", i.icon);
                                     json!({
                                         "name": format_source_name(&i.name),
-                                        "uri": uri,
                                         "active": current_cat.as_deref() == Some(i.category.as_str()),
                                     })
                                 })
                                 .collect();
                             d.insert("sources".into(), json!(source_list));
-                        } else if let Some(ci) = &input {
-                            // Fallback: native API unavailable, show current input only
-                            let name = ci.title.clone().unwrap_or_else(|| {
-                                format_input_name(&ci.uri)
-                            });
-                            d.insert("sources".into(), json!([{
-                                "name": name,
-                                "active": true,
-                            }]));
                         }
                         serde_json::Value::Object(d)
                     })
@@ -261,7 +240,7 @@ fn match_uri_to_category(
 
 /// Formats a Sony input URI into a human-readable name.
 ///
-/// Used as a fallback when the native web API is unavailable.
+/// Formats a Sony input URI into a human-readable name.
 ///
 /// ## Examples
 ///
@@ -269,6 +248,7 @@ fn match_uri_to_category(
 /// - `extInput:bd` -> `"BD/DVD"`
 /// - `radio:fm?contentId=0` -> `"FM"`
 /// - `extInput:mediaBox` -> `"Media Box"` (camelCase fallback)
+#[cfg(test)]
 fn format_input_name(uri: &str) -> String {
     // Strip known scheme prefixes
     let rest = uri
@@ -417,6 +397,7 @@ mod format_tests {
         assert_eq!(format_source_name("AUX"), "Aux");
         assert_eq!(format_source_name("VIDEO"), "Video");
     }
+
 }
 
 /// Probe the Arcam amplifier and return its status.
@@ -535,7 +516,7 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   .instruments {{ display: flex; flex-direction: column; gap: 6px; align-items: flex-end; flex-shrink: 0; }}
   .badge-row {{ display: flex; gap: 6px; flex-wrap: wrap; }}
   .badge {{ background: #0f3460; border: 1px solid #1a4a7a; border-radius: 4px; padding: 4px 10px; font-size: 0.75em; color: #a8c8e8; white-space: nowrap; letter-spacing: 0.02em; }}
-  .badge-muted {{ background: #4a1a1a; border-color: #7a2a2a; color: #e88; }}
+  .badge-muted {{ background: #4a2e0a; border-color: #7a5a1a; color: #f0a030; }}
   .volume-wrap {{ display: flex; align-items: center; gap: 8px; width: 140px; }}
   .volume-track {{ flex: 1; height: 5px; background: #0a1628; border-radius: 3px; overflow: hidden; }}
   .volume-fill {{ height: 100%; border-radius: 3px; background: linear-gradient(90deg, #1a6b5a, #4caf50); transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 0 6px #4caf5044; }}
@@ -545,10 +526,8 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   .sources > .badge-row {{ min-height: 0; }}
   .sources.visible {{ grid-template-rows: 1fr; margin-top: 12px; padding-top: 12px; border-top: 1px solid #1a2a45; }}
   .sources .badge-row {{ justify-content: flex-end; }}
-  .sources .badge {{ cursor: pointer; transition: background 0.2s, border-color 0.2s, color 0.2s; }}
-  .sources .badge:active {{ transform: scale(0.95); }}
+  .sources .badge {{ transition: background 0.2s, border-color 0.2s, color 0.2s; }}
   .badge-dim {{ background: transparent; border-color: #182540; color: #3a4a60; }}
-  .badge-dim:hover {{ border-color: #1a4a7a; color: #6a8aaa; }}
   .explore {{ margin-top: 24px; color: #b5b5b5; }}
   .explore a {{ color: #7cc4ff; text-decoration: none; }}
   .explore a:hover {{ text-decoration: underline; }}
@@ -603,6 +582,7 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   }}
 
   let pollSuppressedUntil = 0;
+  let lastSonyDetail = null;
 
   function togglePower(dotEl, device) {{
     if (dotEl.classList.contains('grey')) return;
@@ -612,7 +592,7 @@ async fn index(State(state): State<AppState>) -> Html<String> {
     void dotEl.offsetWidth; // reflow to restart animation
     dotEl.classList.add('pressing');
     dotEl.addEventListener('animationend', () => dotEl.classList.remove('pressing'), {{ once: true }});
-    // Optimistic UI update
+    // Optimistic UI update — immediate, no waiting
     const labelEl = document.getElementById(device === 'sony' ? 'sony-label' : 'arcam-label');
     setDot(dotEl, isOn ? 'amber' : 'green');
     setText(labelEl, isOn ? 'Power: off' : 'Power: on');
@@ -620,14 +600,19 @@ async fn index(State(state): State<AppState>) -> Html<String> {
       const srcEl = document.getElementById('sony-sources');
       const insEl = document.getElementById('sony-instruments');
       if (isOn) {{
-        srcEl.classList.remove('visible');
-        insEl.innerHTML = '';
+        // Turning off: collapse sources and volume
+        renderSony(insEl, srcEl, null);
+      }} else if (lastSonyDetail) {{
+        // Turning on: restore last known sources and volume
+        renderSony(insEl, srcEl, lastSonyDetail);
       }}
     }}
-    // Suppress polling while receiver transitions
-    pollSuppressedUntil = Date.now() + 4000;
+    // Suppress polling while receiver transitions:
+    // power-off is slow (~4s), power-on from standby is fast (~1s)
+    const delay = isOn ? 4000 : 1000;
+    pollSuppressedUntil = Date.now() + delay;
     // Send API call, then resume polling
-    const done = () => setTimeout(poll, 4000);
+    const done = () => setTimeout(poll, delay);
     if (device === 'sony') {{
       fetch('/sony/power', {{
         method: 'POST',
@@ -684,25 +669,10 @@ async fn index(State(state): State<AppState>) -> Html<String> {
         if (bi !== -1) return 1;
         return a.name.localeCompare(b.name);
       }});
-      let srcHtml = '<div class="badge-row">';
-      srcHtml += sorted.map(s =>
-        '<span class="badge' + (s.active ? '' : ' badge-dim') + '" data-uri="' + s.uri + '">' + s.name + '</span>'
-      ).join('');
-      srcHtml += '</div>';
-      if (sourcesEl.innerHTML !== srcHtml) {{
-        sourcesEl.innerHTML = srcHtml;
-        // Attach click handlers for source switching
-        sourcesEl.querySelectorAll('.badge[data-uri]').forEach(badge => {{
-          badge.addEventListener('click', function() {{
-            const uri = this.getAttribute('data-uri');
-            fetch('/sony/input', {{
-              method: 'POST',
-              headers: {{ 'Content-Type': 'application/json' }},
-              body: JSON.stringify({{ uri: uri }})
-            }}).then(() => setTimeout(poll, 500));
-          }});
-        }});
-      }}
+      const srcHtml = '<div class="badge-row">' + sorted.map(s =>
+        '<span class="badge' + (s.active ? '' : ' badge-dim') + '">' + s.name + '</span>'
+      ).join('') + '</div>';
+      if (sourcesEl.innerHTML !== srcHtml) sourcesEl.innerHTML = srcHtml;
       sourcesEl.classList.add('visible');
     }} else {{
       sourcesEl.innerHTML = '';
@@ -725,6 +695,7 @@ async fn index(State(state): State<AppState>) -> Html<String> {
       if (!resp.ok) return;
       const data = await resp.json();
 
+      if (data.sony.detail) lastSonyDetail = data.sony.detail;
       setDot(document.getElementById("sony-dot"), data.sony.css_class);
       setText(document.getElementById("sony-label"), data.sony.label);
       renderSony(document.getElementById("sony-instruments"), document.getElementById("sony-sources"), data.sony.detail);

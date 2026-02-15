@@ -188,6 +188,17 @@ async fn get_amplifier_mode(ip: &str) -> Result<u8, ArcamError> {
     Ok(resp.data.first().copied().unwrap_or(0))
 }
 
+/// Send a heartbeat to check connectivity and reset the EuP standby timer.
+///
+/// Returns `true` if the amplifier responds with "Alive".
+async fn heartbeat(ip: &str) -> Result<bool, ArcamError> {
+    // Frame: ! Zone=0x01 Cc=0x25(Heartbeat) Dl=0x01 Data=0xF0(Ping) CR
+    let cmd = [0x21, 0x01, 0x25, 0x01, 0xF0, 0x0D];
+    let resp = send_command(ip, &cmd).await?;
+    // Data[0]: 0x00 = alive
+    Ok(resp.data.first().copied() == Some(0x00))
+}
+
 /// **Arcam** struct is used to power on and off (as well
 /// as request the current power state for) an Arcam PA240/PA410/PA720
 /// amplifier.
@@ -250,6 +261,18 @@ impl Arcam {
     pub async fn get_amplifier_mode(&self) -> Result<u8, ArcamError> {
         let addr = self.host_addr();
         get_amplifier_mode(&addr).await
+    }
+
+    /// Send a heartbeat to check connectivity and reset the EuP standby timer.
+    ///
+    /// On the PA series, sending any command (including heartbeat) while the amp
+    /// is reachable keeps the network interface active during standby. Calling
+    /// this periodically prevents the amp from powering down its network port.
+    ///
+    /// Returns `true` if the amplifier responds with "Alive".
+    pub async fn heartbeat(&self) -> Result<bool, ArcamError> {
+        let addr = self.host_addr();
+        heartbeat(&addr).await
     }
 
     /// Send a raw command frame and return the parsed response.
