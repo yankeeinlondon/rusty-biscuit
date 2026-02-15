@@ -497,12 +497,12 @@ async fn index(State(state): State<AppState>) -> Html<String> {
     let sony_host = state
         .sony
         .as_ref()
-        .map(|s| format!("{}:{}", s.host(), s.port()))
+        .map(|s| format!("{}<span class=\"port\">:{}</span>", s.host(), s.port()))
         .unwrap_or_default();
     let arcam_host = state
         .arcam_host
         .as_deref()
-        .map(|h| format!("{h}:50000"))
+        .map(|h| format!("{h}<span class=\"port\">:50000</span>"))
         .unwrap_or_default();
 
     Html(format!(
@@ -531,6 +531,7 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   .device-name {{ font-weight: 600; }}
   .device-detail {{ color: #999; font-size: 0.85em; }}
   .host {{ color: #666; font-size: 0.8em; }}
+  .port {{ opacity: 0.5; }}
   .instruments {{ display: flex; flex-direction: column; gap: 6px; align-items: flex-end; flex-shrink: 0; }}
   .badge-row {{ display: flex; gap: 6px; flex-wrap: wrap; }}
   .badge {{ background: #0f3460; border: 1px solid #1a4a7a; border-radius: 4px; padding: 4px 10px; font-size: 0.75em; color: #a8c8e8; white-space: nowrap; letter-spacing: 0.02em; }}
@@ -540,8 +541,9 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   .volume-fill {{ height: 100%; border-radius: 3px; background: linear-gradient(90deg, #1a6b5a, #4caf50); transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 0 6px #4caf5044; }}
   .volume-fill.muted {{ background: linear-gradient(90deg, #5a1a1a, #c44); box-shadow: 0 0 6px #c4444444; }}
   .volume-label {{ font-size: 0.7em; color: #556; min-width: 18px; text-align: right; font-variant-numeric: tabular-nums; }}
-  .sources {{ display: none; padding-top: 12px; margin-top: 12px; border-top: 1px solid #1a2a45; }}
-  .sources.visible {{ display: block; }}
+  .sources {{ display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.35s ease, margin-top 0.35s ease, padding-top 0.35s ease; overflow: hidden; margin-top: 0; padding-top: 0; }}
+  .sources > .badge-row {{ min-height: 0; }}
+  .sources.visible {{ grid-template-rows: 1fr; margin-top: 12px; padding-top: 12px; border-top: 1px solid #1a2a45; }}
   .sources .badge-row {{ justify-content: flex-end; }}
   .sources .badge {{ cursor: pointer; transition: background 0.2s, border-color 0.2s, color 0.2s; }}
   .sources .badge:active {{ transform: scale(0.95); }}
@@ -600,6 +602,8 @@ async fn index(State(state): State<AppState>) -> Html<String> {
     }}
   }}
 
+  let pollSuppressedUntil = 0;
+
   function togglePower(dotEl, device) {{
     if (dotEl.classList.contains('grey')) return;
     const isOn = dotEl.classList.contains('green');
@@ -608,17 +612,31 @@ async fn index(State(state): State<AppState>) -> Html<String> {
     void dotEl.offsetWidth; // reflow to restart animation
     dotEl.classList.add('pressing');
     dotEl.addEventListener('animationend', () => dotEl.classList.remove('pressing'), {{ once: true }});
-    // Send API call
+    // Optimistic UI update
+    const labelEl = document.getElementById(device === 'sony' ? 'sony-label' : 'arcam-label');
+    setDot(dotEl, isOn ? 'amber' : 'green');
+    setText(labelEl, isOn ? 'Power: off' : 'Power: on');
+    if (device === 'sony') {{
+      const srcEl = document.getElementById('sony-sources');
+      const insEl = document.getElementById('sony-instruments');
+      if (isOn) {{
+        srcEl.classList.remove('visible');
+        insEl.innerHTML = '';
+      }}
+    }}
+    // Suppress polling while receiver transitions
+    pollSuppressedUntil = Date.now() + 4000;
+    // Send API call, then resume polling
+    const done = () => setTimeout(poll, 4000);
     if (device === 'sony') {{
       fetch('/sony/power', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
         body: JSON.stringify({{ active: !isOn }})
-      }}).then(() => setTimeout(poll, 500));
+      }}).then(done, done);
     }} else if (device === 'arcam') {{
       const action = isOn ? 'off' : 'on';
-      fetch('/arcam/power/' + action, {{ method: 'POST' }})
-        .then(() => setTimeout(poll, 500));
+      fetch('/arcam/power/' + action, {{ method: 'POST' }}).then(done, done);
     }}
   }}
 
@@ -701,6 +719,7 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   }}
 
   async function poll() {{
+    if (Date.now() < pollSuppressedUntil) return;
     try {{
       const resp = await fetch("/status");
       if (!resp.ok) return;
