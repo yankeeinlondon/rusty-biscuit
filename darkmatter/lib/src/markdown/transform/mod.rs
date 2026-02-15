@@ -163,6 +163,7 @@ impl Markdown {
                         .unwrap_or(Value::Object(Map::new())),
                 )
                 .with_merge_strategy(super::MergeStrategy::PreferDocument)
+                .with_replace_parent_wins(options.replace_parent_wins)
                 .with_context(options.context().clone())
                 .build();
 
@@ -174,7 +175,7 @@ impl Markdown {
 
             // Stage 1: Interpolation
             if options.stages.interpolation {
-                let interpolations = self.run_interpolation_stage(&effective_state, &options);
+                let interpolations = self.run_interpolation_stage(&effective_state, &options)?;
                 report.interpolations_applied = interpolations;
             }
 
@@ -246,9 +247,20 @@ impl Markdown {
     fn run_replacement_stage(
         &mut self,
         state: &EffectiveState,
-        _options: &TransformOptions,
+        options: &TransformOptions,
     ) -> usize {
-        let (new_content, count) = replacement::apply_replacements(&self.content, state);
+        let (new_content, count) = if let Some(one_off) = &options.one_off_replace {
+            let merged_replace = state::merge_replace_maps(state.get_replace_map(), Some(one_off));
+            let mut frontmatter = HashMap::new();
+            frontmatter.insert("replace".to_string(), Value::Object(merged_replace));
+            let scoped_state = EffectiveStateBuilder::new()
+                .with_frontmatter(frontmatter)
+                .with_context(options.context().clone())
+                .build();
+            replacement::apply_replacements(&self.content, &scoped_state)
+        } else {
+            replacement::apply_replacements(&self.content, state)
+        };
         if count > 0 {
             self.content = new_content;
         }
@@ -263,14 +275,14 @@ impl Markdown {
         &mut self,
         state: &EffectiveState,
         options: &TransformOptions,
-    ) -> usize {
+    ) -> MarkdownResult<usize> {
         use interpolation::{EvalResult, Evaluator, ExpressionFinder, parse};
 
         let finder = ExpressionFinder::new(&self.content);
         let locations = finder.find_all();
 
         if locations.is_empty() {
-            return 0;
+            return Ok(0);
         }
 
         let evaluator = Evaluator::new(state);
@@ -286,24 +298,20 @@ impl Markdown {
                         count += 1;
                     }
                     EvalResult::Error { message, .. } if options.fail_fast => {
-                        // TODO: In the future, return Err from pipeline
-                        // For now, log and continue
-                        tracing::warn!(
-                            expression = %loc.expression,
-                            error = %message,
-                            "Interpolation evaluation failed"
-                        );
+                        return Err(MarkdownError::Transform(format!(
+                            "Interpolation evaluation failed for '{}': {}",
+                            loc.expression, message
+                        )));
                     }
                     EvalResult::Error { .. } => {
                         // Leave original expression in place
                     }
                 },
                 Err(e) if options.fail_fast => {
-                    tracing::warn!(
-                        expression = %loc.expression,
-                        error = %e,
-                        "Interpolation parse failed"
-                    );
+                    return Err(MarkdownError::Transform(format!(
+                        "Interpolation parse failed for '{}': {}",
+                        loc.expression, e
+                    )));
                 }
                 Err(_) => {
                     // Parse error - leave original
@@ -312,7 +320,7 @@ impl Markdown {
         }
 
         self.content = new_content;
-        count
+        Ok(count)
     }
 
     /// Runs the normalization stage.
@@ -540,8 +548,7 @@ impl Markdown {
         ignore_invalid: bool,
     ) -> MarkdownResult<Option<String>> {
         // Inline string content: not a URL, not a file path → use as-is.
-        if !transclusion::is_url_like(reference)
-            && !transclusion::is_file_like_reference(reference)
+        if !transclusion::is_url_like(reference) && !transclusion::is_file_like_reference(reference)
         {
             return Ok(Some(reference.to_string()));
         }
@@ -610,8 +617,17 @@ impl Markdown {
         runtime: &mut transclusion::TransclusionRuntime,
         report: &mut TransformReport,
     ) -> MarkdownResult<String> {
-        let inherited = self.build_child_external_state(state, directive_options);
-        let mut child_options = options.clone();
+        let inherited = self.build_child_external_state(state);
+        let mut child_options = options
+            .clone()
+            .with_replace_parent_wins(matches!(
+                directive_options.replace,
+                transclusion::ReplaceOption::ParentWins
+            ))
+            .with_one_off_replace(match &directive_options.replace {
+                transclusion::ReplaceOption::OneOff(one_off) => Some(one_off.clone()),
+                _ => None,
+            });
         child_options.external_state = Some(inherited);
         child_options.transclusion.source = TransformSource::File(path.to_path_buf());
 
@@ -631,18 +647,6 @@ impl Markdown {
             let mut child_md = Markdown::new(content);
             child_md.remove_sections(&directive_options.exclude);
             content = child_md.into_parts().1;
-        }
-
-        match &directive_options.replace {
-            transclusion::ReplaceOption::ParentWins => {
-                if let Some(parent_map) = state.get_replace_map() {
-                    content = self.apply_replace_map(&content, parent_map, options);
-                }
-            }
-            transclusion::ReplaceOption::OneOff(one_off) => {
-                content = self.apply_replace_map(&content, one_off, options);
-            }
-            transclusion::ReplaceOption::InheritDefault => {}
         }
 
         if let Some((offset, line)) = insertion_context
@@ -755,22 +759,12 @@ impl Markdown {
         replaced
     }
 
-    fn build_child_external_state(
-        &self,
-        state: &EffectiveState,
-        directive_options: &transclusion::BlockOptions,
-    ) -> Value {
+    fn build_child_external_state(&self, state: &EffectiveState) -> Value {
         let mut inherited: Map<String, Value> = state.data().clone().into_iter().collect();
 
         // Prologue/epilogue are scoped to the defining document — never propagate.
         inherited.remove("prologue");
         inherited.remove("epilogue");
-
-        if let transclusion::ReplaceOption::OneOff(one_off) = &directive_options.replace {
-            let current_replace = inherited.get("replace").and_then(Value::as_object);
-            let merged = state::merge_replace_maps(current_replace, Some(one_off));
-            inherited.insert("replace".to_string(), Value::Object(merged));
-        }
 
         Value::Object(inherited)
     }
@@ -1393,6 +1387,19 @@ mod tests {
     }
 
     #[test]
+    fn test_interpolation_parse_error_fail_fast_returns_error() {
+        let content = "---\nname: Alice\n---\nHello {{ @invalid }}!";
+        let md: Markdown = content.into();
+
+        let options = TransformOptions::new()
+            .with_stages(Stage1Stages::only_interpolation())
+            .with_fail_fast(true);
+
+        let err = md.transform_with(options).unwrap_err();
+        assert!(matches!(err, MarkdownError::Transform(_)));
+    }
+
+    #[test]
     fn test_full_transform_with_interpolation() {
         // Integration test: frontmatter + interpolation + cleanup
         let content = "---\nname: Alice\ncount: 3\n---\n# Welcome {{ name }}\nYou have {{ count > 0 ? \"items\" : \"nothing\" }}";
@@ -1592,6 +1599,24 @@ Rounded: {{ round(pi) }}"#;
     }
 
     #[test]
+    fn test_stage2_code_transclusion_uses_fallback_language_for_unknown_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let code = dir.path().join("sample.weird");
+
+        std::fs::write(&root, "::code ./sample.weird").unwrap();
+        std::fs::write(&code, "hello").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        assert!(transformed.content().contains("```txt"));
+        assert!(transformed.content().contains("hello"));
+        assert_eq!(report.transclusions_applied, 1);
+    }
+
+    #[test]
     fn test_stage2_when_false_skips_directive() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("root.md");
@@ -1724,11 +1749,7 @@ Rounded: {{ round(pi) }}"#;
     fn test_stage2_frontmatter_inline_string_epilogue() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("root.md");
-        std::fs::write(
-            &root,
-            "---\nepilogue: \"End of document.\"\n---\nBody.",
-        )
-        .unwrap();
+        std::fs::write(&root, "---\nepilogue: \"End of document.\"\n---\nBody.").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
         let options = TransformOptions::new().with_source_file(root);
@@ -1760,6 +1781,25 @@ Rounded: {{ round(pi) }}"#;
         assert!(content.contains("Inline note."));
         assert!(content.contains("Body."));
         assert_eq!(report.transclusions_applied, 1); // only the file counts
+    }
+
+    #[test]
+    fn test_stage2_frontmatter_bare_filename_is_treated_as_file_reference() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let intro = dir.path().join("intro.md");
+
+        std::fs::write(&root, "---\nprologue: intro.md\n---\nBody.").unwrap();
+        std::fs::write(&intro, "Intro text.").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, report) = md.transform_with(options).unwrap();
+
+        let content = transformed.content();
+        assert!(content.starts_with("Intro text."));
+        assert!(content.contains("Body."));
+        assert_eq!(report.transclusions_applied, 1);
     }
 
     #[test]
@@ -1799,6 +1839,50 @@ Rounded: {{ round(pi) }}"#;
     }
 
     #[test]
+    fn test_stage2_replace_parent_wins_inverts_precedence() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+
+        std::fs::write(
+            &root,
+            "---\nreplace:\n  TOKEN: parent\n---\n::file ./child.md replace=true",
+        )
+        .unwrap();
+        std::fs::write(&child, "---\nreplace:\n  TOKEN: child\n---\nTOKEN").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, _report) = md.transform_with(options).unwrap();
+
+        assert_eq!(transformed.content().trim(), "parent");
+    }
+
+    #[test]
+    fn test_stage2_replace_one_off_does_not_propagate_to_grandchildren() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.md");
+        let child = dir.path().join("child.md");
+        let grand = dir.path().join("grand.md");
+
+        std::fs::write(
+            &root,
+            "---\nreplace:\n  A: root\n---\n::file ./child.md replace={\"ONE\":\"oneoff\"}",
+        )
+        .unwrap();
+        std::fs::write(&child, "Child: ONE A\n::file ./grand.md").unwrap();
+        std::fs::write(&grand, "Grand: ONE A").unwrap();
+
+        let md = Markdown::try_from(root.as_path()).unwrap();
+        let options = TransformOptions::new().with_source_file(root);
+        let (transformed, _report) = md.transform_with(options).unwrap();
+
+        let content = transformed.content();
+        assert!(content.contains("Child: oneoff root"));
+        assert!(content.contains("Grand: ONE root"));
+    }
+
+    #[test]
     fn test_stage2_prologue_epilogue_do_not_propagate_to_children() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("root.md");
@@ -1827,11 +1911,7 @@ Rounded: {{ round(pi) }}"#;
         let root = dir.path().join("root.md");
         let child = dir.path().join("child.md");
 
-        std::fs::write(
-            &root,
-            "::file ./child.md exclude=\"## Remove Me\"",
-        )
-        .unwrap();
+        std::fs::write(&root, "::file ./child.md exclude=\"## Remove Me\"").unwrap();
         std::fs::write(
             &child,
             "## Keep\n\nKept body.\n\n## Remove Me\n\nRemoved body.\n\n## Also Keep\n\nAlso kept.",
@@ -1856,11 +1936,7 @@ Rounded: {{ round(pi) }}"#;
         let root = dir.path().join("root.md");
         let child = dir.path().join("child.md");
 
-        std::fs::write(
-            &root,
-            "::file ./child.md exclude=\"## Remove*\"",
-        )
-        .unwrap();
+        std::fs::write(&root, "::file ./child.md exclude=\"## Remove*\"").unwrap();
         std::fs::write(
             &child,
             "## Keep\n\nKept.\n\n## Remove This\n\nGone.\n\n## Also Keep\n\nStays.",
@@ -1882,16 +1958,8 @@ Rounded: {{ round(pi) }}"#;
         let root = dir.path().join("root.md");
         let child = dir.path().join("child.md");
 
-        std::fs::write(
-            &root,
-            "::file ./child.md exclude=\"!prelude\"",
-        )
-        .unwrap();
-        std::fs::write(
-            &child,
-            "Prelude text here.\n\n## Heading\n\nBody.",
-        )
-        .unwrap();
+        std::fs::write(&root, "::file ./child.md exclude=\"!prelude\"").unwrap();
+        std::fs::write(&child, "Prelude text here.\n\n## Heading\n\nBody.").unwrap();
 
         let md = Markdown::try_from(root.as_path()).unwrap();
         let options = TransformOptions::new().with_source_file(root);
@@ -1908,11 +1976,7 @@ Rounded: {{ round(pi) }}"#;
         let root = dir.path().join("root.md");
         let child = dir.path().join("child.md");
 
-        std::fs::write(
-            &root,
-            "::file ./child.md exclude=\"## A\" exclude=\"## C\"",
-        )
-        .unwrap();
+        std::fs::write(&root, "::file ./child.md exclude=\"## A\" exclude=\"## C\"").unwrap();
         std::fs::write(
             &child,
             "## A\n\nA body.\n\n## B\n\nB body.\n\n## C\n\nC body.",
@@ -1980,7 +2044,9 @@ Rounded: {{ round(pi) }}"#;
         let md = Markdown::try_from(root.as_path()).unwrap();
         let mut ctx = types::TransformContext::capture();
         ctx.env.insert("AGENT".to_string(), "claude".to_string());
-        let options = TransformOptions::new().with_source_file(root).with_context(ctx);
+        let options = TransformOptions::new()
+            .with_source_file(root)
+            .with_context(ctx);
         let (transformed, report) = md.transform_with(options).unwrap();
 
         assert!(transformed.content().contains("Claude content."));
@@ -2004,7 +2070,9 @@ Rounded: {{ round(pi) }}"#;
         let md = Markdown::try_from(root.as_path()).unwrap();
         let mut ctx = types::TransformContext::capture();
         ctx.env.insert("AGENT".to_string(), "opencode".to_string());
-        let options = TransformOptions::new().with_source_file(root).with_context(ctx);
+        let options = TransformOptions::new()
+            .with_source_file(root)
+            .with_context(ctx);
         let (transformed, report) = md.transform_with(options).unwrap();
 
         assert!(!transformed.content().contains("Claude content."));
@@ -2028,7 +2096,9 @@ Rounded: {{ round(pi) }}"#;
         let md = Markdown::try_from(root.as_path()).unwrap();
         // Use a fixed context with no AGENT env var
         let ctx = types::TransformContext::fixed_for_testing();
-        let options = TransformOptions::new().with_source_file(root).with_context(ctx);
+        let options = TransformOptions::new()
+            .with_source_file(root)
+            .with_context(ctx);
         let (transformed, report) = md.transform_with(options).unwrap();
 
         assert!(!transformed.content().contains("Claude content."));
@@ -2064,11 +2134,16 @@ Rounded: {{ round(pi) }}"#;
         let md = Markdown::try_from(root.as_path()).unwrap();
         let mut ctx = types::TransformContext::capture();
         ctx.env.insert("AGENT".to_string(), "claude".to_string());
-        let opts = TransformOptions::new().with_source_file(&root).with_context(ctx);
+        let opts = TransformOptions::new()
+            .with_source_file(&root)
+            .with_context(ctx);
         let (out, report) = md.transform_with(opts).unwrap();
         assert!(out.content().contains("CC only."), "Expected CC content");
         assert!(!out.content().contains("OC only."), "Should not contain OC");
-        assert!(!out.content().contains("Default only."), "Should not contain default");
+        assert!(
+            !out.content().contains("Default only."),
+            "Should not contain default"
+        );
         assert_eq!(report.transclusions_applied, 1);
         assert_eq!(report.transclusions_skipped, 2);
 
@@ -2076,7 +2151,9 @@ Rounded: {{ round(pi) }}"#;
         let md = Markdown::try_from(root.as_path()).unwrap();
         let mut ctx = types::TransformContext::capture();
         ctx.env.insert("AGENT".to_string(), "opencode".to_string());
-        let opts = TransformOptions::new().with_source_file(&root).with_context(ctx);
+        let opts = TransformOptions::new()
+            .with_source_file(&root)
+            .with_context(ctx);
         let (out, report) = md.transform_with(opts).unwrap();
         assert!(!out.content().contains("CC only."));
         assert!(out.content().contains("OC only."), "Expected OC content");
@@ -2087,11 +2164,16 @@ Rounded: {{ round(pi) }}"#;
         // Test 3: AGENT not set → only default.md included
         let md = Markdown::try_from(root.as_path()).unwrap();
         let ctx = types::TransformContext::fixed_for_testing();
-        let opts = TransformOptions::new().with_source_file(&root).with_context(ctx);
+        let opts = TransformOptions::new()
+            .with_source_file(&root)
+            .with_context(ctx);
         let (out, report) = md.transform_with(opts).unwrap();
         assert!(!out.content().contains("CC only."));
         assert!(!out.content().contains("OC only."));
-        assert!(out.content().contains("Default only."), "Expected default content");
+        assert!(
+            out.content().contains("Default only."),
+            "Expected default content"
+        );
         assert_eq!(report.transclusions_applied, 1);
         assert_eq!(report.transclusions_skipped, 2);
     }

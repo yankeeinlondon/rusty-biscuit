@@ -202,6 +202,7 @@ pub struct EffectiveStateBuilder {
     frontmatter: HashMap<String, Value>,
     external_state: Option<Value>,
     merge_strategy: MergeStrategy,
+    replace_parent_wins: bool,
     context: Option<TransformContext>,
 }
 
@@ -212,6 +213,7 @@ impl EffectiveStateBuilder {
             frontmatter: HashMap::new(),
             external_state: None,
             merge_strategy: MergeStrategy::PreferExternal,
+            replace_parent_wins: false,
             context: None,
         }
     }
@@ -234,6 +236,14 @@ impl EffectiveStateBuilder {
     #[must_use]
     pub fn with_merge_strategy(mut self, strategy: MergeStrategy) -> Self {
         self.merge_strategy = strategy;
+        self
+    }
+
+    /// Overrides replace-map precedence so external values win over document
+    /// values for this build only.
+    #[must_use]
+    pub fn with_replace_parent_wins(mut self, enabled: bool) -> Self {
+        self.replace_parent_wins = enabled;
         self
     }
 
@@ -263,10 +273,24 @@ impl EffectiveStateBuilder {
             MergeStrategy::ErrorOnConflict => deep_merge(&frontmatter_value, &external_value),
         };
 
-        let data: HashMap<String, Value> = match merged {
+        let mut data: HashMap<String, Value> = match merged {
             Value::Object(obj) => obj.into_iter().collect(),
-            _ => self.frontmatter,
+            _ => self.frontmatter.clone(),
         };
+
+        if self.replace_parent_wins {
+            let doc_replace = self.frontmatter.get("replace").and_then(Value::as_object);
+            let external_replace = self
+                .external_state
+                .as_ref()
+                .and_then(|v| v.get("replace"))
+                .and_then(Value::as_object);
+
+            if doc_replace.is_some() || external_replace.is_some() {
+                let merged_replace = merge_replace_maps(doc_replace, external_replace);
+                data.insert("replace".to_string(), Value::Object(merged_replace));
+            }
+        }
 
         EffectiveState { data, context }
     }
@@ -445,6 +469,38 @@ mod tests {
 
         // External wins with PreferExternal
         assert_eq!(state.get("key"), Some(json!("external")));
+    }
+
+    #[test]
+    fn test_builder_replace_parent_wins_override() {
+        let mut fm = HashMap::new();
+        fm.insert(
+            "replace".to_string(),
+            json!({
+                "TOKEN": "child",
+                "ONLY_CHILD": "yes"
+            }),
+        );
+
+        let external = json!({
+            "replace": {
+                "TOKEN": "parent",
+                "ONLY_PARENT": "yes"
+            }
+        });
+
+        let state = EffectiveStateBuilder::new()
+            .with_frontmatter(fm)
+            .with_external_state(external)
+            .with_merge_strategy(MergeStrategy::PreferDocument)
+            .with_replace_parent_wins(true)
+            .with_context(test_context())
+            .build();
+
+        let replace = state.get_replace_map().unwrap();
+        assert_eq!(replace.get("TOKEN"), Some(&json!("parent")));
+        assert_eq!(replace.get("ONLY_CHILD"), Some(&json!("yes")));
+        assert_eq!(replace.get("ONLY_PARENT"), Some(&json!("yes")));
     }
 
     #[test]

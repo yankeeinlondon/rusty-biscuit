@@ -205,10 +205,21 @@ pub fn is_url_like(reference: &str) -> bool {
 /// inline string content.  A reference is path-like when it contains a path
 /// separator (`/` or `\`) or starts with a special path prefix (`@` or `~`).
 pub fn is_file_like_reference(reference: &str) -> bool {
-    reference.contains('/')
+    if reference.contains('/')
         || reference.contains('\\')
         || reference.starts_with('@')
         || reference.starts_with('~')
+    {
+        return true;
+    }
+
+    // Bare filenames like "intro.md" should be treated as file-like for
+    // frontmatter transclusion classification.
+    std::path::Path::new(reference)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| !ext.is_empty() && !reference.chars().any(char::is_whitespace))
+        .unwrap_or(false)
 }
 
 /// Attempts to normalize relative reference tokens before parsing.
@@ -324,9 +335,9 @@ mod tests {
         assert!(is_file_like_reference("@/docs/intro.md"));
         assert!(is_file_like_reference("~/notes/intro.md"));
         assert!(is_file_like_reference("/absolute/path.md"));
+        assert!(is_file_like_reference("intro.md"));
         assert!(!is_file_like_reference("Just some text content"));
         assert!(!is_file_like_reference("**Bold** markdown"));
-        assert!(!is_file_like_reference("intro.md")); // no path separator → inline
         assert!(!is_file_like_reference(""));
     }
 

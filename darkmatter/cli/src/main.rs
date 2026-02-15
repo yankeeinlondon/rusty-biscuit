@@ -181,12 +181,7 @@ fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
 }
 
 /// Shared read/render logic for both implicit (no subcommand) and explicit `read` subcommand.
-fn run_read(
-    input: Option<&PathBuf>,
-    output: OutputFormat,
-    show: bool,
-    cli: &Cli,
-) -> Result<()> {
+fn run_read(input: Option<&PathBuf>, output: OutputFormat, show: bool, cli: &Cli) -> Result<()> {
     let md = load_markdown(input)?;
 
     let prose_theme = cli.theme.unwrap_or_else(detect_prose_theme);

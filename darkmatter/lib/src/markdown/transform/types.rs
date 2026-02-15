@@ -58,6 +58,14 @@ pub struct TransformOptions {
     /// If false, failures are recorded as warnings and the pipeline continues.
     pub fail_fast: bool,
 
+    /// Internal flag: when true, external `replace` keys override document
+    /// `replace` keys for this transform invocation only.
+    pub(crate) replace_parent_wins: bool,
+
+    /// Internal one-off replace map applied only to this document's
+    /// replacement stage (never propagated to children).
+    pub(crate) one_off_replace: Option<serde_json::Map<String, serde_json::Value>>,
+
     /// Runtime context captured at construction time.
     context: TransformContext,
 }
@@ -75,6 +83,8 @@ impl TransformOptions {
             transclusion: TransclusionOptions::default(),
             external_state: None,
             fail_fast: false,
+            replace_parent_wins: false,
+            one_off_replace: None,
             context: TransformContext::capture(),
         }
     }
@@ -130,6 +140,23 @@ impl TransformOptions {
     #[must_use]
     pub fn with_fail_fast(mut self, fail_fast: bool) -> Self {
         self.fail_fast = fail_fast;
+        self
+    }
+
+    /// Internal builder: toggles parent-wins behavior for the `replace` map.
+    #[must_use]
+    pub(crate) fn with_replace_parent_wins(mut self, enabled: bool) -> Self {
+        self.replace_parent_wins = enabled;
+        self
+    }
+
+    /// Internal builder: sets a one-off replace map for this document only.
+    #[must_use]
+    pub(crate) fn with_one_off_replace(
+        mut self,
+        replace: Option<serde_json::Map<String, serde_json::Value>>,
+    ) -> Self {
+        self.one_off_replace = replace;
         self
     }
 

@@ -18,7 +18,7 @@ pub fn infer_language(path: &Path, fallback: &str) -> String {
         return ext.to_ascii_lowercase();
     }
 
-    ext.to_ascii_lowercase()
+    fallback.to_string()
 }
 
 /// Generates a backtick fence safe for embedded source content.
@@ -57,6 +57,11 @@ mod tests {
     #[test]
     fn infers_language_from_extension() {
         assert_eq!(infer_language(Path::new("main.rs"), "txt"), "rs");
+    }
+
+    #[test]
+    fn unknown_extension_uses_fallback() {
+        assert_eq!(infer_language(Path::new("sample.weird"), "txt"), "txt");
     }
 
     #[test]

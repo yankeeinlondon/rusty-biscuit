@@ -328,9 +328,9 @@ impl Markdown {
         let headings = normalize::extract_headings(&self.content);
 
         // Find matching heading
-        let match_idx = headings.iter().position(|h| {
-            h.level == level && heading_matches(&h.title, &title_pattern, is_prefix)
-        });
+        let match_idx = headings
+            .iter()
+            .position(|h| h.level == level && heading_matches(&h.title, &title_pattern, is_prefix));
 
         let Some(idx) = match_idx else {
             return false;

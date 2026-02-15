@@ -527,8 +527,7 @@ mod tests {
 
     #[test]
     fn parses_exclude_option() {
-        let content =
-            r###"::file ./doc.md exclude="## Bad Section" exclude="## Also Bad*""###;
+        let content = r###"::file ./doc.md exclude="## Bad Section" exclude="## Also Bad*""###;
         let directives = parse_directives(content).unwrap();
 
         assert_eq!(directives.len(), 1);
