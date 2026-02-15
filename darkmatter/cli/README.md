@@ -72,25 +72,34 @@ md delta original.md updated.md --json
 md -v delta original.md updated.md
 ```
 
+### Compose Pipeline
+
+```bash
+# Compose a document through the markdown pipeline
+md compose README.md
+
+# Compose with initial state (must be a JSON object)
+md compose README.md --state '{"name":"Alice","env":"prod"}'
+
+# Compose from stdin
+echo "# Hello {{ name }}" | md compose - --state '{"name":"Alice"}'
+
+# Render compose output as HTML or JSON
+md compose README.md --output html
+md compose README.md --output json
+```
+
 ### Document Cleanup
 
 ```bash
 # Normalize formatting (output to stdout)
-md README.md --clean
+md clean README.md
 
-# Clean and save back to file
-md README.md --clean-save
+# Clean from stdin
+cat README.md | md clean
 ```
 
-### Frontmatter Manipulation
-
-```bash
-# Merge JSON into frontmatter (JSON wins on conflicts)
-md README.md --fm-merge-with '{"version": "2.0"}'
-
-# Set default values (document wins on conflicts)
-md README.md --fm-defaults '{"draft": false}'
-```
+Frontmatter mutation flags were removed from the CLI; composition uses frontmatter as pipeline input and outputs the composed document content.
 
 ### Theming and Rendering Options
 

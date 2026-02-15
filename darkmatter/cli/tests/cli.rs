@@ -326,3 +326,13 @@ fn test_compose_invalid_state() {
         .failure()
         .stderr(predicate::str::contains("Invalid JSON"));
 }
+
+#[test]
+fn test_compose_state_requires_json_object() {
+    md_cmd()
+        .args(["compose", "-", "--state", "[1,2,3]"])
+        .write_stdin("# Test")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("expected a JSON object"));
+}

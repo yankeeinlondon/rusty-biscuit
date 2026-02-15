@@ -234,6 +234,11 @@ fn run_compose(
     if let Some(json_str) = state_json {
         let state: serde_json::Value =
             serde_json::from_str(json_str).wrap_err("Invalid JSON in --state argument")?;
+        if !state.is_object() {
+            return Err(eyre!(
+                "Invalid --state argument: expected a JSON object like {{\"name\":\"Alice\"}}"
+            ));
+        }
         options = options.with_external_state(state);
     }
 

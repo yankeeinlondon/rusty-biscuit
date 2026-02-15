@@ -40,6 +40,7 @@ use serde_json::Value;
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReplacementRule {
     key: String,
+    key_char_len: usize,
     value: String,
 }
 
@@ -112,6 +113,7 @@ fn build_replacement_rules(state: &EffectiveState) -> Option<Vec<ReplacementRule
 
             Some(ReplacementRule {
                 key: key.clone(),
+                key_char_len: key.chars().count(),
                 value: string_value,
             })
         })
@@ -159,12 +161,16 @@ fn scan_and_replace(content: &str, rules: &[ReplacementRule]) -> (String, usize)
     let mut result = String::with_capacity(content.len());
     let mut replacement_count = 0;
 
-    let content_chars: Vec<char> = content.chars().collect();
-    let content_len = content_chars.len();
+    // Char boundary lookup table so we can slice by byte offset without
+    // rebuilding a prefix string at each cursor step.
+    let mut char_starts: Vec<usize> = content.char_indices().map(|(idx, _)| idx).collect();
+    char_starts.push(content.len());
+    let content_len = char_starts.len().saturating_sub(1);
     let mut pos = 0;
 
     while pos < content_len {
-        let remaining = &content[content_chars[..pos].iter().collect::<String>().len()..];
+        let byte_pos = char_starts[pos];
+        let remaining = &content[byte_pos..];
 
         // Try to match rules in order (longest first due to sorting)
         let matched = rules.iter().find(|rule| remaining.starts_with(&rule.key));
@@ -174,10 +180,11 @@ fn scan_and_replace(content: &str, rules: &[ReplacementRule]) -> (String, usize)
             result.push_str(&rule.value);
             replacement_count += 1;
             // Advance by the number of chars in the key
-            pos += rule.key.chars().count();
+            pos += rule.key_char_len;
         } else {
             // No match - append current character
-            result.push(content_chars[pos]);
+            let next_byte_pos = char_starts[pos + 1];
+            result.push_str(&content[byte_pos..next_byte_pos]);
             pos += 1;
         }
     }
