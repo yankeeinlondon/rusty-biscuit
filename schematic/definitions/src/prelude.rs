@@ -18,8 +18,17 @@
 //! assert_eq!(api.name, "GitHub");
 //! assert_eq!(api.endpoints.len(), 14);
 //! ```
+//!
+//! ```
+//! use schematic_definitions::prelude::*;
+//!
+//! let api = define_gitea_api();
+//! assert_eq!(api.name, "Gitea");
+//! assert_eq!(api.endpoints.len(), 14);
+//! ```
 
 // API definition functions
+pub use crate::gitea::define_gitea_api;
 pub use crate::github::define_github_api;
 pub use crate::openai::define_openai_api;
 
@@ -30,4 +39,12 @@ pub use crate::openai::{DeleteModelResponse, ListModelsResponse, Model};
 pub use crate::github::{
     AnnotatedTagObject, GitRef, GitTreeResponse, IssueSummary, PullRequestSummary, Release,
     RepoTag, RepositoryInfo,
+};
+
+// Response types for Gitea (key top-level types, prefixed to avoid collision)
+pub use crate::gitea::{
+    AnnotatedTagObject as GiteaAnnotatedTagObject, GitRef as GiteaGitRef,
+    GitTreeResponse as GiteaGitTreeResponse, IssueSummary as GiteaIssueSummary,
+    PullRequestSummary as GiteaPullRequestSummary, Release as GiteaRelease,
+    RepoTag as GiteaRepoTag, RepositoryInfo as GiteaRepositoryInfo,
 };

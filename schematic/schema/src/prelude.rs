@@ -18,6 +18,7 @@
 //! - [`Anthropic`] + [`AnthropicRequest`]
 //! - [`OpenAI`] + [`OpenAIRequest`]
 //! - [`ElevenLabs`] + [`ElevenLabsRequest`]
+//! - [`Gitea`] + [`GiteaRequest`]
 //! - [`GitHub`] + [`GitHubRequest`]
 //! - [`HuggingFaceHub`] + [`HuggingFaceHubRequest`]
 //! - [`LmStudio`] + [`LmStudioRequest`]
@@ -56,6 +57,7 @@ pub use crate::shared::{RequestParts, SchematicError};
 pub use crate::anthropic::{Anthropic, AnthropicRequest};
 pub use crate::openai::{OpenAI, OpenAIRequest};
 pub use crate::elevenlabs::{ElevenLabs, ElevenLabsRequest};
+pub use crate::gitea::{Gitea, GiteaRequest};
 pub use crate::github::{GitHub, GitHubRequest};
 pub use crate::huggingface::{HuggingFaceHub, HuggingFaceHubRequest};
 pub use crate::lmstudio::{LmStudio, LmStudioRequest};

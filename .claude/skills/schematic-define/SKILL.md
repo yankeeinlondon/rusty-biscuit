@@ -130,6 +130,8 @@ Keep these aligned when docs/examples mention built-in APIs:
 - LM Studio: 6 endpoints, bearer auth via `LM_API_TOKEN`
 - EMQX Basic: 36 endpoints, basic auth via `EMQX_API_KEY` + `EMQX_API_SECRET`
 - EMQX Bearer: 38 endpoints, bearer auth via `EMQX_TOKEN`
+- GitHub: 14 endpoints, bearer auth via `GITHUB_TOKEN` or `GH_TOKEN`
+- Gitea: 14 endpoints, API key auth via `GITEA_TOKEN` (uses `token ` prefix, not Bearer)
 
 ## Update Workflow
 

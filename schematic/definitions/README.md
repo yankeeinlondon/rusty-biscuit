@@ -25,6 +25,8 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 | ElevenLabs WebSocket | `elevenlabs` | `define_elevenlabs_websocket_api()` | 2 | ElevenLabs TTS WebSocket streaming API |
 | EMQX Basic | `emqx` | `define_emqx_basic_api()` | 36 | EMQX MQTT Broker REST API with Basic auth |
 | EMQX Bearer | `emqx` | `define_emqx_bearer_api()` | 38 | EMQX MQTT Broker REST API with Bearer token auth |
+| GitHub | `github` | `define_github_api()` | 14 | GitHub REST API for repos, PRs, issues, releases |
+| Gitea | `gitea` | `define_gitea_api()` | 14 | Gitea REST API for self-hosted Git forge instances |
 
 ## Usage
 
@@ -95,6 +97,67 @@ assert_eq!(basic_api.name, "EmqxBasic");
 let bearer_api = define_emqx_bearer_api();
 assert_eq!(bearer_api.name, "EmqxBearer");
 ```
+
+```rust
+use schematic_definitions::github::define_github_api;
+
+let api = define_github_api();
+assert_eq!(api.name, "GitHub");
+assert_eq!(api.endpoints.len(), 14);
+```
+
+```rust
+use schematic_definitions::gitea::define_gitea_api;
+
+let api = define_gitea_api();
+assert_eq!(api.name, "Gitea");
+assert_eq!(api.endpoints.len(), 14);
+```
+
+## Gitea API
+
+The Gitea module provides a definition for the Gitea REST API v1.25+, optimized for self-hosted Git forge instances.
+
+### Authentication
+
+**Important**: Gitea uses `Authorization: token <pat>` (not Bearer). When setting `GITEA_TOKEN`, include the `token ` prefix:
+
+```bash
+export GITEA_TOKEN="token your_personal_access_token"
+```
+
+### Base URL
+
+The default base URL is a placeholder (`https://gitea.example.com/api/v1`). Configure this to your Gitea instance URL when creating a variant.
+
+### Endpoints
+
+| Endpoint | Method | Path | Response Type |
+|----------|--------|------|---------------|
+| GetRepository | GET | `/repos/{owner}/{repo}` | `RepositoryInfo` |
+| GetGitTree | GET | `/repos/{owner}/{repo}/git/trees/{sha}` | `GitTreeResponse` |
+| GetGitTreeRecursive | GET | `/repos/{owner}/{repo}/git/trees/{sha}?recursive=true` | `GitTreeResponse` |
+| GetRepositoryContentRaw | GET | `/repos/{owner}/{repo}/raw/{filepath}` | `String` (text) |
+| ListPullRequests | GET | `/repos/{owner}/{repo}/pulls` | `Vec<PullRequestSummary>` |
+| ListPullRequestFiles | GET | `/repos/{owner}/{repo}/pulls/{index}/files` | `Vec<PullRequestFile>` |
+| ListIssues | GET | `/repos/{owner}/{repo}/issues` | `Vec<IssueSummary>` |
+| GetIssue | GET | `/repos/{owner}/{repo}/issues/{index}` | `IssueSummary` |
+| ListIssueComments | GET | `/repos/{owner}/{repo}/issues/{index}/comments` | `Vec<IssueComment>` |
+| ListIssueTimeline | GET | `/repos/{owner}/{repo}/issues/{index}/timeline` | `Vec<TimelineEvent>` |
+| ListTags | GET | `/repos/{owner}/{repo}/tags` | `Vec<RepoTag>` |
+| ListReleases | GET | `/repos/{owner}/{repo}/releases` | `Vec<Release>` |
+| GetTagReference | GET | `/repos/{owner}/{repo}/git/refs/{git_ref}` | `Vec<GitRef>` (array!) |
+| GetAnnotatedTag | GET | `/repos/{owner}/{repo}/git/tags/{sha}` | `AnnotatedTagObject` |
+
+### Key Differences from GitHub
+
+| Aspect | Gitea | GitHub |
+|--------|-------|--------|
+| Auth header | `Authorization: token <pat>` | `Authorization: Bearer <token>` |
+| Base URL | Instance-specific | `https://api.github.com` |
+| Pagination | `limit` (default 50) | `per_page` (default 30) |
+| Issues list | `type=issues` excludes PRs | `pull_request` field filtering |
+| Tag refs | Returns **array** | Returns single object |
 
 ## OpenAI API
 
