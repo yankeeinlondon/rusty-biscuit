@@ -9,6 +9,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use schematic_define::openapi::{ExportFormat, ExportOptions};
 use schematic_definitions::anthropic::define_anthropic_api;
+use schematic_definitions::bitbucket::define_bitbucket_api;
 use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
 use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
 use schematic_definitions::gitea::define_gitea_api;
@@ -27,7 +28,7 @@ use schematic_gen::output::{generate_and_write, generate_and_write_all};
 use schematic_gen::validate_api;
 
 /// List of available API names for error messages.
-const AVAILABLE_APIS: &str = "anthropic, openai, elevenlabs, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all";
+const AVAILABLE_APIS: &str = "anthropic, bitbucket, openai, elevenlabs, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all";
 
 /// OpenAPI output format for CLI.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
@@ -141,6 +142,7 @@ enum Commands {
 fn resolve_api(name: &str) -> Result<schematic_define::RestApi, GeneratorError> {
     match name {
         "anthropic" => Ok(define_anthropic_api()),
+        "bitbucket" => Ok(define_bitbucket_api()),
         "openai" => Ok(define_openai_api()),
         "elevenlabs" => Ok(define_elevenlabs_rest_api()),
         "gitea" => Ok(define_gitea_api()),
@@ -166,6 +168,7 @@ fn resolve_api(name: &str) -> Result<schematic_define::RestApi, GeneratorError> 
 fn resolve_all_apis() -> Vec<schematic_define::RestApi> {
     vec![
         define_anthropic_api(),
+        define_bitbucket_api(),
         define_openai_api(),
         define_elevenlabs_rest_api(),
         define_gitea_api(),

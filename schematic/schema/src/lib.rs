@@ -10,6 +10,7 @@
 //! | Module | Client | Description | Auth |
 //! |--------|--------|-------------|------|
 //! | [`anthropic`] | [`Anthropic`](anthropic::Anthropic) | Anthropic Messages API for Claude AI interactions and agent tool use | API Key (`X-Api-Key`) |
+//! | [`bitbucket`] | [`Bitbucket`](bitbucket::Bitbucket) | Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows | Basic |
 //! | [`openai`] | [`OpenAI`](openai::OpenAI) | OpenAI REST API for model management | Bearer |
 //! | [`elevenlabs`] | [`ElevenLabs`](elevenlabs::ElevenLabs) | ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation | API Key (`xi-api-key`) |
 //! | [`gitea`] | [`Gitea`](gitea::Gitea) | Gitea REST API v1.25+ for repository, PR, issue, and release workflows | API Key (`Authorization`) |
@@ -85,6 +86,7 @@
 pub mod shared;
 pub mod prelude;
 pub mod anthropic;
+pub mod bitbucket;
 pub mod openai;
 pub mod elevenlabs;
 pub mod gitea;

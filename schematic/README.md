@@ -103,6 +103,7 @@ async fn main() -> Result<(), SchematicError> {
 | API | Module | Endpoints | Auth | Description |
 |-----|--------|-----------|------|-------------|
 | Anthropic | `anthropic` | 4 | API Key (`X-Api-Key`) | Claude Messages API with tool use |
+| Bitbucket | `bitbucket` | 14 | Basic | Bitbucket Cloud API for repos, PRs, issues, tags |
 | OpenAI | `openai` | 3 | Bearer | Models API (list, retrieve, delete) |
 | HuggingFace Hub | `huggingface` | 28+ | Bearer | Models, datasets, spaces, repos |
 | ElevenLabs | `elevenlabs` | 45+ REST, 2 WebSocket | API Key (`xi-api-key`) | TTS, voices, audio generation |
@@ -111,6 +112,9 @@ async fn main() -> Result<(), SchematicError> {
 | Ollama OpenAI | `ollama` | 4 | None | OpenAI-compatible subset |
 | EMQX Basic | `emqx` | 36 | Basic | MQTT broker REST API |
 | EMQX Bearer | `emqx` | 38 | Bearer | MQTT broker with token auth |
+| GitHub | `github` | 14 | Bearer | GitHub REST API for repos, PRs, issues, releases |
+| GitLab | `gitlab` | 15 | API Key (`PRIVATE-TOKEN`) | GitLab REST API for repos, MRs, issues, releases |
+| Gitea | `gitea` | 14 | API Key (`token`) | Gitea REST API for self-hosted Git forges |
 
 APIs sharing a module (`ollama`, `emqx`) are combined into a single generated file with distinct request suffixes.
 

@@ -6,6 +6,7 @@
 //! ## Available APIs
 //!
 //! - [`anthropic`] - Anthropic Messages API for Claude AI and agent tool use
+//! - [`bitbucket`] - Bitbucket Cloud REST API for repositories, PRs, issues, and tags
 //! - [`elevenlabs`] - ElevenLabs TTS and voice management API definition
 //! - [`emqx`] - EMQX Broker REST API (Basic Auth + Bearer Token variants)
 //! - [`gitea`] - Gitea REST API for self-hosted Git forge instances
@@ -109,8 +110,17 @@
 //! assert_eq!(api.name, "GitLab");
 //! assert_eq!(api.endpoints.len(), 15);
 //! ```
+//!
+//! ```
+//! use schematic_definitions::bitbucket::define_bitbucket_api;
+//!
+//! let api = define_bitbucket_api();
+//! assert_eq!(api.name, "Bitbucket");
+//! assert_eq!(api.endpoints.len(), 14);
+//! ```
 
 pub mod anthropic;
+pub mod bitbucket;
 pub mod elevenlabs;
 pub mod emqx;
 pub mod gitea;
@@ -125,6 +135,7 @@ pub mod registry;
 
 // Re-export API definition functions for convenience
 pub use anthropic::define_anthropic_api;
+pub use bitbucket::define_bitbucket_api;
 pub use elevenlabs::{define_elevenlabs_rest_api, define_elevenlabs_websocket_api};
 pub use emqx::{define_emqx_basic_api, define_emqx_bearer_api};
 pub use gitea::define_gitea_api;

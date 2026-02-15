@@ -16,6 +16,7 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 | API | Module | Definition Function | Endpoints | Description |
 |-----|--------|---------------------|-----------|-------------|
 | Anthropic | `anthropic` | `define_anthropic_api()` | 4 | Anthropic Messages API for Claude AI and agent tool use |
+| Bitbucket | `bitbucket` | `define_bitbucket_api()` | 14 | Bitbucket Cloud REST API for repos, PRs, issues, tags |
 | OpenAI | `openai` | `define_openai_api()` | 3 | OpenAI Models API (list, retrieve, delete models) |
 | HuggingFace Hub | `huggingface` | `define_huggingface_hub_api()` | 28+ | Hugging Face Hub API (models, datasets, spaces, repos) |
 | LM Studio | `lmstudio` | `define_lmstudio_api()` | 6 | LM Studio local inference API |
@@ -122,6 +123,81 @@ let api = define_gitlab_api();
 assert_eq!(api.name, "GitLab");
 assert_eq!(api.endpoints.len(), 15);
 ```
+
+```rust
+use schematic_definitions::bitbucket::define_bitbucket_api;
+
+let api = define_bitbucket_api();
+assert_eq!(api.name, "Bitbucket");
+assert_eq!(api.endpoints.len(), 14);
+```
+
+## Bitbucket API
+
+The Bitbucket module provides a definition for the Bitbucket Cloud REST API v2.0, optimized for common developer workflows.
+
+### Authentication
+
+Uses HTTP Basic Authentication with App Passwords:
+
+```bash
+export BITBUCKET_USERNAME="your_atlassian_account_username"
+export BITBUCKET_APP_PASSWORD="your_app_password"
+```
+
+Create App Passwords via Bitbucket Settings: **Personal settings > App passwords** with required scopes.
+
+**Important**: Bitbucket scopes are NOT hierarchical — `repository:write` does NOT imply `repository:read`. Request both explicitly.
+
+### Pagination
+
+Bitbucket uses **cursor-based pagination** (not page-based). Responses include a `next` URL field. The generated `PaginatedResponse<T>` type provides:
+
+```rust
+if paginated.has_next() {
+    // Follow the next URL for more results
+    let next_url = paginated.next.unwrap();
+}
+```
+
+### Endpoints
+
+| Endpoint | Method | Path | Response Type |
+|----------|--------|------|---------------|
+| GetRepository | GET | `/repositories/{workspace}/{repo_slug}` | `Repository` |
+| ListDirectoryContents | GET | `/repositories/{workspace}/{repo_slug}/src/{commit}/{path}` | `PaginatedResponse<SourceEntry>` |
+| GetFileContentRaw | GET | `/repositories/{workspace}/{repo_slug}/src/{commit}/{path}` | `String` (text) |
+| ListPullRequests | GET | `/repositories/{workspace}/{repo_slug}/pullrequests` | `PaginatedResponse<PullRequest>` |
+| GetPullRequest | GET | `/repositories/{workspace}/{repo_slug}/pullrequests/{id}` | `PullRequest` |
+| ListPullRequestComments | GET | `/repositories/{workspace}/{repo_slug}/pullrequests/{id}/comments` | `PaginatedResponse<PullRequestComment>` |
+| ListIssues | GET | `/repositories/{workspace}/{repo_slug}/issues` | `PaginatedResponse<Issue>` |
+| GetIssue | GET | `/repositories/{workspace}/{repo_slug}/issues/{id}` | `Issue` |
+| ListIssueComments | GET | `/repositories/{workspace}/{repo_slug}/issues/{id}/comments` | `PaginatedResponse<IssueComment>` |
+| ListIssueChanges | GET | `/repositories/{workspace}/{repo_slug}/issues/{id}/changes` | `PaginatedResponse<IssueChange>` |
+| ListTags | GET | `/repositories/{workspace}/{repo_slug}/refs/tags` | `PaginatedResponse<Tag>` |
+| GetTag | GET | `/repositories/{workspace}/{repo_slug}/refs/tags/{name}` | `Tag` |
+| ListDownloads | GET | `/repositories/{workspace}/{repo_slug}/downloads` | `PaginatedResponse<Download>` |
+| GetDownload | GET | `/repositories/{workspace}/{repo_slug}/downloads/{filename}` | `bytes::Bytes` (binary) |
+
+### Releases in Bitbucket
+
+Bitbucket does NOT have a first-class release concept like GitHub. Instead:
+
+- **Tags** are git refs via `/refs/tags`
+- **Downloads** are release artifacts via `/downloads`
+- A "release" is a tag with associated download artifacts
+
+To list releases, query both ListTags and ListDownloads, then correlate by naming convention.
+
+### Key Differences from GitHub
+
+| Aspect | Bitbucket | GitHub |
+|--------|-----------|--------|
+| Auth | Basic Auth (App Password) | Bearer Token |
+| Pagination | Cursor-based (`next` URL) | Link headers + `per_page` |
+| Releases | Tags + Downloads combined | First-class Release objects |
+| Scopes | NOT hierarchical | Hierarchical (write implies read) |
+| IDs | UUIDs encouraged | Numeric IDs |
 
 ## GitLab API
 
