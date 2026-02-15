@@ -575,7 +575,7 @@ pub fn print_repo_section(
                 }
             }
             if has_excluded {
-                legend.push_str("<orange>name</orange> excluded from workspace");
+                legend.push_str("packages in <orange>orange</orange> are excluded from the workspace");
             }
             legend.push_str("</dim>");
             println!("{}", Prose::new(&legend).render(None));
