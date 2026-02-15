@@ -13,6 +13,7 @@ use schematic_definitions::elevenlabs::define_elevenlabs_rest_api;
 use schematic_definitions::emqx::{define_emqx_basic_api, define_emqx_bearer_api};
 use schematic_definitions::gitea::define_gitea_api;
 use schematic_definitions::github::define_github_api;
+use schematic_definitions::gitlab::define_gitlab_api;
 use schematic_definitions::huggingface::define_huggingface_hub_api;
 use schematic_definitions::lmstudio::define_lmstudio_api;
 use schematic_definitions::ollama::{define_ollama_native_api, define_ollama_openai_api};
@@ -26,7 +27,7 @@ use schematic_gen::output::{generate_and_write, generate_and_write_all};
 use schematic_gen::validate_api;
 
 /// List of available API names for error messages.
-const AVAILABLE_APIS: &str = "anthropic, openai, elevenlabs, gitea, github, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all";
+const AVAILABLE_APIS: &str = "anthropic, openai, elevenlabs, gitea, github, gitlab, huggingface, lmstudio, ollama-native, ollama-openai, emqx-basic, emqx-bearer, all";
 
 /// OpenAPI output format for CLI.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
@@ -144,6 +145,7 @@ fn resolve_api(name: &str) -> Result<schematic_define::RestApi, GeneratorError> 
         "elevenlabs" => Ok(define_elevenlabs_rest_api()),
         "gitea" => Ok(define_gitea_api()),
         "github" => Ok(define_github_api()),
+        "gitlab" => Ok(define_gitlab_api()),
         "huggingface" => Ok(define_huggingface_hub_api()),
         "lmstudio" => Ok(define_lmstudio_api()),
         "ollama-native" => Ok(define_ollama_native_api()),
@@ -168,6 +170,7 @@ fn resolve_all_apis() -> Vec<schematic_define::RestApi> {
         define_elevenlabs_rest_api(),
         define_gitea_api(),
         define_github_api(),
+        define_gitlab_api(),
         define_huggingface_hub_api(),
         define_lmstudio_api(),
         define_ollama_native_api(),
@@ -481,6 +484,7 @@ fn run_generate_all(
             ("ElevenLabs", "elevenlabs"),
             ("Gitea", "gitea"),
             ("GitHub", "github"),
+            ("GitLab", "gitlab"),
             ("HuggingFaceHub", "huggingface"),
             ("LmStudio", "lmstudio"),
             ("OllamaNative", "ollama-native"),

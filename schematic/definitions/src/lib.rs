@@ -10,6 +10,7 @@
 //! - [`emqx`] - EMQX Broker REST API (Basic Auth + Bearer Token variants)
 //! - [`gitea`] - Gitea REST API for self-hosted Git forge instances
 //! - [`github`] - GitHub REST API for repositories, PRs, issues, and releases
+//! - [`gitlab`] - GitLab REST API for repositories, MRs, issues, and releases
 //! - [`huggingface`] - Hugging Face Hub API for model/dataset discovery
 //! - [`lmstudio`] - LM Studio local LLM inference (v1 native API)
 //! - [`ollama`] - Ollama local LLM inference (native + OpenAI-compatible APIs)
@@ -100,12 +101,21 @@
 //! assert_eq!(api.name, "Gitea");
 //! assert_eq!(api.endpoints.len(), 14);
 //! ```
+//!
+//! ```
+//! use schematic_definitions::gitlab::define_gitlab_api;
+//!
+//! let api = define_gitlab_api();
+//! assert_eq!(api.name, "GitLab");
+//! assert_eq!(api.endpoints.len(), 15);
+//! ```
 
 pub mod anthropic;
 pub mod elevenlabs;
 pub mod emqx;
 pub mod gitea;
 pub mod github;
+pub mod gitlab;
 pub mod huggingface;
 pub mod lmstudio;
 pub mod ollama;
@@ -119,6 +129,7 @@ pub use elevenlabs::{define_elevenlabs_rest_api, define_elevenlabs_websocket_api
 pub use emqx::{define_emqx_basic_api, define_emqx_bearer_api};
 pub use gitea::define_gitea_api;
 pub use github::define_github_api;
+pub use gitlab::define_gitlab_api;
 pub use huggingface::define_huggingface_hub_api;
 pub use lmstudio::define_lmstudio_api;
 pub use ollama::{define_ollama_native_api, define_ollama_openai_api};

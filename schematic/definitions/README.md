@@ -26,6 +26,7 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 | EMQX Basic | `emqx` | `define_emqx_basic_api()` | 36 | EMQX MQTT Broker REST API with Basic auth |
 | EMQX Bearer | `emqx` | `define_emqx_bearer_api()` | 38 | EMQX MQTT Broker REST API with Bearer token auth |
 | GitHub | `github` | `define_github_api()` | 14 | GitHub REST API for repos, PRs, issues, releases |
+| GitLab | `gitlab` | `define_gitlab_api()` | 15 | GitLab REST API for repos, MRs, issues, releases |
 | Gitea | `gitea` | `define_gitea_api()` | 14 | Gitea REST API for self-hosted Git forge instances |
 
 ## Usage
@@ -113,6 +114,65 @@ let api = define_gitea_api();
 assert_eq!(api.name, "Gitea");
 assert_eq!(api.endpoints.len(), 14);
 ```
+
+```rust
+use schematic_definitions::gitlab::define_gitlab_api;
+
+let api = define_gitlab_api();
+assert_eq!(api.name, "GitLab");
+assert_eq!(api.endpoints.len(), 15);
+```
+
+## GitLab API
+
+The GitLab module provides a definition for the GitLab REST API v4, optimized for common developer workflows.
+
+### Authentication
+
+**Important**: GitLab uses `PRIVATE-TOKEN` header (not Bearer token):
+
+```bash
+export GITLAB_TOKEN="your_personal_access_token"
+# or
+export GITLAB_PRIVATE_TOKEN="your_personal_access_token"
+```
+
+### GitLab-Specific Patterns
+
+- Project paths must be URL-encoded (`group%2Fproject` for `group/project`)
+- File content is Base64 encoded
+- Uses `iid` (internal ID) scoped to project, not global `id`
+- Releases are optional metadata on tags (check `tag.release` field)
+
+### Endpoints
+
+| Endpoint | Method | Path | Response Type |
+|----------|--------|------|---------------|
+| ListRepositoryTree | GET | `/projects/{id}/repository/tree` | `Vec<TreeItem>` |
+| GetRepositoryFile | GET | `/projects/{id}/repository/files/{file_path}` | `FileContent` |
+| ListMergeRequests | GET | `/projects/{id}/merge_requests` | `Vec<MergeRequest>` |
+| GetMergeRequest | GET | `/projects/{id}/merge_requests/{merge_request_iid}` | `MergeRequest` |
+| ListMergeRequestCommits | GET | `/projects/{id}/merge_requests/{merge_request_iid}/commits` | `Vec<Commit>` |
+| ListMergeRequestChanges | GET | `/projects/{id}/merge_requests/{merge_request_iid}/changes` | `MergeRequestChanges` |
+| ListIssues | GET | `/projects/{id}/issues` | `Vec<Issue>` |
+| GetIssue | GET | `/projects/{id}/issues/{issue_iid}` | `Issue` |
+| ListIssueNotes | GET | `/projects/{id}/issues/{issue_iid}/notes` | `Vec<Note>` |
+| ListIssueParticipants | GET | `/projects/{id}/issues/{issue_iid}/participants` | `Vec<User>` |
+| ListTags | GET | `/projects/{id}/repository/tags` | `Vec<Tag>` |
+| GetTag | GET | `/projects/{id}/repository/tags/{tag_name}` | `Tag` |
+| ListReleases | GET | `/projects/{id}/releases` | `Vec<Release>` |
+| GetRelease | GET | `/projects/{id}/releases/{tag_name}` | `Release` |
+| GetLatestRelease | GET | `/projects/{id}/releases/permalink/latest` | `Release` |
+
+### Key Differences from GitHub
+
+| Aspect | GitLab | GitHub |
+|--------|--------|--------|
+| Auth header | `PRIVATE-TOKEN: <token>` | `Authorization: Bearer <token>` |
+| Merge/Pull Requests | "Merge Requests" (MRs) | "Pull Requests" (PRs) |
+| ID scope | `iid` (project-scoped) | `number` (repo-scoped) |
+| Releases | Optional metadata on tags | Separate entities |
+| File content | Base64 encoded in JSON | Base64 encoded in JSON |
 
 ## Gitea API
 

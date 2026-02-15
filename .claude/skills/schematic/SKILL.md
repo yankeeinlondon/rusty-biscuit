@@ -12,7 +12,7 @@ Type-safe REST and WebSocket API client code generation for Rust. Define APIs de
 | Package | Purpose |
 |---------|---------|
 | `schematic-define` | Primitives: `RestApi`, `Endpoint`, `AuthStrategy`, `Headers`, `ApiRequest`, `ApiResponse` |
-| `schematic-definitions` | Pre-built APIs: Anthropic, OpenAI, ElevenLabs, HuggingFace, LM Studio, Ollama, EMQX |
+| `schematic-definitions` | Pre-built APIs: Anthropic, OpenAI, ElevenLabs, HuggingFace, LM Studio, Ollama, EMQX, GitHub, GitLab, Gitea |
 | `schematic-gen` | Code generator CLI with `generate`, `validate`, and `import` commands |
 | `schematic-schema` | Generated clients (auto-generated, do not edit) |
 
@@ -32,7 +32,8 @@ schematic-gen import --input api.yaml --output schematic/schema/src
 schematic-gen generate --api openai --openapi-out specs/ --openapi-format yaml
 
 # Available APIs: anthropic, openai, elevenlabs, huggingface, lmstudio,
-#                 ollama-native, ollama-openai, emqx-basic, emqx-bearer, all
+#                 ollama-native, ollama-openai, emqx-basic, emqx-bearer,
+#                 github, gitlab, gitea, all
 ```
 
 ## Critical Configuration

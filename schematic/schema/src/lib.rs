@@ -14,6 +14,7 @@
 //! | [`elevenlabs`] | [`ElevenLabs`](elevenlabs::ElevenLabs) | ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation | API Key (`xi-api-key`) |
 //! | [`gitea`] | [`Gitea`](gitea::Gitea) | Gitea REST API v1.25+ for repository, PR, issue, and release workflows | API Key (`Authorization`) |
 //! | [`github`] | [`GitHub`](github::GitHub) | GitHub REST API v2022-11-28 for repository, PR, issue, and release workflows | Bearer |
+//! | [`gitlab`] | [`GitLab`](gitlab::GitLab) | GitLab REST API v4 for repository, MR, issue, and release workflows | API Key (`PRIVATE-TOKEN`) |
 //! | [`huggingface`] | [`HuggingFaceHub`](huggingface::HuggingFaceHub) | Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations | Bearer |
 //! | [`lmstudio`] | [`LmStudio`](lmstudio::LmStudio) | LM Studio v1 native REST API for local LLM inference and model management | Bearer |
 //! | [`ollama`] | [`OllamaNative`](ollama::OllamaNative) | Ollama native REST API for local LLM inference and model management | None |
@@ -88,6 +89,7 @@ pub mod openai;
 pub mod elevenlabs;
 pub mod gitea;
 pub mod github;
+pub mod gitlab;
 pub mod huggingface;
 pub mod lmstudio;
 pub mod ollama;
