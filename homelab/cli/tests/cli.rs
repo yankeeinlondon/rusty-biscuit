@@ -1,5 +1,16 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
+use std::path::PathBuf;
+
+/// Returns a temporary HOME directory with no homey.json config.
+/// This ensures tests don't accidentally use the user's real config.
+fn empty_home() -> PathBuf {
+    let dir = std::env::temp_dir().join("homey-cli-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    // Remove any leftover config from previous test runs
+    let _ = std::fs::remove_file(dir.join("homey.json"));
+    dir
+}
 
 // =============================================================================
 //                              GENERAL CLI TESTS
@@ -73,6 +84,7 @@ fn test_dynamic_completions_fish() {
 fn test_arcam_missing_host_error() {
     cargo_bin_cmd!("homey")
         .env_remove("ARCAM_AMP")
+        .env("HOME", empty_home())
         .args(["arcam", "on"])
         .assert()
         .failure()
@@ -100,6 +112,7 @@ fn test_arcam_help_shows_actions() {
 fn test_sony_missing_host_error() {
     cargo_bin_cmd!("homey")
         .env_remove("SONY_RECEIVER")
+        .env("HOME", empty_home())
         .args(["sony", "system", "power-status"])
         .assert()
         .failure()
@@ -117,6 +130,7 @@ fn test_sony_help_shows_subcommands() {
         .stdout(predicate::str::contains("input"))
         .stdout(predicate::str::contains("playback"))
         .stdout(predicate::str::contains("debug"))
+        .stdout(predicate::str::contains("--name"))
         .stdout(predicate::str::contains("--host"))
         .stdout(predicate::str::contains("--port"));
 }

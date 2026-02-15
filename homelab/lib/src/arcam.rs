@@ -218,12 +218,18 @@ impl From<std::net::Ipv6Addr> for Arcam {
 
 impl From<String> for Arcam {
     fn from(host: String) -> Self {
-        Self::new(Host::Dns(host))
+        Self::from(host.as_str())
     }
 }
 
 impl From<&str> for Arcam {
     fn from(host: &str) -> Self {
+        if let Ok(ipv4) = host.parse::<Ipv4Addr>() {
+            return Self::new(Host::V4(ipv4));
+        }
+        if let Ok(ipv6) = host.parse::<std::net::Ipv6Addr>() {
+            return Self::new(Host::V6(ipv6));
+        }
         Self::new(Host::Dns(host.to_string()))
     }
 }

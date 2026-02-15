@@ -16,6 +16,7 @@ pub fn wrap_quotation(content: &str, attribution: Option<&str>) -> String {
     if let Some(attribution) = attribution
         && !attribution.is_empty()
     {
+        lines.push(">".to_string());
         lines.push(format!("> — {attribution}"));
     }
 
@@ -43,7 +44,7 @@ mod tests {
     #[test]
     fn wraps_quotation_with_attribution() {
         let wrapped = wrap_quotation("line", Some("Alice"));
-        assert_eq!(wrapped, "> line\n> — Alice");
+        assert_eq!(wrapped, "> line\n>\n> — Alice");
     }
 
     #[test]

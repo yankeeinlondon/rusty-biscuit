@@ -295,6 +295,7 @@ pub fn cleanup_content(content: &str) -> String {
     // Note: emphasis_token/strong_token don't matter since we use placeholders
     let options = CmarkOptions {
         code_block_token_count: 3,
+        increment_ordered_list_bullets: true,
         ..Default::default()
     };
 
@@ -461,11 +462,13 @@ fn fix_blockquote_formatting(output: &mut String) {
     let mut result = String::with_capacity(output.len());
     let mut lines = output.lines().peekable();
     let mut in_code_block = false;
+    let mut prev_was_blockquote = false;
 
     while let Some(line) = lines.next() {
         // Track code blocks to avoid modifying content inside them
         if line.trim_start().starts_with("```") {
             in_code_block = !in_code_block;
+            prev_was_blockquote = false;
             result.push_str(line);
             if lines.peek().is_some() {
                 result.push('\n');
@@ -498,13 +501,19 @@ fn fix_blockquote_formatting(output: &mut String) {
             && trimmed.contains('>')
             && !trimmed.is_empty();
 
+        // Only strip empty blockquote lines at the START of a blockquote (pulldown-cmark
+        // artifact). Preserve them mid-blockquote where they represent intentional
+        // paragraph breaks (e.g., blank line before an attribution).
         if is_empty_blockquote
+            && !prev_was_blockquote
             && let Some(next_line) = lines.peek()
             && next_line.trim_start().starts_with('>')
         {
-            // Skip this empty blockquote line (next line continues the blockquote)
+            // Skip this empty blockquote line at the start of the blockquote
             continue;
         }
+
+        prev_was_blockquote = is_blockquote_line;
 
         result.push_str(&fixed_line);
         // Add newline unless this is the last line
@@ -1751,6 +1760,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_blockquote_preserves_blank_separator_before_attribution() {
+        // A blank `>` line mid-blockquote is an intentional paragraph break
+        // (e.g., separating content from an attribution line) and must survive cleanup.
+        let content = "> Some quoted content\n>\n> — Wikipedia";
+        let cleaned = cleanup_content(content);
+
+        // The blank `>` line may gain a trailing space from fix_blockquote_line,
+        // so check for both forms.
+        let has_separator = cleaned.contains(">\n> — Wikipedia")
+            || cleaned.contains("> \n> — Wikipedia");
+        assert!(
+            has_separator,
+            "Blank blockquote separator before attribution should be preserved, got:\n{:?}",
+            cleaned
+        );
+    }
+
     // ==================== List Marker Preservation Tests ====================
 
     #[test]
@@ -1911,6 +1938,28 @@ mod tests {
         assert_eq!(
             dash_count, 5,
             "All 5 items should use dash marker, got:\n{}",
+            cleaned
+        );
+    }
+
+    #[test]
+    fn test_ordered_list_numbers_are_incremented() {
+        let content = "1. First\n2. Second\n3. Third";
+        let cleaned = cleanup_content(content);
+
+        assert!(
+            cleaned.contains("1. First"),
+            "First item should be numbered 1, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("2. Second"),
+            "Second item should be numbered 2, got:\n{}",
+            cleaned
+        );
+        assert!(
+            cleaned.contains("3. Third"),
+            "Third item should be numbered 3, got:\n{}",
             cleaned
         );
     }

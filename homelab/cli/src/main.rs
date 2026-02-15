@@ -7,6 +7,7 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
 use color_eyre::Result;
 use homelab::arcam::Arcam;
+use homelab::config::{HomeyConfig, parse_host_port};
 use homelab::network::Host;
 use homelab::sony_receiver::{
     GenericSettingResult, SonyError, SonyReceiver, SonyReceiverEndpoints,
@@ -49,7 +50,11 @@ struct Cli {
 enum Commands {
     /// Arcam PA240/PA410/PA720 amplifier control
     Arcam {
-        /// Arcam host IP or DNS name
+        /// Device name from ~/homey.json
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Arcam host IP or DNS name (overrides config)
         #[arg(long, env = "ARCAM_AMP")]
         host: Option<String>,
 
@@ -63,7 +68,11 @@ enum Commands {
 
     /// Sony STR-ZA/DN series receiver control
     Sony {
-        /// Sony receiver IP or DNS name
+        /// Device name from ~/homey.json
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Sony receiver IP or DNS name (overrides config)
         #[arg(long, env = "SONY_RECEIVER")]
         host: Option<String>,
 
@@ -404,8 +413,13 @@ async fn main() -> Result<()> {
             print!("{}", COMPLETIONS_HELP.trim_start());
             Ok(())
         }
-        Commands::Arcam { action, host } => handle_arcam(host, action, json).await,
-        Commands::Sony { action, host, port } => handle_sony(host, port, action, json).await,
+        Commands::Arcam { action, name, host } => handle_arcam(name, host, action, json).await,
+        Commands::Sony {
+            action,
+            name,
+            host,
+            port,
+        } => handle_sony(name, host, port, action, json).await,
     }
 }
 
@@ -413,36 +427,48 @@ async fn main() -> Result<()> {
 //                              ARCAM HANDLER
 // =============================================================================
 
-async fn handle_arcam(host: Option<String>, action: ArcamAction, json: bool) -> Result<()> {
-    let host_str = host.ok_or_else(|| {
-        color_eyre::eyre::eyre!(
-            "Host required: use --host <IP> or set ARCAM_AMP environment variable"
-        )
-    })?;
-
+async fn handle_arcam(
+    name: Option<String>,
+    host: Option<String>,
+    action: ArcamAction,
+    json: bool,
+) -> Result<()> {
+    let host_str = resolve_arcam_host(host, name)?;
     let arcam = Arcam::from(host_str.as_str());
 
     match action {
         ArcamAction::On => {
             arcam.power_on().await?;
+            let is_on = arcam.request_power_state().await?;
+            let status = if is_on {
+                "ON"
+            } else {
+                "OFF (command may have been rejected)"
+            };
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&json!({"status": "ON"}))?
+                    serde_json::to_string_pretty(&json!({"status": status, "verified": is_on}))?
                 );
             } else {
-                println!("ON");
+                println!("{status}");
             }
         }
         ArcamAction::Off => {
             arcam.power_off().await?;
+            let is_on = arcam.request_power_state().await?;
+            let status = if !is_on {
+                "OFF"
+            } else {
+                "ON (command may have been rejected)"
+            };
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&json!({"status": "OFF"}))?
+                    serde_json::to_string_pretty(&json!({"status": status, "verified": !is_on}))?
                 );
             } else {
-                println!("OFF");
+                println!("{status}");
             }
         }
         ArcamAction::PowerStatus => {
@@ -470,28 +496,68 @@ async fn handle_arcam(host: Option<String>, action: ArcamAction, json: bool) -> 
             }
         }
         ArcamAction::MuteToggle => {
-            let is_muted = arcam.get_mute_status().await?;
-            if is_muted {
+            let was_muted = arcam.get_mute_status().await?;
+            if was_muted {
                 arcam.mute_off().await?;
-                if json {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&json!({"muted": false}))?
-                    );
-                } else {
-                    println!("UNMUTED");
-                }
             } else {
                 arcam.mute_on().await?;
-                if json {
-                    println!("{}", serde_json::to_string_pretty(&json!({"muted": true}))?);
-                } else {
-                    println!("MUTED");
-                }
+            }
+            let is_muted = arcam.get_mute_status().await?;
+            let status = if is_muted { "MUTED" } else { "UNMUTED" };
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"muted": is_muted}))?
+                );
+            } else {
+                println!("{status}");
             }
         }
     }
     Ok(())
+}
+
+/// Resolves the Arcam host from --host, --name, or config auto-select.
+///
+/// Priority:
+/// 1. `--host` (explicit override, including from `ARCAM_AMP` env)
+/// 2. `--name` (config lookup by device name)
+/// 3. Single device in config (auto-select when only one exists)
+/// 4. Error with helpful message
+fn resolve_arcam_host(host: Option<String>, name: Option<String>) -> Result<String> {
+    // 1. Explicit --host flag (or ARCAM_AMP env)
+    if let Some(h) = host {
+        return Ok(h);
+    }
+
+    // Load config for --name and auto-select
+    let config = HomeyConfig::load().unwrap_or_default();
+
+    // 2. --name lookup
+    if let Some(ref n) = name {
+        if let Some(service) = config.arcam_amps.get(n) {
+            return Ok(format!("{}:{}", service.host, service.port));
+        }
+        let available = device_names(&config.arcam_amps);
+        return Err(color_eyre::eyre::eyre!(
+            "Arcam device '{}' not found in config.{}",
+            n,
+            available
+        ));
+    }
+
+    // 3. Auto-select if only one device
+    if config.arcam_amps.len() == 1 {
+        let service = config.arcam_amps.values().next().unwrap();
+        return Ok(format!("{}:{}", service.host, service.port));
+    }
+
+    // 4. Error with available devices
+    let available = device_names(&config.arcam_amps);
+    Err(color_eyre::eyre::eyre!(
+        "Host required: use --host <IP>, --name <device>, or set ARCAM_AMP env var.{}",
+        available
+    ))
 }
 
 // =============================================================================
@@ -515,18 +581,14 @@ fn render_settings_table(settings: &[GenericSettingResult]) {
 }
 
 async fn handle_sony(
+    name: Option<String>,
     host: Option<String>,
     port: u16,
     action: SonyAction,
     json: bool,
 ) -> Result<()> {
-    let host_str = host.ok_or_else(|| {
-        color_eyre::eyre::eyre!(
-            "Host required: use --host <IP> or set SONY_RECEIVER environment variable"
-        )
-    })?;
-
-    let receiver = SonyReceiver::new(Host::Dns(host_str), port);
+    let (resolved_host, resolved_port) = resolve_sony_host(host, port, name)?;
+    let receiver = SonyReceiver::new(parse_host(&resolved_host), resolved_port);
 
     match action {
         SonyAction::System(sys) => handle_sony_system(&receiver, sys, json).await,
@@ -535,6 +597,69 @@ async fn handle_sony(
         SonyAction::Playback(playback) => handle_sony_playback(&receiver, playback, json).await,
         SonyAction::Debug(debug) => handle_sony_debug(&receiver, debug, json).await,
     }
+}
+
+/// Resolves the Sony host/port from --host, --name, or config auto-select.
+fn resolve_sony_host(
+    host: Option<String>,
+    port: u16,
+    name: Option<String>,
+) -> Result<(String, u16)> {
+    // 1. Explicit --host flag (or SONY_RECEIVER env)
+    if let Some(h) = host {
+        let (parsed_host, parsed_port) = parse_host_port(&h, port);
+        return Ok((parsed_host, parsed_port));
+    }
+
+    // Load config for --name and auto-select
+    let config = HomeyConfig::load().unwrap_or_default();
+
+    // 2. --name lookup
+    if let Some(ref n) = name {
+        if let Some(service) = config.sony_receivers.get(n) {
+            return Ok((service.host.clone(), service.port));
+        }
+        let available = device_names(&config.sony_receivers);
+        return Err(color_eyre::eyre::eyre!(
+            "Sony device '{}' not found in config.{}",
+            n,
+            available
+        ));
+    }
+
+    // 3. Auto-select if only one device
+    if config.sony_receivers.len() == 1 {
+        let service = config.sony_receivers.values().next().unwrap();
+        return Ok((service.host.clone(), service.port));
+    }
+
+    // 4. Error with available devices
+    let available = device_names(&config.sony_receivers);
+    Err(color_eyre::eyre::eyre!(
+        "Host required: use --host <IP>, --name <device>, or set SONY_RECEIVER env var.{}",
+        available
+    ))
+}
+
+/// Parses a host string into a `Host` enum, trying IP before DNS.
+fn parse_host(host: &str) -> Host {
+    if let Ok(ipv4) = host.parse::<std::net::Ipv4Addr>() {
+        return Host::V4(ipv4);
+    }
+    if let Ok(ipv6) = host.parse::<std::net::Ipv6Addr>() {
+        return Host::V6(ipv6);
+    }
+    Host::Dns(host.to_string())
+}
+
+/// Formats available device names for error messages.
+fn device_names<V>(devices: &std::collections::HashMap<String, V>) -> String {
+    if devices.is_empty() {
+        return String::new();
+    }
+    let mut names: Vec<_> = devices.keys().collect();
+    names.sort();
+    format!(" Available: {}", names.iter().map(|n| n.as_str()).collect::<Vec<_>>().join(", "))
 }
 
 async fn handle_sony_system(
@@ -556,24 +681,26 @@ async fn handle_sony_system(
         }
         SonySystemAction::On => {
             receiver.set_power(true).await?;
+            let status = receiver.get_power_status().await?;
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&json!({"status": "ON"}))?
+                    serde_json::to_string_pretty(&json!({"status": status}))?
                 );
             } else {
-                println!("ON");
+                println!("{status}");
             }
         }
         SonySystemAction::Off => {
             receiver.set_power(false).await?;
+            let status = receiver.get_power_status().await?;
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&json!({"status": "OFF"}))?
+                    serde_json::to_string_pretty(&json!({"status": status}))?
                 );
             } else {
-                println!("OFF");
+                println!("{status}");
             }
         }
         SonySystemAction::Info => {
@@ -734,21 +861,26 @@ async fn handle_sony_audio(
         }
         SonyAudioAction::Mute => {
             receiver.set_mute(true).await?;
+            let muted = receiver.get_mute_status().await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&json!({"muted": true}))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({"muted": muted}))?
+                );
             } else {
-                println!("MUTED");
+                println!("{}", if muted { "MUTED" } else { "UNMUTED (command may have been rejected)" });
             }
         }
         SonyAudioAction::Unmute => {
             receiver.set_mute(false).await?;
+            let muted = receiver.get_mute_status().await?;
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&json!({"muted": false}))?
+                    serde_json::to_string_pretty(&json!({"muted": muted}))?
                 );
             } else {
-                println!("UNMUTED");
+                println!("{}", if !muted { "UNMUTED" } else { "MUTED (command may have been rejected)" });
             }
         }
         SonyAudioAction::SpeakerSettings { target } => {

@@ -30,6 +30,6 @@ While the main workhorse in the Markdown pipeline is _transclusion_ we offer a n
     2. Never skip heading levels, going from `H2` to `H3` is normal but you should not go from `H2` directly to `H4`
     3. Headings always have one (_not more, not less_) blank lines _before_ and _after_ them
     4. Ordered and Unordered lists always have one (_not more, not less_) blank lines _before_ and _after_ them
-    5. etc.
+    6. etc.
 
 

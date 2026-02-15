@@ -1,5 +1,5 @@
 use get_if_addrs::get_if_addrs;
-use homelab_server::{build_router, config::HomeyConfig, state::AppState};
+use homelab_server::{build_router, config::{self, HomeyConfig}, state::AppState};
 use std::time::Duration;
 use tokio::{net::TcpListener, signal};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -92,7 +92,7 @@ fn load_config() -> Result<AppState, Box<dyn std::error::Error>> {
     };
 
     // Migrate from ENV if config is empty
-    if config.migrate_from_env() {
+    if config::migrate_from_env(&mut config) {
         tracing::info!("Migrated devices from environment variables");
 
         // Log what was migrated
