@@ -455,7 +455,7 @@ fn build_common_endpoints() -> Vec<Endpoint> {
             path: "/authentication/{id}/users".to_string(),
             description: "List users in a built-in database authenticator".to_string(),
             request: None,
-            response: ApiResponse::json_type("Vec<AuthUser>"),
+            response: ApiResponse::json_vec_type("AuthUser"),
             headers: vec![],
             params: None,
         },

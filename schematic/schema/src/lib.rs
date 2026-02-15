@@ -12,6 +12,7 @@
 //! | [`anthropic`] | [`Anthropic`](anthropic::Anthropic) | Anthropic Messages API for Claude AI interactions and agent tool use | API Key (`X-Api-Key`) |
 //! | [`openai`] | [`OpenAI`](openai::OpenAI) | OpenAI REST API for model management | Bearer |
 //! | [`elevenlabs`] | [`ElevenLabs`](elevenlabs::ElevenLabs) | ElevenLabs Creative Platform API for text-to-speech, voice management, and sound generation | API Key (`xi-api-key`) |
+//! | [`github`] | [`GitHub`](github::GitHub) | GitHub REST API v2022-11-28 for repository, PR, issue, and release workflows | Bearer |
 //! | [`huggingface`] | [`HuggingFaceHub`](huggingface::HuggingFaceHub) | Hugging Face Hub API for model discovery, dataset management, spaces, and repository operations | Bearer |
 //! | [`lmstudio`] | [`LmStudio`](lmstudio::LmStudio) | LM Studio v1 native REST API for local LLM inference and model management | Bearer |
 //! | [`ollama`] | [`OllamaNative`](ollama::OllamaNative) | Ollama native REST API for local LLM inference and model management | None |
@@ -79,12 +80,13 @@
 //!
 //! All request methods return `Result<T, SchematicError>`. See
 //! [`shared::SchematicError`] for the full error enum and handling examples.
+pub mod shared;
+pub mod prelude;
 pub mod anthropic;
+pub mod openai;
 pub mod elevenlabs;
-pub mod emqx;
+pub mod github;
 pub mod huggingface;
 pub mod lmstudio;
 pub mod ollama;
-pub mod openai;
-pub mod prelude;
-pub mod shared;
+pub mod emqx;

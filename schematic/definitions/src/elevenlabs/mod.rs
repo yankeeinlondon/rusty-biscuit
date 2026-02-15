@@ -314,7 +314,7 @@ pub fn define_elevenlabs_rest_api() -> RestApi {
                 path: "/v1/models".to_string(),
                 description: "Lists all available models".to_string(),
                 request: None,
-                response: ApiResponse::json_type("Vec<ModelInfo>"),
+                response: ApiResponse::json_vec_type("ModelInfo"),
                 headers: vec![],
                     params: None,
             },

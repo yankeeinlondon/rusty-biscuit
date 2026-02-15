@@ -104,6 +104,27 @@ impl ApiResponse {
         Self::Json(Schema::new(type_name))
     }
 
+    /// Creates a JSON response that deserializes to `Vec<T>`.
+    ///
+    /// Convenience wrapper around [`json_type`](Self::json_type) for list endpoints
+    /// that return arrays of items.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_define::ApiResponse;
+    ///
+    /// let response = ApiResponse::json_vec_type("ModelInfo");
+    ///
+    /// // Equivalent to: ApiResponse::json_type("Vec<ModelInfo>")
+    /// if let ApiResponse::Json(schema) = response {
+    ///     assert_eq!(schema.type_name, "Vec<ModelInfo>");
+    /// }
+    /// ```
+    pub fn json_vec_type(item_type: impl Into<String>) -> Self {
+        Self::json_type(format!("Vec<{}>", item_type.into()))
+    }
+
     /// Returns true if this is a JSON response.
     pub fn is_json(&self) -> bool {
         matches!(self, Self::Json(_))
@@ -128,6 +149,15 @@ impl ApiResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_vec_type_wraps_in_vec() {
+        let response = ApiResponse::json_vec_type("ModelInfo");
+        match response {
+            ApiResponse::Json(schema) => assert_eq!(schema.type_name, "Vec<ModelInfo>"),
+            _ => panic!("Expected Json variant"),
+        }
+    }
 
     #[test]
     fn is_json_returns_true_for_json_response() {
