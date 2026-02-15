@@ -93,19 +93,60 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
         Some(sony) => match timeout(state.request_timeout, sony.get_power_status()).await {
             Ok(Ok(status)) => match status.as_str() {
                 "active" => {
-                    // Best-effort instrumentation: volume + current input
-                    // Sequential calls required (Sony allows one TCP connection)
+                    // Best-effort instrumentation: volume, current input, native sources
+                    // JSON-RPC calls are sequential (Sony allows one TCP connection);
+                    // native web API (port 80) is a separate connection.
                     let detail = timeout(state.request_timeout, async {
                         let volume = sony.get_volume().await.ok();
                         let input = sony.get_current_input().await.ok();
+                        let native = match sony.get_native_inputs().await {
+                            Ok(n) => Some(n),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Failed to fetch native inputs");
+                                None
+                            }
+                        };
                         let mut d = serde_json::Map::new();
                         if let Some(v) = volume {
                             d.insert("volume".into(), json!(v.volume));
                             d.insert("max_volume".into(), json!(v.max_volume));
                             d.insert("muted".into(), json!(v.mute == "on"));
                         }
-                        if let Some(i) = input {
-                            d.insert("input".into(), json!(format_input_name(&i.uri)));
+                        // Match current input URI to a native input category
+                        let current_cat = input.as_ref().and_then(|i| {
+                            let cat = match_uri_to_category(&i.uri, native.as_deref());
+                            tracing::debug!(
+                                uri = %i.uri,
+                                matched_category = ?cat,
+                                "Current input matching"
+                            );
+                            cat
+                        });
+                        if let Some(inputs) = &native {
+                            // Show all sources — the native API's `visible` field
+                            // is always false on Sony ES receivers, so we ignore it.
+                            let source_list: Vec<serde_json::Value> = inputs
+                                .iter()
+                                .map(|i| {
+                                    // URI for switching: extInput:{icon}
+                                    let uri = format!("extInput:{}", i.icon);
+                                    json!({
+                                        "name": format_source_name(&i.name),
+                                        "uri": uri,
+                                        "active": current_cat.as_deref() == Some(i.category.as_str()),
+                                    })
+                                })
+                                .collect();
+                            d.insert("sources".into(), json!(source_list));
+                        } else if let Some(ci) = &input {
+                            // Fallback: native API unavailable, show current input only
+                            let name = ci.title.clone().unwrap_or_else(|| {
+                                format_input_name(&ci.uri)
+                            });
+                            d.insert("sources".into(), json!([{
+                                "name": name,
+                                "active": true,
+                            }]));
                         }
                         serde_json::Value::Object(d)
                     })
@@ -143,17 +184,50 @@ async fn probe_sony(state: &AppState) -> DeviceStatusJson {
     }
 }
 
-/// Converts a camelCase string into Title Case with spaces.
+/// Formats a source name for display.
+///
+/// Handles two input formats from the Sony native API:
+/// - ALL-CAPS words: title-case long simple words, keep abbreviations
+///   (words with `/`, `-`, or ≤2 chars) as-is
+/// - camelCase: split at lowercase→uppercase transitions
 ///
 /// ## Examples
 ///
-/// - `"mediaBox"` -> `"Media Box"`
-/// - `"appleTv"` -> `"Apple Tv"`
-/// - `"hdmi"` -> `"Hdmi"`
-fn camel_to_title_case(s: &str) -> String {
+/// - `"MEDIA BOX"` → `"Media Box"`
+/// - `"BD/DVD"` → `"BD/DVD"` (abbreviation kept)
+/// - `"TV"` → `"TV"` (short word kept)
+/// - `"mediaBox"` → `"Media Box"` (camelCase split)
+fn format_source_name(s: &str) -> String {
+    let has_lower = s.chars().any(|c| c.is_lowercase());
+
+    // All-uppercase path: title-case simple words, keep abbreviations as-is
+    if !has_lower && s.len() > 1 {
+        return s
+            .split(' ')
+            .map(|word| {
+                // Keep abbreviations: short words or words with / or -
+                if word.len() <= 2 || word.contains('/') || word.contains('-') {
+                    return word.to_string();
+                }
+                let mut chars = word.chars();
+                match chars.next() {
+                    Some(first) => {
+                        let rest: String =
+                            chars.flat_map(|c| c.to_lowercase()).collect();
+                        format!("{first}{rest}")
+                    }
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+    }
+
+    // camelCase splitting
     let mut result = String::with_capacity(s.len() + 4);
-    for (i, c) in s.chars().enumerate() {
-        if c.is_uppercase() && i > 0 {
+    let chars: Vec<char> = s.chars().collect();
+    for (i, &c) in chars.iter().enumerate() {
+        if c.is_uppercase() && i > 0 && chars[i - 1].is_lowercase() {
             result.push(' ');
         }
         if i == 0 {
@@ -165,7 +239,29 @@ fn camel_to_title_case(s: &str) -> String {
     result
 }
 
+/// Matches a Sony input URI to a native input category.
+///
+/// The receiver reports the current input as `extInput:{icon}` where the
+/// icon value corresponds to the `icon` field from the native input
+/// configuration. For example, `extInput:mediaBox` matches the native
+/// input whose `icon == "mediabox"` (case-insensitive).
+fn match_uri_to_category(
+    uri: &str,
+    native: Option<&[homelab::sony_receiver::NativeInputConfig]>,
+) -> Option<String> {
+    let rest = uri.strip_prefix("extInput:")?;
+    let (base, _query) = rest.split_once('?').unwrap_or((rest, ""));
+    let base_lower = base.to_lowercase();
+
+    native?
+        .iter()
+        .find(|n| n.icon.to_lowercase() == base_lower)
+        .map(|n| n.category.clone())
+}
+
 /// Formats a Sony input URI into a human-readable name.
+///
+/// Used as a fallback when the native web API is unavailable.
 ///
 /// ## Examples
 ///
@@ -196,7 +292,7 @@ fn format_input_name(uri: &str) -> String {
         "fm" => "FM".to_string(),
         "am" => "AM".to_string(),
         "music" => "DLNA".to_string(),
-        other => camel_to_title_case(other),
+        other => format_source_name(other),
     };
 
     // Extract port number from query (e.g. "port=1")
@@ -212,7 +308,7 @@ fn format_input_name(uri: &str) -> String {
 
 #[cfg(test)]
 mod format_tests {
-    use super::{camel_to_title_case, format_input_name};
+    use super::{format_source_name, format_input_name, match_uri_to_category};
 
     #[test]
     fn hdmi_with_port() {
@@ -245,12 +341,81 @@ mod format_tests {
     }
 
     #[test]
-    fn camel_to_title_basics() {
-        assert_eq!(camel_to_title_case("mediaBox"), "Media Box");
-        assert_eq!(camel_to_title_case("appleTv"), "Apple Tv");
-        assert_eq!(camel_to_title_case("hdmi"), "Hdmi");
-        assert_eq!(camel_to_title_case(""), "");
-        assert_eq!(camel_to_title_case("a"), "A");
+    fn uri_to_category_matches_icon() {
+        use homelab::sony_receiver::NativeInputConfig;
+        // The receiver reports current input as extInput:{icon}
+        // where icon is the native config's icon field (case-insensitive)
+        let inputs = vec![
+            NativeInputConfig {
+                category: "STB".to_string(),
+                name: "MEDIA BOX".to_string(),
+                hdmi_assign: "in2".to_string(),
+                icon: "mediabox".to_string(),
+                visible: false,
+                sound_field: String::new(),
+            },
+            NativeInputConfig {
+                category: "GAME".to_string(),
+                name: "GAME".to_string(),
+                hdmi_assign: "in1".to_string(),
+                icon: "game".to_string(),
+                visible: false,
+                sound_field: String::new(),
+            },
+            NativeInputConfig {
+                category: "TV".to_string(),
+                name: "TV".to_string(),
+                hdmi_assign: "none".to_string(),
+                icon: "tv".to_string(),
+                visible: false,
+                sound_field: String::new(),
+            },
+        ];
+        // extInput:mediaBox matches icon "mediabox" (case-insensitive)
+        assert_eq!(
+            match_uri_to_category("extInput:mediaBox", Some(&inputs)),
+            Some("STB".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:game", Some(&inputs)),
+            Some("GAME".to_string())
+        );
+        assert_eq!(
+            match_uri_to_category("extInput:tv", Some(&inputs)),
+            Some("TV".to_string())
+        );
+        // No match
+        assert_eq!(
+            match_uri_to_category("extInput:unknown", Some(&inputs)),
+            None
+        );
+        // Non-extInput prefix
+        assert_eq!(match_uri_to_category("radio:fm", Some(&inputs)), None);
+        // No native inputs
+        assert_eq!(match_uri_to_category("extInput:game", None), None);
+    }
+
+    #[test]
+    fn format_source_name_camel_case() {
+        assert_eq!(format_source_name("mediaBox"), "Media Box");
+        assert_eq!(format_source_name("appleTv"), "Apple Tv");
+        assert_eq!(format_source_name("hdmi"), "Hdmi");
+        assert_eq!(format_source_name(""), "");
+        assert_eq!(format_source_name("a"), "A");
+    }
+
+    #[test]
+    fn format_source_name_uppercase() {
+        // Native API returns ALL-CAPS names — title-case long words,
+        // keep abbreviations (short words, words with / or -)
+        assert_eq!(format_source_name("GAME"), "Game");
+        assert_eq!(format_source_name("MEDIA BOX"), "Media Box");
+        assert_eq!(format_source_name("BD/DVD"), "BD/DVD");
+        assert_eq!(format_source_name("SAT/CATV"), "SAT/CATV");
+        assert_eq!(format_source_name("SA-CD/CD"), "SA-CD/CD");
+        assert_eq!(format_source_name("TV"), "TV");
+        assert_eq!(format_source_name("AUX"), "Aux");
+        assert_eq!(format_source_name("VIDEO"), "Video");
     }
 }
 
@@ -351,18 +516,23 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   body {{ font-family: system-ui, -apple-system, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; background: #1a1a2e; color: #e0e0e0; }}
   h1 {{ color: #fff; margin-bottom: 8px; }}
   .subtitle {{ color: #888; margin-bottom: 32px; }}
-  .device {{ background: #16213e; border-radius: 8px; padding: 16px 20px; margin-bottom: 12px; display: flex; align-items: center; gap: 16px; }}
+  .device {{ background: #16213e; border-radius: 8px; padding: 16px 20px; margin-bottom: 12px; }}
+  .device-row {{ display: flex; align-items: center; gap: 16px; }}
   .device-info {{ flex: 1; min-width: 0; }}
-  .dot {{ width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; align-self: flex-start; margin-top: 3px; transition: background 0.3s, box-shadow 0.3s; }}
-  .green {{ background: #4caf50; box-shadow: 0 0 8px #4caf5088; }}
-  .amber {{ background: #ff9800; box-shadow: 0 0 8px #ff980088; }}
-  .red {{ background: #f44336; box-shadow: 0 0 8px #f4433688; }}
-  .grey {{ background: #666; box-shadow: none; }}
+  .dot {{ width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; transition: background 0.3s, box-shadow 0.3s; cursor: pointer; border: 2px solid transparent; }}
+  .dot:not(.grey):hover {{ border-color: rgba(255,255,255,0.15); }}
+  .dot:not(.grey):active {{ transform: scale(0.9); }}
+  .dot.pressing {{ animation: dot-press 0.4s ease-out; }}
+  .green {{ background: #4caf50; box-shadow: 0 0 10px #4caf5088; }}
+  .amber {{ background: #ff9800; box-shadow: 0 0 10px #ff980088; }}
+  .red {{ background: #f44336; box-shadow: 0 0 10px #f4433688; }}
+  .grey {{ background: #666; box-shadow: none; cursor: default; }}
+  @keyframes dot-press {{ 0% {{ transform: scale(1); box-shadow: 0 0 10px currentColor; }} 30% {{ transform: scale(0.8); box-shadow: 0 0 20px currentColor; }} 100% {{ transform: scale(1); box-shadow: 0 0 10px currentColor; }} }}
   .device-name {{ font-weight: 600; }}
   .device-detail {{ color: #999; font-size: 0.85em; }}
   .host {{ color: #666; font-size: 0.8em; }}
-  .instruments {{ display: flex; flex-direction: column; gap: 6px; align-items: flex-end; align-self: flex-start; margin-top: 2px; flex-shrink: 0; }}
-  .badge-row {{ display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }}
+  .instruments {{ display: flex; flex-direction: column; gap: 6px; align-items: flex-end; flex-shrink: 0; }}
+  .badge-row {{ display: flex; gap: 6px; flex-wrap: wrap; }}
   .badge {{ background: #0f3460; border: 1px solid #1a4a7a; border-radius: 4px; padding: 4px 10px; font-size: 0.75em; color: #a8c8e8; white-space: nowrap; letter-spacing: 0.02em; }}
   .badge-muted {{ background: #4a1a1a; border-color: #7a2a2a; color: #e88; }}
   .volume-wrap {{ display: flex; align-items: center; gap: 8px; width: 140px; }}
@@ -370,6 +540,13 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   .volume-fill {{ height: 100%; border-radius: 3px; background: linear-gradient(90deg, #1a6b5a, #4caf50); transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 0 6px #4caf5044; }}
   .volume-fill.muted {{ background: linear-gradient(90deg, #5a1a1a, #c44); box-shadow: 0 0 6px #c4444444; }}
   .volume-label {{ font-size: 0.7em; color: #556; min-width: 18px; text-align: right; font-variant-numeric: tabular-nums; }}
+  .sources {{ display: none; padding-top: 12px; margin-top: 12px; border-top: 1px solid #1a2a45; }}
+  .sources.visible {{ display: block; }}
+  .sources .badge-row {{ justify-content: flex-end; }}
+  .sources .badge {{ cursor: pointer; transition: background 0.2s, border-color 0.2s, color 0.2s; }}
+  .sources .badge:active {{ transform: scale(0.95); }}
+  .badge-dim {{ background: transparent; border-color: #182540; color: #3a4a60; }}
+  .badge-dim:hover {{ border-color: #1a4a7a; color: #6a8aaa; }}
   .explore {{ margin-top: 24px; color: #b5b5b5; }}
   .explore a {{ color: #7cc4ff; text-decoration: none; }}
   .explore a:hover {{ text-decoration: underline; }}
@@ -380,23 +557,28 @@ async fn index(State(state): State<AppState>) -> Html<String> {
 <p class="subtitle">AV Device Control</p>
 
 <div class="device">
-  <div class="dot {}" id="sony-dot"></div>
-  <div class="device-info">
-    <div class="device-name">Sony Receiver</div>
-    <div class="device-detail" id="sony-label">{}</div>
-    <div class="host">{}</div>
+  <div class="device-row">
+    <div class="dot {}" id="sony-dot"></div>
+    <div class="device-info">
+      <div class="device-name">Sony Receiver</div>
+      <div class="device-detail" id="sony-label">{}</div>
+      <div class="host">{}</div>
+    </div>
+    <div class="instruments" id="sony-instruments"></div>
   </div>
-  <div class="instruments" id="sony-instruments"></div>
+  <div class="sources" id="sony-sources"></div>
 </div>
 
 <div class="device">
-  <div class="dot {}" id="arcam-dot"></div>
-  <div class="device-info">
-    <div class="device-name">Arcam Amplifier</div>
-    <div class="device-detail" id="arcam-label">{}</div>
-    <div class="host">{}</div>
+  <div class="device-row">
+    <div class="dot {}" id="arcam-dot"></div>
+    <div class="device-info">
+      <div class="device-name">Arcam Amplifier</div>
+      <div class="device-detail" id="arcam-label">{}</div>
+      <div class="host">{}</div>
+    </div>
+    <div class="instruments" id="arcam-instruments"></div>
   </div>
-  <div class="instruments" id="arcam-instruments"></div>
 </div>
 
 <p class="explore">Try interacting with the API by using the <a href="./explore">explore</a> UI.</p>
@@ -418,6 +600,35 @@ async fn index(State(state): State<AppState>) -> Html<String> {
     }}
   }}
 
+  function togglePower(dotEl, device) {{
+    if (dotEl.classList.contains('grey')) return;
+    const isOn = dotEl.classList.contains('green');
+    // Animate press
+    dotEl.classList.remove('pressing');
+    void dotEl.offsetWidth; // reflow to restart animation
+    dotEl.classList.add('pressing');
+    dotEl.addEventListener('animationend', () => dotEl.classList.remove('pressing'), {{ once: true }});
+    // Send API call
+    if (device === 'sony') {{
+      fetch('/sony/power', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ active: !isOn }})
+      }}).then(() => setTimeout(poll, 500));
+    }} else if (device === 'arcam') {{
+      const action = isOn ? 'off' : 'on';
+      fetch('/arcam/power/' + action, {{ method: 'POST' }})
+        .then(() => setTimeout(poll, 500));
+    }}
+  }}
+
+  document.getElementById('sony-dot').addEventListener('click', function() {{
+    togglePower(this, 'sony');
+  }});
+  document.getElementById('arcam-dot').addEventListener('click', function() {{
+    togglePower(this, 'arcam');
+  }});
+
   function renderBadges(el, badges) {{
     if (!badges.length) {{ el.innerHTML = ''; return; }}
     const html = '<div class="badge-row">' + badges.map(b =>
@@ -426,22 +637,59 @@ async fn index(State(state): State<AppState>) -> Html<String> {
     if (el.innerHTML !== html) el.innerHTML = html;
   }}
 
-  function renderSony(el, detail) {{
-    if (!detail) {{ el.innerHTML = ''; return; }}
-    let html = '<div class="badge-row">';
-    if (detail.input) html += '<span class="badge">' + detail.input + '</span>';
-    if (detail.muted) html += '<span class="badge badge-muted">MUTED</span>';
-    html += '</div>';
+  function renderSony(instrumentsEl, sourcesEl, detail) {{
+    if (!detail) {{
+      instrumentsEl.innerHTML = '';
+      sourcesEl.innerHTML = '';
+      sourcesEl.classList.remove('visible');
+      return;
+    }}
+    // Volume bar in instruments (right side)
+    let volHtml = '';
     if (detail.volume !== undefined) {{
       const max = detail.max_volume || 100;
       const pct = Math.min(100, Math.round((detail.volume / max) * 100));
       const cls = detail.muted ? ' muted' : '';
-      html += '<div class="volume-wrap">';
-      html += '<div class="volume-track"><div class="volume-fill' + cls + '" style="width:' + pct + '%"></div></div>';
-      html += '<span class="volume-label">' + detail.volume + '</span>';
-      html += '</div>';
+      volHtml += '<div class="volume-wrap">';
+      volHtml += '<div class="volume-track"><div class="volume-fill' + cls + '" style="width:' + pct + '%"></div></div>';
+      volHtml += '<span class="volume-label">' + detail.volume + '</span>';
+      volHtml += '</div>';
     }}
-    if (el.innerHTML !== html) el.innerHTML = html;
+    if (instrumentsEl.innerHTML !== volHtml) instrumentsEl.innerHTML = volHtml;
+    // Source badges in full-width row below
+    if (detail.sources && detail.sources.length) {{
+      const P = ['Media Box', 'Game'];
+      const sorted = detail.sources.slice().sort((a, b) => {{
+        const ai = P.indexOf(a.name); const bi = P.indexOf(b.name);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+        return a.name.localeCompare(b.name);
+      }});
+      let srcHtml = '<div class="badge-row">';
+      srcHtml += sorted.map(s =>
+        '<span class="badge' + (s.active ? '' : ' badge-dim') + '" data-uri="' + s.uri + '">' + s.name + '</span>'
+      ).join('');
+      srcHtml += '</div>';
+      if (sourcesEl.innerHTML !== srcHtml) {{
+        sourcesEl.innerHTML = srcHtml;
+        // Attach click handlers for source switching
+        sourcesEl.querySelectorAll('.badge[data-uri]').forEach(badge => {{
+          badge.addEventListener('click', function() {{
+            const uri = this.getAttribute('data-uri');
+            fetch('/sony/input', {{
+              method: 'POST',
+              headers: {{ 'Content-Type': 'application/json' }},
+              body: JSON.stringify({{ uri: uri }})
+            }}).then(() => setTimeout(poll, 500));
+          }});
+        }});
+      }}
+      sourcesEl.classList.add('visible');
+    }} else {{
+      sourcesEl.innerHTML = '';
+      sourcesEl.classList.remove('visible');
+    }}
   }}
 
   function arcamBadges(detail) {{
@@ -460,7 +708,7 @@ async fn index(State(state): State<AppState>) -> Html<String> {
 
       setDot(document.getElementById("sony-dot"), data.sony.css_class);
       setText(document.getElementById("sony-label"), data.sony.label);
-      renderSony(document.getElementById("sony-instruments"), data.sony.detail);
+      renderSony(document.getElementById("sony-instruments"), document.getElementById("sony-sources"), data.sony.detail);
 
       setDot(document.getElementById("arcam-dot"), data.arcam.css_class);
       setText(document.getElementById("arcam-label"), data.arcam.label);
