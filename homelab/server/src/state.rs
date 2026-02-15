@@ -106,10 +106,7 @@ impl AppState {
 
         // Legacy fields: use first device if available
         let sony = sony_receivers.values().next().cloned();
-        let arcam_host = arcam_hosts
-            .values()
-            .next()
-            .map(|s| format!("{}:{}", s.host, s.port));
+        let arcam_host = arcam_hosts.values().next().map(|s| s.host.clone());
 
         let request_timeout = std::env::var("REQUEST_TIMEOUT_MS")
             .ok()

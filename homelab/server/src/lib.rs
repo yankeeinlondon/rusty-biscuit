@@ -99,7 +99,11 @@ async fn index(State(state): State<AppState>) -> Html<String> {
         .as_ref()
         .map(|s| format!("{}:{}", s.host(), s.port()))
         .unwrap_or_default();
-    let arcam_host = state.arcam_host.clone().unwrap_or_default();
+    let arcam_host = state
+        .arcam_host
+        .as_deref()
+        .map(|h| format!("{h}:50000"))
+        .unwrap_or_default();
 
     Html(format!(
         r#"<!DOCTYPE html>
