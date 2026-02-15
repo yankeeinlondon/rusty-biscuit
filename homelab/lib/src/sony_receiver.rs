@@ -414,6 +414,21 @@ impl PlayingContentInfo {
     }
 }
 
+/// Input configuration from the native web API (port 80).
+///
+/// This provides the user-defined input names, HDMI port assignments,
+/// visibility settings, and sound field presets that the JSON-RPC API
+/// doesn't expose.
+#[derive(Debug, Clone, Serialize)]
+pub struct NativeInputConfig {
+    pub category: String,
+    pub name: String,
+    pub hdmi_assign: String,
+    pub icon: String,
+    pub visible: bool,
+    pub sound_field: String,
+}
+
 /// Extract a string from a JSON value that may be a string, object, or null.
 fn value_as_string(value: &Value) -> Option<String> {
     match value {
@@ -432,6 +447,23 @@ fn value_as_string(value: &Value) -> Option<String> {
 ///
 /// This helper unwraps one level when `result[0]` is an array whose first
 /// element is an object (double-nested data). Otherwise returns `result` as-is.
+/// Extract error code and message from a Sony API error value.
+///
+/// Sony errors are typically `[code, "message"]` arrays.
+/// Returns `(Some(code), message)` if the code is an integer, or `(None, message)`.
+fn extract_sony_error(err: &Value) -> (Option<i64>, String) {
+    if let Some(arr) = err.as_array() {
+        let code = arr.iter().find_map(|v| v.as_i64());
+        let msg = arr
+            .iter()
+            .find_map(|v| v.as_str().map(String::from))
+            .unwrap_or_else(|| format!("{err}"));
+        (code, msg)
+    } else {
+        (None, format!("{err}"))
+    }
+}
+
 fn unwrap_sony_result(response: &Value) -> &Value {
     let result = &response["result"];
     let first = &result[0];
@@ -483,14 +515,26 @@ pub struct SonyReceiver {
 
 impl SonyReceiver {
     pub fn new(host: Host, port: u16) -> Self {
+        // Sony receivers only accept one concurrent TCP connection.
+        // Disable connection pooling so each request opens and closes
+        // its own connection, preventing one client from blocking others.
+        let client = Client::builder()
+            .pool_max_idle_per_host(0)
+            .build()
+            .expect("failed to build HTTP client");
+
         Self {
             host,
             port,
-            client: Client::new(),
+            client,
         }
     }
 
-    /// Generic async sender using typed Endpoints and generic Methods
+    /// Send a JSON-RPC command to the receiver and return the response.
+    ///
+    /// No retry logic — each command is sent exactly once. For state-changing
+    /// commands like `setPowerStatus`, retrying can cause the receiver to
+    /// toggle state (e.g. off → on → off) leading to unpredictable results.
     async fn send_command<M: Serialize>(
         &self,
         endpoint: SonyReceiverEndpoints,
@@ -511,15 +555,7 @@ impl SonyReceiver {
         let mut json_resp: Value = response.json().await?;
 
         if let Some(err) = json_resp.get("error") {
-            // Sony errors are typically [code, "message"]
-            let msg = if let Some(arr) = err.as_array() {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .next()
-                    .unwrap_or_else(|| format!("{err}"))
-            } else {
-                format!("{err}")
-            };
+            let (_code, msg) = extract_sony_error(err);
             return Err(SonyError::Api(msg));
         }
 
@@ -533,30 +569,130 @@ impl SonyReceiver {
         Ok(json_resp)
     }
 
-    // --- SYSTEM ENDPOINT ---
-    pub async fn get_power_status(&self) -> Result<String, SonyError> {
-        let response = self
-            .send_command(
-                SonyReceiverEndpoints::System,
-                SystemAction::GetPowerStatus,
-                json!([]),
-                "1.1",
-            )
-            .await?;
+    // --- NATIVE WEB API (port 80) ---
 
-        let result = unwrap_sony_result(&response);
-        let entry = if result[0].is_object() {
-            &result[0]
-        } else {
-            result
-        };
-        let status = entry["status"].as_str().unwrap_or("unknown").to_string();
+    /// Query features from the receiver's native web API (`/fcgi-bin/request.fcgi`).
+    ///
+    /// This is a separate API from the JSON-RPC API on the configured port.
+    /// It runs on port 80 and provides access to settings that the JSON-RPC
+    /// API doesn't expose (e.g. correct power status, input configuration).
+    async fn native_get(&self, features: &[&str]) -> Result<Vec<(String, String)>, SonyError> {
+        let url = format!("http://{}:80/fcgi-bin/request.fcgi", self.host);
+        let feature_list: Vec<&str> = features.to_vec();
+        let payload = json!({
+            "type": "http_get",
+            "packet": [feature_list]
+        });
 
-        Ok(status)
+        let response = self.client.post(&url).json(&payload).send().await?;
+        let json_resp: Value = response.json().await?;
+
+        let mut results = Vec::new();
+        if let Some(packets) = json_resp["packet"].as_array() {
+            for packet in packets {
+                if let Some(entries) = packet.as_array() {
+                    for entry in entries {
+                        if let (Some(feature), Some(value)) =
+                            (entry["feature"].as_str(), entry["value"].as_str())
+                        {
+                            results.push((feature.to_string(), value.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(results)
     }
 
+    // --- SYSTEM ENDPOINT ---
+
+    /// Get the power status from the native web API.
+    ///
+    /// Returns `"active"` when the receiver is on, or `"standby"` when
+    /// in standby. Unlike the JSON-RPC `getPowerStatus`, this correctly
+    /// reports the state even with Quick Start / Network Standby enabled.
+    pub async fn get_power_status(&self) -> Result<String, SonyError> {
+        let results = self.native_get(&["main.power"]).await?;
+        let value = results
+            .first()
+            .map(|(_, v)| v.as_str())
+            .unwrap_or("unknown");
+
+        // Native API uses "on"/"off", normalize to "active"/"standby"
+        // for compatibility with the rest of the codebase
+        match value {
+            "on" => Ok("active".to_string()),
+            "off" => Ok("standby".to_string()),
+            other => Ok(other.to_string()),
+        }
+    }
+
+    /// Queries input configuration from the native web API.
+    ///
+    /// Returns user-defined names, HDMI assignments, visibility, icons,
+    /// and sound field presets for all 8 input categories.
+    pub async fn get_native_inputs(&self) -> Result<Vec<NativeInputConfig>, SonyError> {
+        const CATEGORIES: &[&str] = &["GAME", "STB", "BD", "SAT", "VIDEO", "AUX", "TV", "CD"];
+        const FEATURES: &[&str] = &["inputname", "hdmiassign", "show", "icon", "soundfield"];
+
+        let feature_list: Vec<String> = CATEGORIES
+            .iter()
+            .flat_map(|cat| FEATURES.iter().map(move |feat| format!("{cat}.{feat}")))
+            .collect();
+
+        let feature_refs: Vec<&str> = feature_list.iter().map(|s| s.as_str()).collect();
+        let results = self.native_get(&feature_refs).await?;
+
+        // Build a lookup map: "GAME.inputname" -> "GAME"
+        let mut lookup: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (feature, value) in &results {
+            lookup.insert(feature.clone(), value.clone());
+        }
+
+        let mut inputs = Vec::new();
+        for &cat in CATEGORIES {
+            let name = lookup
+                .get(&format!("{cat}.inputname"))
+                .cloned()
+                .unwrap_or_default();
+            let hdmi_assign = lookup
+                .get(&format!("{cat}.hdmiassign"))
+                .cloned()
+                .unwrap_or_default();
+            let icon = lookup
+                .get(&format!("{cat}.icon"))
+                .cloned()
+                .unwrap_or_default();
+            let visible = lookup
+                .get(&format!("{cat}.show"))
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            let sound_field = lookup
+                .get(&format!("{cat}.soundfield"))
+                .cloned()
+                .unwrap_or_default();
+
+            inputs.push(NativeInputConfig {
+                category: cat.to_string(),
+                name,
+                hdmi_assign,
+                icon,
+                visible,
+                sound_field,
+            });
+        }
+
+        Ok(inputs)
+    }
+
+    /// Set receiver power state.
+    ///
+    /// Uses `"active"` to power on and `"standby"` to power off. The value
+    /// `"off"` is rejected (error 40001) when Quick Start/Network Standby is
+    /// enabled — which is the default on most Sony ES receivers.
     pub async fn set_power(&self, active: bool) -> Result<(), SonyError> {
-        let status = if active { "active" } else { "off" };
+        let status = if active { "active" } else { "standby" };
         let params = json!([{ "status": status }]);
 
         self.send_command(
@@ -568,6 +704,7 @@ impl SonyReceiver {
         .await?;
         Ok(())
     }
+
 
     // --- AUDIO ENDPOINT ---
     pub async fn set_volume(&self, level: u32) -> Result<(), SonyError> {
@@ -591,7 +728,7 @@ impl SonyReceiver {
             .send_command(
                 SonyReceiverEndpoints::Audio,
                 AudioAction::GetVolumeInformation,
-                json!([]),
+                json!([{ "output": "" }]),
                 "1.1",
             )
             .await?;
@@ -613,7 +750,7 @@ impl SonyReceiver {
             .send_command(
                 SonyReceiverEndpoints::Audio,
                 AudioAction::GetVolumeInformation,
-                json!([]),
+                json!([{ "output": "" }]),
                 "1.1",
             )
             .await?;

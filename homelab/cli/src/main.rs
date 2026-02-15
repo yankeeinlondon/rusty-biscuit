@@ -6,13 +6,45 @@ use biscuit_terminal::prelude::{
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::CompleteEnv;
 use color_eyre::Result;
-use homelab::arcam::Arcam;
+use color_eyre::eyre::WrapErr;
+use homelab::arcam::{Arcam, ArcamResponse};
 use homelab::config::{HomeyConfig, parse_host_port};
 use homelab::network::Host;
 use homelab::sony_receiver::{
     GenericSettingResult, SonyError, SonyReceiver, SonyReceiverEndpoints,
 };
 use serde_json::json;
+
+// =============================================================================
+//                          DEVICE RESOLUTION
+// =============================================================================
+
+/// How a device host was resolved.
+enum DeviceSource {
+    /// Explicit --host flag or env var
+    Flag,
+    /// Looked up by --name in config
+    Name(String),
+    /// Auto-selected as the only device in config
+    Auto(String),
+}
+
+/// Renders a styled device context suffix for human-readable output.
+///
+/// Returns something like `(<dim>192.168.1.50:50000 <i>via</i> <blue>office</blue></dim>)`.
+fn device_suffix(host: &str, port: u16, source: &DeviceSource) -> String {
+    match source {
+        DeviceSource::Flag => format!("(<dim>{host}:{port}</dim>)"),
+        DeviceSource::Name(name) | DeviceSource::Auto(name) => {
+            format!("(<dim>{host}:{port} <i>via</i> <blue>{name}</blue></dim>)")
+        }
+    }
+}
+
+/// Renders a styled single-line result using Prose.
+fn styled(text: impl Into<String>) -> String {
+    Prose::new(text).render(None)
+}
 
 const COMPLETIONS_HELP: &str = r#"
 SHELL COMPLETIONS
@@ -101,6 +133,8 @@ enum ArcamAction {
     MuteStatus,
     /// Toggle mute state
     MuteToggle,
+    /// Probe: send power query and show raw response bytes
+    Probe,
 }
 
 // =============================================================================
@@ -180,6 +214,8 @@ enum SonyAudioAction {
 
 #[derive(Subcommand)]
 enum SonyInputAction {
+    /// Show input configuration (names, HDMI assignments, visibility)
+    Config,
     /// List all available inputs
     List,
     /// Get current input
@@ -433,42 +469,48 @@ async fn handle_arcam(
     action: ArcamAction,
     json: bool,
 ) -> Result<()> {
-    let host_str = resolve_arcam_host(host, name)?;
-    let arcam = Arcam::from(host_str.as_str());
+    let (resolved_host, source) = resolve_arcam(host, name)?;
+    let arcam = Arcam::from(resolved_host.as_str());
+    let suffix = device_suffix(&resolved_host, 50000, &source);
+    let err_ctx = format!("Arcam Amp at {resolved_host}:50000");
 
+    run_arcam_action(&arcam, action, json, &suffix)
+        .await
+        .wrap_err(err_ctx)
+}
+
+async fn run_arcam_action(
+    arcam: &Arcam,
+    action: ArcamAction,
+    json: bool,
+    suffix: &str,
+) -> Result<()> {
     match action {
+        // Power on/off: trust the command acknowledgment from send_command.
+        // The Arcam protocol reads a response byte, so Ok(()) means the amp
+        // confirmed receipt. Verification is unreliable because the amp is
+        // physically transitioning and won't respond to a new TCP connection
+        // until it finishes booting (on) or goes to standby (off).
         ArcamAction::On => {
             arcam.power_on().await?;
-            let is_on = arcam.request_power_state().await?;
-            let status = if is_on {
-                "ON"
-            } else {
-                "OFF (command may have been rejected)"
-            };
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&json!({"status": status, "verified": is_on}))?
+                    serde_json::to_string_pretty(&json!({"status": "ON"}))?
                 );
             } else {
-                println!("{status}");
+                println!("{}", styled(format!("Sent signal to <b>Arcam Amp</b> to turn power <b>ON</b> {suffix}. Powering up will take several seconds.")));
             }
         }
         ArcamAction::Off => {
             arcam.power_off().await?;
-            let is_on = arcam.request_power_state().await?;
-            let status = if !is_on {
-                "OFF"
-            } else {
-                "ON (command may have been rejected)"
-            };
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&json!({"status": status, "verified": !is_on}))?
+                    serde_json::to_string_pretty(&json!({"status": "OFF"}))?
                 );
             } else {
-                println!("{status}");
+                println!("{}", styled(format!("Sent signal to <b>Arcam Amp</b> to turn power <b>OFF</b> {suffix}. Powering down will take several seconds.")));
             }
         }
         ArcamAction::PowerStatus => {
@@ -480,7 +522,7 @@ async fn handle_arcam(
                     serde_json::to_string_pretty(&json!({"status": status}))?
                 );
             } else {
-                println!("{status}");
+                println!("{}", styled(format!("<b>Arcam Amp</b> is <b>{status}</b> {suffix}")));
             }
         }
         ArcamAction::MuteStatus => {
@@ -492,7 +534,7 @@ async fn handle_arcam(
                     serde_json::to_string_pretty(&json!({"muted": is_muted}))?
                 );
             } else {
-                println!("{status}");
+                println!("{}", styled(format!("<b>Arcam Amp</b> is <b>{status}</b> {suffix}")));
             }
         }
         ArcamAction::MuteToggle => {
@@ -510,7 +552,65 @@ async fn handle_arcam(
                     serde_json::to_string_pretty(&json!({"muted": is_muted}))?
                 );
             } else {
-                println!("{status}");
+                println!("{}", styled(format!("<b>Arcam Amp</b> is now <b>{status}</b> {suffix}")));
+            }
+        }
+        ArcamAction::Probe => {
+            let format_resp = |label: &str, resp: &ArcamResponse| -> String {
+                let hex: Vec<String> = resp.raw.iter().map(|b| format!("{b:02X}")).collect();
+                let data_hex: Vec<String> = resp.data.iter().map(|b| format!("{b:02X}")).collect();
+                format!(
+                    "{label}:\n  raw:    {}\n  answer: 0x{:02X}{}\n  data:   [{}]",
+                    hex.join(" "),
+                    resp.answer_code,
+                    if resp.answer_code == 0x00 { " (OK)" } else { " (ERROR)" },
+                    data_hex.join(" "),
+                )
+            };
+
+            println!("{}", styled(format!("<b>Arcam Amp</b> probe {suffix}\n")));
+
+            // Power status query
+            let power_cmd = [0x21, 0x01, 0x00, 0x01, 0xF0, 0x0D];
+            match arcam.send_command(&power_cmd).await {
+                Ok(resp) => {
+                    let state = if resp.data.first().copied() == Some(0x01) { "ON" } else { "OFF" };
+                    println!("{}", format_resp("Power query", &resp));
+                    println!("  state:  {state}");
+                }
+                Err(e) => println!("Power query failed: {e}"),
+            }
+
+            println!();
+
+            // Mute status query
+            let mute_cmd = [0x21, 0x01, 0x0E, 0x01, 0xF0, 0x0D];
+            match arcam.send_command(&mute_cmd).await {
+                Ok(resp) => {
+                    let state = if resp.data.first().copied() == Some(0x00) { "MUTED" } else { "UNMUTED" };
+                    println!("{}", format_resp("Mute query", &resp));
+                    println!("  state:  {state}");
+                }
+                Err(e) => println!("Mute query failed: {e}"),
+            }
+
+            println!();
+
+            // Amplifier mode query
+            let mode_cmd = [0x21, 0x01, 0x61, 0x01, 0xF0, 0x0D];
+            match arcam.send_command(&mode_cmd).await {
+                Ok(resp) => {
+                    let mode = match resp.data.first().copied() {
+                        Some(0) => "Stereo",
+                        Some(1) => "Bridged",
+                        Some(2) => "Dual Mono",
+                        Some(n) => &format!("Unknown ({n})"),
+                        None => "No data",
+                    };
+                    println!("{}", format_resp("Amp mode query", &resp));
+                    println!("  mode:   {mode}");
+                }
+                Err(e) => println!("Amp mode query failed: {e}"),
             }
         }
     }
@@ -519,15 +619,18 @@ async fn handle_arcam(
 
 /// Resolves the Arcam host from --host, --name, or config auto-select.
 ///
+/// Returns `(host, source)`. The host is just the hostname/IP — never includes port
+/// since the Arcam protocol always uses port 50000.
+///
 /// Priority:
 /// 1. `--host` (explicit override, including from `ARCAM_AMP` env)
 /// 2. `--name` (config lookup by device name)
 /// 3. Single device in config (auto-select when only one exists)
 /// 4. Error with helpful message
-fn resolve_arcam_host(host: Option<String>, name: Option<String>) -> Result<String> {
+fn resolve_arcam(host: Option<String>, name: Option<String>) -> Result<(String, DeviceSource)> {
     // 1. Explicit --host flag (or ARCAM_AMP env)
     if let Some(h) = host {
-        return Ok(h);
+        return Ok((h, DeviceSource::Flag));
     }
 
     // Load config for --name and auto-select
@@ -536,7 +639,7 @@ fn resolve_arcam_host(host: Option<String>, name: Option<String>) -> Result<Stri
     // 2. --name lookup
     if let Some(ref n) = name {
         if let Some(service) = config.arcam_amps.get(n) {
-            return Ok(format!("{}:{}", service.host, service.port));
+            return Ok((service.host.clone(), DeviceSource::Name(n.clone())));
         }
         let available = device_names(&config.arcam_amps);
         return Err(color_eyre::eyre::eyre!(
@@ -548,8 +651,11 @@ fn resolve_arcam_host(host: Option<String>, name: Option<String>) -> Result<Stri
 
     // 3. Auto-select if only one device
     if config.arcam_amps.len() == 1 {
-        let service = config.arcam_amps.values().next().unwrap();
-        return Ok(format!("{}:{}", service.host, service.port));
+        let (dev_name, service) = config.arcam_amps.iter().next().unwrap();
+        return Ok((
+            service.host.clone(),
+            DeviceSource::Auto(dev_name.clone()),
+        ));
     }
 
     // 4. Error with available devices
@@ -587,28 +693,31 @@ async fn handle_sony(
     action: SonyAction,
     json: bool,
 ) -> Result<()> {
-    let (resolved_host, resolved_port) = resolve_sony_host(host, port, name)?;
+    let (resolved_host, resolved_port, source) = resolve_sony(host, port, name)?;
     let receiver = SonyReceiver::new(parse_host(&resolved_host), resolved_port);
+    let suffix = device_suffix(&resolved_host, resolved_port, &source);
+    let err_ctx = format!("Sony Receiver at {resolved_host}:{resolved_port}");
 
     match action {
-        SonyAction::System(sys) => handle_sony_system(&receiver, sys, json).await,
-        SonyAction::Audio(audio) => handle_sony_audio(&receiver, audio, json).await,
-        SonyAction::Input(input) => handle_sony_input(&receiver, input, json).await,
-        SonyAction::Playback(playback) => handle_sony_playback(&receiver, playback, json).await,
-        SonyAction::Debug(debug) => handle_sony_debug(&receiver, debug, json).await,
+        SonyAction::System(sys) => handle_sony_system(&receiver, sys, json, &suffix).await,
+        SonyAction::Audio(audio) => handle_sony_audio(&receiver, audio, json, &suffix).await,
+        SonyAction::Input(input) => handle_sony_input(&receiver, input, json, &suffix).await,
+        SonyAction::Playback(pb) => handle_sony_playback(&receiver, pb, json, &suffix).await,
+        SonyAction::Debug(debug) => handle_sony_debug(&receiver, debug, json, &suffix).await,
     }
+    .wrap_err(err_ctx)
 }
 
 /// Resolves the Sony host/port from --host, --name, or config auto-select.
-fn resolve_sony_host(
+fn resolve_sony(
     host: Option<String>,
     port: u16,
     name: Option<String>,
-) -> Result<(String, u16)> {
+) -> Result<(String, u16, DeviceSource)> {
     // 1. Explicit --host flag (or SONY_RECEIVER env)
     if let Some(h) = host {
         let (parsed_host, parsed_port) = parse_host_port(&h, port);
-        return Ok((parsed_host, parsed_port));
+        return Ok((parsed_host, parsed_port, DeviceSource::Flag));
     }
 
     // Load config for --name and auto-select
@@ -617,7 +726,7 @@ fn resolve_sony_host(
     // 2. --name lookup
     if let Some(ref n) = name {
         if let Some(service) = config.sony_receivers.get(n) {
-            return Ok((service.host.clone(), service.port));
+            return Ok((service.host.clone(), service.port, DeviceSource::Name(n.clone())));
         }
         let available = device_names(&config.sony_receivers);
         return Err(color_eyre::eyre::eyre!(
@@ -629,8 +738,12 @@ fn resolve_sony_host(
 
     // 3. Auto-select if only one device
     if config.sony_receivers.len() == 1 {
-        let service = config.sony_receivers.values().next().unwrap();
-        return Ok((service.host.clone(), service.port));
+        let (dev_name, service) = config.sony_receivers.iter().next().unwrap();
+        return Ok((
+            service.host.clone(),
+            service.port,
+            DeviceSource::Auto(dev_name.clone()),
+        ));
     }
 
     // 4. Error with available devices
@@ -659,55 +772,51 @@ fn device_names<V>(devices: &std::collections::HashMap<String, V>) -> String {
     }
     let mut names: Vec<_> = devices.keys().collect();
     names.sort();
-    format!(" Available: {}", names.iter().map(|n| n.as_str()).collect::<Vec<_>>().join(", "))
+    format!(
+        " Available: {}",
+        names
+            .iter()
+            .map(|n| n.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
 async fn handle_sony_system(
     receiver: &SonyReceiver,
     action: SonySystemAction,
     json: bool,
+    suffix: &str,
 ) -> Result<()> {
     match action {
         SonySystemAction::PowerStatus => {
             let status = receiver.get_power_status().await?;
+            let display = match status.as_str() {
+                "active" => "on",
+                "standby" => "off",
+                other => other,
+            };
             if json {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&json!({"status": status}))?
+                    serde_json::to_string_pretty(&json!({"status": display}))?
                 );
             } else {
-                println!("{status}");
+                println!("{}", styled(format!("<b>Sony Receiver</b> is <b>{display}</b> {suffix}")));
             }
         }
         SonySystemAction::On => {
-            receiver.set_power(true).await?;
-            let status = receiver.get_power_status().await?;
-            if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({"status": status}))?
-                );
-            } else {
-                println!("{status}");
-            }
+            send_sony_power(&receiver, true, json, suffix).await?;
         }
         SonySystemAction::Off => {
-            receiver.set_power(false).await?;
-            let status = receiver.get_power_status().await?;
-            if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({"status": status}))?
-                );
-            } else {
-                println!("{status}");
-            }
+            send_sony_power(&receiver, false, json, suffix).await?;
         }
         SonySystemAction::Info => {
             let info = receiver.get_system_information().await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&info)?);
             } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> {suffix}")));
                 let mut table =
                     Table::new().with_columns(vec![TableColumn::new(""), TableColumn::new("")]);
                 table.add_row(vec!["Model".into(), info.model.as_str().into()]);
@@ -728,7 +837,7 @@ async fn handle_sony_system(
                 if let Some(bt) = &info.bd_addr {
                     table.add_row(vec!["BT".into(), bt.as_str().into()]);
                 }
-                print!("\n{}", table.display(&Terminal::default()));
+                print!("{}", table.display(&Terminal::default()));
             }
         }
         SonySystemAction::UpdateCheck => {
@@ -736,15 +845,13 @@ async fn handle_sony_system(
             if json {
                 println!("{}", serde_json::to_string_pretty(&update)?);
             } else {
-                let status = if update.is_updatable == "true" {
+                println!("{}", styled(format!("<b>Sony Receiver</b> {suffix}")));
+                let updatable = if update.is_updatable == "true" {
                     "<green>Yes</green>"
                 } else {
                     "<dim>No</dim>"
                 };
-                println!(
-                    "\n{}",
-                    Prose::new(format!("Updatable: {status}")).render(None)
-                );
+                println!("{}", styled(format!("Updatable: {updatable}")));
                 if !update.sw_info.is_empty() {
                     let mut table = Table::new().with_columns(vec![
                         TableColumn::new("Version"),
@@ -770,7 +877,7 @@ async fn handle_sony_system(
                     serde_json::to_string_pretty(&json!({"status": "update_initiated"}))?
                 );
             } else {
-                println!("Update initiated - receiver will reboot");
+                println!("{}", styled(format!("<b>Sony Receiver</b> update initiated - receiver will reboot {suffix}")));
             }
         }
         SonySystemAction::AlexaStatus => match receiver.get_alexa_registration_status().await {
@@ -781,7 +888,7 @@ async fn handle_sony_system(
                         serde_json::to_string_pretty(&json!({"status": status}))?
                     );
                 } else {
-                    println!("{status}");
+                    println!("{}", styled(format!("<b>Sony Receiver</b> Alexa: <b>{status}</b> {suffix}")));
                 }
             }
             Err(SonyError::Api(msg)) if msg.contains("No Such Method") => {
@@ -793,7 +900,7 @@ async fn handle_sony_system(
                         )?
                     );
                 } else {
-                    println!("Alexa is not configured on this receiver");
+                    println!("{}", styled(format!("<b>Sony Receiver</b> Alexa is not configured {suffix}")));
                     println!("Enable Alexa via the receiver's Settings > Amazon Alexa menu");
                 }
             }
@@ -804,7 +911,7 @@ async fn handle_sony_system(
             if json {
                 println!("{}", serde_json::to_string_pretty(&info)?);
             } else {
-                println!("Device ID: {}", info.device_id);
+                println!("{}", styled(format!("<b>Sony Receiver</b> Device ID: <b>{}</b> {suffix}", info.device_id)));
             }
         }
         SonySystemAction::WuTangInfo { target } => {
@@ -813,9 +920,39 @@ async fn handle_sony_system(
             if json {
                 println!("{}", serde_json::to_string_pretty(&settings)?);
             } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> {suffix}")));
                 render_settings_table(&settings);
             }
         }
+    }
+    Ok(())
+}
+
+/// Send a power on/off command to the Sony receiver.
+///
+/// The JSON-RPC response tells us immediately whether the command succeeded.
+/// A successful response means the receiver accepted the command.
+async fn send_sony_power(
+    receiver: &SonyReceiver,
+    on: bool,
+    json: bool,
+    suffix: &str,
+) -> Result<()> {
+    let target = if on { "on" } else { "off" };
+    receiver.set_power(on).await?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({"status": target}))?
+        );
+    } else {
+        println!(
+            "{}",
+            styled(format!(
+                "<b>Sony Receiver</b> powered <b>{target}</b> {suffix}"
+            ))
+        );
     }
     Ok(())
 }
@@ -824,17 +961,19 @@ async fn handle_sony_audio(
     receiver: &SonyReceiver,
     action: SonyAudioAction,
     json: bool,
+    suffix: &str,
 ) -> Result<()> {
     match action {
         SonyAudioAction::Volume => {
-            let muted = receiver.get_mute_status().await?;
+            let info = receiver.get_volume().await?;
             if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&json!({"muted": muted}))?
-                );
+                println!("{}", serde_json::to_string_pretty(&info)?);
             } else {
-                println!("Muted: {}", if muted { "yes" } else { "no" });
+                let mute_hint = if info.mute == "on" { " <dim>(muted)</dim>" } else { "" };
+                println!("{}", styled(format!(
+                    "<b>Sony Receiver</b> volume: <b>{}</b>{mute_hint} {suffix}",
+                    info.volume
+                )));
             }
         }
         SonyAudioAction::SetVolume { level } => {
@@ -845,7 +984,7 @@ async fn handle_sony_audio(
                     serde_json::to_string_pretty(&json!({"volume": level}))?
                 );
             } else {
-                println!("Volume set to {level}");
+                println!("{}", styled(format!("<b>Sony Receiver</b> volume set to <b>{level}</b> {suffix}")));
             }
         }
         SonyAudioAction::MuteStatus => {
@@ -856,7 +995,8 @@ async fn handle_sony_audio(
                     serde_json::to_string_pretty(&json!({"muted": muted}))?
                 );
             } else {
-                println!("{}", if muted { "MUTED" } else { "UNMUTED" });
+                let status = if muted { "MUTED" } else { "UNMUTED" };
+                println!("{}", styled(format!("<b>Sony Receiver</b> is <b>{status}</b> {suffix}")));
             }
         }
         SonyAudioAction::Mute => {
@@ -867,8 +1007,10 @@ async fn handle_sony_audio(
                     "{}",
                     serde_json::to_string_pretty(&json!({"muted": muted}))?
                 );
+            } else if muted {
+                println!("{}", styled(format!("<b>Sony Receiver</b> is now <b>MUTED</b> {suffix}")));
             } else {
-                println!("{}", if muted { "MUTED" } else { "UNMUTED (command may have been rejected)" });
+                println!("{}", styled(format!("<b>Sony Receiver</b> is still <b>UNMUTED</b> <dim>(command may not have taken effect)</dim> {suffix}")));
             }
         }
         SonyAudioAction::Unmute => {
@@ -879,8 +1021,10 @@ async fn handle_sony_audio(
                     "{}",
                     serde_json::to_string_pretty(&json!({"muted": muted}))?
                 );
+            } else if !muted {
+                println!("{}", styled(format!("<b>Sony Receiver</b> is now <b>UNMUTED</b> {suffix}")));
             } else {
-                println!("{}", if !muted { "UNMUTED" } else { "MUTED (command may have been rejected)" });
+                println!("{}", styled(format!("<b>Sony Receiver</b> is still <b>MUTED</b> <dim>(command may not have taken effect)</dim> {suffix}")));
             }
         }
         SonyAudioAction::SpeakerSettings { target } => {
@@ -888,6 +1032,7 @@ async fn handle_sony_audio(
             if json {
                 println!("{}", serde_json::to_string_pretty(&settings)?);
             } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> {suffix}")));
                 render_settings_table(&settings);
             }
         }
@@ -899,13 +1044,42 @@ async fn handle_sony_input(
     receiver: &SonyReceiver,
     action: SonyInputAction,
     json: bool,
+    suffix: &str,
 ) -> Result<()> {
     match action {
+        SonyInputAction::Config => {
+            let inputs = receiver.get_native_inputs().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&inputs)?);
+            } else {
+                println!(
+                    "{}",
+                    styled(format!("<b>Sony Receiver</b> input config {suffix}"))
+                );
+                let mut table = Table::new().with_columns(vec![
+                    TableColumn::new("Name"),
+                    TableColumn::new("HDMI"),
+                    TableColumn::new("Sound Field"),
+                    TableColumn::new("Visible"),
+                ]);
+                for input in &inputs {
+                    let vis = if input.visible { "yes" } else { "no" };
+                    table.add_row(vec![
+                        input.name.as_str().into(),
+                        input.hdmi_assign.as_str().into(),
+                        input.sound_field.as_str().into(),
+                        vis.into(),
+                    ]);
+                }
+                print!("{}", table.display(&Terminal::default()));
+            }
+        }
         SonyInputAction::List => {
             let inputs = receiver.list_inputs().await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&inputs)?);
             } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> inputs {suffix}")));
                 let mut list = UnorderedList::empty();
                 for input in inputs {
                     let connected = input.connection.as_deref() == Some("connected");
@@ -920,7 +1094,7 @@ async fn handle_sony_input(
                     );
                     list.add(Prose::new(line));
                 }
-                print!("\n{}", list.display(&Terminal::default()));
+                print!("{}", list.display(&Terminal::default()));
             }
         }
         SonyInputAction::Current => {
@@ -928,7 +1102,8 @@ async fn handle_sony_input(
             if json {
                 println!("{}", serde_json::to_string_pretty(&input)?);
             } else {
-                println!("{}", input.source.as_deref().unwrap_or(&input.uri));
+                let source = input.source.as_deref().unwrap_or(&input.uri);
+                println!("{}", styled(format!("<b>Sony Receiver</b> input is <b>{source}</b> {suffix}")));
             }
         }
         SonyInputAction::Set { uri } => {
@@ -936,7 +1111,7 @@ async fn handle_sony_input(
             if json {
                 println!("{}", serde_json::to_string_pretty(&json!({"uri": uri}))?);
             } else {
-                println!("Input set to {uri}");
+                println!("{}", styled(format!("<b>Sony Receiver</b> input set to <b>{uri}</b> {suffix}")));
             }
         }
         SonyInputAction::Schemes => {
@@ -944,11 +1119,12 @@ async fn handle_sony_input(
             if json {
                 println!("{}", serde_json::to_string_pretty(&schemes)?);
             } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> URI schemes {suffix}")));
                 let mut list = UnorderedList::empty();
                 for scheme in schemes {
                     list.add(Prose::new(format!("<b>{scheme}</b>")));
                 }
-                print!("\n{}", list.display(&Terminal::default()));
+                print!("{}", list.display(&Terminal::default()));
             }
         }
         SonyInputAction::Sources { scheme } => {
@@ -956,11 +1132,12 @@ async fn handle_sony_input(
             if json {
                 println!("{}", serde_json::to_string_pretty(&sources)?);
             } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> sources for <b>{scheme}</b> {suffix}")));
                 let mut list = UnorderedList::empty();
                 for src in sources {
                     list.add(Prose::new(src.source));
                 }
-                print!("\n{}", list.display(&Terminal::default()));
+                print!("{}", list.display(&Terminal::default()));
             }
         }
         SonyInputAction::ContentCount { source } => {
@@ -971,7 +1148,7 @@ async fn handle_sony_input(
                     serde_json::to_string_pretty(&json!({"count": count}))?
                 );
             } else {
-                println!("{count}");
+                println!("{}", styled(format!("<b>Sony Receiver</b> content count for <b>{source}</b>: <b>{count}</b> {suffix}")));
             }
         }
         SonyInputAction::ContentList {
@@ -983,13 +1160,14 @@ async fn handle_sony_input(
             if json {
                 println!("{}", serde_json::to_string_pretty(&items)?);
             } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> content for <b>{source}</b> {suffix}")));
                 let mut table = Table::new()
                     .with_columns(vec![TableColumn::new("Title"), TableColumn::new("URI")]);
                 for item in items {
                     let title = item.title.as_deref().unwrap_or("");
                     table.add_row(vec![title.into(), item.uri.as_str().into()]);
                 }
-                print!("\n{}", table.display(&Terminal::default()));
+                print!("{}", table.display(&Terminal::default()));
             }
         }
         SonyInputAction::Browse { source } => {
@@ -1000,7 +1178,7 @@ async fn handle_sony_input(
                     serde_json::to_string_pretty(&json!({"status": "browsing", "source": source}))?
                 );
             } else {
-                println!("Browsing {source}");
+                println!("{}", styled(format!("<b>Sony Receiver</b> browsing <b>{source}</b> {suffix}")));
             }
         }
         SonyInputAction::SetTerminal { uri } => {
@@ -1008,31 +1186,36 @@ async fn handle_sony_input(
             if json {
                 println!("{}", serde_json::to_string_pretty(&json!({"uri": uri}))?);
             } else {
-                println!("Active terminal set to {uri}");
+                println!("{}", styled(format!("<b>Sony Receiver</b> active terminal set to <b>{uri}</b> {suffix}")));
             }
         }
         SonyInputAction::Bluetooth { target } => {
             let result = receiver.get_bluetooth_settings(target.as_api_str()).await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
-            } else if let Some(arr) = result.as_array() {
-                let mut table = Table::new().with_columns(vec![
-                    TableColumn::new("Setting"),
-                    TableColumn::new("Value"),
-                    TableColumn::new("Title"),
-                ]);
-                for item in arr {
-                    if let Some(obj) = item.as_object() {
-                        let target = obj.get("target").and_then(|v| v.as_str()).unwrap_or("");
-                        let value = obj
-                            .get("currentValue")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                        table.add_row(vec![target.into(), value.into(), title.into()]);
+            } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> Bluetooth settings {suffix}")));
+                if let Some(arr) = result.as_array() {
+                    let mut table = Table::new().with_columns(vec![
+                        TableColumn::new("Setting"),
+                        TableColumn::new("Value"),
+                        TableColumn::new("Title"),
+                    ]);
+                    for item in arr {
+                        if let Some(obj) = item.as_object() {
+                            let target =
+                                obj.get("target").and_then(|v| v.as_str()).unwrap_or("");
+                            let value = obj
+                                .get("currentValue")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            let title =
+                                obj.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                            table.add_row(vec![target.into(), value.into(), title.into()]);
+                        }
                     }
+                    print!("{}", table.display(&Terminal::default()));
                 }
-                print!("\n{}", table.display(&Terminal::default()));
             }
         }
         SonyInputAction::SetBluetooth { target, value } => {
@@ -1043,7 +1226,7 @@ async fn handle_sony_input(
                     serde_json::to_string_pretty(&json!({"target": target, "value": value}))?
                 );
             } else {
-                println!("{target} set to {value}");
+                println!("{}", styled(format!("<b>Sony Receiver</b> <b>{target}</b> set to <b>{value}</b> {suffix}")));
             }
         }
         SonyInputAction::PlaybackMode { target } => {
@@ -1053,6 +1236,7 @@ async fn handle_sony_input(
             if json {
                 println!("{}", serde_json::to_string_pretty(&settings)?);
             } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> playback mode {suffix}")));
                 render_settings_table(&settings);
             }
         }
@@ -1064,6 +1248,7 @@ async fn handle_sony_playback(
     receiver: &SonyReceiver,
     action: SonyPlaybackAction,
     json: bool,
+    suffix: &str,
 ) -> Result<()> {
     match action {
         SonyPlaybackAction::NowPlaying => {
@@ -1071,6 +1256,7 @@ async fn handle_sony_playback(
             if json {
                 println!("{}", serde_json::to_string_pretty(&content)?);
             } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> now playing {suffix}")));
                 let mut table =
                     Table::new().with_columns(vec![TableColumn::new(""), TableColumn::new("")]);
                 if let Some(title) = &content.title {
@@ -1083,7 +1269,7 @@ async fn handle_sony_playback(
                 if let Some(state) = &content.state {
                     table.add_row(vec!["State".into(), state.as_str().into()]);
                 }
-                print!("\n{}", table.display(&Terminal::default()));
+                print!("{}", table.display(&Terminal::default()));
             }
         }
         SonyPlaybackAction::Stop => {
@@ -1094,7 +1280,7 @@ async fn handle_sony_playback(
                     serde_json::to_string_pretty(&json!({"status": "stopped"}))?
                 );
             } else {
-                println!("Stopped");
+                println!("{}", styled(format!("<b>Sony Receiver</b> playback <b>stopped</b> {suffix}")));
             }
         }
         SonyPlaybackAction::Pause => {
@@ -1105,7 +1291,7 @@ async fn handle_sony_playback(
                     serde_json::to_string_pretty(&json!({"status": "paused"}))?
                 );
             } else {
-                println!("Paused");
+                println!("{}", styled(format!("<b>Sony Receiver</b> playback <b>paused</b> {suffix}")));
             }
         }
         SonyPlaybackAction::Next => {
@@ -1116,7 +1302,7 @@ async fn handle_sony_playback(
                     serde_json::to_string_pretty(&json!({"status": "next"}))?
                 );
             } else {
-                println!("Next");
+                println!("{}", styled(format!("<b>Sony Receiver</b> skipped to <b>next</b> {suffix}")));
             }
         }
         SonyPlaybackAction::Previous => {
@@ -1127,21 +1313,24 @@ async fn handle_sony_playback(
                     serde_json::to_string_pretty(&json!({"status": "previous"}))?
                 );
             } else {
-                println!("Previous");
+                println!("{}", styled(format!("<b>Sony Receiver</b> skipped to <b>previous</b> {suffix}")));
             }
         }
         SonyPlaybackAction::Functions => {
             let funcs = receiver.get_available_playback_function().await?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&funcs)?);
-            } else if funcs.functions.is_empty() {
-                println!("none");
             } else {
-                let mut list = UnorderedList::empty();
-                for func in funcs.functions {
-                    list.add(Prose::new(func));
+                println!("{}", styled(format!("<b>Sony Receiver</b> available playback functions {suffix}")));
+                if funcs.functions.is_empty() {
+                    println!("  (none)");
+                } else {
+                    let mut list = UnorderedList::empty();
+                    for func in funcs.functions {
+                        list.add(Prose::new(func));
+                    }
+                    print!("{}", list.display(&Terminal::default()));
                 }
-                print!("\n{}", list.display(&Terminal::default()));
             }
         }
         SonyPlaybackAction::SupportedFunctions => {
@@ -1149,6 +1338,7 @@ async fn handle_sony_playback(
             if json {
                 println!("{}", serde_json::to_string_pretty(&items)?);
             } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> supported playback functions {suffix}")));
                 let mut list = UnorderedList::empty();
                 for item in &items {
                     if item.functions.is_empty() {
@@ -1169,7 +1359,7 @@ async fn handle_sony_playback(
                         )));
                     }
                 }
-                print!("\n{}", list.display(&Terminal::default()));
+                print!("{}", list.display(&Terminal::default()));
             }
         }
         SonyPlaybackAction::Preset { uri } => {
@@ -1180,7 +1370,7 @@ async fn handle_sony_playback(
                     serde_json::to_string_pretty(&json!({"status": "preset", "uri": uri}))?
                 );
             } else {
-                println!("Station preset: {uri}");
+                println!("{}", styled(format!("<b>Sony Receiver</b> station preset: <b>{uri}</b> {suffix}")));
             }
         }
         SonyPlaybackAction::Seek { direction } => {
@@ -1193,7 +1383,7 @@ async fn handle_sony_playback(
                     serde_json::to_string_pretty(&json!({"status": "seeking", "direction": dir}))?
                 );
             } else {
-                println!("Seeking {dir}");
+                println!("{}", styled(format!("<b>Sony Receiver</b> seeking <b>{dir}</b> {suffix}")));
             }
         }
         SonyPlaybackAction::Scan { direction } => {
@@ -1206,7 +1396,7 @@ async fn handle_sony_playback(
                     serde_json::to_string_pretty(&json!({"status": "scanning", "direction": dir}))?
                 );
             } else {
-                println!("Scanning {dir}");
+                println!("{}", styled(format!("<b>Sony Receiver</b> scanning <b>{dir}</b> {suffix}")));
             }
         }
     }
@@ -1217,6 +1407,7 @@ async fn handle_sony_debug(
     receiver: &SonyReceiver,
     action: SonyDebugAction,
     json: bool,
+    suffix: &str,
 ) -> Result<()> {
     match action {
         SonyDebugAction::Methods { endpoint } => {
@@ -1224,6 +1415,7 @@ async fn handle_sony_debug(
             if json {
                 println!("{}", serde_json::to_string_pretty(&methods)?);
             } else {
+                println!("{}", styled(format!("<b>Sony Receiver</b> supported methods {suffix}")));
                 let mut list = UnorderedList::empty();
                 for method in methods {
                     let mut parts =
@@ -1238,7 +1430,7 @@ async fn handle_sony_debug(
                     }
                     list.add(Prose::new(parts));
                 }
-                print!("\n{}", list.display(&Terminal::default()));
+                print!("{}", list.display(&Terminal::default()));
             }
         }
         SonyDebugAction::Probe => {
@@ -1246,15 +1438,7 @@ async fn handle_sony_debug(
             if json {
                 println!("{}", serde_json::to_string_pretty(&results)?);
             } else {
-                println!(
-                    "\n{}",
-                    Prose::new(format!(
-                        "<dim>Probing Endpoints on {}:{}</dim>",
-                        receiver.host(),
-                        receiver.port()
-                    ))
-                    .render(None)
-                );
+                println!("{}", styled(format!("<b>Sony Receiver</b> endpoint probe {suffix}")));
                 let mut table = Table::new().with_columns(vec![
                     TableColumn::new("Status"),
                     TableColumn::new("Path"),

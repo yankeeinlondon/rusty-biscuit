@@ -19,6 +19,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(get_volume, set_volume))
         .routes(routes!(get_mute, set_mute))
         .routes(routes!(list_inputs))
+        .routes(routes!(get_input_config))
         .routes(routes!(get_current_input))
         .routes(routes!(set_input))
         .routes(routes!(get_system_info))
@@ -31,6 +32,7 @@ pub fn routes_with_name() -> OpenApiRouter<AppState> {
         .routes(routes!(get_volume_by_name, set_volume_by_name))
         .routes(routes!(get_mute_by_name, set_mute_by_name))
         .routes(routes!(list_inputs_by_name))
+        .routes(routes!(get_input_config_by_name))
         .routes(routes!(get_current_input_by_name))
         .routes(routes!(set_input_by_name))
         .routes(routes!(get_system_info_by_name))
@@ -85,6 +87,22 @@ pub struct MuteResponse {
 pub struct InputRequest {
     /// Input URI (e.g. "extInput:hdmi?port=1")
     uri: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct NativeInputConfigResponse {
+    /// Input category (e.g. "GAME", "STB", "BD")
+    category: String,
+    /// User-facing display name
+    name: String,
+    /// HDMI port assignment (e.g. "HDMI 1", "HDMI 3")
+    hdmi_assign: String,
+    /// Icon identifier
+    icon: String,
+    /// Whether the input is visible in the receiver UI
+    visible: bool,
+    /// Sound field preset (e.g. "A.F.D.", "2ch Stereo")
+    sound_field: String,
 }
 
 // --- Legacy Handlers (single device via ENV) ---
@@ -274,6 +292,41 @@ pub(crate) async fn list_inputs(
     let inputs = with_timeout(state.request_timeout, sony.list_inputs()).await?;
 
     Ok(Json(inputs))
+}
+
+#[utoipa::path(
+    get,
+    path = "/inputs/config",
+    tag = "sony",
+    responses(
+        (status = 200, description = "Input configuration from native API", body = Vec<NativeInputConfigResponse>),
+        (status = 404, description = "Device not configured", body = ErrorResponse),
+        (status = 504, description = "Request timeout", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn get_input_config(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ServerError> {
+    let sony = state
+        .sony
+        .as_ref()
+        .ok_or(ServerError::DeviceNotConfigured("Sony Receiver"))?;
+
+    let inputs = with_timeout(state.request_timeout, sony.get_native_inputs()).await?;
+
+    let response: Vec<NativeInputConfigResponse> = inputs
+        .into_iter()
+        .map(|i| NativeInputConfigResponse {
+            category: i.category,
+            name: i.name,
+            hdmi_assign: i.hdmi_assign,
+            icon: i.icon,
+            visible: i.visible,
+            sound_field: i.sound_field,
+        })
+        .collect();
+
+    Ok(Json(response))
 }
 
 #[utoipa::path(
@@ -561,6 +614,45 @@ pub(crate) async fn list_inputs_by_name(
     let inputs = with_timeout(state.request_timeout, sony.list_inputs()).await?;
 
     Ok(Json(inputs))
+}
+
+#[utoipa::path(
+    get,
+    path = "/{name}/inputs/config",
+    tag = "sony_receiver",
+    params(
+        ("name" = String, Path, description = "Device name")
+    ),
+    responses(
+        (status = 200, description = "Input configuration from native API", body = Vec<NativeInputConfigResponse>),
+        (status = 404, description = "Device not found", body = ErrorResponse),
+        (status = 504, description = "Request timeout", body = ErrorResponse),
+    )
+)]
+pub(crate) async fn get_input_config_by_name(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<impl IntoResponse, ServerError> {
+    let sony = state
+        .get_sony(&name)
+        .await
+        .ok_or_else(|| ServerError::DeviceNotFound(name))?;
+
+    let inputs = with_timeout(state.request_timeout, sony.get_native_inputs()).await?;
+
+    let response: Vec<NativeInputConfigResponse> = inputs
+        .into_iter()
+        .map(|i| NativeInputConfigResponse {
+            category: i.category,
+            name: i.name,
+            hdmi_assign: i.hdmi_assign,
+            icon: i.icon,
+            visible: i.visible,
+            sound_field: i.sound_field,
+        })
+        .collect();
+
+    Ok(Json(response))
 }
 
 #[utoipa::path(

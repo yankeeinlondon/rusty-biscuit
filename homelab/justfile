@@ -36,6 +36,9 @@ default:
     just --list | grep -v 'default'
     echo
 
+_notify message:
+    osascript -e 'display notification "{{message}}" with title "Homelab"'
+
 # build Homelab packages (lib, cli, server)
 build *args="":
     @echo ""

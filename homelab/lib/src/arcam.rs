@@ -13,21 +13,59 @@ pub enum ArcamError {
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
 
-    #[error("Invalid response for power state")]
-    InvalidResponse,
+    #[error("Invalid response: expected at least 7 bytes (St Zn Cc Ac Dl Data Et), got {0} bytes: {1}")]
+    ResponseTooShort(usize, String),
 
-    #[error("Invalid response for mute status")]
-    InvalidMuteStatusResponse,
+    #[error("Invalid response: missing start byte 0x21, got: {0}")]
+    BadStartByte(String),
 
-    #[error("Invalid response for amplifier mode")]
-    InvalidAmplifierModeResponse,
+    #[error("Zone invalid (answer code 0x82, raw: {0})")]
+    ZoneInvalid(String),
+
+    #[error("Command not recognised by amplifier (answer code 0x83, raw: {0})")]
+    CommandNotRecognised(String),
+
+    #[error("Parameter not recognised by amplifier (answer code 0x84, raw: {0})")]
+    ParameterNotRecognised(String),
+
+    #[error("Invalid data length (answer code 0x86, raw: {0})")]
+    InvalidDataLength(String),
+
+    #[error("Unknown answer code 0x{answer_code:02X} (raw: {raw})")]
+    UnknownAnswerCode { answer_code: u8, raw: String },
 }
 
-/// Send a raw command frame and optionally read a response.
+/// A parsed Arcam protocol response frame.
+///
+/// Frame format: `St(0x21) Zn Cc Ac Dl Data... Et(0x0D)`
+#[derive(Debug)]
+pub struct ArcamResponse {
+    /// Zone number (typically 0x01).
+    pub zone: u8,
+    /// Command code echoed back.
+    pub command: u8,
+    /// Answer code: 0x00 = status update (success).
+    pub answer_code: u8,
+    /// Payload data bytes.
+    pub data: Vec<u8>,
+    /// Full raw response bytes for diagnostics.
+    pub raw: Vec<u8>,
+}
+
+/// Format raw bytes as a hex string for diagnostics (e.g. `"21 01 00 00 01 01 0D"`).
+fn hex_dump(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Send a raw command frame and read the response.
 ///
 /// `cmd_bytes` should be the complete PA240/PA410/PA720 command frame.
 /// Returns the raw response bytes on success.
-async fn send_command(ip_addr: &str, cmd_bytes: &[u8]) -> Result<Vec<u8>, ArcamError> {
+async fn send_raw(ip_addr: &str, cmd_bytes: &[u8]) -> Result<Vec<u8>, ArcamError> {
     // Arcam PA240/PA410/PA720 IP control default port is 50000
     let addr = format!("{}:50000", ip_addr);
     let mut sock = TcpStream::connect(addr).await?;
@@ -40,87 +78,114 @@ async fn send_command(ip_addr: &str, cmd_bytes: &[u8]) -> Result<Vec<u8>, ArcamE
     Ok(buf)
 }
 
+/// Parse a raw response into a structured [`ArcamResponse`].
+///
+/// Arcam response frame: `St(0x21) Zn Cc Ac Dl Data[Dl bytes] Et(0x0D)`
+/// Minimum valid response is 7 bytes (header + 1 data byte + trailer).
+fn parse_response(raw: Vec<u8>) -> Result<ArcamResponse, ArcamError> {
+    if raw.len() < 7 {
+        return Err(ArcamError::ResponseTooShort(raw.len(), hex_dump(&raw)));
+    }
+    if raw[0] != 0x21 {
+        return Err(ArcamError::BadStartByte(hex_dump(&raw)));
+    }
+
+    let zone = raw[1];
+    let command = raw[2];
+    let answer_code = raw[3];
+    let data_len = raw[4] as usize;
+    // Data bytes start at index 5, followed by Et at index 5 + data_len
+    let data = raw[5..5 + data_len.min(raw.len().saturating_sub(6))].to_vec();
+
+    Ok(ArcamResponse {
+        zone,
+        command,
+        answer_code,
+        data,
+        raw,
+    })
+}
+
+/// Send a command and parse the response, returning an error for non-zero answer codes.
+async fn send_command(ip_addr: &str, cmd_bytes: &[u8]) -> Result<ArcamResponse, ArcamError> {
+    let raw = send_raw(ip_addr, cmd_bytes).await?;
+    let resp = parse_response(raw)?;
+
+    match resp.answer_code {
+        0x00 => Ok(resp),
+        0x82 => Err(ArcamError::ZoneInvalid(hex_dump(&resp.raw))),
+        0x83 => Err(ArcamError::CommandNotRecognised(hex_dump(&resp.raw))),
+        0x84 => Err(ArcamError::ParameterNotRecognised(hex_dump(&resp.raw))),
+        0x86 => Err(ArcamError::InvalidDataLength(hex_dump(&resp.raw))),
+        code => Err(ArcamError::UnknownAnswerCode {
+            answer_code: code,
+            raw: hex_dump(&resp.raw),
+        }),
+    }
+}
+
 /// Request the current power state.
 ///
 /// Returns `Ok(true)` if ON, `Ok(false)` if standby/off.
 async fn request_power_state(ip_addr: &str) -> Result<bool, ArcamError> {
-    // Frame: ! 0x01 0x00 [len=1] 0xF0 CR
+    // Frame: ! Zone=0x01 Cc=0x00(Power) Dl=0x01 Data=0xF0(Query) CR
     let cmd = [0x21, 0x01, 0x00, 0x01, 0xF0, 0x0D];
     let resp = send_command(ip_addr, &cmd).await?;
-
-    // Typical response: ! 0x01 0x00 <AnswerCode> 0x01 <state> CR
-    // State byte is usually the last before CR
-    if resp.len() >= 6 {
-        let state = resp[resp.len() - 2];
-        return Ok(state == 0x01);
-    }
-
-    Err(ArcamError::InvalidResponse)
+    // Data[0]: 0x00 = standby, 0x01 = on
+    Ok(resp.data.first().copied() == Some(0x01))
 }
 
 /// Power ON the amplifier.
 async fn power_on(ip_addr: &str) -> Result<(), ArcamError> {
-    // Frame: ! 0x01 0x00 [len=1] 0x01 CR
+    // Frame: ! Zone=0x01 Cc=0x00(Power) Dl=0x01 Data=0x01(On) CR
     let cmd = [0x21, 0x01, 0x00, 0x01, 0x01, 0x0D];
-    let _ = send_command(ip_addr, &cmd).await?;
+    send_command(ip_addr, &cmd).await?;
     Ok(())
 }
 
 /// Power OFF (standby) the amplifier.
 async fn power_off(ip_addr: &str) -> Result<(), ArcamError> {
-    // Frame: ! 0x01 0x00 [len=1] 0x00 CR
+    // Frame: ! Zone=0x01 Cc=0x00(Power) Dl=0x01 Data=0x00(Standby) CR
     let cmd = [0x21, 0x01, 0x00, 0x01, 0x00, 0x0D];
-    let _ = send_command(ip_addr, &cmd).await?;
+    send_command(ip_addr, &cmd).await?;
     Ok(())
 }
 
 /// Query whether mute is active.
+///
 /// Returns `Ok(true)` if muted, `Ok(false)` if un-muted.
 async fn get_mute_status(ip: &str) -> Result<bool, ArcamError> {
-    // Frame: ! 0x01 0x0E 0x01 0xF0 CR
+    // Frame: ! Zone=0x01 Cc=0x0E(Mute) Dl=0x01 Data=0xF0(Query) CR
     let cmd = [0x21, 0x01, 0x0E, 0x01, 0xF0, 0x0D];
     let resp = send_command(ip, &cmd).await?;
-
-    // Typical response: ! 01 0E AC 01 <status> CR
-    if resp.len() >= 6 {
-        let status = resp[resp.len() - 2];
-        return Ok(status == 0x00); // 0x00 = muted
-    }
-    Err(ArcamError::InvalidMuteStatusResponse)
+    // Data[0]: 0x00 = muted, 0x01 = unmuted
+    Ok(resp.data.first().copied() == Some(0x00))
 }
 
 /// Mute the amplifier (speaker outputs).
 async fn mute_on(ip: &str) -> Result<(), ArcamError> {
-    // Frame: ! 0x01 0x0E 0x01 0x00 CR
+    // Frame: ! Zone=0x01 Cc=0x0E(Mute) Dl=0x01 Data=0x00(Mute) CR
     let cmd = [0x21, 0x01, 0x0E, 0x01, 0x00, 0x0D];
-    let _ = send_command(ip, &cmd).await?;
+    send_command(ip, &cmd).await?;
     Ok(())
 }
 
 /// Unmute the amplifier.
 async fn mute_off(ip: &str) -> Result<(), ArcamError> {
-    // Frame: ! 0x01 0x0E 0x01 0x01 CR
+    // Frame: ! Zone=0x01 Cc=0x0E(Mute) Dl=0x01 Data=0x01(Unmute) CR
     let cmd = [0x21, 0x01, 0x0E, 0x01, 0x01, 0x0D];
-    let _ = send_command(ip, &cmd).await?;
+    send_command(ip, &cmd).await?;
     Ok(())
 }
 
-/// Query the amplifier’s current mode:
-/// returns:
-///   0 => Stereo
-///   1 => Bridged
-///   2 => Dual Mono
+/// Query the amplifier's current mode.
+///
+/// Returns `0` = Stereo, `1` = Bridged, `2` = Dual Mono.
 async fn get_amplifier_mode(ip: &str) -> Result<u8, ArcamError> {
-    // Frame: ! 0x01 0x61 0x01 0xF0 CR
+    // Frame: ! Zone=0x01 Cc=0x61(AmpMode) Dl=0x01 Data=0xF0(Query) CR
     let cmd = [0x21, 0x01, 0x61, 0x01, 0xF0, 0x0D];
     let resp = send_command(ip, &cmd).await?;
-
-    // Typical response: ! 01 61 AC 01 <mode> CR
-    if resp.len() >= 6 {
-        let mode = resp[resp.len() - 2];
-        return Ok(mode);
-    }
-    Err(ArcamError::InvalidAmplifierModeResponse)
+    Ok(resp.data.first().copied().unwrap_or(0))
 }
 
 /// **Arcam** struct is used to power on and off (as well
@@ -179,14 +244,20 @@ impl Arcam {
         mute_off(&addr).await
     }
 
-    /// Query the amplifier’s current mode:
-    /// returns:
-    ///   0 => Stereo
-    ///   1 => Bridged
-    ///   2 => Dual Mono
+    /// Query the amplifier's current mode.
+    ///
+    /// Returns `0` = Stereo, `1` = Bridged, `2` = Dual Mono.
     pub async fn get_amplifier_mode(&self) -> Result<u8, ArcamError> {
         let addr = self.host_addr();
         get_amplifier_mode(&addr).await
+    }
+
+    /// Send a raw command frame and return the parsed response.
+    ///
+    /// Useful for diagnostics and debugging protocol issues.
+    pub async fn send_command(&self, cmd_bytes: &[u8]) -> Result<ArcamResponse, ArcamError> {
+        let addr = self.host_addr();
+        send_command(&addr, cmd_bytes).await
     }
 
     fn host_addr(&self) -> String {
