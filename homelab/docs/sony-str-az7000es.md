@@ -1,60 +1,140 @@
-# Sony STR AZ7000es AV Receiver
+# Sony STR-AZ7000ES AV Receiver
 
 ## Network APIs
 
-The ES (Elevated Standard) receivers from Sony all support control via TCP/IP. There are two distinct ways to communicate:
+The STR-AZ7000ES (and other Sony ES receivers) expose **three** distinct network APIs:
 
-1. Sony Audio Control API (REST/JSON): The modern, human-readable method. This uses standard HTTP requests (JSON-RPC) and is the easiest way to start.
-2. SDCP / CIS (Common Item Set): The legacy binary protocol used by professional control systems (Control4, Crestron, etc.) on a specific TCP port.
+| API | Port | Protocol | Use For |
+|-----|------|----------|---------|
+| JSON-RPC | 10000 | HTTP POST (JSON-RPC) | Volume, mute, input switching, sound settings, system info |
+| Native Web API | 80 | HTTP POST (custom JSON) | **Power status** (reliable), input configuration, deep settings |
+| SDCP / CIS | 33335 | Raw TCP (binary) | Professional control systems (Control4, Crestron) |
 
+> **Important**: The JSON-RPC and Native Web APIs serve different purposes and have
+> different capabilities. Our `homelab` library uses **both** — JSON-RPC for most
+> commands and the Native Web API for power status (see [Quick Start Caveat](#quick-start--network-standby-caveat)).
 
 ## Receiver Prep
 
-Before sending any code, you must enable network control on the receiver itself.
+Before sending any commands, enable network control on the receiver:
 
-Network Standby:
+1. **Network Standby**: Setup > Network Settings > Network Standby > **ON**
+   - Keeps the network stack active in standby so the APIs respond even when the unit is "off"
+2. **External Control**: Setup > Network Settings > External Control > **ON**
+3. **Static IP**: Assign a static IP via your router or the receiver's network menu
 
-- Go to Setup > Network Settings > Network Standby.
-- Set this to ON. (This ensures the API works even when the unit is "off").
+### Connection Behavior
 
-External Control:
+The Sony receiver **only accepts one concurrent TCP connection** per API port. If a
+second client connects while one is already connected, the first is dropped. When
+writing client code, disable HTTP connection pooling so each request opens and closes
+its own connection:
 
-- Go to Setup > Network Settings > External Control.
-- Set this to ON.
+```rust
+let client = Client::builder()
+    .pool_max_idle_per_host(0)
+    .build()?;
+```
 
-Static IP:
+## Quick Start / Network Standby Caveat
 
-It is highly recommended to assign a Static IP to the receiver via your router or the receiver's network menu so the address doesn't change.
+**This is the single most important thing to know about the Sony ES API.**
 
-Example for this guide: 192.168.1.50
+When **Quick Start** (also called **Network Standby**) is enabled — which is the
+default and recommended setting — the JSON-RPC `getPowerStatus` method is **broken**.
+It always returns `"active"` regardless of whether the receiver is truly on or in
+standby. This is because the entire network stack remains powered up in standby mode,
+and the JSON-RPC API cannot distinguish between "network active for standby
+responsiveness" and "receiver fully powered on."
 
-## Rest API
+We verified this exhaustively. When the receiver is physically in standby with Quick
+Start enabled:
 
-This is the most accessible method. You send HTTP POST requests to the receiver.
+- `getPowerStatus` → `{"status": "active"}` (WRONG)
+- `getVolumeInformation` → returns volume data normally (works in standby)
+- `getSoundSettings` → returns sound field data normally (works in standby)
+- `getCurrentExternalTerminalsStatus` → returns input list normally (works in standby)
+- `getPlayingContentInfo` → returns current input normally (works in standby)
+- `getSystemInformation` → returns model/firmware normally (works in standby)
 
-- Port: Typically 80 or 10000 (Try 10000 first for Sony Audio devices, otherwise 80).
-- Endpoint: `http://<Receiver-IP>:<Port>/sony/system` (for power/system) or /sony/audio (for volume).
+**None** of the JSON-RPC methods can distinguish active from standby.
 
-### Get Power Status
+### The Fix: Native Web API
 
-URL: `http://192.168.1.50:10000/sony/system`
-Method: POST
-Body:
+The Native Web API on port 80 correctly reports power state regardless of Quick Start:
+
+```bash
+# Receiver in standby → correctly returns "off"
+curl -s http://192.168.20.120:80/fcgi-bin/request.fcgi \
+  -d '{"type":"http_get","packet":[["main.power"]]}'
+# → {"type":"http_get_result","packet":[[{"feature":"main.power","id":0,"value":"off"}]]}
+
+# Receiver powered on → correctly returns "on"
+# → {"type":"http_get_result","packet":[[{"feature":"main.power","id":0,"value":"on"}]]}
+```
+
+Our `get_power_status()` method uses this API, not the broken JSON-RPC one.
+
+### Power Off: Use "standby", Not "off"
+
+The JSON-RPC `setPowerStatus` command also has a Quick Start caveat:
+
+| Value | Quick Start OFF | Quick Start ON |
+|-------|----------------|----------------|
+| `"active"` | Powers on | Powers on |
+| `"standby"` | Powers off | Powers off |
+| `"off"` | Powers off | **Error 40001** |
+
+Always use `"standby"` to power off the receiver. The value `"off"` is rejected with
+error code 40001 when Quick Start is enabled.
+
+
+## JSON-RPC API (Port 10000)
+
+HTTP POST to `http://<IP>:10000/sony/<endpoint>` with JSON-RPC body.
+
+### Request Format
 
 ```json
 {
-    "method": "getPowerStatus",
+    "method": "methodName",
     "id": 1,
     "params": [],
     "version": "1.1"
 }
 ```
 
-### Turn Power On
+### Response Format
 
-URL: `http://192.168.1.50:10000/sony/system`
-Method: POST
-Body:
+Success:
+```json
+{
+    "id": 1,
+    "result": [{ ... }]
+}
+```
+
+Error:
+```json
+{
+    "id": 1,
+    "error": [40001, "Illegal State"]
+}
+```
+
+### Response Nesting Patterns
+
+Sony responses use three nesting patterns for the `result` field:
+
+- `result: [[{...}, ...]]` — double-nested (e.g. `getPlayingContentInfo` with zones)
+- `result: [{...}]` — single-nested (e.g. `getSystemInformation`)
+- `result: [["name", [...], ...], ...]` — flat array of tuples (e.g. `getMethodTypes`)
+
+The `getMethodTypes` method returns `"results"` (plural) instead of `"result"`.
+
+### Power Control
+
+#### Turn Power On
 
 ```json
 {
@@ -65,58 +145,51 @@ Body:
 }
 ```
 
-### Turn Power Off (standby)
-
-URL: `http://192.168.1.50:10000/sony/system`
-Method: POST
-Body:
+#### Turn Power Off (standby)
 
 ```json
 {
     "method": "setPowerStatus",
     "id": 1,
-    "params": [{"status": "off"}],
+    "params": [{"status": "standby"}],
     "version": "1.1"
 }
 ```
 
+> Do NOT use `"off"` — see [Quick Start Caveat](#power-off-use-standby-not-off).
+
 ### Changing Inputs
 
-- You use the endpoint `http://192.168.1.50:10000/sony/avContent`
-- To list the available inputs use:
+Endpoint: `/sony/avContent`
 
-    ```
-    {
-        "method": "getCurrentExternalInputStatus",
-        "id": 1,
-        "params": [],
-        "version": "1.1"
-    }
-    ```
+List available inputs:
+```json
+{
+    "method": "getCurrentExternalTerminalsStatus",
+    "id": 1,
+    "params": [],
+    "version": "1.0"
+}
+```
 
-### CIS / SDCP (Binary Protocol)
+Switch to a specific input:
+```json
+{
+    "method": "setPlayContent",
+    "id": 1,
+    "params": [{"uri": "extInput:hdmi?port=1"}],
+    "version": "1.2"
+}
+```
 
-If you are writing a driver for a home automation system and require the raw TCP stream, you use the binary protocol.
+### Endpoint Reference
 
-- **Port:** `33335` (Standard for modern Sony ES receivers).
-- **Protocol:** Raw TCP socket.
-
-This protocol relies on sending specific Hex byte strings. It is faster but harder to debug.
-
-- **Header:** Commands usually start with a specific header (often `0x02` start byte).
-- **Example (Conceptual):** A "Power On" command might look like a stream of bytes: `0x02 0x03 0x00 0x01 ...`
-
-*Note: Unless you are building a commercial driver, I strongly recommend sticking to Method 1.*
-
-
-## REST Versioning per Action (with required params)
-
-### System Endpoint
+#### System Endpoint (`/sony/system`)
 
 ```csv
-Method Name,Ver,Required Parameters (JSON Object),Description
-getPowerStatus,1.1,[] (None),"Returns ""active"" or ""standby""."
-setPowerStatus,1.1,"{""status"": ""active""} (or ""off"")",Turns receiver On/Off.
+Method Name,Ver,Required Parameters,Description
+getPowerStatus,1.1,[] (None),"BROKEN with Quick Start — always returns ""active"". Use Native API instead."
+setPowerStatus,1.1,"{""status"": ""active""} or ""standby""","Powers on/off. Do NOT use ""off"" with Quick Start."
 getSystemInformation,1.4,[] (None),"Returns Model, Serial, Mac, Firmware Ver."
 getInterfaceInformation,1.0,[] (None),"Returns Product Category, Model Name."
 getPowerSettings,1.0,"{""target"": ""quickStart""}",Gets specific power settings.
@@ -125,7 +198,7 @@ getDeviceMiscSettings,1.0,"{""target"": ""...""}",Gets miscellaneous settings.
 setDeviceMiscSettings,1.0,"{""settings"": [...]}",Sets miscellaneous settings.
 getSettingsTree,1.1,"{""usage"": ""...""}",Returns menu structure.
 getSWUpdateInfo,1.0,"{""network"": ""network""}",Checks for firmware updates.
-actSWUpdate,1.0,[] (None),Triggers firmware update.
+actSWUpdate,1.0,[] (None),Triggers firmware update (reboots receiver).
 connectBluetoothDevice,1.0,"{""bdAddr"": ""XX:XX:...""}",Connects to specific BT device.
 getStorageList,1.2,"{""uri"": ""storage:usb1""}",Lists files on USB drive.
 getWuTangInfo,1.0,"{""target"": ""...""}",Internal provisioning info.
@@ -133,10 +206,10 @@ getEciaDeviceInfo,1.0,[] (None),Internal device ID.
 getAlexaRegistrationStatus,1.0,[] (None),Checks Alexa enrollment.
 ```
 
-### Audio Endpoint
+#### Audio Endpoint (`/sony/audio`)
 
 ```csv
-Method Name,Ver,Required Parameters (JSON Object),Description
+Method Name,Ver,Required Parameters,Description
 setAudioVolume,1.1,"{""target"": ""speaker"", ""volume"": ""25""}",Sets volume (0-100).
 getVolumeInformation,1.1,"{""output"": """"}","Gets Vol, Mute, Min/Max."
 setAudioMute,1.1,"{""status"": ""on""} (or ""off"")",Mutes/Unmutes.
@@ -148,10 +221,10 @@ getCustomEqualizerSettings,1.0,"{""target"": ""...""}",Gets EQ settings.
 setCustomEqualizerSettings,1.0,"{""settings"": [...]}",Sets EQ settings.
 ```
 
-### AV Content Endpoint
+#### AV Content Endpoint (`/sony/avContent`)
 
 ```csv
-Method Name,Ver,Required Parameters (JSON Object),Description
+Method Name,Ver,Required Parameters,Description
 getCurrentExternalTerminalsStatus,1.0,[] (None),"Lists all Inputs (HDMI, Optical, etc)."
 getPlayingContentInfo,1.2,"{""output"": """"}",Gets Current Input metadata.
 setPlayContent,1.2,"{""uri"": ""extInput:hdmi?port=1""}",Switches Input.
@@ -168,18 +241,143 @@ setPlayPreviousContent,1.0,"{""output"": """"}",Skips to previous track.
 getAvailablePlaybackFunction,1.0,"{""output"": """"}",Lists valid actions (Play/Stop/Pause).
 ```
 
-### App Control Endpoint
+#### App Control Endpoint (`/sony/appControl`)
 
 ```csv
-Method Name,Ver,Required Parameters (JSON Object),Description
+Method Name,Ver,Required Parameters,Description
 getApplicationList,1.2,[] (None),"Lists built-in apps (Spotify, etc)."
 ```
 
+> **Zone Parameter**: Whenever you see `{"output": ""}` in the AvContent or Audio
+> sections, it means the command targets a zone. Main Zone: `""` (empty string) or
+> `"extOutput:zone?zone=1"`. Zone 2: `"extOutput:zone?zone=2"`. Zone 3:
+> `"extOutput:zone?zone=3"`.
 
-> Critical Note on "Output" Parameter:
->
-> Whenever you see {"output": ""} in the AvContent or Audio section, it means the command requires you to specify the Zone.
->
-> Main Zone: "" (Empty string usually works) OR "extOutput:zone?zone=1"
-> Zone 2: "extOutput:zone?zone=2"
-> Zone 3: "extOutput:zone?zone=3"
+
+## Native Web API (Port 80)
+
+The receiver hosts a web configuration interface on port 80. Behind this interface is
+a JSON-based API at `/fcgi-bin/request.fcgi` that provides access to settings the
+JSON-RPC API doesn't properly expose — most critically, **accurate power status**.
+
+### GET Request
+
+Query one or more features:
+
+```bash
+curl -s http://<IP>:80/fcgi-bin/request.fcgi \
+  -d '{"type":"http_get","packet":[["feature1","feature2"]]}'
+```
+
+Response:
+```json
+{
+  "type": "http_get_result",
+  "packet": [[
+    {"feature": "feature1", "id": 0, "value": "value1"},
+    {"feature": "feature2", "id": 1, "value": "value2"}
+  ]]
+}
+```
+
+### SET Request
+
+Set one or more features:
+
+```bash
+curl -s http://<IP>:80/fcgi-bin/request.fcgi \
+  -d '{"type":"http_set","packet":[{"id":0,"feature":"feature1","value":"newvalue"}]}'
+```
+
+### Power Features
+
+| Feature | Values | Description |
+|---------|--------|-------------|
+| `main.power` | `"on"` / `"off"` | Main zone power (reliable, unlike JSON-RPC) |
+
+### Input Configuration Features
+
+The native API exposes all 8 input slots with detailed configuration. Each input has a
+category name and a set of sub-features.
+
+#### Input Categories
+
+| Category | Default Name | Description |
+|----------|-------------|-------------|
+| `GAME` | GAME | Gaming input |
+| `STB` | MEDIA BOX | Set-top box / streaming device |
+| `BD` | BD/DVD | Blu-ray / DVD player |
+| `SAT` | SAT/CATV | Satellite / cable TV |
+| `VIDEO` | VIDEO | Generic video input |
+| `AUX` | AUX | Auxiliary input |
+| `TV` | TV | Television (ARC/eARC) |
+| `CD` | SA-CD/CD | Audio disc player |
+
+#### Per-Input Features
+
+Each category exposes these features (replace `GAME` with the category name):
+
+| Feature | Example Values | Description |
+|---------|---------------|-------------|
+| `GAME.icon` | `"game"` | Icon identifier |
+| `GAME.inputname` | `"GAME"` | User-facing display name |
+| `GAME.hdmiassign` | `"HDMI 3"` | Which physical HDMI port is assigned |
+| `GAME.show` | `"true"` / `"false"` | Whether input is visible in the UI |
+| `GAME.category` | `"game"` | Internal category tag |
+| `GAME.videoin` | `""` | Video input override |
+| `GAME.digitalassign` | `""` | Digital audio input assignment |
+| `GAME.inceilingmode` | `"true"` / `"false"` | In-ceiling speaker mode |
+| `GAME.inputmode` | `"auto"` | Input mode setting |
+| `GAME.soundfield` | `"A.F.D."` | Sound field preset for this input |
+| `GAME.swlevel` | `"0"` | Subwoofer level offset |
+| `GAME.swlpf` | `"off"` | Subwoofer low-pass filter |
+| `GAME.usetrigger1` | `"true"` / `"false"` | 12V trigger 1 activation |
+| `GAME.usetrigger2` | `"true"` / `"false"` | 12V trigger 2 activation |
+| `GAME.usetrigger3` | `"true"` / `"false"` | 12V trigger 3 activation |
+| `GAME.presetgain` | `"0"` | Input gain preset |
+| `GAME.avsync` | `"0"` | AV sync delay (ms) |
+
+#### Querying All Inputs at Once
+
+```bash
+curl -s http://192.168.20.120:80/fcgi-bin/request.fcgi \
+  -d '{"type":"http_get","packet":[["GAME.inputname","GAME.hdmiassign","STB.inputname","STB.hdmiassign","BD.inputname","BD.hdmiassign","SAT.inputname","SAT.hdmiassign","VIDEO.inputname","VIDEO.hdmiassign","AUX.inputname","AUX.hdmiassign","TV.inputname","TV.hdmiassign","CD.inputname","CD.hdmiassign"]]}'
+```
+
+### Model Type
+
+The STR-AZ7000ES identifies as model type `"Z52"` in the native API's internal model
+type system.
+
+
+## SDCP / CIS (Binary Protocol)
+
+For professional control systems requiring raw TCP communication.
+
+- **Port**: 33335
+- **Protocol**: Raw TCP socket with hex byte strings
+- **Header**: Commands start with `0x02` start byte
+
+This protocol is faster but harder to debug. Unless building a commercial driver for
+Control4/Crestron, use the JSON-RPC and Native Web APIs instead.
+
+
+## Implementation Notes
+
+### Which API to Use
+
+| Operation | API | Reason |
+|-----------|-----|--------|
+| Get power status | **Native Web** (port 80) | JSON-RPC is broken with Quick Start |
+| Set power on/off | JSON-RPC (port 10000) | Works with `"active"`/`"standby"` |
+| Volume/mute | JSON-RPC (port 10000) | Full control available |
+| Input switching | JSON-RPC (port 10000) | `setPlayContent` with URI |
+| Input configuration | **Native Web** (port 80) | Names, HDMI assignments, visibility |
+| Sound settings | JSON-RPC (port 10000) | Sound fields, EQ, speaker config |
+| System info | JSON-RPC (port 10000) | Model, firmware, MAC address |
+
+### Do NOT Retry State-Changing Commands
+
+Commands like `setPowerStatus` must be sent **exactly once**. Retrying can cause the
+receiver to toggle state (e.g. off → on → off), leading to unpredictable results.
+Read-only queries (volume info, input status, etc.) are safe to retry.
