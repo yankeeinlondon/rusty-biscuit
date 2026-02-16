@@ -83,10 +83,16 @@ fn map_schematic_error(err: SchematicError) -> SniffError {
             provider: "GitHub".to_string(),
             env_var: env_vars.join(" or "),
         },
-        SchematicError::ApiError { status: 401, body } => SniffError::MissingCredentials {
-            provider: "GitHub".to_string(),
-            env_var: format!("GITHUB_TOKEN or GH_TOKEN (API returned 401: {})", body),
-        },
+        SchematicError::ApiError { status: 401, body } => {
+            let message = serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|v| v.get("message")?.as_str().map(String::from))
+                .unwrap_or_else(|| "bad credentials".to_string());
+            SniffError::InvalidCredentials {
+                provider: "GitHub".to_string(),
+                message,
+            }
+        }
         SchematicError::ApiError { status: 403, body } => {
             // Check if this is a rate limit error
             if body.to_lowercase().contains("rate limit") {

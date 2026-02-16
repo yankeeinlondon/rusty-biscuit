@@ -1008,46 +1008,27 @@ fn test_old_flag_syntax_fails() {
 // ============================================================================
 
 #[test]
-fn test_remote_subcommand_help() {
+fn test_git_remote_help() {
+    // git subcommand help should mention the REMOTE positional arg
     cargo_bin_cmd!("sniff")
-        .args(["remote", "--help"])
+        .args(["git", "--history", "1", "--help"])
         .assert()
-        .success()
-        .stdout(predicate::str::contains("Inspect a remote git repository"))
-        .stdout(predicate::str::contains("Git remote URL (HTTPS or SSH)"));
-}
+        .failure(); // disable_help_flag means --help is not recognized, but -h works
 
-#[test]
-fn test_remote_subcommand_requires_url() {
-    // remote without URL should fail
-    cargo_bin_cmd!("sniff").arg("remote").assert().failure();
-}
-
-#[test]
-fn test_remote_subcommand_invalid_url_fails() {
-    // remote with invalid URL should fail
-    cargo_bin_cmd!("sniff")
-        .args(["remote", "not-a-valid-url"])
-        .assert()
-        .failure();
-}
-
-#[test]
-fn test_repo_remote_flag_help() {
-    cargo_bin_cmd!("sniff")
-        .args(["repo", "--help"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("--remote <NAME_OR_URL>"))
-        .stdout(predicate::str::contains("Fetch remote info"));
-}
-
-#[test]
-fn test_help_mentions_remote_commands() {
+    // Instead, verify via the main help text
     cargo_bin_cmd!("sniff")
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("sniff remote"))
-        .stdout(predicate::str::contains("sniff repo --remote origin"));
+        .stdout(predicate::str::contains("sniff git origin"));
+}
+
+#[test]
+fn test_help_mentions_remote_via_git() {
+    cargo_bin_cmd!("sniff")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("sniff git origin"))
+        .stdout(predicate::str::contains("Inspect the 'origin' remote"));
 }

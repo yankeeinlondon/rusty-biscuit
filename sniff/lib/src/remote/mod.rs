@@ -158,6 +158,78 @@ impl GitRemote {
         }
     }
 
+    /// Resolve an `owner/repo` shorthand by probing configured providers.
+    ///
+    /// Checks which providers have credentials configured, then tries each
+    /// sequentially (GitHub → GitLab → Bitbucket) using `get_repo_metadata`
+    /// as a lightweight existence check.
+    ///
+    /// Gitea is excluded because it is self-hosted and has no default base URL.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// use sniff::remote::GitRemote;
+    ///
+    /// let (remote, owner, repo) = GitRemote::from_shorthand("rust-lang", "cargo").await?;
+    /// let report = remote.fetch_report(&owner, &repo).await?;
+    /// ```
+    ///
+    /// ## Errors
+    ///
+    /// - `MissingCredentials` if no providers have credentials configured.
+    /// - `ShorthandNotFound` if all providers with credentials returned 404.
+    /// - `InvalidCredentials` or `RateLimited` if a provider rejects immediately.
+    pub async fn from_shorthand(owner: &str, repo: &str) -> Result<Self, SniffError> {
+        let candidates: Vec<(&str, fn() -> Result<GitRemote, SniffError>)> = vec![
+            ("GitHub", || GitHubRemote::new().map(GitRemote::GitHub)),
+            ("GitLab", || GitLabRemote::new().map(GitRemote::GitLab)),
+            ("Bitbucket", || BitbucketRemote::new().map(GitRemote::Bitbucket)),
+        ];
+
+        let mut tried: Vec<&str> = Vec::new();
+
+        for (name, constructor) in &candidates {
+            // Skip providers whose constructor fails (missing credentials)
+            let remote = match constructor() {
+                Ok(r) => r,
+                Err(SniffError::MissingCredentials { .. }) => continue,
+                Err(e) => return Err(e),
+            };
+
+            tried.push(name);
+
+            match remote.get_repo_metadata(owner, repo).await {
+                Ok(_) => return Ok(remote),
+                Err(SniffError::RemoteApi { status: 404, .. }) => {
+                    // Not found on this provider, try next
+                    continue;
+                }
+                Err(e @ SniffError::InvalidCredentials { .. })
+                | Err(e @ SniffError::RateLimited { .. }) => {
+                    return Err(e);
+                }
+                Err(_) => {
+                    // Other errors (network, etc.) — skip to next provider
+                    continue;
+                }
+            }
+        }
+
+        if tried.is_empty() {
+            return Err(SniffError::MissingCredentials {
+                provider: "any".to_string(),
+                env_var: "GITHUB_TOKEN/GH_TOKEN, GITLAB_TOKEN/GITLAB_PRIVATE_TOKEN, or BITBUCKET_USERNAME+BITBUCKET_APP_PASSWORD".to_string(),
+            });
+        }
+
+        Err(SniffError::ShorthandNotFound {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            providers_tried: tried.join(", "),
+        })
+    }
+
     /// Parse a git remote URL without constructing a provider.
     ///
     /// Returns the parsed URL info including owner, repo, and provider.

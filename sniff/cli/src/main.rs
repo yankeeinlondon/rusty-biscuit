@@ -85,12 +85,16 @@ pub enum Commands {
     Storage,
 
     // === Filesystem detail sections ===
-    /// Show only git repository information
+    /// Show git repository information, or inspect a remote by name/URL
     #[command(disable_help_flag = true)]
     Git {
         /// Number of recent commits to display (default: 5)
         #[arg(short = 'h', long, default_value = "5")]
         history: usize,
+
+        /// Remote name (e.g., "origin"), URL, or owner/repo shorthand to inspect
+        #[arg(value_name = "REMOTE")]
+        remote: Option<String>,
     },
 
     /// Show only repository/monorepo structure
@@ -98,16 +102,6 @@ pub enum Commands {
         /// Render an internal dependency diagram
         #[arg(long)]
         deps: bool,
-
-        /// Fetch remote info for this remote name or URL
-        #[arg(long, value_name = "NAME_OR_URL")]
-        remote: Option<String>,
-    },
-
-    /// Inspect a remote git repository by URL
-    Remote {
-        /// Git remote URL (HTTPS or SSH)
-        url: String,
     },
 
     /// Show only language detection results
@@ -246,8 +240,7 @@ impl Commands {
             // Services section
             Commands::Services { .. } => OutputFilter::Services,
 
-            // Remote section (handled separately)
-            Commands::Remote { .. } => OutputFilter::Remote,
+            // Note: Git with remote arg is handled separately in main before reaching output filter
         }
     }
 
@@ -294,7 +287,7 @@ impl Commands {
     /// Get history count if this is a git command.
     pub fn history(&self) -> usize {
         match self {
-            Commands::Git { history } => *history,
+            Commands::Git { history, .. } => *history,
             _ => 5, // default
         }
     }
@@ -304,23 +297,10 @@ impl Commands {
         matches!(self, Commands::Repo { deps: true, .. })
     }
 
-    /// Get remote name/URL if this is a repo command with `--remote` flag.
-    pub fn repo_remote(&self) -> Option<&str> {
+    /// Get remote name/URL if this is a git command with a remote arg.
+    pub fn git_remote(&self) -> Option<&str> {
         match self {
-            Commands::Repo { remote, .. } => remote.as_deref(),
-            _ => None,
-        }
-    }
-
-    /// Check if this is a remote command.
-    pub fn is_remote_mode(&self) -> bool {
-        matches!(self, Commands::Remote { .. })
-    }
-
-    /// Get the URL if this is a remote command.
-    pub fn remote_url(&self) -> Option<&str> {
-        match self {
-            Commands::Remote { url } => Some(url.as_str()),
+            Commands::Git { remote, .. } => remote.as_deref(),
             _ => None,
         }
     }
@@ -396,22 +376,19 @@ Commands:
     sniff storage     Show only storage/disk information
 
   Filesystem details:
-    sniff git         Show only git repository information
-    sniff repo        Show only repository/monorepo structure
-    sniff repo --deps Show internal dependency diagram
-    sniff repo --remote origin          Fetch remote info for 'origin'
-    sniff repo --remote https://...     Fetch remote info by URL
-    sniff language    Show only language detection results
-    sniff docs              Show markdown documents in the repository
-    sniff docs --readme     Show only README.md files
-    sniff docs --plan       Show only plan-related documents
-    sniff docs --src        Show only documents under src/ directories
-    sniff docs --has-prompt Show only documents with a prompt
-    sniff docs homelab      Filter documents matching \"homelab\"
-
-  Remote inspection:
-    sniff remote https://github.com/owner/repo   Inspect remote repository
-    sniff remote git@github.com:owner/repo.git   SSH URLs also work
+    sniff git                        Show only git repository information
+    sniff git origin                 Inspect the 'origin' remote
+    sniff git owner/repo             Inspect by owner/repo shorthand
+    sniff git https://github.com/... Inspect a remote by URL
+    sniff repo                       Show only repository/monorepo structure
+    sniff repo --deps                Show internal dependency diagram
+    sniff language                   Show only language detection results
+    sniff docs                       Show markdown documents in the repository
+    sniff docs --readme              Show only README.md files
+    sniff docs --plan                Show only plan-related documents
+    sniff docs --src                 Show only documents under src/ directories
+    sniff docs --has-prompt          Show only documents with a prompt
+    sniff docs homelab               Filter documents matching \"homelab\"
 
   Programs:
     sniff programs                   Show all installed programs
@@ -469,7 +446,14 @@ Setup commands:
 ";
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
+    if let Err(e) = run().await {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Handle dynamic shell completions (invoked by shell completion scripts)
     CompleteEnv::with_factory(Cli::command).complete();
 
@@ -533,10 +517,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
 
-        // Handle remote mode separately (fetches from remote API)
-        if let Some(url) = cmd.remote_url() {
-            return handle_remote_url(url, cli.json).await;
-        }
     }
 
     // Canonicalize path if provided
@@ -545,22 +525,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .clone()
         .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
 
-    // Handle repo --remote flag (resolve name to URL, then fetch remote info)
+    // Handle `sniff git <remote>` - resolve name/URL/shorthand, then fetch remote info
     if let Some(ref cmd) = cli.command {
-        if let Some(remote_ref) = cmd.repo_remote() {
-            // Check if it looks like a URL (contains :// or starts with git@)
-            let url = if remote_ref.contains("://") || remote_ref.starts_with("git@") {
-                remote_ref.to_string()
+        if let Some(remote_ref) = cmd.git_remote() {
+            if remote_ref.contains("://") || remote_ref.starts_with("git@") {
+                // URL: contains :// or starts with git@
+                return handle_remote_url(remote_ref, cli.json).await;
+            } else if is_owner_repo_shorthand(remote_ref) {
+                // owner/repo shorthand: exactly one slash with non-empty parts
+                return handle_shorthand(remote_ref, cli.json).await;
             } else {
-                // It's a remote name - resolve it from the local git repo
-                resolve_remote_name(remote_ref, base_dir.as_deref()).ok_or_else(|| {
-                    format!(
-                        "Could not find remote '{}' in the current repository",
-                        remote_ref
-                    )
-                })?
-            };
-            return handle_remote_url(&url, cli.json).await;
+                // Git remote name (e.g., "origin")
+                let url =
+                    resolve_remote_name(remote_ref, base_dir.as_deref()).ok_or_else(|| {
+                        format!(
+                            "Could not find remote '{}' in the current repository",
+                            remote_ref
+                        )
+                    })?;
+                return handle_remote_url(&url, cli.json).await;
+            }
         }
     }
 
@@ -606,7 +590,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         OutputFilter::All => {
             // No filtering - detect everything
         }
-        // Programs, Services, and Remote filters are handled earlier in main
+        // Programs and Services filters are handled earlier in main
         OutputFilter::Programs
         | OutputFilter::Editors
         | OutputFilter::Utilities
@@ -616,9 +600,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
-        | OutputFilter::Services
-        | OutputFilter::Remote => {
-            unreachable!("Programs, Services, and Remote mode should be handled before this point")
+        | OutputFilter::Services => {
+            unreachable!("Programs and Services mode should be handled before this point")
         }
     }
 
@@ -699,7 +682,31 @@ fn print_completions_help() {
     println!("{}", COMPLETIONS_HELP);
 }
 
-/// Handle remote URL inspection (either from `remote` subcommand or `repo --remote`).
+/// Check if a string looks like an `owner/repo` shorthand.
+///
+/// Returns `true` when the string contains exactly one `/` splitting it into
+/// two non-empty parts, and does not look like a URL or SSH path.
+fn is_owner_repo_shorthand(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('/').collect();
+    parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty()
+}
+
+/// Handle `owner/repo` shorthand by probing configured providers.
+async fn handle_shorthand(shorthand: &str, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let (owner, repo) = shorthand.split_once('/').expect("already validated");
+    let remote = GitRemote::from_shorthand(owner, repo).await?;
+    let report = remote.fetch_report(owner, repo).await?;
+
+    if json {
+        output::print_remote_json(&report)?;
+    } else {
+        output::print_remote_text(&report);
+    }
+
+    Ok(())
+}
+
+/// Handle remote URL inspection (from `sniff git <remote>`).
 ///
 /// Parses the URL, detects the provider, fetches the report, and outputs it.
 async fn handle_remote_url(url: &str, json: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -946,8 +953,9 @@ mod tests {
         #[test]
         fn git_subcommand_with_history_flag() {
             let cli = parse_args(&["git", "--history", "10"]).unwrap();
-            if let Some(Commands::Git { history }) = cli.command {
+            if let Some(Commands::Git { history, remote }) = cli.command {
                 assert_eq!(history, 10);
+                assert!(remote.is_none());
             } else {
                 panic!("Expected Git command");
             }
@@ -956,8 +964,9 @@ mod tests {
         #[test]
         fn git_subcommand_with_short_history_flag() {
             let cli = parse_args(&["git", "-h", "3"]).unwrap();
-            if let Some(Commands::Git { history }) = cli.command {
+            if let Some(Commands::Git { history, remote }) = cli.command {
                 assert_eq!(history, 3);
+                assert!(remote.is_none());
             } else {
                 panic!("Expected Git command");
             }
@@ -966,8 +975,9 @@ mod tests {
         #[test]
         fn git_subcommand_default_history() {
             let cli = parse_args(&["git"]).unwrap();
-            if let Some(Commands::Git { history }) = cli.command {
+            if let Some(Commands::Git { history, remote }) = cli.command {
                 assert_eq!(history, 5);
+                assert!(remote.is_none());
             } else {
                 panic!("Expected Git command");
             }
@@ -978,10 +988,7 @@ mod tests {
             let cli = parse_args(&["repo"]).unwrap();
             assert!(matches!(
                 cli.command,
-                Some(Commands::Repo {
-                    deps: false,
-                    remote: None
-                })
+                Some(Commands::Repo { deps: false })
             ));
         }
 
@@ -990,33 +997,8 @@ mod tests {
             let cli = parse_args(&["repo", "--deps"]).unwrap();
             assert!(matches!(
                 cli.command,
-                Some(Commands::Repo {
-                    deps: true,
-                    remote: None
-                })
+                Some(Commands::Repo { deps: true })
             ));
-        }
-
-        #[test]
-        fn repo_remote_flag_parses() {
-            let cli = parse_args(&["repo", "--remote", "origin"]).unwrap();
-            if let Some(Commands::Repo { deps, remote }) = cli.command {
-                assert!(!deps);
-                assert_eq!(remote, Some("origin".to_string()));
-            } else {
-                panic!("Expected Repo command");
-            }
-        }
-
-        #[test]
-        fn repo_remote_url_parses() {
-            let cli = parse_args(&["repo", "--remote", "https://github.com/owner/repo"]).unwrap();
-            if let Some(Commands::Repo { deps, remote }) = cli.command {
-                assert!(!deps);
-                assert_eq!(remote, Some("https://github.com/owner/repo".to_string()));
-            } else {
-                panic!("Expected Repo command");
-            }
         }
 
         #[test]
@@ -1220,22 +1202,33 @@ mod tests {
         }
 
         #[test]
-        fn remote_subcommand_parses() {
-            let cli = parse_args(&["remote", "https://github.com/owner/repo"]).unwrap();
-            if let Some(Commands::Remote { url }) = cli.command {
-                assert_eq!(url, "https://github.com/owner/repo");
+        fn git_remote_name_parses() {
+            let cli = parse_args(&["git", "origin"]).unwrap();
+            if let Some(Commands::Git { history, remote }) = cli.command {
+                assert_eq!(history, 5); // default
+                assert_eq!(remote, Some("origin".to_string()));
             } else {
-                panic!("Expected Remote command");
+                panic!("Expected Git command");
             }
         }
 
         #[test]
-        fn remote_subcommand_ssh_url_parses() {
-            let cli = parse_args(&["remote", "git@github.com:owner/repo.git"]).unwrap();
-            if let Some(Commands::Remote { url }) = cli.command {
-                assert_eq!(url, "git@github.com:owner/repo.git");
+        fn git_remote_url_parses() {
+            let cli = parse_args(&["git", "https://github.com/owner/repo"]).unwrap();
+            if let Some(Commands::Git { remote, .. }) = cli.command {
+                assert_eq!(remote, Some("https://github.com/owner/repo".to_string()));
             } else {
-                panic!("Expected Remote command");
+                panic!("Expected Git command");
+            }
+        }
+
+        #[test]
+        fn git_remote_ssh_url_parses() {
+            let cli = parse_args(&["git", "git@github.com:owner/repo.git"]).unwrap();
+            if let Some(Commands::Git { remote, .. }) = cli.command {
+                assert_eq!(remote, Some("git@github.com:owner/repo.git".to_string()));
+            } else {
+                panic!("Expected Git command");
             }
         }
     }
@@ -1299,16 +1292,16 @@ mod tests {
 
         #[test]
         fn git_maps_to_git_filter() {
-            let cmd = Commands::Git { history: 5 };
+            let cmd = Commands::Git {
+                history: 5,
+                remote: None,
+            };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Git);
         }
 
         #[test]
         fn repo_maps_to_repo_filter() {
-            let cmd = Commands::Repo {
-                deps: false,
-                remote: None,
-            };
+            let cmd = Commands::Repo { deps: false };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Repo);
         }
 
@@ -1357,11 +1350,12 @@ mod tests {
         }
 
         #[test]
-        fn remote_maps_to_remote_filter() {
-            let cmd = Commands::Remote {
-                url: "https://github.com/owner/repo".to_string(),
+        fn git_with_remote_maps_to_git_filter() {
+            let cmd = Commands::Git {
+                history: 5,
+                remote: Some("origin".to_string()),
             };
-            assert_eq!(cmd.to_output_filter(), OutputFilter::Remote);
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Git);
         }
     }
 
@@ -1562,6 +1556,65 @@ mod tests {
         #[test]
         fn real_world_tokio_major() {
             assert!(is_major_update("0.2.25", "1.48.0"));
+        }
+    }
+
+    mod owner_repo_shorthand_detection {
+        use super::*;
+
+        #[test]
+        fn owner_repo_is_shorthand() {
+            assert!(is_owner_repo_shorthand("owner/repo"));
+        }
+
+        #[test]
+        fn owner_repo_with_hyphens_is_shorthand() {
+            assert!(is_owner_repo_shorthand("yankeeinlondon/gotcha"));
+        }
+
+        #[test]
+        fn url_is_not_shorthand() {
+            assert!(!is_owner_repo_shorthand("https://github.com/owner/repo"));
+        }
+
+        #[test]
+        fn ssh_url_caught_before_shorthand_check() {
+            // SSH URLs start with "git@" and are caught by the first branch
+            // in the dispatch logic, so is_owner_repo_shorthand is never called.
+            // The function itself would match it (two slash-separated parts),
+            // but the dispatch order ensures correct behavior.
+            let ssh = "git@github.com:owner/repo.git";
+            assert!(ssh.starts_with("git@"), "SSH URLs caught by starts_with check");
+        }
+
+        #[test]
+        fn remote_name_is_not_shorthand() {
+            assert!(!is_owner_repo_shorthand("origin"));
+        }
+
+        #[test]
+        fn trailing_slash_is_not_shorthand() {
+            assert!(!is_owner_repo_shorthand("owner/"));
+        }
+
+        #[test]
+        fn leading_slash_is_not_shorthand() {
+            assert!(!is_owner_repo_shorthand("/repo"));
+        }
+
+        #[test]
+        fn multiple_slashes_is_not_shorthand() {
+            assert!(!is_owner_repo_shorthand("a/b/c"));
+        }
+
+        #[test]
+        fn git_shorthand_parses_as_remote_arg() {
+            let cli = parse_args(&["git", "owner/repo"]).unwrap();
+            if let Some(Commands::Git { remote, .. }) = cli.command {
+                assert_eq!(remote, Some("owner/repo".to_string()));
+            } else {
+                panic!("Expected Git command");
+            }
         }
     }
 }

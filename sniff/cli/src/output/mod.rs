@@ -93,8 +93,6 @@ pub enum OutputFilter {
     AiClients,
     /// Show only system services (init system and service list)
     Services,
-    /// Show remote repository information
-    Remote,
 }
 
 // ============================================================================
@@ -343,7 +341,7 @@ pub fn print_text(
                 print_docs_section(&filtered);
             }
         }
-        // Programs, Services, and Remote filters are handled separately in main.rs
+        // Programs and Services filters are handled separately in main.rs
         OutputFilter::Programs
         | OutputFilter::Editors
         | OutputFilter::Utilities
@@ -353,8 +351,7 @@ pub fn print_text(
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
-        | OutputFilter::Services
-        | OutputFilter::Remote => {
+        | OutputFilter::Services => {
             // These are handled separately, should not reach here
             unreachable!("Programs, Services, and Remote filters should be handled separately")
         }
@@ -479,7 +476,7 @@ fn apply_filter_to_json(
                 json!([])
             }
         }
-        // Programs, Services, and Remote filters are handled separately
+        // Programs and Services filters are handled separately
         OutputFilter::Programs
         | OutputFilter::Editors
         | OutputFilter::Utilities
@@ -489,9 +486,8 @@ fn apply_filter_to_json(
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
-        | OutputFilter::Services
-        | OutputFilter::Remote => {
-            unreachable!("Programs, Services, and Remote filters should be handled separately")
+        | OutputFilter::Services => {
+            unreachable!("Programs and Services filters should be handled separately")
         }
     }
 }

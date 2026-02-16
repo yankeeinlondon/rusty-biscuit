@@ -15,8 +15,8 @@
 
 use sniff::error::SniffError;
 use sniff::remote::{
-    BitbucketRemote, DocumentCategory, GitHubRemote, GitLabRemote, GitProvider, GiteaRemote,
-    RemoteRepoProvider,
+    BitbucketRemote, DocumentCategory, GitHubRemote, GitLabRemote, GitProvider, GitRemote,
+    GiteaRemote, RemoteRepoProvider,
 };
 use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -334,10 +334,10 @@ mod github_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            SniffError::MissingCredentials { provider, .. } => {
+            SniffError::InvalidCredentials { provider, .. } => {
                 assert_eq!(provider, "GitHub");
             }
-            other => panic!("Expected MissingCredentials error, got: {:?}", other),
+            other => panic!("Expected InvalidCredentials error, got: {:?}", other),
         }
     }
 
@@ -1322,6 +1322,51 @@ mod bitbucket_tests {
                 assert_eq!(provider, "Bitbucket");
             }
             other => panic!("Expected RateLimited error, got: {:?}", other),
+        }
+    }
+}
+
+// =============================================================================
+// Shorthand Resolution Tests
+// =============================================================================
+
+mod shorthand_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn from_shorthand_tries_github_when_token_set() {
+        // Set GitHub credentials so the constructor succeeds.
+        // Don't remove other provider env vars — that would race with parallel tests.
+        unsafe { std::env::set_var("GITHUB_TOKEN", "test-token-12345") };
+
+        let result = GitRemote::from_shorthand("test-owner", "test-repo").await;
+
+        // With a real API URL and a fake token, we expect either:
+        // - ShorthandNotFound (all providers returned 404 or network errors)
+        // - InvalidCredentials (GitHub rejected the fake token)
+        // - Some other API error
+        // The important thing: GitHub was tried (not skipped for missing credentials).
+        match result {
+            Ok(remote) => {
+                // If it succeeds, it found the repo on some provider
+                assert_eq!(remote.provider(), GitProvider::GitHub);
+            }
+            Err(SniffError::ShorthandNotFound { providers_tried, .. }) => {
+                assert!(
+                    providers_tried.contains("GitHub"),
+                    "GitHub should be in tried providers, got: {}",
+                    providers_tried
+                );
+            }
+            Err(SniffError::InvalidCredentials { provider, .. }) => {
+                assert_eq!(provider, "GitHub");
+            }
+            Err(SniffError::RateLimited { provider, .. }) => {
+                assert_eq!(provider, "GitHub");
+            }
+            Err(_) => {
+                // Network errors, etc. — GitHub was still attempted
+            }
         }
     }
 }

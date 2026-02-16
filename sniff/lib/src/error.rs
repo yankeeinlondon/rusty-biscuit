@@ -74,6 +74,29 @@ pub enum SniffError {
         env_var: String,
     },
 
+    /// No provider could resolve an `owner/repo` shorthand.
+    ///
+    /// This is returned by `GitRemote::from_shorthand` when all tried providers
+    /// returned 404 (not found). The message lists which providers were attempted.
+    #[error("repository '{owner}/{repo}' not found on any provider (tried: {providers_tried})")]
+    ShorthandNotFound {
+        /// Repository owner.
+        owner: String,
+        /// Repository name.
+        repo: String,
+        /// Comma-separated list of providers that were tried.
+        providers_tried: String,
+    },
+
+    /// Authentication credentials were provided but rejected by the provider.
+    #[error("{provider} rejected credentials: {message}")]
+    InvalidCredentials {
+        /// Provider name (e.g., "GitHub", "GitLab").
+        provider: String,
+        /// Human-readable reason for rejection.
+        message: String,
+    },
+
     /// Rate limited by the hosting provider API.
     #[error("rate limited by {provider} API{}", retry_after.map(|s| format!(", retry after {}s", s)).unwrap_or_default())]
     RateLimited {
