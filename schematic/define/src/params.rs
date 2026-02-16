@@ -479,7 +479,7 @@ impl PaginationStyle {
             Self::Cursor {
                 cursor_param,
                 limit_param,
-                default_limit: _,
+                default_limit,
             } => {
                 let mut params = vec![ParamDef {
                     name: cursor_param.clone(),
@@ -494,7 +494,10 @@ impl PaginationStyle {
                     params.push(ParamDef {
                         name: limit_name.clone(),
                         required: false,
-                        description: Some("Maximum items to return".to_string()),
+                        description: Some(format!(
+                            "Maximum items to return (default: {})",
+                            default_limit
+                        )),
                         param_type: QueryParamType::Integer,
                         explode: false,
                         style: ParamStyle::Form,
