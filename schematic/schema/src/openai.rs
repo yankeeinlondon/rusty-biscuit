@@ -738,7 +738,7 @@ impl OpenAI {
                 _ => {}
             }
         }
-        let api_headers = self.headers.clone().from_env().build()?;
+        let api_headers = self.headers.clone().build()?;
         let merged_headers = Self::merge_headers(&api_headers, &endpoint_headers);
         for (key, value) in merged_headers {
             req_builder = req_builder.header(key.as_str(), value.as_str());

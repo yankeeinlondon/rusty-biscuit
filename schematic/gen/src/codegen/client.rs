@@ -144,8 +144,11 @@ fn generate_build_request_method(
             // Apply authentication
             #auth_setup
 
-            // Build headers from Headers builder (resolves environment variables)
-            let api_headers = self.headers.clone().from_env().build()?;
+            // Build headers from Headers builder.
+            // Note: auth is already handled by the auth_strategy block above
+            // (or by programmatic auth on the Headers builder). Calling from_env()
+            // here would duplicate the Authorization header.
+            let api_headers = self.headers.clone().build()?;
 
             // Merge API-level and endpoint-level headers
             let merged_headers = Self::merge_headers(&api_headers, &endpoint_headers);
@@ -831,8 +834,8 @@ mod tests {
         let tokens = generate_request_method(&api);
         let code = format_generated_code(&tokens).expect("Failed to format code");
 
-        // Should build headers from Headers builder and merge with endpoint headers
-        assert!(code.contains(".from_env().build()?"));
+        // Should build headers from Headers builder (without from_env to avoid duplicate auth)
+        assert!(code.contains(".build()?"));
         assert!(code.contains("merge_headers(&api_headers, &endpoint_headers)"));
         assert!(code.contains("for (key, value) in merged_headers"));
         assert!(code.contains("req_builder.header(key.as_str(), value.as_str())"));
