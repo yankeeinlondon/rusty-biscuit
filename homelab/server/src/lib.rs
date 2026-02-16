@@ -531,6 +531,21 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   .explore {{ margin-top: 24px; color: #b5b5b5; }}
   .explore a {{ color: #7cc4ff; text-decoration: none; }}
   .explore a:hover {{ text-decoration: underline; }}
+  .info-popover {{ margin: 0; border: 1px solid #1a4a7a; border-radius: 8px; padding: 14px 18px; background: #16213e; color: #c8d8e8; font-size: 0.85em; line-height: 1.6; max-width: 320px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); position-area: bottom; position-try-fallbacks: flip-block; }}
+  .info-popover, .info-popover:popover-open {{ opacity: 1; transform: translateY(0); transition: opacity 0.2s ease, transform 0.2s ease, overlay 0.2s allow-discrete, display 0.2s allow-discrete; }}
+  .info-popover:not(:popover-open) {{ opacity: 0; transform: translateY(-4px); }}
+  @starting-style {{ .info-popover:popover-open {{ opacity: 0; transform: translateY(-4px); }} }}
+  .info-popover h4 {{ margin: 0 0 8px; color: #fff; font-size: 0.95em; }}
+  .info-popover dl {{ margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }}
+  .info-popover dt {{ color: #7cc4ff; font-weight: 600; white-space: nowrap; }}
+  .info-popover dd {{ margin: 0; color: #99aabb; }}
+  .info-popover .note {{ margin-top: 8px; padding-top: 8px; border-top: 1px solid #1a2a45; color: #667; font-size: 0.9em; font-style: italic; }}
+  #sony-dot {{ anchor-name: --sony-dot; }}
+  #arcam-dot {{ anchor-name: --arcam-dot; }}
+  #pop-sony-power {{ position-anchor: --sony-dot; }}
+  #pop-arcam-power {{ position-anchor: --arcam-dot; }}
+  #arcam-mode-badge {{ anchor-name: --arcam-mode; cursor: help; }}
+  #pop-arcam-mode {{ position-anchor: --arcam-mode; }}
 </style>
 </head>
 <body>
@@ -563,6 +578,35 @@ async fn index(State(state): State<AppState>) -> Html<String> {
 </div>
 
 <p class="explore">Try interacting with the API by using the <a href="./explore">explore</a> UI.</p>
+
+<div id="pop-sony-power" popover="manual" class="info-popover">
+  <h4>Sony Receiver &mdash; Power States</h4>
+  <dl>
+    <dt>Active</dt><dd>Powered on and fully operational. All features and controls are available.</dd>
+    <dt>Standby</dt><dd>Low-power network standby. Not truly &ldquo;off&rdquo;&hairsp;&mdash;&hairsp;the receiver maintains network connectivity so the API can wake it.</dd>
+    <dt>Unreachable</dt><dd>Truly powered off or unplugged. The API cannot communicate with the device in this state.</dd>
+  </dl>
+  <p class="note">Turning &ldquo;off&rdquo; via this UI puts the receiver into Standby, not a full power-off.</p>
+</div>
+
+<div id="pop-arcam-power" popover="manual" class="info-popover">
+  <h4>Arcam Amplifier &mdash; Power States</h4>
+  <dl>
+    <dt>On</dt><dd>Powered on and fully operational. All features and controls are available.</dd>
+    <dt>Standby</dt><dd>Low-power network standby. The amplifier maintains network connectivity; a heartbeat signal is sent every 10&nbsp;minutes to keep the interface alive.</dd>
+    <dt>Unreachable</dt><dd>Truly powered off or unplugged. The API cannot communicate with the device in this state.</dd>
+  </dl>
+  <p class="note">Turning &ldquo;off&rdquo; via this UI puts the amplifier into Standby, not a full power-off.</p>
+</div>
+
+<div id="pop-arcam-mode" popover="manual" class="info-popover">
+  <h4>Arcam Amplifier &mdash; Mode</h4>
+  <dl>
+    <dt>Stereo</dt><dd>Standard two-channel operation. Left and right speakers receive independent audio signals.</dd>
+    <dt>Bridged</dt><dd>Both amplifier channels are combined to drive a single speaker pair, roughly doubling the output wattage.</dd>
+    <dt>Dual Mono</dt><dd>Both channels receive the same mono signal, amplified independently. Used for bi-amping a single speaker pair.</dd>
+  </dl>
+</div>
 
 <script>
 (function() {{
@@ -634,10 +678,11 @@ async fn index(State(state): State<AppState>) -> Html<String> {
 
   function renderBadges(el, badges) {{
     if (!badges.length) {{ el.innerHTML = ''; return; }}
+    const prev = el.innerHTML;
     const html = '<div class="badge-row">' + badges.map(b =>
-      '<span class="badge' + (b.cls ? ' ' + b.cls : '') + '">' + b.text + '</span>'
+      '<span' + (b.id ? ' id="' + b.id + '"' : '') + ' class="badge' + (b.cls ? ' ' + b.cls : '') + '">' + b.text + '</span>'
     ).join('') + '</div>';
-    if (el.innerHTML !== html) el.innerHTML = html;
+    if (prev !== html) el.innerHTML = html;
   }}
 
   function renderSony(instrumentsEl, sourcesEl, detail) {{
@@ -683,10 +728,37 @@ async fn index(State(state): State<AppState>) -> Html<String> {
   function arcamBadges(detail) {{
     if (!detail) return [];
     const b = [];
-    if (detail.mode) b.push({{ text: detail.mode }});
+    if (detail.mode) b.push({{ text: detail.mode, id: 'arcam-mode-badge' }});
     if (detail.muted) b.push({{ text: 'MUTED', cls: 'badge-muted' }});
     return b;
   }}
+
+  function hoverPopover(trigger, pop) {{
+    let showT, hideT;
+    trigger.addEventListener('mouseenter', () => {{
+      clearTimeout(hideT);
+      showT = setTimeout(() => {{ try {{ pop.showPopover(); }} catch(_) {{}} }}, 300);
+    }});
+    trigger.addEventListener('mouseleave', () => {{
+      clearTimeout(showT);
+      hideT = setTimeout(() => {{ try {{ pop.hidePopover(); }} catch(_) {{}} }}, 150);
+    }});
+    pop.addEventListener('mouseenter', () => clearTimeout(hideT));
+    pop.addEventListener('mouseleave', () => {{ try {{ pop.hidePopover(); }} catch(_) {{}} }});
+  }}
+
+  hoverPopover(document.getElementById('sony-dot'), document.getElementById('pop-sony-power'));
+  hoverPopover(document.getElementById('arcam-dot'), document.getElementById('pop-arcam-power'));
+
+  function setupModeBadgeHover() {{
+    const badge = document.getElementById('arcam-mode-badge');
+    const pop = document.getElementById('pop-arcam-mode');
+    if (badge && !badge._hoverBound) {{
+      hoverPopover(badge, pop);
+      badge._hoverBound = true;
+    }}
+  }}
+  setupModeBadgeHover();
 
   async function poll() {{
     if (Date.now() < pollSuppressedUntil) return;
@@ -703,6 +775,7 @@ async fn index(State(state): State<AppState>) -> Html<String> {
       setDot(document.getElementById("arcam-dot"), data.arcam.css_class);
       setText(document.getElementById("arcam-label"), data.arcam.label);
       renderBadges(document.getElementById("arcam-instruments"), arcamBadges(data.arcam.detail));
+      setupModeBadgeHover();
     }} catch (_) {{
       // Network error — leave current state, retry next tick
     }}
