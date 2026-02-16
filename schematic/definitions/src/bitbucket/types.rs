@@ -256,7 +256,7 @@ pub struct Project {
 /// A source entry from directory listing.
 ///
 /// Returned by `GET /repositories/{workspace}/{repo_slug}/src/{commit}/{path}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceEntry {
     /// Full path from repository root.
     #[serde(default)]
@@ -325,7 +325,7 @@ pub struct CommitInfo {
 // =============================================================================
 
 /// Pull request from `GET /repositories/{workspace}/{repo_slug}/pullrequests`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PullRequest {
     /// PR ID (unique within the repository).
     #[serde(default)]
@@ -589,7 +589,7 @@ pub struct InlineContext {
 // =============================================================================
 
 /// An issue from `GET /repositories/{workspace}/{repo_slug}/issues`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Issue {
     /// Issue ID (unique within the repository).
     #[serde(default)]
@@ -798,7 +798,7 @@ pub struct ChangeDetail {
 // =============================================================================
 
 /// A repository tag from `GET /repositories/{workspace}/{repo_slug}/refs/tags`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tag {
     /// Tag name.
     #[serde(default)]
@@ -911,7 +911,7 @@ pub struct Tagger {
 /// A download artifact from `GET /repositories/{workspace}/{repo_slug}/downloads`.
 ///
 /// Downloads serve as release artifacts in Bitbucket (there's no first-class release concept).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Download {
     /// Filename.
     #[serde(default)]
