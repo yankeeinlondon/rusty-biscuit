@@ -427,3 +427,17 @@ EU Energy-using Products (EuP) regulations require automatic standby after a per
 2. **Send periodic heartbeats** while the amp is on to prevent EuP auto-standby during active sessions
 3. **Handle reconnection gracefully** — if the amp enters standby without prior IP activity (e.g., powered on via front panel only), the network will be unreachable until the next manual power-on
 4. **12V trigger is the most reliable non-network wake method** — unlike SA-series amps, there is no IR fallback
+
+## homelab-server Integration Status
+
+Confirmed through real-world testing with `homelab-server` and the PA240:
+
+### Heartbeat Keeps Network Active
+
+The server's background heartbeat messages (`0x25`) successfully keep the amp's network interface alive during standby. As long as the server maintains periodic heartbeats while the amp is powered on, the TCP connection on port 50000 remains reachable after the amp enters standby — exactly as the protocol documentation predicts.
+
+### Heartbeat Prevents Auto-Shutdown
+
+The same heartbeat messages also reset the EuP auto-standby timer (`0x58`). This means the amp will **never** auto-shutdown due to signal inactivity while the server is running, since each heartbeat resets the countdown.
+
+This is a known trade-off: the auto-shutdown feature (which powers down the amp after a configurable period of no audio signal) can be useful for energy savings, but it is effectively disabled by the server's heartbeat cycle. A future enhancement could selectively pause heartbeats to allow auto-shutdown when desired, but for now the server prioritizes reliable network connectivity over energy-saving standby.
