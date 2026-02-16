@@ -61,7 +61,7 @@ Broadly we want to be able to report on the following things:
 
 ## Sniff CLI
 
-We already have a subcommand `sniff repo` which reports on the repo in the current working directory of the host. What we will need to do is provide an optional parameter to specify the remote repo we're interested in.
+We already have a subcommand `git` which reports on the repo in the current working directory of the host. What we will need to do is provide an optional parameter to specify the remote repo we're interested in.
 
 - in cases where the remote parameter is specified we will switch instead to reporting the remote info
 - in cases where the remote parameter is _not_ specified but the `--deep` flag is used then we will supplement the local view with information like PR's, Issues, etc.

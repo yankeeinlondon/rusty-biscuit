@@ -44,6 +44,7 @@
 //! | Pull Requests | `ListPullRequests`, `ListPullRequestFiles` |
 //! | Issues | `ListIssues`, `GetIssue`, `ListIssueComments`, `ListIssueTimeline` |
 //! | Tags/Releases | `ListTags`, `ListReleases`, `GetTagReference`, `GetAnnotatedTag` |
+//! | Organizations | `ListOrgRepos` |
 
 mod types;
 
@@ -91,6 +92,7 @@ use schematic_define::{
 /// | ListReleases | GET | /repos/{owner}/{repo}/releases | List releases |
 /// | GetTagReference | GET | /repos/{owner}/{repo}/git/refs/{git_ref} | Get tag reference (returns array) |
 /// | GetAnnotatedTag | GET | /repos/{owner}/{repo}/git/tags/{sha} | Get annotated tag object |
+/// | ListOrgRepos | GET | /orgs/{org}/repos | List organization repositories |
 ///
 /// ## Examples
 ///
@@ -99,7 +101,7 @@ use schematic_define::{
 ///
 /// let api = define_gitea_api();
 /// assert_eq!(api.name, "Gitea");
-/// assert_eq!(api.endpoints.len(), 14);
+/// assert_eq!(api.endpoints.len(), 15);
 /// ```
 pub fn define_gitea_api() -> RestApi {
     RestApi {
@@ -348,6 +350,21 @@ pub fn define_gitea_api() -> RestApi {
                 headers: vec![],
                 params: None,
             },
+            // =================================================================
+            // Organization Repositories
+            // =================================================================
+            Endpoint {
+                id: "ListOrgRepos".to_string(),
+                method: RestMethod::Get,
+                path: "/orgs/{org}/repos".to_string(),
+                description: "List repositories for an organization".to_string(),
+                request: None,
+                response: ApiResponse::json_vec_type("RepositoryInfo"),
+                headers: vec![],
+                params: Some(
+                    EndpointParams::default().with_pagination(PaginationStyle::gitea()),
+                ),
+            },
         ],
         module_path: Some("gitea".to_string()),
         request_suffix: None,
@@ -393,9 +410,9 @@ mod tests {
     }
 
     #[test]
-    fn api_has_fourteen_endpoints() {
+    fn api_has_fifteen_endpoints() {
         let api = define_gitea_api();
-        assert_eq!(api.endpoints.len(), 14);
+        assert_eq!(api.endpoints.len(), 15);
     }
 
     #[test]
@@ -605,6 +622,7 @@ mod tests {
             "ListTags",
             "ListReleases",
             "GetTagReference", // Gitea returns array for this!
+            "ListOrgRepos",
         ];
 
         for id in list_endpoints {
@@ -672,6 +690,7 @@ mod tests {
             "ListIssueTimeline",
             "ListTags",
             "ListReleases",
+            "ListOrgRepos",
         ];
 
         for id in paginated_endpoints {
@@ -703,6 +722,33 @@ mod tests {
                 _ => panic!("Endpoint {} should use PageNumber pagination style", id),
             }
         }
+    }
+
+    #[test]
+    fn list_org_repos_endpoint() {
+        let api = define_gitea_api();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "ListOrgRepos")
+            .expect("ListOrgRepos endpoint missing");
+
+        assert_eq!(endpoint.method, RestMethod::Get);
+        assert_eq!(endpoint.path, "/orgs/{org}/repos");
+
+        match &endpoint.response {
+            ApiResponse::Json(schema) => {
+                assert!(
+                    schema.type_name.starts_with("Vec<"),
+                    "ListOrgRepos should return Vec type, got {}",
+                    schema.type_name
+                );
+            }
+            _ => panic!("Expected JSON response"),
+        }
+
+        let params = endpoint.params.as_ref().expect("should have params");
+        assert!(params.has_pagination());
     }
 
     #[test]

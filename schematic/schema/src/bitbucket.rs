@@ -25,6 +25,7 @@
 //! - `GetTag` - Get a single tag by name
 //! - `ListDownloads` - List repository downloads (release artifacts)
 //! - `GetDownload` - Download a file from repository downloads
+//! - `ListWorkspaceRepos` - List repositories in a workspace
 //!
 //! ## Example
 //!
@@ -1126,6 +1127,106 @@ impl crate::shared::EndpointSpec for GetDownloadRequest {
     type Response = bytes::Bytes;
     const ENDPOINT_ID: &'static str = "GetDownload";
 }
+/// Request for `ListWorkspaceRepos` endpoint.
+///
+/// ## Example
+///
+/// ```ignore
+/// use schematic_schema::bitbucket::ListWorkspaceReposRequest;
+///
+/// let request = ListWorkspaceReposRequest::new("workspace_value")
+///     .with_page(/* value */)
+///     .with_pagelen(/* value */)
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListWorkspaceReposRequest {
+    /// Path parameter: workspace
+    pub workspace: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub pagelen: Option<i64>,
+}
+impl ListWorkspaceReposRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(workspace: impl Into<String>) -> Self {
+        Self {
+            workspace: workspace.into(),
+            page: None,
+            pagelen: None,
+        }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `pagelen` query parameter.
+    pub fn with_pagelen(mut self, value: i64) -> Self {
+        self.pagelen = Some(value);
+        self
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - Optional JSON body string
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if the request body
+    /// fails to serialize to JSON.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let mut path = format!("/repositories/{}", self.workspace);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.pagelen {
+            query_pairs.push(("pagelen", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
+        Ok(("GET", path, None, vec![]))
+    }
+}
+impl From<&str> for ListWorkspaceReposRequest {
+    fn from(param: &str) -> Self {
+        Self {
+            workspace: param.to_string(),
+            page: None,
+            pagelen: None,
+        }
+    }
+}
+impl From<String> for ListWorkspaceReposRequest {
+    fn from(param: String) -> Self {
+        Self {
+            workspace: param,
+            page: None,
+            pagelen: None,
+        }
+    }
+}
+impl crate::shared::EndpointSpec for ListWorkspaceReposRequest {
+    type Response = PaginatedResponse<Repository>;
+    const ENDPOINT_ID: &'static str = "ListWorkspaceRepos";
+}
 impl Paginated for ListDirectoryContentsRequest {}
 impl Paginated for ListPullRequestsRequest {}
 impl Paginated for ListPullRequestCommentsRequest {}
@@ -1134,6 +1235,7 @@ impl Paginated for ListIssueCommentsRequest {}
 impl Paginated for ListIssueChangesRequest {}
 impl Paginated for ListTagsRequest {}
 impl Paginated for ListDownloadsRequest {}
+impl Paginated for ListWorkspaceReposRequest {}
 /// Request enum for Bitbucket API.
 ///
 /// Each variant wraps a strongly-typed request struct.
@@ -1166,6 +1268,8 @@ pub enum BitbucketRequest {
     ListDownloads(ListDownloadsRequest),
     /// Download a file from repository downloads
     GetDownload(GetDownloadRequest),
+    /// List repositories in a workspace
+    ListWorkspaceRepos(ListWorkspaceReposRequest),
 }
 impl BitbucketRequest {
     /// Converts the request into (method, path, body, headers) parts.
@@ -1192,6 +1296,7 @@ impl BitbucketRequest {
             Self::GetTag(req) => req.into_parts(),
             Self::ListDownloads(req) => req.into_parts(),
             Self::GetDownload(req) => req.into_parts(),
+            Self::ListWorkspaceRepos(req) => req.into_parts(),
         }
     }
     /// Returns the endpoint identifier for this request.
@@ -1241,6 +1346,9 @@ impl BitbucketRequest {
             }
             Self::GetDownload(_) => {
                 <GetDownloadRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::ListWorkspaceRepos(_) => {
+                <ListWorkspaceReposRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
         }
     }
@@ -1313,6 +1421,11 @@ impl From<ListDownloadsRequest> for BitbucketRequest {
 impl From<GetDownloadRequest> for BitbucketRequest {
     fn from(req: GetDownloadRequest) -> Self {
         Self::GetDownload(req)
+    }
+}
+impl From<ListWorkspaceReposRequest> for BitbucketRequest {
+    fn from(req: ListWorkspaceReposRequest) -> Self {
+        Self::ListWorkspaceRepos(req)
     }
 }
 /// Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows client.

@@ -25,6 +25,8 @@
 //! - `ListReleases` - List releases (linked to tags via tag_name)
 //! - `GetTagReference` - Get tag reference (check object.type: 'commit' vs 'tag')
 //! - `GetAnnotatedTag` - Get annotated tag object details (message, tagger, verification)
+//! - `ListWorkflowRuns` - List workflow runs for a repository
+//! - `ListOrgRepos` - List repositories for an organization
 //!
 //! ## Example
 //!
@@ -1154,6 +1156,269 @@ impl crate::shared::EndpointSpec for GetAnnotatedTagRequest {
     type Response = AnnotatedTagObject;
     const ENDPOINT_ID: &'static str = "GetAnnotatedTag";
 }
+/// Request for `ListWorkflowRuns` endpoint.
+///
+/// ## Example
+///
+/// ```ignore
+/// use schematic_schema::github::ListWorkflowRunsRequest;
+///
+/// let request = ListWorkflowRunsRequest::new("owner_value", "repo_value")
+///     .with_page(/* value */)
+///     .with_per_page(/* value */)
+///     .with_status(/* value */)
+///     .with_branch(/* value */)
+///     .with_event(/* value */)
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListWorkflowRunsRequest {
+    /// Path parameter: owner
+    pub owner: String,
+    /// Path parameter: repo
+    pub repo: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 100, max: 100)
+    pub per_page: Option<i64>,
+    /// Query parameter: Filter by workflow run status
+    pub status: Option<String>,
+    /// Query parameter: Filter by branch name
+    pub branch: Option<String>,
+    /// Query parameter: Filter by event type (e.g., push, pull_request)
+    pub event: Option<String>,
+}
+impl ListWorkflowRunsRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(owner: impl Into<String>, repo: impl Into<String>) -> Self {
+        Self {
+            owner: owner.into(),
+            repo: repo.into(),
+            page: None,
+            per_page: None,
+            status: None,
+            branch: None,
+            event: None,
+        }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `per_page` query parameter.
+    pub fn with_per_page(mut self, value: i64) -> Self {
+        self.per_page = Some(value);
+        self
+    }
+    /// Sets the `status` query parameter.
+    pub fn with_status(mut self, value: String) -> Self {
+        self.status = Some(value);
+        self
+    }
+    /// Sets the `branch` query parameter.
+    pub fn with_branch(mut self, value: String) -> Self {
+        self.branch = Some(value);
+        self
+    }
+    /// Sets the `event` query parameter.
+    pub fn with_event(mut self, value: String) -> Self {
+        self.event = Some(value);
+        self
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - Optional JSON body string
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if the request body
+    /// fails to serialize to JSON.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let mut path = format!("/repos/{}/{}/actions/runs", self.owner, self.repo);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.per_page {
+            query_pairs.push(("per_page", value.to_string()));
+        }
+        if let Some(ref value) = self.status {
+            query_pairs.push(("status", value.to_string()));
+        }
+        if let Some(ref value) = self.branch {
+            query_pairs.push(("branch", value.to_string()));
+        }
+        if let Some(ref value) = self.event {
+            query_pairs.push(("event", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
+        Ok(("GET", path, None, vec![]))
+    }
+}
+impl crate::shared::EndpointSpec for ListWorkflowRunsRequest {
+    type Response = WorkflowRunsResponse;
+    const ENDPOINT_ID: &'static str = "ListWorkflowRuns";
+}
+/// Request for `ListOrgRepos` endpoint.
+///
+/// ## Example
+///
+/// ```ignore
+/// use schematic_schema::github::ListOrgReposRequest;
+///
+/// let request = ListOrgReposRequest::new("org_value")
+///     .with_page(/* value */)
+///     .with_per_page(/* value */)
+///     .with_repo_type(/* value */)
+///     .with_sort(/* value */)
+///     .with_direction(/* value */)
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListOrgReposRequest {
+    /// Path parameter: org
+    pub org: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 100, max: 100)
+    pub per_page: Option<i64>,
+    /// Query parameter: Filter by repository type (API param: type)
+    pub repo_type: Option<String>,
+    /// Query parameter: Sort field
+    pub sort: Option<String>,
+    /// Query parameter: Sort direction
+    pub direction: Option<String>,
+}
+impl ListOrgReposRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(org: impl Into<String>) -> Self {
+        Self {
+            org: org.into(),
+            page: None,
+            per_page: None,
+            repo_type: None,
+            sort: None,
+            direction: None,
+        }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `per_page` query parameter.
+    pub fn with_per_page(mut self, value: i64) -> Self {
+        self.per_page = Some(value);
+        self
+    }
+    /// Sets the `repo_type` query parameter.
+    pub fn with_repo_type(mut self, value: String) -> Self {
+        self.repo_type = Some(value);
+        self
+    }
+    /// Sets the `sort` query parameter.
+    pub fn with_sort(mut self, value: String) -> Self {
+        self.sort = Some(value);
+        self
+    }
+    /// Sets the `direction` query parameter.
+    pub fn with_direction(mut self, value: String) -> Self {
+        self.direction = Some(value);
+        self
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - Optional JSON body string
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if the request body
+    /// fails to serialize to JSON.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let mut path = format!("/orgs/{}/repos", self.org);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.per_page {
+            query_pairs.push(("per_page", value.to_string()));
+        }
+        if let Some(ref value) = self.repo_type {
+            query_pairs.push(("repo_type", value.to_string()));
+        }
+        if let Some(ref value) = self.sort {
+            query_pairs.push(("sort", value.to_string()));
+        }
+        if let Some(ref value) = self.direction {
+            query_pairs.push(("direction", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
+        Ok(("GET", path, None, vec![]))
+    }
+}
+impl From<&str> for ListOrgReposRequest {
+    fn from(param: &str) -> Self {
+        Self {
+            org: param.to_string(),
+            page: None,
+            per_page: None,
+            repo_type: None,
+            sort: None,
+            direction: None,
+        }
+    }
+}
+impl From<String> for ListOrgReposRequest {
+    fn from(param: String) -> Self {
+        Self {
+            org: param,
+            page: None,
+            per_page: None,
+            repo_type: None,
+            sort: None,
+            direction: None,
+        }
+    }
+}
+impl crate::shared::EndpointSpec for ListOrgReposRequest {
+    type Response = Vec<RepositoryInfo>;
+    const ENDPOINT_ID: &'static str = "ListOrgRepos";
+}
 impl Paginated for ListPullRequestsRequest {}
 impl Paginated for ListPullRequestFilesRequest {}
 impl Paginated for ListIssuesRequest {}
@@ -1161,6 +1426,8 @@ impl Paginated for ListIssueCommentsRequest {}
 impl Paginated for ListIssueTimelineRequest {}
 impl Paginated for ListTagsRequest {}
 impl Paginated for ListReleasesRequest {}
+impl Paginated for ListWorkflowRunsRequest {}
+impl Paginated for ListOrgReposRequest {}
 /// Request enum for GitHub API.
 ///
 /// Each variant wraps a strongly-typed request struct.
@@ -1193,6 +1460,10 @@ pub enum GitHubRequest {
     GetTagReference(GetTagReferenceRequest),
     /// Get annotated tag object details (message, tagger, verification)
     GetAnnotatedTag(GetAnnotatedTagRequest),
+    /// List workflow runs for a repository
+    ListWorkflowRuns(ListWorkflowRunsRequest),
+    /// List repositories for an organization
+    ListOrgRepos(ListOrgReposRequest),
 }
 impl GitHubRequest {
     /// Converts the request into (method, path, body, headers) parts.
@@ -1219,6 +1490,8 @@ impl GitHubRequest {
             Self::ListReleases(req) => req.into_parts(),
             Self::GetTagReference(req) => req.into_parts(),
             Self::GetAnnotatedTag(req) => req.into_parts(),
+            Self::ListWorkflowRuns(req) => req.into_parts(),
+            Self::ListOrgRepos(req) => req.into_parts(),
         }
     }
     /// Returns the endpoint identifier for this request.
@@ -1268,6 +1541,12 @@ impl GitHubRequest {
             }
             Self::GetAnnotatedTag(_) => {
                 <GetAnnotatedTagRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::ListWorkflowRuns(_) => {
+                <ListWorkflowRunsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::ListOrgRepos(_) => {
+                <ListOrgReposRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
         }
     }
@@ -1340,6 +1619,16 @@ impl From<GetTagReferenceRequest> for GitHubRequest {
 impl From<GetAnnotatedTagRequest> for GitHubRequest {
     fn from(req: GetAnnotatedTagRequest) -> Self {
         Self::GetAnnotatedTag(req)
+    }
+}
+impl From<ListWorkflowRunsRequest> for GitHubRequest {
+    fn from(req: ListWorkflowRunsRequest) -> Self {
+        Self::ListWorkflowRuns(req)
+    }
+}
+impl From<ListOrgReposRequest> for GitHubRequest {
+    fn from(req: ListOrgReposRequest) -> Self {
+        Self::ListOrgRepos(req)
     }
 }
 /// GitHub REST API v2022-11-28 for repository, PR, issue, and release workflows client.

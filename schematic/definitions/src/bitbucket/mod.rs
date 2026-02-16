@@ -36,7 +36,7 @@
 //!     .with_pagelen(100);
 //! ```
 //!
-//! ## Endpoint Coverage (14 endpoints)
+//! ## Endpoint Coverage (15 endpoints)
 //!
 //! | Category | Endpoints |
 //! |----------|-----------|
@@ -46,6 +46,7 @@
 //! | Issues | `ListIssues`, `GetIssue`, `ListIssueComments`, `ListIssueChanges` |
 //! | Tags | `ListTags`, `GetTag` |
 //! | Downloads | `ListDownloads`, `GetDownload` |
+//! | Workspaces | `ListWorkspaceRepos` |
 
 mod types;
 
@@ -84,6 +85,7 @@ fn bitbucket_pagination() -> EndpointParams {
 /// | GetTag | GET | /repositories/{workspace}/{repo_slug}/refs/tags/{name} | Get single tag |
 /// | ListDownloads | GET | /repositories/{workspace}/{repo_slug}/downloads | List downloads |
 /// | GetDownload | GET | /repositories/{workspace}/{repo_slug}/downloads/{filename} | Download file |
+/// | ListWorkspaceRepos | GET | /repositories/{workspace} | List workspace repositories |
 ///
 /// ## Examples
 ///
@@ -92,7 +94,7 @@ fn bitbucket_pagination() -> EndpointParams {
 ///
 /// let api = define_bitbucket_api();
 /// assert_eq!(api.name, "Bitbucket");
-/// assert_eq!(api.endpoints.len(), 14);
+/// assert_eq!(api.endpoints.len(), 15);
 /// ```
 pub fn define_bitbucket_api() -> RestApi {
     RestApi {
@@ -271,6 +273,19 @@ pub fn define_bitbucket_api() -> RestApi {
                 headers: vec![],
                 params: None,
             },
+            // =================================================================
+            // Workspace Repositories
+            // =================================================================
+            Endpoint {
+                id: "ListWorkspaceRepos".to_string(),
+                method: RestMethod::Get,
+                path: "/repositories/{workspace}".to_string(),
+                description: "List repositories in a workspace".to_string(),
+                request: None,
+                response: ApiResponse::json_type("PaginatedResponse<Repository>"),
+                headers: vec![],
+                params: Some(bitbucket_pagination()),
+            },
         ],
         module_path: Some("bitbucket".to_string()),
         request_suffix: None,
@@ -310,9 +325,9 @@ mod tests {
     }
 
     #[test]
-    fn api_has_fourteen_endpoints() {
+    fn api_has_fifteen_endpoints() {
         let api = define_bitbucket_api();
-        assert_eq!(api.endpoints.len(), 14);
+        assert_eq!(api.endpoints.len(), 15);
     }
 
     #[test]
@@ -548,6 +563,7 @@ mod tests {
             "ListIssueChanges",
             "ListTags",
             "ListDownloads",
+            "ListWorkspaceRepos",
         ];
 
         for id in list_endpoints {
@@ -640,6 +656,7 @@ mod tests {
             "ListIssueChanges",
             "ListTags",
             "ListDownloads",
+            "ListWorkspaceRepos",
         ];
 
         for id in list_endpoints {
@@ -660,6 +677,33 @@ mod tests {
                 id
             );
         }
+    }
+
+    #[test]
+    fn list_workspace_repos_endpoint() {
+        let api = define_bitbucket_api();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "ListWorkspaceRepos")
+            .expect("ListWorkspaceRepos endpoint missing");
+
+        assert_eq!(endpoint.method, RestMethod::Get);
+        assert_eq!(endpoint.path, "/repositories/{workspace}");
+
+        match &endpoint.response {
+            ApiResponse::Json(schema) => {
+                assert!(
+                    schema.type_name.contains("PaginatedResponse<Repository>"),
+                    "Expected PaginatedResponse<Repository>, got {}",
+                    schema.type_name
+                );
+            }
+            _ => panic!("Expected JSON response"),
+        }
+
+        let params = endpoint.params.as_ref().expect("should have params");
+        assert!(params.has_pagination());
     }
 
     #[test]

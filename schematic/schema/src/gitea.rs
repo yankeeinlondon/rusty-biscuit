@@ -25,6 +25,7 @@
 //! - `ListReleases` - List releases (linked to tags via tag_name)
 //! - `GetTagReference` - Get tag reference (returns array; check object.type: 'commit' vs 'tag')
 //! - `GetAnnotatedTag` - Get annotated tag object details (message, tagger)
+//! - `ListOrgRepos` - List repositories for an organization
 //!
 //! ## Example
 //!
@@ -1118,6 +1119,106 @@ impl crate::shared::EndpointSpec for GetAnnotatedTagRequest {
     type Response = AnnotatedTagObject;
     const ENDPOINT_ID: &'static str = "GetAnnotatedTag";
 }
+/// Request for `ListOrgRepos` endpoint.
+///
+/// ## Example
+///
+/// ```ignore
+/// use schematic_schema::gitea::ListOrgReposRequest;
+///
+/// let request = ListOrgReposRequest::new("org_value")
+///     .with_page(/* value */)
+///     .with_limit(/* value */)
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListOrgReposRequest {
+    /// Path parameter: org
+    pub org: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub limit: Option<i64>,
+}
+impl ListOrgReposRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(org: impl Into<String>) -> Self {
+        Self {
+            org: org.into(),
+            page: None,
+            limit: None,
+        }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `limit` query parameter.
+    pub fn with_limit(mut self, value: i64) -> Self {
+        self.limit = Some(value);
+        self
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - Optional JSON body string
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if the request body
+    /// fails to serialize to JSON.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let mut path = format!("/orgs/{}/repos", self.org);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.limit {
+            query_pairs.push(("limit", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
+        Ok(("GET", path, None, vec![]))
+    }
+}
+impl From<&str> for ListOrgReposRequest {
+    fn from(param: &str) -> Self {
+        Self {
+            org: param.to_string(),
+            page: None,
+            limit: None,
+        }
+    }
+}
+impl From<String> for ListOrgReposRequest {
+    fn from(param: String) -> Self {
+        Self {
+            org: param,
+            page: None,
+            limit: None,
+        }
+    }
+}
+impl crate::shared::EndpointSpec for ListOrgReposRequest {
+    type Response = Vec<RepositoryInfo>;
+    const ENDPOINT_ID: &'static str = "ListOrgRepos";
+}
 impl Paginated for ListPullRequestsRequest {}
 impl Paginated for ListPullRequestFilesRequest {}
 impl Paginated for ListIssuesRequest {}
@@ -1125,6 +1226,7 @@ impl Paginated for ListIssueCommentsRequest {}
 impl Paginated for ListIssueTimelineRequest {}
 impl Paginated for ListTagsRequest {}
 impl Paginated for ListReleasesRequest {}
+impl Paginated for ListOrgReposRequest {}
 /// Request enum for Gitea API.
 ///
 /// Each variant wraps a strongly-typed request struct.
@@ -1157,6 +1259,8 @@ pub enum GiteaRequest {
     GetTagReference(GetTagReferenceRequest),
     /// Get annotated tag object details (message, tagger)
     GetAnnotatedTag(GetAnnotatedTagRequest),
+    /// List repositories for an organization
+    ListOrgRepos(ListOrgReposRequest),
 }
 impl GiteaRequest {
     /// Converts the request into (method, path, body, headers) parts.
@@ -1183,6 +1287,7 @@ impl GiteaRequest {
             Self::ListReleases(req) => req.into_parts(),
             Self::GetTagReference(req) => req.into_parts(),
             Self::GetAnnotatedTag(req) => req.into_parts(),
+            Self::ListOrgRepos(req) => req.into_parts(),
         }
     }
     /// Returns the endpoint identifier for this request.
@@ -1232,6 +1337,9 @@ impl GiteaRequest {
             }
             Self::GetAnnotatedTag(_) => {
                 <GetAnnotatedTagRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::ListOrgRepos(_) => {
+                <ListOrgReposRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
         }
     }
@@ -1304,6 +1412,11 @@ impl From<GetTagReferenceRequest> for GiteaRequest {
 impl From<GetAnnotatedTagRequest> for GiteaRequest {
     fn from(req: GetAnnotatedTagRequest) -> Self {
         Self::GetAnnotatedTag(req)
+    }
+}
+impl From<ListOrgReposRequest> for GiteaRequest {
+    fn from(req: ListOrgReposRequest) -> Self {
+        Self::ListOrgRepos(req)
     }
 }
 /// Gitea REST API v1.25+ for repository, PR, issue, and release workflows client.

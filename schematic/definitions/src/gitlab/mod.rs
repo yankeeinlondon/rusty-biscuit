@@ -36,6 +36,9 @@
 //! | Merge Requests | `ListMergeRequests`, `GetMergeRequest`, `ListMergeRequestCommits`, `ListMergeRequestChanges` |
 //! | Issues | `ListIssues`, `GetIssue`, `ListIssueNotes`, `ListIssueParticipants` |
 //! | Tags/Releases | `ListTags`, `GetTag`, `ListReleases`, `GetRelease`, `GetLatestRelease` |
+//! | Projects | `GetProject` |
+//! | Pipelines | `ListProjectPipelines` |
+//! | Groups | `ListGroupProjects` |
 
 mod types;
 
@@ -70,6 +73,9 @@ use schematic_define::{
 /// | ListReleases | GET | /projects/{id}/releases | List releases |
 /// | GetRelease | GET | /projects/{id}/releases/{tag_name} | Get single release |
 /// | GetLatestRelease | GET | /projects/{id}/releases/permalink/latest | Get latest release |
+/// | GetProject | GET | /projects/{id} | Get project metadata |
+/// | ListProjectPipelines | GET | /projects/{id}/pipelines | List CI/CD pipelines |
+/// | ListGroupProjects | GET | /groups/{id}/projects | List group projects |
 ///
 /// ## Examples
 ///
@@ -78,7 +84,7 @@ use schematic_define::{
 ///
 /// let api = define_gitlab_api();
 /// assert_eq!(api.name, "GitLab");
-/// assert_eq!(api.endpoints.len(), 15);
+/// assert_eq!(api.endpoints.len(), 18);
 /// ```
 pub fn define_gitlab_api() -> RestApi {
     RestApi {
@@ -320,6 +326,128 @@ pub fn define_gitlab_api() -> RestApi {
                 headers: vec![],
                 params: None,
             },
+            // =================================================================
+            // Project Metadata
+            // =================================================================
+            Endpoint {
+                id: "GetProject".to_string(),
+                method: RestMethod::Get,
+                path: "/projects/{id}".to_string(),
+                description: "Get project metadata (use URL-encoded path or numeric ID)".to_string(),
+                request: None,
+                response: ApiResponse::json_type("Project"),
+                headers: vec![],
+                params: None,
+            },
+            // =================================================================
+            // Pipelines (CI/CD)
+            // =================================================================
+            Endpoint {
+                id: "ListProjectPipelines".to_string(),
+                method: RestMethod::Get,
+                path: "/projects/{id}/pipelines".to_string(),
+                description: "List CI/CD pipelines for a project".to_string(),
+                request: None,
+                response: ApiResponse::json_vec_type("Pipeline"),
+                headers: vec![],
+                params: Some(
+                    EndpointParams::default()
+                        .with_pagination(PaginationStyle::gitlab())
+                        .with_query_param(
+                            "status",
+                            QueryParamType::Enum(vec![
+                                "created".to_string(),
+                                "waiting_for_resource".to_string(),
+                                "preparing".to_string(),
+                                "pending".to_string(),
+                                "running".to_string(),
+                                "success".to_string(),
+                                "failed".to_string(),
+                                "canceled".to_string(),
+                                "skipped".to_string(),
+                                "manual".to_string(),
+                                "scheduled".to_string(),
+                            ]),
+                            false,
+                            Some("Filter by pipeline status"),
+                        )
+                        .with_query_param(
+                            "source",
+                            QueryParamType::String,
+                            false,
+                            Some("Filter by pipeline source (e.g., push, merge_request_event, schedule)"),
+                        )
+                        .with_query_param(
+                            "git_ref",
+                            QueryParamType::String,
+                            false,
+                            Some("Filter by branch or tag name"),
+                        )
+                        .with_query_param(
+                            "sha",
+                            QueryParamType::String,
+                            false,
+                            Some("Filter by commit SHA"),
+                        ),
+                ),
+            },
+            // =================================================================
+            // Group Projects
+            // =================================================================
+            Endpoint {
+                id: "ListGroupProjects".to_string(),
+                method: RestMethod::Get,
+                path: "/groups/{id}/projects".to_string(),
+                description: "List projects in a group".to_string(),
+                request: None,
+                response: ApiResponse::json_vec_type("Project"),
+                headers: vec![],
+                params: Some(
+                    EndpointParams::default()
+                        .with_pagination(PaginationStyle::gitlab())
+                        .with_query_param(
+                            "archived",
+                            QueryParamType::Boolean,
+                            false,
+                            Some("Filter by archived status"),
+                        )
+                        .with_query_param(
+                            "visibility",
+                            QueryParamType::Enum(vec![
+                                "public".to_string(),
+                                "internal".to_string(),
+                                "private".to_string(),
+                            ]),
+                            false,
+                            Some("Filter by visibility level"),
+                        )
+                        .with_query_param(
+                            "order_by",
+                            QueryParamType::Enum(vec![
+                                "id".to_string(),
+                                "name".to_string(),
+                                "path".to_string(),
+                                "created_at".to_string(),
+                                "updated_at".to_string(),
+                                "last_activity_at".to_string(),
+                            ]),
+                            false,
+                            Some("Sort field"),
+                        )
+                        .with_query_param(
+                            "sort",
+                            QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
+                            false,
+                            Some("Sort direction"),
+                        )
+                        .with_query_param(
+                            "include_subgroups",
+                            QueryParamType::Boolean,
+                            false,
+                            Some("Include projects from subgroups"),
+                        ),
+                ),
+            },
         ],
         module_path: Some("gitlab".to_string()),
         request_suffix: None,
@@ -375,9 +503,9 @@ mod tests {
     }
 
     #[test]
-    fn api_has_fifteen_endpoints() {
+    fn api_has_eighteen_endpoints() {
         let api = define_gitlab_api();
-        assert_eq!(api.endpoints.len(), 15);
+        assert_eq!(api.endpoints.len(), 18);
     }
 
     #[test]
@@ -568,6 +696,8 @@ mod tests {
             "ListIssueParticipants",
             "ListTags",
             "ListReleases",
+            "ListProjectPipelines",
+            "ListGroupProjects",
         ];
 
         for id in list_endpoints {
@@ -598,6 +728,7 @@ mod tests {
             "GetTag",
             "GetRelease",
             "GetLatestRelease",
+            "GetProject",
         ];
 
         for id in single_endpoints {
@@ -635,6 +766,8 @@ mod tests {
             "ListIssueNotes",
             "ListTags",
             "ListReleases",
+            "ListProjectPipelines",
+            "ListGroupProjects",
         ];
 
         for id in paginated_endpoints {
@@ -666,6 +799,78 @@ mod tests {
                 _ => panic!("Endpoint {} should use PageNumber pagination", id),
             }
         }
+    }
+
+    #[test]
+    fn get_project_endpoint() {
+        let api = define_gitlab_api();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "GetProject")
+            .expect("GetProject endpoint missing");
+
+        assert_eq!(endpoint.method, RestMethod::Get);
+        assert_eq!(endpoint.path, "/projects/{id}");
+
+        match &endpoint.response {
+            ApiResponse::Json(schema) => {
+                assert_eq!(schema.type_name, "Project");
+            }
+            _ => panic!("Expected JSON response"),
+        }
+    }
+
+    #[test]
+    fn list_project_pipelines_endpoint() {
+        let api = define_gitlab_api();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "ListProjectPipelines")
+            .expect("ListProjectPipelines endpoint missing");
+
+        assert_eq!(endpoint.method, RestMethod::Get);
+        assert_eq!(endpoint.path, "/projects/{id}/pipelines");
+
+        match &endpoint.response {
+            ApiResponse::Json(schema) => {
+                assert!(schema.type_name.starts_with("Vec<"));
+            }
+            _ => panic!("Expected JSON response"),
+        }
+
+        let params = endpoint.params.as_ref().expect("should have params");
+        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "status"));
+        assert!(params.query.iter().any(|p| p.name == "source"));
+        assert!(params.query.iter().any(|p| p.name == "git_ref"));
+    }
+
+    #[test]
+    fn list_group_projects_endpoint() {
+        let api = define_gitlab_api();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "ListGroupProjects")
+            .expect("ListGroupProjects endpoint missing");
+
+        assert_eq!(endpoint.method, RestMethod::Get);
+        assert_eq!(endpoint.path, "/groups/{id}/projects");
+
+        match &endpoint.response {
+            ApiResponse::Json(schema) => {
+                assert!(schema.type_name.starts_with("Vec<"));
+            }
+            _ => panic!("Expected JSON response"),
+        }
+
+        let params = endpoint.params.as_ref().expect("should have params");
+        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "archived"));
+        assert!(params.query.iter().any(|p| p.name == "visibility"));
+        assert!(params.query.iter().any(|p| p.name == "include_subgroups"));
     }
 
     #[test]

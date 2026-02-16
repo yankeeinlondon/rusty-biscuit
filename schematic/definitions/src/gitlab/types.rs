@@ -956,6 +956,190 @@ pub struct ReleaseLinks {
 }
 
 // =============================================================================
+// Project Types
+// =============================================================================
+
+/// A GitLab namespace (group or user).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Namespace {
+    /// Namespace ID.
+    pub id: u64,
+
+    /// Namespace name.
+    #[serde(default)]
+    pub name: Option<String>,
+
+    /// URL-safe path.
+    #[serde(default)]
+    pub path: Option<String>,
+
+    /// Namespace kind: "user" or "group".
+    #[serde(default)]
+    pub kind: Option<String>,
+
+    /// Full path (including parent groups).
+    #[serde(default)]
+    pub full_path: Option<String>,
+
+    /// Parent namespace ID.
+    #[serde(default)]
+    pub parent_id: Option<u64>,
+
+    /// URL to the namespace's avatar image.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+
+    /// HTML URL to the namespace.
+    #[serde(default)]
+    pub web_url: Option<String>,
+}
+
+/// Project metadata from `GET /projects/{id}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Project {
+    /// Project ID.
+    pub id: u64,
+
+    /// Project name.
+    pub name: String,
+
+    /// URL-safe path.
+    #[serde(default)]
+    pub path: Option<String>,
+
+    /// Full path with namespace (e.g., "group/subgroup/project").
+    #[serde(default)]
+    pub path_with_namespace: Option<String>,
+
+    /// Project description.
+    #[serde(default)]
+    pub description: Option<String>,
+
+    /// Default branch name.
+    #[serde(default)]
+    pub default_branch: Option<String>,
+
+    /// Visibility level: "private", "internal", "public".
+    #[serde(default)]
+    pub visibility: Option<String>,
+
+    /// HTML URL to the project.
+    #[serde(default)]
+    pub web_url: Option<String>,
+
+    /// SSH URL for cloning.
+    #[serde(default)]
+    pub ssh_url_to_repo: Option<String>,
+
+    /// HTTPS URL for cloning.
+    #[serde(default)]
+    pub http_url_to_repo: Option<String>,
+
+    /// Namespace the project belongs to.
+    #[serde(default)]
+    pub namespace: Option<Namespace>,
+
+    /// Star count.
+    #[serde(default)]
+    pub star_count: Option<u64>,
+
+    /// Fork count.
+    #[serde(default)]
+    pub forks_count: Option<u64>,
+
+    /// Number of open issues.
+    #[serde(default)]
+    pub open_issues_count: Option<u64>,
+
+    /// Whether the repository is empty.
+    #[serde(default)]
+    pub empty_repo: Option<bool>,
+
+    /// Whether the project is archived.
+    #[serde(default)]
+    pub archived: bool,
+
+    /// Creation timestamp (ISO 8601).
+    #[serde(default)]
+    pub created_at: Option<String>,
+
+    /// Last activity timestamp (ISO 8601).
+    #[serde(default)]
+    pub last_activity_at: Option<String>,
+
+    /// Project owner.
+    #[serde(default)]
+    pub owner: Option<User>,
+
+    /// Topics/tags on the project.
+    #[serde(default)]
+    pub topics: Vec<String>,
+
+    /// Whether issues are enabled.
+    #[serde(default)]
+    pub issues_enabled: Option<bool>,
+
+    /// Whether merge requests are enabled.
+    #[serde(default)]
+    pub merge_requests_enabled: Option<bool>,
+
+    /// Whether the wiki is enabled.
+    #[serde(default)]
+    pub wiki_enabled: Option<bool>,
+
+    /// URL to the project's avatar image.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+}
+
+// =============================================================================
+// Pipeline Types
+// =============================================================================
+
+/// A CI/CD pipeline from `GET /projects/{id}/pipelines`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pipeline {
+    /// Pipeline ID.
+    pub id: u64,
+
+    /// Project ID.
+    #[serde(default)]
+    pub project_id: Option<u64>,
+
+    /// Pipeline status (e.g., "created", "pending", "running", "success", "failed", "canceled", "skipped", "manual").
+    #[serde(default)]
+    pub status: Option<String>,
+
+    /// Pipeline source (e.g., "push", "merge_request_event", "schedule", "api", "web").
+    #[serde(default)]
+    pub source: Option<String>,
+
+    /// Git ref (branch or tag name).
+    #[serde(rename = "ref", default)]
+    pub ref_name: Option<String>,
+
+    /// Commit SHA.
+    #[serde(default)]
+    pub sha: Option<String>,
+
+    /// HTML URL to the pipeline.
+    #[serde(default)]
+    pub web_url: Option<String>,
+
+    /// Creation timestamp (ISO 8601).
+    #[serde(default)]
+    pub created_at: Option<String>,
+
+    /// Last update timestamp (ISO 8601).
+    #[serde(default)]
+    pub updated_at: Option<String>,
+
+    /// Pipeline name.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 

@@ -582,23 +582,6 @@ impl GitHubRemote {
 
 ---
 
-## API Gaps (Schematic Additions Needed)
-
-The following endpoints are not yet in schematic but are needed for full feature coverage. These can be added incrementally as needed.
-
-| Provider | Missing Endpoint | Purpose | Priority |
-|----------|-----------------|---------|----------|
-| GitHub | `GET /repos/{owner}/{repo}/actions/runs` | CI/CD workflow runs | Medium |
-| GitHub | `GET /orgs/{org}/repos` | List org repos | Medium |
-| GitLab | `GET /projects/{id}` | Project/repo metadata | **High** |
-| GitLab | `GET /projects/{id}/pipelines` | CI/CD pipelines | Medium |
-| GitLab | `GET /groups/{id}/projects` | List group repos | Medium |
-| Gitea | `GET /orgs/{org}/repos` | List org repos | Medium |
-| Bitbucket | `GET /repositories/{workspace}` | List workspace repos | Medium |
-
-**Strategy**: Start with what's available today. The `list_ci_cd()` and `list_org_repos()` methods return empty `Vec` initially. The GitLab `repo_metadata()` impl can use a workaround (extract project info from existing responses) until `GetProject` is added.
-
----
 
 ## Integration with Existing Sniff
 
@@ -740,22 +723,22 @@ Remote {
 
 ```bash
 # Local repo, supplement with remote data
-sniff repo --deep
+sniff git --deep
 
 # Query remote info for the "origin" remote
-sniff repo --remote origin
+sniff git origin
 
 # Query remote info for a specific URL
-sniff repo --remote https://github.com/rust-lang/cargo
-
-# Standalone remote query (no local repo needed)
-sniff remote rust-lang/cargo
-sniff remote https://gitlab.com/inkscape/inkscape
-sniff remote https://gitea.example.com/org/repo --base-url https://gitea.example.com/api/v1
+sniff git https://github.com/rust-lang/cargo
+# Query cloud git repo using just org/repo name
+# note: this will query Github, Gitlab, Bitbucket, and Gitea (if Gitea_URL env is set) in parallel
+# and in most cases just resolve to one provider. If we actually resolve to more than one provider
+# we will list all that have the org/repo combo with a warning message at the end that more than
+# one match was found.
+sniff git rust-lang/cargo
 
 # JSON output
-sniff repo --remote origin --json
-sniff remote rust-lang/cargo --json
+sniff git origin --json
 ```
 
 ---

@@ -26,6 +26,9 @@
 //! - `ListReleases` - List releases
 //! - `GetRelease` - Get a single release by tag name
 //! - `GetLatestRelease` - Get the latest release
+//! - `GetProject` - Get project metadata (use URL-encoded path or numeric ID)
+//! - `ListProjectPipelines` - List CI/CD pipelines for a project
+//! - `ListGroupProjects` - List projects in a group
 //!
 //! ## Example
 //!
@@ -1190,6 +1193,385 @@ impl crate::shared::EndpointSpec for GetLatestReleaseRequest {
     type Response = Release;
     const ENDPOINT_ID: &'static str = "GetLatestRelease";
 }
+/// Request for `GetProject` endpoint.
+///
+/// ## Example
+///
+/// ```ignore
+/// use schematic_schema::gitlab::GetProjectRequest;
+///
+/// let request = GetProjectRequest::new("id_value")
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GetProjectRequest {
+    /// Path parameter: id
+    pub id: String,
+}
+impl GetProjectRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self { id: id.into() }
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - Optional JSON body string
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if the request body
+    /// fails to serialize to JSON.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let path = format!("/projects/{}", self.id);
+        Ok(("GET", path, None, vec![]))
+    }
+}
+impl From<&str> for GetProjectRequest {
+    fn from(param: &str) -> Self {
+        Self { id: param.to_string() }
+    }
+}
+impl From<String> for GetProjectRequest {
+    fn from(param: String) -> Self {
+        Self { id: param }
+    }
+}
+impl crate::shared::EndpointSpec for GetProjectRequest {
+    type Response = Project;
+    const ENDPOINT_ID: &'static str = "GetProject";
+}
+/// Request for `ListProjectPipelines` endpoint.
+///
+/// ## Example
+///
+/// ```ignore
+/// use schematic_schema::gitlab::ListProjectPipelinesRequest;
+///
+/// let request = ListProjectPipelinesRequest::new("id_value")
+///     .with_page(/* value */)
+///     .with_per_page(/* value */)
+///     .with_status(/* value */)
+///     .with_source(/* value */)
+///     .with_git_ref(/* value */)
+///     .with_sha(/* value */)
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListProjectPipelinesRequest {
+    /// Path parameter: id
+    pub id: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 100, max: 100)
+    pub per_page: Option<i64>,
+    /// Query parameter: Filter by pipeline status
+    pub status: Option<String>,
+    /// Query parameter: Filter by pipeline source (e.g., push, merge_request_event, schedule)
+    pub source: Option<String>,
+    /// Query parameter: Filter by branch or tag name
+    pub git_ref: Option<String>,
+    /// Query parameter: Filter by commit SHA
+    pub sha: Option<String>,
+}
+impl ListProjectPipelinesRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            page: None,
+            per_page: None,
+            status: None,
+            source: None,
+            git_ref: None,
+            sha: None,
+        }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `per_page` query parameter.
+    pub fn with_per_page(mut self, value: i64) -> Self {
+        self.per_page = Some(value);
+        self
+    }
+    /// Sets the `status` query parameter.
+    pub fn with_status(mut self, value: String) -> Self {
+        self.status = Some(value);
+        self
+    }
+    /// Sets the `source` query parameter.
+    pub fn with_source(mut self, value: String) -> Self {
+        self.source = Some(value);
+        self
+    }
+    /// Sets the `git_ref` query parameter.
+    pub fn with_git_ref(mut self, value: String) -> Self {
+        self.git_ref = Some(value);
+        self
+    }
+    /// Sets the `sha` query parameter.
+    pub fn with_sha(mut self, value: String) -> Self {
+        self.sha = Some(value);
+        self
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - Optional JSON body string
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if the request body
+    /// fails to serialize to JSON.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let mut path = format!("/projects/{}/pipelines", self.id);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.per_page {
+            query_pairs.push(("per_page", value.to_string()));
+        }
+        if let Some(ref value) = self.status {
+            query_pairs.push(("status", value.to_string()));
+        }
+        if let Some(ref value) = self.source {
+            query_pairs.push(("source", value.to_string()));
+        }
+        if let Some(ref value) = self.git_ref {
+            query_pairs.push(("git_ref", value.to_string()));
+        }
+        if let Some(ref value) = self.sha {
+            query_pairs.push(("sha", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
+        Ok(("GET", path, None, vec![]))
+    }
+}
+impl From<&str> for ListProjectPipelinesRequest {
+    fn from(param: &str) -> Self {
+        Self {
+            id: param.to_string(),
+            page: None,
+            per_page: None,
+            status: None,
+            source: None,
+            git_ref: None,
+            sha: None,
+        }
+    }
+}
+impl From<String> for ListProjectPipelinesRequest {
+    fn from(param: String) -> Self {
+        Self {
+            id: param,
+            page: None,
+            per_page: None,
+            status: None,
+            source: None,
+            git_ref: None,
+            sha: None,
+        }
+    }
+}
+impl crate::shared::EndpointSpec for ListProjectPipelinesRequest {
+    type Response = Vec<Pipeline>;
+    const ENDPOINT_ID: &'static str = "ListProjectPipelines";
+}
+/// Request for `ListGroupProjects` endpoint.
+///
+/// ## Example
+///
+/// ```ignore
+/// use schematic_schema::gitlab::ListGroupProjectsRequest;
+///
+/// let request = ListGroupProjectsRequest::new("id_value")
+///     .with_page(/* value */)
+///     .with_per_page(/* value */)
+///     .with_archived(/* value */)
+///     .with_visibility(/* value */)
+///     .with_order_by(/* value */)
+///     .with_sort(/* value */)
+///     .with_include_subgroups(/* value */)
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ListGroupProjectsRequest {
+    /// Path parameter: id
+    pub id: String,
+    /// Query parameter: Page number (1-indexed, default: 1)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 100, max: 100)
+    pub per_page: Option<i64>,
+    /// Query parameter: Filter by archived status
+    pub archived: Option<bool>,
+    /// Query parameter: Filter by visibility level
+    pub visibility: Option<String>,
+    /// Query parameter: Sort field
+    pub order_by: Option<String>,
+    /// Query parameter: Sort direction
+    pub sort: Option<String>,
+    /// Query parameter: Include projects from subgroups
+    pub include_subgroups: Option<bool>,
+}
+impl ListGroupProjectsRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            page: None,
+            per_page: None,
+            archived: None,
+            visibility: None,
+            order_by: None,
+            sort: None,
+            include_subgroups: None,
+        }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `per_page` query parameter.
+    pub fn with_per_page(mut self, value: i64) -> Self {
+        self.per_page = Some(value);
+        self
+    }
+    /// Sets the `archived` query parameter.
+    pub fn with_archived(mut self, value: bool) -> Self {
+        self.archived = Some(value);
+        self
+    }
+    /// Sets the `visibility` query parameter.
+    pub fn with_visibility(mut self, value: String) -> Self {
+        self.visibility = Some(value);
+        self
+    }
+    /// Sets the `order_by` query parameter.
+    pub fn with_order_by(mut self, value: String) -> Self {
+        self.order_by = Some(value);
+        self
+    }
+    /// Sets the `sort` query parameter.
+    pub fn with_sort(mut self, value: String) -> Self {
+        self.sort = Some(value);
+        self
+    }
+    /// Sets the `include_subgroups` query parameter.
+    pub fn with_include_subgroups(mut self, value: bool) -> Self {
+        self.include_subgroups = Some(value);
+        self
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - Optional JSON body string
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if the request body
+    /// fails to serialize to JSON.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let mut path = format!("/groups/{}/projects", self.id);
+        let mut query_pairs: Vec<(&str, String)> = Vec::new();
+        if let Some(ref value) = self.page {
+            query_pairs.push(("page", value.to_string()));
+        }
+        if let Some(ref value) = self.per_page {
+            query_pairs.push(("per_page", value.to_string()));
+        }
+        if let Some(ref value) = self.archived {
+            query_pairs.push(("archived", value.to_string()));
+        }
+        if let Some(ref value) = self.visibility {
+            query_pairs.push(("visibility", value.to_string()));
+        }
+        if let Some(ref value) = self.order_by {
+            query_pairs.push(("order_by", value.to_string()));
+        }
+        if let Some(ref value) = self.sort {
+            query_pairs.push(("sort", value.to_string()));
+        }
+        if let Some(ref value) = self.include_subgroups {
+            query_pairs.push(("include_subgroups", value.to_string()));
+        }
+        if !query_pairs.is_empty() {
+            let query_string: String = query_pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            if path.contains('?') {
+                path.push_str(&format!("&{}", query_string));
+            } else {
+                path.push_str(&format!("?{}", query_string));
+            }
+        }
+        Ok(("GET", path, None, vec![]))
+    }
+}
+impl From<&str> for ListGroupProjectsRequest {
+    fn from(param: &str) -> Self {
+        Self {
+            id: param.to_string(),
+            page: None,
+            per_page: None,
+            archived: None,
+            visibility: None,
+            order_by: None,
+            sort: None,
+            include_subgroups: None,
+        }
+    }
+}
+impl From<String> for ListGroupProjectsRequest {
+    fn from(param: String) -> Self {
+        Self {
+            id: param,
+            page: None,
+            per_page: None,
+            archived: None,
+            visibility: None,
+            order_by: None,
+            sort: None,
+            include_subgroups: None,
+        }
+    }
+}
+impl crate::shared::EndpointSpec for ListGroupProjectsRequest {
+    type Response = Vec<Project>;
+    const ENDPOINT_ID: &'static str = "ListGroupProjects";
+}
 impl Paginated for ListRepositoryTreeRequest {}
 impl Paginated for ListMergeRequestsRequest {}
 impl Paginated for ListMergeRequestCommitsRequest {}
@@ -1197,6 +1579,8 @@ impl Paginated for ListIssuesRequest {}
 impl Paginated for ListIssueNotesRequest {}
 impl Paginated for ListTagsRequest {}
 impl Paginated for ListReleasesRequest {}
+impl Paginated for ListProjectPipelinesRequest {}
+impl Paginated for ListGroupProjectsRequest {}
 /// Request enum for GitLab API.
 ///
 /// Each variant wraps a strongly-typed request struct.
@@ -1231,6 +1615,12 @@ pub enum GitLabRequest {
     GetRelease(GetReleaseRequest),
     /// Get the latest release
     GetLatestRelease(GetLatestReleaseRequest),
+    /// Get project metadata (use URL-encoded path or numeric ID)
+    GetProject(GetProjectRequest),
+    /// List CI/CD pipelines for a project
+    ListProjectPipelines(ListProjectPipelinesRequest),
+    /// List projects in a group
+    ListGroupProjects(ListGroupProjectsRequest),
 }
 impl GitLabRequest {
     /// Converts the request into (method, path, body, headers) parts.
@@ -1258,6 +1648,9 @@ impl GitLabRequest {
             Self::ListReleases(req) => req.into_parts(),
             Self::GetRelease(req) => req.into_parts(),
             Self::GetLatestRelease(req) => req.into_parts(),
+            Self::GetProject(req) => req.into_parts(),
+            Self::ListProjectPipelines(req) => req.into_parts(),
+            Self::ListGroupProjects(req) => req.into_parts(),
         }
     }
     /// Returns the endpoint identifier for this request.
@@ -1310,6 +1703,15 @@ impl GitLabRequest {
             }
             Self::GetLatestRelease(_) => {
                 <GetLatestReleaseRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetProject(_) => {
+                <GetProjectRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::ListProjectPipelines(_) => {
+                <ListProjectPipelinesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::ListGroupProjects(_) => {
+                <ListGroupProjectsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
         }
     }
@@ -1387,6 +1789,21 @@ impl From<GetReleaseRequest> for GitLabRequest {
 impl From<GetLatestReleaseRequest> for GitLabRequest {
     fn from(req: GetLatestReleaseRequest) -> Self {
         Self::GetLatestRelease(req)
+    }
+}
+impl From<GetProjectRequest> for GitLabRequest {
+    fn from(req: GetProjectRequest) -> Self {
+        Self::GetProject(req)
+    }
+}
+impl From<ListProjectPipelinesRequest> for GitLabRequest {
+    fn from(req: ListProjectPipelinesRequest) -> Self {
+        Self::ListProjectPipelines(req)
+    }
+}
+impl From<ListGroupProjectsRequest> for GitLabRequest {
+    fn from(req: ListGroupProjectsRequest) -> Self {
+        Self::ListGroupProjects(req)
     }
 }
 /// GitLab REST API v4 for repository, MR, issue, and release workflows client.

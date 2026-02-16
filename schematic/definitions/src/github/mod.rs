@@ -34,6 +34,8 @@
 //! | Pull Requests | `ListPullRequests`, `ListPullRequestFiles` |
 //! | Issues | `ListIssues`, `GetIssue`, `ListIssueComments`, `ListIssueTimeline` |
 //! | Tags/Releases | `ListTags`, `ListReleases`, `GetTagReference`, `GetAnnotatedTag` |
+//! | Actions | `ListWorkflowRuns` |
+//! | Organizations | `ListOrgRepos` |
 
 mod types;
 
@@ -67,6 +69,8 @@ use schematic_define::{
 /// | ListReleases | GET | /repos/{owner}/{repo}/releases | List releases |
 /// | GetTagReference | GET | /repos/{owner}/{repo}/git/ref/tags/{tag} | Get tag reference |
 /// | GetAnnotatedTag | GET | /repos/{owner}/{repo}/git/tags/{tag_sha} | Get annotated tag object |
+/// | ListWorkflowRuns | GET | /repos/{owner}/{repo}/actions/runs | List workflow runs |
+/// | ListOrgRepos | GET | /orgs/{org}/repos | List organization repositories |
 ///
 /// All `List*` endpoints support pagination via `page` and `per_page` query parameters.
 /// The `GetGitTreeRecursive` endpoint has a required `recursive` boolean parameter.
@@ -78,7 +82,7 @@ use schematic_define::{
 ///
 /// let api = define_github_api();
 /// assert_eq!(api.name, "GitHub");
-/// assert_eq!(api.endpoints.len(), 14);
+/// assert_eq!(api.endpoints.len(), 16);
 /// ```
 pub fn define_github_api() -> RestApi {
     RestApi {
@@ -335,6 +339,101 @@ pub fn define_github_api() -> RestApi {
                 headers: vec![],
                 params: None,
             },
+            // =================================================================
+            // Workflow Runs (Actions / CI/CD)
+            // =================================================================
+            Endpoint {
+                id: "ListWorkflowRuns".to_string(),
+                method: RestMethod::Get,
+                path: "/repos/{owner}/{repo}/actions/runs".to_string(),
+                description: "List workflow runs for a repository".to_string(),
+                request: None,
+                response: ApiResponse::json_type("WorkflowRunsResponse"),
+                headers: vec![],
+                params: Some(
+                    EndpointParams::default()
+                        .with_pagination(PaginationStyle::github())
+                        .with_query_param(
+                            "status",
+                            QueryParamType::Enum(vec![
+                                "completed".to_string(),
+                                "action_required".to_string(),
+                                "cancelled".to_string(),
+                                "failure".to_string(),
+                                "neutral".to_string(),
+                                "skipped".to_string(),
+                                "stale".to_string(),
+                                "success".to_string(),
+                                "timed_out".to_string(),
+                                "in_progress".to_string(),
+                                "queued".to_string(),
+                                "requested".to_string(),
+                                "waiting".to_string(),
+                                "pending".to_string(),
+                            ]),
+                            false,
+                            Some("Filter by workflow run status"),
+                        )
+                        .with_query_param(
+                            "branch",
+                            QueryParamType::String,
+                            false,
+                            Some("Filter by branch name"),
+                        )
+                        .with_query_param(
+                            "event",
+                            QueryParamType::String,
+                            false,
+                            Some("Filter by event type (e.g., push, pull_request)"),
+                        ),
+                ),
+            },
+            // =================================================================
+            // Organization Repositories
+            // =================================================================
+            Endpoint {
+                id: "ListOrgRepos".to_string(),
+                method: RestMethod::Get,
+                path: "/orgs/{org}/repos".to_string(),
+                description: "List repositories for an organization".to_string(),
+                request: None,
+                response: ApiResponse::json_vec_type("RepositoryInfo"),
+                headers: vec![],
+                params: Some(
+                    EndpointParams::default()
+                        .with_pagination(PaginationStyle::github())
+                        .with_query_param(
+                            "repo_type",
+                            QueryParamType::Enum(vec![
+                                "all".to_string(),
+                                "public".to_string(),
+                                "private".to_string(),
+                                "forks".to_string(),
+                                "sources".to_string(),
+                                "member".to_string(),
+                            ]),
+                            false,
+                            Some("Filter by repository type (API param: type)"),
+                        )
+                        .with_query_param(
+                            "sort",
+                            QueryParamType::Enum(vec![
+                                "created".to_string(),
+                                "updated".to_string(),
+                                "pushed".to_string(),
+                                "full_name".to_string(),
+                            ]),
+                            false,
+                            Some("Sort field"),
+                        )
+                        .with_query_param(
+                            "direction",
+                            QueryParamType::Enum(vec!["asc".to_string(), "desc".to_string()]),
+                            false,
+                            Some("Sort direction"),
+                        ),
+                ),
+            },
         ],
         module_path: Some("github".to_string()),
         request_suffix: None,
@@ -394,9 +493,9 @@ mod tests {
     }
 
     #[test]
-    fn api_has_fourteen_endpoints() {
+    fn api_has_sixteen_endpoints() {
         let api = define_github_api();
-        assert_eq!(api.endpoints.len(), 14);
+        assert_eq!(api.endpoints.len(), 16);
     }
 
     #[test]
@@ -587,6 +686,7 @@ mod tests {
             "ListIssueTimeline",
             "ListTags",
             "ListReleases",
+            "ListOrgRepos",
         ];
 
         for id in list_endpoints {
@@ -616,6 +716,7 @@ mod tests {
             "GetIssue",
             "GetTagReference",
             "GetAnnotatedTag",
+            "ListWorkflowRuns", // Returns WorkflowRunsResponse wrapper, not Vec
         ];
 
         for id in single_endpoints {
@@ -645,6 +746,8 @@ mod tests {
             "ListIssueTimeline",
             "ListTags",
             "ListReleases",
+            "ListWorkflowRuns",
+            "ListOrgRepos",
         ];
 
         for id in list_endpoints {
@@ -670,6 +773,63 @@ mod tests {
                 id
             );
         }
+    }
+
+    #[test]
+    fn workflow_runs_endpoint() {
+        let api = define_github_api();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "ListWorkflowRuns")
+            .expect("ListWorkflowRuns endpoint missing");
+
+        assert_eq!(endpoint.method, RestMethod::Get);
+        assert_eq!(endpoint.path, "/repos/{owner}/{repo}/actions/runs");
+
+        // Returns WorkflowRunsResponse (not Vec) because GitHub wraps in total_count + array
+        match &endpoint.response {
+            ApiResponse::Json(schema) => {
+                assert_eq!(schema.type_name, "WorkflowRunsResponse");
+            }
+            _ => panic!("Expected JSON response"),
+        }
+
+        let params = endpoint.params.as_ref().expect("should have params");
+        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "status"));
+        assert!(params.query.iter().any(|p| p.name == "branch"));
+        assert!(params.query.iter().any(|p| p.name == "event"));
+    }
+
+    #[test]
+    fn list_org_repos_endpoint() {
+        let api = define_github_api();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "ListOrgRepos")
+            .expect("ListOrgRepos endpoint missing");
+
+        assert_eq!(endpoint.method, RestMethod::Get);
+        assert_eq!(endpoint.path, "/orgs/{org}/repos");
+
+        match &endpoint.response {
+            ApiResponse::Json(schema) => {
+                assert!(
+                    schema.type_name.starts_with("Vec<"),
+                    "ListOrgRepos should return Vec type, got {}",
+                    schema.type_name
+                );
+            }
+            _ => panic!("Expected JSON response"),
+        }
+
+        let params = endpoint.params.as_ref().expect("should have params");
+        assert!(params.has_pagination());
+        assert!(params.query.iter().any(|p| p.name == "repo_type"));
+        assert!(params.query.iter().any(|p| p.name == "sort"));
+        assert!(params.query.iter().any(|p| p.name == "direction"));
     }
 
     #[test]
