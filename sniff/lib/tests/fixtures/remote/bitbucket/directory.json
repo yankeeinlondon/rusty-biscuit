@@ -1,0 +1,30 @@
+{
+  "values": [
+    {
+      "path": "README.md",
+      "type": "commit_file",
+      "size": 1024
+    },
+    {
+      "path": "src",
+      "type": "commit_directory"
+    },
+    {
+      "path": "docs",
+      "type": "commit_directory"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "type": "commit_file",
+      "size": 2048
+    },
+    {
+      "path": "bitbucket-pipelines.yml",
+      "type": "commit_file",
+      "size": 512
+    }
+  ],
+  "size": 5,
+  "pagelen": 10,
+  "page": 1
+}

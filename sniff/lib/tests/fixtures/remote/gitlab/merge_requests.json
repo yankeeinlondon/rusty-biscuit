@@ -1,0 +1,38 @@
+[
+  {
+    "iid": 15,
+    "title": "Implement feature X",
+    "state": "opened",
+    "author": {
+      "username": "developer1",
+      "id": 100,
+      "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/100/avatar.png"
+    },
+    "draft": false,
+    "work_in_progress": false,
+    "source_branch": "feature-x",
+    "target_branch": "main",
+    "created_at": "2024-06-10T08:00:00Z",
+    "updated_at": "2024-06-15T12:00:00Z",
+    "merged_at": null,
+    "web_url": "https://gitlab.com/test-owner/test-repo/-/merge_requests/15"
+  },
+  {
+    "iid": 14,
+    "title": "Fix critical bug",
+    "state": "merged",
+    "author": {
+      "username": "developer2",
+      "id": 101,
+      "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/101/avatar.png"
+    },
+    "draft": false,
+    "work_in_progress": false,
+    "source_branch": "fix-bug",
+    "target_branch": "main",
+    "created_at": "2024-06-05T10:00:00Z",
+    "updated_at": "2024-06-08T16:00:00Z",
+    "merged_at": "2024-06-08T16:00:00Z",
+    "web_url": "https://gitlab.com/test-owner/test-repo/-/merge_requests/14"
+  }
+]

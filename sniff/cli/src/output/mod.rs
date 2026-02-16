@@ -9,6 +9,7 @@ mod hardware;
 mod network;
 mod os;
 mod programs;
+mod remote;
 mod services;
 mod structure;
 mod topics;
@@ -21,6 +22,7 @@ use crate::DocsFilter;
 
 pub use filesystem::print_git_section;
 pub use programs::{print_programs_json, print_programs_markdown};
+pub use remote::{print_remote_json, print_remote_text};
 pub use services::{print_services_json, print_services_text};
 pub use structure::print_structure;
 pub use topics::print_topics_table;
@@ -91,6 +93,8 @@ pub enum OutputFilter {
     AiClients,
     /// Show only system services (init system and service list)
     Services,
+    /// Show remote repository information
+    Remote,
 }
 
 // ============================================================================
@@ -339,7 +343,7 @@ pub fn print_text(
                 print_docs_section(&filtered);
             }
         }
-        // Programs and Services filters are handled separately in main.rs
+        // Programs, Services, and Remote filters are handled separately in main.rs
         OutputFilter::Programs
         | OutputFilter::Editors
         | OutputFilter::Utilities
@@ -349,9 +353,10 @@ pub fn print_text(
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
-        | OutputFilter::Services => {
+        | OutputFilter::Services
+        | OutputFilter::Remote => {
             // These are handled separately, should not reach here
-            unreachable!("Programs and Services filters should be handled separately")
+            unreachable!("Programs, Services, and Remote filters should be handled separately")
         }
     }
 }
@@ -474,7 +479,7 @@ fn apply_filter_to_json(
                 json!([])
             }
         }
-        // Programs and Services filters are handled separately
+        // Programs, Services, and Remote filters are handled separately
         OutputFilter::Programs
         | OutputFilter::Editors
         | OutputFilter::Utilities
@@ -484,8 +489,9 @@ fn apply_filter_to_json(
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
-        | OutputFilter::Services => {
-            unreachable!("Programs and Services filters should be handled separately")
+        | OutputFilter::Services
+        | OutputFilter::Remote => {
+            unreachable!("Programs, Services, and Remote filters should be handled separately")
         }
     }
 }

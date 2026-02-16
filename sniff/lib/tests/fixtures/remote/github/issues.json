@@ -1,0 +1,42 @@
+[
+  {
+    "number": 10,
+    "title": "Document the API",
+    "state": "open",
+    "user": {
+      "login": "reporter1",
+      "id": 1111,
+      "avatar_url": "https://avatars.githubusercontent.com/u/1111",
+      "type": "User"
+    },
+    "comments": 5,
+    "labels": [
+      {"name": "documentation"},
+      {"name": "good first issue"}
+    ],
+    "created_at": "2024-06-01T09:00:00Z",
+    "updated_at": "2024-06-15T11:00:00Z",
+    "closed_at": null,
+    "html_url": "https://github.com/test-owner/test-repo/issues/10"
+  },
+  {
+    "number": 9,
+    "title": "Performance regression",
+    "state": "closed",
+    "user": {
+      "login": "reporter2",
+      "id": 2222,
+      "avatar_url": "https://avatars.githubusercontent.com/u/2222",
+      "type": "User"
+    },
+    "comments": 12,
+    "labels": [
+      {"name": "bug"},
+      {"name": "performance"}
+    ],
+    "created_at": "2024-05-20T14:00:00Z",
+    "updated_at": "2024-05-25T10:00:00Z",
+    "closed_at": "2024-05-25T10:00:00Z",
+    "html_url": "https://github.com/test-owner/test-repo/issues/9"
+  }
+]

@@ -695,20 +695,16 @@ fn resolve_package_name(path: &Path, root: &Path, tool: MonorepoTool) -> String 
     match tool {
         MonorepoTool::CargoWorkspace => {
             let cargo_toml = path.join("Cargo.toml");
-            if cargo_toml.exists() {
-                if let Some(name) = read_cargo_package_name(&cargo_toml) {
-                    return name;
-                }
+            if cargo_toml.exists() && let Some(name) = read_cargo_package_name(&cargo_toml) {
+                return name;
             }
         }
         MonorepoTool::NpmWorkspaces
         | MonorepoTool::PnpmWorkspaces
         | MonorepoTool::YarnWorkspaces => {
             let package_json = path.join("package.json");
-            if package_json.exists() {
-                if let Some(name) = read_npm_package_name(&package_json) {
-                    return name;
-                }
+            if package_json.exists() && let Some(name) = read_npm_package_name(&package_json) {
+                return name;
             }
         }
         _ => {}
@@ -764,10 +760,11 @@ fn resolve_internal_deps(packages: &mut [Package]) {
         .flatten()
         {
             for dep in dep_list {
-                if package_names.contains(&dep.name) && dep.name != pkg.name {
-                    if !internal_deps.contains(&dep.name) {
-                        internal_deps.push(dep.name.clone());
-                    }
+                if package_names.contains(&dep.name)
+                    && dep.name != pkg.name
+                    && !internal_deps.contains(&dep.name)
+                {
+                    internal_deps.push(dep.name.clone());
                 }
             }
         }

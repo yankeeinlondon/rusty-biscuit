@@ -3,6 +3,7 @@ use clap_complete::CompleteEnv;
 use clap_complete::Shell;
 use sniff::package::enrich_dependency;
 use sniff::programs::ProgramsInfo;
+use sniff::remote::{GitRemote, RemoteRepoProvider};
 use sniff::services::{ServiceState, detect_services};
 use sniff::{SniffConfig, SniffResult, detect_with_config};
 use std::path::PathBuf;
@@ -97,6 +98,16 @@ pub enum Commands {
         /// Render an internal dependency diagram
         #[arg(long)]
         deps: bool,
+
+        /// Fetch remote info for this remote name or URL
+        #[arg(long, value_name = "NAME_OR_URL")]
+        remote: Option<String>,
+    },
+
+    /// Inspect a remote git repository by URL
+    Remote {
+        /// Git remote URL (HTTPS or SSH)
+        url: String,
     },
 
     /// Show only language detection results
@@ -234,6 +245,9 @@ impl Commands {
 
             // Services section
             Commands::Services { .. } => OutputFilter::Services,
+
+            // Remote section (handled separately)
+            Commands::Remote { .. } => OutputFilter::Remote,
         }
     }
 
@@ -287,7 +301,28 @@ impl Commands {
 
     /// Check if this is a repo command with `--deps` flag.
     pub fn deps(&self) -> bool {
-        matches!(self, Commands::Repo { deps: true })
+        matches!(self, Commands::Repo { deps: true, .. })
+    }
+
+    /// Get remote name/URL if this is a repo command with `--remote` flag.
+    pub fn repo_remote(&self) -> Option<&str> {
+        match self {
+            Commands::Repo { remote, .. } => remote.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Check if this is a remote command.
+    pub fn is_remote_mode(&self) -> bool {
+        matches!(self, Commands::Remote { .. })
+    }
+
+    /// Get the URL if this is a remote command.
+    pub fn remote_url(&self) -> Option<&str> {
+        match self {
+            Commands::Remote { url } => Some(url.as_str()),
+            _ => None,
+        }
     }
 
     /// Get docs filter flags if this is a docs command.
@@ -364,6 +399,8 @@ Commands:
     sniff git         Show only git repository information
     sniff repo        Show only repository/monorepo structure
     sniff repo --deps Show internal dependency diagram
+    sniff repo --remote origin          Fetch remote info for 'origin'
+    sniff repo --remote https://...     Fetch remote info by URL
     sniff language    Show only language detection results
     sniff docs              Show markdown documents in the repository
     sniff docs --readme     Show only README.md files
@@ -371,6 +408,10 @@ Commands:
     sniff docs --src        Show only documents under src/ directories
     sniff docs --has-prompt Show only documents with a prompt
     sniff docs homelab      Filter documents matching \"homelab\"
+
+  Remote inspection:
+    sniff remote https://github.com/owner/repo   Inspect remote repository
+    sniff remote git@github.com:owner/repo.git   SSH URLs also work
 
   Programs:
     sniff programs                   Show all installed programs
@@ -491,6 +532,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             return Ok(());
         }
+
+        // Handle remote mode separately (fetches from remote API)
+        if let Some(url) = cmd.remote_url() {
+            return handle_remote_url(url, cli.json).await;
+        }
     }
 
     // Canonicalize path if provided
@@ -498,6 +544,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .base
         .clone()
         .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+
+    // Handle repo --remote flag (resolve name to URL, then fetch remote info)
+    if let Some(ref cmd) = cli.command {
+        if let Some(remote_ref) = cmd.repo_remote() {
+            // Check if it looks like a URL (contains :// or starts with git@)
+            let url = if remote_ref.contains("://") || remote_ref.starts_with("git@") {
+                remote_ref.to_string()
+            } else {
+                // It's a remote name - resolve it from the local git repo
+                resolve_remote_name(remote_ref, base_dir.as_deref()).ok_or_else(|| {
+                    format!(
+                        "Could not find remote '{}' in the current repository",
+                        remote_ref
+                    )
+                })?
+            };
+            return handle_remote_url(&url, cli.json).await;
+        }
+    }
 
     let mut config = SniffConfig::new();
 
@@ -541,7 +606,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         OutputFilter::All => {
             // No filtering - detect everything
         }
-        // Programs and Services filters are handled earlier in main, should not reach here
+        // Programs, Services, and Remote filters are handled earlier in main
         OutputFilter::Programs
         | OutputFilter::Editors
         | OutputFilter::Utilities
@@ -551,8 +616,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         | OutputFilter::TerminalApps
         | OutputFilter::HeadlessAudio
         | OutputFilter::AiClients
-        | OutputFilter::Services => {
-            unreachable!("Programs and Services mode should be handled before this point")
+        | OutputFilter::Services
+        | OutputFilter::Remote => {
+            unreachable!("Programs, Services, and Remote mode should be handled before this point")
         }
     }
 
@@ -631,6 +697,33 @@ fn wants_completions_help() -> bool {
 
 fn print_completions_help() {
     println!("{}", COMPLETIONS_HELP);
+}
+
+/// Handle remote URL inspection (either from `remote` subcommand or `repo --remote`).
+///
+/// Parses the URL, detects the provider, fetches the report, and outputs it.
+async fn handle_remote_url(url: &str, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let remote = GitRemote::from_url(url)?;
+    let parsed = GitRemote::parse_url(url)?;
+    let report = remote.fetch_report(&parsed.owner, &parsed.repo).await?;
+
+    if json {
+        output::print_remote_json(&report)?;
+    } else {
+        output::print_remote_text(&report);
+    }
+
+    Ok(())
+}
+
+/// Resolve a remote name to a URL by looking it up in the local git repository.
+///
+/// Returns `None` if not in a git repo or if the remote doesn't exist.
+fn resolve_remote_name(name: &str, base_dir: Option<&std::path::Path>) -> Option<String> {
+    let dir = base_dir.unwrap_or_else(|| std::path::Path::new("."));
+    let repo = git2::Repository::discover(dir).ok()?;
+    let remote = repo.find_remote(name).ok()?;
+    remote.url().map(String::from)
 }
 
 /// Enriches all dependencies in a SniffResult with latest versions from package registries.
@@ -883,13 +976,47 @@ mod tests {
         #[test]
         fn repo_subcommand_parses() {
             let cli = parse_args(&["repo"]).unwrap();
-            assert!(matches!(cli.command, Some(Commands::Repo { deps: false })));
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    deps: false,
+                    remote: None
+                })
+            ));
         }
 
         #[test]
         fn repo_deps_flag_parses() {
             let cli = parse_args(&["repo", "--deps"]).unwrap();
-            assert!(matches!(cli.command, Some(Commands::Repo { deps: true })));
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Repo {
+                    deps: true,
+                    remote: None
+                })
+            ));
+        }
+
+        #[test]
+        fn repo_remote_flag_parses() {
+            let cli = parse_args(&["repo", "--remote", "origin"]).unwrap();
+            if let Some(Commands::Repo { deps, remote }) = cli.command {
+                assert!(!deps);
+                assert_eq!(remote, Some("origin".to_string()));
+            } else {
+                panic!("Expected Repo command");
+            }
+        }
+
+        #[test]
+        fn repo_remote_url_parses() {
+            let cli = parse_args(&["repo", "--remote", "https://github.com/owner/repo"]).unwrap();
+            if let Some(Commands::Repo { deps, remote }) = cli.command {
+                assert!(!deps);
+                assert_eq!(remote, Some("https://github.com/owner/repo".to_string()));
+            } else {
+                panic!("Expected Repo command");
+            }
         }
 
         #[test]
@@ -1091,6 +1218,26 @@ mod tests {
             let cli = parse_args(&["services"]).unwrap();
             assert!(matches!(cli.command, Some(Commands::Services { .. })));
         }
+
+        #[test]
+        fn remote_subcommand_parses() {
+            let cli = parse_args(&["remote", "https://github.com/owner/repo"]).unwrap();
+            if let Some(Commands::Remote { url }) = cli.command {
+                assert_eq!(url, "https://github.com/owner/repo");
+            } else {
+                panic!("Expected Remote command");
+            }
+        }
+
+        #[test]
+        fn remote_subcommand_ssh_url_parses() {
+            let cli = parse_args(&["remote", "git@github.com:owner/repo.git"]).unwrap();
+            if let Some(Commands::Remote { url }) = cli.command {
+                assert_eq!(url, "git@github.com:owner/repo.git");
+            } else {
+                panic!("Expected Remote command");
+            }
+        }
     }
 
     mod to_output_filter {
@@ -1158,7 +1305,10 @@ mod tests {
 
         #[test]
         fn repo_maps_to_repo_filter() {
-            let cmd = Commands::Repo { deps: false };
+            let cmd = Commands::Repo {
+                deps: false,
+                remote: None,
+            };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Repo);
         }
 
@@ -1204,6 +1354,14 @@ mod tests {
                 state: ServiceStateArg::Running,
             };
             assert_eq!(cmd.to_output_filter(), OutputFilter::Services);
+        }
+
+        #[test]
+        fn remote_maps_to_remote_filter() {
+            let cmd = Commands::Remote {
+                url: "https://github.com/owner/repo".to_string(),
+            };
+            assert_eq!(cmd.to_output_filter(), OutputFilter::Remote);
         }
     }
 

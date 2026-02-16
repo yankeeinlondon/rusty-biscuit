@@ -1,0 +1,28 @@
+{
+  "uuid": "{abc12345-def6-7890-abcd-ef1234567890}",
+  "name": "test-repo",
+  "full_name": "test-workspace/test-repo",
+  "description": "A test repository on Bitbucket",
+  "is_private": false,
+  "owner": {
+    "type": "team",
+    "uuid": "{workspace-uuid}",
+    "display_name": "Test Workspace",
+    "account_id": "workspace-account-id"
+  },
+  "links": {
+    "html": {"href": "https://bitbucket.org/test-workspace/test-repo"},
+    "clone": [
+      {"name": "https", "href": "https://bitbucket.org/test-workspace/test-repo.git"}
+    ]
+  },
+  "mainbranch": {
+    "name": "main",
+    "type": "branch"
+  },
+  "language": "python",
+  "created_on": "2024-02-01T12:00:00Z",
+  "updated_on": "2024-06-18T08:00:00Z",
+  "has_issues": true,
+  "has_wiki": true
+}

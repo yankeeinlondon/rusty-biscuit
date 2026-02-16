@@ -1,0 +1,23 @@
+{
+  "values": [
+    {
+      "name": "release-3.0.0.zip",
+      "links": {
+        "self": {"href": "https://bitbucket.org/test-workspace/test-repo/downloads/release-3.0.0.zip"}
+      },
+      "created_on": "2024-06-01T12:30:00Z",
+      "size": 1048576
+    },
+    {
+      "name": "release-2.9.0.zip",
+      "links": {
+        "self": {"href": "https://bitbucket.org/test-workspace/test-repo/downloads/release-2.9.0.zip"}
+      },
+      "created_on": "2024-05-15T10:00:00Z",
+      "size": 1024000
+    }
+  ],
+  "size": 2,
+  "pagelen": 10,
+  "page": 1
+}

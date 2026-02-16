@@ -668,6 +668,7 @@ pub type Result<T> = std::result::Result<T, SniffError>;
 [features]
 default = []
 network = ["reqwest"]  # Enable network-based registry queries
+remote = ["network"]   # Enable remote repository inspection
 ```
 
 **Network Feature:**
@@ -677,6 +678,58 @@ When enabled, provides:
 - `CargoNetwork`, `NpmNetwork`, etc. implementations
 - `enrich_dependencies()` async function
 - Latest version resolution from package registries
+
+**Remote Feature:**
+
+When enabled, provides:
+
+- `GitRemote::from_url()` for automatic provider detection
+- Support for GitHub, GitLab, Gitea/Forgejo, and Bitbucket
+- Remote repository metadata, pull requests, issues, tags, releases
+- CI/CD detection for GitHub Actions, GitLab CI, Bitbucket Pipelines, etc.
+
+### Remote Repository Inspection
+
+The `remote` feature enables inspection of remote git repositories via hosting provider APIs.
+
+**Automatic Provider Detection:**
+
+```rust
+use sniff::remote::{GitRemote, RemoteRepoProvider};
+
+// Auto-detect provider from URL
+let remote = GitRemote::from_url("https://github.com/rust-lang/cargo")?;
+let parsed = GitRemote::parse_url("https://github.com/rust-lang/cargo")?;
+let report = remote.fetch_report(&parsed.owner, &parsed.repo).await?;
+
+println!("Stars: {:?}", report.metadata.stars);
+println!("Open issues: {:?}", report.metadata.open_issues);
+```
+
+**Direct Provider Construction:**
+
+```rust
+use sniff::remote::{GitHubRemote, RemoteRepoProvider};
+
+let provider = GitHubRemote::new()?;
+let metadata = provider.get_repo_metadata("rust-lang", "cargo").await?;
+```
+
+**Supported Providers:**
+
+| Provider | Public API | Self-Hosted | Auth Env Vars |
+|----------|:----------:|:-----------:|---------------|
+| GitHub | Yes | Yes (GHE) | `GITHUB_TOKEN`, `GH_TOKEN` |
+| GitLab | Yes | Yes | `GITLAB_TOKEN`, `GITLAB_PRIVATE_TOKEN` |
+| Gitea | - | Yes | `GITEA_TOKEN` |
+| Bitbucket | Yes | Yes (DC) | `BITBUCKET_USERNAME` + `BITBUCKET_APP_PASSWORD` |
+
+**URL Formats Supported:**
+
+- HTTPS: `https://github.com/owner/repo`
+- SSH: `git@github.com:owner/repo.git`
+- GitLab nested groups: `https://gitlab.com/group/subgroup/repo`
+- Self-hosted: `https://gitlab.example.com/team/project`
 
 ## Platform Support
 

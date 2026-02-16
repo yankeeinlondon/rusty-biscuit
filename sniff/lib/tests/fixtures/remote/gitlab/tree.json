@@ -1,0 +1,37 @@
+[
+  {
+    "id": "aaa111",
+    "name": "README.md",
+    "type": "blob",
+    "path": "README.md",
+    "mode": "100644"
+  },
+  {
+    "id": "bbb222",
+    "name": "src",
+    "type": "tree",
+    "path": "src",
+    "mode": "040000"
+  },
+  {
+    "id": "ccc333",
+    "name": ".gitlab-ci.yml",
+    "type": "blob",
+    "path": ".gitlab-ci.yml",
+    "mode": "100644"
+  },
+  {
+    "id": "ddd444",
+    "name": "docs",
+    "type": "tree",
+    "path": "docs",
+    "mode": "040000"
+  },
+  {
+    "id": "eee555",
+    "name": "guide.md",
+    "type": "blob",
+    "path": "docs/guide.md",
+    "mode": "100644"
+  }
+]

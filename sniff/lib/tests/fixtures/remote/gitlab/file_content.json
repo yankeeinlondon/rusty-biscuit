@@ -1,0 +1,12 @@
+{
+  "file_name": "README.md",
+  "file_path": "README.md",
+  "size": 1024,
+  "encoding": "base64",
+  "content": "IyBUZXN0IFJlcG9zaXRvcnkKClRoaXMgaXMgYSB0ZXN0IFJFQURNRSBmb3Igd2lyZW1vY2sgdGVzdHMu",
+  "content_sha256": "abc123",
+  "ref": "main",
+  "blob_id": "aaa111",
+  "commit_id": "bbb222",
+  "last_commit_id": "ccc333"
+}

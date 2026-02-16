@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Version 2.0.0",
+    "tag_name": "v2.0.0",
+    "description": "Major release with new features",
+    "released_at": "2024-06-01T12:00:00Z",
+    "links": {
+      "self": "https://gitlab.com/test-owner/test-repo/-/releases/v2.0.0"
+    }
+  },
+  {
+    "name": "Version 1.9.0",
+    "tag_name": "v1.9.0",
+    "description": "Minor release",
+    "released_at": "2024-05-15T10:00:00Z",
+    "links": {
+      "self": "https://gitlab.com/test-owner/test-repo/-/releases/v1.9.0"
+    }
+  }
+]

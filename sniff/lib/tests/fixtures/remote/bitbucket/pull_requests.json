@@ -1,0 +1,49 @@
+{
+  "values": [
+    {
+      "id": 100,
+      "title": "Refactor authentication module",
+      "state": "OPEN",
+      "author": {
+        "type": "user",
+        "display_name": "Alice Developer",
+        "account_id": "alice-account-id"
+      },
+      "source": {
+        "branch": {"name": "feature/auth-refactor"}
+      },
+      "destination": {
+        "branch": {"name": "main"}
+      },
+      "created_on": "2024-06-12T14:00:00Z",
+      "updated_on": "2024-06-16T09:00:00Z",
+      "links": {
+        "html": {"href": "https://bitbucket.org/test-workspace/test-repo/pull-requests/100"}
+      }
+    },
+    {
+      "id": 99,
+      "title": "Add unit tests",
+      "state": "MERGED",
+      "author": {
+        "type": "user",
+        "display_name": "Bob Tester",
+        "account_id": "bob-account-id"
+      },
+      "source": {
+        "branch": {"name": "tests/add-unit-tests"}
+      },
+      "destination": {
+        "branch": {"name": "main"}
+      },
+      "created_on": "2024-06-05T10:00:00Z",
+      "updated_on": "2024-06-08T16:00:00Z",
+      "links": {
+        "html": {"href": "https://bitbucket.org/test-workspace/test-repo/pull-requests/99"}
+      }
+    }
+  ],
+  "size": 2,
+  "pagelen": 10,
+  "page": 1
+}

@@ -1002,3 +1002,52 @@ fn test_old_flag_syntax_fails() {
     // Old --hardware flag should not work (not a valid subcommand or flag)
     cargo_bin_cmd!("sniff").arg("--hardware").assert().failure();
 }
+
+// ============================================================================
+// Remote Subcommand Tests
+// ============================================================================
+
+#[test]
+fn test_remote_subcommand_help() {
+    cargo_bin_cmd!("sniff")
+        .args(["remote", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Inspect a remote git repository"))
+        .stdout(predicate::str::contains("Git remote URL (HTTPS or SSH)"));
+}
+
+#[test]
+fn test_remote_subcommand_requires_url() {
+    // remote without URL should fail
+    cargo_bin_cmd!("sniff").arg("remote").assert().failure();
+}
+
+#[test]
+fn test_remote_subcommand_invalid_url_fails() {
+    // remote with invalid URL should fail
+    cargo_bin_cmd!("sniff")
+        .args(["remote", "not-a-valid-url"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_repo_remote_flag_help() {
+    cargo_bin_cmd!("sniff")
+        .args(["repo", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--remote <NAME_OR_URL>"))
+        .stdout(predicate::str::contains("Fetch remote info"));
+}
+
+#[test]
+fn test_help_mentions_remote_commands() {
+    cargo_bin_cmd!("sniff")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("sniff remote"))
+        .stdout(predicate::str::contains("sniff repo --remote origin"));
+}

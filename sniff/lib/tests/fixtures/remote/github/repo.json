@@ -1,0 +1,37 @@
+{
+  "id": 12345678,
+  "name": "test-repo",
+  "full_name": "test-owner/test-repo",
+  "description": "A test repository for wiremock tests",
+  "private": false,
+  "owner": {
+    "login": "test-owner",
+    "id": 1234,
+    "avatar_url": "https://avatars.githubusercontent.com/u/1234",
+    "url": "https://api.github.com/users/test-owner",
+    "html_url": "https://github.com/test-owner",
+    "type": "User"
+  },
+  "html_url": "https://github.com/test-owner/test-repo",
+  "url": "https://api.github.com/repos/test-owner/test-repo",
+  "default_branch": "main",
+  "language": "Rust",
+  "stargazers_count": 42,
+  "watchers_count": 42,
+  "forks_count": 5,
+  "open_issues_count": 3,
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-06-20T15:45:00Z",
+  "pushed_at": "2024-06-19T12:00:00Z",
+  "has_issues": true,
+  "has_wiki": true,
+  "archived": false,
+  "disabled": false,
+  "license": {
+    "key": "mit",
+    "name": "MIT License",
+    "spdx_id": "MIT",
+    "url": "https://api.github.com/licenses/mit"
+  },
+  "topics": ["testing", "wiremock", "rust"]
+}

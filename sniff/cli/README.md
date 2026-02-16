@@ -472,6 +472,58 @@ Deep git inspection (`--deep`) queries remote repositories:
 - Detects if local branch is behind remote
 - Network-bound operations with error handling
 
+### Remote Repository Inspection
+
+The `sniff remote` command inspects remote git repositories via hosting provider APIs:
+
+```bash
+# Inspect a GitHub repository
+sniff remote https://github.com/rust-lang/cargo
+
+# SSH URLs also work
+sniff remote git@github.com:rust-lang/cargo.git
+
+# GitLab (including nested groups)
+sniff remote https://gitlab.com/inkscape/inkscape
+
+# Gitea/Codeberg
+sniff remote https://codeberg.org/forgejo/forgejo
+
+# Bitbucket
+sniff remote https://bitbucket.org/atlassian/python-bitbucket
+
+# JSON output
+sniff remote https://github.com/rust-lang/cargo --json
+```
+
+**From within a repository**, use `sniff repo --remote` to inspect a remote by name:
+
+```bash
+# Fetch remote info for 'origin'
+sniff repo --remote origin
+
+# Or specify a URL directly
+sniff repo --remote https://github.com/rust-lang/cargo
+```
+
+**Output includes:**
+
+- Repository metadata (stars, forks, language, license)
+- Open pull requests/merge requests
+- Open issues
+- Tags and releases
+- CI/CD configuration detection
+- Key URLs (issues, PRs, wiki, CI/CD, releases)
+
+**Environment Variables:**
+
+| Provider | Auth Env Vars |
+|----------|---------------|
+| GitHub | `GITHUB_TOKEN` or `GH_TOKEN` |
+| GitLab | `GITLAB_TOKEN` or `GITLAB_PRIVATE_TOKEN` |
+| Gitea | `GITEA_TOKEN` (or `CODEBERG_TOKEN` for Codeberg) |
+| Bitbucket | `BITBUCKET_USERNAME` + `BITBUCKET_APP_PASSWORD` |
+
 ### Error Handling
 
 - Library uses `thiserror` for structured error types

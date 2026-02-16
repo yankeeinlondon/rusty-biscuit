@@ -8,6 +8,8 @@ pub mod network;
 pub mod os;
 pub mod package;
 pub mod programs;
+#[cfg(feature = "remote")]
+pub mod remote;
 pub mod services;
 
 pub use error::{Result, SniffError};

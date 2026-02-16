@@ -1,0 +1,16 @@
+[
+  {
+    "name": "v1.5.0",
+    "commit": {
+      "sha": "abc123"
+    },
+    "message": "Release 1.5.0"
+  },
+  {
+    "name": "v1.4.0",
+    "commit": {
+      "sha": "def456"
+    },
+    "message": null
+  }
+]

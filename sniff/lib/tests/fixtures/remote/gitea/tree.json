@@ -1,0 +1,53 @@
+{
+  "sha": "abc123def456",
+  "url": "https://gitea.example.com/api/v1/repos/test-owner/test-repo/git/trees/abc123def456",
+  "tree": [
+    {
+      "path": "README.md",
+      "type": "blob",
+      "mode": "100644",
+      "sha": "aaa111",
+      "size": 512
+    },
+    {
+      "path": "src",
+      "type": "tree",
+      "mode": "040000",
+      "sha": "bbb222"
+    },
+    {
+      "path": "src/main.go",
+      "type": "blob",
+      "mode": "100644",
+      "sha": "ccc333",
+      "size": 1024
+    },
+    {
+      "path": ".gitea/workflows",
+      "type": "tree",
+      "mode": "040000",
+      "sha": "ddd444"
+    },
+    {
+      "path": ".gitea/workflows/ci.yml",
+      "type": "blob",
+      "mode": "100644",
+      "sha": "eee555",
+      "size": 256
+    },
+    {
+      "path": "docs",
+      "type": "tree",
+      "mode": "040000",
+      "sha": "fff666"
+    },
+    {
+      "path": "docs/api.md",
+      "type": "blob",
+      "mode": "100644",
+      "sha": "ggg777",
+      "size": 2048
+    }
+  ],
+  "truncated": false
+}

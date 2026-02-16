@@ -1,0 +1,26 @@
+{
+  "values": [
+    {
+      "name": "v3.0.0",
+      "target": {
+        "hash": "abc123def456789"
+      },
+      "message": "Release 3.0.0",
+      "tagger": {
+        "raw": "Release Bot <release@example.com>"
+      },
+      "date": "2024-06-01T12:00:00Z"
+    },
+    {
+      "name": "v2.9.0",
+      "target": {
+        "hash": "def456abc789012"
+      },
+      "message": null,
+      "date": null
+    }
+  ],
+  "size": 2,
+  "pagelen": 10,
+  "page": 1
+}

@@ -1,0 +1,73 @@
+{
+  "sha": "abc123def456",
+  "url": "https://api.github.com/repos/test-owner/test-repo/git/trees/abc123def456",
+  "tree": [
+    {
+      "path": "README.md",
+      "type": "blob",
+      "mode": "100644",
+      "sha": "aaa111",
+      "size": 1024
+    },
+    {
+      "path": "src",
+      "type": "tree",
+      "mode": "040000",
+      "sha": "bbb222"
+    },
+    {
+      "path": "src/main.rs",
+      "type": "blob",
+      "mode": "100644",
+      "sha": "ccc333",
+      "size": 512
+    },
+    {
+      "path": "src/README.md",
+      "type": "blob",
+      "mode": "100644",
+      "sha": "ddd444",
+      "size": 256
+    },
+    {
+      "path": "docs",
+      "type": "tree",
+      "mode": "040000",
+      "sha": "eee555"
+    },
+    {
+      "path": "docs/guide.md",
+      "type": "blob",
+      "mode": "100644",
+      "sha": "fff666",
+      "size": 2048
+    },
+    {
+      "path": "CHANGELOG.md",
+      "type": "blob",
+      "mode": "100644",
+      "sha": "ggg777",
+      "size": 4096
+    },
+    {
+      "path": ".github",
+      "type": "tree",
+      "mode": "040000",
+      "sha": "hhh888"
+    },
+    {
+      "path": ".github/workflows",
+      "type": "tree",
+      "mode": "040000",
+      "sha": "iii999"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "type": "blob",
+      "mode": "100644",
+      "sha": "jjj000",
+      "size": 128
+    }
+  ],
+  "truncated": false
+}

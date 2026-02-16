@@ -31,6 +31,57 @@ pub enum SniffError {
     /// Language detection failed for the given reason.
     #[error("Language detection failed: {0}")]
     LanguageDetection(String),
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Remote provider errors (requires `remote` feature)
+    // ─────────────────────────────────────────────────────────────────────────
+    /// Failed to initialize a remote provider client.
+    #[error("failed to initialize {provider} remote provider: {message}")]
+    RemoteInit {
+        /// Provider name (e.g., "GitHub", "GitLab").
+        provider: String,
+        /// Initialization error message.
+        message: String,
+    },
+
+    /// Remote API request failed.
+    #[error("{provider} API error (HTTP {status}): {message}")]
+    RemoteApi {
+        /// Provider name (e.g., "GitHub", "GitLab").
+        provider: String,
+        /// HTTP status code.
+        status: u16,
+        /// Error message from the API or description.
+        message: String,
+    },
+
+    /// Unsupported hosting provider for remote queries.
+    ///
+    /// The URL points to a git hosting provider that is not yet supported
+    /// for remote inspection (e.g., SourceHut, self-hosted servers).
+    #[error("unsupported hosting provider for remote inspection: {url}")]
+    UnsupportedProvider {
+        /// The remote URL that could not be resolved to a supported provider.
+        url: String,
+    },
+
+    /// Authentication credentials not configured for provider.
+    #[error("missing credentials for {provider}: set the {env_var} environment variable")]
+    MissingCredentials {
+        /// Provider name (e.g., "GitHub", "GitLab").
+        provider: String,
+        /// Environment variable name that should be set.
+        env_var: String,
+    },
+
+    /// Rate limited by the hosting provider API.
+    #[error("rate limited by {provider} API{}", retry_after.map(|s| format!(", retry after {}s", s)).unwrap_or_default())]
+    RateLimited {
+        /// Provider name (e.g., "GitHub", "GitLab").
+        provider: String,
+        /// Seconds until rate limit resets (if provided by the API).
+        retry_after: Option<u64>,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]

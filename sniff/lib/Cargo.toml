@@ -5,6 +5,8 @@ edition = "2024"
 license = "AGPL-3.0-only"
 
 [dependencies]
+async-trait = "0.1"
+base64 = "0.22"
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 chrono = { version = "0.4", features = ["serde"] }
 ec4rs = "1"
@@ -16,6 +18,7 @@ ignore = "0.4"
 rayon = "1.11.0"
 regex = "1.11"
 reqwest = { version = "0.12", features = ["json"], default-features = false, optional = true }
+schematic-schema = { path = "../../schematic/schema" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 strum = { version = "0.27", features = ["derive"] }
@@ -24,12 +27,14 @@ sysinfo = "0.37.2"
 thiserror = "2.0"
 tokio = { version = "1", features = ["rt"], optional = true }
 toml = "0.9"
+urlencoding = "2.1"
 walkdir = "2.5"
 which = { version = "8.0.0", features = ["regex", "tracing"] }
 
 [features]
 default = []
 network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls-tls"]
+remote = ["network"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 metal = "0.33"

@@ -6680,6 +6680,8 @@ checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
 name = "sniff"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "base64",
  "biscuit-hash",
  "chrono",
  "ec4rs",
@@ -6692,6 +6694,7 @@ dependencies = [
  "rayon",
  "regex",
  "reqwest 0.12.28",
+ "schematic-schema",
  "serde",
  "serde_json",
  "serde_yaml 0.9.34+deprecated",
@@ -6701,6 +6704,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml 0.9.11+spec-1.1.0",
+ "urlencoding",
  "walkdir",
  "which",
  "wiremock",
@@ -6717,6 +6721,7 @@ dependencies = [
  "clap_complete",
  "darkmatter",
  "futures",
+ "git2",
  "predicates",
  "serde",
  "serde_json",
