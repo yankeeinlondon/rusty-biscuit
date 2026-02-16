@@ -1,16 +1,57 @@
 //! Request struct generation for API endpoints.
 //!
-//! Generates Rust structs that encapsulate path parameters and request bodies
-//! for each API endpoint, with methods to convert them into HTTP request parts.
+//! Generates Rust structs that encapsulate path parameters, query parameters,
+//! and request bodies for each API endpoint, with methods to convert them into
+//! HTTP request parts.
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use schematic_define::{ApiResponse, Endpoint};
+use schematic_define::{ApiResponse, Endpoint, EndpointParams, QueryParamType};
 
 use crate::parser::extract_path_params;
 
 /// Default suffix for request struct names.
 const DEFAULT_REQUEST_SUFFIX: &str = "Request";
+
+/// Extracts query parameters from an endpoint's params field.
+fn extract_query_params(params: &Option<EndpointParams>) -> Vec<QueryParamInfo> {
+    match params {
+        Some(EndpointParams { query, .. }) => query
+            .iter()
+            .map(|p| QueryParamInfo {
+                name: p.name.clone(),
+                description: p.description.clone(),
+                param_type: p.param_type.clone(),
+            })
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+/// Information about a query parameter for code generation.
+#[derive(Debug, Clone)]
+struct QueryParamInfo {
+    name: String,
+    description: Option<String>,
+    param_type: QueryParamType,
+}
+
+/// Maps QueryParamType to a Rust type token stream.
+fn query_param_type_to_rust_type(param_type: &QueryParamType) -> TokenStream {
+    match param_type {
+        QueryParamType::String => quote! { String },
+        QueryParamType::Integer => quote! { i64 },
+        QueryParamType::Number => quote! { f64 },
+        QueryParamType::Boolean => quote! { bool },
+        QueryParamType::Array(inner) => {
+            let inner_type = query_param_type_to_rust_type(inner);
+            quote! { Vec<#inner_type> }
+        }
+        QueryParamType::Enum(_) => quote! { String },
+        QueryParamType::Json => quote! { serde_json::Value },
+        _ => quote! { String },
+    }
+}
 
 /// Generates a request struct for the given endpoint.
 ///
@@ -83,6 +124,7 @@ pub fn generate_request_struct_with_options(
     let struct_name = format_ident!("{}{}", endpoint.id, suffix);
     let struct_name_str = format!("{}{}", endpoint.id, suffix);
     let path_params = extract_path_params(&endpoint.path);
+    let query_params = extract_query_params(&endpoint.params);
     // Only JSON requests have a typed body field
     let has_body = matches!(&endpoint.request, Some(ApiRequest::Json(_)));
     let method_str = endpoint.method.to_string();
@@ -94,37 +136,48 @@ pub fn generate_request_struct_with_options(
     };
 
     // Generate struct fields
-    let param_fields = generate_param_fields(&path_params);
+    let path_param_fields = generate_path_param_fields(&path_params);
+    let query_param_fields = generate_query_param_fields(&query_params);
     let body_field = generate_body_field(endpoint);
 
     // Generate derives (Default only if no body or body type implements Default)
     let derives = generate_derives(has_body);
 
     // Generate Default impl if we have a body (manual impl needed)
-    let default_impl = generate_default_impl(&struct_name, &path_params, has_body);
+    let default_impl = generate_default_impl(&struct_name, &path_params, &query_params, has_body);
 
     // Generate new() constructor method body for type-safe construction
-    let new_method = generate_new_method(&path_params, has_body, body_type_name);
+    let new_method = generate_new_method(&path_params, &query_params, has_body, body_type_name);
+
+    // Generate builder methods for query params
+    let query_builder_methods = generate_query_builder_methods(&query_params);
 
     // Generate From<Body> impl for body-only structs
-    let from_body_impl =
-        generate_from_body_impl(&struct_name, &path_params, has_body, body_type_name);
+    let from_body_impl = generate_from_body_impl(
+        &struct_name,
+        &path_params,
+        &query_params,
+        has_body,
+        body_type_name,
+    );
 
     // Generate From<&str> and From<String> impls for single-param no-body structs
-    let from_string_impls = generate_from_string_impls(&struct_name, &path_params, has_body);
+    let from_string_impls =
+        generate_from_string_impls(&struct_name, &path_params, &query_params, has_body);
 
     // Generate EndpointSpec implementation for type-safe hook registration
     let endpoint_spec_impl =
         generate_endpoint_spec_impl(&struct_name, &endpoint.id, &endpoint.response);
 
     // Generate into_parts method
-    let into_parts = generate_into_parts(endpoint, &path_params, &method_str);
+    let into_parts = generate_into_parts(endpoint, &path_params, &query_params, &method_str);
 
     // Generate doc comments with example section
     let doc_lines = generate_doc_comment_with_example(
         &endpoint.id,
         &struct_name_str,
         &path_params,
+        &query_params,
         has_body,
         body_type_name,
         module_path,
@@ -133,11 +186,15 @@ pub fn generate_request_struct_with_options(
     // Combine all fields
     let all_fields = if has_body {
         quote! {
-            #param_fields
+            #path_param_fields
+            #query_param_fields
             #body_field
         }
     } else {
-        param_fields
+        quote! {
+            #path_param_fields
+            #query_param_fields
+        }
     };
 
     quote! {
@@ -151,6 +208,7 @@ pub fn generate_request_struct_with_options(
 
         impl #struct_name {
             #new_method
+            #query_builder_methods
             #into_parts
         }
 
@@ -168,12 +226,14 @@ pub fn generate_request_struct_with_options(
 /// - For structs with no required fields: uses `Default::default()`
 /// - For structs with path params only: uses `new()` with params
 /// - For structs with body: uses `new()` with body (and optional params)
+/// - Query params use builder-style `with_*` methods
 ///
 /// ## Arguments
 ///
 /// * `endpoint_id` - The endpoint identifier (e.g., "CreateChatCompletion")
 /// * `struct_name` - The full struct name (e.g., "CreateChatCompletionRequest")
 /// * `path_params` - List of path parameter names
+/// * `query_params` - List of query parameter info
 /// * `has_body` - Whether the struct has a body field
 /// * `body_type` - The body type name, if any
 /// * `module_path` - Optional module path for imports (e.g., "openai")
@@ -185,6 +245,7 @@ fn generate_doc_comment_with_example(
     endpoint_id: &str,
     struct_name: &str,
     path_params: &[&str],
+    query_params: &[QueryParamInfo],
     has_body: bool,
     body_type: Option<&str>,
     module_path: Option<&str>,
@@ -218,7 +279,7 @@ fn generate_doc_comment_with_example(
 
         // Show request construction
         if path_params.is_empty() {
-            lines.push(format!(" let request = {struct_name}::new(body);"));
+            lines.push(format!(" let request = {struct_name}::new(body)"));
         } else {
             // Include path params in new() call
             let param_args: Vec<String> = path_params
@@ -226,8 +287,15 @@ fn generate_doc_comment_with_example(
                 .map(|p| format!("\"{p}_value\""))
                 .collect();
             let args = param_args.join(", ");
-            lines.push(format!(" let request = {struct_name}::new({args}, body);"));
+            lines.push(format!(" let request = {struct_name}::new({args}, body)"));
         }
+
+        // Add query param builder calls
+        for qp in query_params {
+            let setter_name = format_ident!("{}", qp.name);
+            lines.push(format!("     .with_{}(/* value */)", setter_name));
+        }
+        lines.push(";".to_string());
     } else if !path_params.is_empty() {
         // Path params only - use new()
         lines.push(format!(" use schematic_schema::{mod_path}::{struct_name};"));
@@ -238,12 +306,24 @@ fn generate_doc_comment_with_example(
             .map(|p| format!("\"{p}_value\""))
             .collect();
         let args = param_args.join(", ");
-        lines.push(format!(" let request = {struct_name}::new({args});"));
+        lines.push(format!(" let request = {struct_name}::new({args})"));
+
+        // Add query param builder calls
+        for qp in query_params {
+            lines.push(format!("     .with_{}(/* value */)", qp.name));
+        }
+        lines.push(";".to_string());
     } else {
         // No required fields - use default()
         lines.push(format!(" use schematic_schema::{mod_path}::{struct_name};"));
         lines.push(String::new());
-        lines.push(format!(" let request = {struct_name}::default();"));
+        lines.push(format!(" let request = {struct_name}::default()"));
+
+        // Add query param builder calls
+        for qp in query_params {
+            lines.push(format!("     .with_{}(/* value */)", qp.name));
+        }
+        lines.push(";".to_string());
     }
 
     lines.push(" ```".to_string());
@@ -252,10 +332,9 @@ fn generate_doc_comment_with_example(
 }
 
 /// Generates field declarations for path parameters.
-fn generate_param_fields(path_params: &[&str]) -> TokenStream {
+fn generate_path_param_fields(path_params: &[&str]) -> TokenStream {
     let fields = path_params.iter().map(|param| {
         let field_name = format_ident!("{}", param);
-        // Leading space for proper /// formatting
         let doc = format!(" Path parameter: {}", param);
         quote! {
             #[doc = #doc]
@@ -264,6 +343,58 @@ fn generate_param_fields(path_params: &[&str]) -> TokenStream {
     });
 
     quote! { #(#fields)* }
+}
+
+/// Generates field declarations for query parameters.
+///
+/// Query parameters are optional (wrapped in `Option<T>`) since they typically
+/// have default values on the server side.
+fn generate_query_param_fields(query_params: &[QueryParamInfo]) -> TokenStream {
+    let fields = query_params.iter().map(|qp| {
+        let field_name = format_ident!("{}", qp.name);
+        let rust_type = query_param_type_to_rust_type(&qp.param_type);
+        let doc = qp
+            .description
+            .as_ref()
+            .map(|d| {
+                let doc_str = format!(" Query parameter: {}", d);
+                quote! { #[doc = #doc_str] }
+            })
+            .unwrap_or_else(|| {
+                let doc_str = format!(" Query parameter: {}", qp.name);
+                quote! { #[doc = #doc_str] }
+            });
+
+        quote! {
+            #doc
+            pub #field_name: Option<#rust_type>,
+        }
+    });
+
+    quote! { #(#fields)* }
+}
+
+/// Generates builder-style `with_*` methods for query parameters.
+///
+/// Each query parameter gets a `with_name(value)` method that returns `Self`
+/// for method chaining.
+fn generate_query_builder_methods(query_params: &[QueryParamInfo]) -> TokenStream {
+    let methods = query_params.iter().map(|qp| {
+        let method_name = format_ident!("with_{}", qp.name);
+        let field_name = format_ident!("{}", qp.name);
+        let rust_type = query_param_type_to_rust_type(&qp.param_type);
+        let doc = format!(" Sets the `{}` query parameter.", qp.name);
+
+        quote! {
+            #[doc = #doc]
+            pub fn #method_name(mut self, value: #rust_type) -> Self {
+                self.#field_name = Some(value);
+                self
+            }
+        }
+    });
+
+    quote! { #(#methods)* }
 }
 
 /// Generates the body field if the endpoint has a request schema.
@@ -302,6 +433,7 @@ fn generate_derives(_has_body: bool) -> TokenStream {
 fn generate_default_impl(
     _struct_name: &proc_macro2::Ident,
     _path_params: &[&str],
+    _query_params: &[QueryParamInfo],
     _has_body: bool,
 ) -> TokenStream {
     // Default is derived for all structs, no manual impl needed
@@ -322,16 +454,30 @@ fn generate_default_impl(
 fn generate_from_body_impl(
     struct_name: &proc_macro2::Ident,
     path_params: &[&str],
+    query_params: &[QueryParamInfo],
     has_body: bool,
     body_type: Option<&str>,
 ) -> TokenStream {
     // Only generate From impl for body-only structs (no path params)
     if has_body && path_params.is_empty() {
         let body_ty = format_ident!("{}", body_type.unwrap());
+
+        // Initialize query params to None
+        let query_field_inits: Vec<_> = query_params
+            .iter()
+            .map(|qp| {
+                let name = format_ident!("{}", qp.name);
+                quote! { #name: None }
+            })
+            .collect();
+
         quote! {
             impl From<#body_ty> for #struct_name {
                 fn from(body: #body_ty) -> Self {
-                    Self { body }
+                    Self {
+                        #(#query_field_inits,)*
+                        body,
+                    }
                 }
             }
         }
@@ -350,15 +496,16 @@ fn generate_from_body_impl(
 ///
 /// ## Returns
 ///
-/// - For structs with exactly one path param and no body: `impl From<&str>` and `impl From<String>`
+/// - For structs with exactly one path param and no body/query params: `impl From<&str>` and `impl From<String>`
 /// - Otherwise: empty `TokenStream`
 fn generate_from_string_impls(
     struct_name: &proc_macro2::Ident,
     path_params: &[&str],
+    query_params: &[QueryParamInfo],
     has_body: bool,
 ) -> TokenStream {
-    // Only generate From impls for single-param no-body structs
-    if path_params.len() == 1 && !has_body {
+    // Only generate From impls for single-param no-body no-query-param structs
+    if path_params.len() == 1 && !has_body && query_params.is_empty() {
         let field_name = format_ident!("{}", path_params[0]);
         quote! {
             impl From<&str> for #struct_name {
@@ -370,6 +517,36 @@ fn generate_from_string_impls(
             impl From<String> for #struct_name {
                 fn from(param: String) -> Self {
                     Self { #field_name: param }
+                }
+            }
+        }
+    } else if path_params.len() == 1 && !has_body && !query_params.is_empty() {
+        // Single path param with query params - still generate From but initialize query params
+        let field_name = format_ident!("{}", path_params[0]);
+        let query_field_inits: Vec<_> = query_params
+            .iter()
+            .map(|qp| {
+                let name = format_ident!("{}", qp.name);
+                quote! { #name: None }
+            })
+            .collect();
+
+        quote! {
+            impl From<&str> for #struct_name {
+                fn from(param: &str) -> Self {
+                    Self {
+                        #field_name: param.to_string(),
+                        #(#query_field_inits,)*
+                    }
+                }
+            }
+
+            impl From<String> for #struct_name {
+                fn from(param: String) -> Self {
+                    Self {
+                        #field_name: param,
+                        #(#query_field_inits,)*
+                    }
                 }
             }
         }
@@ -389,6 +566,7 @@ fn generate_from_string_impls(
 /// - For empty structs (no params, no body): empty `TokenStream` (use `Default`)
 fn generate_new_method(
     path_params: &[&str],
+    query_params: &[QueryParamInfo],
     has_body: bool,
     body_type: Option<&str>,
 ) -> TokenStream {
@@ -400,11 +578,20 @@ fn generate_new_method(
         })
         .collect();
 
-    let field_inits: Vec<_> = path_params
+    let path_field_inits: Vec<_> = path_params
         .iter()
         .map(|p| {
             let name = format_ident!("{}", p);
             quote! { #name: #name.into() }
+        })
+        .collect();
+
+    // Initialize query params to None
+    let query_field_inits: Vec<_> = query_params
+        .iter()
+        .map(|qp| {
+            let name = format_ident!("{}", qp.name);
+            quote! { #name: None }
         })
         .collect();
 
@@ -414,7 +601,8 @@ fn generate_new_method(
             /// Creates a new request with the required path parameters and body.
             pub fn new(#(#params,)* body: #body_ty) -> Self {
                 Self {
-                    #(#field_inits,)*
+                    #(#path_field_inits,)*
+                    #(#query_field_inits,)*
                     body,
                 }
             }
@@ -424,7 +612,18 @@ fn generate_new_method(
             /// Creates a new request with the required path parameters.
             pub fn new(#(#params),*) -> Self {
                 Self {
-                    #(#field_inits,)*
+                    #(#path_field_inits,)*
+                    #(#query_field_inits,)*
+                }
+            }
+        }
+    } else if !query_params.is_empty() {
+        // No path params but has query params - need to initialize them
+        quote! {
+            /// Creates a new request with default values.
+            pub fn new() -> Self {
+                Self {
+                    #(#query_field_inits,)*
                 }
             }
         }
@@ -435,10 +634,15 @@ fn generate_new_method(
 }
 
 /// Generates the into_parts method.
-fn generate_into_parts(endpoint: &Endpoint, path_params: &[&str], method_str: &str) -> TokenStream {
+fn generate_into_parts(
+    endpoint: &Endpoint,
+    path_params: &[&str],
+    query_params: &[QueryParamInfo],
+    method_str: &str,
+) -> TokenStream {
     use schematic_define::ApiRequest;
 
-    let path_format = generate_path_format(&endpoint.path, path_params);
+    let path_format = generate_path_format(&endpoint.path, path_params, query_params);
     // Only JSON requests have a typed body field
     let has_json_body = matches!(&endpoint.request, Some(ApiRequest::Json(_)));
 
@@ -462,7 +666,7 @@ fn generate_into_parts(endpoint: &Endpoint, path_params: &[&str], method_str: &s
         ///
         /// A tuple of:
         /// - HTTP method as a static string (e.g., "GET", "POST")
-        /// - Fully substituted path string
+        /// - Fully substituted path string with query parameters
         /// - Optional JSON body string
         /// - Endpoint-specific headers as key-value pairs
         ///
@@ -528,11 +732,21 @@ fn generate_endpoint_spec_impl(
     }
 }
 
-/// Generates the path format expression.
-fn generate_path_format(path: &str, path_params: &[&str]) -> TokenStream {
-    if path_params.is_empty() {
+/// Generates the path format expression with query parameter handling.
+fn generate_path_format(
+    path: &str,
+    path_params: &[&str],
+    query_params: &[QueryParamInfo],
+) -> TokenStream {
+    let mut_tok = if !query_params.is_empty() {
+        quote! { mut }
+    } else {
+        quote! {}
+    };
+
+    let base_path = if path_params.is_empty() {
         let path_literal = path;
-        quote! { let path = #path_literal.to_string(); }
+        quote! { let #mut_tok path = #path_literal.to_string(); }
     } else {
         // Build format string and arguments
         let format_str = build_format_string(path, path_params);
@@ -541,7 +755,53 @@ fn generate_path_format(path: &str, path_params: &[&str]) -> TokenStream {
             quote! { self.#field_name }
         });
 
-        quote! { let path = format!(#format_str, #(#format_args),*); }
+        quote! { let #mut_tok path = format!(#format_str, #(#format_args),*); }
+    };
+
+    // Generate query parameter appending
+    let query_appending = if query_params.is_empty() {
+        quote! {}
+    } else {
+        let query_param_code = query_params.iter().map(|qp| {
+            let field_name = format_ident!("{}", qp.name);
+            let param_name = &qp.name;
+
+            match &qp.param_type {
+                QueryParamType::Array(_) => {
+                    quote! {
+                        if let Some(ref values) = self.#field_name {
+                            for value in values {
+                                if !path.contains('?') {
+                                    path.push_str(&format!("?{}={}", #param_name, value));
+                                } else {
+                                    path.push_str(&format!("&{}={}", #param_name, value));
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    quote! {
+                        if let Some(ref value) = self.#field_name {
+                            if !path.contains('?') {
+                                path.push_str(&format!("?{}={}", #param_name, value));
+                            } else {
+                                path.push_str(&format!("&{}={}", #param_name, value));
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        quote! {
+            #(#query_param_code)*
+        }
+    };
+
+    quote! {
+        #base_path
+        #query_appending
     }
 }
 
@@ -642,9 +902,15 @@ mod tests {
         assert!(code.contains("pub struct GetMessageRequest"));
         assert!(code.contains("pub thread_id: String"));
         assert!(code.contains("pub message_id: String"));
+        // The path is now let path (no mut since no query params)
         assert!(
-            code.contains(r#"format!("/threads/{}/messages/{}", self.thread_id, self.message_id)"#)
+            code.contains("let path = format!("),
+            "Expected let path format, got:\n{}",
+            code
         );
+        assert!(code.contains("/threads/{}/messages/{}"));
+        assert!(code.contains("self.thread_id"));
+        assert!(code.contains("self.message_id"));
     }
 
     #[test]
@@ -1281,6 +1547,195 @@ mod tests {
         assert!(
             code.contains("pub fn into_parts("),
             "Expected into_parts() method"
+        );
+    }
+
+    // === Query parameter tests ===
+
+    fn make_endpoint_with_query(
+        id: &str,
+        method: RestMethod,
+        path: &str,
+        request: Option<ApiRequest>,
+        query_params: Vec<(&str, bool, Option<&str>, QueryParamType)>,
+    ) -> Endpoint {
+        use schematic_define::{EndpointParams, ParamDef, ParamStyle};
+
+        let params = if query_params.is_empty() {
+            None
+        } else {
+            Some(EndpointParams {
+                query: query_params
+                    .into_iter()
+                    .map(|(name, required, desc, param_type)| ParamDef {
+                        name: name.to_string(),
+                        required,
+                        description: desc.map(|s| s.to_string()),
+                        param_type,
+                        explode: false,
+                        style: ParamStyle::Form,
+                    })
+                    .collect(),
+                header: vec![],
+                cookie: vec![],
+            })
+        };
+
+        Endpoint {
+            id: id.to_string(),
+            method,
+            path: path.to_string(),
+            description: format!("Test endpoint for {}", id),
+            request,
+            response: ApiResponse::json_type("TestResponse"),
+            headers: vec![],
+            params,
+        }
+    }
+
+    #[test]
+    fn generates_query_param_fields() {
+        let endpoint = make_endpoint_with_query(
+            "ListItems",
+            RestMethod::Get,
+            "/items",
+            None,
+            vec![
+                ("page", false, Some("Page number"), QueryParamType::Integer),
+                (
+                    "limit",
+                    false,
+                    Some("Items per page"),
+                    QueryParamType::Integer,
+                ),
+            ],
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        assert!(code.contains("pub page: Option<i64>"));
+        assert!(code.contains("pub limit: Option<i64>"));
+        assert!(code.contains("Query parameter: Page number"));
+        assert!(code.contains("Query parameter: Items per page"));
+    }
+
+    #[test]
+    fn generates_query_param_builder_methods() {
+        let endpoint = make_endpoint_with_query(
+            "ListItems",
+            RestMethod::Get,
+            "/items",
+            None,
+            vec![("page", false, None, QueryParamType::Integer)],
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        assert!(
+            code.contains("pub fn with_page(mut self, value: i64) -> Self"),
+            "Expected with_page builder method, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn generates_query_param_in_into_parts() {
+        let endpoint = make_endpoint_with_query(
+            "ListItems",
+            RestMethod::Get,
+            "/items",
+            None,
+            vec![
+                ("page", false, None, QueryParamType::Integer),
+                ("limit", false, None, QueryParamType::Integer),
+            ],
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Check that query param appending is generated
+        // The format uses: path.push_str(&format!("?{}={}", "page", value))
+        assert!(
+            code.contains(r#"path.push_str(&format!("?{}={}", "page""#),
+            "Expected page query param append, got:\n{}",
+            code
+        );
+        assert!(code.contains(r#""limit""#), "Expected limit param name");
+    }
+
+    #[test]
+    fn generates_different_query_param_types() {
+        let endpoint = make_endpoint_with_query(
+            "Search",
+            RestMethod::Get,
+            "/search",
+            None,
+            vec![
+                ("q", false, None, QueryParamType::String),
+                (
+                    "sort",
+                    false,
+                    None,
+                    QueryParamType::Enum(vec!["asc".into(), "desc".into()]),
+                ),
+                ("flag", false, None, QueryParamType::Boolean),
+            ],
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        assert!(code.contains("pub q: Option<String>"));
+        // Enum becomes String
+        assert!(code.contains("pub sort: Option<String>"));
+        assert!(code.contains("pub flag: Option<bool>"));
+    }
+
+    #[test]
+    fn generates_array_query_param() {
+        let endpoint = make_endpoint_with_query(
+            "Filter",
+            RestMethod::Get,
+            "/items",
+            None,
+            vec![(
+                "tags",
+                false,
+                None,
+                QueryParamType::Array(Box::new(QueryParamType::String)),
+            )],
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        assert!(code.contains("pub tags: Option<Vec<String>>"));
+        // Array params are handled specially
+        assert!(code.contains("for value in values"));
+    }
+
+    #[test]
+    fn query_params_with_path_params() {
+        let endpoint = make_endpoint_with_query(
+            "ListRepoIssues",
+            RestMethod::Get,
+            "/repos/{owner}/{repo}/issues",
+            None,
+            vec![
+                ("state", false, None, QueryParamType::String),
+                ("page", false, None, QueryParamType::Integer),
+            ],
+        );
+        let tokens = generate_request_struct(&endpoint);
+        let code = format_generated_code(&tokens).expect("Failed to format code");
+
+        // Both path and query params
+        assert!(code.contains("pub owner: String"));
+        assert!(code.contains("pub repo: String"));
+        assert!(code.contains("pub state: Option<String>"));
+        assert!(code.contains("pub page: Option<i64>"));
+
+        // new() should include path params
+        assert!(
+            code.contains("pub fn new(owner: impl Into<String>, repo: impl Into<String>) -> Self")
         );
     }
 }

@@ -10,6 +10,38 @@
 //! - [`ParamDef`] - Definition of a single parameter
 //! - [`QueryParamType`] - Type of a parameter value
 //! - [`ParamStyle`] - Serialization style for parameter values
+//! - [`PaginationStyle`] - Common pagination patterns with builder support
+//!
+//! ## Pagination Helpers
+//!
+//! Use [`PaginationStyle`] to add pagination parameters with sensible defaults:
+//!
+//! ```
+//! use schematic_define::params::{EndpointParams, PaginationStyle};
+//!
+//! // Bitbucket-style pagination (page + pagelen)
+//! let params = EndpointParams::default().with_pagination(PaginationStyle::PageNumber {
+//!     page_param: "page".to_string(),
+//!     per_page_param: "pagelen".to_string(),
+//!     default_per_page: 50,
+//!     max_per_page: 100,
+//! });
+//!
+//! // GitHub/GitLab-style pagination (page + per_page)
+//! let params = EndpointParams::default().with_pagination(PaginationStyle::PageNumber {
+//!     page_param: "page".to_string(),
+//!     per_page_param: "per_page".to_string(),
+//!     default_per_page: 100,
+//!     max_per_page: 100,
+//! });
+//!
+//! // Cursor-based pagination
+//! let params = EndpointParams::default().with_pagination(PaginationStyle::Cursor {
+//!     cursor_param: "after".to_string(),
+//!     limit_param: Some("limit".to_string()),
+//!     default_limit: 20,
+//! });
+//! ```
 //!
 //! ## Examples
 //!
@@ -203,6 +235,397 @@ pub enum ParamStyle {
     ///
     /// Objects are serialized as: `filter[name]=value&filter[age]=30`
     DeepObject,
+}
+
+/// Common pagination patterns for API endpoints.
+///
+/// Provides standardized pagination parameter definitions for common API patterns.
+/// Use with [`EndpointParams::with_pagination`] to add pagination to list endpoints.
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::params::{EndpointParams, PaginationStyle};
+///
+/// // Bitbucket-style (page + pagelen)
+/// let params = EndpointParams::default()
+///     .with_pagination(PaginationStyle::bitbucket());
+///
+/// // GitHub/GitLab-style (page + per_page)
+/// let params = EndpointParams::default()
+///     .with_pagination(PaginationStyle::github());
+///
+/// // Cursor-based (after + limit)
+/// let params = EndpointParams::default()
+///     .with_pagination(PaginationStyle::cursor("after", Some("limit"), 20));
+/// ```
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaginationStyle {
+    /// Page number-based pagination (page + per_page).
+    ///
+    /// Used by GitHub, GitLab, and many REST APIs.
+    /// Page numbers are typically 1-indexed.
+    PageNumber {
+        /// Query parameter name for page number (e.g., "page").
+        page_param: String,
+        /// Query parameter name for items per page (e.g., "per_page", "pagelen").
+        per_page_param: String,
+        /// Default number of items per page.
+        default_per_page: u32,
+        /// Maximum allowed items per page.
+        max_per_page: u32,
+    },
+
+    /// Offset/limit-based pagination.
+    ///
+    /// Used by APIs that prefer absolute positioning over page numbers.
+    OffsetLimit {
+        /// Query parameter name for offset (e.g., "offset", "skip").
+        offset_param: String,
+        /// Query parameter name for limit (e.g., "limit", "count").
+        limit_param: String,
+        /// Default limit value.
+        default_limit: u32,
+        /// Maximum allowed limit.
+        max_limit: u32,
+    },
+
+    /// Cursor-based pagination.
+    ///
+    /// Used by APIs for stable pagination through large or changing datasets.
+    /// The cursor is typically an opaque token from the previous response.
+    Cursor {
+        /// Query parameter name for cursor (e.g., "after", "cursor", "next_token").
+        cursor_param: String,
+        /// Optional query parameter for limit/page size.
+        limit_param: Option<String>,
+        /// Default limit value.
+        default_limit: u32,
+    },
+
+    /// Bitbucket-specific pagination (page + pagelen).
+    ///
+    /// Bitbucket uses `pagelen` instead of `per_page` and supports `page`
+    /// for 1-indexed page navigation.
+    Bitbucket {
+        /// Default page size (typically 50).
+        default_pagelen: u32,
+    },
+}
+
+impl PaginationStyle {
+    /// Creates GitHub-style pagination (page + per_page, default 100).
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// use schematic_define::params::PaginationStyle;
+    ///
+    /// let style = PaginationStyle::github();
+    /// ```
+    pub fn github() -> Self {
+        Self::PageNumber {
+            page_param: "page".to_string(),
+            per_page_param: "per_page".to_string(),
+            default_per_page: 100,
+            max_per_page: 100,
+        }
+    }
+
+    /// Creates GitLab-style pagination (same as GitHub).
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// use schematic_define::params::PaginationStyle;
+    ///
+    /// let style = PaginationStyle::gitlab();
+    /// ```
+    pub fn gitlab() -> Self {
+        Self::github()
+    }
+
+    /// Creates Bitbucket-style pagination (page + pagelen, default 50).
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// use schematic_define::params::PaginationStyle;
+    ///
+    /// let style = PaginationStyle::bitbucket();
+    /// ```
+    pub fn bitbucket() -> Self {
+        Self::Bitbucket {
+            default_pagelen: 50,
+        }
+    }
+
+    /// Creates cursor-based pagination.
+    ///
+    /// ## Arguments
+    ///
+    /// * `cursor_param` - Name of the cursor parameter (e.g., "after", "cursor")
+    /// * `limit_param` - Optional name of the limit parameter
+    /// * `default_limit` - Default page size
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// use schematic_define::params::PaginationStyle;
+    ///
+    /// let style = PaginationStyle::cursor("after", Some("limit"), 20);
+    /// ```
+    pub fn cursor(cursor_param: &str, limit_param: Option<&str>, default_limit: u32) -> Self {
+        Self::Cursor {
+            cursor_param: cursor_param.to_string(),
+            limit_param: limit_param.map(|s| s.to_string()),
+            default_limit,
+        }
+    }
+
+    /// Creates offset/limit-based pagination.
+    ///
+    /// ## Arguments
+    ///
+    /// * `offset_param` - Name of the offset parameter (e.g., "offset", "skip")
+    /// * `limit_param` - Name of the limit parameter
+    /// * `default_limit` - Default limit value
+    /// * `max_limit` - Maximum allowed limit
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// use schematic_define::params::PaginationStyle;
+    ///
+    /// let style = PaginationStyle::offset_limit("offset", "limit", 20, 100);
+    /// ```
+    pub fn offset_limit(
+        offset_param: &str,
+        limit_param: &str,
+        default_limit: u32,
+        max_limit: u32,
+    ) -> Self {
+        Self::OffsetLimit {
+            offset_param: offset_param.to_string(),
+            limit_param: limit_param.to_string(),
+            default_limit,
+            max_limit,
+        }
+    }
+
+    /// Converts the pagination style into query parameters.
+    ///
+    /// Returns a vector of [`ParamDef`] instances suitable for adding to
+    /// [`EndpointParams::query`].
+    pub fn to_query_params(&self) -> Vec<ParamDef> {
+        match self {
+            Self::PageNumber {
+                page_param,
+                per_page_param,
+                default_per_page,
+                max_per_page,
+            } => {
+                vec![
+                    ParamDef {
+                        name: page_param.clone(),
+                        required: false,
+                        description: Some("Page number (1-indexed, default: 1)".to_string()),
+                        param_type: QueryParamType::Integer,
+                        explode: false,
+                        style: ParamStyle::Form,
+                    },
+                    ParamDef {
+                        name: per_page_param.clone(),
+                        required: false,
+                        description: Some(format!(
+                            "Items per page (default: {}, max: {})",
+                            default_per_page, max_per_page
+                        )),
+                        param_type: QueryParamType::Integer,
+                        explode: false,
+                        style: ParamStyle::Form,
+                    },
+                ]
+            }
+            Self::OffsetLimit {
+                offset_param,
+                limit_param,
+                default_limit,
+                max_limit,
+            } => {
+                vec![
+                    ParamDef {
+                        name: offset_param.clone(),
+                        required: false,
+                        description: Some("Number of items to skip".to_string()),
+                        param_type: QueryParamType::Integer,
+                        explode: false,
+                        style: ParamStyle::Form,
+                    },
+                    ParamDef {
+                        name: limit_param.clone(),
+                        required: false,
+                        description: Some(format!(
+                            "Maximum items to return (default: {}, max: {})",
+                            default_limit, max_limit
+                        )),
+                        param_type: QueryParamType::Integer,
+                        explode: false,
+                        style: ParamStyle::Form,
+                    },
+                ]
+            }
+            Self::Cursor {
+                cursor_param,
+                limit_param,
+                default_limit: _,
+            } => {
+                let mut params = vec![ParamDef {
+                    name: cursor_param.clone(),
+                    required: false,
+                    description: Some("Pagination cursor from previous response".to_string()),
+                    param_type: QueryParamType::String,
+                    explode: false,
+                    style: ParamStyle::Form,
+                }];
+
+                if let Some(limit_name) = limit_param {
+                    params.push(ParamDef {
+                        name: limit_name.clone(),
+                        required: false,
+                        description: Some("Maximum items to return".to_string()),
+                        param_type: QueryParamType::Integer,
+                        explode: false,
+                        style: ParamStyle::Form,
+                    });
+                }
+
+                params
+            }
+            Self::Bitbucket { default_pagelen } => {
+                vec![
+                    ParamDef {
+                        name: "page".to_string(),
+                        required: false,
+                        description: Some("Page number (1-indexed)".to_string()),
+                        param_type: QueryParamType::Integer,
+                        explode: false,
+                        style: ParamStyle::Form,
+                    },
+                    ParamDef {
+                        name: "pagelen".to_string(),
+                        required: false,
+                        description: Some(format!(
+                            "Items per page (default: {}, max: 100)",
+                            default_pagelen
+                        )),
+                        param_type: QueryParamType::Integer,
+                        explode: false,
+                        style: ParamStyle::Form,
+                    },
+                ]
+            }
+        }
+    }
+}
+
+impl EndpointParams {
+    /// Adds pagination parameters to this endpoint.
+    ///
+    /// Appends pagination query parameters to the existing query params.
+    /// Use this for list endpoints that support pagination.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_define::params::{EndpointParams, PaginationStyle};
+    ///
+    /// // Add Bitbucket-style pagination
+    /// let params = EndpointParams::default()
+    ///     .with_pagination(PaginationStyle::bitbucket());
+    ///
+    /// assert_eq!(params.query.len(), 2);
+    /// assert!(params.query.iter().any(|p| p.name == "page"));
+    /// assert!(params.query.iter().any(|p| p.name == "pagelen"));
+    /// ```
+    pub fn with_pagination(mut self, style: PaginationStyle) -> Self {
+        self.query.extend(style.to_query_params());
+        self
+    }
+
+    /// Adds a single query parameter.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_define::params::{EndpointParams, QueryParamType, ParamStyle};
+    ///
+    /// let params = EndpointParams::default()
+    ///     .with_query_param("state", QueryParamType::Enum(vec![
+    ///         "open".to_string(),
+    ///         "closed".to_string(),
+    ///         "all".to_string(),
+    ///     ]), false, Some("Filter by state"));
+    ///
+    /// assert_eq!(params.query.len(), 1);
+    /// assert_eq!(params.query[0].name, "state");
+    /// ```
+    pub fn with_query_param(
+        mut self,
+        name: &str,
+        param_type: QueryParamType,
+        required: bool,
+        description: Option<&str>,
+    ) -> Self {
+        self.query.push(ParamDef {
+            name: name.to_string(),
+            required,
+            description: description.map(|s| s.to_string()),
+            param_type,
+            explode: false,
+            style: ParamStyle::Form,
+        });
+        self
+    }
+
+    /// Adds multiple query parameters.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use schematic_define::params::{EndpointParams, QueryParamType};
+    ///
+    /// let params = EndpointParams::default()
+    ///     .with_query_params(vec![
+    ///         ("sort", QueryParamType::String, false, Some("Sort field")),
+    ///         ("order", QueryParamType::Enum(vec!["asc".into(), "desc".into()]), false, Some("Sort order")),
+    ///     ]);
+    ///
+    /// assert_eq!(params.query.len(), 2);
+    /// ```
+    pub fn with_query_params(
+        mut self,
+        params: Vec<(&str, QueryParamType, bool, Option<&str>)>,
+    ) -> Self {
+        for (name, param_type, required, description) in params {
+            self = self.with_query_param(name, param_type, required, description);
+        }
+        self
+    }
+
+    /// Checks if this endpoint has pagination parameters.
+    ///
+    /// Returns `true` if the endpoint has common pagination parameter names:
+    /// `page`, `per_page`, `pagelen`, `offset`, `limit`, `cursor`, `after`, `before`.
+    pub fn has_pagination(&self) -> bool {
+        let pagination_params = [
+            "page", "per_page", "pagelen", "offset", "limit", "cursor", "after", "before",
+        ];
+        self.query
+            .iter()
+            .any(|p| pagination_params.contains(&p.name.as_str()))
+    }
 }
 
 #[cfg(test)]
@@ -512,5 +935,177 @@ mod tests {
         } else {
             panic!("Expected Array");
         }
+    }
+
+    // ========== PaginationStyle Tests ==========
+
+    #[test]
+    fn pagination_style_github() {
+        let style = PaginationStyle::github();
+        let params = style.to_query_params();
+
+        assert_eq!(params.len(), 2);
+        assert!(params.iter().any(|p| p.name == "page"));
+        assert!(params.iter().any(|p| p.name == "per_page"));
+    }
+
+    #[test]
+    fn pagination_style_gitlab() {
+        let style = PaginationStyle::gitlab();
+        let params = style.to_query_params();
+
+        assert_eq!(params.len(), 2);
+        assert!(params.iter().any(|p| p.name == "page"));
+        assert!(params.iter().any(|p| p.name == "per_page"));
+    }
+
+    #[test]
+    fn pagination_style_bitbucket() {
+        let style = PaginationStyle::bitbucket();
+        let params = style.to_query_params();
+
+        assert_eq!(params.len(), 2);
+        assert!(params.iter().any(|p| p.name == "page"));
+        assert!(params.iter().any(|p| p.name == "pagelen"));
+    }
+
+    #[test]
+    fn pagination_style_cursor() {
+        let style = PaginationStyle::cursor("after", Some("limit"), 20);
+        let params = style.to_query_params();
+
+        assert_eq!(params.len(), 2);
+        assert!(params.iter().any(|p| p.name == "after"));
+        assert!(params.iter().any(|p| p.name == "limit"));
+    }
+
+    #[test]
+    fn pagination_style_cursor_without_limit() {
+        let style = PaginationStyle::cursor("cursor", None, 20);
+        let params = style.to_query_params();
+
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name, "cursor");
+    }
+
+    #[test]
+    fn pagination_style_offset_limit() {
+        let style = PaginationStyle::offset_limit("offset", "limit", 20, 100);
+        let params = style.to_query_params();
+
+        assert_eq!(params.len(), 2);
+        assert!(params.iter().any(|p| p.name == "offset"));
+        assert!(params.iter().any(|p| p.name == "limit"));
+    }
+
+    // ========== EndpointParams Builder Tests ==========
+
+    #[test]
+    fn endpoint_params_with_pagination_bitbucket() {
+        let params = EndpointParams::default().with_pagination(PaginationStyle::bitbucket());
+
+        assert_eq!(params.query.len(), 2);
+        assert!(params.has_pagination());
+    }
+
+    #[test]
+    fn endpoint_params_with_pagination_github() {
+        let params = EndpointParams::default().with_pagination(PaginationStyle::github());
+
+        assert_eq!(params.query.len(), 2);
+        assert!(params.has_pagination());
+    }
+
+    #[test]
+    fn endpoint_params_with_query_param() {
+        let params = EndpointParams::default().with_query_param(
+            "state",
+            QueryParamType::String,
+            false,
+            Some("Filter state"),
+        );
+
+        assert_eq!(params.query.len(), 1);
+        assert_eq!(params.query[0].name, "state");
+        assert!(!params.query[0].required);
+    }
+
+    #[test]
+    fn endpoint_params_with_query_params() {
+        let params = EndpointParams::default().with_query_params(vec![
+            ("sort", QueryParamType::String, false, Some("Sort field")),
+            (
+                "order",
+                QueryParamType::Enum(vec!["asc".into(), "desc".into()]),
+                false,
+                Some("Sort order"),
+            ),
+        ]);
+
+        assert_eq!(params.query.len(), 2);
+    }
+
+    #[test]
+    fn endpoint_params_has_pagination_detects_page() {
+        let params = EndpointParams {
+            query: vec![ParamDef {
+                name: "page".to_string(),
+                required: false,
+                description: None,
+                param_type: QueryParamType::Integer,
+                explode: false,
+                style: ParamStyle::Form,
+            }],
+            header: vec![],
+            cookie: vec![],
+        };
+
+        assert!(params.has_pagination());
+    }
+
+    #[test]
+    fn endpoint_params_has_pagination_detects_cursor() {
+        let params = EndpointParams {
+            query: vec![ParamDef {
+                name: "after".to_string(),
+                required: false,
+                description: None,
+                param_type: QueryParamType::String,
+                explode: false,
+                style: ParamStyle::Form,
+            }],
+            header: vec![],
+            cookie: vec![],
+        };
+
+        assert!(params.has_pagination());
+    }
+
+    #[test]
+    fn endpoint_params_has_pagination_returns_false_without_pagination() {
+        let params = EndpointParams {
+            query: vec![ParamDef {
+                name: "state".to_string(),
+                required: false,
+                description: None,
+                param_type: QueryParamType::String,
+                explode: false,
+                style: ParamStyle::Form,
+            }],
+            header: vec![],
+            cookie: vec![],
+        };
+
+        assert!(!params.has_pagination());
+    }
+
+    #[test]
+    fn endpoint_params_chained_builders() {
+        let params = EndpointParams::default()
+            .with_query_param("state", QueryParamType::String, false, Some("Filter state"))
+            .with_pagination(PaginationStyle::github());
+
+        assert_eq!(params.query.len(), 3);
+        assert!(params.has_pagination());
     }
 }

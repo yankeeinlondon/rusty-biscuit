@@ -49,7 +49,8 @@ use crate::shared::{RequestParts, SchematicError};
 /// ```ignore
 /// use schematic_schema::gitea::GetRepositoryRequest;
 ///
-/// let request = GetRepositoryRequest::new("owner_value", "repo_value");
+/// let request = GetRepositoryRequest::new("owner_value", "repo_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRepositoryRequest {
@@ -72,7 +73,7 @@ impl GetRepositoryRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -96,7 +97,8 @@ impl crate::shared::EndpointSpec for GetRepositoryRequest {
 /// ```ignore
 /// use schematic_schema::gitea::GetGitTreeRequest;
 ///
-/// let request = GetGitTreeRequest::new("owner_value", "repo_value", "sha_value");
+/// let request = GetGitTreeRequest::new("owner_value", "repo_value", "sha_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetGitTreeRequest {
@@ -126,7 +128,7 @@ impl GetGitTreeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -150,7 +152,8 @@ impl crate::shared::EndpointSpec for GetGitTreeRequest {
 /// ```ignore
 /// use schematic_schema::gitea::GetGitTreeRecursiveRequest;
 ///
-/// let request = GetGitTreeRecursiveRequest::new("owner_value", "repo_value", "sha_value");
+/// let request = GetGitTreeRecursiveRequest::new("owner_value", "repo_value", "sha_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetGitTreeRecursiveRequest {
@@ -180,7 +183,7 @@ impl GetGitTreeRecursiveRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -206,7 +209,8 @@ impl crate::shared::EndpointSpec for GetGitTreeRecursiveRequest {
 /// ```ignore
 /// use schematic_schema::gitea::GetRepositoryContentRawRequest;
 ///
-/// let request = GetRepositoryContentRawRequest::new("owner_value", "repo_value", "filepath_value");
+/// let request = GetRepositoryContentRawRequest::new("owner_value", "repo_value", "filepath_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRepositoryContentRawRequest {
@@ -236,7 +240,7 @@ impl GetRepositoryContentRawRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -260,7 +264,8 @@ impl crate::shared::EndpointSpec for GetRepositoryContentRawRequest {
 /// ```ignore
 /// use schematic_schema::gitea::ListPullRequestsRequest;
 ///
-/// let request = ListPullRequestsRequest::new("owner_value", "repo_value");
+/// let request = ListPullRequestsRequest::new("owner_value", "repo_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestsRequest {
@@ -283,7 +288,7 @@ impl ListPullRequestsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -310,7 +315,8 @@ impl crate::shared::EndpointSpec for ListPullRequestsRequest {
 /// ```ignore
 /// use schematic_schema::gitea::ListPullRequestFilesRequest;
 ///
-/// let request = ListPullRequestFilesRequest::new("owner_value", "repo_value", "index_value");
+/// let request = ListPullRequestFilesRequest::new("owner_value", "repo_value", "index_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestFilesRequest {
@@ -340,7 +346,7 @@ impl ListPullRequestFilesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -366,7 +372,8 @@ impl crate::shared::EndpointSpec for ListPullRequestFilesRequest {
 /// ```ignore
 /// use schematic_schema::gitea::ListIssuesRequest;
 ///
-/// let request = ListIssuesRequest::new("owner_value", "repo_value");
+/// let request = ListIssuesRequest::new("owner_value", "repo_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssuesRequest {
@@ -389,7 +396,7 @@ impl ListIssuesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -415,7 +422,8 @@ impl crate::shared::EndpointSpec for ListIssuesRequest {
 /// ```ignore
 /// use schematic_schema::gitea::GetIssueRequest;
 ///
-/// let request = GetIssueRequest::new("owner_value", "repo_value", "index_value");
+/// let request = GetIssueRequest::new("owner_value", "repo_value", "index_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetIssueRequest {
@@ -445,7 +453,7 @@ impl GetIssueRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -469,7 +477,8 @@ impl crate::shared::EndpointSpec for GetIssueRequest {
 /// ```ignore
 /// use schematic_schema::gitea::ListIssueCommentsRequest;
 ///
-/// let request = ListIssueCommentsRequest::new("owner_value", "repo_value", "index_value");
+/// let request = ListIssueCommentsRequest::new("owner_value", "repo_value", "index_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueCommentsRequest {
@@ -499,7 +508,7 @@ impl ListIssueCommentsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -525,7 +534,8 @@ impl crate::shared::EndpointSpec for ListIssueCommentsRequest {
 /// ```ignore
 /// use schematic_schema::gitea::ListIssueTimelineRequest;
 ///
-/// let request = ListIssueTimelineRequest::new("owner_value", "repo_value", "index_value");
+/// let request = ListIssueTimelineRequest::new("owner_value", "repo_value", "index_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueTimelineRequest {
@@ -555,7 +565,7 @@ impl ListIssueTimelineRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -581,7 +591,8 @@ impl crate::shared::EndpointSpec for ListIssueTimelineRequest {
 /// ```ignore
 /// use schematic_schema::gitea::ListTagsRequest;
 ///
-/// let request = ListTagsRequest::new("owner_value", "repo_value");
+/// let request = ListTagsRequest::new("owner_value", "repo_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTagsRequest {
@@ -604,7 +615,7 @@ impl ListTagsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -628,7 +639,8 @@ impl crate::shared::EndpointSpec for ListTagsRequest {
 /// ```ignore
 /// use schematic_schema::gitea::ListReleasesRequest;
 ///
-/// let request = ListReleasesRequest::new("owner_value", "repo_value");
+/// let request = ListReleasesRequest::new("owner_value", "repo_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListReleasesRequest {
@@ -651,7 +663,7 @@ impl ListReleasesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -678,7 +690,8 @@ impl crate::shared::EndpointSpec for ListReleasesRequest {
 /// ```ignore
 /// use schematic_schema::gitea::GetTagReferenceRequest;
 ///
-/// let request = GetTagReferenceRequest::new("owner_value", "repo_value", "git_ref_value");
+/// let request = GetTagReferenceRequest::new("owner_value", "repo_value", "git_ref_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetTagReferenceRequest {
@@ -708,7 +721,7 @@ impl GetTagReferenceRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -734,7 +747,8 @@ impl crate::shared::EndpointSpec for GetTagReferenceRequest {
 /// ```ignore
 /// use schematic_schema::gitea::GetAnnotatedTagRequest;
 ///
-/// let request = GetAnnotatedTagRequest::new("owner_value", "repo_value", "sha_value");
+/// let request = GetAnnotatedTagRequest::new("owner_value", "repo_value", "sha_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetAnnotatedTagRequest {
@@ -764,7 +778,7 @@ impl GetAnnotatedTagRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///

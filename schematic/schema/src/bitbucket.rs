@@ -49,7 +49,8 @@ use crate::shared::{RequestParts, SchematicError};
 /// ```ignore
 /// use schematic_schema::bitbucket::GetRepositoryRequest;
 ///
-/// let request = GetRepositoryRequest::new("workspace_value", "repo_slug_value");
+/// let request = GetRepositoryRequest::new("workspace_value", "repo_slug_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRepositoryRequest {
@@ -72,7 +73,7 @@ impl GetRepositoryRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -96,7 +97,10 @@ impl crate::shared::EndpointSpec for GetRepositoryRequest {
 /// ```ignore
 /// use schematic_schema::bitbucket::ListDirectoryContentsRequest;
 ///
-/// let request = ListDirectoryContentsRequest::new("workspace_value", "repo_slug_value", "commit_value", "path_value");
+/// let request = ListDirectoryContentsRequest::new("workspace_value", "repo_slug_value", "commit_value", "path_value")
+///     .with_page(/* value */)
+///     .with_pagelen(/* value */)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListDirectoryContentsRequest {
@@ -108,6 +112,10 @@ pub struct ListDirectoryContentsRequest {
     pub commit: String,
     /// Path parameter: path
     pub path: String,
+    /// Query parameter: Page number (1-indexed)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub pagelen: Option<i64>,
 }
 impl ListDirectoryContentsRequest {
     /// Creates a new request with the required path parameters.
@@ -122,7 +130,19 @@ impl ListDirectoryContentsRequest {
             repo_slug: repo_slug.into(),
             commit: commit.into(),
             path: path.into(),
+            page: None,
+            pagelen: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `pagelen` query parameter.
+    pub fn with_pagelen(mut self, value: i64) -> Self {
+        self.pagelen = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -130,7 +150,7 @@ impl ListDirectoryContentsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -139,10 +159,24 @@ impl ListDirectoryContentsRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repositories/{}/{}/src/{}/{}?pagelen=50", self.workspace, self.repo_slug,
-            self.commit, self.path
+        let mut path = format!(
+            "/repositories/{}/{}/src/{}/{}", self.workspace, self.repo_slug, self.commit,
+            self.path
         );
+        if let Some(ref value) = self.page {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "page", value));
+            } else {
+                path.push_str(&format!("&{}={}", "page", value));
+            }
+        }
+        if let Some(ref value) = self.pagelen {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "pagelen", value));
+            } else {
+                path.push_str(&format!("&{}={}", "pagelen", value));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -157,7 +191,8 @@ impl crate::shared::EndpointSpec for ListDirectoryContentsRequest {
 /// ```ignore
 /// use schematic_schema::bitbucket::GetFileContentRawRequest;
 ///
-/// let request = GetFileContentRawRequest::new("workspace_value", "repo_slug_value", "commit_value", "path_value");
+/// let request = GetFileContentRawRequest::new("workspace_value", "repo_slug_value", "commit_value", "path_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetFileContentRawRequest {
@@ -191,7 +226,7 @@ impl GetFileContentRawRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -218,7 +253,11 @@ impl crate::shared::EndpointSpec for GetFileContentRawRequest {
 /// ```ignore
 /// use schematic_schema::bitbucket::ListPullRequestsRequest;
 ///
-/// let request = ListPullRequestsRequest::new("workspace_value", "repo_slug_value");
+/// let request = ListPullRequestsRequest::new("workspace_value", "repo_slug_value")
+///     .with_page(/* value */)
+///     .with_pagelen(/* value */)
+///     .with_state(/* value */)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestsRequest {
@@ -226,6 +265,12 @@ pub struct ListPullRequestsRequest {
     pub workspace: String,
     /// Path parameter: repo_slug
     pub repo_slug: String,
+    /// Query parameter: Page number (1-indexed)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub pagelen: Option<i64>,
+    /// Query parameter: Filter by state (OPEN, MERGED, DECLINED, SUPERSEDED)
+    pub state: Option<String>,
 }
 impl ListPullRequestsRequest {
     /// Creates a new request with the required path parameters.
@@ -233,7 +278,25 @@ impl ListPullRequestsRequest {
         Self {
             workspace: workspace.into(),
             repo_slug: repo_slug.into(),
+            page: None,
+            pagelen: None,
+            state: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `pagelen` query parameter.
+    pub fn with_pagelen(mut self, value: i64) -> Self {
+        self.pagelen = Some(value);
+        self
+    }
+    /// Sets the `state` query parameter.
+    pub fn with_state(mut self, value: String) -> Self {
+        self.state = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -241,7 +304,7 @@ impl ListPullRequestsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -250,10 +313,30 @@ impl ListPullRequestsRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repositories/{}/{}/pullrequests?state=all&pagelen=50", self.workspace, self
-            .repo_slug
+        let mut path = format!(
+            "/repositories/{}/{}/pullrequests", self.workspace, self.repo_slug
         );
+        if let Some(ref value) = self.page {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "page", value));
+            } else {
+                path.push_str(&format!("&{}={}", "page", value));
+            }
+        }
+        if let Some(ref value) = self.pagelen {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "pagelen", value));
+            } else {
+                path.push_str(&format!("&{}={}", "pagelen", value));
+            }
+        }
+        if let Some(ref value) = self.state {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "state", value));
+            } else {
+                path.push_str(&format!("&{}={}", "state", value));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -268,7 +351,8 @@ impl crate::shared::EndpointSpec for ListPullRequestsRequest {
 /// ```ignore
 /// use schematic_schema::bitbucket::GetPullRequestRequest;
 ///
-/// let request = GetPullRequestRequest::new("workspace_value", "repo_slug_value", "id_value");
+/// let request = GetPullRequestRequest::new("workspace_value", "repo_slug_value", "id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetPullRequestRequest {
@@ -298,7 +382,7 @@ impl GetPullRequestRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -325,7 +409,10 @@ impl crate::shared::EndpointSpec for GetPullRequestRequest {
 /// ```ignore
 /// use schematic_schema::bitbucket::ListPullRequestCommentsRequest;
 ///
-/// let request = ListPullRequestCommentsRequest::new("workspace_value", "repo_slug_value", "id_value");
+/// let request = ListPullRequestCommentsRequest::new("workspace_value", "repo_slug_value", "id_value")
+///     .with_page(/* value */)
+///     .with_pagelen(/* value */)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListPullRequestCommentsRequest {
@@ -335,6 +422,10 @@ pub struct ListPullRequestCommentsRequest {
     pub repo_slug: String,
     /// Path parameter: id
     pub id: String,
+    /// Query parameter: Page number (1-indexed)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub pagelen: Option<i64>,
 }
 impl ListPullRequestCommentsRequest {
     /// Creates a new request with the required path parameters.
@@ -347,7 +438,19 @@ impl ListPullRequestCommentsRequest {
             workspace: workspace.into(),
             repo_slug: repo_slug.into(),
             id: id.into(),
+            page: None,
+            pagelen: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `pagelen` query parameter.
+    pub fn with_pagelen(mut self, value: i64) -> Self {
+        self.pagelen = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -355,7 +458,7 @@ impl ListPullRequestCommentsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -364,10 +467,24 @@ impl ListPullRequestCommentsRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repositories/{}/{}/pullrequests/{}/comments?pagelen=50", self.workspace,
-            self.repo_slug, self.id
+        let mut path = format!(
+            "/repositories/{}/{}/pullrequests/{}/comments", self.workspace, self
+            .repo_slug, self.id
         );
+        if let Some(ref value) = self.page {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "page", value));
+            } else {
+                path.push_str(&format!("&{}={}", "page", value));
+            }
+        }
+        if let Some(ref value) = self.pagelen {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "pagelen", value));
+            } else {
+                path.push_str(&format!("&{}={}", "pagelen", value));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -382,7 +499,10 @@ impl crate::shared::EndpointSpec for ListPullRequestCommentsRequest {
 /// ```ignore
 /// use schematic_schema::bitbucket::ListIssuesRequest;
 ///
-/// let request = ListIssuesRequest::new("workspace_value", "repo_slug_value");
+/// let request = ListIssuesRequest::new("workspace_value", "repo_slug_value")
+///     .with_page(/* value */)
+///     .with_pagelen(/* value */)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssuesRequest {
@@ -390,6 +510,10 @@ pub struct ListIssuesRequest {
     pub workspace: String,
     /// Path parameter: repo_slug
     pub repo_slug: String,
+    /// Query parameter: Page number (1-indexed)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub pagelen: Option<i64>,
 }
 impl ListIssuesRequest {
     /// Creates a new request with the required path parameters.
@@ -397,7 +521,19 @@ impl ListIssuesRequest {
         Self {
             workspace: workspace.into(),
             repo_slug: repo_slug.into(),
+            page: None,
+            pagelen: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `pagelen` query parameter.
+    pub fn with_pagelen(mut self, value: i64) -> Self {
+        self.pagelen = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -405,7 +541,7 @@ impl ListIssuesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -414,9 +550,23 @@ impl ListIssuesRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repositories/{}/{}/issues?pagelen=50", self.workspace, self.repo_slug
+        let mut path = format!(
+            "/repositories/{}/{}/issues", self.workspace, self.repo_slug
         );
+        if let Some(ref value) = self.page {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "page", value));
+            } else {
+                path.push_str(&format!("&{}={}", "page", value));
+            }
+        }
+        if let Some(ref value) = self.pagelen {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "pagelen", value));
+            } else {
+                path.push_str(&format!("&{}={}", "pagelen", value));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -431,7 +581,8 @@ impl crate::shared::EndpointSpec for ListIssuesRequest {
 /// ```ignore
 /// use schematic_schema::bitbucket::GetIssueRequest;
 ///
-/// let request = GetIssueRequest::new("workspace_value", "repo_slug_value", "id_value");
+/// let request = GetIssueRequest::new("workspace_value", "repo_slug_value", "id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetIssueRequest {
@@ -461,7 +612,7 @@ impl GetIssueRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -487,7 +638,10 @@ impl crate::shared::EndpointSpec for GetIssueRequest {
 /// ```ignore
 /// use schematic_schema::bitbucket::ListIssueCommentsRequest;
 ///
-/// let request = ListIssueCommentsRequest::new("workspace_value", "repo_slug_value", "id_value");
+/// let request = ListIssueCommentsRequest::new("workspace_value", "repo_slug_value", "id_value")
+///     .with_page(/* value */)
+///     .with_pagelen(/* value */)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueCommentsRequest {
@@ -497,6 +651,10 @@ pub struct ListIssueCommentsRequest {
     pub repo_slug: String,
     /// Path parameter: id
     pub id: String,
+    /// Query parameter: Page number (1-indexed)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub pagelen: Option<i64>,
 }
 impl ListIssueCommentsRequest {
     /// Creates a new request with the required path parameters.
@@ -509,7 +667,19 @@ impl ListIssueCommentsRequest {
             workspace: workspace.into(),
             repo_slug: repo_slug.into(),
             id: id.into(),
+            page: None,
+            pagelen: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `pagelen` query parameter.
+    pub fn with_pagelen(mut self, value: i64) -> Self {
+        self.pagelen = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -517,7 +687,7 @@ impl ListIssueCommentsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -526,10 +696,24 @@ impl ListIssueCommentsRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repositories/{}/{}/issues/{}/comments?pagelen=50", self.workspace, self
-            .repo_slug, self.id
+        let mut path = format!(
+            "/repositories/{}/{}/issues/{}/comments", self.workspace, self.repo_slug,
+            self.id
         );
+        if let Some(ref value) = self.page {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "page", value));
+            } else {
+                path.push_str(&format!("&{}={}", "page", value));
+            }
+        }
+        if let Some(ref value) = self.pagelen {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "pagelen", value));
+            } else {
+                path.push_str(&format!("&{}={}", "pagelen", value));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -544,7 +728,10 @@ impl crate::shared::EndpointSpec for ListIssueCommentsRequest {
 /// ```ignore
 /// use schematic_schema::bitbucket::ListIssueChangesRequest;
 ///
-/// let request = ListIssueChangesRequest::new("workspace_value", "repo_slug_value", "id_value");
+/// let request = ListIssueChangesRequest::new("workspace_value", "repo_slug_value", "id_value")
+///     .with_page(/* value */)
+///     .with_pagelen(/* value */)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueChangesRequest {
@@ -554,6 +741,10 @@ pub struct ListIssueChangesRequest {
     pub repo_slug: String,
     /// Path parameter: id
     pub id: String,
+    /// Query parameter: Page number (1-indexed)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub pagelen: Option<i64>,
 }
 impl ListIssueChangesRequest {
     /// Creates a new request with the required path parameters.
@@ -566,7 +757,19 @@ impl ListIssueChangesRequest {
             workspace: workspace.into(),
             repo_slug: repo_slug.into(),
             id: id.into(),
+            page: None,
+            pagelen: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `pagelen` query parameter.
+    pub fn with_pagelen(mut self, value: i64) -> Self {
+        self.pagelen = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -574,7 +777,7 @@ impl ListIssueChangesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -583,10 +786,24 @@ impl ListIssueChangesRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repositories/{}/{}/issues/{}/changes?pagelen=50", self.workspace, self
-            .repo_slug, self.id
+        let mut path = format!(
+            "/repositories/{}/{}/issues/{}/changes", self.workspace, self.repo_slug, self
+            .id
         );
+        if let Some(ref value) = self.page {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "page", value));
+            } else {
+                path.push_str(&format!("&{}={}", "page", value));
+            }
+        }
+        if let Some(ref value) = self.pagelen {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "pagelen", value));
+            } else {
+                path.push_str(&format!("&{}={}", "pagelen", value));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -601,7 +818,10 @@ impl crate::shared::EndpointSpec for ListIssueChangesRequest {
 /// ```ignore
 /// use schematic_schema::bitbucket::ListTagsRequest;
 ///
-/// let request = ListTagsRequest::new("workspace_value", "repo_slug_value");
+/// let request = ListTagsRequest::new("workspace_value", "repo_slug_value")
+///     .with_page(/* value */)
+///     .with_pagelen(/* value */)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTagsRequest {
@@ -609,6 +829,10 @@ pub struct ListTagsRequest {
     pub workspace: String,
     /// Path parameter: repo_slug
     pub repo_slug: String,
+    /// Query parameter: Page number (1-indexed)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub pagelen: Option<i64>,
 }
 impl ListTagsRequest {
     /// Creates a new request with the required path parameters.
@@ -616,7 +840,19 @@ impl ListTagsRequest {
         Self {
             workspace: workspace.into(),
             repo_slug: repo_slug.into(),
+            page: None,
+            pagelen: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `pagelen` query parameter.
+    pub fn with_pagelen(mut self, value: i64) -> Self {
+        self.pagelen = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -624,7 +860,7 @@ impl ListTagsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -633,9 +869,23 @@ impl ListTagsRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repositories/{}/{}/refs/tags?pagelen=50", self.workspace, self.repo_slug
+        let mut path = format!(
+            "/repositories/{}/{}/refs/tags", self.workspace, self.repo_slug
         );
+        if let Some(ref value) = self.page {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "page", value));
+            } else {
+                path.push_str(&format!("&{}={}", "page", value));
+            }
+        }
+        if let Some(ref value) = self.pagelen {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "pagelen", value));
+            } else {
+                path.push_str(&format!("&{}={}", "pagelen", value));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -650,7 +900,8 @@ impl crate::shared::EndpointSpec for ListTagsRequest {
 /// ```ignore
 /// use schematic_schema::bitbucket::GetTagRequest;
 ///
-/// let request = GetTagRequest::new("workspace_value", "repo_slug_value", "name_value");
+/// let request = GetTagRequest::new("workspace_value", "repo_slug_value", "name_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetTagRequest {
@@ -680,7 +931,7 @@ impl GetTagRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -706,7 +957,10 @@ impl crate::shared::EndpointSpec for GetTagRequest {
 /// ```ignore
 /// use schematic_schema::bitbucket::ListDownloadsRequest;
 ///
-/// let request = ListDownloadsRequest::new("workspace_value", "repo_slug_value");
+/// let request = ListDownloadsRequest::new("workspace_value", "repo_slug_value")
+///     .with_page(/* value */)
+///     .with_pagelen(/* value */)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListDownloadsRequest {
@@ -714,6 +968,10 @@ pub struct ListDownloadsRequest {
     pub workspace: String,
     /// Path parameter: repo_slug
     pub repo_slug: String,
+    /// Query parameter: Page number (1-indexed)
+    pub page: Option<i64>,
+    /// Query parameter: Items per page (default: 50, max: 100)
+    pub pagelen: Option<i64>,
 }
 impl ListDownloadsRequest {
     /// Creates a new request with the required path parameters.
@@ -721,7 +979,19 @@ impl ListDownloadsRequest {
         Self {
             workspace: workspace.into(),
             repo_slug: repo_slug.into(),
+            page: None,
+            pagelen: None,
         }
+    }
+    /// Sets the `page` query parameter.
+    pub fn with_page(mut self, value: i64) -> Self {
+        self.page = Some(value);
+        self
+    }
+    /// Sets the `pagelen` query parameter.
+    pub fn with_pagelen(mut self, value: i64) -> Self {
+        self.pagelen = Some(value);
+        self
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -729,7 +999,7 @@ impl ListDownloadsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -738,9 +1008,23 @@ impl ListDownloadsRequest {
     /// Returns `SchematicError::SerializationError` if the request body
     /// fails to serialize to JSON.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!(
-            "/repositories/{}/{}/downloads?pagelen=50", self.workspace, self.repo_slug
+        let mut path = format!(
+            "/repositories/{}/{}/downloads", self.workspace, self.repo_slug
         );
+        if let Some(ref value) = self.page {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "page", value));
+            } else {
+                path.push_str(&format!("&{}={}", "page", value));
+            }
+        }
+        if let Some(ref value) = self.pagelen {
+            if !path.contains('?') {
+                path.push_str(&format!("?{}={}", "pagelen", value));
+            } else {
+                path.push_str(&format!("&{}={}", "pagelen", value));
+            }
+        }
         Ok(("GET", path, None, vec![]))
     }
 }
@@ -755,7 +1039,8 @@ impl crate::shared::EndpointSpec for ListDownloadsRequest {
 /// ```ignore
 /// use schematic_schema::bitbucket::GetDownloadRequest;
 ///
-/// let request = GetDownloadRequest::new("workspace_value", "repo_slug_value", "filename_value");
+/// let request = GetDownloadRequest::new("workspace_value", "repo_slug_value", "filename_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDownloadRequest {
@@ -785,7 +1070,7 @@ impl GetDownloadRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///

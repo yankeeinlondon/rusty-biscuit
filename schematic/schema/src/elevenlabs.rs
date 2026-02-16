@@ -87,7 +87,8 @@ use crate::shared::{RequestParts, SchematicError};
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateSpeechRequest::new("voice_id_value", body);
+/// let request = CreateSpeechRequest::new("voice_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSpeechRequest {
@@ -110,7 +111,7 @@ impl CreateSpeechRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -146,7 +147,8 @@ impl crate::shared::EndpointSpec for CreateSpeechRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = StreamSpeechRequest::new("voice_id_value", body);
+/// let request = StreamSpeechRequest::new("voice_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StreamSpeechRequest {
@@ -169,7 +171,7 @@ impl StreamSpeechRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -205,7 +207,8 @@ impl crate::shared::EndpointSpec for StreamSpeechRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateSpeechWithTimestampsRequest::new("voice_id_value", body);
+/// let request = CreateSpeechWithTimestampsRequest::new("voice_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSpeechWithTimestampsRequest {
@@ -228,7 +231,7 @@ impl CreateSpeechWithTimestampsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -264,7 +267,8 @@ impl crate::shared::EndpointSpec for CreateSpeechWithTimestampsRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = StreamSpeechWithTimestampsRequest::new("voice_id_value", body);
+/// let request = StreamSpeechWithTimestampsRequest::new("voice_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StreamSpeechWithTimestampsRequest {
@@ -287,7 +291,7 @@ impl StreamSpeechWithTimestampsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -321,7 +325,8 @@ impl crate::shared::EndpointSpec for StreamSpeechWithTimestampsRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::ListVoicesRequest;
 ///
-/// let request = ListVoicesRequest::default();
+/// let request = ListVoicesRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListVoicesRequest {}
@@ -332,7 +337,7 @@ impl ListVoicesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -356,7 +361,8 @@ impl crate::shared::EndpointSpec for ListVoicesRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::GetVoiceRequest;
 ///
-/// let request = GetVoiceRequest::new("voice_id_value");
+/// let request = GetVoiceRequest::new("voice_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetVoiceRequest {
@@ -374,7 +380,7 @@ impl GetVoiceRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -410,7 +416,8 @@ impl crate::shared::EndpointSpec for GetVoiceRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::DeleteVoiceRequest;
 ///
-/// let request = DeleteVoiceRequest::new("voice_id_value");
+/// let request = DeleteVoiceRequest::new("voice_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteVoiceRequest {
@@ -428,7 +435,7 @@ impl DeleteVoiceRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -464,7 +471,8 @@ impl crate::shared::EndpointSpec for DeleteVoiceRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::GetDefaultVoiceSettingsRequest;
 ///
-/// let request = GetDefaultVoiceSettingsRequest::default();
+/// let request = GetDefaultVoiceSettingsRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDefaultVoiceSettingsRequest {}
@@ -475,7 +483,7 @@ impl GetDefaultVoiceSettingsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -499,7 +507,8 @@ impl crate::shared::EndpointSpec for GetDefaultVoiceSettingsRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::GetVoiceSettingsRequest;
 ///
-/// let request = GetVoiceSettingsRequest::new("voice_id_value");
+/// let request = GetVoiceSettingsRequest::new("voice_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetVoiceSettingsRequest {
@@ -517,7 +526,7 @@ impl GetVoiceSettingsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -557,7 +566,8 @@ impl crate::shared::EndpointSpec for GetVoiceSettingsRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = UpdateVoiceSettingsRequest::new("voice_id_value", body);
+/// let request = UpdateVoiceSettingsRequest::new("voice_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateVoiceSettingsRequest {
@@ -580,7 +590,7 @@ impl UpdateVoiceSettingsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -612,7 +622,8 @@ impl crate::shared::EndpointSpec for UpdateVoiceSettingsRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::GetVoiceSampleAudioRequest;
 ///
-/// let request = GetVoiceSampleAudioRequest::new("voice_id_value", "sample_id_value");
+/// let request = GetVoiceSampleAudioRequest::new("voice_id_value", "sample_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetVoiceSampleAudioRequest {
@@ -635,7 +646,7 @@ impl GetVoiceSampleAudioRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -661,7 +672,8 @@ impl crate::shared::EndpointSpec for GetVoiceSampleAudioRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::DeleteVoiceSampleRequest;
 ///
-/// let request = DeleteVoiceSampleRequest::new("voice_id_value", "sample_id_value");
+/// let request = DeleteVoiceSampleRequest::new("voice_id_value", "sample_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteVoiceSampleRequest {
@@ -684,7 +696,7 @@ impl DeleteVoiceSampleRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -708,7 +720,8 @@ impl crate::shared::EndpointSpec for DeleteVoiceSampleRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::AddVoiceSampleRequest;
 ///
-/// let request = AddVoiceSampleRequest::new("voice_id_value");
+/// let request = AddVoiceSampleRequest::new("voice_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AddVoiceSampleRequest {
@@ -726,7 +739,7 @@ impl AddVoiceSampleRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -762,7 +775,8 @@ impl crate::shared::EndpointSpec for AddVoiceSampleRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::ListSharedVoicesRequest;
 ///
-/// let request = ListSharedVoicesRequest::default();
+/// let request = ListSharedVoicesRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSharedVoicesRequest {}
@@ -773,7 +787,7 @@ impl ListSharedVoicesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -801,7 +815,8 @@ impl crate::shared::EndpointSpec for ListSharedVoicesRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = AddSharedVoiceRequest::new("public_user_id_value", "voice_id_value", body);
+/// let request = AddSharedVoiceRequest::new("public_user_id_value", "voice_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AddSharedVoiceRequest {
@@ -831,7 +846,7 @@ impl AddSharedVoiceRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -867,7 +882,8 @@ impl crate::shared::EndpointSpec for AddSharedVoiceRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreatePvcVoiceRequest::new(body);
+/// let request = CreatePvcVoiceRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreatePvcVoiceRequest {
@@ -885,7 +901,7 @@ impl CreatePvcVoiceRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -926,7 +942,8 @@ impl crate::shared::EndpointSpec for CreatePvcVoiceRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = UpdatePvcVoiceRequest::new("voice_id_value", body);
+/// let request = UpdatePvcVoiceRequest::new("voice_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdatePvcVoiceRequest {
@@ -949,7 +966,7 @@ impl UpdatePvcVoiceRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -985,7 +1002,8 @@ impl crate::shared::EndpointSpec for UpdatePvcVoiceRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = TrainPvcVoiceRequest::new("voice_id_value", body);
+/// let request = TrainPvcVoiceRequest::new("voice_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TrainPvcVoiceRequest {
@@ -1008,7 +1026,7 @@ impl TrainPvcVoiceRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1044,7 +1062,8 @@ impl crate::shared::EndpointSpec for TrainPvcVoiceRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateSoundEffectRequest::new(body);
+/// let request = CreateSoundEffectRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSoundEffectRequest {
@@ -1062,7 +1081,7 @@ impl CreateSoundEffectRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1099,7 +1118,8 @@ impl crate::shared::EndpointSpec for CreateSoundEffectRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::ListModelsRequest;
 ///
-/// let request = ListModelsRequest::default();
+/// let request = ListModelsRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
@@ -1110,7 +1130,7 @@ impl ListModelsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1134,7 +1154,8 @@ impl crate::shared::EndpointSpec for ListModelsRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::CreateSingleUseTokenRequest;
 ///
-/// let request = CreateSingleUseTokenRequest::new("token_type_value");
+/// let request = CreateSingleUseTokenRequest::new("token_type_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateSingleUseTokenRequest {
@@ -1154,7 +1175,7 @@ impl CreateSingleUseTokenRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1190,7 +1211,8 @@ impl crate::shared::EndpointSpec for CreateSingleUseTokenRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::GetHistoryRequest;
 ///
-/// let request = GetHistoryRequest::default();
+/// let request = GetHistoryRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetHistoryRequest {}
@@ -1201,7 +1223,7 @@ impl GetHistoryRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1225,7 +1247,8 @@ impl crate::shared::EndpointSpec for GetHistoryRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::GetHistoryItemRequest;
 ///
-/// let request = GetHistoryItemRequest::new("history_item_id_value");
+/// let request = GetHistoryItemRequest::new("history_item_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetHistoryItemRequest {
@@ -1245,7 +1268,7 @@ impl GetHistoryItemRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1281,7 +1304,8 @@ impl crate::shared::EndpointSpec for GetHistoryItemRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::DeleteHistoryItemRequest;
 ///
-/// let request = DeleteHistoryItemRequest::new("history_item_id_value");
+/// let request = DeleteHistoryItemRequest::new("history_item_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteHistoryItemRequest {
@@ -1301,7 +1325,7 @@ impl DeleteHistoryItemRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1337,7 +1361,8 @@ impl crate::shared::EndpointSpec for DeleteHistoryItemRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::GetHistoryItemAudioRequest;
 ///
-/// let request = GetHistoryItemAudioRequest::new("history_item_id_value");
+/// let request = GetHistoryItemAudioRequest::new("history_item_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetHistoryItemAudioRequest {
@@ -1357,7 +1382,7 @@ impl GetHistoryItemAudioRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1397,7 +1422,8 @@ impl crate::shared::EndpointSpec for GetHistoryItemAudioRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = DownloadHistoryItemsRequest::new(body);
+/// let request = DownloadHistoryItemsRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DownloadHistoryItemsRequest {
@@ -1415,7 +1441,7 @@ impl DownloadHistoryItemsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1452,7 +1478,8 @@ impl crate::shared::EndpointSpec for DownloadHistoryItemsRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::GetUsageStatsRequest;
 ///
-/// let request = GetUsageStatsRequest::default();
+/// let request = GetUsageStatsRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetUsageStatsRequest {}
@@ -1463,7 +1490,7 @@ impl GetUsageStatsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1487,7 +1514,8 @@ impl crate::shared::EndpointSpec for GetUsageStatsRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::GetUserRequest;
 ///
-/// let request = GetUserRequest::default();
+/// let request = GetUserRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetUserRequest {}
@@ -1498,7 +1526,7 @@ impl GetUserRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1522,7 +1550,8 @@ impl crate::shared::EndpointSpec for GetUserRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::GetUserSubscriptionRequest;
 ///
-/// let request = GetUserSubscriptionRequest::default();
+/// let request = GetUserSubscriptionRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetUserSubscriptionRequest {}
@@ -1533,7 +1562,7 @@ impl GetUserSubscriptionRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1557,7 +1586,8 @@ impl crate::shared::EndpointSpec for GetUserSubscriptionRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::GetResourceRequest;
 ///
-/// let request = GetResourceRequest::new("resource_id_value");
+/// let request = GetResourceRequest::new("resource_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetResourceRequest {
@@ -1577,7 +1607,7 @@ impl GetResourceRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1617,7 +1647,8 @@ impl crate::shared::EndpointSpec for GetResourceRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = ShareResourceRequest::new("resource_id_value", body);
+/// let request = ShareResourceRequest::new("resource_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ShareResourceRequest {
@@ -1640,7 +1671,7 @@ impl ShareResourceRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1676,7 +1707,8 @@ impl crate::shared::EndpointSpec for ShareResourceRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = UnshareResourceRequest::new("resource_id_value", body);
+/// let request = UnshareResourceRequest::new("resource_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnshareResourceRequest {
@@ -1699,7 +1731,7 @@ impl UnshareResourceRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1735,7 +1767,8 @@ impl crate::shared::EndpointSpec for UnshareResourceRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CopyResourceToWorkspaceRequest::new("resource_id_value", body);
+/// let request = CopyResourceToWorkspaceRequest::new("resource_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CopyResourceToWorkspaceRequest {
@@ -1758,7 +1791,7 @@ impl CopyResourceToWorkspaceRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1792,7 +1825,8 @@ impl crate::shared::EndpointSpec for CopyResourceToWorkspaceRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::ListServiceAccountsRequest;
 ///
-/// let request = ListServiceAccountsRequest::default();
+/// let request = ListServiceAccountsRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListServiceAccountsRequest {}
@@ -1803,7 +1837,7 @@ impl ListServiceAccountsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1827,7 +1861,8 @@ impl crate::shared::EndpointSpec for ListServiceAccountsRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::ListServiceAccountApiKeysRequest;
 ///
-/// let request = ListServiceAccountApiKeysRequest::new("service_account_user_id_value");
+/// let request = ListServiceAccountApiKeysRequest::new("service_account_user_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListServiceAccountApiKeysRequest {
@@ -1847,7 +1882,7 @@ impl ListServiceAccountApiKeysRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1891,7 +1926,8 @@ impl crate::shared::EndpointSpec for ListServiceAccountApiKeysRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateApiKeyRequest::new("service_account_user_id_value", body);
+/// let request = CreateApiKeyRequest::new("service_account_user_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateApiKeyRequest {
@@ -1917,7 +1953,7 @@ impl CreateApiKeyRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1955,7 +1991,8 @@ impl crate::shared::EndpointSpec for CreateApiKeyRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = UpdateApiKeyRequest::new("service_account_user_id_value", "api_key_id_value", body);
+/// let request = UpdateApiKeyRequest::new("service_account_user_id_value", "api_key_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateApiKeyRequest {
@@ -1985,7 +2022,7 @@ impl UpdateApiKeyRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -2020,7 +2057,8 @@ impl crate::shared::EndpointSpec for UpdateApiKeyRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::DeleteApiKeyRequest;
 ///
-/// let request = DeleteApiKeyRequest::new("service_account_user_id_value", "api_key_id_value");
+/// let request = DeleteApiKeyRequest::new("service_account_user_id_value", "api_key_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteApiKeyRequest {
@@ -2046,7 +2084,7 @@ impl DeleteApiKeyRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -2073,7 +2111,8 @@ impl crate::shared::EndpointSpec for DeleteApiKeyRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::ListWebhooksRequest;
 ///
-/// let request = ListWebhooksRequest::default();
+/// let request = ListWebhooksRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListWebhooksRequest {}
@@ -2084,7 +2123,7 @@ impl ListWebhooksRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -2112,7 +2151,8 @@ impl crate::shared::EndpointSpec for ListWebhooksRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateWebhookRequest::new(body);
+/// let request = CreateWebhookRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateWebhookRequest {
@@ -2130,7 +2170,7 @@ impl CreateWebhookRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -2171,7 +2211,8 @@ impl crate::shared::EndpointSpec for CreateWebhookRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = UpdateWebhookRequest::new("webhook_id_value", body);
+/// let request = UpdateWebhookRequest::new("webhook_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateWebhookRequest {
@@ -2194,7 +2235,7 @@ impl UpdateWebhookRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -2226,7 +2267,8 @@ impl crate::shared::EndpointSpec for UpdateWebhookRequest {
 /// ```ignore
 /// use schematic_schema::elevenlabs::DeleteWebhookRequest;
 ///
-/// let request = DeleteWebhookRequest::new("webhook_id_value");
+/// let request = DeleteWebhookRequest::new("webhook_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteWebhookRequest {
@@ -2246,7 +2288,7 @@ impl DeleteWebhookRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///

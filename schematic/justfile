@@ -23,9 +23,6 @@ SCHEMA := SCHEMATIC + "/schema"
 
 DOCS := "@schematic/docs/io/openapi-extensions.md @schematic/docs/json-schema/deep-dive.md "
 
-# Uses TTS if available but never error
-_speak *args:
-    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
 
 default:
     #!/usr/bin/env bash
@@ -42,6 +39,11 @@ default:
     echo ""
     just --list | grep -v 'default'
     echo
+
+
+# Uses TTS if available but never error
+_speak *args:
+    @so-you-say "{{args}}" --background >/dev/null 2>&1 || exit 0
 
 # build schematic packages (define, definitions, gen)
 build *args="":

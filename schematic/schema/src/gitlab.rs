@@ -50,7 +50,8 @@ use crate::shared::{RequestParts, SchematicError};
 /// ```ignore
 /// use schematic_schema::gitlab::ListRepositoryTreeRequest;
 ///
-/// let request = ListRepositoryTreeRequest::new("id_value");
+/// let request = ListRepositoryTreeRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRepositoryTreeRequest {
@@ -68,7 +69,7 @@ impl ListRepositoryTreeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -104,7 +105,8 @@ impl crate::shared::EndpointSpec for ListRepositoryTreeRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::GetRepositoryFileRequest;
 ///
-/// let request = GetRepositoryFileRequest::new("id_value", "file_path_value", "git_ref_value");
+/// let request = GetRepositoryFileRequest::new("id_value", "file_path_value", "git_ref_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRepositoryFileRequest {
@@ -134,7 +136,7 @@ impl GetRepositoryFileRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -161,7 +163,8 @@ impl crate::shared::EndpointSpec for GetRepositoryFileRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::ListMergeRequestsRequest;
 ///
-/// let request = ListMergeRequestsRequest::new("id_value");
+/// let request = ListMergeRequestsRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListMergeRequestsRequest {
@@ -179,7 +182,7 @@ impl ListMergeRequestsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -215,7 +218,8 @@ impl crate::shared::EndpointSpec for ListMergeRequestsRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::GetMergeRequestRequest;
 ///
-/// let request = GetMergeRequestRequest::new("id_value", "merge_request_iid_value");
+/// let request = GetMergeRequestRequest::new("id_value", "merge_request_iid_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetMergeRequestRequest {
@@ -238,7 +242,7 @@ impl GetMergeRequestRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -264,7 +268,8 @@ impl crate::shared::EndpointSpec for GetMergeRequestRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::ListMergeRequestCommitsRequest;
 ///
-/// let request = ListMergeRequestCommitsRequest::new("id_value", "merge_request_iid_value");
+/// let request = ListMergeRequestCommitsRequest::new("id_value", "merge_request_iid_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListMergeRequestCommitsRequest {
@@ -287,7 +292,7 @@ impl ListMergeRequestCommitsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -314,7 +319,8 @@ impl crate::shared::EndpointSpec for ListMergeRequestCommitsRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::ListMergeRequestChangesRequest;
 ///
-/// let request = ListMergeRequestChangesRequest::new("id_value", "merge_request_iid_value");
+/// let request = ListMergeRequestChangesRequest::new("id_value", "merge_request_iid_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListMergeRequestChangesRequest {
@@ -337,7 +343,7 @@ impl ListMergeRequestChangesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -363,7 +369,8 @@ impl crate::shared::EndpointSpec for ListMergeRequestChangesRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::ListIssuesRequest;
 ///
-/// let request = ListIssuesRequest::new("id_value");
+/// let request = ListIssuesRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssuesRequest {
@@ -381,7 +388,7 @@ impl ListIssuesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -415,7 +422,8 @@ impl crate::shared::EndpointSpec for ListIssuesRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::GetIssueRequest;
 ///
-/// let request = GetIssueRequest::new("id_value", "issue_iid_value");
+/// let request = GetIssueRequest::new("id_value", "issue_iid_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetIssueRequest {
@@ -438,7 +446,7 @@ impl GetIssueRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -462,7 +470,8 @@ impl crate::shared::EndpointSpec for GetIssueRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::ListIssueNotesRequest;
 ///
-/// let request = ListIssueNotesRequest::new("id_value", "issue_iid_value");
+/// let request = ListIssueNotesRequest::new("id_value", "issue_iid_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueNotesRequest {
@@ -485,7 +494,7 @@ impl ListIssueNotesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -511,7 +520,8 @@ impl crate::shared::EndpointSpec for ListIssueNotesRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::ListIssueParticipantsRequest;
 ///
-/// let request = ListIssueParticipantsRequest::new("id_value", "issue_iid_value");
+/// let request = ListIssueParticipantsRequest::new("id_value", "issue_iid_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListIssueParticipantsRequest {
@@ -534,7 +544,7 @@ impl ListIssueParticipantsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -560,7 +570,8 @@ impl crate::shared::EndpointSpec for ListIssueParticipantsRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::ListTagsRequest;
 ///
-/// let request = ListTagsRequest::new("id_value");
+/// let request = ListTagsRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTagsRequest {
@@ -578,7 +589,7 @@ impl ListTagsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -612,7 +623,8 @@ impl crate::shared::EndpointSpec for ListTagsRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::GetTagRequest;
 ///
-/// let request = GetTagRequest::new("id_value", "tag_name_value");
+/// let request = GetTagRequest::new("id_value", "tag_name_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetTagRequest {
@@ -635,7 +647,7 @@ impl GetTagRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -659,7 +671,8 @@ impl crate::shared::EndpointSpec for GetTagRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::ListReleasesRequest;
 ///
-/// let request = ListReleasesRequest::new("id_value");
+/// let request = ListReleasesRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListReleasesRequest {
@@ -677,7 +690,7 @@ impl ListReleasesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -711,7 +724,8 @@ impl crate::shared::EndpointSpec for ListReleasesRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::GetReleaseRequest;
 ///
-/// let request = GetReleaseRequest::new("id_value", "tag_name_value");
+/// let request = GetReleaseRequest::new("id_value", "tag_name_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetReleaseRequest {
@@ -734,7 +748,7 @@ impl GetReleaseRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -758,7 +772,8 @@ impl crate::shared::EndpointSpec for GetReleaseRequest {
 /// ```ignore
 /// use schematic_schema::gitlab::GetLatestReleaseRequest;
 ///
-/// let request = GetLatestReleaseRequest::new("id_value");
+/// let request = GetLatestReleaseRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetLatestReleaseRequest {
@@ -776,7 +791,7 @@ impl GetLatestReleaseRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///

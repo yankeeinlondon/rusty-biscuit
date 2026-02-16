@@ -47,7 +47,8 @@ use crate::shared::{RequestParts, SchematicError};
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = ChatRequest::new(body);
+/// let request = ChatRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatRequest {
@@ -65,7 +66,7 @@ impl ChatRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -102,7 +103,8 @@ impl crate::shared::EndpointSpec for ChatRequest {
 /// ```ignore
 /// use schematic_schema::lmstudio::ListModelsRequest;
 ///
-/// let request = ListModelsRequest::default();
+/// let request = ListModelsRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
@@ -113,7 +115,7 @@ impl ListModelsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -141,7 +143,8 @@ impl crate::shared::EndpointSpec for ListModelsRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = LoadModelRequest::new(body);
+/// let request = LoadModelRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LoadModelRequest {
@@ -159,7 +162,7 @@ impl LoadModelRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -200,7 +203,8 @@ impl crate::shared::EndpointSpec for LoadModelRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = UnloadModelRequest::new(body);
+/// let request = UnloadModelRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnloadModelRequest {
@@ -218,7 +222,7 @@ impl UnloadModelRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -259,7 +263,8 @@ impl crate::shared::EndpointSpec for UnloadModelRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = DownloadModelRequest::new(body);
+/// let request = DownloadModelRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DownloadModelRequest {
@@ -277,7 +282,7 @@ impl DownloadModelRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -318,7 +323,8 @@ impl crate::shared::EndpointSpec for DownloadModelRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = GetDownloadStatusRequest::new(body);
+/// let request = GetDownloadStatusRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDownloadStatusRequest {
@@ -336,7 +342,7 @@ impl GetDownloadStatusRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///

@@ -147,7 +147,7 @@ pub use models::{
     EnumDef, EnumVariant, FieldDef, ModelCatalog, ModelDef, PrimitiveType, StructDef, TypeAlias,
     TypeRef,
 };
-pub use params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
+pub use params::{EndpointParams, ParamDef, ParamStyle, PaginationStyle, QueryParamType};
 pub use request::{ApiRequest, FormField, FormFieldKind};
 pub use response::ApiResponse;
 pub use schema::{Schema, SchemaObject};

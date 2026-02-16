@@ -67,7 +67,8 @@ use crate::shared::{RequestParts, SchematicError};
 /// ```ignore
 /// use schematic_schema::huggingface::ListModelsRequest;
 ///
-/// let request = ListModelsRequest::default();
+/// let request = ListModelsRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
@@ -78,7 +79,7 @@ impl ListModelsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -102,7 +103,8 @@ impl crate::shared::EndpointSpec for ListModelsRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::GetModelRequest;
 ///
-/// let request = GetModelRequest::new("repo_id_value");
+/// let request = GetModelRequest::new("repo_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetModelRequest {
@@ -120,7 +122,7 @@ impl GetModelRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -154,7 +156,8 @@ impl crate::shared::EndpointSpec for GetModelRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::ListModelFilesRequest;
 ///
-/// let request = ListModelFilesRequest::new("repo_id_value", "revision_value");
+/// let request = ListModelFilesRequest::new("repo_id_value", "revision_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelFilesRequest {
@@ -177,7 +180,7 @@ impl ListModelFilesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -201,7 +204,8 @@ impl crate::shared::EndpointSpec for ListModelFilesRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::GetModelFileRequest;
 ///
-/// let request = GetModelFileRequest::new("repo_id_value", "revision_value", "path_value");
+/// let request = GetModelFileRequest::new("repo_id_value", "revision_value", "path_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetModelFileRequest {
@@ -231,7 +235,7 @@ impl GetModelFileRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -257,7 +261,8 @@ impl crate::shared::EndpointSpec for GetModelFileRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::ListModelCommitsRequest;
 ///
-/// let request = ListModelCommitsRequest::new("repo_id_value", "revision_value");
+/// let request = ListModelCommitsRequest::new("repo_id_value", "revision_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelCommitsRequest {
@@ -280,7 +285,7 @@ impl ListModelCommitsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -304,7 +309,8 @@ impl crate::shared::EndpointSpec for ListModelCommitsRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::GetModelReadmeRequest;
 ///
-/// let request = GetModelReadmeRequest::new("repo_id_value", "revision_value");
+/// let request = GetModelReadmeRequest::new("repo_id_value", "revision_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetModelReadmeRequest {
@@ -327,7 +333,7 @@ impl GetModelReadmeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -353,7 +359,8 @@ impl crate::shared::EndpointSpec for GetModelReadmeRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::ListModelDiscussionsRequest;
 ///
-/// let request = ListModelDiscussionsRequest::new("repo_id_value");
+/// let request = ListModelDiscussionsRequest::new("repo_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelDiscussionsRequest {
@@ -371,7 +378,7 @@ impl ListModelDiscussionsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -405,7 +412,8 @@ impl crate::shared::EndpointSpec for ListModelDiscussionsRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::GetModelCardRequest;
 ///
-/// let request = GetModelCardRequest::new("repo_id_value", "revision_value");
+/// let request = GetModelCardRequest::new("repo_id_value", "revision_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetModelCardRequest {
@@ -428,7 +436,7 @@ impl GetModelCardRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -454,7 +462,8 @@ impl crate::shared::EndpointSpec for GetModelCardRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::ListDatasetsRequest;
 ///
-/// let request = ListDatasetsRequest::default();
+/// let request = ListDatasetsRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListDatasetsRequest {}
@@ -465,7 +474,7 @@ impl ListDatasetsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -489,7 +498,8 @@ impl crate::shared::EndpointSpec for ListDatasetsRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::GetDatasetRequest;
 ///
-/// let request = GetDatasetRequest::new("repo_id_value");
+/// let request = GetDatasetRequest::new("repo_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDatasetRequest {
@@ -507,7 +517,7 @@ impl GetDatasetRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -541,7 +551,8 @@ impl crate::shared::EndpointSpec for GetDatasetRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::ListDatasetFilesRequest;
 ///
-/// let request = ListDatasetFilesRequest::new("repo_id_value", "revision_value");
+/// let request = ListDatasetFilesRequest::new("repo_id_value", "revision_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListDatasetFilesRequest {
@@ -564,7 +575,7 @@ impl ListDatasetFilesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -588,7 +599,8 @@ impl crate::shared::EndpointSpec for ListDatasetFilesRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::GetDatasetFileRequest;
 ///
-/// let request = GetDatasetFileRequest::new("repo_id_value", "revision_value", "path_value");
+/// let request = GetDatasetFileRequest::new("repo_id_value", "revision_value", "path_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDatasetFileRequest {
@@ -618,7 +630,7 @@ impl GetDatasetFileRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -644,7 +656,8 @@ impl crate::shared::EndpointSpec for GetDatasetFileRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::ListDatasetCommitsRequest;
 ///
-/// let request = ListDatasetCommitsRequest::new("repo_id_value", "revision_value");
+/// let request = ListDatasetCommitsRequest::new("repo_id_value", "revision_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListDatasetCommitsRequest {
@@ -667,7 +680,7 @@ impl ListDatasetCommitsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -691,7 +704,8 @@ impl crate::shared::EndpointSpec for ListDatasetCommitsRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::GetDatasetReadmeRequest;
 ///
-/// let request = GetDatasetReadmeRequest::new("repo_id_value", "revision_value");
+/// let request = GetDatasetReadmeRequest::new("repo_id_value", "revision_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetDatasetReadmeRequest {
@@ -714,7 +728,7 @@ impl GetDatasetReadmeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -740,7 +754,8 @@ impl crate::shared::EndpointSpec for GetDatasetReadmeRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::ListSpacesRequest;
 ///
-/// let request = ListSpacesRequest::default();
+/// let request = ListSpacesRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSpacesRequest {}
@@ -751,7 +766,7 @@ impl ListSpacesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -775,7 +790,8 @@ impl crate::shared::EndpointSpec for ListSpacesRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::GetSpaceRequest;
 ///
-/// let request = GetSpaceRequest::new("repo_id_value");
+/// let request = GetSpaceRequest::new("repo_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetSpaceRequest {
@@ -793,7 +809,7 @@ impl GetSpaceRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -827,7 +843,8 @@ impl crate::shared::EndpointSpec for GetSpaceRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::ListSpaceFilesRequest;
 ///
-/// let request = ListSpaceFilesRequest::new("repo_id_value", "revision_value");
+/// let request = ListSpaceFilesRequest::new("repo_id_value", "revision_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSpaceFilesRequest {
@@ -850,7 +867,7 @@ impl ListSpaceFilesRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -874,7 +891,8 @@ impl crate::shared::EndpointSpec for ListSpaceFilesRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::GetSpaceFileRequest;
 ///
-/// let request = GetSpaceFileRequest::new("repo_id_value", "revision_value", "path_value");
+/// let request = GetSpaceFileRequest::new("repo_id_value", "revision_value", "path_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetSpaceFileRequest {
@@ -904,7 +922,7 @@ impl GetSpaceFileRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -934,7 +952,8 @@ impl crate::shared::EndpointSpec for GetSpaceFileRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateRepoRequest::new(body);
+/// let request = CreateRepoRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRepoRequest {
@@ -952,7 +971,7 @@ impl CreateRepoRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -993,7 +1012,8 @@ impl crate::shared::EndpointSpec for CreateRepoRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = DeleteRepoRequest::new(body);
+/// let request = DeleteRepoRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteRepoRequest {
@@ -1011,7 +1031,7 @@ impl DeleteRepoRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1052,7 +1072,8 @@ impl crate::shared::EndpointSpec for DeleteRepoRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = UpdateRepoSettingsRequest::new("repo_type_value", "repo_id_value", body);
+/// let request = UpdateRepoSettingsRequest::new("repo_type_value", "repo_id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateRepoSettingsRequest {
@@ -1082,7 +1103,7 @@ impl UpdateRepoSettingsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1118,7 +1139,8 @@ impl crate::shared::EndpointSpec for UpdateRepoSettingsRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = MoveRepoRequest::new(body);
+/// let request = MoveRepoRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MoveRepoRequest {
@@ -1136,7 +1158,7 @@ impl MoveRepoRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1173,7 +1195,8 @@ impl crate::shared::EndpointSpec for MoveRepoRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::WhoAmIRequest;
 ///
-/// let request = WhoAmIRequest::default();
+/// let request = WhoAmIRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WhoAmIRequest {}
@@ -1184,7 +1207,7 @@ impl WhoAmIRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1208,7 +1231,8 @@ impl crate::shared::EndpointSpec for WhoAmIRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::GetUserRequest;
 ///
-/// let request = GetUserRequest::new("username_value");
+/// let request = GetUserRequest::new("username_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetUserRequest {
@@ -1226,7 +1250,7 @@ impl GetUserRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1262,7 +1286,8 @@ impl crate::shared::EndpointSpec for GetUserRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::ListUserReposRequest;
 ///
-/// let request = ListUserReposRequest::new("username_value");
+/// let request = ListUserReposRequest::new("username_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListUserReposRequest {
@@ -1280,7 +1305,7 @@ impl ListUserReposRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1316,7 +1341,8 @@ impl crate::shared::EndpointSpec for ListUserReposRequest {
 /// ```ignore
 /// use schematic_schema::huggingface::GetUserCollectionsRequest;
 ///
-/// let request = GetUserCollectionsRequest::new("username_value");
+/// let request = GetUserCollectionsRequest::new("username_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetUserCollectionsRequest {
@@ -1334,7 +1360,7 @@ impl GetUserCollectionsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///

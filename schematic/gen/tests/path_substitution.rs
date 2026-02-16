@@ -65,8 +65,13 @@ fn single_path_param_into_parts_format_string() {
 
     // Verify format string uses {} placeholder
     assert!(
-        code.contains(r#"format!("/users/{}", self.user_id)"#),
-        "Should have format string with self.user_id\nGenerated code:\n{}",
+        code.contains("/users/{}"),
+        "Should have format string template\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        code.contains("self.user_id"),
+        "Should have self.user_id in format args\nGenerated code:\n{}",
         code
     );
     // Verify HTTP method is correct
@@ -121,9 +126,15 @@ fn multiple_path_params_into_parts_format_string() {
     let code = format_tokens(&tokens);
 
     // Verify format string substitutes all parameters in order
+    // The format may be split across lines by prettyplease
     assert!(
-        code.contains(r#"format!("/threads/{}/messages/{}", self.thread_id, self.message_id)"#),
-        "Should have format string with both parameters\nGenerated code:\n{}",
+        code.contains("/threads/{}/messages/{}"),
+        "Should have format string template\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        code.contains("self.thread_id") && code.contains("self.message_id"),
+        "Should have both params in format args\nGenerated code:\n{}",
         code
     );
 }
@@ -191,9 +202,9 @@ fn no_path_params_no_fields() {
         "Should have struct"
     );
 
-    // Verify path is used directly (no format!)
+    // Verify path is used directly (no format!) - now uses let path since no query params
     assert!(
-        code.contains(r#""/items".to_string()"#),
+        code.contains(r#"let path = "/items".to_string()"#),
         "Should use path directly without format!\nGenerated code:\n{}",
         code
     );
@@ -231,8 +242,13 @@ fn path_param_with_body_has_both_fields() {
 
     // Verify format string for path
     assert!(
-        code.contains(r#"format!("/threads/{}", self.thread_id)"#),
-        "Should have format string for path\nGenerated code:\n{}",
+        code.contains("/threads/{}"),
+        "Should have format string template\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        code.contains("self.thread_id"),
+        "Should have thread_id in format args\nGenerated code:\n{}",
         code
     );
 
@@ -357,8 +373,13 @@ fn consecutive_path_params() {
     assert!(code.contains("pub b: String"), "Should have b field");
     assert!(code.contains("pub c: String"), "Should have c field");
     assert!(
-        code.contains(r#"format!("/{}/{}/{}", self.a, self.b, self.c)"#),
-        "Should have format string\nGenerated code:\n{}",
+        code.contains("/{}/{}/{}"),
+        "Should have format string template\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        code.contains("self.a") && code.contains("self.b") && code.contains("self.c"),
+        "Should have all params in format args\nGenerated code:\n{}",
         code
     );
 }
@@ -384,8 +405,13 @@ fn path_param_at_start() {
         "Should have version field"
     );
     assert!(
-        code.contains(r#"format!("/{}/resource", self.version)"#),
-        "Should have format string\nGenerated code:\n{}",
+        code.contains("/{}/resource"),
+        "Should have format string template\nGenerated code:\n{}",
+        code
+    );
+    assert!(
+        code.contains("self.version"),
+        "Should have version in format args\nGenerated code:\n{}",
         code
     );
 }

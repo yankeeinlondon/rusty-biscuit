@@ -21,7 +21,8 @@ use crate::shared::{RequestParts, SchematicError};
 /// ```ignore
 /// use schematic_schema::emqx::ListNodesBasicRequest;
 ///
-/// let request = ListNodesBasicRequest::default();
+/// let request = ListNodesBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListNodesBasicRequest {}
@@ -32,7 +33,7 @@ impl ListNodesBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -56,7 +57,8 @@ impl crate::shared::EndpointSpec for ListNodesBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetNodeBasicRequest;
 ///
-/// let request = GetNodeBasicRequest::new("node_value");
+/// let request = GetNodeBasicRequest::new("node_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetNodeBasicRequest {
@@ -74,7 +76,7 @@ impl GetNodeBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -108,7 +110,8 @@ impl crate::shared::EndpointSpec for GetNodeBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetClusterBasicRequest;
 ///
-/// let request = GetClusterBasicRequest::default();
+/// let request = GetClusterBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetClusterBasicRequest {}
@@ -119,7 +122,7 @@ impl GetClusterBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -143,7 +146,8 @@ impl crate::shared::EndpointSpec for GetClusterBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListClientsBasicRequest;
 ///
-/// let request = ListClientsBasicRequest::default();
+/// let request = ListClientsBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListClientsBasicRequest {}
@@ -154,7 +158,7 @@ impl ListClientsBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -178,7 +182,8 @@ impl crate::shared::EndpointSpec for ListClientsBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetClientBasicRequest;
 ///
-/// let request = GetClientBasicRequest::new("clientid_value");
+/// let request = GetClientBasicRequest::new("clientid_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetClientBasicRequest {
@@ -196,7 +201,7 @@ impl GetClientBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -232,7 +237,8 @@ impl crate::shared::EndpointSpec for GetClientBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::DisconnectClientBasicRequest;
 ///
-/// let request = DisconnectClientBasicRequest::new("clientid_value");
+/// let request = DisconnectClientBasicRequest::new("clientid_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DisconnectClientBasicRequest {
@@ -250,7 +256,7 @@ impl DisconnectClientBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -290,7 +296,8 @@ impl crate::shared::EndpointSpec for DisconnectClientBasicRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = SubscribeClientBasicRequest::new("clientid_value", body);
+/// let request = SubscribeClientBasicRequest::new("clientid_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SubscribeClientBasicRequest {
@@ -313,7 +320,7 @@ impl SubscribeClientBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -349,7 +356,8 @@ impl crate::shared::EndpointSpec for SubscribeClientBasicRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = UnsubscribeClientBasicRequest::new("clientid_value", body);
+/// let request = UnsubscribeClientBasicRequest::new("clientid_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnsubscribeClientBasicRequest {
@@ -372,7 +380,7 @@ impl UnsubscribeClientBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -404,7 +412,8 @@ impl crate::shared::EndpointSpec for UnsubscribeClientBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListSubscriptionsBasicRequest;
 ///
-/// let request = ListSubscriptionsBasicRequest::default();
+/// let request = ListSubscriptionsBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSubscriptionsBasicRequest {}
@@ -415,7 +424,7 @@ impl ListSubscriptionsBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -443,7 +452,8 @@ impl crate::shared::EndpointSpec for ListSubscriptionsBasicRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = PublishBasicRequest::new(body);
+/// let request = PublishBasicRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PublishBasicRequest {
@@ -461,7 +471,7 @@ impl PublishBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -502,7 +512,8 @@ impl crate::shared::EndpointSpec for PublishBasicRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = PublishBulkBasicRequest::new(body);
+/// let request = PublishBulkBasicRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PublishBulkBasicRequest {
@@ -520,7 +531,7 @@ impl PublishBulkBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -557,7 +568,8 @@ impl crate::shared::EndpointSpec for PublishBulkBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListRulesBasicRequest;
 ///
-/// let request = ListRulesBasicRequest::default();
+/// let request = ListRulesBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRulesBasicRequest {}
@@ -568,7 +580,7 @@ impl ListRulesBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -596,7 +608,8 @@ impl crate::shared::EndpointSpec for ListRulesBasicRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateRuleBasicRequest::new(body);
+/// let request = CreateRuleBasicRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRuleBasicRequest {
@@ -614,7 +627,7 @@ impl CreateRuleBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -651,7 +664,8 @@ impl crate::shared::EndpointSpec for CreateRuleBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetRuleBasicRequest;
 ///
-/// let request = GetRuleBasicRequest::new("id_value");
+/// let request = GetRuleBasicRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRuleBasicRequest {
@@ -669,7 +683,7 @@ impl GetRuleBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -707,7 +721,8 @@ impl crate::shared::EndpointSpec for GetRuleBasicRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = UpdateRuleBasicRequest::new("id_value", body);
+/// let request = UpdateRuleBasicRequest::new("id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateRuleBasicRequest {
@@ -727,7 +742,7 @@ impl UpdateRuleBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -759,7 +774,8 @@ impl crate::shared::EndpointSpec for UpdateRuleBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::DeleteRuleBasicRequest;
 ///
-/// let request = DeleteRuleBasicRequest::new("id_value");
+/// let request = DeleteRuleBasicRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteRuleBasicRequest {
@@ -777,7 +793,7 @@ impl DeleteRuleBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -815,7 +831,8 @@ impl crate::shared::EndpointSpec for DeleteRuleBasicRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = TestRuleBasicRequest::new("id_value", body);
+/// let request = TestRuleBasicRequest::new("id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TestRuleBasicRequest {
@@ -835,7 +852,7 @@ impl TestRuleBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -867,7 +884,8 @@ impl crate::shared::EndpointSpec for TestRuleBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListAuthenticatorsBasicRequest;
 ///
-/// let request = ListAuthenticatorsBasicRequest::default();
+/// let request = ListAuthenticatorsBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthenticatorsBasicRequest {}
@@ -878,7 +896,7 @@ impl ListAuthenticatorsBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -902,7 +920,8 @@ impl crate::shared::EndpointSpec for ListAuthenticatorsBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetAuthenticatorBasicRequest;
 ///
-/// let request = GetAuthenticatorBasicRequest::new("id_value");
+/// let request = GetAuthenticatorBasicRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetAuthenticatorBasicRequest {
@@ -920,7 +939,7 @@ impl GetAuthenticatorBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -954,7 +973,8 @@ impl crate::shared::EndpointSpec for GetAuthenticatorBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListAuthUsersBasicRequest;
 ///
-/// let request = ListAuthUsersBasicRequest::new("id_value");
+/// let request = ListAuthUsersBasicRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthUsersBasicRequest {
@@ -972,7 +992,7 @@ impl ListAuthUsersBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1010,7 +1030,8 @@ impl crate::shared::EndpointSpec for ListAuthUsersBasicRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateAuthUserBasicRequest::new("id_value", body);
+/// let request = CreateAuthUserBasicRequest::new("id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateAuthUserBasicRequest {
@@ -1030,7 +1051,7 @@ impl CreateAuthUserBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1062,7 +1083,8 @@ impl crate::shared::EndpointSpec for CreateAuthUserBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::DeleteAuthUserBasicRequest;
 ///
-/// let request = DeleteAuthUserBasicRequest::new("id_value", "user_id_value");
+/// let request = DeleteAuthUserBasicRequest::new("id_value", "user_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteAuthUserBasicRequest {
@@ -1085,7 +1107,7 @@ impl DeleteAuthUserBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1109,7 +1131,8 @@ impl crate::shared::EndpointSpec for DeleteAuthUserBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListAuthzSourcesBasicRequest;
 ///
-/// let request = ListAuthzSourcesBasicRequest::default();
+/// let request = ListAuthzSourcesBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthzSourcesBasicRequest {}
@@ -1120,7 +1143,7 @@ impl ListAuthzSourcesBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1144,7 +1167,8 @@ impl crate::shared::EndpointSpec for ListAuthzSourcesBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListListenersBasicRequest;
 ///
-/// let request = ListListenersBasicRequest::default();
+/// let request = ListListenersBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListListenersBasicRequest {}
@@ -1155,7 +1179,7 @@ impl ListListenersBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1179,7 +1203,8 @@ impl crate::shared::EndpointSpec for ListListenersBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetListenerBasicRequest;
 ///
-/// let request = GetListenerBasicRequest::new("id_value");
+/// let request = GetListenerBasicRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetListenerBasicRequest {
@@ -1197,7 +1222,7 @@ impl GetListenerBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1231,7 +1256,8 @@ impl crate::shared::EndpointSpec for GetListenerBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListMetricsBasicRequest;
 ///
-/// let request = ListMetricsBasicRequest::default();
+/// let request = ListMetricsBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListMetricsBasicRequest {}
@@ -1242,7 +1268,7 @@ impl ListMetricsBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1266,7 +1292,8 @@ impl crate::shared::EndpointSpec for ListMetricsBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListStatsBasicRequest;
 ///
-/// let request = ListStatsBasicRequest::default();
+/// let request = ListStatsBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListStatsBasicRequest {}
@@ -1277,7 +1304,7 @@ impl ListStatsBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1301,7 +1328,8 @@ impl crate::shared::EndpointSpec for ListStatsBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetPrometheusBasicRequest;
 ///
-/// let request = GetPrometheusBasicRequest::default();
+/// let request = GetPrometheusBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetPrometheusBasicRequest {}
@@ -1312,7 +1340,7 @@ impl GetPrometheusBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1336,7 +1364,8 @@ impl crate::shared::EndpointSpec for GetPrometheusBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListTopicsBasicRequest;
 ///
-/// let request = ListTopicsBasicRequest::default();
+/// let request = ListTopicsBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTopicsBasicRequest {}
@@ -1347,7 +1376,7 @@ impl ListTopicsBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1371,7 +1400,8 @@ impl crate::shared::EndpointSpec for ListTopicsBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListRetainedBasicRequest;
 ///
-/// let request = ListRetainedBasicRequest::default();
+/// let request = ListRetainedBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRetainedBasicRequest {}
@@ -1382,7 +1412,7 @@ impl ListRetainedBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1406,7 +1436,8 @@ impl crate::shared::EndpointSpec for ListRetainedBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetRetainedBasicRequest;
 ///
-/// let request = GetRetainedBasicRequest::new("topic_value");
+/// let request = GetRetainedBasicRequest::new("topic_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRetainedBasicRequest {
@@ -1424,7 +1455,7 @@ impl GetRetainedBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1458,7 +1489,8 @@ impl crate::shared::EndpointSpec for GetRetainedBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::DeleteRetainedBasicRequest;
 ///
-/// let request = DeleteRetainedBasicRequest::new("topic_value");
+/// let request = DeleteRetainedBasicRequest::new("topic_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteRetainedBasicRequest {
@@ -1476,7 +1508,7 @@ impl DeleteRetainedBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1510,7 +1542,8 @@ impl crate::shared::EndpointSpec for DeleteRetainedBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListAlarmsBasicRequest;
 ///
-/// let request = ListAlarmsBasicRequest::default();
+/// let request = ListAlarmsBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAlarmsBasicRequest {}
@@ -1521,7 +1554,7 @@ impl ListAlarmsBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1545,7 +1578,8 @@ impl crate::shared::EndpointSpec for ListAlarmsBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListBannedBasicRequest;
 ///
-/// let request = ListBannedBasicRequest::default();
+/// let request = ListBannedBasicRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListBannedBasicRequest {}
@@ -1556,7 +1590,7 @@ impl ListBannedBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1584,7 +1618,8 @@ impl crate::shared::EndpointSpec for ListBannedBasicRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateBanBasicRequest::new(body);
+/// let request = CreateBanBasicRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateBanBasicRequest {
@@ -1602,7 +1637,7 @@ impl CreateBanBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1639,7 +1674,8 @@ impl crate::shared::EndpointSpec for CreateBanBasicRequest {
 /// ```ignore
 /// use schematic_schema::emqx::DeleteBanBasicRequest;
 ///
-/// let request = DeleteBanBasicRequest::new("ban_type_value", "who_value");
+/// let request = DeleteBanBasicRequest::new("ban_type_value", "who_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteBanBasicRequest {
@@ -1662,7 +1698,7 @@ impl DeleteBanBasicRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -2860,7 +2896,8 @@ impl EmqxBasic {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = LoginBearerRequest::new(body);
+/// let request = LoginBearerRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LoginBearerRequest {
@@ -2878,7 +2915,7 @@ impl LoginBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -2915,7 +2952,8 @@ impl crate::shared::EndpointSpec for LoginBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::LogoutBearerRequest;
 ///
-/// let request = LogoutBearerRequest::default();
+/// let request = LogoutBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LogoutBearerRequest {}
@@ -2926,7 +2964,7 @@ impl LogoutBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -2950,7 +2988,8 @@ impl crate::shared::EndpointSpec for LogoutBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListNodesBearerRequest;
 ///
-/// let request = ListNodesBearerRequest::default();
+/// let request = ListNodesBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListNodesBearerRequest {}
@@ -2961,7 +3000,7 @@ impl ListNodesBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -2985,7 +3024,8 @@ impl crate::shared::EndpointSpec for ListNodesBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetNodeBearerRequest;
 ///
-/// let request = GetNodeBearerRequest::new("node_value");
+/// let request = GetNodeBearerRequest::new("node_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetNodeBearerRequest {
@@ -3003,7 +3043,7 @@ impl GetNodeBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3037,7 +3077,8 @@ impl crate::shared::EndpointSpec for GetNodeBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetClusterBearerRequest;
 ///
-/// let request = GetClusterBearerRequest::default();
+/// let request = GetClusterBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetClusterBearerRequest {}
@@ -3048,7 +3089,7 @@ impl GetClusterBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3072,7 +3113,8 @@ impl crate::shared::EndpointSpec for GetClusterBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListClientsBearerRequest;
 ///
-/// let request = ListClientsBearerRequest::default();
+/// let request = ListClientsBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListClientsBearerRequest {}
@@ -3083,7 +3125,7 @@ impl ListClientsBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3107,7 +3149,8 @@ impl crate::shared::EndpointSpec for ListClientsBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetClientBearerRequest;
 ///
-/// let request = GetClientBearerRequest::new("clientid_value");
+/// let request = GetClientBearerRequest::new("clientid_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetClientBearerRequest {
@@ -3125,7 +3168,7 @@ impl GetClientBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3161,7 +3204,8 @@ impl crate::shared::EndpointSpec for GetClientBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::DisconnectClientBearerRequest;
 ///
-/// let request = DisconnectClientBearerRequest::new("clientid_value");
+/// let request = DisconnectClientBearerRequest::new("clientid_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DisconnectClientBearerRequest {
@@ -3179,7 +3223,7 @@ impl DisconnectClientBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3219,7 +3263,8 @@ impl crate::shared::EndpointSpec for DisconnectClientBearerRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = SubscribeClientBearerRequest::new("clientid_value", body);
+/// let request = SubscribeClientBearerRequest::new("clientid_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SubscribeClientBearerRequest {
@@ -3242,7 +3287,7 @@ impl SubscribeClientBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3278,7 +3323,8 @@ impl crate::shared::EndpointSpec for SubscribeClientBearerRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = UnsubscribeClientBearerRequest::new("clientid_value", body);
+/// let request = UnsubscribeClientBearerRequest::new("clientid_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UnsubscribeClientBearerRequest {
@@ -3301,7 +3347,7 @@ impl UnsubscribeClientBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3333,7 +3379,8 @@ impl crate::shared::EndpointSpec for UnsubscribeClientBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListSubscriptionsBearerRequest;
 ///
-/// let request = ListSubscriptionsBearerRequest::default();
+/// let request = ListSubscriptionsBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListSubscriptionsBearerRequest {}
@@ -3344,7 +3391,7 @@ impl ListSubscriptionsBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3372,7 +3419,8 @@ impl crate::shared::EndpointSpec for ListSubscriptionsBearerRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = PublishBearerRequest::new(body);
+/// let request = PublishBearerRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PublishBearerRequest {
@@ -3390,7 +3438,7 @@ impl PublishBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3431,7 +3479,8 @@ impl crate::shared::EndpointSpec for PublishBearerRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = PublishBulkBearerRequest::new(body);
+/// let request = PublishBulkBearerRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PublishBulkBearerRequest {
@@ -3449,7 +3498,7 @@ impl PublishBulkBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3486,7 +3535,8 @@ impl crate::shared::EndpointSpec for PublishBulkBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListRulesBearerRequest;
 ///
-/// let request = ListRulesBearerRequest::default();
+/// let request = ListRulesBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRulesBearerRequest {}
@@ -3497,7 +3547,7 @@ impl ListRulesBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3525,7 +3575,8 @@ impl crate::shared::EndpointSpec for ListRulesBearerRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateRuleBearerRequest::new(body);
+/// let request = CreateRuleBearerRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateRuleBearerRequest {
@@ -3543,7 +3594,7 @@ impl CreateRuleBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3580,7 +3631,8 @@ impl crate::shared::EndpointSpec for CreateRuleBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetRuleBearerRequest;
 ///
-/// let request = GetRuleBearerRequest::new("id_value");
+/// let request = GetRuleBearerRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRuleBearerRequest {
@@ -3598,7 +3650,7 @@ impl GetRuleBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3636,7 +3688,8 @@ impl crate::shared::EndpointSpec for GetRuleBearerRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = UpdateRuleBearerRequest::new("id_value", body);
+/// let request = UpdateRuleBearerRequest::new("id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateRuleBearerRequest {
@@ -3656,7 +3709,7 @@ impl UpdateRuleBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3688,7 +3741,8 @@ impl crate::shared::EndpointSpec for UpdateRuleBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::DeleteRuleBearerRequest;
 ///
-/// let request = DeleteRuleBearerRequest::new("id_value");
+/// let request = DeleteRuleBearerRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteRuleBearerRequest {
@@ -3706,7 +3760,7 @@ impl DeleteRuleBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3744,7 +3798,8 @@ impl crate::shared::EndpointSpec for DeleteRuleBearerRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = TestRuleBearerRequest::new("id_value", body);
+/// let request = TestRuleBearerRequest::new("id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TestRuleBearerRequest {
@@ -3764,7 +3819,7 @@ impl TestRuleBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3796,7 +3851,8 @@ impl crate::shared::EndpointSpec for TestRuleBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListAuthenticatorsBearerRequest;
 ///
-/// let request = ListAuthenticatorsBearerRequest::default();
+/// let request = ListAuthenticatorsBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthenticatorsBearerRequest {}
@@ -3807,7 +3863,7 @@ impl ListAuthenticatorsBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3831,7 +3887,8 @@ impl crate::shared::EndpointSpec for ListAuthenticatorsBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetAuthenticatorBearerRequest;
 ///
-/// let request = GetAuthenticatorBearerRequest::new("id_value");
+/// let request = GetAuthenticatorBearerRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetAuthenticatorBearerRequest {
@@ -3849,7 +3906,7 @@ impl GetAuthenticatorBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3883,7 +3940,8 @@ impl crate::shared::EndpointSpec for GetAuthenticatorBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListAuthUsersBearerRequest;
 ///
-/// let request = ListAuthUsersBearerRequest::new("id_value");
+/// let request = ListAuthUsersBearerRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthUsersBearerRequest {
@@ -3901,7 +3959,7 @@ impl ListAuthUsersBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3939,7 +3997,8 @@ impl crate::shared::EndpointSpec for ListAuthUsersBearerRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateAuthUserBearerRequest::new("id_value", body);
+/// let request = CreateAuthUserBearerRequest::new("id_value", body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateAuthUserBearerRequest {
@@ -3959,7 +4018,7 @@ impl CreateAuthUserBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -3991,7 +4050,8 @@ impl crate::shared::EndpointSpec for CreateAuthUserBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::DeleteAuthUserBearerRequest;
 ///
-/// let request = DeleteAuthUserBearerRequest::new("id_value", "user_id_value");
+/// let request = DeleteAuthUserBearerRequest::new("id_value", "user_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteAuthUserBearerRequest {
@@ -4014,7 +4074,7 @@ impl DeleteAuthUserBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4038,7 +4098,8 @@ impl crate::shared::EndpointSpec for DeleteAuthUserBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListAuthzSourcesBearerRequest;
 ///
-/// let request = ListAuthzSourcesBearerRequest::default();
+/// let request = ListAuthzSourcesBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAuthzSourcesBearerRequest {}
@@ -4049,7 +4110,7 @@ impl ListAuthzSourcesBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4073,7 +4134,8 @@ impl crate::shared::EndpointSpec for ListAuthzSourcesBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListListenersBearerRequest;
 ///
-/// let request = ListListenersBearerRequest::default();
+/// let request = ListListenersBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListListenersBearerRequest {}
@@ -4084,7 +4146,7 @@ impl ListListenersBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4108,7 +4170,8 @@ impl crate::shared::EndpointSpec for ListListenersBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetListenerBearerRequest;
 ///
-/// let request = GetListenerBearerRequest::new("id_value");
+/// let request = GetListenerBearerRequest::new("id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetListenerBearerRequest {
@@ -4126,7 +4189,7 @@ impl GetListenerBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4160,7 +4223,8 @@ impl crate::shared::EndpointSpec for GetListenerBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListMetricsBearerRequest;
 ///
-/// let request = ListMetricsBearerRequest::default();
+/// let request = ListMetricsBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListMetricsBearerRequest {}
@@ -4171,7 +4235,7 @@ impl ListMetricsBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4195,7 +4259,8 @@ impl crate::shared::EndpointSpec for ListMetricsBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListStatsBearerRequest;
 ///
-/// let request = ListStatsBearerRequest::default();
+/// let request = ListStatsBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListStatsBearerRequest {}
@@ -4206,7 +4271,7 @@ impl ListStatsBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4230,7 +4295,8 @@ impl crate::shared::EndpointSpec for ListStatsBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetPrometheusBearerRequest;
 ///
-/// let request = GetPrometheusBearerRequest::default();
+/// let request = GetPrometheusBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetPrometheusBearerRequest {}
@@ -4241,7 +4307,7 @@ impl GetPrometheusBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4265,7 +4331,8 @@ impl crate::shared::EndpointSpec for GetPrometheusBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListTopicsBearerRequest;
 ///
-/// let request = ListTopicsBearerRequest::default();
+/// let request = ListTopicsBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListTopicsBearerRequest {}
@@ -4276,7 +4343,7 @@ impl ListTopicsBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4300,7 +4367,8 @@ impl crate::shared::EndpointSpec for ListTopicsBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListRetainedBearerRequest;
 ///
-/// let request = ListRetainedBearerRequest::default();
+/// let request = ListRetainedBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRetainedBearerRequest {}
@@ -4311,7 +4379,7 @@ impl ListRetainedBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4335,7 +4403,8 @@ impl crate::shared::EndpointSpec for ListRetainedBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::GetRetainedBearerRequest;
 ///
-/// let request = GetRetainedBearerRequest::new("topic_value");
+/// let request = GetRetainedBearerRequest::new("topic_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GetRetainedBearerRequest {
@@ -4353,7 +4422,7 @@ impl GetRetainedBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4387,7 +4456,8 @@ impl crate::shared::EndpointSpec for GetRetainedBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::DeleteRetainedBearerRequest;
 ///
-/// let request = DeleteRetainedBearerRequest::new("topic_value");
+/// let request = DeleteRetainedBearerRequest::new("topic_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteRetainedBearerRequest {
@@ -4405,7 +4475,7 @@ impl DeleteRetainedBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4439,7 +4509,8 @@ impl crate::shared::EndpointSpec for DeleteRetainedBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListAlarmsBearerRequest;
 ///
-/// let request = ListAlarmsBearerRequest::default();
+/// let request = ListAlarmsBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListAlarmsBearerRequest {}
@@ -4450,7 +4521,7 @@ impl ListAlarmsBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4474,7 +4545,8 @@ impl crate::shared::EndpointSpec for ListAlarmsBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::ListBannedBearerRequest;
 ///
-/// let request = ListBannedBearerRequest::default();
+/// let request = ListBannedBearerRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListBannedBearerRequest {}
@@ -4485,7 +4557,7 @@ impl ListBannedBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4513,7 +4585,8 @@ impl crate::shared::EndpointSpec for ListBannedBearerRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateBanBearerRequest::new(body);
+/// let request = CreateBanBearerRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateBanBearerRequest {
@@ -4531,7 +4604,7 @@ impl CreateBanBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -4568,7 +4641,8 @@ impl crate::shared::EndpointSpec for CreateBanBearerRequest {
 /// ```ignore
 /// use schematic_schema::emqx::DeleteBanBearerRequest;
 ///
-/// let request = DeleteBanBearerRequest::new("ban_type_value", "who_value");
+/// let request = DeleteBanBearerRequest::new("ban_type_value", "who_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteBanBearerRequest {
@@ -4591,7 +4665,7 @@ impl DeleteBanBearerRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///

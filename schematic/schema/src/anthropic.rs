@@ -45,7 +45,8 @@ use crate::shared::{RequestParts, SchematicError};
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateMessageRequest::new(body);
+/// let request = CreateMessageRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateMessageRequest {
@@ -63,7 +64,7 @@ impl CreateMessageRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -104,7 +105,8 @@ impl crate::shared::EndpointSpec for CreateMessageRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CountTokensRequest::new(body);
+/// let request = CountTokensRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CountTokensRequest {
@@ -122,7 +124,7 @@ impl CountTokensRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -159,7 +161,8 @@ impl crate::shared::EndpointSpec for CountTokensRequest {
 /// ```ignore
 /// use schematic_schema::anthropic::ListModelsRequest;
 ///
-/// let request = ListModelsRequest::default();
+/// let request = ListModelsRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
@@ -170,7 +173,7 @@ impl ListModelsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -194,7 +197,8 @@ impl crate::shared::EndpointSpec for ListModelsRequest {
 /// ```ignore
 /// use schematic_schema::anthropic::RetrieveModelRequest;
 ///
-/// let request = RetrieveModelRequest::new("model_id_value");
+/// let request = RetrieveModelRequest::new("model_id_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveModelRequest {
@@ -212,7 +216,7 @@ impl RetrieveModelRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///

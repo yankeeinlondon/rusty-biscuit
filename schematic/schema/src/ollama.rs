@@ -25,7 +25,8 @@ use crate::shared::{RequestParts, SchematicError};
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = GenerateNativeRequest::new(body);
+/// let request = GenerateNativeRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GenerateNativeRequest {
@@ -43,7 +44,7 @@ impl GenerateNativeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -84,7 +85,8 @@ impl crate::shared::EndpointSpec for GenerateNativeRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = ChatNativeRequest::new(body);
+/// let request = ChatNativeRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatNativeRequest {
@@ -102,7 +104,7 @@ impl ChatNativeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -143,7 +145,8 @@ impl crate::shared::EndpointSpec for ChatNativeRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = EmbeddingsNativeRequest::new(body);
+/// let request = EmbeddingsNativeRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EmbeddingsNativeRequest {
@@ -161,7 +164,7 @@ impl EmbeddingsNativeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -198,7 +201,8 @@ impl crate::shared::EndpointSpec for EmbeddingsNativeRequest {
 /// ```ignore
 /// use schematic_schema::ollama::ListModelsNativeRequest;
 ///
-/// let request = ListModelsNativeRequest::default();
+/// let request = ListModelsNativeRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsNativeRequest {}
@@ -209,7 +213,7 @@ impl ListModelsNativeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -237,7 +241,8 @@ impl crate::shared::EndpointSpec for ListModelsNativeRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = ShowModelNativeRequest::new(body);
+/// let request = ShowModelNativeRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ShowModelNativeRequest {
@@ -255,7 +260,7 @@ impl ShowModelNativeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -296,7 +301,8 @@ impl crate::shared::EndpointSpec for ShowModelNativeRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = PullModelNativeRequest::new(body);
+/// let request = PullModelNativeRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PullModelNativeRequest {
@@ -314,7 +320,7 @@ impl PullModelNativeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -355,7 +361,8 @@ impl crate::shared::EndpointSpec for PullModelNativeRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = PushModelNativeRequest::new(body);
+/// let request = PushModelNativeRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PushModelNativeRequest {
@@ -373,7 +380,7 @@ impl PushModelNativeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -414,7 +421,8 @@ impl crate::shared::EndpointSpec for PushModelNativeRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CopyModelNativeRequest::new(body);
+/// let request = CopyModelNativeRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CopyModelNativeRequest {
@@ -432,7 +440,7 @@ impl CopyModelNativeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -473,7 +481,8 @@ impl crate::shared::EndpointSpec for CopyModelNativeRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = DeleteModelNativeRequest::new(body);
+/// let request = DeleteModelNativeRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteModelNativeRequest {
@@ -491,7 +500,7 @@ impl DeleteModelNativeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -532,7 +541,8 @@ impl crate::shared::EndpointSpec for DeleteModelNativeRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CreateModelNativeRequest::new(body);
+/// let request = CreateModelNativeRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CreateModelNativeRequest {
@@ -550,7 +560,7 @@ impl CreateModelNativeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -587,7 +597,8 @@ impl crate::shared::EndpointSpec for CreateModelNativeRequest {
 /// ```ignore
 /// use schematic_schema::ollama::ListRunningModelsNativeRequest;
 ///
-/// let request = ListRunningModelsNativeRequest::default();
+/// let request = ListRunningModelsNativeRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListRunningModelsNativeRequest {}
@@ -598,7 +609,7 @@ impl ListRunningModelsNativeRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1468,7 +1479,8 @@ impl OllamaNative {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = ChatCompletionsOaiRequest::new(body);
+/// let request = ChatCompletionsOaiRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ChatCompletionsOaiRequest {
@@ -1486,7 +1498,7 @@ impl ChatCompletionsOaiRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1527,7 +1539,8 @@ impl crate::shared::EndpointSpec for ChatCompletionsOaiRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = CompletionsOaiRequest::new(body);
+/// let request = CompletionsOaiRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompletionsOaiRequest {
@@ -1545,7 +1558,7 @@ impl CompletionsOaiRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1586,7 +1599,8 @@ impl crate::shared::EndpointSpec for CompletionsOaiRequest {
 ///     // ... set required fields ...
 ///     ..Default::default()
 /// };
-/// let request = EmbeddingsOaiRequest::new(body);
+/// let request = EmbeddingsOaiRequest::new(body)
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EmbeddingsOaiRequest {
@@ -1604,7 +1618,7 @@ impl EmbeddingsOaiRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -1641,7 +1655,8 @@ impl crate::shared::EndpointSpec for EmbeddingsOaiRequest {
 /// ```ignore
 /// use schematic_schema::ollama::ListModelsOaiRequest;
 ///
-/// let request = ListModelsOaiRequest::default();
+/// let request = ListModelsOaiRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsOaiRequest {}
@@ -1652,7 +1667,7 @@ impl ListModelsOaiRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///

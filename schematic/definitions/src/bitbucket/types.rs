@@ -879,15 +879,17 @@ pub struct CommitAuthor {
 impl CommitAuthor {
     /// Extracts the name from the raw author string.
     pub fn name(&self) -> Option<&str> {
-        self.raw.as_deref().and_then(|r| r.split('<').next()).map(|s| s.trim())
+        self.raw
+            .as_deref()
+            .and_then(|r| r.split('<').next())
+            .map(|s| s.trim())
     }
 
     /// Extracts the email from the raw author string.
     pub fn email(&self) -> Option<&str> {
         self.raw.as_deref().and_then(|r| {
-            r.find('<').and_then(|start| {
-                r.find('>').map(|end| &r[start + 1..end])
-            })
+            r.find('<')
+                .and_then(|start| r.find('>').map(|end| &r[start + 1..end]))
         })
     }
 }
@@ -945,7 +947,8 @@ pub struct Download {
 impl Download {
     /// Returns the download URL if available.
     pub fn download_url(&self) -> Option<&str> {
-        self.links.as_ref()
+        self.links
+            .as_ref()
             .and_then(|l| l.get("self"))
             .map(|link| link.href.as_str())
     }
@@ -1137,7 +1140,10 @@ mod tests {
         let comment: PullRequestComment = serde_json::from_str(json).unwrap();
         assert_eq!(comment.id, Some(123));
         assert!(!comment.deleted);
-        assert_eq!(comment.content.as_ref().unwrap().raw, Some("Looks good!".to_string()));
+        assert_eq!(
+            comment.content.as_ref().unwrap().raw,
+            Some("Looks good!".to_string())
+        );
     }
 
     #[test]
@@ -1227,7 +1233,10 @@ mod tests {
         let tag: Tag = serde_json::from_str(json).unwrap();
         assert_eq!(tag.name, Some("v1.0.0".to_string()));
         assert!(tag.is_annotated());
-        assert_eq!(tag.target.as_ref().unwrap().hash, Some("abc123def456".to_string()));
+        assert_eq!(
+            tag.target.as_ref().unwrap().hash,
+            Some("abc123def456".to_string())
+        );
     }
 
     #[test]

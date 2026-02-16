@@ -24,9 +24,17 @@
 //!
 //! ## Pagination
 //!
-//! Bitbucket uses cursor-based pagination with a `next` URL field. Most list
-//! endpoints return `PaginatedResponse<T>` with a `values` array and optional
-//! `next` URL for the next page.
+//! Bitbucket uses page-based pagination with `page` and `pagelen` parameters.
+//! Most list endpoints return `PaginatedResponse<T>` with a `values` array and
+//! optional `next` URL for the next page.
+//!
+//! Use the builder pattern to set pagination:
+//!
+//! ```ignore
+//! let request = ListPullRequestsRequest::new("workspace", "repo")
+//!     .with_page(2)
+//!     .with_pagelen(100);
+//! ```
 //!
 //! ## Endpoint Coverage (14 endpoints)
 //!
@@ -44,8 +52,14 @@ mod types;
 pub use types::*;
 
 use schematic_define::{
-    ApiResponse, AuthStrategy, Endpoint, EnvList, EnvMapping, RestApi, RestMethod,
+    ApiResponse, AuthStrategy, Endpoint, EndpointParams, EnvList, EnvMapping, PaginationStyle,
+    RestApi, RestMethod,
 };
+
+/// Creates Bitbucket-style pagination parameters.
+fn bitbucket_pagination() -> EndpointParams {
+    EndpointParams::default().with_pagination(PaginationStyle::bitbucket())
+}
 
 /// Creates the Bitbucket Cloud REST API definition.
 ///
@@ -83,9 +97,8 @@ use schematic_define::{
 pub fn define_bitbucket_api() -> RestApi {
     RestApi {
         name: "Bitbucket".to_string(),
-        description:
-            "Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows"
-                .to_string(),
+        description: "Bitbucket Cloud REST API v2.0 for repository, PR, issue, and tag workflows"
+            .to_string(),
         base_url: "https://api.bitbucket.org/2.0".to_string(),
         docs_url: Some("https://developer.atlassian.com/cloud/bitbucket/rest/".to_string()),
         auth: AuthStrategy::Basic,
@@ -113,13 +126,12 @@ pub fn define_bitbucket_api() -> RestApi {
             Endpoint {
                 id: "ListDirectoryContents".to_string(),
                 method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/src/{commit}/{path}?pagelen=50"
-                    .to_string(),
+                path: "/repositories/{workspace}/{repo_slug}/src/{commit}/{path}".to_string(),
                 description: "List directory contents at a specific commit".to_string(),
                 request: None,
                 response: ApiResponse::json_type("PaginatedResponse<SourceEntry>"),
                 headers: vec![],
-                params: None,
+                params: Some(bitbucket_pagination()),
             },
             Endpoint {
                 id: "GetFileContentRaw".to_string(),
@@ -137,13 +149,17 @@ pub fn define_bitbucket_api() -> RestApi {
             Endpoint {
                 id: "ListPullRequests".to_string(),
                 method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/pullrequests?state=all&pagelen=50"
-                    .to_string(),
+                path: "/repositories/{workspace}/{repo_slug}/pullrequests".to_string(),
                 description: "List pull requests (all states)".to_string(),
                 request: None,
                 response: ApiResponse::json_type("PaginatedResponse<PullRequest>"),
                 headers: vec![],
-                params: None,
+                params: Some(bitbucket_pagination().with_query_param(
+                    "state",
+                    schematic_define::QueryParamType::String,
+                    false,
+                    Some("Filter by state (OPEN, MERGED, DECLINED, SUPERSEDED)"),
+                )),
             },
             Endpoint {
                 id: "GetPullRequest".to_string(),
@@ -158,13 +174,13 @@ pub fn define_bitbucket_api() -> RestApi {
             Endpoint {
                 id: "ListPullRequestComments".to_string(),
                 method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/pullrequests/{id}/comments?pagelen=50"
+                path: "/repositories/{workspace}/{repo_slug}/pullrequests/{id}/comments"
                     .to_string(),
                 description: "List comments on a pull request".to_string(),
                 request: None,
                 response: ApiResponse::json_type("PaginatedResponse<PullRequestComment>"),
                 headers: vec![],
-                params: None,
+                params: Some(bitbucket_pagination()),
             },
             // =================================================================
             // Issues
@@ -172,12 +188,12 @@ pub fn define_bitbucket_api() -> RestApi {
             Endpoint {
                 id: "ListIssues".to_string(),
                 method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/issues?pagelen=50".to_string(),
+                path: "/repositories/{workspace}/{repo_slug}/issues".to_string(),
                 description: "List repository issues".to_string(),
                 request: None,
                 response: ApiResponse::json_type("PaginatedResponse<Issue>"),
                 headers: vec![],
-                params: None,
+                params: Some(bitbucket_pagination()),
             },
             Endpoint {
                 id: "GetIssue".to_string(),
@@ -192,24 +208,22 @@ pub fn define_bitbucket_api() -> RestApi {
             Endpoint {
                 id: "ListIssueComments".to_string(),
                 method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/issues/{id}/comments?pagelen=50"
-                    .to_string(),
+                path: "/repositories/{workspace}/{repo_slug}/issues/{id}/comments".to_string(),
                 description: "List comments on an issue".to_string(),
                 request: None,
                 response: ApiResponse::json_type("PaginatedResponse<IssueComment>"),
                 headers: vec![],
-                params: None,
+                params: Some(bitbucket_pagination()),
             },
             Endpoint {
                 id: "ListIssueChanges".to_string(),
                 method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/issues/{id}/changes?pagelen=50"
-                    .to_string(),
+                path: "/repositories/{workspace}/{repo_slug}/issues/{id}/changes".to_string(),
                 description: "List change history for an issue".to_string(),
                 request: None,
                 response: ApiResponse::json_type("PaginatedResponse<IssueChange>"),
                 headers: vec![],
-                params: None,
+                params: Some(bitbucket_pagination()),
             },
             // =================================================================
             // Tags
@@ -217,12 +231,12 @@ pub fn define_bitbucket_api() -> RestApi {
             Endpoint {
                 id: "ListTags".to_string(),
                 method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/refs/tags?pagelen=50".to_string(),
+                path: "/repositories/{workspace}/{repo_slug}/refs/tags".to_string(),
                 description: "List repository tags".to_string(),
                 request: None,
                 response: ApiResponse::json_type("PaginatedResponse<Tag>"),
                 headers: vec![],
-                params: None,
+                params: Some(bitbucket_pagination()),
             },
             Endpoint {
                 id: "GetTag".to_string(),
@@ -240,12 +254,12 @@ pub fn define_bitbucket_api() -> RestApi {
             Endpoint {
                 id: "ListDownloads".to_string(),
                 method: RestMethod::Get,
-                path: "/repositories/{workspace}/{repo_slug}/downloads?pagelen=50".to_string(),
+                path: "/repositories/{workspace}/{repo_slug}/downloads".to_string(),
                 description: "List repository downloads (release artifacts)".to_string(),
                 request: None,
                 response: ApiResponse::json_type("PaginatedResponse<Download>"),
                 headers: vec![],
-                params: None,
+                params: Some(bitbucket_pagination()),
             },
             Endpoint {
                 id: "GetDownload".to_string(),
@@ -292,10 +306,7 @@ mod tests {
 
         assert!(matches!(api.auth, AuthStrategy::Basic));
         assert!(api.env_auth.contains(&"BITBUCKET_APP_PASSWORD".to_string()));
-        assert_eq!(
-            api.env_username,
-            Some("BITBUCKET_USERNAME".to_string())
-        );
+        assert_eq!(api.env_username, Some("BITBUCKET_USERNAME".to_string()));
     }
 
     #[test]
@@ -330,7 +341,8 @@ mod tests {
 
         assert!(endpoint.path.contains("{commit}"));
         assert!(endpoint.path.contains("{path}"));
-        assert!(endpoint.path.contains("pagelen=50"));
+        // No hardcoded query params - they're in params field now
+        assert!(!endpoint.path.contains("?"));
 
         match &endpoint.response {
             ApiResponse::Json(schema) => {
@@ -342,6 +354,13 @@ mod tests {
             }
             _ => panic!("Expected JSON response"),
         }
+
+        // Check pagination params
+        let params = endpoint
+            .params
+            .as_ref()
+            .expect("Should have pagination params");
+        assert!(params.has_pagination());
     }
 
     #[test]
@@ -370,8 +389,12 @@ mod tests {
             .iter()
             .find(|e| e.id == "ListPullRequests")
             .expect("ListPullRequests endpoint missing");
-        assert!(list_prs.path.contains("state=all"));
-        assert!(list_prs.path.contains("pagelen=50"));
+        // No hardcoded query params - state is now a query param
+        assert!(!list_prs.path.contains("?"));
+        // Check state param exists
+        let params = list_prs.params.as_ref().expect("Should have params");
+        assert!(params.query.iter().any(|p| p.name == "state"));
+        assert!(params.has_pagination());
 
         let get_pr = api
             .endpoints
@@ -397,7 +420,9 @@ mod tests {
             .iter()
             .find(|e| e.id == "ListIssues")
             .expect("ListIssues endpoint missing");
-        assert!(list_issues.path.contains("pagelen=50"));
+        // No hardcoded query params - pagination is in params field
+        assert!(!list_issues.path.contains("?"));
+        assert!(list_issues.params.as_ref().unwrap().has_pagination());
 
         let get_issue = api
             .endpoints
@@ -431,7 +456,9 @@ mod tests {
             .find(|e| e.id == "ListTags")
             .expect("ListTags endpoint missing");
         assert!(list_tags.path.contains("refs/tags"));
-        assert!(list_tags.path.contains("pagelen=50"));
+        // No hardcoded query params - pagination is in params field
+        assert!(!list_tags.path.contains("?"));
+        assert!(list_tags.params.as_ref().unwrap().has_pagination());
 
         let get_tag = api
             .endpoints
@@ -476,22 +503,23 @@ mod tests {
     fn env_mapping_configured() {
         let api = define_bitbucket_api();
 
-        let mapping = api
-            .env_mapping
-            .as_ref()
-            .expect("env_mapping should be set");
+        let mapping = api.env_mapping.as_ref().expect("env_mapping should be set");
 
         let basic_user = mapping
             .basic_user
             .as_ref()
             .expect("basic_user mapping should be set");
-        assert!(basic_user.names().contains(&"BITBUCKET_USERNAME".to_string()));
+        assert!(basic_user
+            .names()
+            .contains(&"BITBUCKET_USERNAME".to_string()));
 
         let basic_pass = mapping
             .basic_pass
             .as_ref()
             .expect("basic_pass mapping should be set");
-        assert!(basic_pass.names().contains(&"BITBUCKET_APP_PASSWORD".to_string()));
+        assert!(basic_pass
+            .names()
+            .contains(&"BITBUCKET_APP_PASSWORD".to_string()));
     }
 
     #[test]
@@ -595,6 +623,55 @@ mod tests {
                 ids.insert(&endpoint.id),
                 "Duplicate endpoint ID: {}",
                 endpoint.id
+            );
+        }
+    }
+
+    #[test]
+    fn list_endpoints_have_pagination_params() {
+        let api = define_bitbucket_api();
+
+        let list_endpoints = [
+            "ListDirectoryContents",
+            "ListPullRequests",
+            "ListPullRequestComments",
+            "ListIssues",
+            "ListIssueComments",
+            "ListIssueChanges",
+            "ListTags",
+            "ListDownloads",
+        ];
+
+        for id in list_endpoints {
+            let endpoint = api
+                .endpoints
+                .iter()
+                .find(|e| e.id == id)
+                .unwrap_or_else(|| panic!("Endpoint {} not found", id));
+
+            let params = endpoint
+                .params
+                .as_ref()
+                .unwrap_or_else(|| panic!("Endpoint {} should have params", id));
+
+            assert!(
+                params.has_pagination(),
+                "Endpoint {} should have pagination params",
+                id
+            );
+        }
+    }
+
+    #[test]
+    fn paths_have_no_hardcoded_query_params() {
+        let api = define_bitbucket_api();
+
+        for endpoint in &api.endpoints {
+            assert!(
+                !endpoint.path.contains("?"),
+                "Endpoint {} should not have hardcoded query params in path: {}",
+                endpoint.id,
+                endpoint.path
             );
         }
     }

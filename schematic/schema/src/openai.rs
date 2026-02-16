@@ -40,7 +40,8 @@ use crate::shared::{RequestParts, SchematicError};
 /// ```ignore
 /// use schematic_schema::openai::ListModelsRequest;
 ///
-/// let request = ListModelsRequest::default();
+/// let request = ListModelsRequest::default()
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ListModelsRequest {}
@@ -51,7 +52,7 @@ impl ListModelsRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -75,7 +76,8 @@ impl crate::shared::EndpointSpec for ListModelsRequest {
 /// ```ignore
 /// use schematic_schema::openai::RetrieveModelRequest;
 ///
-/// let request = RetrieveModelRequest::new("model_value");
+/// let request = RetrieveModelRequest::new("model_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RetrieveModelRequest {
@@ -93,7 +95,7 @@ impl RetrieveModelRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
@@ -127,7 +129,8 @@ impl crate::shared::EndpointSpec for RetrieveModelRequest {
 /// ```ignore
 /// use schematic_schema::openai::DeleteModelRequest;
 ///
-/// let request = DeleteModelRequest::new("model_value");
+/// let request = DeleteModelRequest::new("model_value")
+///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DeleteModelRequest {
@@ -145,7 +148,7 @@ impl DeleteModelRequest {
     ///
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
-    /// - Fully substituted path string
+    /// - Fully substituted path string with query parameters
     /// - Optional JSON body string
     /// - Endpoint-specific headers as key-value pairs
     ///
